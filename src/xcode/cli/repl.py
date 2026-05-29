@@ -75,6 +75,7 @@ class ReplState:
     mode: str = "act"
     verbose: bool = False
     approved_plan: str | None = None
+    exit_pending: float = 0.0
 
 
 class ReplHITLHandler:
@@ -90,11 +91,11 @@ class ReplHITLHandler:
 
     def __call__(self, tool: ToolSpec, action_input: str) -> HITLResult:
         session_decision = self.session_policy.decide(tool.name, action_input)
-        if session_decision is not None:
+        if session_decision is not None and session_decision != "ask":
             return HITLResult(session_decision, "session")
         persistent_policy = self.persistent_store.load()
         pers_decision = persistent_policy.decide(tool.name, action_input)
-        if pers_decision is not None:
+        if pers_decision is not None and pers_decision != "ask":
             return HITLResult(pers_decision, "permanent")
         if _should_use_radiolist(self.prompt):
             choice = _radiolist_prompt(tool, action_input)
@@ -214,14 +215,11 @@ def run_repl(
             text = session.prompt("xcode> ").strip()
         except (EOFError, KeyboardInterrupt):
             now = time.time()
-            if (
-                getattr(run_repl, "_exit_pending", 0)
-                and now - run_repl._exit_pending < 1.5
-            ):
+            if state.exit_pending and now - state.exit_pending < 1.5:
                 print()
                 _print_saved_conversation(store)
                 return 0
-            run_repl._exit_pending = now
+            state.exit_pending = now
             print()
             sys.stdout.write("\033[90m(press Ctrl+C again to exit)\033[0m\n")
             sys.stdout.flush()
@@ -829,8 +827,8 @@ def _run_tool_command(command: str, app) -> str:
     if len(parts) < 2:
         return "usage: /tool NAME INPUT\n/tool list — show enabled tools by group"
     name = parts[1]
+    registry: tuple[ToolSpec, ...] = tuple(getattr(app, "registry", ()) or ())
     if name == "list":
-        registry: tuple[ToolSpec, ...] = tuple(getattr(app, "registry", ()) or ())
         catalog = build_tool_catalog()
         enabled_names = {t.name for t in registry}
 
@@ -875,7 +873,6 @@ def _run_tool_command(command: str, app) -> str:
             lines.append("</available groups>")
         return "\n".join(lines)
     action_input = parts[2] if len(parts) == 3 else ""
-    registry: tuple[ToolSpec, ...] = tuple(getattr(app, "registry", ()) or ())
     result = run_tool_result(
         {tool.name: tool for tool in registry},
         name,
@@ -908,7 +905,7 @@ def _brief_input(name: str, raw_input: Any) -> str:
 
 def _event_to_dict(event) -> dict[str, Any]:
     data = event.data
-    if is_dataclass(data):
+    if is_dataclass(data) and not isinstance(data, type):
         payload = asdict(data)
     else:
         payload = data

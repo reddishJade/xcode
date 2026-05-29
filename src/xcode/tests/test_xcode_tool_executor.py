@@ -54,13 +54,18 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_policy_denies_unavailable_call_at_executor_boundary(self) -> None:
         called = []
+
+        def write_handler(value: str) -> str:
+            called.append(value)
+            return value
+
         executor = ToolExecutor(
             (
                 ToolSpec(
                     "write_file",
                     "Write.",
                     "text",
-                    lambda value: called.append(value) or value,
+                    write_handler,
                 ),
             ),
             policy=PlanPolicy(),
@@ -89,13 +94,18 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_act_high_risk_tool_still_requires_approval(self) -> None:
         called = []
+
+        def write_handler(value: str) -> str:
+            called.append(value)
+            return "wrote"
+
         executor = ToolExecutor(
             (
                 ToolSpec(
                     "write_file",
                     "Write.",
                     "text",
-                    lambda value: called.append(value) or "wrote",
+                    write_handler,
                     risk="high",
                 ),
             ),
@@ -111,13 +121,18 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_act_high_risk_tool_runs_after_user_approval(self) -> None:
         called = []
+
+        def write_handler(value: str) -> str:
+            called.append(value)
+            return "wrote"
+
         executor = ToolExecutor(
             (
                 ToolSpec(
                     "write_file",
                     "Write.",
                     "text",
-                    lambda value: called.append(value) or "wrote",
+                    write_handler,
                     risk="high",
                 ),
             ),

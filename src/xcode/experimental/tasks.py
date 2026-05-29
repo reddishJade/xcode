@@ -230,7 +230,11 @@ def resolve_task_dependencies(tasks: list[TaskRecord]) -> list[TaskRecord]:
 
 def render_kanban_view(tasks: list[TaskRecord]) -> str:
     """输出美化的终端看板视图。"""
-    categories = {"pending": [], "claimed": [], "completed": []}
+    categories: dict[str, list[TaskRecord]] = {
+        "pending": [],
+        "claimed": [],
+        "completed": [],
+    }
     for t in tasks:
         cat = t.status if t.status in categories else "pending"
         categories[cat].append(t)

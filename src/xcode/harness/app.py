@@ -59,14 +59,14 @@ class XcodeApp:
         reasoning_effort: str | None = None,
     ) -> str:
         from xcode.ai.providers import build_provider_bundle, ProviderSettings
-        from xcode.ai.providers.factory import ModelProfileConfig
+        from xcode.ai.providers.factory import ModelProfileConfig, ModelProfileProto
 
         if not self._model_profiles:
             return getattr(self.agent.provider, "model", "unknown")
         profile_config = self._model_profiles.get(profile)
         if not profile_config:
             return getattr(self.agent.provider, "model", "unknown")
-        new_cfg = ModelProfileConfig(
+        new_cfg: ModelProfileProto = ModelProfileConfig(
             transport=profile_config.transport,
             chat_model=model,
             base_url=base_url or profile_config.base_url,
@@ -135,10 +135,16 @@ class XcodeApp:
 
 
 def _build_providers(runtime_config: XcodeRuntimeConfig, env_files: tuple[Path, ...]):
+    from xcode.ai.providers.factory import ModelProfileProto
+    from typing import cast
+
+    model_profiles = cast(
+        "dict[str, ModelProfileProto]", runtime_config.provider.model_profiles
+    )
     return build_provider_bundle(
         ProviderSettings(
             env_files=env_files,
-            model_profiles=runtime_config.provider.model_profiles,
+            model_profiles=model_profiles,
         )
     )
 

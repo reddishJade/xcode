@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .runtime import ProviderRuntime, RetryPolicy, RateLimitPolicy
 
@@ -34,6 +34,21 @@ def get_config_value(name: str, env_files: tuple[Path, ...] = ()) -> str | None:
     return None
 
 
+class ModelProfileProto(Protocol):
+    @property
+    def transport(self) -> str: ...
+    @property
+    def chat_model(self) -> str: ...
+    @property
+    def base_url(self) -> str: ...
+    @property
+    def api_key(self) -> str: ...
+    @property
+    def thinking(self) -> bool: ...
+    @property
+    def reasoning_effort(self) -> str | None: ...
+
+
 @dataclass(frozen=True)
 class ModelProfileConfig:
     transport: str = "chat_completions"
@@ -47,7 +62,7 @@ class ModelProfileConfig:
 @dataclass(frozen=True)
 class ProviderSettings:
     env_files: tuple[Path, ...]
-    model_profiles: dict[str, ModelProfileConfig]
+    model_profiles: dict[str, ModelProfileProto]
     retry: RetryPolicy = RetryPolicy()
     rate_limit: RateLimitPolicy = RateLimitPolicy()
 
@@ -109,7 +124,7 @@ def _build_llm_profiles(
 
 
 def _build_llm_profile(
-    profile: ModelProfileConfig,
+    profile: ModelProfileProto,
     profile_name: str,
     env_files: tuple[Path, ...],
     runtime: ProviderRuntime,

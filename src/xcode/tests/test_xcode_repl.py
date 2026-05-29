@@ -366,9 +366,11 @@ class XcodeReplForkTests(unittest.TestCase):
             store = SessionStore(Path(temp_dir))
             store.append("user", "parent conversation")
             parent = store.current_metadata()
+            assert parent is not None
             store.fork_into()
             fork_meta = store.current_metadata()
             self.assertIsNotNone(fork_meta)
+            assert fork_meta is not None
             self.assertEqual(fork_meta.parent_id, parent.id)
 
     def test_fork_into_copies_transcript(self) -> None:
@@ -404,6 +406,7 @@ class XcodeReplForkTests(unittest.TestCase):
                 store.append("user", "test")
                 store.fork_into(ft)
                 meta = store.current_metadata()
+                assert meta is not None
                 self.assertEqual(meta.fork_type, ft)
 
     def test_fork_preserves_parent_metadata(self) -> None:
@@ -412,8 +415,10 @@ class XcodeReplForkTests(unittest.TestCase):
             store = SessionStore(sessions, project_root=Path(temp_dir))
             store.append("user", "parent conversation")
             parent_meta = store.current_metadata()
+            assert parent_meta is not None
             store.fork_into()
             fork_meta = store.current_metadata()
+            assert fork_meta is not None
             self.assertEqual(fork_meta.title, f"Fork of {parent_meta.title}")
             self.assertEqual(fork_meta.summary, parent_meta.summary)
 
@@ -423,7 +428,9 @@ class XcodeReplForkTests(unittest.TestCase):
             store = SessionStore(sessions, project_root=Path(temp_dir))
             store.append("user", "parent")
             store.update_summary()
-            parent_id = store.current_metadata().id
+            parent_meta = store.current_metadata()
+            assert parent_meta is not None
+            parent_id = parent_meta.id
             store.fork_into("verify")
             # 执行 fork 后 list_session_infos 应显示 parent_id
             views = store.list_session_infos(limit=10)
@@ -437,6 +444,7 @@ class XcodeReplForkTests(unittest.TestCase):
             store.append("user", "hello")
             store.fork_into()
             meta = store.current_metadata()
+            assert meta is not None
             self.assertIsNone(meta.fork_type)
 
     def test_run_repl_compact_command(self) -> None:

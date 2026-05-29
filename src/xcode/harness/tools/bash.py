@@ -34,7 +34,7 @@ class OutputAccumulator:
         self._total_bytes = 0
         self._truncated = False
         self._full_path: str | None = None
-        self._file: tempfile.NamedTemporaryFile | None = None
+        self._file: Any = None
 
     def append(self, chunk: bytes) -> None:
         """摄入原始字节块。"""
@@ -138,7 +138,9 @@ def _kill_process(proc: subprocess.Popen) -> None:
 
 def _kill_process_group(proc: subprocess.Popen, sig: int) -> None:
     try:
-        os.killpg(os.getpgid(proc.pid), sig)
+        killpg = getattr(os, "killpg")
+        getpgid = getattr(os, "getpgid")
+        killpg(getpgid(proc.pid), sig)
     except ProcessLookupError:
         pass
     except OSError:

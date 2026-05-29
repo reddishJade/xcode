@@ -80,7 +80,7 @@ class WorktreeTaskRunner:
                         ["git", "cherry", "@{u}"], task.path
                     )
                 else:
-                    base_branch = "main"
+                    base_branch: str | None = "main"
                     try:
                         self.command_runner(
                             ["git", "rev-parse", "--verify", "main"], task.path

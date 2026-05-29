@@ -1,37 +1,39 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from typing import Union
-
+from typing import Union, Iterator, Any
+from xcode.agent.types import ToolDefinition
 from xcode.harness.agent_runtime.provider import ModelProvider
 from xcode.harness.agent_runtime.events import ProviderEvent
-from xcode.harness.skills import ToolSpec
 
 
 class FakeProvider(ModelProvider):
     """A strict FakeProvider that only accepts explicit ProviderEvent lists or factories."""
+
+    _iterator: Iterator[list[ProviderEvent]] | None
 
     def __init__(
         self,
         events: Union[
             list[ProviderEvent],
             list[list[ProviderEvent]],
-            Callable[[list[dict], list[ToolSpec]], list[ProviderEvent]],
+            Callable[[list[Any], list[Any]], list[ProviderEvent]],
         ],
     ) -> None:
         self.events = events
+        self._iterator = None
         if isinstance(events, list):
             if events and isinstance(events[0], list):
-                self._iterator = iter(events)
+                self._iterator = iter(events)  # type: ignore[assignment]
             else:
-                self._iterator = iter([events])
-        else:
-            self._iterator = None
+                from typing import cast
+
+                self._iterator = iter([cast(list[ProviderEvent], events)])
 
     async def stream(
         self,
-        messages: list[dict],
-        tools: list[ToolSpec],
+        messages: list[Any],
+        tools: list[ToolDefinition],
     ) -> AsyncIterator[ProviderEvent]:
         if callable(self.events):
             res_list = self.events(messages, tools)

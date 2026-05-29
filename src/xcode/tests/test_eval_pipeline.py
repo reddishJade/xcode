@@ -171,7 +171,9 @@ class EvalPipelineTests(unittest.TestCase):
 
 
 def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
-    responses = [
+    from xcode.harness.agent_runtime.events import ProviderEvent
+
+    responses: list[list[ProviderEvent]] = [
         [ToolCallReady([ToolCall("a", "echo", "hello")]), FinalMessage("", "end_turn")],
         [TextDelta("finished"), FinalMessage("", "end_turn")],
     ]
@@ -186,11 +188,15 @@ def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
 
 
 def _text_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
+    from xcode.harness.agent_runtime.events import ProviderEvent
+
+    responses: list[ProviderEvent] = [
+        TextDelta("async ok"),
+        FinalMessage("", "end_turn"),
+    ]
     return XcodeApp(
         agent=StructuredAgent(
-            provider=FakeProvider(
-                [TextDelta("async ok"), FinalMessage("", "end_turn")]
-            ),
+            provider=FakeProvider(responses),
             registry=(),
         )
     )
@@ -207,7 +213,9 @@ def _editing_app(project_root: Path) -> XcodeApp:
         return "edited"
 
     tool = ToolSpec("edit_file", "Edit file.", "text", edit_file)
-    responses = [
+    from xcode.harness.agent_runtime.events import ProviderEvent
+
+    responses: list[list[ProviderEvent]] = [
         [
             ToolCallReady([ToolCall("edit", "edit_file", "math_utils.py")]),
             FinalMessage("", "end_turn"),

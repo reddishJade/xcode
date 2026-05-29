@@ -26,15 +26,16 @@ class XcodeHookTests(unittest.TestCase):
         hooks.register(
             "post_tool", lambda record: seen.append((record.event, record.output))
         )
-        provider = FakeProvider(
+        from xcode.harness.agent_runtime.events import ProviderEvent
+
+        responses: list[list[ProviderEvent]] = [
             [
-                [
-                    ToolCallReady([ToolCall("x", "echo", "hi")]),
-                    FinalMessage("", "end_turn"),
-                ],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
-            ]
-        )
+                ToolCallReady([ToolCall("x", "echo", "hi")]),
+                FinalMessage("", "end_turn"),
+            ],
+            [TextDelta("done"), FinalMessage("", "end_turn")],
+        ]
+        provider = FakeProvider(responses)
         agent = StructuredAgent(
             provider=provider,
             registry=(ToolSpec("echo", "Echo.", "text", lambda value: value),),
@@ -49,15 +50,16 @@ class XcodeHookTests(unittest.TestCase):
         seen = []
         hooks = HookManager()
         hooks.register("on_error", lambda record: seen.append(record.error))
-        provider = FakeProvider(
+        from xcode.harness.agent_runtime.events import ProviderEvent
+
+        responses: list[list[ProviderEvent]] = [
             [
-                [
-                    ToolCallReady([ToolCall("x", "boom", "")]),
-                    FinalMessage("", "end_turn"),
-                ],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
-            ]
-        )
+                ToolCallReady([ToolCall("x", "boom", "")]),
+                FinalMessage("", "end_turn"),
+            ],
+            [TextDelta("done"), FinalMessage("", "end_turn")],
+        ]
+        provider = FakeProvider(responses)
 
         def fail(_value: str) -> str:
             raise ValueError("bad")

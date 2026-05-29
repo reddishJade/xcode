@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 from xcode.harness.agent_runtime.compaction import (
     budget_large_tool_outputs,
     LayeredCompactor,
@@ -9,7 +10,7 @@ from xcode.harness.agent_runtime.compaction import (
 
 class TestXcodeCompactionBudget(unittest.TestCase):
     def test_budget_no_truncation_when_under_threshold(self) -> None:
-        messages = [
+        messages: list[dict[str, Any]] = [
             {"role": "user", "content": "hello"},
             {
                 "role": "user",
@@ -32,7 +33,7 @@ class TestXcodeCompactionBudget(unittest.TestCase):
         self.assertEqual(compacted[1]["content"][0]["content"], "a" * 100)
 
     def test_budget_truncation_when_over_threshold(self) -> None:
-        messages = [
+        messages: list[dict[str, Any]] = [
             {"role": "user", "content": "hello world test content"},
             {
                 "role": "user",

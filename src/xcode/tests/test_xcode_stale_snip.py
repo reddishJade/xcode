@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 from xcode.harness.agent_runtime.compaction import stale_snip_file_reads
 
 
 class TestXcodeStaleSnip(unittest.TestCase):
     def test_stale_snip_only_keeps_latest_read_file(self) -> None:
-        messages = [
+        messages: list[dict[str, Any]] = [
             {
                 "role": "user",
                 "content": "Read files",
@@ -101,7 +102,7 @@ class TestXcodeStaleSnip(unittest.TestCase):
         self.assertEqual(other_result["content"], "some grep results")
 
     def test_stale_snip_no_error_on_missing_fields(self) -> None:
-        messages = [
+        messages: list[dict[str, Any]] = [
             {"role": "user", "content": "hello"},
             {
                 "role": "assistant",

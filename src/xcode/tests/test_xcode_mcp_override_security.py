@@ -66,7 +66,7 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
 
             orig_hash = mcp.compute_config_hash
             try:
-                mcp.compute_config_hash = lambda cfg: "dummy_hash"
+                mcp.compute_config_hash = lambda server_config: "dummy_hash"
                 tools = build_mcp_tools(project_root)
             finally:
                 mcp.compute_config_hash = orig_hash

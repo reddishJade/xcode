@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import patch
+from typing import Any
 
 from xcode.harness.config import (
     discover_runtime_config,
@@ -165,7 +166,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
 
                 self.assertEqual(main_module.main(), 0)
 
-            runtime = captured["runtime_config"]
+            runtime: Any = captured["runtime_config"]
             self.assertEqual(runtime.agent.max_steps, 11)
             self.assertEqual(runtime.agent.tool_workers, 3)
             self.assertEqual(runtime.paths.skills_dir, Path("skills"))
@@ -212,7 +213,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
 
                 self.assertEqual(main_module.main(), 0)
 
-            runtime = captured["runtime_config"]
+            runtime: Any = captured["runtime_config"]
             self.assertEqual(runtime.agent.max_steps, 12)
             self.assertEqual(captured["sessions_dir"], root / "sessions")
 

@@ -30,6 +30,8 @@ class TestHeartbeatDaemon(unittest.TestCase):
         """测试守护进程正常启动与停止。"""
         self.assertFalse(self.daemon._stop_event.is_set())
         self.daemon.start()
+        self.assertIsNotNone(self.daemon._thread)
+        assert self.daemon._thread is not None
         self.assertTrue(self.daemon._thread.is_alive())
 
         self.daemon.stop()
@@ -69,6 +71,7 @@ class TestHeartbeatDaemon(unittest.TestCase):
 
             alerts = self.daemon.check_git_status()
             self.assertIsNotNone(alerts)
+            assert alerts is not None
             self.assertEqual(len(alerts), 1)
             self.assertEqual(alerts[0]["type"], "git_dirty_alert")
             self.assertEqual(alerts[0]["payload"]["dirty_files_count"], 2)
@@ -85,6 +88,7 @@ class TestHeartbeatDaemon(unittest.TestCase):
 
         alerts = self.daemon.check_background_tasks()
         self.assertIsNotNone(alerts)
+        assert alerts is not None
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0]["type"], "tasks_summary")
         self.assertEqual(alerts[0]["payload"]["pending_count"], 1)

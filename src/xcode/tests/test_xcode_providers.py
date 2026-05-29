@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from xcode.harness.agent_runtime.events import TextDelta, ToolCallReady
+from typing import Any
+from xcode.harness.agent_runtime.events import TextDelta, ToolCallReady, FinalMessage
 from xcode.ai.providers.factory import (
     ProviderRuntime,
     ProviderSettings,
@@ -206,9 +207,10 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             },
         )
 
-        events = list(llm._stream_sync([{"role": "user", "content": "echo"}], (tool,)))
+        events = list(llm._stream_sync([{"role": "user", "content": "echo"}], (tool,)))  # type: ignore[arg-type]
         tool_call = events[-1]
         self.assertIsInstance(tool_call, ToolCallReady)
+        assert isinstance(tool_call, ToolCallReady)
         self.assertEqual(tool_call.calls[0].name, "echo")
         self.assertEqual(tool_call.calls[0].input, {"text": "hello"})
         sent_tool = llm.client.chat.completions.kwargs["tools"][0]
@@ -292,10 +294,13 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         events = list(llm._stream_sync([{"role": "user", "content": "go"}], ()))
 
         self.assertIsInstance(events[0], TextDelta)
+        assert isinstance(events[0], TextDelta)
         self.assertEqual(events[0].chunk, "he")
         self.assertIsInstance(events[1], TextDelta)
+        assert isinstance(events[1], TextDelta)
         self.assertEqual(events[1].chunk, "llo")
         self.assertIsInstance(events[-1], ToolCallReady)
+        assert isinstance(events[-1], ToolCallReady)
         self.assertEqual(events[-1].calls[0].id, "call-1")
         self.assertEqual(events[-1].calls[0].name, "echo")
         self.assertEqual(events[-1].calls[0].input, {"text": "hi"})
@@ -335,10 +340,12 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             [event.chunk for event in first if isinstance(event, TextDelta)],
             ["he", "llo"],
         )
+        assert isinstance(first[-1], FinalMessage)
         self.assertEqual(first[-1].content, "ok-r1")
         self.assertEqual(
             [event.chunk for event in second if isinstance(event, TextDelta)], ["ok"]
         )
+        assert isinstance(second[-1], FinalMessage)
         self.assertEqual(second[-1].content, "ok-r2")
         calls = llm.client.responses.calls
         self.assertNotIn("previous_response_id", calls[0])
@@ -356,7 +363,7 @@ class FakeOpenAIClient:
 class FakeResponses:
     def __init__(self, outputs) -> None:
         self.outputs = list(outputs)
-        self.calls = []
+        self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
@@ -367,7 +374,7 @@ class FakeResponsesResponse:
     def __init__(self, response_id) -> None:
         self.id = response_id
         self.output_text = f"ok-{response_id}"
-        self.output = []
+        self.output: list[Any] = []
         self.usage = None
 
 
@@ -388,7 +395,7 @@ class FakeCompletions:
         self.content = content
         self.tool_calls = tool_calls
         self.stream_chunks = stream_chunks
-        self.kwargs = {}
+        self.kwargs: dict[str, Any] = {}
 
     def create(self, **kwargs):
         self.kwargs = kwargs

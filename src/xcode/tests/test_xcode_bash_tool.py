@@ -68,6 +68,8 @@ class XcodeBashToolTests(unittest.TestCase):
     def test_bash_tool_has_structured_schema(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tool = build_bash_tool(Path(tmp))
+            self.assertIsNotNone(tool.schema)
+            assert tool.schema is not None
             self.assertEqual(tool.schema["required"], ["command"])
             self.assertIn("timeout", tool.schema["properties"])
 

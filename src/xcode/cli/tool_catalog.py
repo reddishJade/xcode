@@ -9,8 +9,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 import tempfile
+from typing import Any
 
 from xcode.harness.skills import ToolSpec
 from xcode.harness.tools import (
@@ -23,7 +25,7 @@ from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
 from xcode.experimental.tasks import TaskStore, build_task_tools
 
 
-def _builders(base_tmp: Path) -> list[tuple[str, callable]]:
+def _builders(base_tmp: Path) -> list[tuple[str, Callable[[], Any]]]:
     from xcode.harness.skill_loader import SkillLoader, build_skill_loader_tool
 
     return [

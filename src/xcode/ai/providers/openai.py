@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
+from ...agent.types import ToolDefinition
+from ...harness.agent_runtime.events import ProviderEvent
+
 from .codec import (
     chat_stream_to_events,
     responses_stream_to_events,
@@ -52,14 +55,14 @@ class OpenAIChatProvider:
     async def stream(
         self,
         messages: list[dict[str, Any]],
-        tools: list[Any],
-    ) -> AsyncIterator[dict[str, Any]]:
+        tools: list[ToolDefinition],
+    ) -> AsyncIterator[ProviderEvent]:
         for event in self._stream_sync(messages, tuple(tools)):
             yield event
 
     def _stream_sync(
-        self, messages: list[dict[str, Any]], tools: tuple[dict[str, Any], ...]
-    ) -> Iterator[dict[str, Any]]:
+        self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...]
+    ) -> Iterator[ProviderEvent]:
         kwargs: dict[str, object] = {
             "model": self.model,
             "messages": to_openai_messages(messages),
@@ -150,14 +153,14 @@ class OpenAIResponsesProvider:
     async def stream(
         self,
         messages: list[dict[str, Any]],
-        tools: list[Any],
-    ) -> AsyncIterator[dict[str, Any]]:
+        tools: list[ToolDefinition],
+    ) -> AsyncIterator[ProviderEvent]:
         for event in self._stream_sync(messages, tuple(tools)):
             yield event
 
     def _stream_sync(
-        self, messages: list[dict[str, Any]], tools: tuple[dict[str, Any], ...]
-    ) -> Iterator[dict[str, Any]]:
+        self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...]
+    ) -> Iterator[ProviderEvent]:
         kwargs = self._responses_kwargs(messages, tools, stream=True)
         stream = self.runtime.run(lambda: self.client.responses.create(**kwargs))
         self.metrics["sent_messages"] = len(kwargs["input"])
@@ -175,7 +178,7 @@ class OpenAIResponsesProvider:
     def _responses_kwargs(
         self,
         messages: list[dict[str, Any]],
-        tools: tuple[dict[str, Any], ...],
+        tools: tuple[ToolDefinition, ...],
         stream: bool,
     ) -> dict:
         converted = to_openai_messages(messages)

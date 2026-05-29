@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
+from ...agent.types import ToolDefinition
+from ...harness.agent_runtime.events import ProviderEvent
+
 from .codec import chat_stream_to_events, to_chat_tool, to_openai_messages
 from .runtime import ProviderRuntime
 
@@ -47,14 +50,14 @@ class MiMoProvider:
     async def stream(
         self,
         messages: list[dict[str, Any]],
-        tools: list[Any],
-    ) -> AsyncIterator[dict[str, Any]]:
+        tools: list[ToolDefinition],
+    ) -> AsyncIterator[ProviderEvent]:
         for event in self._stream_sync(messages, tuple(tools)):
             yield event
 
     def _stream_sync(
-        self, messages: list[dict[str, Any]], tools: tuple[dict[str, Any], ...]
-    ) -> Iterator[dict[str, Any]]:
+        self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...]
+    ) -> Iterator[ProviderEvent]:
         kwargs: dict[str, object] = {
             "model": self.model,
             "messages": to_openai_messages(messages),

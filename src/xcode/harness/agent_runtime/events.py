@@ -7,7 +7,7 @@ from typing import Any, Literal, TypeAlias
 
 Message: TypeAlias = dict[str, Any]
 StopReason: TypeAlias = Literal[
-    "end_turn", "tool_use", "max_steps", "cancelled", "error"
+    "end_turn", "tool_use", "max_steps", "cancelled", "error", "max_tokens"
 ]
 
 

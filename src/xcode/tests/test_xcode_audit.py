@@ -39,15 +39,16 @@ class XcodeAuditTests(unittest.TestCase):
     def test_structured_agent_writes_audit_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "audit.jsonl"
-            provider = FakeProvider(
+            from xcode.harness.agent_runtime.events import ProviderEvent
+
+            responses: list[list[ProviderEvent]] = [
                 [
-                    [
-                        ToolCallReady([ToolCall("t1", "echo", "sk-1234567890abcdef")]),
-                        FinalMessage("", "end_turn"),
-                    ],
-                    [TextDelta("done"), FinalMessage("", "end_turn")],
-                ]
-            )
+                    ToolCallReady([ToolCall("t1", "echo", "sk-1234567890abcdef")]),
+                    FinalMessage("", "end_turn"),
+                ],
+                [TextDelta("done"), FinalMessage("", "end_turn")],
+            ]
+            provider = FakeProvider(responses)
             agent = StructuredAgent(
                 provider=provider,
                 registry=(ToolSpec("echo", "Echo.", "text", lambda value: value),),
@@ -95,15 +96,16 @@ class XcodeAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "audit.jsonl"
             # Tool with high risk that returns output resembling old approval prefix
-            provider = FakeProvider(
+            from xcode.harness.agent_runtime.events import ProviderEvent
+
+            responses: list[list[ProviderEvent]] = [
                 [
-                    [
-                        ToolCallReady([ToolCall("t1", "danger", "go")]),
-                        FinalMessage("", "end_turn"),
-                    ],
-                    [TextDelta("done"), FinalMessage("", "end_turn")],
-                ]
-            )
+                    ToolCallReady([ToolCall("t1", "danger", "go")]),
+                    FinalMessage("", "end_turn"),
+                ],
+                [TextDelta("done"), FinalMessage("", "end_turn")],
+            ]
+            provider = FakeProvider(responses)
             agent = StructuredAgent(
                 provider=provider,
                 registry=(

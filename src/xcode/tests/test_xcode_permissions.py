@@ -62,15 +62,16 @@ class XcodePermissionsTests(unittest.TestCase):
         self.assertEqual(output, "go")
 
     def test_structured_agent_uses_permission_policy(self) -> None:
-        provider = FakeProvider(
+        from xcode.harness.agent_runtime.events import ProviderEvent
+
+        responses: list[list[ProviderEvent]] = [
             [
-                [
-                    ToolCallReady([ToolCall("x", "echo", "hello")]),
-                    FinalMessage("", "end_turn"),
-                ],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
-            ]
-        )
+                ToolCallReady([ToolCall("x", "echo", "hello")]),
+                FinalMessage("", "end_turn"),
+            ],
+            [TextDelta("done"), FinalMessage("", "end_turn")],
+        ]
+        provider = FakeProvider(responses)
         agent = StructuredAgent(
             provider=provider,
             registry=(ToolSpec("echo", "Echo.", "text", lambda value: value),),

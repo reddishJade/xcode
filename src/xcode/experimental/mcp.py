@@ -8,7 +8,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 
 from xcode.harness.skills import ToolSpec, parse_tool_input
 
@@ -66,7 +66,7 @@ class McpClient:
 
     def _read_loop(self) -> None:
         while self._running and self.process and self.process.stdout:
-            msg = _read_jsonrpc_message(self.process.stdout)
+            msg = _read_jsonrpc_message(cast(BinaryIO, self.process.stdout))
             if msg is None:
                 break
             if isinstance(msg, dict) and "id" in msg:
@@ -93,6 +93,7 @@ class McpClient:
 
         payload = _encode_jsonrpc_message(req)
         try:
+            assert self.process.stdin is not None
             self.process.stdin.write(payload)
             self.process.stdin.flush()
         except OSError as e:
@@ -125,7 +126,7 @@ class McpClient:
         if not self._running or not self.process:
             raise RuntimeError("MCP client is not running.")
 
-        req = {
+        req: dict[str, Any] = {
             "jsonrpc": "2.0",
             "method": method,
         }
@@ -134,6 +135,7 @@ class McpClient:
 
         payload = _encode_jsonrpc_message(req)
         try:
+            assert self.process.stdin is not None
             self.process.stdin.write(payload)
             self.process.stdin.flush()
         except OSError as e:
@@ -161,7 +163,8 @@ class McpClient:
                 pass
         if self.process:
             try:
-                self.process.stdin.close()
+                if self.process.stdin:
+                    self.process.stdin.close()
             except Exception:
                 pass
             try:
@@ -334,7 +337,7 @@ def build_fetch_tools_tool(
                 )
 
             cache_path = project_root / ".local" / "mcp_cache.json"
-            cache_data = {"servers": {}}
+            cache_data: dict[str, Any] = {"servers": {}}
             if cache_path.exists():
                 try:
                     cache_data = json.loads(cache_path.read_text(encoding="utf-8"))

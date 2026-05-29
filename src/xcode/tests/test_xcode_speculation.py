@@ -21,18 +21,21 @@ class XcodeSpeculationTests(unittest.TestCase):
     def test_planner_prepares_diff_after_edit(self) -> None:
         event = SpeculationPlanner().plan("edit_file", "ok")
 
+        self.assertIsNotNone(event)
+        assert event is not None
         self.assertEqual(event.kind, "prepare_diff_view")
 
     def test_structured_agent_emits_speculation_event(self) -> None:
-        provider = FakeProvider(
+        from xcode.harness.agent_runtime.events import ProviderEvent
+
+        mock_events: list[list[ProviderEvent]] = [
             [
-                [
-                    ToolCallReady([ToolCall("e", "edit_file", "")]),
-                    FinalMessage("", "end_turn"),
-                ],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
-            ]
-        )
+                ToolCallReady([ToolCall("e", "edit_file", "")]),
+                FinalMessage("", "end_turn"),
+            ],
+            [TextDelta("done"), FinalMessage("", "end_turn")],
+        ]
+        provider = FakeProvider(mock_events)
         agent = StructuredAgent(
             provider=provider,
             registry=(
@@ -50,6 +53,8 @@ class XcodeSpeculationTests(unittest.TestCase):
     def test_planner_prepares_recovery_after_error(self) -> None:
         event = SpeculationPlanner().plan("bash", "error")
 
+        self.assertIsNotNone(event)
+        assert event is not None
         self.assertEqual(event.kind, "prepare_recovery_hint")
 
 

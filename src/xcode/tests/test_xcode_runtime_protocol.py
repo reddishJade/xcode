@@ -23,7 +23,9 @@ class RuntimeProtocolTest(unittest.TestCase):
 
     def test_provider_protocol_is_stream(self) -> None:
         hints = get_type_hints(ModelProvider.stream)
-        self.assertEqual(hints.get("return").__name__, "AsyncIterator")
+        ret = hints.get("return")
+        assert ret is not None
+        self.assertEqual(ret.__name__, "AsyncIterator")
 
 
 if __name__ == "__main__":

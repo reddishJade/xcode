@@ -45,7 +45,7 @@ class MemoryManager:
 
         content = self.memory_file.read_text(encoding="utf-8")
         blocks = []
-        current_block = []
+        current_block: list[str] = []
 
         for line in content.splitlines():
             if line.startswith("## "):

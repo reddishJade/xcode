@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, cast
 
 from xcode.harness.agent_runtime.compaction import (
     LayeredCompactor,
@@ -111,7 +112,7 @@ class XcodeContextRestorationTests(unittest.TestCase):
                 project_root=project_root,
                 registry=(),
                 question="How to build?",
-                skill_loader=FakeLoader(),
+                skill_loader=cast(Any, FakeLoader()),
             )
 
             builder = SystemPromptBuilder()

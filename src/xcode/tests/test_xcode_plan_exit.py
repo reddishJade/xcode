@@ -21,8 +21,10 @@ class XcodePlanExitTests(unittest.TestCase):
 
             parent_meta = store.current_metadata()
             self.assertIsNotNone(parent_meta)
+            assert parent_meta is not None
 
             fork_meta = store.fork_clean_into("isolate", title="Act continuation")
+            assert fork_meta is not None
             self.assertEqual(fork_meta.parent_id, parent_meta.id)
             self.assertEqual(fork_meta.fork_type, "isolate")
             self.assertEqual(fork_meta.title, "Act continuation")
@@ -83,7 +85,7 @@ class XcodePlanExitTests(unittest.TestCase):
             # Setup a Custom FakeApp that captures the prompts
             class PlanExitApp:
                 def __init__(self) -> None:
-                    self.prompts = []
+                    self.prompts: list[str] = []
 
                 def ask_stream(self, text: str, mode: str | None = None):
                     self.prompts.append(text)

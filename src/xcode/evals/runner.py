@@ -89,7 +89,7 @@ class EvalRunner:
         evidence_graders = _grade_file_evidence(task, before_evidence, after_evidence)
         graders = grade_events(task, events, answer, runtime_error) + evidence_graders
         success = all(grader.passed for grader in graders)
-        metrics = {
+        metrics: dict[str, Any] = {
             "event_count": len(events),
             "tool_calls": sum(1 for event in events if event.type == "tool_use"),
             "tool_errors": sum(

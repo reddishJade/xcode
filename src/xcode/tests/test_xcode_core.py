@@ -47,9 +47,10 @@ class XcodeSkillCoreTests(unittest.TestCase):
 class XcodeAgentCoreTests(unittest.TestCase):
     def test_agent_runs_without_rag_or_react_imports(self) -> None:
         from xcode.tests.fixtures import FakeProvider
-        from xcode.harness.agent_runtime.events import FinalMessage
+        from xcode.harness.agent_runtime.events import ProviderEvent, FinalMessage
 
-        provider = FakeProvider([FinalMessage("3", "end_turn")])
+        responses: list[ProviderEvent] = [FinalMessage("3", "end_turn")]
+        provider = FakeProvider(responses)
         runner = agent.StructuredAgent(
             provider=provider,
             registry=skills.BASE_REGISTRY,

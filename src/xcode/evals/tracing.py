@@ -54,7 +54,7 @@ class TraceRecorder:
 
 def _jsonable(value: Any) -> Any:
     if is_dataclass(value):
-        return _jsonable(asdict(value))
+        return _jsonable(asdict(value))  # type: ignore[arg-type]
     if isinstance(value, dict):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

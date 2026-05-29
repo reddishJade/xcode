@@ -29,6 +29,7 @@ class TestTaskStoreAndMailbox(unittest.TestCase):
         # Test claim
         claimed = store.claim(1, "worker1")
         self.assertIsNotNone(claimed)
+        assert claimed is not None
         self.assertEqual(claimed.status, "claimed")
         self.assertEqual(claimed.claimed_by, "worker1")
 

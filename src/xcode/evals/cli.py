@@ -10,11 +10,13 @@ from typing import Any
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.events import (
     FinalMessage,
+    Message,
     ProviderEvent,
     TextDelta,
     ToolCall,
     ToolCallReady,
 )
+from xcode.agent.types import ToolDefinition
 from xcode.harness.agent_runtime.provider import ModelProvider
 from xcode.harness.app import XcodeApp, build_app as build_real_app
 from xcode.harness.config import AgentConfig
@@ -167,6 +169,8 @@ def _trial_project_root(
 
 
 def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
+    provider: _StaticProvider
+    tools: tuple[ToolSpec, ...]
     if task.expected_tool_calls:
         tool_name = task.expected_tool_calls[0]
         provider = _StaticProvider(
@@ -217,8 +221,8 @@ class _StaticProvider(ModelProvider):
 
     async def stream(
         self,
-        _messages: list[dict],
-        _tools: list[ToolSpec],
+        _messages: list[Message],
+        _tools: list[ToolDefinition],
     ) -> AsyncIterator[ProviderEvent]:
         try:
             events = next(self._turns)

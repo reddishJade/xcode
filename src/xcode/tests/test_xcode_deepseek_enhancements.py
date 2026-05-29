@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from typing import cast
+from typing import Any, cast
 
 from xcode.ai.providers.codec import (
     to_openai_messages,
@@ -91,7 +91,7 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
         self.assertNotIn("frequency_penalty", kwargs)
 
     def test_tool_call_replay_does_not_stringify_none_content(self) -> None:
-        messages = [
+        messages: list[dict[str, Any]] = [
             {
                 "role": "assistant",
                 "content": None,
@@ -203,7 +203,7 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
         self.assertNotIn("reasoning_content", cleaned[1])
 
     def test_reasoning_content_history_cleanup_tool_loop(self) -> None:
-        messages = [
+        messages: list[dict[str, Any]] = [
             {"role": "user", "content": "Query 1"},
             {"role": "assistant", "content": "Ans 1", "reasoning_content": "Thought 1"},
             {"role": "user", "content": "Query 2"},
@@ -297,7 +297,7 @@ class FakeCompletions:
         self.stream_chunks = stream_chunks
         self.retry_content = retry_content
         self.tool_calls = tool_calls
-        self.kwargs = {}
+        self.kwargs: dict[str, Any] = {}
         self.call_count = 0
 
     def create(self, **kwargs):

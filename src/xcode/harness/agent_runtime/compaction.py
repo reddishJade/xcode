@@ -81,7 +81,9 @@ class LayeredCompactor:
             if second_msg.get("role") == "user" and str(
                 second_msg.get("content")
             ).startswith("[Compressed]"):
-                cleaned_content = context_collapse_clean(second_msg.get("content"))
+                content_val = second_msg.get("content")
+                assert isinstance(content_val, str)
+                cleaned_content = context_collapse_clean(content_val)
                 second_msg["content"] = cleaned_content
                 if self.on_compact is not None:
                     self.on_compact(cleaned_content)
