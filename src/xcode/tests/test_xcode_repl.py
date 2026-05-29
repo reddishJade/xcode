@@ -10,13 +10,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from xcode.cli.completion import ReplCompleter
-from xcode.cli.repl import _brief_input, run_repl
+from xcode.cli.repl import _brief_input, _reasoning_preview_lines, run_repl
 from xcode.cli.session import SessionStore
 from xcode.harness.agent_runtime import (
     CancellationToken,
     StructuredAgentEvent,
     StructuredAgentResult,
 )
+from xcode.harness.agent_runtime.structured import ToolResultBlock
 from xcode.harness.agent_runtime.events import ToolCall
 from xcode.harness.skills import ToolSpec
 
@@ -109,22 +110,86 @@ class XcodeReplTests(unittest.TestCase):
             self.assertNotIn("Session:", text)
             self.assertNotIn("session-", text.splitlines()[0])
 
-    def test_run_repl_renders_markdown_without_changing_transcript(self) -> None:
+    def test_run_repl_streams_markdown_without_changing_transcript(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = FakeMarkdownApp()
             prompt = FakePrompt(["hello", "/exit"])
             renderer = FakeRenderer()
+            output = StringIO()
 
-            with redirect_stdout(StringIO()):
+            with redirect_stdout(output):
                 code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
 
             self.assertEqual(code, 0)
-            self.assertEqual(len(renderer.rendered), 1)
-            self.assertIn("# Title", renderer.rendered[0])
-            self.assertIn("- item", renderer.rendered[0])
+            self.assertEqual(renderer.rendered, [])
+            self.assertIn("Title", output.getvalue())
+            self.assertIn("item", output.getvalue())
             session = next(Path(temp_dir).glob("session-*.jsonl"))
             text = session.read_text(encoding="utf-8")
             self.assertIn("# Title", text)
+
+    def test_run_repl_streams_text_delta_answer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = MultiDeltaApp()
+            prompt = FakePrompt(["hello", "/exit"])
+            output = StringIO()
+
+            with redirect_stdout(output):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            self.assertIn("hello", output.getvalue())
+            self.assertNotIn("thinking...", output.getvalue())
+
+    def test_run_repl_collapses_reasoning_preview_before_answer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = ReasoningApp()
+            prompt = FakePrompt(["hello", "/exit"])
+            output = StringIO()
+
+            with redirect_stdout(output):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            self.assertIn("thinked for", output.getvalue())
+            self.assertIn("one two three four", output.getvalue())
+            self.assertIn("done", output.getvalue())
+
+    def test_run_repl_summarizes_tools_without_success_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = ToolEventApp()
+            prompt = FakePrompt(["search", "/exit"])
+            output = StringIO()
+
+            with redirect_stdout(output):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            text = output.getvalue()
+            self.assertEqual(code, 0)
+            self.assertIn("Explore: Search src/xcode for mcp", text)
+            self.assertIn("done: 1 tools", text)
+            self.assertNotIn("tool result", text)
+            self.assertNotIn("← ok", text)
+
+    def test_run_repl_verbose_shows_individual_tool_events(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = ToolEventApp()
+            prompt = FakePrompt(["/verbose on", "search", "/exit"])
+            output = StringIO()
+
+            with redirect_stdout(output):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            text = output.getvalue()
+            self.assertEqual(code, 0)
+            self.assertIn('grep_search: pattern="mcp", path="src/xcode"', text)
+            self.assertIn("← ok", text)
+
+    def test_reasoning_preview_lines_keep_latest_three_visual_lines(self) -> None:
+        self.assertEqual(
+            _reasoning_preview_lines("one\ntwo\nthree\nfour", width=80),
+            ["two", "three", "four"],
+        )
 
     def test_run_repl_expands_file_references_but_preserves_user_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -220,9 +285,14 @@ class XcodeReplTests(unittest.TestCase):
             _brief_input("bash", {"command": "Remove-Item tmp\\hello.c"}),
             "bash: Remove-Item tmp\\hello.c",
         )
+        write_summary = _brief_input(
+            "write_file", {"path": "tmp/hello.py", "content": "x" * 200}
+        )
+        self.assertTrue(write_summary.startswith('write_file: path="tmp/hello.py"'))
+        self.assertTrue(write_summary.endswith("…"))
         self.assertEqual(
-            _brief_input("write_file", {"path": "tmp/hello.py", "content": "x" * 200}),
-            "write_file: tmp/hello.py",
+            _brief_input("grep_search", {"pattern": "**/*mcp*", "path": "src/xcode"}),
+            'grep_search: pattern="**/*mcp*", path="src/xcode"',
         )
 
     def test_run_repl_interrupt_is_final_standalone_line(self) -> None:
@@ -537,6 +607,64 @@ class FakeMarkdownApp:
             1,
             StructuredAgentResult(
                 answer="# Title\n\n- item",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class MultiDeltaApp:
+    def ask_stream(self, _text: str, mode: str | None = None):
+        yield StructuredAgentEvent("text_delta", 1, "he")
+        yield StructuredAgentEvent("text_delta", 1, "ll")
+        yield StructuredAgentEvent("text_delta", 1, "o")
+        yield StructuredAgentEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer="hello",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class ReasoningApp:
+    def ask_stream(self, _text: str, mode: str | None = None):
+        yield StructuredAgentEvent("reasoning_delta", 1, "one\n")
+        yield StructuredAgentEvent("reasoning_delta", 1, "two\nthree\nfour")
+        yield StructuredAgentEvent("text_delta", 1, "done")
+        yield StructuredAgentEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer="done",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class ToolEventApp:
+    def ask_stream(self, _text: str, mode: str | None = None):
+        yield StructuredAgentEvent(
+            "tool_use",
+            1,
+            ToolCall("call_1", "grep_search", {"pattern": "mcp", "path": "src/xcode"}),
+        )
+        yield StructuredAgentEvent(
+            "tool_result",
+            1,
+            ToolResultBlock("call_1", "ok", "ok"),
+        )
+        yield StructuredAgentEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer="",
                 messages=[],
                 steps=1,
                 tool_calls=[],

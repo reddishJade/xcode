@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict, dataclass, is_dataclass
+import json
 from pathlib import Path
+import shutil
 import sys
+import textwrap
 import time
 from typing import Any, Protocol
 
@@ -19,13 +22,94 @@ from xcode.harness.observability import (
 from xcode.harness.skills import ToolSpec, run_tool_result
 
 from rich.console import Console
-from rich.panel import Panel
+from rich.live import Live
+from rich.markdown import Markdown
+from rich.text import Text
 
 _console = Console(file=sys.stdout)
+_MIN_REASONING_PREVIEW_SECONDS = 0.15
+_THINKING_STYLE = "grey50"
 
 
 class PromptLike(Protocol):
     def prompt(self, prompt_text: str) -> str: ...
+
+
+def _reasoning_preview_lines(text: str, width: int | None = None) -> list[str]:
+    width = width or max(20, shutil.get_terminal_size((100, 20)).columns - 4)
+    lines: list[str] = []
+    for line in text.splitlines() or [text]:
+        wrapped = textwrap.wrap(
+            line,
+            width=width,
+            replace_whitespace=False,
+            drop_whitespace=False,
+        )
+        lines.extend(wrapped or [""])
+    return lines[-3:]
+
+
+def _format_elapsed(seconds: float) -> str:
+    if seconds < 1:
+        return f"{seconds * 1000:.0f}ms"
+    return f"{seconds:.1f}s"
+
+
+def _single_line_preview(text: str, width: int | None = None) -> str:
+    width = width or max(20, shutil.get_terminal_size((100, 20)).columns - 6)
+    preview = " ".join(text.split())
+    if len(preview) <= width:
+        return preview
+    return f"{preview[: max(0, width - 1)]}…"
+
+
+class _LiveMarkdownStream:
+    def __init__(self, console: Console) -> None:
+        self.console = console
+        self.live: Live | None = None
+
+    def update(self, text: str) -> None:
+        if self.live is None:
+            self.live = Live(
+                Markdown(text),
+                console=self.console,
+                refresh_per_second=12,
+                transient=False,
+            )
+            self.live.start(refresh=True)
+            return
+        self.live.update(Markdown(text), refresh=True)
+
+    def stop(self) -> None:
+        if self.live is None:
+            return
+        self.live.stop()
+        self.live = None
+
+
+class _LiveReasoningPreview:
+    def __init__(self, console: Console) -> None:
+        self.console = console
+        self.live: Live | None = None
+
+    def update(self, lines: list[str]) -> None:
+        text = Text("\n".join(lines), style=_THINKING_STYLE)
+        if self.live is None:
+            self.live = Live(
+                text,
+                console=self.console,
+                refresh_per_second=12,
+                transient=True,
+            )
+            self.live.start(refresh=True)
+            return
+        self.live.update(text, refresh=True)
+
+    def stop(self) -> None:
+        if self.live is None:
+            return
+        self.live.stop()
+        self.live = None
 
 
 HELP_TEXT = """Commands:
@@ -252,10 +336,8 @@ def run_repl(
         step_answers: list[str] = []
         current_step_thoughts: list[str] = []
         stopped_reason: str | None = None
-        pending_name: str | None = None
-        pending_count: int = 0
-        pending_input: Any = None
         interrupted = False
+        live_console = Console(file=sys.stdout)
 
         def _safe_write(text: str) -> None:
             try:
@@ -274,56 +356,110 @@ def run_repl(
                 )
                 sys.stdout.flush()
 
-        def _print_pending_tool() -> None:
-            nonlocal pending_name, pending_count, pending_input
-            if pending_name is not None:
-                brief = _brief_input(pending_name, pending_input)
-                label = (
-                    f"{brief}" if pending_count == 1 else f"{brief} × {pending_count}"
-                )
-                _safe_write(f"\r\033[K  • {label}\n")
-                pending_name = None
-                pending_count = 0
-
         def _clear_line() -> None:
             _safe_write("\r\033[K")
 
-        def _show_status() -> None:
-            nonlocal pending_name, pending_count, pending_input
-            if pending_name is not None:
-                brief = _brief_input(pending_name, pending_input)
-                label = (
-                    f"{brief}" if pending_count == 1 else f"{brief} × {pending_count}"
-                )
-                _safe_write(f"\r\033[K  • {label}")
+        reasoning_started_at: float | None = None
+        reasoning_text = ""
+        reasoning_preview = _LiveReasoningPreview(live_console)
+        answer_stream = _LiveMarkdownStream(live_console)
+        streamed_text = False
+        tool_group: dict[str, Any] | None = None
+        tool_call_labels: dict[str, str] = {}
 
-        printed_reasoning_status = False
+        def _record_tool_call(event_data: Any) -> None:
+            nonlocal tool_group
+            label = _brief_input(event_data.name, event_data.input)
+            intent = _tool_intent(event_data.name, event_data.input)
+            tool_call_labels[event_data.id] = label
+            if state.verbose:
+                _print_tool_call_rich(label, live_console)
+                return
+            if tool_group is None:
+                tool_group = {
+                    "intents": [],
+                    "calls": 0,
+                    "ok": 0,
+                    "errors": [],
+                }
+            tool_group["calls"] += 1
+            if intent not in tool_group["intents"]:
+                tool_group["intents"].append(intent)
+
+        def _record_tool_result(event_data: Any) -> None:
+            if state.verbose:
+                _print_tool_result_rich(event_data, state.verbose, live_console)
+                return
+            if tool_group is None:
+                return
+            if event_data.status == "ok":
+                tool_group["ok"] += 1
+                return
+            label = tool_call_labels.get(event_data.tool_use_id, event_data.tool_use_id)
+            tool_group["errors"].append((label, event_data))
+
+        def _flush_tool_group() -> None:
+            nonlocal tool_group
+            if tool_group is None:
+                return
+            calls = int(tool_group["calls"])
+            errors = list(tool_group["errors"])
+            intents = list(tool_group["intents"])
+            title = _summarize_intents(intents)
+            status = "failed" if errors else "done"
+            style = "red" if errors else "green"
+            live_console.print(Text(f"  • Explore: {title}", style="yellow"))
+            live_console.print(Text(f"    {status}: {calls} tools", style=style))
+            for label, result in errors:
+                summary = _single_line_preview(str(result.content), width=120)
+                live_console.print(Text(f"    error: {label}: {summary}", style="red"))
+            tool_group = None
+
+        def _render_reasoning_preview() -> None:
+            lines = _reasoning_preview_lines(reasoning_text)
+            if lines:
+                reasoning_preview.update(lines)
+
+        def _finish_reasoning_preview() -> None:
+            nonlocal reasoning_started_at, reasoning_text
+            if reasoning_started_at is None:
+                return
+            elapsed = time.perf_counter() - reasoning_started_at
+            if reasoning_text and elapsed < _MIN_REASONING_PREVIEW_SECONDS:
+                time.sleep(_MIN_REASONING_PREVIEW_SECONDS - elapsed)
+                elapsed = time.perf_counter() - reasoning_started_at
+            reasoning_preview.stop()
+            preview = _single_line_preview(reasoning_text)
+            live_console.print(
+                Text(
+                    f"  • thinked for {_format_elapsed(elapsed)}", style=_THINKING_STYLE
+                )
+            )
+            if preview:
+                live_console.print(Text(f"    {preview}", style=_THINKING_STYLE))
+            reasoning_started_at = None
+            reasoning_text = ""
+
         try:
             for event in _ask_stream(app, agent_text, state.mode):
                 store.append("event", _event_to_dict(event))
-                if event.type == "reasoning_delta":
-                    _print_pending_tool()
-                    if state.verbose:
-                        if not printed_reasoning_status:
-                            _safe_write("\033[90m")
-                            printed_reasoning_status = True
-                        _safe_write(str(event.data))
-                    else:
-                        if not printed_reasoning_status:
-                            _console.print("  • reasoning...", style="dim", end="")
-                            printed_reasoning_status = True
+                if event.type in {"reasoning_delta", "thinking_delta"}:
+                    _flush_tool_group()
+                    if reasoning_started_at is None:
+                        reasoning_started_at = time.perf_counter()
+                    reasoning_text += str(event.data)
+                    _render_reasoning_preview()
                     continue
 
-                if printed_reasoning_status and state.verbose:
-                    _safe_write("\033[0m\n")
-                    printed_reasoning_status = False
+                _finish_reasoning_preview()
 
                 if event.type == "text_delta":
-                    _print_pending_tool()
-                    _console.print("  • thinking...", style="dim", end="")
-                    current_step_thoughts.append(str(event.data))
+                    _flush_tool_group()
+                    chunk = str(event.data)
+                    current_step_thoughts.append(chunk)
+                    streamed_text = True
+                    answer_stream.update("".join(current_step_thoughts))
                 elif event.type == "assistant":
-                    _clear_line()
                     has_tool_calls = False
                     if isinstance(event.data, list):
                         has_tool_calls = any(
@@ -333,44 +469,38 @@ def run_repl(
                     if has_tool_calls:
                         thoughts = "".join(current_step_thoughts).strip()
                         if thoughts:
+                            answer_stream.stop()
                             if step_answers:
                                 print()
-                            print(thoughts)
-                            print()
                             step_answers.append(thoughts)
                         current_step_thoughts = []
+                        streamed_text = False
                 elif event.type == "tool_use":
-                    pending_input = event.data.input
-                    if pending_name == event.data.name:
-                        pending_count += 1
-                    else:
-                        _print_pending_tool()
-                        pending_name = event.data.name
-                        pending_count = 1
-                    _show_status()
+                    _record_tool_call(event.data)
                 elif event.type == "tool_result":
-                    if event.data.status not in ("ok",) or state.verbose:
-                        _print_pending_tool()
-                        _print_tool_result_rich(event.data, state.verbose)
+                    _record_tool_result(event.data)
                 elif event.type == "final":
-                    _print_pending_tool()
-                    _clear_line()
+                    _flush_tool_group()
                     final_answer = "".join(current_step_thoughts).strip()
                     if not final_answer and getattr(event.data, "answer", None):
                         final_answer = str(event.data.answer).strip()
                     if final_answer:
                         step_answers.append(final_answer)
-                        if len(step_answers) > 1:
+                        if streamed_text:
+                            answer_stream.stop()
+                        elif len(step_answers) > 1:
                             print()
-                        markdown_renderer.render(final_answer)
+                            markdown_renderer.render(final_answer)
+                        else:
+                            markdown_renderer.render(final_answer)
+                        streamed_text = False
                     stopped_reason = _final_stop_reason(event.data)
         except KeyboardInterrupt:
             interrupted = True
             token = getattr(getattr(app, "agent", None), "cancellation_token", None)
             if token is not None:
                 token.cancel("interrupted by user")
-            pending_name = None
-            pending_count = 0
+            tool_group = None
             _clear_line()
             store.append(
                 "event", {"type": "interrupted", "data": "interrupted by user"}
@@ -378,11 +508,10 @@ def run_repl(
             print("[interrupted] current run cancelled; session is still active.")
             continue
         finally:
-            if printed_reasoning_status and state.verbose:
-                _safe_write("\033[0m\n")
+            _finish_reasoning_preview()
+            answer_stream.stop()
             if not interrupted:
-                _print_pending_tool()
-            _clear_line()
+                _flush_tool_group()
 
         if stopped_reason:
             print(stopped_reason)
@@ -600,10 +729,15 @@ def _handle_command(
             target = parts[1].strip()
             if target == "last":
                 view = _resume_latest(store)
-                print(_resumed_message(view) if view else "No conversations found.")
+                if view:
+                    print(_resumed_message(view))
+                    _print_loaded_history(store)
+                else:
+                    print("No conversations found.")
                 return False
             store.resume(target)
             print(_resumed_message(_current_view(store)))
+            _print_loaded_history(store)
             return False
         _resume_interactively(store, prompt_session)
         return False
@@ -750,6 +884,7 @@ def _resume_interactively(store: SessionStore, prompt_session: PromptLike) -> No
         return
     store.resume(selected.id)
     print(_resumed_message(selected))
+    _print_loaded_history(store)
 
 
 def _resume_latest(store: SessionStore) -> SessionMetadataView | None:
@@ -807,6 +942,29 @@ def _current_view(store: SessionStore) -> SessionMetadataView:
 
 def _resumed_message(view: SessionMetadataView) -> str:
     return f"Resumed conversation: {view.title}"
+
+
+def _print_loaded_history(store: SessionStore) -> None:
+    console = Console(file=sys.stdout)
+    records = [
+        record
+        for record in store.load_records()
+        if record.type in {"user", "assistant"} and str(record.content).strip()
+    ]
+    if not records:
+        return
+    console.print(
+        Text(
+            f"  • loaded {len(records)} message(s) from this session branch",
+            style="blue",
+        )
+    )
+    for record in records:
+        if record.type == "assistant":
+            console.print(Text("assistant:", style="green"))
+            console.print(Markdown(str(record.content)))
+        else:
+            console.print(Text(f"user: {record.content}", style="cyan"))
 
 
 def _print_saved_conversation(store: SessionStore) -> None:
@@ -886,21 +1044,62 @@ def _brief_input(name: str, raw_input: Any) -> str:
     if isinstance(raw_input, dict):
         if name == "bash":
             command = raw_input.get("command") or raw_input.get("input")
-            return f"bash: {str(command)[:80]}" if command else name
-        if name in {"read_file", "write_file", "edit_file"}:
-            path = raw_input.get("path")
-            if path:
-                return f"{name}: {str(path)[:80]}"
-        for key in ("path", "pattern", "command", "query", "name"):
-            if key in raw_input:
-                return f"{name}: {str(raw_input[key])[:80]}"
+            return _single_line_preview(f"bash: {command}") if command else name
+        parts = []
+        for key, value in raw_input.items():
+            if value in (None, "", [], {}):
+                continue
+            parts.append(f"{key}={json.dumps(value, ensure_ascii=False)}")
+        if parts:
+            return _single_line_preview(f"{name}: {', '.join(parts)}")
         if raw_input:
             key, val = next(iter(raw_input.items()))
-            return f"{name}: {val}"[:84]
+            return _single_line_preview(f"{name}: {key}={val}")
         return name
     if isinstance(raw_input, str) and raw_input:
-        return f"{name}: {raw_input}"[:84]
+        return _single_line_preview(f"{name}: {raw_input}")
     return name
+
+
+def _tool_intent(name: str, raw_input: Any) -> str:
+    if not isinstance(raw_input, dict):
+        return _single_line_preview(f"Run {name}")
+    if name == "grep_search":
+        pattern = (
+            raw_input.get("pattern") or raw_input.get("query") or raw_input.get("input")
+        )
+        path = raw_input.get("path") or raw_input.get("include") or "workspace"
+        if pattern:
+            return _single_line_preview(f"Search {path} for {pattern}")
+    if name == "glob_files":
+        pattern = (
+            raw_input.get("pattern") or raw_input.get("path") or raw_input.get("input")
+        )
+        path = raw_input.get("path") if raw_input.get("pattern") else "workspace"
+        if pattern:
+            return _single_line_preview(f"Find {pattern} in {path}")
+    if name == "read_file":
+        path = raw_input.get("path") or raw_input.get("input")
+        if path:
+            return _single_line_preview(f"Read {path}")
+    if name in {"write_file", "edit_file"}:
+        path = raw_input.get("path") or raw_input.get("input")
+        if path:
+            return _single_line_preview(f"Edit {path}")
+    if name == "bash":
+        command = raw_input.get("command") or raw_input.get("input")
+        if command:
+            return _single_line_preview(f"Run {command}")
+    return _single_line_preview(f"Run {name}")
+
+
+def _summarize_intents(intents: list[str]) -> str:
+    if not intents:
+        return "workspace"
+    if len(intents) == 1:
+        return intents[0]
+    first = intents[0]
+    return _single_line_preview(f"{first} and {len(intents) - 1} more")
 
 
 def _event_to_dict(event) -> dict[str, Any]:
@@ -912,9 +1111,19 @@ def _event_to_dict(event) -> dict[str, Any]:
     return {"type": event.type, "step": event.step, "data": payload}
 
 
-def _print_tool_result_rich(data, verbose: bool) -> None:
-    if data.status in ("ok",) and not verbose:
+def _print_tool_call_rich(label: str, console: Console | None = None) -> None:
+    target = console or _console
+    target.print(Text(f"  • {label}", style="yellow"))
+
+
+def _print_tool_result_rich(
+    data,
+    verbose: bool,
+    console: Console | None = None,
+) -> None:
+    if data.status == "ok" and not verbose:
         return
+    target = console or _console
     border = {
         "error": "red",
         "denied": "red",
@@ -923,15 +1132,9 @@ def _print_tool_result_rich(data, verbose: bool) -> None:
     mark = {"error": "✘", "denied": "⊘", "approval_required": "?"}.get(
         data.status, data.status
     )
-    summary = data.content[:200].replace("\n", " ")
-    _console.print(
-        Panel(
-            f"  ← {mark} {summary}",
-            title=f"[bold]{data.tool_name}[/bold]",
-            border_style=border,
-            padding=(0, 1),
-        )
-    )
+    limit = 600 if verbose else 200
+    summary = _single_line_preview(str(data.content), width=limit)
+    target.print(Text(f"  ← {mark} {summary}", style=border))
 
 
 def _final_stop_reason(data) -> str | None:
