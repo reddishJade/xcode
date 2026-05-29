@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import queue
-import threading
 from time import perf_counter
 from typing import Any, AsyncIterator, Generator, Iterator, cast
 
@@ -50,6 +49,7 @@ from ..config import AgentConfig, ExecutionMode
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
 from .provider import ModelProvider
 from ..skills import ApprovalCallback, ToolSpec
+from .async_worker import IsolatedAsyncWorker
 
 """结构化工具调用执行框架。
 
@@ -849,6 +849,7 @@ def _aiter_to_sync_iter(
     cancellation_token: CancellationToken,
 ) -> Iterator[StructuredAgentEvent]:
     items: queue.Queue[tuple[str, Any]] = queue.Queue()
+    worker = IsolatedAsyncWorker(name="xcode-sync-stream-worker")
 
     async def consume() -> None:
         try:
@@ -859,11 +860,7 @@ def _aiter_to_sync_iter(
         finally:
             items.put(("done", None))
 
-    def runner() -> None:
-        asyncio.run(consume())
-
-    thread = threading.Thread(target=runner, daemon=True)
-    thread.start()
+    future = worker.submit(consume())
     try:
         while True:
             kind, payload = items.get()
@@ -874,9 +871,10 @@ def _aiter_to_sync_iter(
             else:
                 return
     finally:
-        if thread.is_alive():
+        if not future.done():
             cancellation_token.cancel("sync stream consumer stopped")
-            thread.join(timeout=1)
+            future.cancel()
+        worker.close()
 
 
 async def _collect_provider_events(

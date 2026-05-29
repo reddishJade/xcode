@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 import unittest
+from unittest.mock import patch
 
 from xcode.harness.config import AgentConfig
 from xcode.harness.agent_runtime.events import (
@@ -382,6 +384,41 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         )
         self.assertEqual(events[0].data, "he")
         self.assertEqual(events[-1].data.answer, "hello")
+
+    def test_run_stream_uses_windows_selector_worker(self) -> None:
+        if not hasattr(asyncio, "SelectorEventLoop"):
+            self.skipTest("SelectorEventLoop is unavailable")
+
+        agent = StructuredAgent(
+            provider=FakeProvider([TextDelta("done"), FinalMessage("", "end_turn")]),
+            registry=(),
+        )
+
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch(
+                "xcode.harness.agent_runtime.async_worker.asyncio.SelectorEventLoop",
+                side_effect=asyncio.new_event_loop,
+            ) as selector_loop,
+        ):
+            events = list(agent.run_stream("go"))
+
+        self.assertTrue(selector_loop.called)
+        self.assertEqual(events[-1].data.answer, "done")
+
+    def test_run_stream_does_not_call_asyncio_run_in_bridge(self) -> None:
+        agent = StructuredAgent(
+            provider=FakeProvider([TextDelta("done"), FinalMessage("", "end_turn")]),
+            registry=(),
+        )
+
+        with patch(
+            "xcode.harness.agent_runtime.structured.asyncio.run",
+            side_effect=AssertionError("asyncio.run should not be used by run_stream"),
+        ):
+            events = list(agent.run_stream("go"))
+
+        self.assertEqual(events[-1].data.answer, "done")
 
     def test_arun_returns_result_inside_event_loop(self) -> None:
         async def main():
