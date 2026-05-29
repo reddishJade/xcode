@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
+from pathlib import Path
+import hashlib
+import uuid
+from typing import Any
+
+from xcode.harness.app import XcodeApp
+from xcode.harness.agent_runtime import StructuredAgentEvent
+
+from .graders import grade_events
+from .reporting import write_report_files
+from .schema import EvalReport, EvalTask, GraderResult, TrialResult
+from .tracing import TraceRecorder
+
+AppFactory = Callable[[EvalTask, int], XcodeApp]
+
+
+class EvalRunner:
+    """面向 Agent 事件流的最小 eval pipeline。"""
+
+    def __init__(
+        self,
+        tasks: Sequence[EvalTask],
+        app_factory: AppFactory,
+        output_dir: Path | None = None,
+        trials_per_task: int = 1,
+    ) -> None:
+        if trials_per_task < 1:
+            raise ValueError("trials_per_task must be >= 1")
+        self.tasks = tuple(tasks)
+        self.app_factory = app_factory
+        self.run_id = _new_run_id()
+        self.output_dir = (
+            output_dir or Path.cwd() / ".local" / "eval_runs" / self.run_id
+        )
+        self.trials_per_task = trials_per_task
+
+    def run(self) -> EvalReport:
+        return _run_coro_sync(self.arun())
+
+    async def arun(self) -> EvalReport:
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        trials: list[TrialResult] = []
+        for task in self.tasks:
+            for trial_index in range(self.trials_per_task):
+                trials.append(await self._run_trial(task, trial_index))
+        success = all(trial.success for trial in trials)
+        metrics = {
+            "task_count": len(self.tasks),
+            "trial_count": len(trials),
+            "passed_trials": sum(1 for trial in trials if trial.success),
+        }
+        report = EvalReport(
+            run_id=self.run_id,
+            success=success,
+            output_dir=self.output_dir,
+            trials=tuple(trials),
+            metrics=metrics,
+        )
+        write_report_files(report)
+        return report
+
+    async def _run_trial(self, task: EvalTask, trial_index: int) -> TrialResult:
+        trial_id = f"{task.id}-{trial_index + 1}"
+        trace_path = self.output_dir / f"{trial_id}.jsonl"
+        app = self.app_factory(task, trial_index)
+        events: list[StructuredAgentEvent] = []
+        answer = ""
+        runtime_error: BaseException | None = None
+
+        project_root = getattr(app.agent, "project_root", None)
+        before_evidence = _collect_file_evidence(task, project_root)
+        with TraceRecorder(trace_path) as trace:
+            try:
+                async for event in app.aask_stream(task.prompt, mode=task.mode):
+                    events.append(event)
+                    trace.record(event)
+                    if event.type == "final":
+                        answer = event.data.answer
+            except BaseException as exc:
+                runtime_error = exc
+                trace.record_error(exc)
+
+        after_evidence = _collect_file_evidence(task, project_root)
+        evidence_graders = _grade_file_evidence(task, before_evidence, after_evidence)
+        graders = grade_events(task, events, answer, runtime_error) + evidence_graders
+        success = all(grader.passed for grader in graders)
+        metrics = {
+            "event_count": len(events),
+            "tool_calls": sum(1 for event in events if event.type == "tool_use"),
+            "tool_errors": sum(
+                1
+                for event in events
+                if event.type == "tool_result"
+                and getattr(event.data, "status", "ok") not in {"ok", "interrupted"}
+            ),
+        }
+        if after_evidence:
+            metrics["file_evidence"] = after_evidence
+        return TrialResult(
+            task_id=task.id,
+            trial_id=trial_id,
+            success=success,
+            answer=answer,
+            trace_path=trace_path,
+            graders=graders,
+            metrics=metrics,
+        )
+
+
+def _new_run_id() -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{stamp}-{uuid.uuid4().hex[:8]}"
+
+
+def _run_coro_sync(coro):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    if hasattr(coro, "close"):
+        coro.close()
+    raise RuntimeError(
+        "EvalRunner.run cannot run inside an active event loop; use arun"
+    )
+
+
+def _collect_file_evidence(
+    task: EvalTask,
+    project_root: Path | None,
+) -> list[dict[str, Any]]:
+    specs = _file_evidence_specs(task)
+    if not specs or project_root is None:
+        return []
+    root = project_root.resolve()
+    records: list[dict[str, Any]] = []
+    for spec in specs:
+        rel_path = str(spec.get("path", "")).strip()
+        if not rel_path:
+            continue
+        path = (root / rel_path).resolve()
+        record: dict[str, Any] = {
+            "path": rel_path,
+            "exists": path.is_file(),
+        }
+        try:
+            path.relative_to(root)
+        except ValueError:
+            record["exists"] = False
+            record["error"] = "path outside project root"
+            records.append(record)
+            continue
+        if path.is_file():
+            data = path.read_bytes()
+            record["sha1"] = hashlib.sha1(data).hexdigest()
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                text = ""
+                record["text"] = False
+            else:
+                record["text"] = True
+                record["contains"] = {
+                    expected: expected in text
+                    for expected in _string_tuple(spec.get("contains", ()))
+                }
+                record["not_contains"] = {
+                    expected: expected not in text
+                    for expected in _string_tuple(spec.get("not_contains", ()))
+                }
+        records.append(record)
+    return records
+
+
+def _grade_file_evidence(
+    task: EvalTask,
+    before: list[dict[str, Any]],
+    after: list[dict[str, Any]],
+) -> tuple[GraderResult, ...]:
+    specs = _file_evidence_specs(task)
+    if not specs:
+        return ()
+    before_by_path = {record["path"]: record for record in before}
+    after_by_path = {record["path"]: record for record in after}
+    graders: list[GraderResult] = []
+    for spec in specs:
+        rel_path = str(spec.get("path", "")).strip()
+        if not rel_path:
+            continue
+        record = after_by_path.get(rel_path, {"exists": False})
+        expected_exists = bool(spec.get("exists", True))
+        exists = bool(record.get("exists", False))
+        graders.append(
+            GraderResult(
+                name=f"file_exists:{rel_path}",
+                passed=exists is expected_exists,
+                details="" if exists is expected_exists else f"exists={exists}",
+            )
+        )
+        for expected, present in record.get("contains", {}).items():
+            graders.append(
+                GraderResult(
+                    name=f"file_contains:{rel_path}:{expected}",
+                    passed=bool(present),
+                    details="" if present else f"missing {expected!r}",
+                )
+            )
+        for expected, absent in record.get("not_contains", {}).items():
+            graders.append(
+                GraderResult(
+                    name=f"file_not_contains:{rel_path}:{expected}",
+                    passed=bool(absent),
+                    details="" if absent else f"still contains {expected!r}",
+                )
+            )
+        if "changed" in spec:
+            before_sha = before_by_path.get(rel_path, {}).get("sha1")
+            after_sha = record.get("sha1")
+            changed = before_sha != after_sha
+            expected_changed = bool(spec["changed"])
+            graders.append(
+                GraderResult(
+                    name=f"file_changed:{rel_path}",
+                    passed=changed is expected_changed,
+                    details="" if changed is expected_changed else f"changed={changed}",
+                )
+            )
+    return tuple(graders)
+
+
+def _file_evidence_specs(task: EvalTask) -> tuple[dict[str, Any], ...]:
+    evidence = task.metadata.get("evidence", {})
+    if not isinstance(evidence, dict):
+        return ()
+    files = evidence.get("files", ())
+    if not isinstance(files, list | tuple):
+        return ()
+    return tuple(item for item in files if isinstance(item, dict))
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, list | tuple):
+        return tuple(str(item) for item in value)
+    return ()

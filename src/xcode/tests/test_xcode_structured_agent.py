@@ -1,0 +1,605 @@
+from __future__ import annotations
+
+import asyncio
+import threading
+import unittest
+
+from xcode.harness.config import AgentConfig
+from xcode.harness.agent_runtime.events import (
+    FinalMessage,
+    TextDelta,
+    ToolCallReady,
+    ToolCall,
+)
+from xcode.harness.agent_runtime import CancellationToken, StructuredAgent
+from xcode.harness.skills import ToolSpec
+from xcode.tests.fixtures import FakeProvider
+
+
+class XcodeStructuredAgentTests(unittest.TestCase):
+    def test_chat_turn_still_uses_normal_runtime_boundary(self) -> None:
+        seen_tools: list[list[str]] = []
+
+        def factory(messages, tools):
+            seen_tools.append([tool.name for tool in tools])
+            self.assertEqual(messages[0]["role"], "system")
+            self.assertIn("<git-preflight>", messages[0]["content"])
+            return [TextDelta("你好，我是 Xcode。"), FinalMessage("", "end_turn")]
+
+        tool = ToolSpec("read_file", "Read file.", "path", lambda _input: "content")
+        agent = StructuredAgent(
+            provider=FakeProvider(factory),
+            registry=(tool,),
+            runtime_context_provider=lambda _question: [
+                "<git-preflight>dirty</git-preflight>"
+            ],
+        )
+
+        result = agent.run("hello, who are you?")
+
+        self.assertEqual(result.answer, "你好，我是 Xcode。")
+        self.assertEqual(seen_tools, [["read_file"]])
+        self.assertEqual(result.tool_calls, [])
+
+    def test_no_tool_call_returns_text(self) -> None:
+        agent = StructuredAgent(
+            provider=FakeProvider([TextDelta("done"), FinalMessage("", "end_turn")]),
+            registry=(),
+        )
+
+        result = agent.run("hello")
+
+        self.assertEqual(result.answer, "done")
+        self.assertEqual(result.steps, 1)
+        self.assertEqual(result.tool_calls, [])
+        self.assertEqual(result.metrics["llm_calls"], 1)
+
+    def test_provider_events_drive_main_loop(self) -> None:
+        agent = StructuredAgent(
+            provider=FakeProvider([TextDelta("done"), FinalMessage("", "end_turn")]),
+            registry=(),
+        )
+
+        result = agent.run("hello")
+
+        self.assertEqual(result.answer, "done")
+
+    def test_multiple_tool_calls_append_tool_results(self) -> None:
+        responses = iter(
+            [
+                [
+                    ToolCallReady(
+                        [
+                            ToolCall("a", "echo", {"text": "one"}),
+                            ToolCall("b", "echo", {"text": "two"}),
+                        ]
+                    ),
+                    FinalMessage("", "end_turn"),
+                ],
+                [TextDelta("finished"), FinalMessage("", "end_turn")],
+            ]
+        )
+        tool = ToolSpec(
+            name="echo",
+            description="Echo input.",
+            input_hint="JSON",
+            handler=lambda text: text,
+            read_only=True,
+            concurrency_safe=True,
+        )
+        agent = StructuredAgent(
+            provider=FakeProvider(lambda _m, _t: next(responses)),
+            registry=(tool,),
+            config=AgentConfig(max_steps=3),
+        )
+
+        result = agent.run("go")
+
+        self.assertEqual(result.answer, "finished")
+        self.assertEqual(len(result.tool_calls), 2)
+        self.assertEqual(result.metrics["tool_calls"], 2)
+        self.assertEqual(result.messages[2]["content"][0]["tool_use_id"], "a")
+
+    def test_unknown_tool_is_returned_as_tool_result(self) -> None:
+        responses = iter(
+            [
+                [
+                    ToolCallReady([ToolCall("x", "missing", {})]),
+                    FinalMessage("", "end_turn"),
+                ],
+                [TextDelta("saw error"), FinalMessage("", "end_turn")],
+            ]
+        )
+        agent = StructuredAgent(
+            provider=FakeProvider(lambda _m, _t: next(responses)),
+            registry=(),
+            config=AgentConfig(max_steps=2),
+        )
+
+        result = agent.run("use missing")
+
+        self.assertIn(
+            "unknown tool: missing", result.messages[2]["content"][0]["content"]
+        )
+        self.assertEqual(result.messages[2]["content"][0]["status"], "error")
+        self.assertEqual(result.answer, "saw error")
+
+    def test_step_limit(self) -> None:
+        agent = StructuredAgent(
+            provider=FakeProvider(
+                [
+                    ToolCallReady([ToolCall("x", "missing", {})]),
+                    FinalMessage("", "end_turn"),
+                ]
+            ),
+            registry=(),
+            config=AgentConfig(max_steps=1),
+        )
+
+        result = agent.run("loop")
+
+        self.assertTrue(result.stopped_by_limit)
+        self.assertEqual(result.answer, "step limit reached")
+
+    def test_watchdog_stops_repeated_tool_call(self) -> None:
+        tool = ToolSpec("echo", "Echo.", "text", lambda value: value)
+        agent = StructuredAgent(
+            provider=FakeProvider(
+                lambda _m, _t: [
+                    ToolCallReady([ToolCall("x", "echo", "same")]),
+                    FinalMessage("", "end_turn"),
+                ]
+            ),
+            registry=(tool,),
+            config=AgentConfig(max_steps=5, watchdog_repeated_tool_limit=2),
+        )
+
+        result = agent.run("loop")
+
+        self.assertTrue(result.stopped_by_watchdog)
+        self.assertEqual(result.steps, 3)
+        self.assertIn("watchdog stopped", result.answer)
+
+    def test_watchdog_signature_stable_for_dict_input(self) -> None:
+        tool = ToolSpec("echo", "Echo.", "text", lambda value: value)
+        responses = iter(
+            [
+                [
+                    ToolCallReady([ToolCall("x", "echo", {"a": 1, "b": 2})]),
+                    FinalMessage("", "end_turn"),
+                ],
+                [
+                    ToolCallReady([ToolCall("y", "echo", {"b": 2, "a": 1})]),
+                    FinalMessage("", "end_turn"),
+                ],
+                [TextDelta("done"), FinalMessage("", "end_turn")],
+            ]
+        )
+        agent = StructuredAgent(
+            provider=FakeProvider(lambda _m, _t: next(responses)),
+            registry=(tool,),
+            config=AgentConfig(max_steps=3, watchdog_repeated_tool_limit=1),
+        )
+
+        result = agent.run("test")
+
+        self.assertTrue(result.stopped_by_watchdog)
+        self.assertIn("watchdog stopped", result.answer)
+
+    def test_idle_watchdog_allows_successful_read_only_steps(self) -> None:
+        responses = iter(
+            [
+                [
+                    ToolCallReady(
+                        [ToolCall(f"r{index}", "read_file", f"notes-{index}.md")]
+                    ),
+                    FinalMessage("", "end_turn"),
+                ]
+                for index in range(4)
+            ]
+            + [[TextDelta("done"), FinalMessage("", "end_turn")]]
+        )
+        tool = ToolSpec(
+            "read_file",
+            "Read.",
+            "path",
+            lambda _value: "content",
+            read_only=True,
+        )
+        agent = StructuredAgent(
+            provider=FakeProvider(lambda _m, _t: next(responses)),
+            registry=(tool,),
+            config=AgentConfig(max_steps=5),
+        )
+
+        result = agent.run("inspect")
+
+        self.assertEqual(result.answer, "done")
+
+    def test_runtime_context_provider_injects_system_message(self) -> None:
+        seen = []
+
+        def factory(messages, _tools):
+            seen.append(messages[0])
+            return [TextDelta("done"), FinalMessage("", "end_turn")]
+
+        agent = StructuredAgent(
+            provider=FakeProvider(factory),
+            registry=(),
+            runtime_context_provider=lambda _question: [
+                "<skill>Review workflow.</skill>"
+            ],
+        )
+
+        result = agent.run("please review this")
+
+        self.assertEqual(result.answer, "done")
+        self.assertEqual(seen[0]["role"], "system")
+        self.assertIn("Review workflow", seen[0]["content"])
+
+    def test_plan_mode_exposes_read_tools_and_blocks_write_tools(self) -> None:
+        seen_tools = []
+        called = []
+
+        def factory(_messages, tools):
+            seen_tools.append([tool.name for tool in tools])
+            return [
+                ToolCallReady([ToolCall("x", "edit_file", "hello")]),
+                FinalMessage("", "end_turn"),
+            ]
+
+        agent = StructuredAgent(
+            provider=FakeProvider(factory),
+            registry=(
+                ToolSpec(
+                    "read_file", "Read.", "path", lambda value: value, read_only=True
+                ),
+                ToolSpec(
+                    "edit_file",
+                    "Edit.",
+                    "json",
+                    lambda value: called.append(value) or value,
+                    risk="high",
+                ),
+            ),
+            config=AgentConfig(execution_mode="plan", max_steps=1),
+        )
+
+        result = agent.run("plan")
+
+        self.assertEqual(seen_tools, [["read_file"]])
+        self.assertEqual(called, [])
+        self.assertIn(
+            "permission denied for tool: edit_file",
+            result.messages[3]["content"][0]["content"],
+        )
+
+    def test_review_mode_allows_git_diff_but_denies_other_bash(self) -> None:
+        outputs = []
+
+        def bash(value):
+            outputs.append(value)
+            return "diff"
+
+        responses = iter(
+            [
+                [
+                    ToolCallReady(
+                        [ToolCall("a", "bash", {"command": "git diff --stat"})]
+                    ),
+                    FinalMessage("", "end_turn"),
+                ],
+                [
+                    ToolCallReady(
+                        [ToolCall("b", "bash", {"command": "python script.py"})]
+                    ),
+                    FinalMessage("", "end_turn"),
+                ],
+                [TextDelta("done"), FinalMessage("", "end_turn")],
+            ]
+        )
+        agent = StructuredAgent(
+            provider=FakeProvider(lambda _m, _t: next(responses)),
+            registry=(
+                ToolSpec(
+                    "bash",
+                    "Shell.",
+                    "json",
+                    bash,
+                    risk_evaluator=lambda _value: "allow",
+                ),
+            ),
+            config=AgentConfig(execution_mode="review", max_steps=3),
+        )
+
+        result = agent.run("review")
+
+        self.assertEqual(outputs, ['{"command": "git diff --stat"}'])
+        tool_results = [
+            block["content"]
+            for message in result.messages
+            if isinstance(message.get("content"), list)
+            for block in message["content"]
+            if isinstance(block, dict) and block.get("type") == "tool_result"
+        ]
+        self.assertTrue(
+            any(
+                "需要授权" in item or "permission denied" in item
+                for item in tool_results
+            )
+        )
+
+    def test_run_stream_yields_tool_and_final_events(self) -> None:
+        responses = iter(
+            [
+                [
+                    ToolCallReady([ToolCall("a", "echo", "hello")]),
+                    FinalMessage("", "end_turn"),
+                ],
+                [TextDelta("done"), FinalMessage("", "end_turn")],
+            ]
+        )
+        tool = ToolSpec(
+            name="echo",
+            description="Echo input.",
+            input_hint="text",
+            handler=lambda text: text,
+        )
+        agent = StructuredAgent(
+            provider=FakeProvider(lambda _m, _t: next(responses)),
+            registry=(tool,),
+            config=AgentConfig(max_steps=3),
+        )
+
+        events = list(agent.run_stream("go"))
+
+        self.assertEqual(
+            [event.type for event in events],
+            [
+                "assistant",
+                "tool_use",
+                "tool_result",
+                "text_delta",
+                "assistant",
+                "final",
+            ],
+        )
+        self.assertEqual(events[-1].data.answer, "done")
+
+    def test_run_stream_yields_text_delta_events(self) -> None:
+        agent = StructuredAgent(
+            provider=FakeProvider(
+                [TextDelta("he"), TextDelta("llo"), FinalMessage("", "end_turn")]
+            ),
+            registry=(),
+        )
+
+        events = list(agent.run_stream("go"))
+
+        self.assertEqual(
+            [event.type for event in events],
+            ["text_delta", "text_delta", "assistant", "final"],
+        )
+        self.assertEqual(events[0].data, "he")
+        self.assertEqual(events[-1].data.answer, "hello")
+
+    def test_arun_returns_result_inside_event_loop(self) -> None:
+        async def main():
+            agent = StructuredAgent(
+                provider=FakeProvider(
+                    [TextDelta("async done"), FinalMessage("", "end_turn")]
+                ),
+                registry=(),
+            )
+            return await agent.arun("go")
+
+        result = asyncio.run(main())
+
+        self.assertEqual(result.answer, "async done")
+
+    def test_run_async_returns_result_inside_event_loop(self) -> None:
+        async def main():
+            agent = StructuredAgent(
+                provider=FakeProvider(
+                    [TextDelta("async done"), FinalMessage("", "end_turn")]
+                ),
+                registry=(),
+            )
+            return await agent.run_async("go")
+
+        result = asyncio.run(main())
+
+        self.assertEqual(result.answer, "async done")
+
+    def test_arun_stream_yields_events_inside_event_loop(self) -> None:
+        async def main():
+            agent = StructuredAgent(
+                provider=FakeProvider(
+                    [TextDelta("he"), TextDelta("llo"), FinalMessage("", "end_turn")]
+                ),
+                registry=(),
+            )
+            events = []
+            async for event in agent.arun_stream("go"):
+                events.append(event)
+            return events
+
+        events = asyncio.run(main())
+
+        self.assertEqual(
+            [event.type for event in events],
+            ["text_delta", "text_delta", "assistant", "final"],
+        )
+        self.assertEqual(events[-1].data.answer, "hello")
+
+    def test_sync_api_rejects_active_event_loop(self) -> None:
+        async def main():
+            agent = StructuredAgent(
+                provider=FakeProvider(
+                    [TextDelta("done"), FinalMessage("", "end_turn")]
+                ),
+                registry=(),
+            )
+            with self.assertRaises(RuntimeError) as ctx:
+                agent.run("go")
+            return str(ctx.exception)
+
+        message = asyncio.run(main())
+
+        self.assertIn("use await StructuredAgent.run_async()", message)
+
+    def test_read_only_tools_run_in_threadpool(self) -> None:
+        started_second = threading.Event()
+
+        def first(_text: str) -> str:
+            if not started_second.wait(1):
+                return "not parallel"
+            return "one"
+
+        def second(_text: str) -> str:
+            started_second.set()
+            return "two"
+
+        responses = iter(
+            [
+                [
+                    ToolCallReady(
+                        [
+                            ToolCall("a", "first", ""),
+                            ToolCall("b", "second", ""),
+                        ]
+                    ),
+                    FinalMessage("", "end_turn"),
+                ],
+                [TextDelta("done"), FinalMessage("", "end_turn")],
+            ]
+        )
+        tools = (
+            ToolSpec(
+                "first", "First.", "empty", first, read_only=True, concurrency_safe=True
+            ),
+            ToolSpec(
+                "second",
+                "Second.",
+                "empty",
+                second,
+                read_only=True,
+                concurrency_safe=True,
+            ),
+        )
+        agent = StructuredAgent(
+            provider=FakeProvider(lambda _m, _t: next(responses)),
+            registry=tools,
+            config=AgentConfig(max_steps=2, tool_workers=2),
+        )
+
+        result = agent.run("go")
+
+        self.assertEqual(result.messages[2]["content"][0]["content"], "one")
+        self.assertEqual(result.messages[2]["content"][1]["content"], "two")
+
+    def test_tool_exception_is_error_result_and_agent_continues(self) -> None:
+        responses = iter(
+            [
+                [
+                    ToolCallReady([ToolCall("x", "boom", "")]),
+                    FinalMessage("", "end_turn"),
+                ],
+                [TextDelta("recovered"), FinalMessage("", "end_turn")],
+            ]
+        )
+
+        def boom(_text: str) -> str:
+            raise RuntimeError("broken")
+
+        agent = StructuredAgent(
+            provider=FakeProvider(lambda _m, _t: next(responses)),
+            registry=(ToolSpec("boom", "Boom.", "empty", boom),),
+            config=AgentConfig(max_steps=2),
+        )
+
+        result = agent.run("go")
+
+        self.assertEqual(result.messages[2]["content"][0]["status"], "error")
+        self.assertIn("broken", result.messages[2]["content"][0]["content"])
+        self.assertEqual(result.answer, "recovered")
+
+    def test_cancelled_token_marks_tool_result_interrupted(self) -> None:
+        token = CancellationToken()
+
+        def factory(_messages, _tools):
+            token.cancel()
+            return [
+                ToolCallReady([ToolCall("x", "echo", "")]),
+                FinalMessage("", "end_turn"),
+            ]
+
+        tool = ToolSpec("echo", "Echo.", "empty", lambda _value: "should not run")
+        agent = StructuredAgent(
+            provider=FakeProvider(factory),
+            registry=(tool,),
+            cancellation_token=token,
+            config=AgentConfig(max_steps=2),
+        )
+
+        result = agent.run("go")
+
+        self.assertEqual(result.messages[2]["content"][0]["status"], "interrupted")
+        self.assertIn("interrupted", result.messages[2]["content"][0]["content"])
+
+    def test_max_tokens_truncation_triggers_continuation(self) -> None:
+        calls = []
+
+        def factory(messages, tools):
+            calls.append(list(messages))
+            if len(calls) == 1:
+                return [TextDelta("part1"), FinalMessage("", "max_tokens")]
+            else:
+                return [TextDelta(" part2"), FinalMessage("", "end_turn")]
+
+        agent = StructuredAgent(
+            provider=FakeProvider(factory),
+            registry=(),
+        )
+        result = agent.run("hello")
+        self.assertEqual(result.answer, "part1 part2")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1][-1]["role"], "user")
+        self.assertEqual(calls[1][-1]["content"], "continue")
+
+    def test_low_token_continuation_circuit_breaker(self) -> None:
+        def factory(messages, tools):
+            return [TextDelta("x"), FinalMessage("", "max_tokens")]
+
+        agent = StructuredAgent(
+            provider=FakeProvider(factory),
+            registry=(),
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            agent.run("hello")
+        self.assertIn("Diminishing Returns", str(ctx.exception))
+
+    def test_transient_error_retry(self) -> None:
+        import unittest.mock as mock
+
+        calls = []
+
+        def factory(messages, tools):
+            calls.append(messages)
+            if len(calls) < 3:
+                raise RuntimeError("529 overloaded")
+            return [TextDelta("success"), FinalMessage("", "end_turn")]
+
+        agent = StructuredAgent(
+            provider=FakeProvider(factory),
+            registry=(),
+        )
+        with mock.patch("asyncio.sleep", new=mock.AsyncMock()) as mock_sleep:
+            result = agent.run("hello")
+            self.assertEqual(result.answer, "success")
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(mock_sleep.call_count, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

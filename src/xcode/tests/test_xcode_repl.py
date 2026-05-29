@@ -1,0 +1,615 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
+
+from xcode.cli.completion import ReplCompleter
+from xcode.cli.repl import _brief_input, run_repl
+from xcode.cli.session import SessionStore
+from xcode.harness.agent_runtime import (
+    CancellationToken,
+    StructuredAgentEvent,
+    StructuredAgentResult,
+)
+from xcode.harness.agent_runtime.events import ToolCall
+from xcode.harness.skills import ToolSpec
+
+
+class XcodeReplTests(unittest.TestCase):
+    def test_session_store_writes_jsonl_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+
+            store.append("user", "hello")
+
+            text = store.current_path.read_text(encoding="utf-8")
+            self.assertIn('"type": "user"', text)
+            self.assertIn('"hello"', text)
+
+    def test_session_store_rewinds_last_user_turn(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "first")
+            store.append("assistant", "one")
+            store.append("user", "second")
+            store.append("assistant", "two")
+
+            removed = store.rewind_turns()
+            records = store.load_records()
+
+            self.assertEqual(removed, 2)
+            self.assertEqual([record.content for record in records], ["first", "one"])
+
+    def test_session_store_resumes_latest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            first = store.current_path
+            store.append("user", "hello")
+            store.clear()
+
+            resumed = store.resume_latest()
+
+            self.assertEqual(resumed, first)
+            self.assertEqual(store.current_path, first)
+
+    def test_session_store_writes_title_summary_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sessions = Path(temp_dir) / ".local" / "sessions"
+            store = SessionStore(sessions, project_root=Path(temp_dir))
+
+            store.append("user", "Refactor session storage and resume flow")
+            store.append("assistant", "Implemented titled session metadata.")
+            metadata = store.update_summary()
+
+            self.assertIsNotNone(metadata)
+            index = json.loads(
+                (Path(temp_dir) / ".local" / "session_index.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            item = index["sessions"][0]
+            self.assertEqual(item["title"], "Refactor session storage and resume flow")
+            self.assertIn("Answer preview", item["summary"])
+            self.assertFalse(Path(item["transcript_path"]).is_absolute())
+
+    def test_run_repl_persists_user_and_answer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = FakeApp()
+            prompt = FakePrompt(["hello", "/exit"])
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            session = next(Path(temp_dir).glob("session-*.jsonl"))
+            text = session.read_text(encoding="utf-8")
+            self.assertIn('"type": "user"', text)
+            self.assertIn('"type": "assistant"', text)
+            self.assertIn("hello!", text)
+
+    def test_run_repl_hides_session_path_and_prints_saved_title(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = FakeApp()
+            prompt = FakePrompt(["hello", "/exit"])
+            output = StringIO()
+
+            with redirect_stdout(output):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            text = output.getvalue()
+            self.assertEqual(code, 0)
+            self.assertIn("Xcode REPL", text)
+            self.assertIn("Conversation saved: hello", text)
+            self.assertNotIn("Session:", text)
+            self.assertNotIn("session-", text.splitlines()[0])
+
+    def test_run_repl_renders_markdown_without_changing_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = FakeMarkdownApp()
+            prompt = FakePrompt(["hello", "/exit"])
+            renderer = FakeRenderer()
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(len(renderer.rendered), 1)
+            self.assertIn("# Title", renderer.rendered[0])
+            self.assertIn("- item", renderer.rendered[0])
+            session = next(Path(temp_dir).glob("session-*.jsonl"))
+            text = session.read_text(encoding="utf-8")
+            self.assertIn("# Title", text)
+
+    def test_run_repl_expands_file_references_but_preserves_user_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "note.md").write_text("file body", encoding="utf-8")
+            app = CapturingApp()
+            prompt = FakePrompt(["read @note.md", "/exit"])
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, root, prompt, project_root=root)
+
+            self.assertEqual(code, 0)
+            self.assertIn('<file-reference path="note.md">', app.seen[0])
+            self.assertIn("file body", app.seen[0])
+            session = next(root.glob("session-*.jsonl"))
+            text = session.read_text(encoding="utf-8")
+            self.assertIn("read @note.md", text)
+            self.assertIn("file_references", text)
+
+    def test_run_repl_plan_review_and_act_toggle_execution_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = CapturingApp()
+            prompt = FakePrompt(
+                ["/plan", "first", "/review", "second", "/act", "2", "third", "/exit"]
+            )
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(app.modes, ["plan", "review", "act"])
+
+    def test_run_repl_tool_command_runs_registered_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = ToolApp()
+            prompt = FakePrompt(["/tool echo hello", "/exit"])
+            renderer = FakeRenderer()
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(renderer.rendered, ["hello"])
+
+    def test_run_repl_tool_command_preserves_high_risk_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = ToolApp(
+                registry=(
+                    ToolSpec(
+                        "danger", "Danger.", "text", lambda value: value, risk="high"
+                    ),
+                )
+            )
+            prompt = FakePrompt(["/tool danger now", "/exit"])
+            renderer = FakeRenderer()
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+
+            self.assertEqual(code, 0)
+            self.assertIn("需要授权", renderer.rendered[0])
+
+    def test_run_repl_tool_list_shows_visible_and_hidden_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = ToolApp(
+                registry=(
+                    ToolSpec(
+                        "read_file", "Read.", "path", lambda value: value, group="core"
+                    ),
+                )
+            )
+            prompt = FakePrompt(["/tool list", "/exit"])
+            renderer = FakeRenderer()
+
+            with patch(
+                "xcode.cli.repl.build_tool_catalog",
+                return_value={
+                    "core": {"read_file"},
+                    "subagent": {"submit_subagent"},
+                },
+            ):
+                with redirect_stdout(StringIO()):
+                    code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+
+            self.assertEqual(code, 0)
+            self.assertIn("<visible tools>", renderer.rendered[0])
+            self.assertIn("read_file", renderer.rendered[0])
+            self.assertIn("<hidden tools", renderer.rendered[0])
+            self.assertIn("submit_subagent", renderer.rendered[0])
+
+    def test_brief_input_shows_bash_command_and_file_paths(self) -> None:
+        self.assertEqual(
+            _brief_input("bash", {"command": "Remove-Item tmp\\hello.c"}),
+            "bash: Remove-Item tmp\\hello.c",
+        )
+        self.assertEqual(
+            _brief_input("write_file", {"path": "tmp/hello.py", "content": "x" * 200}),
+            "write_file: tmp/hello.py",
+        )
+
+    def test_run_repl_interrupt_is_final_standalone_line(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = InterruptingToolApp()
+            prompt = FakePrompt(["run command", "/exit"])
+            output = StringIO()
+
+            with redirect_stdout(output):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            text = _strip_ansi(output.getvalue())
+            interrupt_index = text.rfind("[interrupted] current run cancelled")
+            self.assertNotEqual(interrupt_index, -1)
+            self.assertNotIn(
+                "bash: cd .. && git diff .gitignore", text[interrupt_index:]
+            )
+            self.assertTrue(app.agent.cancellation_token.is_cancelled())
+
+    def test_run_repl_resume_uses_picker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sessions_dir = Path(temp_dir)
+            seed = SessionStore(sessions_dir)
+            seed.append("user", "first conversation")
+            seed.append("assistant", "old answer")
+            seed.update_summary()
+            app = FakeApp()
+            prompt = FakePrompt(["/resume", "1", "/exit"])
+            output = StringIO()
+
+            with redirect_stdout(output):
+                code = run_repl(app, sessions_dir, prompt)
+
+            self.assertEqual(code, 0)
+            text = output.getvalue()
+            self.assertIn("1. first conversation", text)
+            self.assertIn("Resumed conversation: first conversation", text)
+
+    def test_repl_completer_suggests_slash_commands(self) -> None:
+        completer = ReplCompleter(Path.cwd())
+
+        items = completer.complete("/pl")
+
+        self.assertEqual([item.text for item in items], ["/plan"])
+
+    def test_repl_completer_suggests_tool_names(self) -> None:
+        completer = ReplCompleter(
+            Path.cwd(),
+            (
+                ToolSpec("read_file", "Read.", "path", lambda value: value),
+                ToolSpec("run_validation", "Validate.", "name", lambda value: value),
+            ),
+        )
+
+        items = completer.complete("/tool r")
+
+        self.assertEqual(
+            [item.text for item in items],
+            ["read_file", "run_validation"],
+        )
+
+    def test_repl_completer_suggests_file_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "docs").mkdir()
+            (root / "docs" / "note.md").write_text("note", encoding="utf-8")
+            (root / ".env").write_text("secret", encoding="utf-8")
+            completer = ReplCompleter(root)
+
+            items = completer.complete("read @do")
+
+            self.assertEqual([item.text for item in items], ["docs/"])
+
+    def test_repl_completer_ignores_empty_file_marker(self) -> None:
+        completer = ReplCompleter(Path.cwd())
+
+        self.assertEqual(completer.complete("@"), [])
+
+    def test_repl_completer_scans_only_current_directory_level(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "docs").mkdir()
+            (root / "docs" / "nested").mkdir()
+            (root / "docs" / "nested" / "deep.md").write_text("deep", encoding="utf-8")
+            (root / "docs" / "note.md").write_text("note", encoding="utf-8")
+            completer = ReplCompleter(root)
+
+            items = completer.complete("read @docs/")
+
+            self.assertEqual(
+                [item.text for item in items], ["docs/nested/", "docs/note.md"]
+            )
+
+    def test_repl_completer_filters_sensitive_file_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / ".git").mkdir()
+            (root / ".git" / "config").write_text("secret", encoding="utf-8")
+            (root / ".env").write_text("secret", encoding="utf-8")
+            (root / "public.txt").write_text("ok", encoding="utf-8")
+            completer = ReplCompleter(root)
+
+            items = completer.complete("read @")
+            public_items = completer.complete("read @p")
+
+            self.assertEqual(items, [])
+            self.assertEqual([item.text for item in public_items], ["public.txt"])
+
+    def test_repl_completer_supports_prompt_toolkit_async_api(self) -> None:
+        try:
+            from prompt_toolkit.document import Document
+        except ImportError:
+            self.skipTest("prompt_toolkit is not installed")
+
+        completer = ReplCompleter(Path.cwd())
+
+        async def collect():
+            return [
+                completion.text
+                async for completion in completer.get_completions_async(
+                    Document("/pl"),
+                    None,
+                )
+            ]
+
+        self.assertEqual(asyncio.run(collect()), ["/plan"])
+
+
+class XcodeReplForkTests(unittest.TestCase):
+    def test_fork_into_switches_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            original = store.current_path
+            store.append("user", "hello")
+            store.fork_into()
+            self.assertNotEqual(store.current_path, original)
+
+    def test_fork_into_has_parent_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "parent conversation")
+            parent = store.current_metadata()
+            store.fork_into()
+            fork_meta = store.current_metadata()
+            self.assertIsNotNone(fork_meta)
+            self.assertEqual(fork_meta.parent_id, parent.id)
+
+    def test_fork_into_copies_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "first message")
+            store.append("assistant", "first answer")
+            store.fork_into()
+            records = store.load_records()
+            self.assertEqual(len(records), 2)
+            self.assertEqual(records[0].content, "first message")
+            self.assertEqual(records[1].content, "first answer")
+
+    def test_fork_into_independent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "parent msg")
+            store.fork_into()
+            store.append("user", "fork msg")
+            fork_records = store.load_records()
+            self.assertIn("fork msg", [r.content for r in fork_records])
+
+    def test_fork_into_validates_type(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            with self.assertRaises(ValueError):
+                store.fork_into("invalid")
+
+    def test_fork_into_all_fork_types(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for ft in ("explore", "verify", "isolate"):
+                store = SessionStore(Path(temp_dir))
+                store.append("user", "test")
+                store.fork_into(ft)
+                meta = store.current_metadata()
+                self.assertEqual(meta.fork_type, ft)
+
+    def test_fork_preserves_parent_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sessions = Path(temp_dir) / ".local" / "sessions"
+            store = SessionStore(sessions, project_root=Path(temp_dir))
+            store.append("user", "parent conversation")
+            parent_meta = store.current_metadata()
+            store.fork_into()
+            fork_meta = store.current_metadata()
+            self.assertEqual(fork_meta.title, f"Fork of {parent_meta.title}")
+            self.assertEqual(fork_meta.summary, parent_meta.summary)
+
+    def test_fork_sessions_shows_fork_relationship(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sessions = Path(temp_dir) / ".local" / "sessions"
+            store = SessionStore(sessions, project_root=Path(temp_dir))
+            store.append("user", "parent")
+            store.update_summary()
+            parent_id = store.current_metadata().id
+            store.fork_into("verify")
+            # 执行 fork 后 list_session_infos 应显示 parent_id
+            views = store.list_session_infos(limit=10)
+            fork_view = next(v for v in views if v.id != parent_id)
+            self.assertEqual(fork_view.parent_id, parent_id)
+            self.assertEqual(fork_view.fork_type, "verify")
+
+    def test_fork_into_default_type_is_none(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "hello")
+            store.fork_into()
+            meta = store.current_metadata()
+            self.assertIsNone(meta.fork_type)
+
+    def test_run_repl_compact_command(self) -> None:
+        class FakeAgent:
+            def __init__(self) -> None:
+                self.compact_requested = False
+
+            def request_compaction(self) -> None:
+                self.compact_requested = True
+
+        class CompactFakeApp:
+            def __init__(self) -> None:
+                self.agent = FakeAgent()
+
+            def ask_stream(self, _text: str, mode: str | None = None):
+                yield StructuredAgentEvent(
+                    "final",
+                    1,
+                    StructuredAgentResult(
+                        answer="unused", messages=[], steps=1, tool_calls=[]
+                    ),
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = CompactFakeApp()
+            prompt = FakePrompt(["/compact", "/exit"])
+            store = SessionStore(Path(temp_dir))
+            store.append(
+                "event",
+                {
+                    "type": "tool_result",
+                    "step": 1,
+                    "data": {
+                        "tool_use_id": "call_1",
+                        "content": "a" * 300,
+                        "status": "ok",
+                        "type": "tool_result",
+                    },
+                },
+            )
+            with patch("xcode.cli.repl.SessionStore") as mock_store_cls:
+                mock_store_cls.return_value = store
+                with redirect_stdout(StringIO()):
+                    code = run_repl(app, Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            self.assertTrue(app.agent.compact_requested)
+            records = store.load_records()
+            tool_results = [
+                r
+                for r in records
+                if r.type == "event" and r.content.get("type") == "tool_result"
+            ]
+            self.assertEqual(len(tool_results), 1)
+            content = tool_results[0].content["data"]["content"]
+            self.assertIn("compacted", content)
+            self.assertIn("300 chars removed", content)
+
+
+class FakePrompt:
+    def __init__(self, values: list[str]) -> None:
+        self.values = iter(values)
+
+    def prompt(self, _prompt_text: str) -> str:
+        return next(self.values)
+
+
+class FakeApp:
+    def ask_stream(self, text: str, mode: str | None = None):
+        yield StructuredAgentEvent("text_delta", 1, text)
+        yield StructuredAgentEvent("text_delta", 1, "!")
+        yield StructuredAgentEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer=f"{text}!",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class FakeMarkdownApp:
+    def ask_stream(self, _text: str, mode: str | None = None):
+        yield StructuredAgentEvent("text_delta", 1, "# Title\n\n")
+        yield StructuredAgentEvent("text_delta", 1, "- item")
+        yield StructuredAgentEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer="# Title\n\n- item",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class CapturingApp:
+    registry: tuple[ToolSpec, ...] = ()
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+        self.modes: list[str | None] = []
+
+    def ask_stream(self, text: str, mode: str | None = None):
+        self.seen.append(text)
+        self.modes.append(mode)
+        yield StructuredAgentEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer="ok",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class ToolApp:
+    def __init__(
+        self,
+        registry: tuple[ToolSpec, ...] = (
+            ToolSpec("echo", "Echo.", "text", lambda value: value),
+        ),
+    ) -> None:
+        self.registry = registry
+
+    def ask_stream(self, _text: str, mode: str | None = None):
+        yield StructuredAgentEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer="unused",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class InterruptingToolApp:
+    class Agent:
+        def __init__(self) -> None:
+            self.cancellation_token = CancellationToken()
+
+    def __init__(self) -> None:
+        self.agent = self.Agent()
+
+    def ask_stream(self, _text: str, mode: str | None = None):
+        yield StructuredAgentEvent(
+            "tool_use",
+            1,
+            ToolCall("call_1", "bash", {"command": "cd .. && git diff .gitignore"}),
+        )
+        raise KeyboardInterrupt()
+
+
+class FakeRenderer:
+    def __init__(self) -> None:
+        self.rendered: list[str] = []
+
+    def render(self, text: str) -> None:
+        self.rendered.append(text)
+
+
+def _strip_ansi(text: str) -> str:
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

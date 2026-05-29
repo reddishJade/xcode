@@ -1,0 +1,362 @@
+from __future__ import annotations
+
+
+from copy import deepcopy
+from datetime import datetime
+import json
+from pathlib import Path
+from typing import Any, Callable
+
+from ..skills import ToolSpec
+
+"""分层上下文压缩工具。"""
+
+
+class CompactController:
+    def __init__(self) -> None:
+        self._requested = False
+
+    def request(self) -> str:
+        self._requested = True
+        return "manual compact requested"
+
+    def consume(self) -> bool:
+        requested = self._requested
+        self._requested = False
+        return requested
+
+
+class LayeredCompactor:
+    def __init__(
+        self,
+        transcript_dir: Path | None = None,
+        keep_recent_tool_results: int = 2,
+        max_tool_result_chars: int = 100,
+        max_recent_messages: int = 8,
+        large_tool_output_chars: int = 20_000,
+        large_tool_output_head_chars: int = 10_000,
+        large_tool_output_tail_chars: int = 10_000,
+        compact_token_threshold: int = 32_000,
+        budget_trigger_token_ratio: float = 0.5,
+        on_compact: Callable[[str], None] | None = None,
+    ) -> None:
+        self.transcript_dir = transcript_dir
+        self.keep_recent_tool_results = keep_recent_tool_results
+        self.max_tool_result_chars = max_tool_result_chars
+        self.max_recent_messages = max_recent_messages
+        self.large_tool_output_chars = large_tool_output_chars
+        self.large_tool_output_head_chars = large_tool_output_head_chars
+        self.large_tool_output_tail_chars = large_tool_output_tail_chars
+        self.compact_token_threshold = compact_token_threshold
+        self.budget_trigger_token_ratio = budget_trigger_token_ratio
+        self.on_compact = on_compact
+        self.last_transcript_path: Path | None = None
+
+    def __call__(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        compacted = stale_snip_file_reads(messages)
+        preserved_tool_results = latest_read_file_tool_result_ids(compacted)
+        compacted = budget_large_tool_outputs(
+            compacted,
+            large_tool_output_chars=self.large_tool_output_chars,
+            large_tool_output_head_chars=self.large_tool_output_head_chars,
+            large_tool_output_tail_chars=self.large_tool_output_tail_chars,
+            compact_token_threshold=self.compact_token_threshold,
+            budget_trigger_token_ratio=self.budget_trigger_token_ratio,
+            preserve_tool_result_ids=preserved_tool_results,
+        )
+        micro = micro_compact_tool_results(
+            compacted,
+            keep_recent=self.keep_recent_tool_results,
+            max_content_chars=self.max_tool_result_chars,
+            preserve_tool_result_ids=preserved_tool_results,
+        )
+        if self.transcript_dir is not None:
+            self.last_transcript_path = save_transcript(micro, self.transcript_dir)
+
+        final_messages = summarize_messages(
+            micro, max_recent_messages=self.max_recent_messages
+        )
+        if len(final_messages) > 1:
+            second_msg = final_messages[1]
+            if second_msg.get("role") == "user" and str(
+                second_msg.get("content")
+            ).startswith("[Compressed]"):
+                cleaned_content = context_collapse_clean(second_msg.get("content"))
+                second_msg["content"] = cleaned_content
+                if self.on_compact is not None:
+                    self.on_compact(cleaned_content)
+
+        return final_messages
+
+
+def context_collapse_clean(content: str) -> str:
+    """提取 <summary> 标签中的纯净摘要，剥离思考区与分析块。"""
+    import re
+
+    content_str = str(content).strip()
+
+    # 提取 <summary> 标签中的内容
+    summary_match = re.search(
+        r"<summary>(.*?)</summary>", content_str, re.DOTALL | re.IGNORECASE
+    )
+    if summary_match:
+        prefix = "[Compressed]\n" if content_str.startswith("[Compressed]") else ""
+        return prefix + summary_match.group(1).strip()
+
+    # 移除 <analysis> 和 <think> 标签及其内容
+    cleaned = re.sub(
+        r"<analysis>.*?</analysis>", "", content_str, flags=re.DOTALL | re.IGNORECASE
+    )
+    cleaned = re.sub(
+        r"<think>.*?</think>", "", cleaned, flags=re.DOTALL | re.IGNORECASE
+    )
+    return cleaned.strip()
+
+
+def stale_snip_file_reads(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """裁剪旧的 read_file 工具结果，仅保留最新一次读取。"""
+    compacted = deepcopy(messages)
+    tool_use_id_to_path: dict[str, str] = {}
+
+    for message in compacted:
+        if message.get("role") == "assistant":
+            content = message.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "tool_use":
+                        tool_use_id = part.get("id")
+                        tool_name = part.get("name")
+                        tool_input = part.get("input", {})
+                        if tool_use_id and tool_name == "read_file":
+                            path_val = ""
+                            if isinstance(tool_input, dict):
+                                path_val = str(tool_input.get("path", "")).strip()
+                            elif isinstance(tool_input, str):
+                                try:
+                                    parsed = json.loads(tool_input)
+                                    if isinstance(parsed, dict):
+                                        path_val = str(parsed.get("path", "")).strip()
+                                except json.JSONDecodeError:
+                                    path_val = tool_input.strip()
+                            if path_val:
+                                norm_path = Path(path_val).as_posix()
+                                tool_use_id_to_path[tool_use_id] = norm_path
+
+    path_to_results: dict[str, list[tuple[int, int, dict[str, Any]]]] = {}
+    for message_index, message in enumerate(compacted):
+        content = message.get("content")
+        if isinstance(content, list):
+            for part_index, part in enumerate(content):
+                if isinstance(part, dict) and part.get("type") == "tool_result":
+                    tool_use_id = part.get("tool_use_id")
+                    if tool_use_id and tool_use_id in tool_use_id_to_path:
+                        path = tool_use_id_to_path[tool_use_id]
+                        if path not in path_to_results:
+                            path_to_results[path] = []
+                        path_to_results[path].append((message_index, part_index, part))
+
+    for path, results in path_to_results.items():
+        if len(results) > 1:
+            for _msg_idx, _part_idx, part in results[:-1]:
+                part["content"] = "[Content snipped - re-read if needed]"
+    return compacted
+
+
+def latest_read_file_tool_result_ids(messages: list[dict[str, Any]]) -> set[str]:
+    """返回每个文件最新一次 read_file 对应的 tool_result id。"""
+    tool_use_id_to_path = _read_file_tool_paths(messages)
+    path_to_latest: dict[str, str] = {}
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not (isinstance(part, dict) and part.get("type") == "tool_result"):
+                continue
+            tool_use_id = str(part.get("tool_use_id", ""))
+            path = tool_use_id_to_path.get(tool_use_id)
+            if path:
+                path_to_latest[path] = tool_use_id
+    return set(path_to_latest.values())
+
+
+def _read_file_tool_paths(messages: list[dict[str, Any]]) -> dict[str, str]:
+    tool_use_id_to_path: dict[str, str] = {}
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not (isinstance(part, dict) and part.get("type") == "tool_use"):
+                continue
+            tool_use_id = part.get("id")
+            tool_name = part.get("name")
+            tool_input = part.get("input", {})
+            if not tool_use_id or tool_name != "read_file":
+                continue
+            path_val = ""
+            if isinstance(tool_input, dict):
+                path_val = str(tool_input.get("path", "")).strip()
+            elif isinstance(tool_input, str):
+                try:
+                    parsed = json.loads(tool_input)
+                    if isinstance(parsed, dict):
+                        path_val = str(parsed.get("path", "")).strip()
+                except json.JSONDecodeError:
+                    path_val = tool_input.strip()
+            if path_val:
+                tool_use_id_to_path[str(tool_use_id)] = Path(path_val).as_posix()
+    return tool_use_id_to_path
+
+
+def budget_large_tool_outputs(
+    messages: list[dict[str, Any]],
+    large_tool_output_chars: int = 20_000,
+    large_tool_output_head_chars: int = 10_000,
+    large_tool_output_tail_chars: int = 10_000,
+    compact_token_threshold: int = 32_000,
+    budget_trigger_token_ratio: float = 0.5,
+    preserve_tool_result_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """在 token 压力大时，对超大工具结果进行头尾保留裁剪。"""
+    compacted = deepcopy(messages)
+    current_tokens = estimate_message_tokens(compacted)
+    trigger_threshold = compact_token_threshold * budget_trigger_token_ratio
+
+    if current_tokens <= trigger_threshold:
+        return compacted
+
+    for message in compacted:
+        content = message.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "tool_result":
+                    tool_use_id = str(part.get("tool_use_id", ""))
+                    if (
+                        preserve_tool_result_ids
+                        and tool_use_id in preserve_tool_result_ids
+                    ):
+                        continue
+                    tool_content = part.get("content", "")
+                    if (
+                        isinstance(tool_content, str)
+                        and len(tool_content) > large_tool_output_chars
+                    ):
+                        if tool_content.startswith("[") and tool_content.endswith("]"):
+                            continue
+                        if (
+                            len(tool_content)
+                            > large_tool_output_head_chars
+                            + large_tool_output_tail_chars
+                        ):
+                            head = tool_content[:large_tool_output_head_chars]
+                            tail = tool_content[-large_tool_output_tail_chars:]
+                            truncated_len = (
+                                len(tool_content)
+                                - large_tool_output_head_chars
+                                - large_tool_output_tail_chars
+                            )
+                            part["content"] = (
+                                f"{head}\n\n[... truncated {truncated_len} characters due to token budget ...]\n\n{tail}"
+                            )
+    return compacted
+
+
+def micro_compact_tool_results(
+    messages: list[dict[str, Any]],
+    keep_recent: int = 2,
+    max_content_chars: int = 100,
+    preserve_tool_result_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    compacted = deepcopy(messages)
+    locations: list[tuple[int, int, dict[str, Any]]] = []
+    for message_index, message in enumerate(compacted):
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part_index, part in enumerate(content):
+            if isinstance(part, dict) and part.get("type") == "tool_result":
+                locations.append((message_index, part_index, part))
+    for _message_index, _part_index, part in locations[:-keep_recent]:
+        tool_use_id = str(part.get("tool_use_id", ""))
+        if preserve_tool_result_ids and tool_use_id in preserve_tool_result_ids:
+            continue
+        content = str(part.get("content", ""))
+        if len(content) > max_content_chars:
+            part["content"] = (
+                f"[Previous tool_result compacted; {len(content)} chars removed]"
+            )
+    return compacted
+
+
+def estimate_message_tokens(messages: list[dict[str, Any]]) -> int:
+    return sum(
+        estimate_text_tokens(json.dumps(message, ensure_ascii=False, default=str))
+        for message in messages
+    )
+
+
+def estimate_text_tokens(text: str) -> int:
+    try:
+        import tiktoken
+    except ImportError:
+        return max(1, len(text) // 4)
+    encoding = tiktoken.get_encoding("cl100k_base")
+    return len(encoding.encode(text))
+
+
+def summarize_messages(
+    messages: list[dict[str, Any]],
+    max_recent_messages: int = 8,
+) -> list[dict[str, Any]]:
+    if len(messages) <= max_recent_messages + 1:
+        return messages
+    recent_start = max(1, len(messages) - max_recent_messages)
+    older = messages[1:recent_start]
+    summary_lines = []
+    for message in older:
+        content = _content_preview(message.get("content"))
+        summary_lines.append(f"- {message.get('role')}: {content}")
+    summary = {
+        "role": "user",
+        "content": "[Compressed]\n" + "\n".join(summary_lines),
+    }
+    return [messages[0], summary, *messages[recent_start:]]
+
+
+def save_transcript(messages: list[dict[str, Any]], transcript_dir: Path) -> Path:
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    path = (
+        transcript_dir
+        / f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jsonl"
+    )
+    with path.open("w", encoding="utf-8") as file:
+        for message in messages:
+            file.write(json.dumps(message, ensure_ascii=False, default=str) + "\n")
+    return path
+
+
+def build_compact_tool(controller: CompactController) -> ToolSpec:
+    return ToolSpec(
+        name="compact",
+        description="Request manual context compaction before the next model call.",
+        input_hint="empty",
+        handler=lambda _input: controller.request(),
+        risk="low",
+    )
+
+
+def _content_preview(content: Any) -> str:
+    if isinstance(content, list):
+        rendered = []
+        for part in content:
+            if isinstance(part, dict):
+                rendered.append(str(part.get("type", "block")))
+            else:
+                rendered.append(str(part))
+        text = " ".join(rendered)
+    else:
+        text = str(content)
+    return " ".join(text.split())[:180]
