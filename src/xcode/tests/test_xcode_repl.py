@@ -10,7 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from xcode.cli.completion import ReplCompleter
-from xcode.cli.repl import _brief_input, _reasoning_preview_lines, run_repl
+from xcode.cli.repl import (
+    PromptText,
+    _brief_input,
+    _reasoning_preview_lines,
+    run_repl,
+)
 from xcode.cli.session import SessionStore
 from xcode.harness.agent_runtime import (
     CancellationToken,
@@ -105,7 +110,13 @@ class XcodeReplTests(unittest.TestCase):
 
             text = output.getvalue()
             self.assertEqual(code, 0)
-            self.assertIn("Xcode REPL", text)
+            self.assertIn("XCode", text)
+            self.assertIn("model:", text)
+            self.assertIn("unknown", text)
+            self.assertIn("thinking: unknown", text)
+            self.assertIn("effort:", text)
+            self.assertIn("not set", text)
+            self.assertIn("cwd:", text)
             self.assertIn("Conversation saved: hello", text)
             self.assertNotIn("Session:", text)
             self.assertNotIn("session-", text.splitlines()[0])
@@ -152,7 +163,20 @@ class XcodeReplTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertIn("thinked for", output.getvalue())
-            self.assertIn("one two three four", output.getvalue())
+            self.assertIn("three four five six seven eight", output.getvalue())
+            self.assertIn("done", output.getvalue())
+
+    def test_run_repl_hides_tiny_reasoning_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = TinyReasoningApp()
+            prompt = FakePrompt(["hello", "/exit"])
+            output = StringIO()
+
+            with redirect_stdout(output):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            self.assertNotIn("thinked for", output.getvalue())
             self.assertIn("done", output.getvalue())
 
     def test_run_repl_summarizes_tools_without_success_result(self) -> None:
@@ -578,7 +602,7 @@ class FakePrompt:
     def __init__(self, values: list[str]) -> None:
         self.values = iter(values)
 
-    def prompt(self, _prompt_text: str) -> str:
+    def prompt(self, _prompt_text: PromptText) -> str:
         return next(self.values)
 
 
@@ -634,7 +658,25 @@ class MultiDeltaApp:
 class ReasoningApp:
     def ask_stream(self, _text: str, mode: str | None = None):
         yield StructuredAgentEvent("reasoning_delta", 1, "one\n")
-        yield StructuredAgentEvent("reasoning_delta", 1, "two\nthree\nfour")
+        yield StructuredAgentEvent(
+            "reasoning_delta", 1, "two\nthree\nfour\nfive six seven eight"
+        )
+        yield StructuredAgentEvent("text_delta", 1, "done")
+        yield StructuredAgentEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer="done",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class TinyReasoningApp:
+    def ask_stream(self, _text: str, mode: str | None = None):
+        yield StructuredAgentEvent("reasoning_delta", 1, "ok")
         yield StructuredAgentEvent("text_delta", 1, "done")
         yield StructuredAgentEvent(
             "final",

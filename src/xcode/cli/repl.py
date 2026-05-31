@@ -24,15 +24,37 @@ from xcode.harness.skills import ToolSpec, run_tool_result
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
 _console = Console(file=sys.stdout)
-_MIN_REASONING_PREVIEW_SECONDS = 0.15
-_THINKING_STYLE = "grey50"
+_MIN_REASONING_SUMMARY_SECONDS = 0.5
+_MIN_REASONING_SUMMARY_CHARS = 24
+CLI_COLOR_TITLE = "bold"
+CLI_COLOR_DIM = "grey50"
+CLI_COLOR_USER = "green bold"
+CLI_COLOR_ASSISTANT = "cyan"
+CLI_COLOR_THINKING = "grey50"
+CLI_COLOR_TOOL = "yellow"
+CLI_COLOR_SUCCESS = "green"
+CLI_COLOR_ERROR = "red"
+CLI_COLOR_WARNING = "yellow"
+CLI_COLOR_INFO = "blue"
+CLI_PROMPT_MARKER_STYLE = "ansigreen bold"
+PromptText = str | list[tuple[str, str]]
 
 
 class PromptLike(Protocol):
-    def prompt(self, prompt_text: str) -> str: ...
+    def prompt(self, prompt_text: PromptText) -> str: ...
+
+
+class PromptSessionAdapter:
+    def __init__(self, session: Any) -> None:
+        self.session = session
+
+    def prompt(self, prompt_text: PromptText) -> str:
+        return str(self.session.prompt(prompt_text))
 
 
 def _reasoning_preview_lines(text: str, width: int | None = None) -> list[str]:
@@ -63,22 +85,39 @@ def _single_line_preview(text: str, width: int | None = None) -> str:
     return f"{preview[: max(0, width - 1)]}…"
 
 
+def _should_print_reasoning_summary(text: str, elapsed: float) -> bool:
+    preview = " ".join(text.split())
+    return bool(preview) and (
+        elapsed >= _MIN_REASONING_SUMMARY_SECONDS
+        or len(preview) >= _MIN_REASONING_SUMMARY_CHARS
+    )
+
+
+def _answer_renderable(text: str) -> Table:
+    layout = Table.grid(padding=(0, 1), expand=True)
+    layout.add_column(width=1)
+    layout.add_column(ratio=1)
+    layout.add_row(Text("●", style=CLI_COLOR_ASSISTANT), Markdown(text or ""))
+    return layout
+
+
 class _LiveMarkdownStream:
     def __init__(self, console: Console) -> None:
         self.console = console
         self.live: Live | None = None
 
     def update(self, text: str) -> None:
+        renderable = _answer_renderable(text)
         if self.live is None:
             self.live = Live(
-                Markdown(text),
+                renderable,
                 console=self.console,
                 refresh_per_second=12,
                 transient=False,
             )
             self.live.start(refresh=True)
             return
-        self.live.update(Markdown(text), refresh=True)
+        self.live.update(renderable, refresh=True)
 
     def stop(self) -> None:
         if self.live is None:
@@ -93,7 +132,7 @@ class _LiveReasoningPreview:
         self.live: Live | None = None
 
     def update(self, lines: list[str]) -> None:
-        text = Text("\n".join(lines), style=_THINKING_STYLE)
+        text = Text("\n".join(lines), style=CLI_COLOR_THINKING)
         if self.live is None:
             self.live = Live(
                 text,
@@ -251,6 +290,39 @@ def _is_prompt_toolkit_prompt(prompt: PromptLike | None) -> bool:
     return module.startswith("prompt_toolkit.")
 
 
+def _print_startup_banner(app, root: Path) -> None:
+    console = Console(file=sys.stdout)
+    info = app.get_model_info() if hasattr(app, "get_model_info") else {}
+    model = str(info.get("model", "unknown")) if info else "unknown"
+    thinking = _format_thinking(info.get("thinking") if info else None)
+    effort = str(info.get("reasoning_effort") or "not set") if info else "not set"
+    lines = Text()
+    lines.append("XCode\n", style=CLI_COLOR_TITLE)
+    lines.append(f"model:    {model}\n", style=CLI_COLOR_DIM)
+    lines.append(f"thinking: {thinking}\n", style=CLI_COLOR_DIM)
+    lines.append(f"effort:   {effort}\n", style=CLI_COLOR_DIM)
+    lines.append(f"cwd:      {root}", style=CLI_COLOR_DIM)
+    console.print(
+        Panel(lines, border_style=CLI_COLOR_DIM, padding=(0, 1), expand=False)
+    )
+    console.print(Text("Type /help for commands.", style=CLI_COLOR_DIM))
+
+
+def _input_prompt() -> PromptText:
+    return [("class:prompt-marker", "❯ "), ("", "")]
+
+
+def _format_thinking(value: object) -> str:
+    if isinstance(value, bool):
+        return "enabled" if value else "disabled"
+    text = str(value).strip().lower() if value is not None else ""
+    if text in {"true", "1", "yes", "on", "enabled"}:
+        return "enabled"
+    if text in {"false", "0", "no", "off", "disabled"}:
+        return "disabled"
+    return "unknown"
+
+
 def _radiolist_prompt(tool: ToolSpec, action_input: str) -> str:
     from prompt_toolkit.shortcuts.dialogs import radiolist_dialog
 
@@ -289,14 +361,13 @@ def run_repl(
     agent = getattr(app, "agent", None)
     if agent is not None:
         agent.approval_callback = hitl_handler
-    print("Xcode REPL")
-    print("Type /help for commands.")
+    _print_startup_banner(app, root)
     if resume_latest:
         _resume_interactively(store, session)
 
     while True:
         try:
-            text = session.prompt("xcode> ").strip()
+            text = session.prompt(_input_prompt()).strip()
         except (EOFError, KeyboardInterrupt):
             now = time.time()
             if state.exit_pending and now - state.exit_pending < 1.5:
@@ -407,12 +478,14 @@ def run_repl(
             intents = list(tool_group["intents"])
             title = _summarize_intents(intents)
             status = "failed" if errors else "done"
-            style = "red" if errors else "green"
-            live_console.print(Text(f"  • Explore: {title}", style="yellow"))
+            style = CLI_COLOR_ERROR if errors else CLI_COLOR_SUCCESS
+            live_console.print(Text(f"  • Explore: {title}", style=CLI_COLOR_TOOL))
             live_console.print(Text(f"    {status}: {calls} tools", style=style))
             for label, result in errors:
                 summary = _single_line_preview(str(result.content), width=120)
-                live_console.print(Text(f"    error: {label}: {summary}", style="red"))
+                live_console.print(
+                    Text(f"    error: {label}: {summary}", style=CLI_COLOR_ERROR)
+                )
             tool_group = None
 
         def _render_reasoning_preview() -> None:
@@ -425,18 +498,20 @@ def run_repl(
             if reasoning_started_at is None:
                 return
             elapsed = time.perf_counter() - reasoning_started_at
-            if reasoning_text and elapsed < _MIN_REASONING_PREVIEW_SECONDS:
-                time.sleep(_MIN_REASONING_PREVIEW_SECONDS - elapsed)
-                elapsed = time.perf_counter() - reasoning_started_at
             reasoning_preview.stop()
+            if not _should_print_reasoning_summary(reasoning_text, elapsed):
+                reasoning_started_at = None
+                reasoning_text = ""
+                return
             preview = _single_line_preview(reasoning_text)
             live_console.print(
                 Text(
-                    f"  • thinked for {_format_elapsed(elapsed)}", style=_THINKING_STYLE
+                    f"  • thinked for {_format_elapsed(elapsed)}",
+                    style=CLI_COLOR_THINKING,
                 )
             )
             if preview:
-                live_console.print(Text(f"    {preview}", style=_THINKING_STYLE))
+                live_console.print(Text(f"    {preview}", style=CLI_COLOR_THINKING))
             reasoning_started_at = None
             reasoning_text = ""
 
@@ -528,6 +603,7 @@ def create_prompt_session(
     try:
         from prompt_toolkit import PromptSession
         from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.styles import Style
     except ImportError as exc:
         raise RuntimeError(
             "prompt_toolkit is required for REPL mode. Install it in .venv first."
@@ -559,13 +635,21 @@ def create_prompt_session(
         history = FileHistory(str(history_dir / "repl_history"))
     except OSError:
         pass
+    style = Style.from_dict(
+        {
+            "prompt-marker": CLI_PROMPT_MARKER_STYLE,
+        }
+    )
 
-    return PromptSession(
-        multiline=True,
-        key_bindings=bindings,
-        completer=completer,
-        complete_while_typing=True,
-        history=history,
+    return PromptSessionAdapter(
+        PromptSession(
+            multiline=True,
+            key_bindings=bindings,
+            completer=completer,
+            complete_while_typing=True,
+            history=history,
+            style=style,
+        )
     )
 
 
@@ -956,15 +1040,15 @@ def _print_loaded_history(store: SessionStore) -> None:
     console.print(
         Text(
             f"  • loaded {len(records)} message(s) from this session branch",
-            style="blue",
+            style=CLI_COLOR_INFO,
         )
     )
     for record in records:
         if record.type == "assistant":
-            console.print(Text("assistant:", style="green"))
+            console.print(Text("assistant:", style=CLI_COLOR_ASSISTANT))
             console.print(Markdown(str(record.content)))
         else:
-            console.print(Text(f"user: {record.content}", style="cyan"))
+            console.print(Text(f"user: {record.content}", style=CLI_COLOR_USER))
 
 
 def _print_saved_conversation(store: SessionStore) -> None:
@@ -1113,7 +1197,7 @@ def _event_to_dict(event) -> dict[str, Any]:
 
 def _print_tool_call_rich(label: str, console: Console | None = None) -> None:
     target = console or _console
-    target.print(Text(f"  • {label}", style="yellow"))
+    target.print(Text(f"  • {label}", style=CLI_COLOR_TOOL))
 
 
 def _print_tool_result_rich(
@@ -1125,10 +1209,10 @@ def _print_tool_result_rich(
         return
     target = console or _console
     border = {
-        "error": "red",
-        "denied": "red",
-        "approval_required": "yellow",
-    }.get(data.status, "green" if data.status == "ok" else "cyan")
+        "error": CLI_COLOR_ERROR,
+        "denied": CLI_COLOR_ERROR,
+        "approval_required": CLI_COLOR_WARNING,
+    }.get(data.status, CLI_COLOR_SUCCESS if data.status == "ok" else CLI_COLOR_INFO)
     mark = {"error": "✘", "denied": "⊘", "approval_required": "?"}.get(
         data.status, data.status
     )
