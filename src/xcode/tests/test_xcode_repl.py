@@ -337,6 +337,17 @@ class XcodeReplTests(unittest.TestCase):
             )
             self.assertTrue(app.agent.cancellation_token.is_cancelled())
 
+    def test_run_repl_second_ctrl_c_uses_blank_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = FakeApp()
+            prompt = InterruptingPrompt([KeyboardInterrupt(), KeyboardInterrupt()])
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(prompt.prompts[1], "")
+
     def test_run_repl_resume_uses_picker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             sessions_dir = Path(temp_dir)
@@ -604,6 +615,19 @@ class FakePrompt:
 
     def prompt(self, _prompt_text: PromptText) -> str:
         return next(self.values)
+
+
+class InterruptingPrompt:
+    def __init__(self, values: list[str | BaseException]) -> None:
+        self.values = iter(values)
+        self.prompts: list[PromptText] = []
+
+    def prompt(self, prompt_text: PromptText) -> str:
+        self.prompts.append(prompt_text)
+        value = next(self.values)
+        if isinstance(value, BaseException):
+            raise value
+        return value
 
 
 class FakeApp:

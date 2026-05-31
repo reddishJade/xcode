@@ -367,7 +367,12 @@ def run_repl(
 
     while True:
         try:
-            text = session.prompt(_input_prompt()).strip()
+            prompt_text: PromptText = (
+                ""
+                if state.exit_pending and time.time() - state.exit_pending < 1.5
+                else _input_prompt()
+            )
+            text = session.prompt(prompt_text).strip()
         except (EOFError, KeyboardInterrupt):
             now = time.time()
             if state.exit_pending and now - state.exit_pending < 1.5:
@@ -381,6 +386,7 @@ def run_repl(
             continue
         if not text:
             continue
+        state.exit_pending = 0.0
         if text.startswith("/"):
             if _handle_command(
                 text,
