@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable
 
+from ..harness.agent_runtime.cancellation import CancellationToken
 from .agent_loop import run_agent_loop, run_agent_loop_continue
 from .types import (
     AgentContext,
@@ -15,9 +16,13 @@ from .types import (
     ImageContent,
     MessageEndEvent,
     MessageStartEvent,
+    MessageUpdateEvent,
     TextContent,
     ThinkingLevel,
+    ToolExecutionMode,
     TurnEndEvent,
+    ToolExecutionStartEvent,
+    ToolExecutionEndEvent,
 )
 
 EMPTY_USAGE = {
@@ -65,8 +70,8 @@ class PendingMessageQueue:
 
 class ActiveRun:
     def __init__(self) -> None:
-        self.promise: asyncio.Future[None] = asyncio.Future()
-        self.abort_controller: Any = None  # CancellationToken
+        self.done = asyncio.Event()
+        self.cancellation_token = CancellationToken()
 
 
 # ── Agent ──
@@ -94,7 +99,7 @@ class Agent:
         steering_mode: str = "one-at-a-time",
         follow_up_mode: str = "one-at-a-time",
         session_id: str | None = None,
-        tool_execution: str = "parallel",
+        tool_execution: ToolExecutionMode = "parallel",
     ) -> None:
         self._system_prompt = system_prompt
         self._model = model
@@ -173,19 +178,20 @@ class Agent:
 
     # ── 生命周期 ──
 
-    def subscribe(
-        self, listener: Callable[[AgentEvent, Any], None]
-    ) -> Callable[[], None]:
+    def add_listener(self, listener: Callable[[AgentEvent, Any], None]) -> None:
         self.listeners.append(listener)
-        return lambda: self.listeners.remove(listener)
+
+    def remove_listener(self, listener: Callable[[AgentEvent, Any], None]) -> None:
+        if listener in self.listeners:
+            self.listeners.remove(listener)
 
     def abort(self) -> None:
-        if self._active_run and self._active_run.abort_controller:
-            self._active_run.abort_controller.cancel()  # type: ignore
+        if self._active_run:
+            self._active_run.cancellation_token.cancel()
 
     async def wait_for_idle(self) -> None:
         if self._active_run:
-            await self._active_run.promise
+            await self._active_run.done.wait()
 
     def reset(self) -> None:
         self._messages = []
@@ -216,7 +222,7 @@ class Agent:
         if not last:
             raise ValueError("No messages to continue from")
 
-        if hasattr(last, "role") and last.role == "assistant":
+        if isinstance(last, AssistantMessage):
             queued = self.steering_queue.drain()
             if queued:
                 await self._run_prompt_messages(queued)
@@ -258,7 +264,7 @@ class Agent:
     def _build_loop_config(self) -> AgentLoopConfig:
         return AgentLoopConfig(
             model=self._model,
-            tool_execution=self.tool_execution,  # type: ignore
+            tool_execution=self.tool_execution,
             convert_to_llm=self.convert_to_llm,
             transform_context=self.transform_context,
             get_api_key=self.get_api_key,
@@ -273,13 +279,13 @@ class Agent:
         context = self._create_context_snapshot()
         config = self._build_loop_config()
 
-        async def executor(_: Any) -> None:
+        async def executor(signal: CancellationToken) -> None:
             await run_agent_loop(
                 prompts=messages,
                 context=context,
                 config=config,
                 emit=self._emit,
-                signal=None,
+                signal=signal,
                 stream_fn=None,
             )
 
@@ -289,12 +295,12 @@ class Agent:
         context = self._create_context_snapshot()
         config = self._build_loop_config()
 
-        async def executor(_: Any) -> None:
+        async def executor(signal: CancellationToken) -> None:
             await run_agent_loop_continue(
                 context=context,
                 config=config,
                 emit=self._emit,
-                signal=None,
+                signal=signal,
                 stream_fn=None,
             )
 
@@ -302,56 +308,23 @@ class Agent:
 
     def _emit(self, event: AgentEvent) -> None:
         """同步 emit 函数，供 agent_loop 调用。"""
-        event_type = (
-            event.get("type", "")
-            if isinstance(event, dict)
-            else getattr(event, "type", "")
-        )
-
-        if event_type == "message_start":
-            self._streaming_message = (
-                event.get("message", None)
-                if isinstance(event, dict)
-                else getattr(event, "message", None)
-            )
-        elif event_type == "message_update":
-            self._streaming_message = (
-                event.get("message", None)
-                if isinstance(event, dict)
-                else getattr(event, "message", None)
-            )
-        elif event_type == "message_end":
+        if isinstance(event, (MessageStartEvent, MessageUpdateEvent)):
+            self._streaming_message = event.message
+        elif isinstance(event, MessageEndEvent):
             self._streaming_message = None
-            msg = (
-                event.get("message", None)
-                if isinstance(event, dict)
-                else getattr(event, "message", None)
-            )
-            if msg is not None:
-                self._messages.append(msg)
-        elif event_type == "tool_execution_start":
-            tool_id = (
-                event.get("tool_call_id", "")
-                if isinstance(event, dict)
-                else getattr(event, "tool_call_id", "")
-            )
-            self._pending_tool_calls.add(tool_id)
-        elif event_type == "tool_execution_end":
-            tool_id = (
-                event.get("tool_call_id", "")
-                if isinstance(event, dict)
-                else getattr(event, "tool_call_id", "")
-            )
-            self._pending_tool_calls.discard(tool_id)
-        elif event_type == "turn_end":
-            msg = (
-                event.get("message", None)
-                if isinstance(event, dict)
-                else getattr(event, "message", None)
-            )
-            if msg and hasattr(msg, "error_message") and msg.error_message:
-                self._error_message = msg.error_message
-        elif event_type == "agent_end":
+            if event.message is not None:
+                self._messages.append(event.message)
+        elif isinstance(event, ToolExecutionStartEvent):
+            self._pending_tool_calls.add(event.tool_call_id)
+        elif isinstance(event, ToolExecutionEndEvent):
+            self._pending_tool_calls.discard(event.tool_call_id)
+        elif isinstance(event, TurnEndEvent):
+            if (
+                isinstance(event.message, AssistantMessage)
+                and event.message.error_message
+            ):
+                self._error_message = event.message.error_message
+        elif isinstance(event, AgentEndEvent):
             self._streaming_message = None
 
         for listener in self.listeners:
@@ -373,7 +346,7 @@ class Agent:
         self._error_message = None
 
         try:
-            await executor(None)
+            await executor(active.cancellation_token)
         except Exception as e:
             self._handle_run_failure(e, False)
         finally:
@@ -395,7 +368,7 @@ class Agent:
         self._streaming_message = None
         self._pending_tool_calls = set()
         if self._active_run:
-            self._active_run.promise.set_result(None)
+            self._active_run.done.set()
             self._active_run = None
 
 

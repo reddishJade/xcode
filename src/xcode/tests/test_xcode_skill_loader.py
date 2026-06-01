@@ -33,7 +33,7 @@ class XcodeSkillLoaderTests(unittest.TestCase):
             loader = SkillLoader(Path(tmp) / "skills")
             tool = build_skill_loader_tool(loader)
 
-            output = tool.handler('{"name": "git"}')
+            output = tool.handler({"name": "git"})
 
             self.assertIn('<skill name="git">', output)
             self.assertIn("Full workflow.", output)
@@ -107,7 +107,7 @@ class XcodeSkillLoaderTests(unittest.TestCase):
         loader = SkillLoader(Path("missing"))
         tool = build_skill_loader_tool(loader)
 
-        self.assertIn("Unknown skill", tool.handler('{"name": "missing"}'))
+        self.assertIn("Unknown skill", tool.handler({"name": "missing"}))
 
 
 if __name__ == "__main__":

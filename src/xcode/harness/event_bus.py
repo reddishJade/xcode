@@ -5,15 +5,26 @@ from typing import Any
 
 
 class EventEmitter:
-    """简单的发布/订阅事件总线。"""
+    """简单的事件总线。"""
 
     def __init__(self) -> None:
         self._handlers: dict[str, list[Callable[..., None]]] = {}
 
-    def on(self, channel: str, handler: Callable[..., None]) -> Callable[[], None]:
-        """注册事件处理器，返回取消注册函数。"""
+    def register(self, channel: str, handler: Callable[..., None]) -> None:
+        """注册事件处理器。"""
         self._handlers.setdefault(channel, []).append(handler)
-        return lambda: self._handlers[channel].remove(handler)
+
+    def remove(self, channel: str, handler: Callable[..., None]) -> None:
+        """移除事件处理器。"""
+        handlers = self._handlers.get(channel)
+        if not handlers:
+            return
+        try:
+            handlers.remove(handler)
+        except ValueError:
+            return
+        if not handlers:
+            del self._handlers[channel]
 
     def emit(self, channel: str, **data: Any) -> None:
         """触发事件。"""

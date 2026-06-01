@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import signal
 import subprocess
@@ -11,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ..skills import ToolSpec
+from ..skills import ToolInput, ToolSpec
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 
 MAX_OUTPUT_BYTES = 50_000
@@ -172,17 +171,11 @@ def build_bash_tool(
     root = project_root.resolve()
     spec = shell_spec or detect_shell()
 
-    def bash(action_input: str) -> str:
-        try:
-            data = _parse_input(action_input)
-        except ValueError as exc:
-            return str(exc)
+    def bash(data: ToolInput) -> str:
         command = str(data.get("command") or data.get("input") or "").strip()
-        timeout = _parse_timeout(data.get("timeout", DEFAULT_TIMEOUT_SECONDS))
-        if isinstance(timeout, str):
-            return timeout
         if not command:
-            return "command is required"
+            raise ValueError("command is required")
+        timeout = _parse_timeout(data.get("timeout", DEFAULT_TIMEOUT_SECONDS))
 
         argv = build_shell_argv(spec, command)
         popen_kwargs: dict[str, Any] = {}
@@ -269,34 +262,11 @@ def build_bash_tool(
     )
 
 
-def _parse_input(action_input: str) -> dict[str, Any]:
-    text = action_input.strip()
-    if text.startswith(("{", "[")):
-        text = text.replace("，", ",")
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid JSON input: {exc.msg}") from exc
-        if not isinstance(data, dict):
-            raise ValueError("JSON input must be an object")
-        if "command" in data:
-            return data
-        if "input" in data and isinstance(data["input"], dict):
-            return dict(data["input"])
-        if "input" in data:
-            return {
-                "command": data["input"],
-                "timeout": data.get("timeout", DEFAULT_TIMEOUT_SECONDS),
-            }
-        return data
-    return {"command": text}
-
-
-def _parse_timeout(value: Any) -> int | str:
+def _parse_timeout(value: Any) -> int:
     try:
         timeout = int(value)
-    except (TypeError, ValueError):
-        return "timeout must be an integer"
+    except (TypeError, ValueError) as exc:
+        raise ValueError("timeout must be an integer") from exc
     if timeout <= 0:
-        return "timeout must be positive"
+        raise ValueError("timeout must be positive")
     return timeout

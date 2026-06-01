@@ -83,7 +83,7 @@ class ProviderResponse:
 class StreamOptions:
     temperature: float | None = None
     max_tokens: int | None = None
-    signal: Any | None = None  # CancellationToken or AbortSignal
+    signal: Any | None = None
     api_key: str | None = None
     transport: Transport = "auto"
     cache_retention: CacheRetention = "short"
@@ -113,7 +113,7 @@ class ImageContent:
 
 @dataclass(frozen=True)
 class ToolCallContent:
-    type: str = "toolCall"
+    type: str = "tool_call"
     id: str = ""
     name: str = ""
     arguments: dict[str, Any] | None = None

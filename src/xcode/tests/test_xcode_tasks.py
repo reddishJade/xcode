@@ -98,21 +98,21 @@ class XcodeTaskStoreTests(unittest.TestCase):
 
             # 1. Test create_task handler
             res_create = create_tool.handler(
-                '{"title": "Implement auth", "blocked_by": [10]}'
+                {"title": "Implement auth", "blocked_by": [10]}
             )
             self.assertIn("Created task #1: 'Implement auth'", res_create)
 
             # 2. Test get_task handler
-            res_get = get_tool.handler('{"id": 1}')
+            res_get = get_tool.handler({"id": 1})
             self.assertIn("Implement auth", res_get)
 
             # 3. Test list_tasks handler
-            res_list = list_tool.handler('{"view": "kanban"}')
+            res_list = list_tool.handler({"view": "kanban"})
             self.assertIn("=== TASK KANBAN VIEW ===", res_list)
             self.assertIn("Implement auth", res_list)
 
             # 4. Test update_task handler
-            res_update = update_tool.handler('{"id": 1, "status": "completed"}')
+            res_update = update_tool.handler({"id": 1, "status": "completed"})
             self.assertIn("Updated task #1: status=completed", res_update)
 
             self.assertEqual(store.get(1).status, "completed")

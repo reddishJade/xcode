@@ -77,7 +77,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             plugins_dir.mkdir(parents=True)
             (plugins_dir / "demo.py").write_text(
                 "from xcode.harness.skills import ToolSpec\n"
-                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _value: 'ok')]\n",
+                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _data: 'ok')]\n",
                 encoding="utf-8",
             )
 
@@ -106,7 +106,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             plugins_dir.mkdir(parents=True)
             (plugins_dir / "demo.py").write_text(
                 "from xcode.harness.skills import ToolSpec\n"
-                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _value: 'ok')]\n",
+                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _data: 'ok')]\n",
                 encoding="utf-8",
             )
 
@@ -209,7 +209,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         def fake_bash_tool(*_args, **kwargs):
             captured["cancel_event"] = kwargs.get("cancel_event")
-            return ToolSpec("bash", "Run shell.", "command", lambda _value: "ok")
+            return ToolSpec("bash", "Run shell.", "command", lambda _data: "ok")
 
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             with patch("xcode.harness.app.build_bash_tool", side_effect=fake_bash_tool):
@@ -320,7 +320,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         tools = {tool.name: tool for tool in app.registry}
         self.assertIn("submit_subagent", tools)
-        tools["submit_subagent"].handler('{"prompt":"inspect"}')
+        tools["submit_subagent"].handler({"prompt": "inspect"})
 
         import time
 
@@ -368,7 +368,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             }
 
             self.assertEqual(
-                tools["read_file"].handler('{"path":"marker.txt"}'), "worktree"
+                tools["read_file"].handler({"path": "marker.txt"}), "worktree"
             )
 
     def test_scoped_child_registry_uses_override_for_bash(self) -> None:
@@ -404,7 +404,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 )
             }
             with patch("xcode.harness.tools.bash.subprocess.Popen", FakePopen):
-                tools["bash"].handler('{"command":"pwd"}')
+                tools["bash"].handler({"command": "pwd"})
 
         self.assertEqual(seen_cwds, [worktree.resolve()])
 
@@ -414,7 +414,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         class ReadingProvider(ModelProvider):
             async def stream(self, messages, tools):
                 read_file = {tool.name: tool for tool in tools}["read_file"]
-                seen_reads.append(read_file.handler('{"path":"marker.txt"}'))
+                seen_reads.append(read_file.handler({"path": "marker.txt"}))
                 yield TextDelta("child done")
                 yield FinalMessage("", "end_turn")
 
@@ -460,11 +460,11 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
             tools = {tool.name: tool for tool in app.registry}
             submitted = tools["submit_subagent"].handler(
-                '{"prompt":"inspect","isolation":"worktree"}'
+                {"prompt": "inspect", "isolation": "worktree"}
             )
             job_id = submitted.split()[2]
             for _ in range(100):
-                checked = tools["check_subagent"].handler(f'{{"job_id":"{job_id}"}}')
+                checked = tools["check_subagent"].handler({"job_id": job_id})
                 if "status=done" in checked:
                     break
                 import time

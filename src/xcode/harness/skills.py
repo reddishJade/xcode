@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ..agent.types import ToolExecutionMode
 from .observability import HITLResult, PermissionPolicy, redact_text
 
 """工具注册表与 HITL 执行门禁。
@@ -15,9 +16,10 @@ from .observability import HITLResult, PermissionPolicy, redact_text
 handler 前根据 risk 字段和 permission policy 决定是否需要 approval callback。
 """
 
-ActionHandler = Callable[[str], str]
-RiskEvaluator = Callable[[str], str]
-ApprovalCallback = Callable[["ToolSpec", str], HITLResult]
+ToolInput = dict[str, Any]
+ActionHandler = Callable[[ToolInput], str]
+RiskEvaluator = Callable[[ToolInput], str]
+ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ class ToolSpec:
     concurrency_safe: bool = False
     risk_evaluator: RiskEvaluator | None = None
     group: str = "core"
+    execution_mode: ToolExecutionMode | None = None
 
 
 @dataclass(frozen=True)
@@ -76,16 +79,18 @@ def build_tool_prompt(registry: tuple[ToolSpec, ...]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def should_require_approval(tool: ToolSpec, action_input: str = "") -> bool:
+def should_require_approval(
+    tool: ToolSpec, action_input: ToolInput | None = None
+) -> bool:
     if tool.risk_evaluator is not None:
-        return tool.risk_evaluator(action_input) == "ask"
+        return tool.risk_evaluator(action_input or {}) == "ask"
     return tool.risk == "high"
 
 
 def run_tool(
     registry: dict[str, ToolSpec],
     action: str,
-    action_input: str,
+    action_input: ToolInput,
     approval_callback: ApprovalCallback | None = None,
     permission_policy: PermissionPolicy | None = None,
 ) -> str:
@@ -101,7 +106,7 @@ def run_tool(
 def run_tool_result(
     registry: dict[str, ToolSpec],
     action: str,
-    action_input: str,
+    action_input: ToolInput,
     approval_callback: ApprovalCallback | None = None,
     permission_policy: PermissionPolicy | None = None,
 ) -> ToolExecutionResult:
@@ -117,8 +122,11 @@ def run_tool_result(
             "error",
             f"unknown tool: {action}. available tools: {', '.join(sorted(registry))}",
         )
+    action_input_text = stringify_tool_input(action_input)
     decision = (
-        permission_policy.decide(action, action_input) if permission_policy else None
+        permission_policy.decide(action, action_input_text)
+        if permission_policy
+        else None
     )
     tool_decision = tool.risk_evaluator(action_input) if tool.risk_evaluator else None
     if tool_decision == "deny":
@@ -160,32 +168,8 @@ def run_tool_result(
         return ToolExecutionResult("error", f"tool error: {exc}", meta)
 
 
-def parse_tool_input(
-    action_input: str, default_key: str | None = None
-) -> dict[str, Any]:
-    """将工具输入解析为字典，并兼容中文逗号。"""
-    text = action_input.strip()
-    if text.startswith(("{", "[")):
-        text = text.replace("，", ",")
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid JSON input: {exc.msg}") from exc
-        if not isinstance(data, dict):
-            raise ValueError("JSON input must be an object")
-        nested = data.get("input")
-        if isinstance(nested, dict):
-            merged = dict(nested)
-            for key, value in data.items():
-                if key != "input" and key not in merged:
-                    merged[key] = value
-            return merged
-        if default_key is not None and nested is not None:
-            return {default_key: nested}
-        return data
-    if default_key is not None:
-        return {default_key: text}
-    return {}
+def stringify_tool_input(action_input: ToolInput) -> str:
+    return json.dumps(action_input, ensure_ascii=False, sort_keys=True)
 
 
 BASE_REGISTRY: tuple[ToolSpec, ...] = ()

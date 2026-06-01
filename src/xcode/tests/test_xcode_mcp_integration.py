@@ -185,7 +185,7 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         mock_client_class.assert_not_called()
 
         # Invoke handler
-        res = tool.handler('{"id": 42, "value": "new_val"}')
+        res = tool.handler({"id": 42, "value": "new_val"})
         self.assertEqual(res, "Success")
 
         # Now connection should be created and started, and call_tool invoked

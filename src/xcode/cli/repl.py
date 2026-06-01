@@ -19,7 +19,12 @@ from xcode.harness.observability import (
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
-from xcode.harness.skills import ToolSpec, run_tool_result
+from xcode.harness.skills import (
+    ToolInput,
+    ToolSpec,
+    run_tool_result,
+    stringify_tool_input,
+)
 
 from rich.console import Console
 from rich.live import Live
@@ -212,12 +217,13 @@ class ReplHITLHandler:
         self.persistent_store = persistent_store
         self.prompt = prompt
 
-    def __call__(self, tool: ToolSpec, action_input: str) -> HITLResult:
-        session_decision = self.session_policy.decide(tool.name, action_input)
+    def __call__(self, tool: ToolSpec, action_input: ToolInput) -> HITLResult:
+        action_input_text = stringify_tool_input(action_input)
+        session_decision = self.session_policy.decide(tool.name, action_input_text)
         if session_decision is not None and session_decision != "ask":
             return HITLResult(session_decision, "session")
         persistent_policy = self.persistent_store.load()
-        pers_decision = persistent_policy.decide(tool.name, action_input)
+        pers_decision = persistent_policy.decide(tool.name, action_input_text)
         if pers_decision is not None and pers_decision != "ask":
             return HITLResult(pers_decision, "permanent")
         if _should_use_radiolist(self.prompt):
@@ -228,7 +234,7 @@ class ReplHITLHandler:
             choice = input(self._terminal_prompt_text(tool, action_input)).strip()
         return self._apply_choice(choice, tool, action_input)
 
-    def _prompt_text(self, tool: ToolSpec, action_input: str) -> str:
+    def _prompt_text(self, tool: ToolSpec, action_input: ToolInput) -> str:
         brief = _brief_input(tool.name, action_input)
         return (
             f"需要授权：{tool.name}"
@@ -241,19 +247,20 @@ class ReplHITLHandler:
             f"\n    4) 拒绝"
         )
 
-    def _terminal_prompt_text(self, tool: ToolSpec, action_input: str) -> str:
+    def _terminal_prompt_text(self, tool: ToolSpec, action_input: ToolInput) -> str:
         return f"\r\033[K\n{self._prompt_text(tool, action_input)}\napprove [1-4]> "
 
     def _apply_choice(
-        self, choice: str, tool: ToolSpec, action_input: str
+        self, choice: str, tool: ToolSpec, action_input: ToolInput
     ) -> HITLResult:
+        action_input_text = stringify_tool_input(action_input)
         if choice == "1":
             return HITLResult("allow", "once")
         if choice == "2":
-            self.session_policy.grant(tool.name, "allow", action_input)
+            self.session_policy.grant(tool.name, "allow", action_input_text)
             return HITLResult("allow", "session")
         if choice == "3":
-            self.persistent_store.grant(tool.name, "allow", action_input)
+            self.persistent_store.grant(tool.name, "allow", action_input_text)
             return HITLResult("allow", "permanent")
         return HITLResult("deny", "once")
 
@@ -323,7 +330,7 @@ def _format_thinking(value: object) -> str:
     return "unknown"
 
 
-def _radiolist_prompt(tool: ToolSpec, action_input: str) -> str:
+def _radiolist_prompt(tool: ToolSpec, action_input: ToolInput) -> str:
     from prompt_toolkit.shortcuts.dialogs import radiolist_dialog
 
     brief = _brief_input(tool.name, action_input)
@@ -1120,13 +1127,48 @@ def _run_tool_command(command: str, app) -> str:
             lines.extend(f"  {g}" for g in available_groups)
             lines.append("</available groups>")
         return "\n".join(lines)
-    action_input = parts[2] if len(parts) == 3 else ""
+    tool_map = {tool.name: tool for tool in registry}
+    tool = tool_map.get(name)
+    if tool is None:
+        return f"unknown tool: {name}"
+    raw_input = parts[2] if len(parts) == 3 else ""
+    try:
+        action_input = parse_tool_input(tool, raw_input)
+    except ValueError as exc:
+        return str(exc)
     result = run_tool_result(
-        {tool.name: tool for tool in registry},
+        tool_map,
         name,
         action_input,
     )
     return result.content
+
+
+def parse_tool_input(tool: ToolSpec, raw_input: str) -> ToolInput:
+    """解析 `/tool` 命令的人类输入；核心工具协议只接收 dict。"""
+    text = raw_input.strip()
+    if text.startswith(("{", "[")):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid JSON input: {exc.msg}") from exc
+        if not isinstance(data, dict):
+            raise ValueError("JSON input must be an object")
+        return data
+    key = _cli_shorthand_key(tool)
+    return {key: text} if key else {}
+
+
+def _cli_shorthand_key(tool: ToolSpec) -> str:
+    schema = tool.schema or {}
+    required = schema.get("required")
+    if (
+        isinstance(required, list)
+        and len(required) == 1
+        and isinstance(required[0], str)
+    ):
+        return required[0]
+    return "input"
 
 
 def _brief_input(name: str, raw_input: Any) -> str:

@@ -30,7 +30,7 @@ class XcodeSpeculationTests(unittest.TestCase):
 
         mock_events: list[list[ProviderEvent]] = [
             [
-                ToolCallReady([ToolCall("e", "edit_file", "")]),
+                ToolCallReady([ToolCall("e", "edit_file", {})]),
                 FinalMessage("", "end_turn"),
             ],
             [TextDelta("done"), FinalMessage("", "end_turn")],

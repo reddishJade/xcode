@@ -25,19 +25,21 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         cancel = asyncio.Event()
         cancel.set()
         executor = ToolExecutor(
-            (ToolSpec("echo", "Echo.", "text", lambda value: value),)
+            (ToolSpec("echo", "Echo.", "text", lambda data: data["input"]),)
         )
 
         with self.assertRaises(ExecutionCancelled):
-            await executor.execute([ToolCall("t1", "echo", "hello")], cancel=cancel)
+            await executor.execute(
+                [ToolCall("t1", "echo", {"input": "hello"})], cancel=cancel
+            )
 
     async def test_execute_formats_runtime_results(self) -> None:
         executor = ToolExecutor(
-            (ToolSpec("echo", "Echo.", "text", lambda value: value),)
+            (ToolSpec("echo", "Echo.", "text", lambda data: data["input"]),)
         )
 
         results = await executor.execute(
-            [ToolCall("t1", "echo", "hello")],
+            [ToolCall("t1", "echo", {"input": "hello"})],
             cancel=asyncio.Event(),
         )
 
@@ -55,9 +57,9 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
     async def test_policy_denies_unavailable_call_at_executor_boundary(self) -> None:
         called = []
 
-        def write_handler(value: str) -> str:
-            called.append(value)
-            return value
+        def write_handler(data: dict) -> str:
+            called.append(data["input"])
+            return data["input"]
 
         executor = ToolExecutor(
             (
@@ -72,7 +74,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         results = await executor.execute(
-            [ToolCall("t1", "write_file", "hello")],
+            [ToolCall("t1", "write_file", {"input": "hello"})],
             cancel=asyncio.Event(),
         )
 
@@ -81,12 +83,19 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_require_approval_without_callback_returns_result(self) -> None:
         executor = ToolExecutor(
-            (ToolSpec("run_validation", "Run tests.", "command", lambda value: value),),
+            (
+                ToolSpec(
+                    "run_validation",
+                    "Run tests.",
+                    "command",
+                    lambda data: data["input"],
+                ),
+            ),
             policy=ReviewPolicy(),
         )
 
         results = await executor.execute(
-            [ToolCall("t1", "run_validation", "tests")],
+            [ToolCall("t1", "run_validation", {"input": "tests"})],
             cancel=asyncio.Event(),
         )
 
@@ -95,8 +104,8 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
     async def test_act_high_risk_tool_still_requires_approval(self) -> None:
         called = []
 
-        def write_handler(value: str) -> str:
-            called.append(value)
+        def write_handler(data: dict) -> str:
+            called.append(data["input"])
             return "wrote"
 
         executor = ToolExecutor(
@@ -112,7 +121,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         results = await executor.execute(
-            [ToolCall("t1", "write_file", "content")],
+            [ToolCall("t1", "write_file", {"input": "content"})],
             cancel=asyncio.Event(),
         )
 
@@ -122,8 +131,8 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
     async def test_act_high_risk_tool_runs_after_user_approval(self) -> None:
         called = []
 
-        def write_handler(value: str) -> str:
-            called.append(value)
+        def write_handler(data: dict) -> str:
+            called.append(data["input"])
             return "wrote"
 
         executor = ToolExecutor(
@@ -140,7 +149,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         results = await executor.execute(
-            [ToolCall("t1", "write_file", "content")],
+            [ToolCall("t1", "write_file", {"input": "content"})],
             cancel=asyncio.Event(),
         )
 
@@ -156,7 +165,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         await executor.execute(
-            [ToolCall("t1", "write_file", "content")],
+            [ToolCall("t1", "write_file", {"input": "content"})],
             cancel=asyncio.Event(),
         )
 
@@ -167,13 +176,13 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
     async def test_approval_required_records_audit(self) -> None:
         audit_records: list[AuditRecord] = []
         executor = ToolExecutor(
-            (ToolSpec("run_validation", "Run tests.", "command", lambda value: "ok"),),
+            (ToolSpec("run_validation", "Run tests.", "command", lambda _data: "ok"),),
             policy=ReviewPolicy(),
             audit_logger=lambda r: audit_records.append(r),
         )
 
         await executor.execute(
-            [ToolCall("t1", "run_validation", "tests")],
+            [ToolCall("t1", "run_validation", {"input": "tests"})],
             cancel=asyncio.Event(),
         )
 
@@ -190,7 +199,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         await executor.execute(
-            [ToolCall("t1", "run_validation", "tests")],
+            [ToolCall("t1", "run_validation", {"input": "tests"})],
             cancel=asyncio.Event(),
         )
 
@@ -201,7 +210,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
     async def test_allowed_then_handler_error_records_approved_true(self) -> None:
         audit_records: list[AuditRecord] = []
 
-        def fail_handler(_value: str) -> str:
+        def fail_handler(_data: dict) -> str:
             raise RuntimeError("fail")
 
         executor = ToolExecutor(
@@ -211,7 +220,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         await executor.execute(
-            [ToolCall("t1", "fail", "x")],
+            [ToolCall("t1", "fail", {"input": "x"})],
             cancel=asyncio.Event(),
         )
 
@@ -224,13 +233,18 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         # Define some tools
         t_read = ToolSpec(
-            "read", "Read.", "text", lambda v: v, read_only=True, concurrency_safe=True
+            "read",
+            "Read.",
+            "text",
+            lambda _data: "",
+            read_only=True,
+            concurrency_safe=True,
         )
         t_write = ToolSpec(
             "write",
             "Write.",
             "text",
-            lambda v: v,
+            lambda _data: "",
             read_only=False,
             concurrency_safe=False,
         )
@@ -238,7 +252,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
             "unsafe",
             "Unsafe.",
             "text",
-            lambda v: v,
+            lambda _data: "",
             read_only=True,
             concurrency_safe=False,
         )
@@ -246,7 +260,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
             "high_risk",
             "High risk.",
             "text",
-            lambda v: v,
+            lambda _data: "",
             read_only=True,
             concurrency_safe=True,
             risk="high",
@@ -255,12 +269,12 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         active_map = {t.name: t for t in (t_read, t_write, t_unsafe, t_high_risk)}
 
         calls = [
-            ToolCall("c1", "read", "1"),
-            ToolCall("c2", "read", "2"),
-            ToolCall("c3", "write", "3"),
-            ToolCall("c4", "read", "4"),
-            ToolCall("c5", "unsafe", "5"),
-            ToolCall("c6", "high_risk", "6"),
+            ToolCall("c1", "read", {"input": "1"}),
+            ToolCall("c2", "read", {"input": "2"}),
+            ToolCall("c3", "write", {"input": "3"}),
+            ToolCall("c4", "read", {"input": "4"}),
+            ToolCall("c5", "unsafe", {"input": "5"}),
+            ToolCall("c6", "high_risk", {"input": "6"}),
         ]
 
         batches = partition_tool_calls(calls, active_map)
@@ -279,14 +293,14 @@ class ExecutionModeTests(unittest.TestCase):
         from xcode.harness.agent_runtime.events import ToolCall
 
         policy = ActPolicy()
-        result = policy.check_call(ToolCall("t1", "run_validation", ""))
+        result = policy.check_call(ToolCall("t1", "run_validation", {}))
         self.assertEqual(result, "require_approval")
 
     def test_act_bash_still_allowed(self) -> None:
         from xcode.harness.agent_runtime.execution_modes import ActPolicy
 
         policy = ActPolicy()
-        result = policy.check_call(ToolCall("t1", "bash", "echo hello"))
+        result = policy.check_call(ToolCall("t1", "bash", {"command": "echo hello"}))
         self.assertEqual(result, "allow")
 
 
@@ -297,18 +311,20 @@ class ReplHITLHandlerTests(unittest.TestCase):
         self.session_policy = SessionPermissionPolicy()
         self.persistent_store = PersistentPermissionStore(Path(""))
         self.handler = ReplHITLHandler(self.session_policy, self.persistent_store)
-        self.tool = ToolSpec("bash", "Bash.", "text", lambda v: v)
+        self.tool = ToolSpec("bash", "Bash.", "text", lambda _data: "")
 
     def test_handler_allow_once(self) -> None:
-        result = self.handler._apply_choice("1", self.tool, "echo hello")
+        result = self.handler._apply_choice("1", self.tool, {"command": "echo hello"})
         self.assertEqual(result.decision, "allow")
         self.assertEqual(result.scope, "once")
 
     def test_handler_session_scope(self) -> None:
-        result = self.handler._apply_choice("2", self.tool, "echo hello")
+        result = self.handler._apply_choice("2", self.tool, {"command": "echo hello"})
         self.assertEqual(result.decision, "allow")
         self.assertEqual(result.scope, "session")
-        self.assertIsNotNone(self.session_policy.decide("bash", "echo hello"))
+        self.assertIsNotNone(
+            self.session_policy.decide("bash", '{"command": "echo hello"}')
+        )
 
     def test_handler_permanent_scope(self) -> None:
         import tempfile
@@ -318,19 +334,19 @@ class ReplHITLHandlerTests(unittest.TestCase):
             from xcode.cli.repl import ReplHITLHandler
 
             handler = ReplHITLHandler(SessionPermissionPolicy(), store)
-            result = handler._apply_choice("3", self.tool, "git push")
+            result = handler._apply_choice("3", self.tool, {"command": "git push"})
             self.assertEqual(result.decision, "allow")
             self.assertEqual(result.scope, "permanent")
             loaded = store.load()
-            self.assertIsNotNone(loaded.decide("bash", "git push"))
+            self.assertIsNotNone(loaded.decide("bash", '{"command": "git push"}'))
 
     def test_handler_deny(self) -> None:
-        result = self.handler._apply_choice("4", self.tool, "git add .")
+        result = self.handler._apply_choice("4", self.tool, {"command": "git add ."})
         self.assertEqual(result.decision, "deny")
         self.assertEqual(result.scope, "once")
 
     def test_unknown_choice_treated_as_deny(self) -> None:
-        result = self.handler._apply_choice("x", self.tool, "")
+        result = self.handler._apply_choice("x", self.tool, {})
         self.assertEqual(result.decision, "deny")
 
     def test_async_context_uses_plain_input_not_radiolist(self) -> None:
@@ -346,7 +362,7 @@ class ReplHITLHandlerTests(unittest.TestCase):
                     return_value="1",
                 ) as mock_input,
             ):
-                result = self.handler(self.tool, "echo hello")
+                result = self.handler(self.tool, {"command": "echo hello"})
                 self.assertTrue(mock_input.called)
                 prompt_text = mock_input.call_args.args[0]
                 self.assertTrue(prompt_text.startswith("\r\033[K\n"))
@@ -359,7 +375,7 @@ class ReplHITLHandlerTests(unittest.TestCase):
 
     def test_session_policy_auto_allows_within_session(self) -> None:
         self.session_policy.grant("bash", "allow", "git commit")
-        result = self.handler(self.tool, "git commit -m 'fix'")
+        result = self.handler(self.tool, {"command": "git commit -m 'fix'"})
         self.assertEqual(result.decision, "allow")
         self.assertEqual(result.scope, "session")
 
@@ -372,7 +388,7 @@ class ReplHITLHandlerTests(unittest.TestCase):
             from xcode.cli.repl import ReplHITLHandler
 
             handler = ReplHITLHandler(SessionPermissionPolicy(), persistent_store)
-            result = handler(self.tool, "git push origin main")
+            result = handler(self.tool, {"command": "git push origin main"})
             self.assertEqual(result.decision, "allow")
             self.assertEqual(result.scope, "permanent")
 

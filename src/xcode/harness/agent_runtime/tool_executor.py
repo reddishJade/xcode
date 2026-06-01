@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
-from typing import Any
 
 from .events import ToolCall, ToolResult
 from .execution_modes import ActPolicy, ExecutionPolicy
@@ -17,7 +15,13 @@ from ..observability import (
     PermissionPolicy,
     redact_text,
 )
-from ..skills import ApprovalCallback, ToolExecutionResult, ToolSpec, run_tool_result
+from ..skills import (
+    ApprovalCallback,
+    ToolExecutionResult,
+    ToolSpec,
+    stringify_tool_input,
+    run_tool_result,
+)
 
 """工具执行器。
 
@@ -155,7 +159,7 @@ class ToolExecutor:
                 return ToolExecutionResult(
                     "approval_required", f"工具需要授权：{call.name}"
                 )
-            hitl = self.approval_callback(tool, stringify_tool_input(call.input))
+            hitl = self.approval_callback(tool, dict(call.input))
             if hitl.decision == "deny":
                 return ToolExecutionResult(
                     "denied",
@@ -171,7 +175,8 @@ class ToolExecutor:
         active_tool_map: dict[str, ToolSpec],
         mode: ExecutionMode,
     ) -> ToolExecutionResult:
-        action_input = stringify_tool_input(call.input)
+        tool_input = dict(call.input)
+        action_input = stringify_tool_input(tool_input)
         if call.name not in active_tool_map and call.name in self.tool_map:
             return ToolExecutionResult(
                 "denied",
@@ -182,7 +187,7 @@ class ToolExecutor:
             result = run_tool_result(
                 active_tool_map,
                 call.name,
-                action_input,
+                tool_input,
                 self.approval_callback,
                 self.permission_policy,
             )
@@ -215,15 +220,17 @@ class ToolExecutor:
             return
         tool = self.tool_map.get(call.name)
         static_risk = tool.risk if tool else "unknown"
-        action_input = stringify_tool_input(call.input)
+        tool_input = dict(call.input)
+        action_input = stringify_tool_input(tool_input)
         policy_decision = (
             self.permission_policy.decide(call.name, action_input)
             if self.permission_policy
             else None
         )
-        dynamic_decision = (
-            tool.risk_evaluator(action_input) if tool and tool.risk_evaluator else None
-        )
+        if tool and tool.risk_evaluator:
+            dynamic_decision = tool.risk_evaluator(tool_input)
+        else:
+            dynamic_decision = None
         meta = result.metadata or {}
         user_decision = meta.get("user_decision")
         approval_scope = meta.get("approval_scope")
@@ -256,12 +263,6 @@ def tool_result_message(result: ToolResult) -> dict[str, str]:
         "content": result.content,
         "status": result.status,
     }
-
-
-def stringify_tool_input(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def _to_tool_result(

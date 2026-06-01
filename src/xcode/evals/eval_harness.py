@@ -5,7 +5,6 @@ import shutil
 import uuid
 import time
 import sys
-import json
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
@@ -131,20 +130,18 @@ class EvaluationRunner:
 
             # Execute assertions sequentially
             for assertion in assertions:
-                input_str = (
-                    json.dumps(assertion.params)
-                    if isinstance(assertion.params, dict)
-                    else str(assertion.params)
+                input_data = (
+                    assertion.params if isinstance(assertion.params, dict) else {}
                 )
                 print(
-                    f"[Harness] Dispatched tool '{assertion.tool_name}' with input: {input_str}"
+                    f"[Harness] Dispatched tool '{assertion.tool_name}' with input: {input_data}"
                 )
 
                 # Execute tool using the main tool executor unified dispatch entrypoint
                 res = run_tool_result(
                     registry,
                     assertion.tool_name,
-                    input_str,
+                    input_data,
                     permission_policy=allow_all_policy,
                 )
 

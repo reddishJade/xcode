@@ -30,7 +30,7 @@ class XcodeHookTests(unittest.TestCase):
 
         responses: list[list[ProviderEvent]] = [
             [
-                ToolCallReady([ToolCall("x", "echo", "hi")]),
+                ToolCallReady([ToolCall("x", "echo", {"input": "hi"})]),
                 FinalMessage("", "end_turn"),
             ],
             [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -38,7 +38,7 @@ class XcodeHookTests(unittest.TestCase):
         provider = FakeProvider(responses)
         agent = StructuredAgent(
             provider=provider,
-            registry=(ToolSpec("echo", "Echo.", "text", lambda value: value),),
+            registry=(ToolSpec("echo", "Echo.", "text", lambda value: value["input"]),),
             hook_manager=hooks,
         )
 
@@ -54,14 +54,14 @@ class XcodeHookTests(unittest.TestCase):
 
         responses: list[list[ProviderEvent]] = [
             [
-                ToolCallReady([ToolCall("x", "boom", "")]),
+                ToolCallReady([ToolCall("x", "boom", {})]),
                 FinalMessage("", "end_turn"),
             ],
             [TextDelta("done"), FinalMessage("", "end_turn")],
         ]
         provider = FakeProvider(responses)
 
-        def fail(_value: str) -> str:
+        def fail(_value: dict) -> str:
             raise ValueError("bad")
 
         agent = StructuredAgent(

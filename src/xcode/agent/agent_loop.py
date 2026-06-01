@@ -1,3 +1,14 @@
+"""Agent 核心循环。
+
+Xcode 的类型化 Agent 循环。模块本身不持有运行状态。
+流程：
+  外层循环：follow-up 队列驱动（队列为空时停止）
+  内层循环：steer + tool call 驱动
+    → stream_assistant_response()
+    → execute_tool_calls()（按 execution_mode 串行/并行）
+    → prepare_next_turn / should_stop_after_turn
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -5,17 +16,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-"""Agent 核心循环。
-
-基于 TS pi/packages/agent/src/agent-loop.ts。纯函数式，不持有状态。
-流程：
-  外层循环：followUp 驱动（队列为空时停止）
-  内层循环：steer + tool call 驱动
-    → stream_assistant_response()
-    → execute_tool_calls()（按 execution_mode 串行/并行）
-    → prepareNextTurn / shouldStopAfterTurn
-"""
-
+from ..harness.agent_runtime.cancellation import CancellationToken
+from ..harness.agent_runtime.events import (
+    TextDelta,
+    ReasoningDelta,
+    ToolCallReady,
+)
 from .types import (  # noqa: E402
     AfterToolCallContext,
     AgentContext,
@@ -34,36 +40,43 @@ from .types import (  # noqa: E402
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolResultMessage,
+    AgentStartEvent,
+    AgentEndEvent,
+    TurnStartEvent,
+    TurnEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
+    MessageEndEvent,
 )
 
 
 # 事件辅助构造
-def _agent_start_event() -> AgentEvent:
-    return {"type": "agent_start"}  # type: ignore
+def _agent_start_event() -> AgentStartEvent:
+    return AgentStartEvent()
 
 
-def _agent_end_event(messages=None) -> AgentEvent:
-    return {"type": "agent_end", "messages": messages or []}  # type: ignore
+def _agent_end_event(messages=None) -> AgentEndEvent:
+    return AgentEndEvent(messages=messages or [])
 
 
-def _turn_start_event() -> AgentEvent:
-    return {"type": "turn_start"}  # type: ignore
+def _turn_start_event() -> TurnStartEvent:
+    return TurnStartEvent()
 
 
-def _turn_end_event(message=None, tool_results=None) -> AgentEvent:
-    return {"type": "turn_end", "message": message, "tool_results": tool_results or []}  # type: ignore
+def _turn_end_event(message=None, tool_results=None) -> TurnEndEvent:
+    return TurnEndEvent(message=message, tool_results=tool_results or [])
 
 
-def _message_start_event(message) -> AgentEvent:
-    return {"type": "message_start", "message": message}  # type: ignore
+def _message_start_event(message) -> MessageStartEvent:
+    return MessageStartEvent(message=message)
 
 
-def _message_end_event(message) -> AgentEvent:
-    return {"type": "message_end", "message": message}  # type: ignore
+def _message_end_event(message) -> MessageEndEvent:
+    return MessageEndEvent(message=message)
 
 
-def _message_update_event(message) -> AgentEvent:
-    return {"type": "message_update", "message": message}  # type: ignore
+def _message_update_event(message) -> MessageUpdateEvent:
+    return MessageUpdateEvent(message=message)
 
 
 async def run_agent_loop(
@@ -71,7 +84,7 @@ async def run_agent_loop(
     context: AgentContext,
     config: AgentLoopConfig,
     emit: Callable[[AgentEvent], None],
-    signal: Any = None,
+    signal: CancellationToken | None = None,
     stream_fn: StreamFn | None = None,
 ) -> list[AgentMessage]:
     new_messages: list[AgentMessage] = list(prompts)
@@ -95,13 +108,13 @@ async def run_agent_loop_continue(
     context: AgentContext,
     config: AgentLoopConfig,
     emit: Callable[[AgentEvent], None],
-    signal: Any = None,
+    signal: CancellationToken | None = None,
     stream_fn: StreamFn | None = None,
 ) -> list[AgentMessage]:
     if not context.messages:
         raise ValueError("Cannot continue: no messages in context")
     last = context.messages[-1]
-    if getattr(last, "role", "") == "assistant":
+    if isinstance(last, AssistantMessage):
         raise ValueError("Cannot continue from message role: assistant")
 
     new_messages: list[AgentMessage] = []
@@ -123,7 +136,7 @@ async def _run_loop(
     new_messages: list[AgentMessage],
     initial_config: AgentLoopConfig,
     emit: Callable[[AgentEvent], None],
-    signal: Any = None,
+    signal: CancellationToken | None = None,
     stream_fn: StreamFn | None = None,
 ) -> None:
     current_context = initial_context
@@ -135,6 +148,15 @@ async def _run_loop(
         has_more_tool_calls = True
 
         while has_more_tool_calls or pending_messages:
+            if _is_cancelled(signal):
+                message = _cancelled_message(signal)
+                new_messages.append(message)
+                emit(_message_start_event(message))
+                emit(_message_end_event(message))
+                emit(_turn_end_event(message, []))
+                emit(_agent_end_event(new_messages))
+                return
+
             if not first_turn:
                 emit(_turn_start_event())
             else:
@@ -218,7 +240,7 @@ async def _execute_tool_calls(
     assistant_message: AssistantMessage,
     tool_calls: list[ToolCallBlock],
     config: AgentLoopConfig,
-    signal: Any,
+    signal: CancellationToken | None,
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
     has_sequential = False
@@ -245,7 +267,7 @@ async def _execute_sequential(
     assistant_message: AssistantMessage,
     tool_calls: list[ToolCallBlock],
     config: AgentLoopConfig,
-    signal: Any,
+    signal: CancellationToken | None,
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
     results: list[ToolResultMessage] = []
@@ -261,7 +283,7 @@ async def _execute_sequential(
             current_context, assistant_message, tc, config, signal, emit
         )
         results.append(result)
-        if signal and hasattr(signal, "aborted") and signal.aborted:
+        if _is_cancelled(signal):
             break
     return ExecutedToolBatch(results=results, terminate=False)
 
@@ -271,7 +293,7 @@ async def _execute_parallel(
     assistant_message: AssistantMessage,
     tool_calls: list[ToolCallBlock],
     config: AgentLoopConfig,
-    signal: Any,
+    signal: CancellationToken | None,
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
     tasks = []
@@ -300,7 +322,7 @@ async def _execute_one(
     assistant_message: AssistantMessage,
     tool_call: ToolCallBlock,
     config: AgentLoopConfig,
-    signal: Any,
+    signal: CancellationToken | None,
     emit: Callable[[AgentEvent], None],
 ) -> ToolResultMessage:
     tool = None
@@ -319,6 +341,14 @@ async def _execute_one(
 
     args = tool_call.arguments or {}
 
+    if _is_cancelled(signal):
+        return ToolResultMessage(
+            tool_call_id=tool_call.id,
+            tool_name=tool_call.name,
+            content=_cancel_reason(signal),
+            is_error=True,
+        )
+
     if config.before_tool_call:
         ctx = BeforeToolCallContext(
             assistant_message=assistant_message,
@@ -327,12 +357,11 @@ async def _execute_one(
             context=current_context,
         )
         before_result = config.before_tool_call(ctx, signal)
-        if before_result and getattr(before_result, "block", False):
+        if before_result and before_result.block:
             return ToolResultMessage(
                 tool_call_id=tool_call.id,
                 tool_name=tool_call.name,
-                content=getattr(before_result, "reason", "")
-                or "Tool execution was blocked",
+                content=before_result.reason or "Tool execution was blocked",
                 is_error=True,
             )
 
@@ -364,7 +393,9 @@ async def _execute_one(
     result_msg = ToolResultMessage(
         tool_call_id=tool_call.id,
         tool_name=tool_call.name,
-        content="".join(getattr(c, "text", "") for c in content) if content else "",
+        content="".join(c.text for c in content if isinstance(c, TextContent))
+        if content
+        else "",
         is_error=is_error,
     )
 
@@ -382,11 +413,13 @@ async def _execute_one(
 async def _stream_assistant_response(
     context: AgentContext,
     config: AgentLoopConfig,
-    signal: Any,
+    signal: CancellationToken | None,
     emit: Callable[[AgentEvent], None],
     stream_fn: StreamFn | None,
 ) -> AssistantMessage:
     messages = context.messages
+    if _is_cancelled(signal):
+        return _cancelled_message(signal)
 
     if config.transform_context:
         messages = config.transform_context(messages, signal)
@@ -416,30 +449,25 @@ async def _stream_assistant_response(
 
         tool_specs = _tools_to_specs(context.tools)
         async for event in provider.stream(tool_specs, llm_context):
+            if _is_cancelled(signal):
+                final = _cancelled_message(signal)
+                emit(_message_end_event(final))
+                return final
+
             et = ""
             delta_text = ""
             reasoning_delta = ""
             calls_list = []
 
-            if isinstance(event, dict):
-                et = event.get("type", "")
-                if et == "text_delta":
-                    delta_text = event.get("delta", "")
-                elif et == "reasoning_delta":
-                    reasoning_delta = event.get("delta", "")
-                elif et == "tool_call_ready":
-                    calls_list = event.get("calls", [])
-            else:
-                cls_name = event.__class__.__name__
-                if cls_name == "TextDelta":
-                    et = "text_delta"
-                    delta_text = getattr(event, "chunk", "")
-                elif cls_name == "ReasoningDelta":
-                    et = "reasoning_delta"
-                    reasoning_delta = getattr(event, "chunk", "")
-                elif cls_name == "ToolCallReady":
-                    et = "tool_call_ready"
-                    calls_list = getattr(event, "calls", [])
+            if isinstance(event, TextDelta):
+                et = "text_delta"
+                delta_text = event.chunk
+            elif isinstance(event, ReasoningDelta):
+                et = "reasoning_delta"
+                reasoning_delta = event.chunk
+            elif isinstance(event, ToolCallReady):
+                et = "tool_call_ready"
+                calls_list = event.calls
 
             if et == "text_delta" and delta_text:
                 text_parts.append(delta_text)
@@ -454,28 +482,11 @@ async def _stream_assistant_response(
                 reasoning_parts.append(reasoning_delta)
             elif et == "tool_call_ready" and calls_list:
                 for call in calls_list:
-                    call_id = (
-                        call.get("id", "")
-                        if isinstance(call, dict)
-                        else getattr(call, "id", "")
-                    )
-                    call_name = (
-                        call.get("name", "")
-                        if isinstance(call, dict)
-                        else getattr(call, "name", "")
-                    )
-                    call_input = (
-                        call.get("input", {})
-                        if isinstance(call, dict)
-                        else getattr(call, "input", {})
-                    )
                     tool_calls_found.append(
                         ToolCallBlock(
-                            id=call_id,
-                            name=call_name,
-                            arguments=call_input
-                            if isinstance(call_input, dict)
-                            else {},
+                            id=call.id,
+                            name=call.name,
+                            arguments=dict(call.input),
                         )
                     )
 
@@ -508,3 +519,21 @@ def _tools_to_specs(tools: list[AgentTool[Any]] | None) -> list[dict[str, Any]]:
         {"name": t.name, "description": t.description, "schema": t.parameters}
         for t in tools
     ]
+
+
+def _is_cancelled(signal: CancellationToken | None) -> bool:
+    return bool(signal and signal.is_cancelled())
+
+
+def _cancel_reason(signal: CancellationToken | None) -> str:
+    if signal is None:
+        return "interrupted by user"
+    return signal.reason
+
+
+def _cancelled_message(signal: CancellationToken | None) -> AssistantMessage:
+    return AssistantMessage(
+        content=[],
+        stop_reason="aborted",
+        error_message=_cancel_reason(signal),
+    )

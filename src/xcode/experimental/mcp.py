@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, BinaryIO, cast
 
-from xcode.harness.skills import ToolSpec, parse_tool_input
+from xcode.harness.skills import ToolInput, ToolSpec
 
 
 class McpClient:
@@ -321,7 +321,7 @@ def build_fetch_tools_tool(
 ) -> ToolSpec:
     """创建用于冷启动延迟加载服务器并拉取工具列表的引导工具。"""
 
-    def handler(action_input: str) -> str:
+    def handler(_args: ToolInput) -> str:
         config_hash = compute_config_hash(server_config)
         try:
             command = [server_config["command"]] + server_config.get("args", [])
@@ -372,8 +372,7 @@ def build_fetch_tools_tool(
 def build_mcp_tool_search(project_root: Path, deferred_servers: set[str]) -> ToolSpec:
     """创建用于搜索和获取延迟加载工具完整参数 Schema 的工具。"""
 
-    def handler(action_input: str) -> str:
-        args = parse_tool_input(action_input)
+    def handler(args: ToolInput) -> str:
         query = str(args.get("query", "")).strip().lower()
         if not query:
             return "Please provide a query to search."
@@ -589,8 +588,7 @@ def build_mcp_tools(project_root: Path) -> tuple[ToolSpec, ...]:
             def make_handler(
                 ref: LazyClientRef, t_name: str, deferred: bool, s_name: str
             ) -> Any:
-                def handler(action_input: str) -> str:
-                    args = parse_tool_input(action_input)
+                def handler(args: ToolInput) -> str:
                     if deferred:
                         # 延迟加载工具执行时， JIT 强校验 Required 参数
                         # 获取缓存的真实 Schema 进行 JIT 校验

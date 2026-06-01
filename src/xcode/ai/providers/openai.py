@@ -63,9 +63,10 @@ class OpenAIChatProvider:
     def _stream_sync(
         self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...]
     ) -> Iterator[ProviderEvent]:
+        openai_messages = to_openai_messages(messages)
         kwargs: dict[str, object] = {
             "model": self.model,
-            "messages": to_openai_messages(messages),
+            "messages": openai_messages,
             "tools": [
                 to_chat_tool(
                     t.name,
@@ -90,7 +91,7 @@ class OpenAIChatProvider:
             kwargs["reasoning_effort"] = self.reasoning_effort
         stream = self.runtime.run(lambda: self.client.chat.completions.create(**kwargs))
         self._ensure_metrics()
-        self.metrics["sent_messages"] = len(kwargs["messages"])  # type: ignore[arg-type]
+        self.metrics["sent_messages"] = len(openai_messages)
         yield from chat_stream_to_events(stream)
 
     def _record_usage(self, response, sent_messages: int) -> None:

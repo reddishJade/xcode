@@ -3,11 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-import json
 import subprocess
 import uuid
 
-from ..harness.skills import ToolSpec
+from ..harness.skills import ToolInput, ToolSpec
 
 """托管实现任务使用的 Git worktree 隔离。"""
 
@@ -120,19 +119,18 @@ class WorktreeTaskRunner:
 
 
 def build_worktree_tools(runner: WorktreeTaskRunner) -> tuple[ToolSpec, ...]:
-    def create_worktree_task(action_input: str) -> str:
-        name = str(_parse_input(action_input).get("name", "")).strip()
+    def create_worktree_task(args: ToolInput) -> str:
+        name = str(args.get("name", "")).strip()
         if not name:
-            return "name is required"
+            raise ValueError("name is required")
         task = runner.create(name)
         return f"id={task.id}\nbranch={task.branch}\npath={task.path}"
 
-    def remove_worktree_task(action_input: str) -> str:
-        parsed = _parse_input(action_input)
-        task_id = str(parsed.get("id", "")).strip()
-        force = bool(parsed.get("force", False))
+    def remove_worktree_task(args: ToolInput) -> str:
+        task_id = str(args.get("id", "")).strip()
+        force = bool(args.get("force", False))
         if not task_id:
-            return "id is required"
+            raise ValueError("id is required")
         return runner.remove(task_id, force=force)
 
     return (
@@ -153,13 +151,6 @@ def build_worktree_tools(runner: WorktreeTaskRunner) -> tuple[ToolSpec, ...]:
             group="worktree",
         ),
     )
-
-
-def _parse_input(action_input: str) -> dict:
-    text = action_input.strip()
-    if text.startswith("{"):
-        return json.loads(text)
-    return {"name": text}
 
 
 def _run_command(command: list[str], cwd: Path) -> str:

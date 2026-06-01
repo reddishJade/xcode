@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Iterator
 import json
 
-from ..harness.skills import ToolSpec
+from ..harness.skills import ToolInput, ToolSpec
 import os
 import time
 import uuid
@@ -262,13 +262,10 @@ def render_kanban_view(tasks: list[TaskRecord]) -> str:
 
 
 def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
-    from ..harness.skills import parse_tool_input
-
-    def create_task(action_input: str) -> str:
-        args = parse_tool_input(action_input)
+    def create_task(args: ToolInput) -> str:
         title = str(args.get("title", "")).strip()
         if not title:
-            return "title is required"
+            raise ValueError("title is required")
         blocked_by = args.get("blocked_by") or args.get("dependencies")
         payload = {}
         if blocked_by:
@@ -278,11 +275,10 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
         task = store.create(title, payload)
         return f"Created task #{task.id}: '{task.title}' (status: {task.status})"
 
-    def update_task(action_input: str) -> str:
-        args = parse_tool_input(action_input)
+    def update_task(args: ToolInput) -> str:
         task_id = args.get("id")
         if task_id is None:
-            return "id is required"
+            raise ValueError("id is required")
         title = args.get("title")
         status = args.get("status")
         payload_update = args.get("payload")
@@ -297,8 +293,7 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
         task = store.update(task_id, title=title, status=status, payload=payload)
         return f"Updated task #{task.id}: status={task.status}, version={task.version}"
 
-    def list_tasks(action_input: str) -> str:
-        args = parse_tool_input(action_input)
+    def list_tasks(args: ToolInput) -> str:
         view = str(args.get("view", "kanban")).strip().lower()
         tasks = store.list()
         if not tasks:
@@ -322,11 +317,10 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
                 lines.append(f"  - #{t.id} [{t.status}]: {t.title}")
             return "\n".join(lines)
 
-    def get_task(action_input: str) -> str:
-        args = parse_tool_input(action_input)
+    def get_task(args: ToolInput) -> str:
         task_id = args.get("id")
         if task_id is None:
-            return "id is required"
+            raise ValueError("id is required")
         try:
             task = store.get(task_id)
             return json.dumps(asdict(task), ensure_ascii=False, indent=2)

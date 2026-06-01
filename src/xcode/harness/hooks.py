@@ -13,10 +13,21 @@ class HookManager:
     def __init__(self) -> None:
         self._handlers: dict[str, list[Callable[..., Any]]] = {}
 
-    def on(self, event: str, handler: Callable[..., Any]) -> Callable[[], None]:
-        """注册 hook handler。返回取消注册函数。"""
+    def register(self, event: str, handler: Callable[..., Any]) -> None:
+        """注册 hook handler。"""
         self._handlers.setdefault(event, []).append(handler)
-        return lambda: self._handlers[event].remove(handler)
+
+    def remove(self, event: str, handler: Callable[..., Any]) -> None:
+        """移除 hook handler。"""
+        handlers = self._handlers.get(event)
+        if not handlers:
+            return
+        try:
+            handlers.remove(handler)
+        except ValueError:
+            return
+        if not handlers:
+            del self._handlers[event]
 
     async def emit(self, event: str, **kwargs: Any) -> list[Any]:
         """顺序触发所有 handler，返回结果列表。"""

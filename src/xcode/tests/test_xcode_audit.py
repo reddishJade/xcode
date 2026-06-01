@@ -32,7 +32,7 @@ class XcodeAuditTests(unittest.TestCase):
     def test_run_tool_redacts_handler_output(self) -> None:
         tool = ToolSpec("leak", "Leak.", "empty", lambda _input: "token=secret12345")
 
-        output = run_tool({"leak": tool}, "leak", "")
+        output = run_tool({"leak": tool}, "leak", {})
 
         self.assertEqual(output, "token=[REDACTED]")
 
@@ -43,7 +43,9 @@ class XcodeAuditTests(unittest.TestCase):
 
             responses: list[list[ProviderEvent]] = [
                 [
-                    ToolCallReady([ToolCall("t1", "echo", "sk-1234567890abcdef")]),
+                    ToolCallReady(
+                        [ToolCall("t1", "echo", {"input": "sk-1234567890abcdef"})]
+                    ),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -51,7 +53,9 @@ class XcodeAuditTests(unittest.TestCase):
             provider = FakeProvider(responses)
             agent = StructuredAgent(
                 provider=provider,
-                registry=(ToolSpec("echo", "Echo.", "text", lambda value: value),),
+                registry=(
+                    ToolSpec("echo", "Echo.", "text", lambda data: data["input"]),
+                ),
                 audit_logger=JsonlAuditLogger(path).write,
                 session_id="s1",
             )
@@ -61,7 +65,7 @@ class XcodeAuditTests(unittest.TestCase):
             record = json.loads(path.read_text(encoding="utf-8").strip())
             self.assertEqual(record["session_id"], "s1")
             self.assertEqual(record["tool"], "echo")
-            self.assertEqual(record["redacted_input"], "[REDACTED]")
+            self.assertEqual(record["redacted_input"], '{"input": "[REDACTED]"}')
             self.assertEqual(record["redacted_output"], "[REDACTED]")
             self.assertIn("static_risk", record)
             self.assertIn("dynamic_decision", record)
@@ -100,7 +104,7 @@ class XcodeAuditTests(unittest.TestCase):
 
             responses: list[list[ProviderEvent]] = [
                 [
-                    ToolCallReady([ToolCall("t1", "danger", "go")]),
+                    ToolCallReady([ToolCall("t1", "danger", {"input": "go"})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -113,7 +117,7 @@ class XcodeAuditTests(unittest.TestCase):
                         "danger",
                         "Danger.",
                         "text",
-                        lambda value: "approval required but actually ran",
+                        lambda _data: "approval required but actually ran",
                         risk="high",
                     ),
                 ),
@@ -135,7 +139,7 @@ class XcodeAuditTests(unittest.TestCase):
             "leak", "Leak.", "empty", lambda _input: "sk-12345 token=secret"
         )
 
-        result = tool.handler("")
+        result = tool.handler({})
 
         self.assertIn("sk-12345", result)
         self.assertIn("token=secret", result)
@@ -145,7 +149,7 @@ class XcodeAuditTests(unittest.TestCase):
 
         tool = ToolSpec("leak", "Leak.", "empty", lambda _input: "api_key=mysecret")
 
-        result = run_tool_result({"leak": tool}, "leak", "")
+        result = run_tool_result({"leak": tool}, "leak", {})
 
         self.assertEqual(result.status, "ok")
         self.assertNotIn("mysecret", result.content)

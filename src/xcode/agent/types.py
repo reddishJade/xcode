@@ -5,8 +5,7 @@ from typing import Any, AsyncIterator, Callable, Literal, Protocol
 
 """Agent 核心类型。
 
-基于 TS pi/packages/agent/src/types.ts 设计，定义了 Agent 循环所需的
-所有类型：消息、事件、工具定义、配置和队列模式。
+定义 Xcode Agent 循环所需的消息、事件、工具定义、配置和队列模式。
 """
 
 # ── 基础 ──
@@ -33,7 +32,7 @@ class ImageContent:
 
 @dataclass(frozen=True)
 class ToolCallBlock:
-    type: str = "toolCall"
+    type: str = "tool_call"
     id: str = ""
     name: str = ""
     arguments: dict[str, Any] | None = None
@@ -80,7 +79,7 @@ class AssistantMessage:
 
 @dataclass
 class ToolResultMessage:
-    role: str = "toolResult"
+    role: str = "tool_result"
     tool_call_id: str = ""
     tool_name: str = ""
     content: str | list[TextContent | ImageContent] = ""
@@ -100,7 +99,7 @@ class CustomMessage:
 
 @dataclass
 class BashExecutionMessage:
-    role: str = "bashExecution"
+    role: str = "bash_execution"
     command: str = ""
     output: str = ""
     exit_code: int | None = None
@@ -111,7 +110,7 @@ class BashExecutionMessage:
 
 @dataclass
 class CompactionSummaryMessage:
-    role: str = "compactionSummary"
+    role: str = "compaction_summary"
     summary: str = ""
     tokens_before: int = 0
     timestamp: int = 0
@@ -119,7 +118,7 @@ class CompactionSummaryMessage:
 
 @dataclass
 class BranchSummaryMessage:
-    role: str = "branchSummary"
+    role: str = "branch_summary"
     summary: str = ""
     from_id: str = ""
     timestamp: int = 0
@@ -177,13 +176,29 @@ class AgentTool[Details](Protocol):
     ) -> AgentToolResult[Details]: ...
 
 
-def tool_definition_from_spec(spec: Any) -> ToolDefinition:
-    """从 ToolSpec（或其他兼容对象）提取 ToolDefinition。"""
+class ToolSpecLike(Protocol):
+    """工具规格的最小接口，供 tool_definition_from_spec 使用。"""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def description(self) -> str: ...
+
+    @property
+    def schema(self) -> dict[str, Any] | None: ...
+
+    @property
+    def execution_mode(self) -> ToolExecutionMode | None: ...
+
+
+def tool_definition_from_spec(spec: ToolSpecLike) -> ToolDefinition:
+    """从 ToolSpec 提取 ToolDefinition。"""
     return ToolDefinition(
-        name=getattr(spec, "name", ""),
-        description=getattr(spec, "description", ""),
-        schema=getattr(spec, "schema", {}) or {},
-        execution_mode=getattr(spec, "execution_mode", None),
+        name=spec.name,
+        description=spec.description,
+        schema=spec.schema or {},
+        execution_mode=spec.execution_mode,
     )
 
 
@@ -282,9 +297,7 @@ type AgentEvent = (
 
 # ── 监听器 ──
 
-type AgentListener = Callable[
-    [AgentEvent, Any], None
-]  # signal is Any (AbortSignal | CancellationToken)
+type AgentListener = Callable[[AgentEvent, Any], None]
 
 # ── 循环配置 ──
 

@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..harness.skills import ToolSpec
+from ..harness.skills import ToolInput, ToolSpec
 
 logger = logging.getLogger("xcode.experimental.mailbox")
 
@@ -135,22 +135,19 @@ class AgentMailbox:
 
 
 def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
-    from ..harness.skills import parse_tool_input
-
-    def send_mailbox_message(action_input: str) -> str:
-        args = parse_tool_input(action_input)
+    def send_mailbox_message(args: ToolInput) -> str:
         sender_id = str(args.get("sender_id", "")).strip()
         recipient_id = str(args.get("recipient_id", "")).strip()
         type_name = str(args.get("type", args.get("type_name", ""))).strip()
         payload = args.get("payload", {})
         if not sender_id:
-            return "sender_id is required"
+            raise ValueError("sender_id is required")
         if not recipient_id:
-            return "recipient_id is required"
+            raise ValueError("recipient_id is required")
         if not type_name:
-            return "type is required"
+            raise ValueError("type is required")
         if not isinstance(payload, dict):
-            return "payload must be an object"
+            raise ValueError("payload must be an object")
         message_id = mailbox.send_message(
             sender_id=sender_id,
             recipient_id=recipient_id,
@@ -159,22 +156,20 @@ def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
         )
         return f"sent message {message_id} to {recipient_id}"
 
-    def read_mailbox_messages(action_input: str) -> str:
-        args = parse_tool_input(action_input)
+    def read_mailbox_messages(args: ToolInput) -> str:
         recipient_id = str(args.get("recipient_id", "")).strip()
         if not recipient_id:
-            return "recipient_id is required"
+            raise ValueError("recipient_id is required")
         messages = mailbox.read_unread_messages(recipient_id)
         return json.dumps(messages, ensure_ascii=False, indent=2)
 
-    def acknowledge_mailbox_message(action_input: str) -> str:
-        args = parse_tool_input(action_input)
+    def acknowledge_mailbox_message(args: ToolInput) -> str:
         message_id = str(args.get("message_id", "")).strip()
         recipient_id = str(args.get("recipient_id", "")).strip()
         if not message_id:
-            return "message_id is required"
+            raise ValueError("message_id is required")
         if not recipient_id:
-            return "recipient_id is required"
+            raise ValueError("recipient_id is required")
         mailbox.acknowledge_message(message_id, recipient_id)
         return f"acknowledged message {message_id} for {recipient_id}"
 

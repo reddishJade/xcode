@@ -2,10 +2,9 @@ from __future__ import annotations
 
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 
-from ..harness.skills import ToolSpec
+from ..harness.skills import ToolInput, ToolSpec
 
 """按需加载 skill 的轻量目录。"""
 
@@ -98,8 +97,7 @@ class SkillLoader:
 
 
 def build_skill_loader_tool(loader: SkillLoader) -> ToolSpec:
-    def load_skill(action_input: str) -> str:
-        data = _parse_input(action_input)
+    def load_skill(data: ToolInput) -> str:
         return loader.get_content(str(data.get("name", "")).strip())
 
     return ToolSpec(
@@ -151,10 +149,3 @@ def _parse_list(value: str) -> tuple[str, ...]:
     if text.startswith("[") and text.endswith("]"):
         text = text[1:-1]
     return tuple(item.strip().strip("\"'") for item in text.split(",") if item.strip())
-
-
-def _parse_input(action_input: str) -> dict:
-    text = action_input.strip()
-    if text.startswith("{"):
-        return json.loads(text)
-    return {"name": text}

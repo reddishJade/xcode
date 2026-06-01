@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from typing import Union, Iterator, Any
+from typing import Any, Iterator, Union, cast
 from xcode.agent.types import ToolDefinition
 from xcode.harness.agent_runtime.provider import ModelProvider
 from xcode.harness.agent_runtime.events import ProviderEvent
@@ -24,10 +24,8 @@ class FakeProvider(ModelProvider):
         self._iterator = None
         if isinstance(events, list):
             if events and isinstance(events[0], list):
-                self._iterator = iter(events)  # type: ignore[assignment]
+                self._iterator = iter(cast(list[list[ProviderEvent]], events))
             else:
-                from typing import cast
-
                 self._iterator = iter([cast(list[ProviderEvent], events)])
 
     async def stream(

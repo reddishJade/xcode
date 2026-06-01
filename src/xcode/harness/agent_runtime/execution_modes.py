@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from .events import ToolCall
 from ..config import ExecutionMode
@@ -62,9 +61,7 @@ class ReviewPolicy:
             return "require_approval"
         if call.name == "bash":
             return (
-                "allow"
-                if _is_review_bash_allowed(_stringify_call_input(call.input))
-                else "require_approval"
+                "allow" if _is_review_bash_allowed(call.input) else "require_approval"
             )
         return "deny"
 
@@ -112,7 +109,7 @@ def mode_notice(mode: ExecutionMode) -> str:
     return ""
 
 
-def _is_review_bash_allowed(action_input: str) -> bool:
+def _is_review_bash_allowed(action_input: Any) -> bool:
     command = _command_from_tool_input(action_input).lower().strip()
     return any(
         command == prefix or command.startswith(prefix + " ")
@@ -120,24 +117,10 @@ def _is_review_bash_allowed(action_input: str) -> bool:
     )
 
 
-def _command_from_tool_input(action_input: str) -> str:
-    text = action_input.strip()
-    if text.startswith("{"):
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            return text
-        if "command" in data:
-            return str(data["command"])
-        nested = data.get("input")
-        if isinstance(nested, dict) and "command" in nested:
-            return str(nested["command"])
-        if nested is not None:
-            return str(nested)
-    return text
-
-
-def _stringify_call_input(value) -> str:
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+def _command_from_tool_input(action_input: Any) -> str:
+    if isinstance(action_input, dict):
+        command = action_input.get("command")
+        return "" if command is None else str(command)
+    if action_input is None:
+        return ""
+    return str(action_input)

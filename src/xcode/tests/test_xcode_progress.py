@@ -67,11 +67,16 @@ class TestTaskProgress(unittest.TestCase):
         tools = {tool.name: tool for tool in build_progress_tools(self.store)}
 
         saved = tools["save_task_progress"].handler(
-            '{"task_id":1,"feature_list":[{"title":"Index files","status":"completed"}]}'
+            {
+                "task_id": 1,
+                "feature_list": [
+                    {"title": "Index files", "status": "completed"},
+                ],
+            }
         )
         self.assertEqual(saved, f"saved progress for task {task.id}")
 
-        resumed = tools["resume_task_progress"].handler('{"task_id":1}')
+        resumed = tools["resume_task_progress"].handler({"task_id": 1})
         self.assertIn('"title": "Index files"', resumed)
         self.assertIn('"status": "completed"', resumed)
         self.assertTrue((self.root / "claude-progress.txt").exists())

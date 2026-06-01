@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
+from xcode.harness.agent_runtime.events import FinalMessage, ProviderEvent, TextDelta
+
 """模拟 provider：无真实 API 调用，用于测试。"""
 
 
@@ -22,15 +24,11 @@ class FauxProvider:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncIterator[ProviderEvent]:
         import asyncio
 
         if self.delay_seconds > 0:
             await asyncio.sleep(self.delay_seconds)
 
-        yield {"type": "text_delta", "delta": self.response_text}
-        yield {
-            "type": "final_message",
-            "text": self.response_text,
-            "stop_reason": "end_turn",
-        }
+        yield TextDelta(self.response_text)
+        yield FinalMessage(self.response_text, "end_turn")

@@ -174,10 +174,13 @@ def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
     from xcode.harness.agent_runtime.events import ProviderEvent
 
     responses: list[list[ProviderEvent]] = [
-        [ToolCallReady([ToolCall("a", "echo", "hello")]), FinalMessage("", "end_turn")],
+        [
+            ToolCallReady([ToolCall("a", "echo", {"input": "hello"})]),
+            FinalMessage("", "end_turn"),
+        ],
         [TextDelta("finished"), FinalMessage("", "end_turn")],
     ]
-    tool = ToolSpec("echo", "Echo input.", "text", lambda value: value)
+    tool = ToolSpec("echo", "Echo input.", "text", lambda value: value["input"])
     return XcodeApp(
         agent=StructuredAgent(
             provider=FakeProvider(responses),
@@ -203,7 +206,7 @@ def _text_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
 
 
 def _editing_app(project_root: Path) -> XcodeApp:
-    def edit_file(_value: str) -> str:
+    def edit_file(_value: dict) -> str:
         path = project_root / "math_utils.py"
         path.write_text(
             path.read_text(encoding="utf-8")
@@ -217,7 +220,7 @@ def _editing_app(project_root: Path) -> XcodeApp:
 
     responses: list[list[ProviderEvent]] = [
         [
-            ToolCallReady([ToolCall("edit", "edit_file", "math_utils.py")]),
+            ToolCallReady([ToolCall("edit", "edit_file", {"path": "math_utils.py"})]),
             FinalMessage("", "end_turn"),
         ],
         [TextDelta("done"), FinalMessage("", "end_turn")],

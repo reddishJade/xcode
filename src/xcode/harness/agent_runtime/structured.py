@@ -67,9 +67,11 @@ StructuredCompactor = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
 RuntimeContextProvider = Callable[[str], list[str]]
 
 
-def _to_dict(msg: object) -> dict[str, Any]:
+def _to_dict(msg: AgentMessage) -> dict[str, Any]:
     """将类型化消息转为 dict（保持 state.messages 的 dict 格式）。"""
-    return convert_to_llm([msg])[0]  # type: ignore[arg-type]
+    result = convert_to_llm([msg])
+    assert result, f"convert_to_llm returned empty for {type(msg).__name__}"
+    return result[0]
 
 
 def _blocks_to_typed(blocks: list[dict[str, Any]]) -> list[ContentBlock]:
@@ -131,6 +133,7 @@ class RunState:
         self.step: int = 1
         self.consecutive_continuations: int = 0
         self.consecutive_idle_steps: int = 0  # 连续空转步数计数器
+        self.step_retries: int = 0  # 当前步的 session 级重试次数
         self.metrics: dict[str, Any] = {
             "llm_calls": 0,
             "tool_calls": 0,
@@ -204,6 +207,7 @@ class StructuredAgent:
         self.runtime_context_provider = runtime_context_provider
         self.cancellation_token = cancellation_token or CancellationToken()
         self.speculation_planner = speculation_planner
+        self._consecutive_errors: int = 0
         self.steer_queue: list[AgentMessage] = []
         self.followup_queue: list[AgentMessage] = []
 
@@ -299,7 +303,8 @@ class StructuredAgent:
                             "on_compact", metadata={"messages": len(state.messages)}
                         )
                     )
-                    state.messages = self.compactor(state.messages)  # type: ignore[misc]
+                    assert self.compactor is not None
+                    state.messages = self.compactor(state.messages)
                 state.messages = _budget_messages_for_provider(state.messages)
                 state.metrics["llm_calls"] += 1
                 state.metrics["estimated_prompt_tokens"] += estimate_message_tokens(
@@ -322,8 +327,8 @@ class StructuredAgent:
 
                 if stop_reason == "error":
                     # session 级别自动重试（指数退避）
-                    retries = getattr(state, "_step_retries", 0) + 1
-                    state._step_retries = retries  # type: ignore[attr-defined]
+                    retries = state.step_retries + 1
+                    state.step_retries = retries
                     if retries <= 3:
                         delay = 0.5 * (2 ** (retries - 1))
                         await asyncio.sleep(delay)
@@ -606,8 +611,7 @@ class StructuredAgent:
                 events = await _collect_provider_events(
                     self.provider, messages, registry
                 )
-                if hasattr(self, "_consecutive_errors"):
-                    self._consecutive_errors = 0
+                self._consecutive_errors = 0
                 return events
             except Exception as e:
                 last_error = e
@@ -623,15 +627,10 @@ class StructuredAgent:
                 if not is_transient:
                     return [FinalMessage(f"Provider error: {e}", "error")]
 
-                if not hasattr(self, "_consecutive_errors"):
-                    self._consecutive_errors = 0
                 self._consecutive_errors += 1
 
-                if (
-                    self._consecutive_errors >= 3
-                    and getattr(self, "fallback_provider", None) is not None
-                ):
-                    self.provider = cast(ModelProvider, self.fallback_provider)
+                if self._consecutive_errors >= 3 and self.fallback_provider is not None:
+                    self.provider = self.fallback_provider
                     self._consecutive_errors = 0
                     try:
                         return await _collect_provider_events(
@@ -713,7 +712,7 @@ class StructuredAgent:
         mode: ExecutionMode = "act",
     ) -> list[dict[str, Any]]:
         """创建初始消息列表（AgentMessage 构造后转为 dict）。"""
-        typed_messages: list[object] = []
+        typed_messages: list[AgentMessage] = []
         mode_notice_text = mode_notice(mode)
         if self.runtime_context_provider is not None:
             context_parts = self.runtime_context_provider(question)
@@ -728,7 +727,7 @@ class StructuredAgent:
         elif mode_notice_text:
             typed_messages.append(SystemMessage(content=mode_notice_text))
         typed_messages.append(UserMessage(content=question))
-        return convert_to_llm(typed_messages)  # type: ignore[arg-type]
+        return convert_to_llm(typed_messages)
 
     def _emit_speculation(
         self,

@@ -15,7 +15,7 @@ StopReason: TypeAlias = Literal[
 class ToolCall:
     id: str
     name: str
-    input: Any
+    input: dict[str, Any]
 
 
 @dataclass(frozen=True)

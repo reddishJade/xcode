@@ -27,37 +27,45 @@ from xcode.harness.agent_runtime.events import (
 
 class XcodePermissionsTests(unittest.TestCase):
     def test_permission_policy_denies_tool(self) -> None:
-        tool = ToolSpec("echo", "Echo.", "text", lambda value: value)
+        tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
         policy = PermissionPolicy((PermissionRule("echo", "deny"),))
 
-        output = run_tool({"echo": tool}, "echo", "hello", permission_policy=policy)
+        output = run_tool(
+            {"echo": tool}, "echo", {"input": "hello"}, permission_policy=policy
+        )
 
         self.assertEqual(output, "permission denied for tool: echo")
 
     def test_run_tool_result_reports_handler_exception(self) -> None:
-        def fail(_value: str) -> str:
+        def fail(_value: dict) -> str:
             raise RuntimeError("boom")
 
         result = run_tool_result(
-            {"fail": ToolSpec("fail", "Fail.", "text", fail)}, "fail", ""
+            {"fail": ToolSpec("fail", "Fail.", "text", fail)}, "fail", {}
         )
 
         self.assertEqual(result.status, "error")
         self.assertIn("boom", result.content)
 
     def test_permission_policy_ask_for_low_risk_tool(self) -> None:
-        tool = ToolSpec("echo", "Echo.", "text", lambda value: value)
+        tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
         policy = PermissionPolicy((PermissionRule("echo", "ask"),))
 
-        output = run_tool({"echo": tool}, "echo", "hello", permission_policy=policy)
+        output = run_tool(
+            {"echo": tool}, "echo", {"input": "hello"}, permission_policy=policy
+        )
 
         self.assertEqual(output, "工具需要授权：echo")
 
     def test_permission_policy_allow_skips_high_risk_approval(self) -> None:
-        tool = ToolSpec("danger", "Danger.", "text", lambda value: value, risk="high")
+        tool = ToolSpec(
+            "danger", "Danger.", "text", lambda value: value["input"], risk="high"
+        )
         policy = PermissionPolicy((PermissionRule("danger", "allow"),))
 
-        output = run_tool({"danger": tool}, "danger", "go", permission_policy=policy)
+        output = run_tool(
+            {"danger": tool}, "danger", {"input": "go"}, permission_policy=policy
+        )
 
         self.assertEqual(output, "go")
 
@@ -66,7 +74,7 @@ class XcodePermissionsTests(unittest.TestCase):
 
         responses: list[list[ProviderEvent]] = [
             [
-                ToolCallReady([ToolCall("x", "echo", "hello")]),
+                ToolCallReady([ToolCall("x", "echo", {"input": "hello"})]),
                 FinalMessage("", "end_turn"),
             ],
             [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -74,7 +82,7 @@ class XcodePermissionsTests(unittest.TestCase):
         provider = FakeProvider(responses)
         agent = StructuredAgent(
             provider=provider,
-            registry=(ToolSpec("echo", "Echo.", "text", lambda value: value),),
+            registry=(ToolSpec("echo", "Echo.", "text", lambda value: value["input"]),),
             permission_policy=PermissionPolicy((PermissionRule("echo", "deny"),)),
         )
 
@@ -156,7 +164,7 @@ class HITLPermissionModelTests(unittest.TestCase):
             self.assertEqual(len(policy.rules), 2)
 
     def test_approved_but_failed_handler_sets_approved_true(self) -> None:
-        def fail_handler(_value: str) -> str:
+        def fail_handler(_value: dict) -> str:
             raise RuntimeError("handler failed")
 
         tool = ToolSpec(
@@ -169,7 +177,7 @@ class HITLPermissionModelTests(unittest.TestCase):
         result = run_tool_result(
             {"failing": tool},
             "failing",
-            "go",
+            {"input": "go"},
             approval_callback=lambda _t, _i: HITLResult("allow", "once"),
         )
         self.assertEqual(result.status, "error")
@@ -180,13 +188,13 @@ class HITLPermissionModelTests(unittest.TestCase):
             "bash",
             "Bash.",
             "text",
-            lambda v: v,
+            lambda v: v["command"],
             risk_evaluator=lambda _: "ask",
         )
         result = run_tool_result(
             {"bash": tool},
             "bash",
-            "git add .",
+            {"command": "git add ."},
             approval_callback=lambda _t, _i: HITLResult("deny", "once"),
         )
         self.assertEqual(result.status, "denied")
@@ -197,13 +205,13 @@ class HITLPermissionModelTests(unittest.TestCase):
             "bash",
             "Bash.",
             "text",
-            lambda v: v,
+            lambda v: v["command"],
             risk_evaluator=lambda _: "ask",
         )
         result = run_tool_result(
             {"bash": tool},
             "bash",
-            "git push",
+            {"command": "git push"},
             approval_callback=lambda _t, _i: HITLResult("deny", "session"),
         )
         meta = result.metadata or {}

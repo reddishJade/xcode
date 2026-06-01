@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from ..skills import ToolSpec, parse_tool_input, resolve_project_path
+from ..skills import ToolInput, ToolSpec, resolve_project_path
 from .file import MAX_RETURN_CHARS
 
 """供编码 Agent 使用的只读代码搜索工具。"""
@@ -19,25 +19,22 @@ _RG_MISSING_HINT_EMITTED = False
 def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
     root = project_root.resolve()
 
-    def grep_search(action_input: str) -> str:
-        data = parse_tool_input(action_input, default_key="pattern")
+    def grep_search(data: ToolInput) -> str:
         pattern = str(data.get("pattern", "")).strip()
         if not pattern:
-            return "pattern is required"
+            raise ValueError("pattern is required")
         base = _safe_path(root, str(data.get("path", ".")))
         glob = data.get("glob")
         max_results = int(data.get("max_results", MAX_GREP_RESULTS))
         return _grep(root, base, pattern, str(glob) if glob else None, max_results)
 
-    def glob_files(action_input: str) -> str:
-        data = parse_tool_input(action_input, default_key="pattern")
+    def glob_files(data: ToolInput) -> str:
         pattern = str(data.get("pattern", "*")).strip() or "*"
         base = _safe_path(root, str(data.get("path", ".")))
         max_results = int(data.get("max_results", MAX_GLOB_RESULTS))
         return _glob_files(root, base, pattern, max_results)
 
-    def ls_files(action_input: str) -> str:
-        data = parse_tool_input(action_input)
+    def ls_files(data: ToolInput) -> str:
         raw_path = str(data.get("path", ".")).strip()
         base = _safe_path(root, raw_path)
         limit = int(data.get("limit", MAX_LS_ENTRIES))
@@ -147,13 +144,13 @@ def _glob_files(root: Path, base: Path, pattern: str, max_results: int) -> str:
 
 def _ls(root: Path, base: Path, limit: int) -> str:
     if not base.exists():
-        return f"Path not found: {_display(root, base)}"
+        raise FileNotFoundError(f"Path not found: {_display(root, base)}")
     if not base.is_dir():
-        return f"Not a directory: {_display(root, base)}"
+        raise NotADirectoryError(f"Not a directory: {_display(root, base)}")
     try:
         entries = sorted(base.iterdir(), key=lambda p: p.name.lower())
-    except PermissionError:
-        return f"Permission denied: {_display(root, base)}"
+    except PermissionError as exc:
+        raise PermissionError(f"Permission denied: {_display(root, base)}") from exc
 
     lines: list[str] = []
     for entry in entries:

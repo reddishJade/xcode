@@ -66,7 +66,7 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallReady([ToolCall("c", "compact", "")]),
+                    ToolCallReady([ToolCall("c", "compact", {})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -96,7 +96,7 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallReady([ToolCall("c", "compact", "")]),
+                    ToolCallReady([ToolCall("c", "compact", {})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -216,7 +216,11 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
 
             # edit_file 不再依赖 read_versions 缓存，压缩后直接基于 old_text 匹配即可工作
             edit_res = edit_tool.handler(
-                '{"path": "test_compact.txt", "old_text": "original content", "new_text": "new"}'
+                {
+                    "path": "test_compact.txt",
+                    "old_text": "original content",
+                    "new_text": "new",
+                }
             )
             self.assertIn("replacements=1", edit_res)
             self.assertEqual(file_path.read_text(encoding="utf-8"), "new for compact")

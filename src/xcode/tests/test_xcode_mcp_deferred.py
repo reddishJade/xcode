@@ -88,7 +88,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
         search_tool = build_mcp_tool_search(self.root, {"heavy_service"})
 
         # 执行搜索
-        result = search_tool.handler('{"query": "all"}')
+        result = search_tool.handler({"query": "all"})
         self.assertIn("Schema not yet loaded", result)
         self.assertIn("mcp__heavy_service__fetch_tools", result)
 
@@ -118,7 +118,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
         }
         self.cache_path.write_text(json.dumps(cache), encoding="utf-8")
 
-        result = search_tool.handler('{"query": "heavy"}')
+        result = search_tool.handler({"query": "heavy"})
         self.assertIn("mcp__heavy_service__heavy_calculate", result)
         self.assertIn("Multiplier factor", result)
         self.assertIn("factor (required)", result)
@@ -167,7 +167,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
 
         # 缺省 factor 参数调用，应被 JIT 校验直接拦截
         with self.assertRaises(ValueError) as ctx:
-            stub_tool.handler('{"args": {}}')
+            stub_tool.handler({"args": {}})
         self.assertIn("Missing required parameters", str(ctx.exception))
 
         # 提供正确参数调用时，应透传给后台 lazy connection 执行（mock 掉 mcp client）
@@ -180,7 +180,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
             "xcode.experimental.mcp.LazyClientRef.get_or_create",
             return_value=mock_client,
         ):
-            output = stub_tool.handler('{"factor": 5}')
+            output = stub_tool.handler({"factor": 5})
             self.assertEqual(output, "result: 42")
             mock_client.call_tool.assert_called_with("heavy_calculate", {"factor": 5})
 
@@ -202,7 +202,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
         ]
 
         with patch("xcode.experimental.mcp.McpClient", return_value=mock_client):
-            result = bootstrap_tool.handler("{}")
+            result = bootstrap_tool.handler({})
             self.assertIn("Successfully fetched 1 tools", result)
             self.assertTrue(self.cache_path.exists())
 

@@ -1,55 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
 
-"""Harness 层类型系统：错误体系 + Result[T, E] 模式。"""
-
-T = TypeVar("T")
-E = TypeVar("E")
-
-
-@dataclass(frozen=True)
-class Ok(Generic[T, E]):
-    value: T
-
-    def is_ok(self) -> bool:
-        return True
-
-    def is_err(self) -> bool:
-        return False
-
-    def unwrap(self) -> T:
-        return self.value
-
-
-@dataclass(frozen=True)
-class Err(Generic[T, E]):
-    error: E
-
-    def is_ok(self) -> bool:
-        return False
-
-    def is_err(self) -> bool:
-        return True
-
-    def unwrap(self) -> T:
-        raise (
-            self.error
-            if isinstance(self.error, Exception)
-            else RuntimeError(str(self.error))
-        )
-
-
-Result = Ok[T, E] | Err[T, E]
-
-
-def ok[T](value: T) -> Ok[T, Any]:
-    return Ok(value)
-
-
-def err[E](error: E) -> Err[Any, E]:
-    return Err(error)
+"""Harness 层类型系统：错误体系。"""
 
 
 class AgentHarnessError(Exception):

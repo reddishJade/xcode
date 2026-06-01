@@ -123,7 +123,7 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
             name="strict_test",
             description="Strict testing.",
             input_hint="empty",
-            handler=lambda x: x,
+            handler=lambda _data: "",
             schema={
                 "type": "object",
                 "properties": {

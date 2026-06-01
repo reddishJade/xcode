@@ -602,10 +602,10 @@ on tool_start: emit { type, tool_name, input, timestamp }
 on tool_end:   emit { type, tool_name, result, duration }
 on turn_end:   emit { type, turn_output }
 
-# 多路下游订阅，Agent 核心代码不变
-agent.on("event") -> write_to_logs
-agent.on("event") -> update_ui
-agent.on("event") -> send_to_eval_framework
+# 显式注册监听器，Agent 核心代码不变
+agent.add_listener(write_to_logs)
+agent.add_listener(update_ui)
+agent.add_listener(send_to_eval_framework)
 ```
 
 ---

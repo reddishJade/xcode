@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from typing import Any
+from xcode.agent.types import tool_definition_from_spec
 from xcode.harness.agent_runtime.events import TextDelta, ToolCallReady, FinalMessage
 from xcode.ai.providers.factory import (
     ProviderRuntime,
@@ -199,7 +200,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             name="echo",
             description="Echo input.",
             input_hint='JSON: {"text": "..."}',
-            handler=lambda value: value,
+            handler=lambda data: data["text"],
             schema={
                 "type": "object",
                 "properties": {"text": {"type": "string"}},
@@ -207,7 +208,12 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             },
         )
 
-        events = list(llm._stream_sync([{"role": "user", "content": "echo"}], (tool,)))  # type: ignore[arg-type]
+        events = list(
+            llm._stream_sync(
+                [{"role": "user", "content": "echo"}],
+                (tool_definition_from_spec(tool),),
+            )
+        )
         tool_call = events[-1]
         self.assertIsInstance(tool_call, ToolCallReady)
         assert isinstance(tool_call, ToolCallReady)

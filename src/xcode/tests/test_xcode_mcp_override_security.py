@@ -130,7 +130,7 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
                 "        name='plugin_calc',\n"
                 "        description='Calculator',\n"
                 "        input_hint='{}',\n"
-                "        handler=lambda x: '42',\n"
+                "        handler=lambda _data: '42',\n"
                 "        risk='low'\n"
                 "    )\n"
                 "]\n"
@@ -147,7 +147,7 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
 
             self.assertEqual(len(data["tools"]), 1)
             self.assertEqual(data["tools"][0].name, "plugin_calc")
-            self.assertEqual(data["tools"][0].handler("{}"), "42")
+            self.assertEqual(data["tools"][0].handler({}), "42")
             self.assertIn("post_tool", data["hooks"])
 
     def test_task_dependency_topo_sort_and_kanban_view(self) -> None:

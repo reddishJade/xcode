@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 
-import json
 from difflib import unified_diff
 from pathlib import Path
 from typing import Any
 
 from ..agent_runtime.contextual import ContextualRetrievalState
-from ..skills import ToolSpec, parse_tool_input, resolve_project_path
+from ..skills import ToolInput, ToolSpec, resolve_project_path
 
 """受沙箱约束的本地文件工具。
 
@@ -26,20 +25,16 @@ def build_file_tools(
 ) -> tuple[ToolSpec, ...]:
     root = project_root.resolve()
 
-    def read_file(action_input: str) -> str:
-        try:
-            data = parse_tool_input(action_input, default_key="path")
-        except ValueError as exc:
-            return str(exc)
+    def read_file(data: ToolInput) -> str:
         path_str = str(data.get("path", "")).strip()
         if not path_str:
-            return "path is required"
+            raise ValueError("path is required")
         path = _safe_path(root, path_str)
         if not path.is_file():
-            return f"not a file: {_display(root, path)}"
+            raise ValueError(f"not a file: {_display(root, path)}")
         size = path.stat().st_size
         if size > MAX_READ_BYTES:
-            return f"file too large: {size} bytes"
+            raise ValueError(f"file too large: {size} bytes")
         text, _encoding = _read_text(path)
         if context_state is not None:
             context_state.record_file(path)
@@ -47,27 +42,23 @@ def build_file_tools(
         if limit is not None:
             try:
                 limit_value = int(limit)
-            except (TypeError, ValueError):
-                return "limit must be an integer"
+            except (TypeError, ValueError) as exc:
+                raise ValueError("limit must be an integer") from exc
             if limit_value < 0:
-                return "limit must be non-negative"
+                raise ValueError("limit must be non-negative")
             lines = text.splitlines()
             text = "\n".join(lines[:limit_value])
         return _truncate(text)
 
-    def write_file(action_input: str) -> str:
-        try:
-            data = parse_tool_input(action_input)
-        except ValueError as exc:
-            return str(exc)
+    def write_file(data: ToolInput) -> str:
         path_str = str(data.get("path", "")).strip()
         if not path_str:
-            return "path is required"
+            raise ValueError("path is required")
         path = _safe_path(root, path_str)
         if path.exists() and path.is_dir():
-            return f"path is a directory: {_display(root, path)}"
+            raise ValueError(f"path is a directory: {_display(root, path)}")
         if "content" not in data:
-            return "content is required"
+            raise ValueError("content is required")
         content = str(data.get("content", ""))
         path.parent.mkdir(parents=True, exist_ok=True)
         _write_text(path, content, "utf-8")
@@ -75,36 +66,27 @@ def build_file_tools(
             context_state.record_file(path)
         return f"wrote file: {_display(root, path)}"
 
-    def edit_file(action_input: str) -> str:
-        try:
-            data = parse_tool_input(action_input)
-        except ValueError as exc:
-            return str(exc)
+    def edit_file(data: ToolInput) -> str:
         path_str = str(data.get("path", "")).strip()
         if not path_str:
-            return "path is required"
+            raise ValueError("path is required")
         path = _safe_path(root, path_str)
         if path.exists() and path.is_dir():
-            return f"path is a directory: {_display(root, path)}"
+            raise ValueError(f"path is a directory: {_display(root, path)}")
         if not path.is_file():
-            return f"not a file: {_display(root, path)}"
+            raise ValueError(f"not a file: {_display(root, path)}")
 
         edits = _prepare_edits(data)
-        if isinstance(edits, str):
-            return edits
         if not edits:
-            return "no edits provided"
+            raise ValueError("no edits provided")
 
         content, encoding = _read_text(path)
-        result = _apply_edits(
+        updated, edit_count = _apply_edits(
             content,
             edits,
             _display(root, path),
             replace_all=bool(data.get("replace_all", False)),
         )
-        if isinstance(result, str):
-            return result
-        updated, edit_count = result
         _write_text(path, updated, encoding)
         if context_state is not None:
             context_state.record_file(path)
@@ -162,8 +144,8 @@ def build_file_tools(
         ),
         ToolSpec(
             name="edit_file",
-            description="Edit a text file with one or more search-and-replace edits. Each edit's oldText is matched against the original file content (not incrementally). Use this tool for targeted replacements.",
-            input_hint='JSON: {"path": "src/main.py", "edits": [{"oldText": "...", "newText": "..."}]}',
+            description="Edit a text file with one or more search-and-replace edits. Each edit's old_text is matched against the original file content (not incrementally). Use this tool for targeted replacements.",
+            input_hint='JSON: {"path": "src/main.py", "edits": [{"old_text": "...", "new_text": "..."}]}',
             handler=edit_file,
             risk="high",
             schema={
@@ -179,26 +161,18 @@ def build_file_tools(
                         "items": {
                             "type": "object",
                             "properties": {
-                                "oldText": {
+                                "old_text": {
                                     "type": "string",
                                     "description": "Exact text to find. Must match exactly one occurrence.",
                                 },
-                                "newText": {
+                                "new_text": {
                                     "type": "string",
                                     "description": "Replacement text.",
                                 },
                             },
-                            "required": ["oldText", "newText"],
+                            "required": ["old_text", "new_text"],
                             "additionalProperties": False,
                         },
-                    },
-                    "old_text": {
-                        "type": "string",
-                        "description": "(Legacy) Exact text to replace. Use edits[] instead.",
-                    },
-                    "new_text": {
-                        "type": "string",
-                        "description": "(Legacy) Replacement text. Use edits[] instead.",
                     },
                 },
                 "required": ["path"],
@@ -294,35 +268,26 @@ def _display(root: Path, path: Path) -> str:
         return str(path)
 
 
-def _prepare_edits(data: dict[str, Any]) -> list[dict[str, str]] | str:
-    """将输入归一化为 edits 列表。支持 edits[] 数组和旧版 old_text/new_text。"""
+def _prepare_edits(data: dict[str, Any]) -> list[dict[str, str]]:
+    """将输入归一化为 edits 列表。"""
     edits: list[dict[str, str]] = []
 
     raw_edits = data.get("edits")
-    if isinstance(raw_edits, str):
-        try:
-            parsed = json.loads(raw_edits)
-            if isinstance(parsed, list):
-                raw_edits = parsed
-        except json.JSONDecodeError:
-            return "edits: invalid JSON string"
-
     if isinstance(raw_edits, list):
         for i, edit in enumerate(raw_edits):
             if not isinstance(edit, dict):
-                return f"edits[{i}]: must be an object"
-            old = str(edit.get("oldText", edit.get("old_text", "")))
-            new = str(edit.get("newText", edit.get("new_text", "")))
+                raise ValueError(f"edits[{i}]: must be an object")
+            old = str(edit.get("old_text", ""))
+            new = str(edit.get("new_text", ""))
             if not old:
-                return f"edits[{i}].oldText must not be empty"
-            edits.append({"oldText": old, "newText": new})
+                raise ValueError(f"edits[{i}].old_text must not be empty")
+            edits.append({"old_text": old, "new_text": new})
 
-    # 旧版兼容：顶层 old_text/new_text
     old_text = str(data.get("old_text", "")).strip()
     if old_text:
         if "new_text" not in data:
-            return "new_text is required"
-        edits.append({"oldText": old_text, "newText": str(data.get("new_text", ""))})
+            raise ValueError("new_text is required")
+        edits.append({"old_text": old_text, "new_text": str(data.get("new_text", ""))})
 
     return edits
 
@@ -332,36 +297,36 @@ def _apply_edits(
     edits: list[dict[str, str]],
     display_path: str,
     replace_all: bool = False,
-) -> tuple[str, int] | str:
+) -> tuple[str, int]:
     """对原始内容应用编辑。所有编辑基于原始内容匹配，逆序替换。
 
-    返回 (更新后内容, 替换次数) 或错误字符串。
+    返回 (更新后内容, 替换次数) 或抛出 ValueError。
     """
     if replace_all and len(edits) == 1:
         edit = edits[0]
-        count = content.count(edit["oldText"])
+        count = content.count(edit["old_text"])
         if count == 0:
-            return "old_text not found"
-        updated = content.replace(edit["oldText"], edit["newText"])
+            raise ValueError("old_text not found")
+        updated = content.replace(edit["old_text"], edit["new_text"])
         return updated, count
 
     matches: list[dict[str, Any]] = []
     for i, edit in enumerate(edits):
-        old = edit["oldText"]
+        old = edit["old_text"]
         if not old:
-            return f"edits[{i}].oldText must not be empty in {display_path}"
+            raise ValueError(f"edits[{i}].old_text must not be empty in {display_path}")
 
         idx = content.find(old)
         if idx == -1:
-            return (
+            raise ValueError(
                 f"Could not find edits[{i}] in {display_path}. "
                 "The old text must match exactly."
             )
         idx2 = content.find(old, idx + 1)
         if idx2 != -1:
-            return (
+            raise ValueError(
                 f"Found multiple occurrences of edits[{i}] in {display_path}. "
-                "Each oldText must be unique. Use more context to disambiguate."
+                "Each old_text must be unique. Use more context to disambiguate."
             )
         matches.append(
             {
@@ -369,7 +334,7 @@ def _apply_edits(
                 "start": idx,
                 "end": idx + len(old),
                 "old": old,
-                "new": edit["newText"],
+                "new": edit["new_text"],
             }
         )
 
@@ -377,7 +342,7 @@ def _apply_edits(
     matches.sort(key=lambda m: m["start"])
     for a, b in zip(matches, matches[1:]):
         if a["end"] > b["start"]:
-            return (
+            raise ValueError(
                 f"edits[{a['index']}] and edits[{b['index']}] overlap in {display_path}. "
                 "Merge them into one edit or target disjoint regions."
             )
@@ -388,6 +353,8 @@ def _apply_edits(
         new_content = new_content[: m["start"]] + m["new"] + new_content[m["end"] :]
 
     if new_content == content:
-        return f"No changes made to {display_path}. The replacements produced identical content."
+        raise ValueError(
+            f"No changes made to {display_path}. The replacements produced identical content."
+        )
 
     return new_content, len(matches)

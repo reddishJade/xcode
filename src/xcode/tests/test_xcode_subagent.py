@@ -43,10 +43,10 @@ class XcodeSubagentToolTests(unittest.TestCase):
         try:
             tools = {tool.name: tool for tool in build_managed_subagent_tools(runner)}
 
-            submitted = tools["submit_subagent"].handler('{"prompt":"work"}')
+            submitted = tools["submit_subagent"].handler({"prompt": "work"})
             job_id = submitted.split()[2]
             self._wait_status(runner, job_id, "done")
-            checked = tools["check_subagent"].handler(f'{{"job_id":"{job_id}"}}')
+            checked = tools["check_subagent"].handler({"job_id": job_id})
 
             self.assertIn("status=done", checked)
             self.assertIn("done work", checked)
@@ -92,7 +92,7 @@ class XcodeSubagentToolTests(unittest.TestCase):
             tools = {tool.name: tool for tool in build_managed_subagent_tools(runner)}
 
             output = tools["submit_subagent"].handler(
-                '{"prompt":"work","model_profile":"missing"}'
+                {"prompt": "work", "model_profile": "missing"}
             )
 
             self.assertIn("unknown model_profile: missing", output)

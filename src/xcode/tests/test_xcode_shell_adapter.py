@@ -127,7 +127,7 @@ class XcodeShellAdapterTests(unittest.TestCase):
             tool = build_bash_tool(Path(tmp))
             registry = {tool.name: tool}
 
-            output = run_tool(registry, "bash", "echo hello")
+            output = run_tool(registry, "bash", {"command": "echo hello"})
             self.assertIn("hello", output)
 
     @mock.patch("xcode.harness.tools.bash.subprocess.Popen")
@@ -147,7 +147,7 @@ class XcodeShellAdapterTests(unittest.TestCase):
         spec = _KNOWN_SHELLS["bash"]
         with tempfile.TemporaryDirectory() as tmp:
             tool = build_bash_tool(Path(tmp), shell_spec=spec)
-            tool.handler('{"command": "echo mock_shell", "timeout": 5}')
+            tool.handler({"command": "echo mock_shell", "timeout": 5})
 
         mock_popen.assert_called_once()
         _args, _kwargs = mock_popen.call_args

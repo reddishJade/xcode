@@ -44,20 +44,16 @@ class HookManager:
     def __init__(self) -> None:
         self._callbacks: dict[HookEvent, list[HookCallback]] = defaultdict(list)
 
-    def on(self, event: HookEvent, callback: HookCallback) -> Callable[[], None]:
-        """注册钩子，返回取消注册函数。"""
-        self._callbacks[event].append(callback)
-
-        def unsubscribe() -> None:
-            try:
-                self._callbacks[event].remove(callback)
-            except ValueError:
-                pass
-
-        return unsubscribe
-
     def register(self, event: HookEvent, callback: HookCallback) -> None:
+        """注册钩子。"""
         self._callbacks[event].append(callback)
+
+    def remove(self, event: HookEvent, callback: HookCallback) -> None:
+        """移除钩子。"""
+        try:
+            self._callbacks[event].remove(callback)
+        except ValueError:
+            return
 
     def emit(self, record: HookRecord) -> list[Any]:
         results: list[Any] = []

@@ -19,7 +19,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
             tools = _tools(root)
 
             output = tools["glob_files"].handler(
-                '{"path": "pkg", "pattern": "*.py", "max_results": 10}'
+                {"path": "pkg", "pattern": "*.py", "max_results": 10}
             )
 
             self.assertEqual(output, "pkg/a.py")
@@ -31,7 +31,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
             tools = _tools(root)
 
             with self.assertRaises(ValueError):
-                tools["glob_files"].handler('{"path": ".env", "pattern": "*"}')
+                tools["glob_files"].handler({"path": ".env", "pattern": "*"})
 
     def test_glob_files_recursive_finds_subdir_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -43,7 +43,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
             tools = _tools(root)
 
             output = tools["glob_files"].handler(
-                '{"path": ".", "pattern": "**/*.md", "max_results": 10}'
+                {"path": ".", "pattern": "**/*.md", "max_results": 10}
             )
 
             self.assertIn("docs/a.md", output)
@@ -59,7 +59,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
             tools = _tools(root)
 
             output = tools["grep_search"].handler(
-                '{"pattern": "Agent", "path": ".", "glob": "*.py"}'
+                {"pattern": "Agent", "path": ".", "glob": "*.py"}
             )
 
             self.assertIn("a.py", output)
@@ -75,8 +75,8 @@ class XcodeCodeToolsTests(unittest.TestCase):
             with patch(
                 "xcode.harness.tools.code_search.shutil.which", return_value=None
             ):
-                first = tools["grep_search"].handler("needle")
-                second = tools["grep_search"].handler("needle")
+                first = tools["grep_search"].handler({"pattern": "needle"})
+                second = tools["grep_search"].handler({"pattern": "needle"})
 
             self.assertIn("ripgrep not found", first)
             self.assertIn("a.txt", first)
@@ -89,7 +89,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
             tools = _tools(root)
 
             with self.assertRaises(ValueError):
-                tools["grep_search"].handler('{"pattern": "TOKEN", "path": ".env"}')
+                tools["grep_search"].handler({"pattern": "TOKEN", "path": ".env"})
 
 
 def _tools(root: Path):

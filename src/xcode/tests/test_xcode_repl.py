@@ -263,7 +263,11 @@ class XcodeReplTests(unittest.TestCase):
             app = ToolApp(
                 registry=(
                     ToolSpec(
-                        "danger", "Danger.", "text", lambda value: value, risk="high"
+                        "danger",
+                        "Danger.",
+                        "text",
+                        lambda value: value["input"],
+                        risk="high",
                     ),
                 )
             )
@@ -281,7 +285,11 @@ class XcodeReplTests(unittest.TestCase):
             app = ToolApp(
                 registry=(
                     ToolSpec(
-                        "read_file", "Read.", "path", lambda value: value, group="core"
+                        "read_file",
+                        "Read.",
+                        "path",
+                        lambda value: value["input"],
+                        group="core",
                     ),
                 )
             )
@@ -378,8 +386,10 @@ class XcodeReplTests(unittest.TestCase):
         completer = ReplCompleter(
             Path.cwd(),
             (
-                ToolSpec("read_file", "Read.", "path", lambda value: value),
-                ToolSpec("run_validation", "Validate.", "name", lambda value: value),
+                ToolSpec("read_file", "Read.", "path", lambda value: value["input"]),
+                ToolSpec(
+                    "run_validation", "Validate.", "name", lambda value: value["input"]
+                ),
             ),
         )
 
@@ -764,7 +774,7 @@ class ToolApp:
     def __init__(
         self,
         registry: tuple[ToolSpec, ...] = (
-            ToolSpec("echo", "Echo.", "text", lambda value: value),
+            ToolSpec("echo", "Echo.", "text", lambda value: value["input"]),
         ),
     ) -> None:
         self.registry = registry

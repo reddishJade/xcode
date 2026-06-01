@@ -4,7 +4,14 @@ import unittest
 from typing import cast
 
 from xcode.agent.messages import convert_to_llm
-from xcode.agent.types import AssistantMessage, ToolCallBlock
+from xcode.agent.types import (
+    AssistantMessage,
+    BashExecutionMessage,
+    BranchSummaryMessage,
+    CompactionSummaryMessage,
+    ToolCallBlock,
+    ToolResultMessage,
+)
 from xcode.harness.agent_runtime.events import ReasoningDelta, TextDelta, ToolCallReady
 from xcode.ai.providers.codec import (
     chat_stream_to_events,
@@ -20,7 +27,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
             "echo",
             "Echo input.",
             'JSON: {"text":"..."}',
-            lambda value: value,
+            lambda _value: "",
             schema={"type": "object", "properties": {"text": {"type": "string"}}},
         )
 
@@ -118,6 +125,24 @@ class OpenAIToolCodecTest(unittest.TestCase):
         messages = to_openai_messages(raw_messages)
 
         self.assertEqual(messages[0]["reasoning_content"], "")
+
+    def test_agent_message_discriminators_are_pythonic_inside_boundary(self) -> None:
+        tool_call = ToolCallBlock(id="t1", name="grep_search")
+        self.assertEqual(tool_call.type, "tool_call")
+        self.assertEqual(ToolResultMessage().role, "tool_result")
+        self.assertEqual(BashExecutionMessage().role, "bash_execution")
+        self.assertEqual(BranchSummaryMessage().role, "branch_summary")
+        self.assertEqual(CompactionSummaryMessage().role, "compaction_summary")
+
+        raw_messages = convert_to_llm(
+            [
+                AssistantMessage(content=[tool_call]),
+                ToolResultMessage(tool_call_id="t1", content="done"),
+            ]
+        )
+
+        self.assertEqual(raw_messages[0]["tool_calls"][0]["id"], "t1")
+        self.assertEqual(raw_messages[1]["role"], "tool")
 
 
 class OpenAIStreamCodecTest(unittest.TestCase):

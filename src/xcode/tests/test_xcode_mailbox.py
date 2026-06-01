@@ -103,22 +103,27 @@ class TestTaskStoreAndMailbox(unittest.TestCase):
         }
 
         sent = tools["send_mailbox_message"].handler(
-            '{"sender_id":"agent_a","recipient_id":"agent_b","type":"query","payload":{"question":"ping"}}'
+            {
+                "sender_id": "agent_a",
+                "recipient_id": "agent_b",
+                "type": "query",
+                "payload": {"question": "ping"},
+            }
         )
         self.assertIn("sent message", sent)
         message_id = sent.split()[2]
 
-        unread = tools["read_mailbox_messages"].handler('{"recipient_id":"agent_b"}')
+        unread = tools["read_mailbox_messages"].handler({"recipient_id": "agent_b"})
         self.assertIn(message_id, unread)
         self.assertIn('"question": "ping"', unread)
 
         acked = tools["acknowledge_mailbox_message"].handler(
-            f'{{"recipient_id":"agent_b","message_id":"{message_id}"}}'
+            {"recipient_id": "agent_b", "message_id": message_id}
         )
         self.assertIn("acknowledged message", acked)
 
         self.assertEqual(
-            tools["read_mailbox_messages"].handler('{"recipient_id":"agent_b"}'),
+            tools["read_mailbox_messages"].handler({"recipient_id": "agent_b"}),
             "[]",
         )
 

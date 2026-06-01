@@ -133,13 +133,6 @@ def stale_snip_file_reads(messages: list[dict[str, Any]]) -> list[dict[str, Any]
                             path_val = ""
                             if isinstance(tool_input, dict):
                                 path_val = str(tool_input.get("path", "")).strip()
-                            elif isinstance(tool_input, str):
-                                try:
-                                    parsed = json.loads(tool_input)
-                                    if isinstance(parsed, dict):
-                                        path_val = str(parsed.get("path", "")).strip()
-                                except json.JSONDecodeError:
-                                    path_val = tool_input.strip()
                             if path_val:
                                 norm_path = Path(path_val).as_posix()
                                 tool_use_id_to_path[tool_use_id] = norm_path
@@ -201,13 +194,6 @@ def _read_file_tool_paths(messages: list[dict[str, Any]]) -> dict[str, str]:
             path_val = ""
             if isinstance(tool_input, dict):
                 path_val = str(tool_input.get("path", "")).strip()
-            elif isinstance(tool_input, str):
-                try:
-                    parsed = json.loads(tool_input)
-                    if isinstance(parsed, dict):
-                        path_val = str(parsed.get("path", "")).strip()
-                except json.JSONDecodeError:
-                    path_val = tool_input.strip()
             if path_val:
                 tool_use_id_to_path[str(tool_use_id)] = Path(path_val).as_posix()
     return tool_use_id_to_path
@@ -350,7 +336,7 @@ def build_compact_tool(controller: CompactController) -> ToolSpec:
     )
 
 
-def _content_preview(content: Any) -> str:
+def _content_preview(content: str | list[dict[str, Any]] | None) -> str:
     if isinstance(content, list):
         rendered = []
         for part in content:

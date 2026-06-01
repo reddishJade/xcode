@@ -14,18 +14,18 @@ class XcodeSkillCoreTests(unittest.TestCase):
             name="danger",
             description="Dangerous sample tool.",
             input_hint="anything",
-            handler=lambda value: f"ran {value}",
+            handler=lambda data: f"ran {data['input']}",
             risk="high",
         )
         registry = {tool.name: tool}
 
-        self.assertIn("需要授权", skills.run_tool(registry, "danger", "x"))
+        self.assertIn("需要授权", skills.run_tool(registry, "danger", {"input": "x"}))
         self.assertIn(
             "拒绝了",
             skills.run_tool(
                 registry,
                 "danger",
-                "x",
+                {"input": "x"},
                 lambda _tool, _input: HITLResult("deny", "once"),
             ),
         )
@@ -33,7 +33,7 @@ class XcodeSkillCoreTests(unittest.TestCase):
             skills.run_tool(
                 registry,
                 "danger",
-                "x",
+                {"input": "x"},
                 lambda _tool, _input: HITLResult("allow", "once"),
             ),
             "ran x",

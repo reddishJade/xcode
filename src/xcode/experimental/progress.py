@@ -4,7 +4,7 @@ import logging
 import json
 from typing import Any
 
-from ..harness.skills import ToolSpec
+from ..harness.skills import ToolInput, ToolSpec
 from .tasks import TaskStore
 
 logger = logging.getLogger("xcode.experimental.progress")
@@ -73,29 +73,25 @@ class TaskProgress:
 
 
 def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
-    from ..harness.skills import parse_tool_input
-
-    def save_task_progress(action_input: str) -> str:
-        args = parse_tool_input(action_input)
+    def save_task_progress(args: ToolInput) -> str:
         task_id = args.get("task_id", args.get("id"))
         feature_list = args.get("feature_list", args.get("checklist"))
         if task_id is None:
-            return "task_id is required"
+            raise ValueError("task_id is required")
         if not isinstance(feature_list, list):
-            return "feature_list must be an array"
+            raise ValueError("feature_list must be an array")
         checklist: list[dict[str, Any]] = []
         for item in feature_list:
             if not isinstance(item, dict):
-                return "feature_list items must be objects"
+                raise ValueError("feature_list items must be objects")
             checklist.append(item)
         TaskProgress.save_progress(task_store, task_id, checklist)
         return f"saved progress for task {task_id}"
 
-    def resume_task_progress(action_input: str) -> str:
-        args = parse_tool_input(action_input)
+    def resume_task_progress(args: ToolInput) -> str:
         task_id = args.get("task_id", args.get("id"))
         if task_id is None:
-            return "task_id is required"
+            raise ValueError("task_id is required")
         checklist = TaskProgress.resume_task(task_store, task_id)
         return json.dumps(checklist, ensure_ascii=False, indent=2)
 

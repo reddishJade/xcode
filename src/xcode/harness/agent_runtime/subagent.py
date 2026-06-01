@@ -6,11 +6,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 import itertools
-import json
 from pathlib import Path
 from typing import Literal
 
-from ..skills import ToolSpec
+from ..skills import ToolInput, ToolSpec
 from .async_worker import IsolatedAsyncWorker
 
 """子 Agent 任务工具。
@@ -163,11 +162,10 @@ class ManagedSubagentRunner:
 
 
 def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpec, ...]:
-    def submit_subagent(action_input: str) -> str:
-        data = _parse_input(action_input)
+    def submit_subagent(data: ToolInput) -> str:
         prompt = str(data.get("prompt", "")).strip()
         if not prompt:
-            return "prompt is required"
+            raise ValueError("prompt is required")
         model_profile = str(data.get("model_profile", runner.default_profile)).strip()
         isolation = str(data.get("isolation", "context")).strip()
         try:
@@ -176,10 +174,10 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
             return str(exc)
         return f"subagent job {job_id} submitted"
 
-    def check_subagent(action_input: str) -> str:
-        job_id = str(_parse_input(action_input).get("job_id", "")).strip()
+    def check_subagent(data: ToolInput) -> str:
+        job_id = str(data.get("job_id", "")).strip()
         if not job_id:
-            return "job_id is required"
+            raise ValueError("job_id is required")
         status = runner.status(job_id)
         if status in ("unknown", "running", "cancelled"):
             return f"status={status}"
@@ -193,10 +191,10 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
         except KeyError as exc:
             return str(exc)
 
-    def cancel_subagent(action_input: str) -> str:
-        job_id = str(_parse_input(action_input).get("job_id", "")).strip()
+    def cancel_subagent(data: ToolInput) -> str:
+        job_id = str(data.get("job_id", "")).strip()
         if not job_id:
-            return "job_id is required"
+            raise ValueError("job_id is required")
         return runner.cancel(job_id)
 
     return (
@@ -222,13 +220,6 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
             group="subagent",
         ),
     )
-
-
-def _parse_input(action_input: str) -> dict:
-    text = action_input.strip()
-    if text.startswith("{"):
-        return json.loads(text)
-    return {"prompt": text}
 
 
 def _unknown_profile(model_profile: str, profiles) -> str:

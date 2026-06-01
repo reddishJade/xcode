@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import threading
 import unittest
@@ -90,7 +91,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             name="echo",
             description="Echo input.",
             input_hint="JSON",
-            handler=lambda text: text,
+            handler=lambda data: json.dumps(data, ensure_ascii=False, sort_keys=True),
             read_only=True,
             concurrency_safe=True,
         )
@@ -149,13 +150,13 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         self.assertEqual(result.answer, "step limit reached")
 
     def test_watchdog_stops_repeated_tool_call(self) -> None:
-        tool = ToolSpec("echo", "Echo.", "text", lambda value: value)
+        tool = ToolSpec("echo", "Echo.", "text", lambda data: data["input"])
         agent = StructuredAgent(
             provider=FakeProvider(
                 lambda _m, _t: cast(
                     list[ProviderEvent],
                     [
-                        ToolCallReady([ToolCall("x", "echo", "same")]),
+                        ToolCallReady([ToolCall("x", "echo", {"input": "same"})]),
                         FinalMessage("", "end_turn"),
                     ],
                 )
@@ -171,7 +172,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         self.assertIn("watchdog stopped", result.answer)
 
     def test_watchdog_signature_stable_for_dict_input(self) -> None:
-        tool = ToolSpec("echo", "Echo.", "text", lambda value: value)
+        tool = ToolSpec("echo", "Echo.", "text", lambda data: data["input"])
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
@@ -200,7 +201,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         mock_response_list: list[list[ProviderEvent]] = [
             [
                 ToolCallReady(
-                    [ToolCall(f"r{index}", "read_file", f"notes-{index}.md")]
+                    [ToolCall(f"r{index}", "read_file", {"path": f"notes-{index}.md"})]
                 ),
                 FinalMessage("", "end_turn"),
             ]
@@ -216,7 +217,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             "read_file",
             "Read.",
             "path",
-            lambda _value: "content",
+            lambda _data: "content",
             read_only=True,
         )
         agent = StructuredAgent(
@@ -257,19 +258,23 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         def factory(_messages, tools) -> list[ProviderEvent]:
             seen_tools.append([tool.name for tool in tools])
             return [
-                ToolCallReady([ToolCall("x", "edit_file", "hello")]),
+                ToolCallReady([ToolCall("x", "edit_file", {"input": "hello"})]),
                 FinalMessage("", "end_turn"),
             ]
 
-        def edit_handler(value: str) -> str:
-            called.append(value)
-            return value
+        def edit_handler(data: dict) -> str:
+            called.append(data["input"])
+            return data["input"]
 
         agent = StructuredAgent(
             provider=FakeProvider(factory),
             registry=(
                 ToolSpec(
-                    "read_file", "Read.", "path", lambda value: value, read_only=True
+                    "read_file",
+                    "Read.",
+                    "path",
+                    lambda data: data["input"],
+                    read_only=True,
                 ),
                 ToolSpec(
                     "edit_file",
@@ -294,8 +299,8 @@ class XcodeStructuredAgentTests(unittest.TestCase):
     def test_review_mode_allows_git_diff_but_denies_other_bash(self) -> None:
         outputs = []
 
-        def bash(value):
-            outputs.append(value)
+        def bash(data):
+            outputs.append(data)
             return "diff"
 
         responses: Iterator[list[ProviderEvent]] = iter(
@@ -331,7 +336,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("review")
 
-        self.assertEqual(outputs, ['{"command": "git diff --stat"}'])
+        self.assertEqual(outputs, [{"command": "git diff --stat"}])
         tool_results = [
             block["content"]
             for message in result.messages
@@ -350,7 +355,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallReady([ToolCall("a", "echo", "hello")]),
+                    ToolCallReady([ToolCall("a", "echo", {"input": "hello"})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -360,7 +365,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             name="echo",
             description="Echo input.",
             input_hint="text",
-            handler=lambda text: text,
+            handler=lambda data: data["input"],
         )
         agent = StructuredAgent(
             provider=FakeProvider(lambda _m, _t: next(responses)),
@@ -523,12 +528,12 @@ class XcodeStructuredAgentTests(unittest.TestCase):
     def test_read_only_tools_run_in_threadpool(self) -> None:
         started_second = threading.Event()
 
-        def first(_text: str) -> str:
+        def first(_data: dict) -> str:
             if not started_second.wait(1):
                 return "not parallel"
             return "one"
 
-        def second(_text: str) -> str:
+        def second(_data: dict) -> str:
             started_second.set()
             return "two"
 
@@ -537,8 +542,8 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 [
                     ToolCallReady(
                         [
-                            ToolCall("a", "first", ""),
-                            ToolCall("b", "second", ""),
+                            ToolCall("a", "first", {}),
+                            ToolCall("b", "second", {}),
                         ]
                     ),
                     FinalMessage("", "end_turn"),
@@ -574,14 +579,14 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallReady([ToolCall("x", "boom", "")]),
+                    ToolCallReady([ToolCall("x", "boom", {})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("recovered"), FinalMessage("", "end_turn")],
             ]
         )
 
-        def boom(_text: str) -> str:
+        def boom(_data: dict) -> str:
             raise RuntimeError("broken")
 
         agent = StructuredAgent(
@@ -602,11 +607,11 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         def factory(_messages, _tools) -> list[ProviderEvent]:
             token.cancel()
             return [
-                ToolCallReady([ToolCall("x", "echo", "")]),
+                ToolCallReady([ToolCall("x", "echo", {})]),
                 FinalMessage("", "end_turn"),
             ]
 
-        tool = ToolSpec("echo", "Echo.", "empty", lambda _value: "should not run")
+        tool = ToolSpec("echo", "Echo.", "empty", lambda _data: "should not run")
         agent = StructuredAgent(
             provider=FakeProvider(factory),
             registry=(tool,),
