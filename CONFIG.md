@@ -18,14 +18,21 @@
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `transport` | string | `"chat_completions"` | 模型传输协议。当前配置类型声明支持 `chat_completions`、`responses_stateful`；provider 工厂中还装配了 Anthropic、DeepSeek、MiMo 等兼容入口。 |
+| `transport` | string | `"chat_completions"` | 模型传输协议。支持 `chat_completions`、`responses_stateful`、`deepseek_chat`、`mimo_chat`、`chatglm`、`anthropic_messages`。 |
 | `chat_model` | string | `"deepseek-v4-flash"` | 聊天模型名。 |
 | `base_url` | string | `"https://api.deepseek.com"` | OpenAI-compatible API 地址。 |
 | `api_key` | string | `""` | 显式 API key；留空时按 profile 环境变量和通用环境变量查找。 |
 | `thinking` | bool | `true` | 传给支持 thinking 的 provider。 |
-| `reasoning_effort` | string/null | `"high"` | 传给支持 reasoning effort 的 provider。 |
+| `reasoning_effort` | string/null | `"high"` | 传给支持 reasoning effort 的 provider（DeepSeek、MiMo）。 |
 
-示例：
+#### ChatGLM 专用字段
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `clear_thinking` | bool | `false` | 保留式思考开关。`false` 保留历史 reasoning_content，官方推荐 Coding/Agent 场景使用。 |
+| `tool_stream` | bool | `true` | 工具流式输出。实时流式传输工具调用参数，减少延迟，仅 `glm-4.6`/`glm-4.7` 支持。 |
+
+示例（DeepSeek）：
 
 ```json
 {
@@ -42,6 +49,25 @@
       },
       "fallback": {
         "chat_model": "deepseek-v4-flash"
+      }
+    }
+  }
+}
+```
+
+示例（ChatGLM）：
+
+```json
+{
+  "provider": {
+    "model_profiles": {
+      "main": {
+        "transport": "chatglm",
+        "chat_model": "glm-4.7",
+        "api_key": "YOUR_ZHIPU_API_KEY",
+        "thinking": true,
+        "clear_thinking": false,
+        "tool_stream": true
       }
     }
   }
