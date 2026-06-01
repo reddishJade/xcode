@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
+from ...harness.agent_runtime.provider import ModelProvider
 from .runtime import ProviderRuntime, RetryPolicy, RateLimitPolicy
 
 
@@ -69,8 +70,8 @@ class ProviderSettings:
 
 @dataclass(frozen=True)
 class ProviderBundle:
-    llm: Any  # ModelProvider
-    llms: dict[str, Any]
+    llm: ModelProvider
+    llms: dict[str, ModelProvider]
 
 
 def build_provider_bundle(settings: ProviderSettings) -> ProviderBundle:
@@ -111,7 +112,7 @@ def _resolve_api_key(
 def _build_llm_profiles(
     settings: ProviderSettings,
     runtime: ProviderRuntime,
-) -> dict[str, Any]:
+) -> dict[str, ModelProvider]:
     profile_settings = dict(settings.model_profiles)
     profile_settings.setdefault("main", ModelProfileConfig())
     profile_settings.setdefault("subagent", profile_settings["main"])
@@ -128,7 +129,7 @@ def _build_llm_profile(
     profile_name: str,
     env_files: tuple[Path, ...],
     runtime: ProviderRuntime,
-) -> Any:
+) -> ModelProvider:
     api_key = _resolve_api_key(profile.api_key, profile_name, env_files)
     from . import PROVIDER_REGISTRY
 

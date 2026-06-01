@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING, cast
 
 from xcode.harness.config import (
     AgentConfig,
+    ExecutionMode,
     XcodeRuntimeConfig,
     discover_runtime_config,
     resolve_config_path,
@@ -23,6 +25,7 @@ from xcode.harness.agent_runtime import (
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.harness.agent_runtime.provider import ModelProvider
 from xcode.harness.observability import JsonlAuditLogger, HookManager
+from xcode.harness.observability.hooks import HookEvent
 from xcode.harness.skills import ToolSpec
 from xcode.harness.skill_loader import SkillLoader, build_skill_loader_tool
 from xcode.harness.tools import (
@@ -31,7 +34,17 @@ from xcode.harness.tools import (
     build_code_tools,
     build_file_tools,
 )
-from xcode.ai.providers.factory import ProviderSettings, build_provider_bundle
+from xcode.ai.providers.factory import (
+    ModelProfileProto,
+    ProviderSettings,
+    build_provider_bundle,
+)
+
+if TYPE_CHECKING:
+    from xcode.experimental.daemon import HeartbeatDaemon
+    from xcode.experimental.mailbox import AgentMailbox
+    from xcode.experimental.progress import TaskProgress
+    from xcode.experimental.speculation import SpeculationPlanner
 
 
 EXPERIMENTAL_FEATURE_GROUPS = frozenset(
@@ -53,12 +66,12 @@ EXPERIMENTAL_FEATURE_GROUPS = frozenset(
 class XcodeApp:
     """Xcode 应用句柄。"""
 
-    agent: Any
-    registry: tuple[Any, ...] = ()
-    contextual_state: Any = None
-    daemon: Any = None
-    mailbox: Any = None
-    progress: Any = None
+    agent: StructuredAgent
+    registry: tuple[ToolSpec, ...] = ()
+    contextual_state: ContextualRetrievalState | None = None
+    daemon: HeartbeatDaemon | None = None
+    mailbox: AgentMailbox | None = None
+    progress: type[TaskProgress] | None = None
     _model_profiles: dict[str, Any] | None = None
     _env_files: tuple[Path, ...] = ()
     _closers: tuple[Callable[[], None], ...] = ()
@@ -75,7 +88,7 @@ class XcodeApp:
         reasoning_effort: str | None = None,
     ) -> str:
         from xcode.ai.providers import build_provider_bundle, ProviderSettings
-        from xcode.ai.providers.factory import ModelProfileConfig, ModelProfileProto
+        from xcode.ai.providers.factory import ModelProfileConfig, ModelProfileProto  # noqa: F401
 
         if not self._model_profiles:
             return getattr(self.agent.provider, "model", "unknown")
@@ -127,11 +140,13 @@ class XcodeApp:
     async def aask(self, question: str) -> str:
         return (await self.agent.run_async(question)).answer
 
-    def ask_stream(self, question: str, mode: str | None = None) -> Iterator[Any]:
+    def ask_stream(
+        self, question: str, mode: ExecutionMode | None = None
+    ) -> Iterator[Any]:
         yield from self.agent.run_stream(question, mode=mode)
 
     async def aask_stream(
-        self, question: str, mode: str | None = None
+        self, question: str, mode: ExecutionMode | None = None
     ) -> AsyncIterator[Any]:
         async for event in self.agent.arun_stream(question, mode=mode):
             yield event
@@ -151,8 +166,7 @@ class XcodeApp:
 
 
 def _build_providers(runtime_config: XcodeRuntimeConfig, env_files: tuple[Path, ...]):
-    from xcode.ai.providers.factory import ModelProfileProto
-    from typing import cast
+    from xcode.ai.providers.factory import ModelProfileProto  # noqa: F401
 
     model_profiles = cast(
         "dict[str, ModelProfileProto]", runtime_config.provider.model_profiles
@@ -167,14 +181,14 @@ def _build_providers(runtime_config: XcodeRuntimeConfig, env_files: tuple[Path, 
 
 def _build_tool_registry(
     project_root: Path,
-    llm,
+    llm: ModelProvider,
     llm_profiles: Mapping[str, ModelProvider] | None,
     config: AgentConfig,
     runtime_config: XcodeRuntimeConfig,
     skills_dir: Path | None,
     contextual_state: ContextualRetrievalState | None = None,
     compact_controller: CompactController | None = None,
-    cancel_event: Any = None,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[
     tuple[ToolSpec, ...], SkillLoader | None, ShellSpec, tuple[Callable[[], None], ...]
 ]:
@@ -259,7 +273,7 @@ def _build_project_scoped_registry(
     enabled: set[str],
     contextual_state: ContextualRetrievalState | None,
     shell_spec: ShellSpec,
-    cancel_event: Any = None,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[ToolSpec, ...]:
     from xcode.harness.skills import BASE_REGISTRY
 
@@ -272,7 +286,9 @@ def _build_project_scoped_registry(
     return tuple(t for t in registry if t.group in enabled)
 
 
-def _llm_profiles(llm, llm_profiles: Mapping[str, ModelProvider] | None):
+def _llm_profiles(
+    llm: ModelProvider, llm_profiles: Mapping[str, ModelProvider] | None
+) -> dict[str, ModelProvider]:
     profiles = dict(llm_profiles or {})
     if not profiles:
         profiles["main"] = llm
@@ -295,7 +311,7 @@ def _build_worktree_runner(project_root: Path):
 
 def _build_agent(
     project_root: Path,
-    llm,
+    llm: ModelProvider,
     registry: tuple[ToolSpec, ...],
     config: AgentConfig,
     audit_path: Path | None,
@@ -306,10 +322,10 @@ def _build_agent(
     compact_controller: CompactController | None = None,
     cancellation_token: CancellationToken | None = None,
     compactor: LayeredCompactor | None = None,
-    speculation_planner: Any = None,
-    fallback_provider=None,
-    plugins_hooks=None,
-):
+    speculation_planner: SpeculationPlanner | None = None,
+    fallback_provider: ModelProvider | None = None,
+    plugins_hooks: dict[str, list[Callable]] | None = None,
+) -> StructuredAgent:
 
     hook_manager = None
     if contextual_state is not None:
@@ -326,7 +342,7 @@ def _build_agent(
     if plugins_hooks and hook_manager is not None:
         for event, callbacks in plugins_hooks.items():
             for cb in callbacks:
-                hook_manager.register(event, cb)
+                hook_manager.register(cast("HookEvent", event), cb)
 
     return StructuredAgent(
         provider=llm,

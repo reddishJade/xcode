@@ -437,6 +437,7 @@ class FakeToolCall:
 class FakeStreamChunk:
     def __init__(self, content=None, tool_call=None) -> None:
         self.choices = [FakeStreamChoice(content, tool_call)]
+        self.usage = None
 
 
 class FakeStreamChoice:
@@ -448,6 +449,7 @@ class FakeStreamDelta:
     def __init__(self, content, tool_call) -> None:
         self.content = content
         self.tool_calls = [tool_call] if tool_call is not None else []
+        self.reasoning_content = None
 
 
 class FakeStreamToolCall:

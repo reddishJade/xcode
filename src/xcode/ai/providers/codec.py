@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import Any, Protocol
 
 from ...harness.agent_runtime.events import (
     FinalMessage,
@@ -15,6 +15,102 @@ from ...harness.agent_runtime.events import (
 )
 
 """OpenAI tool schema and stream delta codecs consolidated."""
+
+
+class _Usage(Protocol):
+    @property
+    def prompt_tokens(self) -> int: ...
+    @property
+    def completion_tokens(self) -> int: ...
+
+
+class _ChoiceDeltaToolCallFunction(Protocol):
+    @property
+    def name(self) -> str | None: ...
+    @property
+    def arguments(self) -> str | None: ...
+
+
+class _ChoiceDeltaToolCall(Protocol):
+    @property
+    def index(self) -> int: ...
+    @property
+    def id(self) -> str | None: ...
+    @property
+    def function(self) -> _ChoiceDeltaToolCallFunction | None: ...
+
+
+class _ChoiceDelta(Protocol):
+    @property
+    def reasoning_content(self) -> str | None: ...
+    @property
+    def content(self) -> str | None: ...
+    @property
+    def tool_calls(self) -> list[_ChoiceDeltaToolCall] | None: ...
+
+
+class _Choice(Protocol):
+    @property
+    def delta(self) -> _ChoiceDelta: ...
+
+
+class _ChatCompletionChunk(Protocol):
+    @property
+    def usage(self) -> _Usage | None: ...
+    @property
+    def choices(self) -> list[_Choice]: ...
+
+
+class _ChatToolCallFunction(Protocol):
+    @property
+    def name(self) -> str: ...
+    @property
+    def arguments(self) -> str: ...
+
+
+class _ChatToolCall(Protocol):
+    @property
+    def id(self) -> str: ...
+    @property
+    def function(self) -> _ChatToolCallFunction: ...
+
+
+class _ResponseContent(Protocol):
+    @property
+    def text(self) -> str | None: ...
+
+
+class _ResponseOutputItem(Protocol):
+    @property
+    def type(self) -> str: ...
+    @property
+    def content(self) -> list[_ResponseContent] | None: ...
+    @property
+    def call_id(self) -> str | None: ...
+    @property
+    def id(self) -> str | None: ...
+    @property
+    def name(self) -> str | None: ...
+    @property
+    def arguments(self) -> str | None: ...
+
+
+class _Response(Protocol):
+    @property
+    def output_text(self) -> str | None: ...
+    @property
+    def output(self) -> list[_ResponseOutputItem] | None: ...
+    @property
+    def id(self) -> str | None: ...
+
+
+class _ResponseStreamEvent(Protocol):
+    @property
+    def type(self) -> str: ...
+    @property
+    def delta(self) -> str | None: ...
+    @property
+    def response(self) -> _Response | None: ...
 
 
 def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
@@ -170,9 +266,10 @@ def _normalize_chat_tool_calls(tool_calls: object) -> list[dict[str, Any]]:
     return normalized
 
 
-def parse_tool_arguments(raw_arguments: str) -> object:
+def parse_tool_arguments(raw_arguments: str) -> dict[str, Any]:
     try:
-        return json.loads(raw_arguments or "{}")
+        result = json.loads(raw_arguments or "{}")
+        return result if isinstance(result, dict) else {"input": str(result)}
     except json.JSONDecodeError:
         return {"input": raw_arguments}
 
@@ -235,61 +332,58 @@ def _content_blocks_to_openai_messages(
     return converted
 
 
-def tool_call_from_chat(call: Any) -> dict[str, Any]:
-    function = getattr(call, "function", None)
+def tool_call_from_chat(call: _ChatToolCall) -> dict[str, Any]:
     return {
-        "id": str(getattr(call, "id", "")),
-        "name": str(getattr(function, "name", "")),
-        "input": parse_tool_arguments(str(getattr(function, "arguments", "{}"))),
+        "id": call.id,
+        "name": call.function.name,
+        "input": parse_tool_arguments(call.function.arguments),
     }
 
 
-def tool_call_from_response_item(item: Any) -> dict[str, Any]:
+def tool_call_from_response_item(item: _ResponseOutputItem) -> dict[str, Any]:
     return {
-        "id": str(getattr(item, "call_id", None) or getattr(item, "id", "")),
-        "name": str(getattr(item, "name", "")),
-        "input": parse_tool_arguments(str(getattr(item, "arguments", "{}"))),
+        "id": str(item.call_id or item.id or ""),
+        "name": str(item.name or ""),
+        "input": parse_tool_arguments(str(item.arguments or "{}")),
     }
 
 
 def chat_stream_to_events(
-    stream: Iterable[object],
+    stream: Iterable[_ChatCompletionChunk],
 ) -> Iterator[TextDelta | ReasoningDelta | ToolCallReady | UsageUpdate]:
     """Yields provider events dicts: TextDelta, ReasoningDelta, ToolCallReady, UsageUpdate."""
     calls: dict[int, dict[str, str]] = defaultdict(
         lambda: {"id": "", "name": "", "arguments": ""}
     )
     for chunk in stream:
-        usage = getattr(chunk, "usage", None)
-        if usage:
-            input_tokens = getattr(usage, "prompt_tokens", 0) or 0
-            output_tokens = getattr(usage, "completion_tokens", 0) or 0
+        usage = chunk.usage
+        if usage is not None:
+            input_tokens = usage.prompt_tokens or 0
+            output_tokens = usage.completion_tokens or 0
             yield UsageUpdate(input_tokens, output_tokens)
 
-        choices = getattr(chunk, "choices", [])
+        choices = chunk.choices
         if not choices:
             continue
         choice = choices[0]
-        delta = getattr(choice, "delta", None)
-        reasoning = getattr(delta, "reasoning_content", None)
+        delta = choice.delta
+        reasoning = delta.reasoning_content
         if reasoning:
             yield ReasoningDelta(str(reasoning))
-        text = getattr(delta, "content", None)
+        text = delta.content
         if text:
             yield TextDelta(str(text))
-        for call in getattr(delta, "tool_calls", None) or []:
-            index = int(getattr(call, "index", 0) or 0)
+        for call in delta.tool_calls or []:
+            index = call.index
             current = calls[index]
-            call_id = getattr(call, "id", None)
-            if call_id:
-                current["id"] = str(call_id)
-            function = getattr(call, "function", None)
-            name = getattr(function, "name", None)
-            if name:
-                current["name"] = str(name)
-            arguments = getattr(function, "arguments", None)
-            if arguments:
-                current["arguments"] += str(arguments)
+            if call.id is not None:
+                current["id"] = call.id
+            func = call.function
+            if func is not None:
+                if func.name is not None:
+                    current["name"] = func.name
+                if func.arguments is not None:
+                    current["arguments"] += func.arguments
 
     ready = [
         ToolCall(
@@ -304,16 +398,16 @@ def chat_stream_to_events(
 
 
 def responses_stream_to_events(
-    stream: Iterable[object],
+    stream: Iterable[_ResponseStreamEvent],
 ) -> Iterator[TextDelta | FinalMessage | ToolCallReady]:  # noqa: C901
     for event in stream:
-        event_type = str(getattr(event, "type", ""))
+        event_type = event.type
         if event_type.endswith(".delta"):
-            text = getattr(event, "delta", None)
+            text = event.delta
             if text:
                 yield TextDelta(str(text))
         elif event_type.endswith(".completed"):
-            response = getattr(event, "response", None)
+            response = event.response
             if response is not None:
                 for provider_event in responses_to_events(response):
                     if not isinstance(provider_event, TextDelta):
@@ -321,18 +415,18 @@ def responses_stream_to_events(
 
 
 def responses_to_events(
-    response: object,
+    response: _Response,
 ) -> list[TextDelta | FinalMessage | ToolCallReady]:
     events: list[TextDelta | FinalMessage | ToolCallReady] = []
-    text = getattr(response, "output_text", None)
+    text = response.output_text
     if text:
         events.append(TextDelta(str(text)))
     calls = []
-    for item in getattr(response, "output", []) or []:
-        item_type = str(getattr(item, "type", ""))
+    for item in response.output or []:
+        item_type = item.type
         if item_type == "message":
-            for content in getattr(item, "content", []) or []:
-                content_text = getattr(content, "text", None)
+            for content in item.content or []:
+                content_text = content.text
                 if content_text:
                     events.append(TextDelta(str(content_text)))
         elif item_type in {"function_call", "tool_call"}:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# mypy: disable-error-code="list-item"
+
 import unittest
 from typing import cast
 
@@ -148,7 +150,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
 class OpenAIStreamCodecTest(unittest.TestCase):
     def test_chat_stream_aggregates_tool_call_arguments(self) -> None:
         events = list(
-            chat_stream_to_events(
+            chat_stream_to_events(  # type: ignore
                 [
                     FakeStreamChunk(content="he"),
                     FakeStreamChunk(content="llo"),
@@ -171,7 +173,7 @@ class OpenAIStreamCodecTest(unittest.TestCase):
 
     def test_chat_stream_extracts_reasoning_content(self) -> None:
         events = list(
-            chat_stream_to_events(
+            chat_stream_to_events(  # type: ignore
                 [
                     FakeStreamChunk(reasoning_content="I am thinking"),
                     FakeStreamChunk(reasoning_content=" deeply"),
@@ -194,6 +196,7 @@ class OpenAIStreamCodecTest(unittest.TestCase):
 class FakeStreamChunk:
     def __init__(self, tool_call=None, content=None, reasoning_content=None) -> None:
         self.choices = [FakeStreamChoice(content, tool_call, reasoning_content)]
+        self.usage = None
 
 
 class FakeStreamChoice:
