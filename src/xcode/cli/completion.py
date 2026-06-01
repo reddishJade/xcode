@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from xcode.harness.skills import ToolSpec
 
+from .commands import COMMAND_NAMES
+
 """REPL 命令、工具名和 @file 引用补全。"""
 
 if TYPE_CHECKING:
@@ -20,25 +22,6 @@ else:
             pass
 
 
-COMMANDS = (
-    "/help",
-    "/clear",
-    "/fork",
-    "/rewind",
-    "/resume",
-    "/sessions",
-    "/model",
-    "/effort",
-    "/thinking",
-    "/plan",
-    "/review",
-    "/act",
-    "/verbose",
-    "/compact",
-    "/permissions",
-    "/tool",
-    "/exit",
-)
 MAX_FILE_COMPLETIONS = 100
 BLOCKED_PARTS = {".git", ".venv", "__pycache__"}
 
@@ -82,7 +65,7 @@ class ReplCompleter(Completer):
     def _complete_command(self, text: str) -> list[CompletionItem]:
         return [
             CompletionItem(command, -len(text), "command")
-            for command in COMMANDS
+            for command in COMMAND_NAMES
             if command.startswith(text)
         ]
 

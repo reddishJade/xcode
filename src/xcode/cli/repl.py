@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, is_dataclass
 import importlib.util
 import json
 from pathlib import Path
@@ -9,8 +9,17 @@ import shutil
 import sys
 import textwrap
 import time
-from typing import Any, Protocol
+from typing import Any
 
+from .commands import (
+    CommandContext,
+    CommandEntry,
+    ReplState,
+    PromptLike,
+    PromptText,
+    COMMAND_NAMES,
+    generate_help_text,
+)
 from .completion import ReplCompleter
 from .file_refs import FileReference, expand_file_references
 from .markdown import MarkdownRenderer, TerminalMarkdownRenderer
@@ -49,13 +58,6 @@ CLI_COLOR_ERROR = "red"
 CLI_COLOR_WARNING = "yellow"
 CLI_COLOR_INFO = "blue"
 CLI_PROMPT_MARKER_STYLE = "ansigreen bold"
-PromptText = str | list[tuple[str, str]]
-
-
-class PromptLike(Protocol):
-    def prompt(self, prompt_text: PromptText) -> str: ...
-
-
 class PromptSessionAdapter:
     def __init__(self, session: Any) -> None:
         self.session = session
@@ -158,59 +160,289 @@ class _LiveReasoningPreview:
         self.live = None
 
 
-HELP_TEXT = """Commands:
-  /help      Show this help.
-  /clear     Start a new session transcript.
-  /fork [explore|verify|isolate]
-             Fork current session into an independent branch.
-  /rewind N  Remove the last N user turns from the transcript.
-  /resume    Choose a recent conversation to resume.
-  /resume last
-             Resume the latest conversation.
-  /sessions  List recent conversations.
-  /model     Show current model info.
-  /model <name>
-             Switch model (e.g. /model deepseek-v4-pro).
-  /model <name> --thinking <level>
-             Switch model with thinking mode (off/minimal/low/medium/high/xhigh).
-  /effort    Show current reasoning effort.
-  /effort <level>
-             Set reasoning effort (off/minimal/low/medium/high/max).
-  /thinking  Show current thinking state (on/off).
-  /thinking on|off
-             Enable or disable thinking mode.
-  /plan      Enter Plan Mode: read-only inspection tools, no edits or shell.
-  /review    Enter Review Mode: read-only review, guarded validation.
-  /act       Enter Act Mode and allow normal tool use within policy.
-  /verbose on / off
-             Show or hide tool call ids and result details.
-  /compact   Manually request context compaction and shrink the session log.
-  /permissions
-             List session-level and persistent permission rules.
-  /permissions revoke <tool>
-             Revoke a persistent permission rule.
-  /permissions clear
-             Clear session-level permission rules.
-  /tool NAME INPUT
-             Run one registered tool directly.
-  /tool list
-             Show enabled and available tools by group.
-  /exit      Exit the REPL.
-
-Press Shift+Enter for a newline. If your terminal does not send Shift+Enter,
-use Esc Enter as the fallback accepted by prompt_toolkit.
-Use Tab to complete slash commands, /tool names, and @file references.
-"""
+# ── 命令处理函数 ──
 
 
-@dataclass
-class ReplState:
-    mode: str = "act"
-    verbose: bool = False
-    approved_plan: str | None = None
-    exit_pending: float = 0.0
-    pending_partial: tuple[str, str] | None = None  # (reasoning, text) captured on interrupt
-    pending_inject: str | None = None  # user message to inject after interrupt
+def _cmd_help(cmd: str, ctx: CommandContext) -> bool:
+    print(HELP_TEXT)
+    return False
+
+
+def _cmd_clear(cmd: str, ctx: CommandContext) -> bool:
+    ctx.store.clear()
+    if ctx.session_policy is not None:
+        ctx.session_policy.clear()
+    print("New session started.")
+    return False
+
+
+def _cmd_fork(cmd: str, ctx: CommandContext) -> bool:
+    parts = cmd.split(maxsplit=1)
+    fork_type = parts[1].strip() if len(parts) == 2 else None
+    if fork_type is not None and fork_type not in FORK_TYPES:
+        print(f"fork_type must be one of {sorted(FORK_TYPES)}, got {fork_type!r}")
+        return False
+    meta = ctx.store.fork_into(fork_type)
+    if ctx.session_policy is not None:
+        ctx.session_policy.clear()
+    label = f" ({fork_type})" if fork_type else ""
+    print(f'Forked: "{meta.title}"{label}')
+    return False
+
+
+def _cmd_rewind(cmd: str, ctx: CommandContext) -> bool:
+    parts = cmd.split()
+    turns = int(parts[1]) if len(parts) > 1 else 1
+    removed = ctx.store.rewind_turns(turns)
+    print(f"Rewound {removed} transcript records.")
+    return False
+
+
+def _cmd_resume(cmd: str, ctx: CommandContext) -> bool:
+    parts = cmd.split(maxsplit=1)
+    if len(parts) == 2:
+        target = parts[1].strip()
+        if target == "last":
+            view = _resume_latest(ctx.store)
+            if view:
+                print(_resumed_message(view))
+                _print_loaded_history(ctx.store)
+            else:
+                print("No conversations found.")
+            return False
+        ctx.store.resume(target)
+        print(_resumed_message(_current_view(ctx.store)))
+        _print_loaded_history(ctx.store)
+        return False
+    _resume_interactively(ctx.store, ctx.prompt_session)
+    return False
+
+
+def _cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
+    _print_sessions(ctx.store.list_session_infos())
+    return False
+
+
+def _cmd_model(cmd: str, ctx: CommandContext) -> bool:
+    _handle_model_command(cmd, ctx.app)
+    return False
+
+
+def _cmd_effort(cmd: str, ctx: CommandContext) -> bool:
+    _handle_effort_command(cmd, ctx.app)
+    return False
+
+
+def _cmd_thinking(cmd: str, ctx: CommandContext) -> bool:
+    _handle_thinking_command(cmd, ctx.app)
+    return False
+
+
+def _cmd_plan(cmd: str, ctx: CommandContext) -> bool:
+    ctx.state.mode = "plan"
+    print(
+        "Plan Mode enabled. Read-only inspection tools are available; edits and shell are blocked."
+    )
+    return False
+
+
+def _cmd_review(cmd: str, ctx: CommandContext) -> bool:
+    ctx.state.mode = "review"
+    print(
+        "Review Mode enabled. Edits are blocked; validation requires approval."
+    )
+    return False
+
+
+def _cmd_act(cmd: str, ctx: CommandContext) -> bool:
+    is_clear = False
+    parts = cmd.split(maxsplit=1)
+    if len(parts) == 2 and parts[1].strip() == "--clear":
+        is_clear = True
+
+    choice = "1" if is_clear else None
+    if choice is None:
+        print("\nSelect action:")
+        print("  1) Clear and Act (Clear context, keep plan, and act)")
+        print("  2) Keep and Act (Keep current context and act directly)")
+        print("  3) Review Mode")
+        print("  4) Continue in Plan Mode")
+        try:
+            choice = ctx.prompt_session.prompt("Choice (1-4): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled.")
+            return False
+
+    if choice == "1":
+        records = ctx.store.load_records()
+        last_assistant_content = None
+        for r in reversed(records):
+            if r.type == "assistant":
+                last_assistant_content = r.content
+                break
+
+        if not last_assistant_content or not str(last_assistant_content).strip():
+            print(
+                "Error: No plan found in the last assistant reply. Cannot Clear and Act."
+            )
+            return False
+
+        parent_id = ctx.store.current_path.stem.removeprefix("session-")
+        from datetime import datetime
+
+        plan_text = f"# Approved Plan (Forked from {parent_id})\nDate: {datetime.now().isoformat(timespec='seconds')}\n\n{last_assistant_content}"
+
+        plan_file = ctx.store.artifacts_dir / f"plan-{parent_id}.md"
+        try:
+            plan_file.write_text(plan_text, encoding="utf-8")
+        except OSError as e:
+            print(f"Warning: Failed to write plan artifact: {e}")
+
+        meta = ctx.store.fork_clean_into(
+            "isolate", title=f"Act Continuation of Plan {parent_id}"
+        )
+        if ctx.session_policy is not None:
+            ctx.session_policy.clear()
+
+        ctx.state.approved_plan = str(last_assistant_content)
+        ctx.state.mode = "act"
+        print(f'Clean Fork created: "{meta.title}"')
+        print("Act Mode enabled with approved plan.")
+    elif choice == "2":
+        ctx.state.mode = "act"
+        print("Act Mode enabled. Normal tool use restored within policy.")
+    elif choice == "3":
+        ctx.state.mode = "review"
+        print(
+            "Review Mode enabled. Edits are blocked; validation requires approval."
+        )
+    elif choice == "4":
+        print("Continuing in Plan Mode.")
+    else:
+        print(f"Invalid choice: {choice}")
+    return False
+
+
+def _cmd_verbose(cmd: str, ctx: CommandContext) -> bool:
+    parts = cmd.split(maxsplit=1)
+    if len(parts) == 2 and parts[1] == "on":
+        ctx.state.verbose = True
+        print("Verbose mode on: tool call ids and result details will be shown.")
+    elif len(parts) == 2 and parts[1] == "off":
+        ctx.state.verbose = False
+        print("Verbose mode off.")
+    else:
+        print("Usage: /verbose on|off")
+    return False
+
+
+def _cmd_compact(cmd: str, ctx: CommandContext) -> bool:
+    agent = getattr(ctx.app, "agent", None)
+    if agent is not None and hasattr(agent, "request_compaction"):
+        agent.request_compaction()
+        print("Active context compaction requested for the next agent run.")
+    else:
+        print(
+            "Context compaction is not supported or not configured in the current agent."
+        )
+    compacted = ctx.store.compact_current_session(max_tool_result_chars=200)
+    if compacted > 0:
+        print(f"Compacted {compacted} large tool results in the session log.")
+    else:
+        print("No large tool results to compact in the session log.")
+    return False
+
+
+def _cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
+    _handle_permissions(cmd, ctx.session_policy, ctx.persistent_store)
+    return False
+
+
+def _cmd_tool(cmd: str, ctx: CommandContext) -> bool:
+    output = _run_tool_command(cmd, ctx.app)
+    ctx.store.append("event", {"type": "tool_command", "data": cmd})
+    ctx.store.append("event", {"type": "tool_result", "data": output})
+    ctx.renderer.render(output)
+    return False
+
+
+def _cmd_exit(cmd: str, ctx: CommandContext) -> bool:
+    return True
+
+
+# ── 命令注册表（单一事实来源）──
+
+COMMAND_REGISTRY: dict[str, CommandEntry] = {
+    "/help": CommandEntry(handler=_cmd_help, desc="Show this help."),
+    "/clear": CommandEntry(
+        handler=_cmd_clear, desc="Start a new session transcript."
+    ),
+    "/fork": CommandEntry(
+        handler=_cmd_fork,
+        desc="Fork current session into an independent branch.",
+        args_desc="[explore|verify|isolate]",
+    ),
+    "/rewind": CommandEntry(
+        handler=_cmd_rewind,
+        desc="Remove the last N user turns from the transcript.",
+        args_desc="N",
+    ),
+    "/resume": CommandEntry(
+        handler=_cmd_resume,
+        desc="Choose a recent conversation to resume.",
+    ),
+    "/sessions": CommandEntry(
+        handler=_cmd_sessions, desc="List recent conversations."
+    ),
+    "/model": CommandEntry(
+        handler=_cmd_model,
+        desc="Show current model info.",
+        args_desc="<name> [--thinking <level>]",
+    ),
+    "/effort": CommandEntry(
+        handler=_cmd_effort,
+        desc="Show current reasoning effort.",
+        args_desc="<level>",
+    ),
+    "/thinking": CommandEntry(
+        handler=_cmd_thinking,
+        desc="Show current thinking state (on/off).",
+        args_desc="on|off",
+    ),
+    "/plan": CommandEntry(
+        handler=_cmd_plan,
+        desc="Enter Plan Mode: read-only inspection tools, no edits or shell.",
+    ),
+    "/review": CommandEntry(
+        handler=_cmd_review,
+        desc="Enter Review Mode: read-only review, guarded validation.",
+    ),
+    "/act": CommandEntry(
+        handler=_cmd_act,
+        desc="Enter Act Mode and allow normal tool use within policy.",
+    ),
+    "/verbose": CommandEntry(
+        handler=_cmd_verbose,
+        desc="Show or hide tool call ids and result details.",
+        args_desc="on|off",
+    ),
+    "/compact": CommandEntry(
+        handler=_cmd_compact,
+        desc="Manually request context compaction and shrink the session log.",
+    ),
+    "/permissions": CommandEntry(
+        handler=_cmd_permissions,
+        desc="List / revoke / clear permission rules.",
+    ),
+    "/tool": CommandEntry(
+        handler=_cmd_tool,
+        desc="Run one registered tool directly, or list tools.",
+        args_desc="NAME INPUT|list",
+    ),
+    "/exit": CommandEntry(handler=_cmd_exit, desc="Exit the REPL."),
+}
+
+HELP_TEXT = generate_help_text(COMMAND_REGISTRY)
 
 
 class ReplHITLHandler:
@@ -876,179 +1108,18 @@ def _handle_command(
     session_policy: SessionPermissionPolicy | None = None,
     persistent_store: PersistentPermissionStore | None = None,
 ) -> bool:
-    if command in {"/exit", "/quit"}:
-        return True
-    if command == "/help":
-        print(HELP_TEXT)
-        return False
-    if command == "/clear":
-        store.clear()
-        if session_policy is not None:
-            session_policy.clear()
-        print("New session started.")
-        return False
-    if command == "/fork" or command.startswith("/fork "):
-        parts = command.split(maxsplit=1)
-        fork_type = parts[1].strip() if len(parts) == 2 else None
-        if fork_type is not None and fork_type not in FORK_TYPES:
-            print(f"fork_type must be one of {sorted(FORK_TYPES)}, got {fork_type!r}")
-            return False
-        meta = store.fork_into(fork_type)
-        if session_policy is not None:
-            session_policy.clear()
-        label = f" ({fork_type})" if fork_type else ""
-        print(f'Forked: "{meta.title}"{label}')
-        return False
-    if command.startswith("/rewind"):
-        parts = command.split()
-        turns = int(parts[1]) if len(parts) > 1 else 1
-        removed = store.rewind_turns(turns)
-        print(f"Rewound {removed} transcript records.")
-        return False
-    if command.startswith("/resume"):
-        parts = command.split(maxsplit=1)
-        if len(parts) == 2:
-            target = parts[1].strip()
-            if target == "last":
-                view = _resume_latest(store)
-                if view:
-                    print(_resumed_message(view))
-                    _print_loaded_history(store)
-                else:
-                    print("No conversations found.")
-                return False
-            store.resume(target)
-            print(_resumed_message(_current_view(store)))
-            _print_loaded_history(store)
-            return False
-        _resume_interactively(store, prompt_session)
-        return False
-    if command == "/sessions":
-        _print_sessions(store.list_session_infos())
-        return False
-    if command == "/model" or command.startswith("/model "):
-        _handle_model_command(command, app)
-        return False
-    if command == "/effort" or command.startswith("/effort "):
-        _handle_effort_command(command, app)
-        return False
-    if command == "/thinking" or command.startswith("/thinking "):
-        _handle_thinking_command(command, app)
-        return False
-    if command == "/plan":
-        state.mode = "plan"
-        print(
-            "Plan Mode enabled. Read-only inspection tools are available; edits and shell are blocked."
-        )
-        return False
-    if command == "/review":
-        state.mode = "review"
-        print("Review Mode enabled. Edits are blocked; validation requires approval.")
-        return False
-    if command == "/act" or command.startswith("/act "):
-        is_clear = False
-        parts = command.split(maxsplit=1)
-        if len(parts) == 2 and parts[1].strip() == "--clear":
-            is_clear = True
-
-        choice = "1" if is_clear else None
-        if choice is None:
-            print("\nSelect action:")
-            print("  1) Clear and Act (Clear context, keep plan, and act)")
-            print("  2) Keep and Act (Keep current context and act directly)")
-            print("  3) Review Mode")
-            print("  4) Continue in Plan Mode")
-            try:
-                choice = prompt_session.prompt("Choice (1-4): ").strip()
-            except (EOFError, KeyboardInterrupt):
-                print("\nCancelled.")
-                return False
-
-        if choice == "1":
-            records = store.load_records()
-            last_assistant_content = None
-            for r in reversed(records):
-                if r.type == "assistant":
-                    last_assistant_content = r.content
-                    break
-
-            if not last_assistant_content or not str(last_assistant_content).strip():
-                print(
-                    "Error: No plan found in the last assistant reply. Cannot Clear and Act."
-                )
-                return False
-
-            parent_id = store.current_path.stem.removeprefix("session-")
-            from datetime import datetime
-
-            plan_text = f"# Approved Plan (Forked from {parent_id})\nDate: {datetime.now().isoformat(timespec='seconds')}\n\n{last_assistant_content}"
-
-            plan_file = store.artifacts_dir / f"plan-{parent_id}.md"
-            try:
-                plan_file.write_text(plan_text, encoding="utf-8")
-            except OSError as e:
-                print(f"Warning: Failed to write plan artifact: {e}")
-
-            meta = store.fork_clean_into(
-                "isolate", title=f"Act Continuation of Plan {parent_id}"
-            )
-            if session_policy is not None:
-                session_policy.clear()
-
-            state.approved_plan = str(last_assistant_content)
-            state.mode = "act"
-            print(f'Clean Fork created: "{meta.title}"')
-            print("Act Mode enabled with approved plan.")
-            return False
-
-        elif choice == "2":
-            state.mode = "act"
-            print("Act Mode enabled. Normal tool use restored within policy.")
-            return False
-        elif choice == "3":
-            state.mode = "review"
-            print(
-                "Review Mode enabled. Edits are blocked; validation requires approval."
-            )
-            return False
-        elif choice == "4":
-            print("Continuing in Plan Mode.")
-            return False
-        else:
-            print(f"Invalid choice: {choice}")
-            return False
-    if command == "/verbose on":
-        state.verbose = True
-        print("Verbose mode on: tool call ids and result details will be shown.")
-        return False
-    if command == "/verbose off":
-        state.verbose = False
-        print("Verbose mode off.")
-        return False
-    if command == "/compact":
-        agent = getattr(app, "agent", None)
-        if agent is not None and hasattr(agent, "request_compaction"):
-            agent.request_compaction()
-            print("Active context compaction requested for the next agent run.")
-        else:
-            print(
-                "Context compaction is not supported or not configured in the current agent."
-            )
-        compacted = store.compact_current_session(max_tool_result_chars=200)
-        if compacted > 0:
-            print(f"Compacted {compacted} large tool results in the session log.")
-        else:
-            print("No large tool results to compact in the session log.")
-        return False
-    if command == "/permissions" or command.startswith("/permissions "):
-        _handle_permissions(command, session_policy, persistent_store)
-        return False
-    if command == "/tool" or command.startswith("/tool "):
-        output = _run_tool_command(command, app)
-        store.append("event", {"type": "tool_command", "data": command})
-        store.append("event", {"type": "tool_result", "data": output})
-        renderer.render(output)
-        return False
+    ctx = CommandContext(
+        store=store,
+        app=app,
+        renderer=renderer,
+        state=state,
+        prompt_session=prompt_session,
+        session_policy=session_policy,
+        persistent_store=persistent_store,
+    )
+    for prefix in sorted(COMMAND_REGISTRY, key=len, reverse=True):
+        if command == prefix or command.startswith(prefix + " "):
+            return COMMAND_REGISTRY[prefix].handler(command, ctx)
     print(f"Unknown command: {command}")
     return False
 
