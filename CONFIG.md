@@ -57,9 +57,11 @@ REPL 会话索引固定写入 `.local/session_index.json`。Plan artifact 写入
 |---|---|---|---|
 | `enabled_groups` | array | `["core"]` | 启用的工具分组 |
 
-可选 group：`core`、`validation`、`worktree`、`mcp`、`skills`、`subagent`、`tasks`。
+可选 group：`core`、`validation`、`skills`、`subagent`、`worktree`、`mcp`、`tasks`、`memory`、`plugins`、`daemon`、`mailbox`、`progress`、`speculation`、`experimental`。
 
 `core` 分组包含：`read_file`、`write_file`、`edit_file`、`glob_files`、`grep_search`、`bash`。`run_validation` 通过 `"validation"` 启用。MCP 工具必须通过 `"mcp"` 启用。
+
+实验性能力可以单独启用：`worktree`、`mcp`、`tasks`、`memory`、`plugins`、`daemon`、`mailbox`、`progress`、`speculation`。`experimental` 是总开关，等价于同时启用这些实验性能力。`bm25` 是 `memory` 的内部检索实现，不单独作为启用入口。默认配置不会加载任何实验性能力。
 
 ### tools.bash
 
@@ -93,6 +95,8 @@ MCP server 不写进 `xcode.config.json` 的 `tools` 段，而是放在 `.local/
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `auto_trigger` | bool | `true` | 启用 `skills` 工具组且找到 skills 目录时，按当前任务自动匹配 SKILL.md |
+
+`skills` 不是默认工具组；只有 `enabled_groups` 包含 `"skills"` 时，`auto_trigger` 才会生效。
 
 ## prompt
 

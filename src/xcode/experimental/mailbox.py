@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..harness.skills import ToolSpec
+
 logger = logging.getLogger("xcode.experimental.mailbox")
 
 
@@ -130,3 +132,102 @@ class AgentMailbox:
 
     def _timestamp(self) -> str:
         return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
+    from ..harness.skills import parse_tool_input
+
+    def send_mailbox_message(action_input: str) -> str:
+        args = parse_tool_input(action_input)
+        sender_id = str(args.get("sender_id", "")).strip()
+        recipient_id = str(args.get("recipient_id", "")).strip()
+        type_name = str(args.get("type", args.get("type_name", ""))).strip()
+        payload = args.get("payload", {})
+        if not sender_id:
+            return "sender_id is required"
+        if not recipient_id:
+            return "recipient_id is required"
+        if not type_name:
+            return "type is required"
+        if not isinstance(payload, dict):
+            return "payload must be an object"
+        message_id = mailbox.send_message(
+            sender_id=sender_id,
+            recipient_id=recipient_id,
+            type_name=type_name,
+            payload=payload,
+        )
+        return f"sent message {message_id} to {recipient_id}"
+
+    def read_mailbox_messages(action_input: str) -> str:
+        args = parse_tool_input(action_input)
+        recipient_id = str(args.get("recipient_id", "")).strip()
+        if not recipient_id:
+            return "recipient_id is required"
+        messages = mailbox.read_unread_messages(recipient_id)
+        return json.dumps(messages, ensure_ascii=False, indent=2)
+
+    def acknowledge_mailbox_message(action_input: str) -> str:
+        args = parse_tool_input(action_input)
+        message_id = str(args.get("message_id", "")).strip()
+        recipient_id = str(args.get("recipient_id", "")).strip()
+        if not message_id:
+            return "message_id is required"
+        if not recipient_id:
+            return "recipient_id is required"
+        mailbox.acknowledge_message(message_id, recipient_id)
+        return f"acknowledged message {message_id} for {recipient_id}"
+
+    return (
+        ToolSpec(
+            name="send_mailbox_message",
+            description="Send an append-only message event to an agent mailbox.",
+            input_hint='{"sender_id":"agent_a","recipient_id":"agent_b","type":"query","payload":{}}',
+            handler=send_mailbox_message,
+            risk="low",
+            schema={
+                "type": "object",
+                "properties": {
+                    "sender_id": {"type": "string"},
+                    "recipient_id": {"type": "string"},
+                    "type": {"type": "string"},
+                    "payload": {"type": "object"},
+                },
+                "required": ["sender_id", "recipient_id", "type"],
+                "additionalProperties": False,
+            },
+            group="mailbox",
+        ),
+        ToolSpec(
+            name="read_mailbox_messages",
+            description="Read unread message events for a recipient mailbox.",
+            input_hint='{"recipient_id":"agent_b"}',
+            handler=read_mailbox_messages,
+            risk="low",
+            schema={
+                "type": "object",
+                "properties": {"recipient_id": {"type": "string"}},
+                "required": ["recipient_id"],
+                "additionalProperties": False,
+            },
+            read_only=True,
+            group="mailbox",
+        ),
+        ToolSpec(
+            name="acknowledge_mailbox_message",
+            description="Append an ACK event for a mailbox message.",
+            input_hint='{"recipient_id":"agent_b","message_id":"..."}',
+            handler=acknowledge_mailbox_message,
+            risk="low",
+            schema={
+                "type": "object",
+                "properties": {
+                    "recipient_id": {"type": "string"},
+                    "message_id": {"type": "string"},
+                },
+                "required": ["recipient_id", "message_id"],
+                "additionalProperties": False,
+            },
+            group="mailbox",
+        ),
+    )

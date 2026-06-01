@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 import logging
 
-from xcode.experimental.mailbox import AgentMailbox
+from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
 from xcode.experimental.tasks import TaskStore
 
 
@@ -96,6 +96,31 @@ class TestTaskStoreAndMailbox(unittest.TestCase):
         self.assertEqual(len(unread), 2)
         self.assertEqual(unread[0]["message_id"], msg_id1)
         self.assertEqual(unread[1]["message_id"], msg_id2)
+
+    def test_mailbox_tools_basic_flow(self) -> None:
+        tools = {
+            tool.name: tool for tool in build_mailbox_tools(AgentMailbox(self.root))
+        }
+
+        sent = tools["send_mailbox_message"].handler(
+            '{"sender_id":"agent_a","recipient_id":"agent_b","type":"query","payload":{"question":"ping"}}'
+        )
+        self.assertIn("sent message", sent)
+        message_id = sent.split()[2]
+
+        unread = tools["read_mailbox_messages"].handler('{"recipient_id":"agent_b"}')
+        self.assertIn(message_id, unread)
+        self.assertIn('"question": "ping"', unread)
+
+        acked = tools["acknowledge_mailbox_message"].handler(
+            f'{{"recipient_id":"agent_b","message_id":"{message_id}"}}'
+        )
+        self.assertIn("acknowledged message", acked)
+
+        self.assertEqual(
+            tools["read_mailbox_messages"].handler('{"recipient_id":"agent_b"}'),
+            "[]",
+        )
 
 
 if __name__ == "__main__":

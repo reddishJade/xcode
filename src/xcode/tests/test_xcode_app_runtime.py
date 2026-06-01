@@ -10,6 +10,7 @@ from xcode.harness.app import XcodeApp, _build_project_scoped_registry, build_ap
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.config import (
     AgentRuntimeConfig,
+    DaemonRuntimeConfig,
     ObservabilityRuntimeConfig,
     PathsRuntimeConfig,
     ToolsRuntimeConfig,
@@ -48,7 +49,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
     def test_default_tool_groups_do_not_construct_optional_groups(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             with patch(
-                "xcode.harness.app.build_worktree_tools", side_effect=AssertionError
+                "xcode.harness.app._build_worktree_runner", side_effect=AssertionError
             ):
                 app = build_app(
                     project_root=Path(tmp),
@@ -69,6 +70,140 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             },
         )
 
+    def test_default_runtime_does_not_enable_experimental_components(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+            root = Path(tmp)
+            plugins_dir = root / ".local" / "plugins"
+            plugins_dir.mkdir(parents=True)
+            (plugins_dir / "demo.py").write_text(
+                "from xcode.harness.skills import ToolSpec\n"
+                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _value: 'ok')]\n",
+                encoding="utf-8",
+            )
+
+            app = build_app(
+                project_root=root,
+                runtime_config=XcodeRuntimeConfig(
+                    daemon=DaemonRuntimeConfig(enabled=True),
+                ),
+            )
+
+        names = {tool.name for tool in app.registry}
+        self.assertNotIn("plugin_tool", names)
+        self.assertIsNone(app.agent.compactor.on_compact)
+        self.assertIsNone(app.agent.speculation_planner)
+        self.assertIsNone(app.daemon)
+        self.assertIsNone(app.mailbox)
+        self.assertIsNone(app.progress)
+
+    def test_experimental_group_enables_experimental_components(self) -> None:
+        runtime_config = XcodeRuntimeConfig(
+            tools=ToolsRuntimeConfig(enabled_groups=("core", "experimental")),
+        )
+        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+            root = Path(tmp)
+            plugins_dir = root / ".local" / "plugins"
+            plugins_dir.mkdir(parents=True)
+            (plugins_dir / "demo.py").write_text(
+                "from xcode.harness.skills import ToolSpec\n"
+                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _value: 'ok')]\n",
+                encoding="utf-8",
+            )
+
+            app = build_app(
+                project_root=root,
+                runtime_config=runtime_config,
+            )
+
+        names = {tool.name for tool in app.registry}
+        self.assertIn("create_worktree_task", names)
+        self.assertIn("create_task", names)
+        self.assertIn("send_mailbox_message", names)
+        self.assertIn("save_task_progress", names)
+        self.assertIn("plugin_tool", names)
+        self.assertIsNotNone(app.agent.compactor.on_compact)
+        self.assertIsNotNone(app.agent.speculation_planner)
+        self.assertIsNotNone(app.daemon)
+        self.assertIsNotNone(app.mailbox)
+        self.assertIsNotNone(app.progress)
+
+    def test_individual_experimental_feature_groups_enable_individual_features(
+        self,
+    ) -> None:
+        runtime_config = XcodeRuntimeConfig(
+            tools=ToolsRuntimeConfig(enabled_groups=("core", "memory")),
+        )
+        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+            app = build_app(
+                project_root=Path(tmp),
+                runtime_config=runtime_config,
+            )
+
+        names = {tool.name for tool in app.registry}
+        self.assertNotIn("create_worktree_task", names)
+        self.assertNotIn("create_task", names)
+        self.assertIsNotNone(app.agent.compactor.on_compact)
+        self.assertIsNone(app.agent.speculation_planner)
+        self.assertIsNone(app.daemon)
+        self.assertIsNone(app.mailbox)
+        self.assertIsNone(app.progress)
+
+    def test_mailbox_group_adds_mailbox_tools_only(self) -> None:
+        runtime_config = XcodeRuntimeConfig(
+            tools=ToolsRuntimeConfig(enabled_groups=("core", "mailbox")),
+        )
+        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+            app = build_app(
+                project_root=Path(tmp),
+                runtime_config=runtime_config,
+            )
+
+        names = {tool.name for tool in app.registry}
+        self.assertIn("send_mailbox_message", names)
+        self.assertIn("read_mailbox_messages", names)
+        self.assertIn("acknowledge_mailbox_message", names)
+        self.assertNotIn("save_task_progress", names)
+        self.assertIsNone(app.agent.compactor.on_compact)
+        self.assertIsNotNone(app.mailbox)
+        self.assertIsNone(app.progress)
+
+    def test_progress_group_adds_progress_tools_only(self) -> None:
+        runtime_config = XcodeRuntimeConfig(
+            tools=ToolsRuntimeConfig(enabled_groups=("core", "progress")),
+        )
+        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+            app = build_app(
+                project_root=Path(tmp),
+                runtime_config=runtime_config,
+            )
+
+        names = {tool.name for tool in app.registry}
+        self.assertIn("save_task_progress", names)
+        self.assertIn("resume_task_progress", names)
+        self.assertNotIn("send_mailbox_message", names)
+        self.assertIsNone(app.agent.compactor.on_compact)
+        self.assertIsNone(app.mailbox)
+        self.assertIsNotNone(app.progress)
+
+    def test_speculation_group_enables_speculation_only(self) -> None:
+        runtime_config = XcodeRuntimeConfig(
+            tools=ToolsRuntimeConfig(enabled_groups=("core", "speculation")),
+        )
+        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+            app = build_app(
+                project_root=Path(tmp),
+                runtime_config=runtime_config,
+            )
+
+        names = {tool.name for tool in app.registry}
+        self.assertNotIn("create_worktree_task", names)
+        self.assertNotIn("create_task", names)
+        self.assertIsNone(app.agent.compactor.on_compact)
+        self.assertIsNotNone(app.agent.speculation_planner)
+        self.assertIsNone(app.daemon)
+        self.assertIsNone(app.mailbox)
+        self.assertIsNone(app.progress)
+
     def test_bash_tool_uses_agent_cancellation_event(self) -> None:
         captured = {}
 
@@ -77,9 +212,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             return ToolSpec("bash", "Run shell.", "command", lambda _value: "ok")
 
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
-            with patch(
-                "xcode.harness.tools.build_bash_tool", side_effect=fake_bash_tool
-            ):
+            with patch("xcode.harness.app.build_bash_tool", side_effect=fake_bash_tool):
                 app = build_app(
                     project_root=Path(tmp),
                     runtime_config=XcodeRuntimeConfig(),
@@ -319,8 +452,8 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             with (
                 patch("xcode.harness.app._build_providers", return_value=bundle),
                 patch(
-                    "xcode.harness.app.WorktreeTaskRunner",
-                    FakeWorktreeRunner,
+                    "xcode.harness.app._build_worktree_runner",
+                    lambda project_root: FakeWorktreeRunner(project_root),
                 ),
             ):
                 app = build_app(project_root=root, runtime_config=runtime_config)

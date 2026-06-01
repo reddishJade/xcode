@@ -32,7 +32,21 @@ from xcode.harness.tools import (
     build_file_tools,
 )
 from xcode.ai.providers.factory import ProviderSettings, build_provider_bundle
-from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
+
+
+EXPERIMENTAL_FEATURE_GROUPS = frozenset(
+    {
+        "worktree",
+        "mcp",
+        "tasks",
+        "memory",
+        "plugins",
+        "daemon",
+        "mailbox",
+        "progress",
+        "speculation",
+    }
+)
 
 
 @dataclass
@@ -43,6 +57,8 @@ class XcodeApp:
     registry: tuple[Any, ...] = ()
     contextual_state: Any = None
     daemon: Any = None
+    mailbox: Any = None
+    progress: Any = None
     _model_profiles: dict[str, Any] | None = None
     _env_files: tuple[Path, ...] = ()
     _closers: tuple[Callable[[], None], ...] = ()
@@ -164,7 +180,7 @@ def _build_tool_registry(
 ]:
     from xcode.harness.tools.shell_adapter import detect_shell
 
-    enabled = set(runtime_config.tools.enabled_groups)
+    enabled = _effective_enabled_groups(runtime_config.tools.enabled_groups)
     closers: list[Callable[[], None]] = []
     shell_spec = detect_shell(runtime_config.tools.shell)
     registry = _build_project_scoped_registry(
@@ -175,6 +191,8 @@ def _build_tool_registry(
         cancel_event=cancel_event,
     )
     if "worktree" in enabled:
+        from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
+
         registry += build_worktree_tools(WorktreeTaskRunner(project_root))
     if "mcp" in enabled:
         from xcode.experimental.mcp import build_mcp_tools
@@ -184,6 +202,15 @@ def _build_tool_registry(
         from xcode.experimental.tasks import TaskStore, build_task_tools
 
         registry += build_task_tools(TaskStore(project_root))
+    if "mailbox" in enabled:
+        from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
+
+        registry += build_mailbox_tools(AgentMailbox(project_root))
+    if "progress" in enabled:
+        from xcode.experimental.progress import build_progress_tools
+        from xcode.experimental.tasks import TaskStore
+
+        registry += build_progress_tools(TaskStore(project_root))
 
     skills_dir = skills_dir or project_root / "xcode" / "skills"
     skill_loader = None
@@ -213,7 +240,7 @@ def _build_tool_registry(
             return result.answer
 
         worktree_runner = (
-            WorktreeTaskRunner(project_root) if "worktree" in enabled else None
+            _build_worktree_runner(project_root) if "worktree" in enabled else None
         )
         managed_runner = ManagedSubagentRunner(
             run_child,
@@ -253,6 +280,19 @@ def _llm_profiles(llm, llm_profiles: Mapping[str, ModelProvider] | None):
     return profiles
 
 
+def _effective_enabled_groups(configured_groups: tuple[str, ...]) -> set[str]:
+    enabled = set(configured_groups)
+    if "experimental" in enabled:
+        enabled.update(EXPERIMENTAL_FEATURE_GROUPS)
+    return enabled
+
+
+def _build_worktree_runner(project_root: Path):
+    from xcode.experimental.worktree import WorktreeTaskRunner
+
+    return WorktreeTaskRunner(project_root)
+
+
 def _build_agent(
     project_root: Path,
     llm,
@@ -266,6 +306,7 @@ def _build_agent(
     compact_controller: CompactController | None = None,
     cancellation_token: CancellationToken | None = None,
     compactor: LayeredCompactor | None = None,
+    speculation_planner: Any = None,
     fallback_provider=None,
     plugins_hooks=None,
 ):
@@ -304,6 +345,7 @@ def _build_agent(
         compactor=compactor,
         compact_controller=compact_controller,
         cancellation_token=cancellation_token,
+        speculation_planner=speculation_planner,
         fallback_provider=fallback_provider,
         project_root=project_root,
     )
@@ -344,20 +386,30 @@ def build_app(
         else project_root / ".local" / "sessions"
     )
 
-    from xcode.experimental.memory import MemoryManager
+    enabled = _effective_enabled_groups(runtime_config.tools.enabled_groups)
+    on_compact = None
+    if "memory" in enabled:
+        from xcode.experimental.memory import MemoryManager
 
-    memory_manager = MemoryManager(project_root)
+        on_compact = MemoryManager(project_root).consolidate
 
     compactor = LayeredCompactor(
         transcript_dir=transcript_dir,
         max_recent_messages=runtime_config.agent.max_recent_messages,
-        on_compact=memory_manager.consolidate,
+        on_compact=on_compact,
     )
 
-    from xcode.experimental.plugins import PluginManager
+    plugins_data: dict[str, Any] = {"tools": [], "hooks": {}, "skills": []}
+    if "plugins" in enabled:
+        from xcode.experimental.plugins import PluginManager
 
-    plugin_mgr = PluginManager(project_root)
-    plugins_data = plugin_mgr.scan_and_load()
+        plugins_data = PluginManager(project_root).scan_and_load()
+
+    speculation_planner = None
+    if "speculation" in enabled:
+        from xcode.experimental.speculation import SpeculationPlanner
+
+        speculation_planner = SpeculationPlanner()
 
     registry, skill_loader, shell_spec, closers = _build_tool_registry(
         project_root=project_root,
@@ -389,11 +441,12 @@ def build_app(
         compact_controller=compact_controller,
         cancellation_token=cancellation_token,
         fallback_provider=fallback_provider,
+        speculation_planner=speculation_planner,
         plugins_hooks=plugins_data.get("hooks"),
     )
 
     daemon = None
-    if runtime_config.daemon.enabled:
+    if "daemon" in enabled:
         from xcode.experimental.daemon import HeartbeatDaemon
 
         daemon = HeartbeatDaemon(
@@ -401,11 +454,25 @@ def build_app(
             interval_seconds=runtime_config.daemon.interval_seconds,
         )
 
+    mailbox = None
+    if "mailbox" in enabled:
+        from xcode.experimental.mailbox import AgentMailbox
+
+        mailbox = AgentMailbox(project_root)
+
+    progress = None
+    if "progress" in enabled:
+        from xcode.experimental.progress import TaskProgress
+
+        progress = TaskProgress
+
     return XcodeApp(
         agent=agent,
         registry=registry,
         contextual_state=contextual_state,
         daemon=daemon,
+        mailbox=mailbox,
+        progress=progress,
         _env_files=env_files,
         _model_profiles=runtime_config.provider.model_profiles,
         _closers=closers,

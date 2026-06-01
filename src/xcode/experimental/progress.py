@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+import json
 from typing import Any
+
+from ..harness.skills import ToolSpec
 from .tasks import TaskStore
 
 logger = logging.getLogger("xcode.experimental.progress")
@@ -67,3 +70,69 @@ class TaskProgress:
         except KeyError:
             logger.error("Failed to resume task: unknown task_id %s", task_id)
             return []
+
+
+def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
+    from ..harness.skills import parse_tool_input
+
+    def save_task_progress(action_input: str) -> str:
+        args = parse_tool_input(action_input)
+        task_id = args.get("task_id", args.get("id"))
+        feature_list = args.get("feature_list", args.get("checklist"))
+        if task_id is None:
+            return "task_id is required"
+        if not isinstance(feature_list, list):
+            return "feature_list must be an array"
+        checklist: list[dict[str, Any]] = []
+        for item in feature_list:
+            if not isinstance(item, dict):
+                return "feature_list items must be objects"
+            checklist.append(item)
+        TaskProgress.save_progress(task_store, task_id, checklist)
+        return f"saved progress for task {task_id}"
+
+    def resume_task_progress(action_input: str) -> str:
+        args = parse_tool_input(action_input)
+        task_id = args.get("task_id", args.get("id"))
+        if task_id is None:
+            return "task_id is required"
+        checklist = TaskProgress.resume_task(task_store, task_id)
+        return json.dumps(checklist, ensure_ascii=False, indent=2)
+
+    return (
+        ToolSpec(
+            name="save_task_progress",
+            description="Save a durable task checklist into TaskStore and write the read-only progress summary.",
+            input_hint='{"task_id":1,"feature_list":[{"title":"Design","status":"completed"}]}',
+            handler=save_task_progress,
+            risk="low",
+            schema={
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "integer"},
+                    "feature_list": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                    },
+                },
+                "required": ["task_id", "feature_list"],
+                "additionalProperties": False,
+            },
+            group="progress",
+        ),
+        ToolSpec(
+            name="resume_task_progress",
+            description="Load the durable task checklist from TaskStore.",
+            input_hint='{"task_id":1}',
+            handler=resume_task_progress,
+            risk="low",
+            schema={
+                "type": "object",
+                "properties": {"task_id": {"type": "integer"}},
+                "required": ["task_id"],
+                "additionalProperties": False,
+            },
+            read_only=True,
+            group="progress",
+        ),
+    )

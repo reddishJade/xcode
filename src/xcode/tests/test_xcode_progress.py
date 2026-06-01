@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from xcode.experimental.tasks import TaskStore
-from xcode.experimental.progress import TaskProgress
+from xcode.experimental.progress import TaskProgress, build_progress_tools
 
 
 class TestTaskProgress(unittest.TestCase):
@@ -61,6 +61,20 @@ class TestTaskProgress(unittest.TestCase):
         task = self.store.create("Some other task")
         resumed_empty = TaskProgress.resume_task(self.store, task.id)
         self.assertEqual(resumed_empty, [])
+
+    def test_progress_tools_basic_flow(self) -> None:
+        task = self.store.create("Implement search")
+        tools = {tool.name: tool for tool in build_progress_tools(self.store)}
+
+        saved = tools["save_task_progress"].handler(
+            '{"task_id":1,"feature_list":[{"title":"Index files","status":"completed"}]}'
+        )
+        self.assertEqual(saved, f"saved progress for task {task.id}")
+
+        resumed = tools["resume_task_progress"].handler('{"task_id":1}')
+        self.assertIn('"title": "Index files"', resumed)
+        self.assertIn('"status": "completed"', resumed)
+        self.assertTrue((self.root / "claude-progress.txt").exists())
 
 
 if __name__ == "__main__":
