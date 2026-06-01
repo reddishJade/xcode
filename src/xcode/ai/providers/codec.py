@@ -42,8 +42,6 @@ class _ChoiceDeltaToolCall(Protocol):
 
 class _ChoiceDelta(Protocol):
     @property
-    def reasoning_content(self) -> str | None: ...
-    @property
     def content(self) -> str | None: ...
     @property
     def tool_calls(self) -> list[_ChoiceDeltaToolCall] | None: ...
@@ -487,7 +485,7 @@ def chat_stream_to_events(
             continue
         choice = choices[0]
         delta = choice.delta
-        reasoning = delta.reasoning_content
+        reasoning = getattr(delta, "reasoning_content", None)  # DeepSeek 非标准扩展字段，部分模型不返回
         if reasoning:
             yield ReasoningDelta(str(reasoning))
         text = delta.content

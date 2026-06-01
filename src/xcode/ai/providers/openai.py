@@ -18,7 +18,12 @@ from .runtime import ProviderRuntime
 
 
 class OpenAIChatProvider:
-    """OpenAI Chat Completions provider (兼容所有 OpenAI API 兼容服务)。"""
+    """OpenAI Chat Completions provider（兼容所有 OpenAI API 兼容服务）。
+
+    只发送 OpenAI Chat Completions 标准参数。
+    DeepSeek/ChatGLM/MiMo 等专有扩展字段（如 extra_body.thinking）
+    由各自的 Provider 实现，不在此处处理。
+    """
 
     def __init__(
         self,
@@ -41,7 +46,6 @@ class OpenAIChatProvider:
             client = OpenAI(api_key=api_key, base_url=base_url)
         self.client = client
         self.model = model
-        self.thinking = thinking
         self.reasoning_effort = reasoning_effort
         self.runtime = runtime or ProviderRuntime()
         self.prompt_cache_key = prompt_cache_key
@@ -81,17 +85,7 @@ class OpenAIChatProvider:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        prompt_cache_key = getattr(self, "prompt_cache_key", None)
-        if prompt_cache_key:
-            kwargs["prompt_cache_key"] = prompt_cache_key
-        extra_body = {}
-        if not self.thinking:
-            extra_body["thinking"] = {"type": "disabled"}
-        elif self.reasoning_effort:
-            extra_body["thinking"] = {"type": "enabled"}
-        if extra_body:
-            kwargs["extra_body"] = extra_body
-        if self.thinking and self.reasoning_effort:
+        if self.reasoning_effort:
             kwargs["reasoning_effort"] = self.reasoning_effort
 
         def intercept_usage(chunks):
