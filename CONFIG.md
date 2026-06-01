@@ -20,10 +20,34 @@
 | --- | --- | --- | --- |
 | `transport` | string | `"chat_completions"` | 模型传输协议。支持 `chat_completions`、`responses_stateful`、`deepseek_chat`、`mimo_chat`、`chatglm`、`anthropic_messages`。 |
 | `chat_model` | string | `"deepseek-v4-flash"` | 聊天模型名。 |
-| `base_url` | string | `"https://api.deepseek.com"` | OpenAI-compatible API 地址。 |
+| `base_url` | string | `""` | OpenAI-compatible API 地址。DeepSeek 和 ChatGLM 有默认值，MiMo 需要显式配置。 |
 | `api_key` | string | `""` | 显式 API key；留空时按 profile 环境变量和通用环境变量查找。 |
 | `thinking` | bool | `true` | 传给支持 thinking 的 provider。 |
-| `reasoning_effort` | string/null | `"high"` | 传给支持 reasoning effort 的 provider（DeepSeek、MiMo）。 |
+| `reasoning_effort` | string/null | `"high"` | 传给支持 reasoning effort 的 provider（DeepSeek）。可选值：`high`、`max`。 |
+
+#### Provider 默认 base_url
+
+| Provider | 默认 base_url | 说明 |
+|----------|--------------|------|
+| DeepSeek | `https://api.deepseek.com` | 官方 API |
+| ChatGLM | `https://open.bigmodel.cn/api/paas/v4/` | 智谱 AI 官方 API |
+| MiMo | `https://api.xiaomimimo.com/v1` | 小米 MiMo 官方 API |
+
+#### DeepSeek 专用说明
+
+- **Thinking Mode**：默认开启，通过 `extra_body={"thinking": {"type": "enabled"}}` 控制
+- **reasoning_effort**：默认 `"high"`，复杂 agent 请求自动设为 `"max"`
+- **reasoning_content 处理**：
+  - 无工具调用时：历史 reasoning_content 自动清除
+  - 有工具调用时：保留当前轮次 reasoning_content，确保 API 调用成功
+
+#### MiMo 专用说明
+
+- **Thinking Mode**：mimo-v2.5-pro/mimo-v2.5 默认开启，mimo-v2-flash 默认关闭
+- **reasoning_effort**：不支持（MiMo 无此参数）
+- **reasoning_content 处理**：建议保留所有历史 reasoning_content 以获得最佳表现
+- **缓存统计**：记录 `cached_tokens` 和 `reasoning_tokens`
+- **默认 base_url**：`https://api.xiaomimimo.com/v1`（小米官方 API）
 
 #### ChatGLM 专用字段
 
@@ -39,15 +63,12 @@
   "provider": {
     "model_profiles": {
       "main": {
-        "transport": "chat_completions",
-        "chat_model": "deepseek-v4-flash",
-        "base_url": "https://api.deepseek.com",
-        "api_key": ""
+        "transport": "deepseek_chat",
+        "chat_model": "deepseek-v4-pro",
+        "api_key": "YOUR_DEEPSEEK_API_KEY"
       },
       "subagent": {
-        "chat_model": "deepseek-v4-flash"
-      },
-      "fallback": {
+        "transport": "deepseek_chat",
         "chat_model": "deepseek-v4-flash"
       }
     }
@@ -64,10 +85,23 @@
       "main": {
         "transport": "chatglm",
         "chat_model": "glm-4.7",
-        "api_key": "YOUR_ZHIPU_API_KEY",
-        "thinking": true,
-        "clear_thinking": false,
-        "tool_stream": true
+        "api_key": "YOUR_ZHIPU_API_KEY"
+      }
+    }
+  }
+}
+```
+
+示例（MiMo）：
+
+```json
+{
+  "provider": {
+    "model_profiles": {
+      "main": {
+        "transport": "mimo_chat",
+        "chat_model": "mimo-v2.5-pro",
+        "api_key": "YOUR_MIMO_API_KEY"
       }
     }
   }

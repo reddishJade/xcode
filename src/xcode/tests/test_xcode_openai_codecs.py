@@ -15,8 +15,8 @@ from xcode.agent.types import (
 from xcode.harness.agent_runtime.events import ReasoningDelta, TextDelta, ToolCallReady
 from xcode.ai.providers.codec import (
     chat_stream_to_events,
+    to_chat_messages,
     to_chat_tool,
-    to_openai_messages,
 )
 from xcode.harness.skills import ToolSpec
 
@@ -36,7 +36,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
         self.assertEqual(encoded["function"]["parameters"], tool.schema)
 
     def test_tool_results_convert_to_openai_tool_messages(self) -> None:
-        messages = to_openai_messages(
+        messages = to_chat_messages(
             [
                 {
                     "role": "assistant",
@@ -62,7 +62,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
         self.assertEqual(messages[1]["role"], "tool")
 
     def test_tool_call_arguments_are_serialized_for_chat_api(self) -> None:
-        messages = to_openai_messages(
+        messages = to_chat_messages(
             [
                 {
                     "role": "assistant",
@@ -86,7 +86,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
         self.assertEqual(arguments, '{"path": "src/xcode"}')
 
     def test_reasoning_content_is_preserved_for_thinking_mode(self) -> None:
-        messages = to_openai_messages(
+        messages = to_chat_messages(
             [
                 {
                     "role": "assistant",
@@ -122,7 +122,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
             ]
         )
 
-        messages = to_openai_messages(raw_messages)
+        messages = to_chat_messages(raw_messages)
 
         self.assertEqual(messages[0]["reasoning_content"], "")
 

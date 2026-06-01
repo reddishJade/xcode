@@ -6,7 +6,7 @@ from typing import Any
 
 from ...agent.types import ToolDefinition
 from ...harness.agent_runtime.events import ProviderEvent
-from .codec import chat_stream_to_events, to_chat_tool, to_openai_messages
+from .codec import chat_stream_to_events, to_chat_messages, to_chat_tool
 from .runtime import ProviderRuntime
 
 """智谱 AI ChatGLM provider（兼容 OpenAI Chat API）。
@@ -54,6 +54,7 @@ class ChatGLMProvider:
             "transport": self.transport,
             "sent_messages": 0,
             "cached_tokens": 0,
+            "reasoning_tokens": 0,
         }
 
     async def stream(
@@ -68,7 +69,7 @@ class ChatGLMProvider:
         self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...]
     ) -> Iterator[ProviderEvent]:
         cleaned_messages = self._clean_reasoning_content(messages)
-        openai_messages = to_openai_messages(cleaned_messages)
+        openai_messages = to_chat_messages(cleaned_messages)
 
         kwargs: dict[str, object] = {
             "model": self.model,
@@ -105,6 +106,7 @@ class ChatGLMProvider:
         stream = self.runtime.run(
             lambda: self.client.chat.completions.create(**kwargs)
         )
+        self.metrics["sent_messages"] = len(openai_messages)
         yield from chat_stream_to_events(intercept_usage(stream))
 
     def _clean_reasoning_content(
@@ -138,10 +140,14 @@ class ChatGLMProvider:
         return cleaned
 
     def _record_usage(self, response, sent_messages: int) -> None:
-        """记录 usage 指标，包含缓存 Token 统计。"""
+        """记录 usage 指标，包含缓存 Token 和 reasoning_tokens 统计。"""
         self.metrics["sent_messages"] = sent_messages
         usage = getattr(response, "usage", None)
         if usage:
             details = getattr(usage, "prompt_tokens_details", None)
             cached = getattr(details, "cached_tokens", 0) if details else 0
             self.metrics["cached_tokens"] = cached or 0
+
+            completion_details = getattr(usage, "completion_tokens_details", None)
+            reasoning = getattr(completion_details, "reasoning_tokens", 0) if completion_details else 0
+            self.metrics["reasoning_tokens"] = reasoning or 0

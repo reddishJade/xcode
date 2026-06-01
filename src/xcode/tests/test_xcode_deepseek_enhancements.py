@@ -4,7 +4,7 @@ import unittest
 from typing import Any, cast
 
 from xcode.ai.providers.codec import (
-    to_openai_messages,
+    to_chat_messages,
     to_chat_tool,
 )
 from xcode.ai.providers.deepseek import DeepSeekProvider
@@ -111,7 +111,7 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
             },
         ]
 
-        converted = to_openai_messages(messages)
+        converted = to_chat_messages(messages)
 
         self.assertIsNone(converted[0]["content"])
         self.assertEqual(converted[1]["role"], "tool")

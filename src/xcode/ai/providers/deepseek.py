@@ -4,10 +4,13 @@ import copy
 from collections.abc import AsyncIterator, Iterator, Iterable
 from typing import Any
 
-from .codec import chat_stream_to_events, to_chat_tool, to_openai_messages
+from .codec import chat_stream_to_events, to_chat_messages, to_chat_tool
 from .runtime import ProviderRuntime
 
 """DeepSeek provider（兼容 OpenAI Chat API，带 reasoning_content 支持）。"""
+
+# DeepSeek API 地址
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 
 class DeepSeekProvider:
@@ -19,10 +22,10 @@ class DeepSeekProvider:
     def __init__(
         self,
         api_key: str,
-        base_url: str,
-        model: str,
+        base_url: str = DEEPSEEK_BASE_URL,
+        model: str = "deepseek-v4-pro",
         thinking: bool = True,
-        reasoning_effort: str | None = None,
+        reasoning_effort: str | None = "high",
         runtime: ProviderRuntime | None = None,
         client=None,
         strict_tools: bool = False,
@@ -39,13 +42,14 @@ class DeepSeekProvider:
         self.reasoning_effort = reasoning_effort
         self.runtime = runtime or ProviderRuntime()
         self.strict_tools = strict_tools
-        self.transport = "chat_completions"
+        self.transport = "deepseek_chat"
         self.metrics: dict[str, object] = {
             "transport": self.transport,
             "sent_messages": 0,
             "cached_tokens": 0,
             "prompt_cache_hit_tokens": 0,
             "prompt_cache_miss_tokens": 0,
+            "reasoning_tokens": 0,
         }
 
     def complete(
@@ -66,7 +70,7 @@ class DeepSeekProvider:
 
         # Handle reasoning_content cleanup for tool loop and turns
         cleaned_messages = self._clean_reasoning_content(messages)
-        api_messages = to_openai_messages(cleaned_messages)
+        api_messages = to_chat_messages(cleaned_messages)
 
         # Ensure "json" word in prompt if json_object mode is requested
         if response_format and response_format.get("type") == "json_object":
@@ -185,7 +189,7 @@ class DeepSeekProvider:
 
         # Handle reasoning_content cleanup for tool loop and turns
         cleaned_messages = self._clean_reasoning_content(messages)
-        api_messages = to_openai_messages(cleaned_messages)
+        api_messages = to_chat_messages(cleaned_messages)
 
         if response_format and response_format.get("type") == "json_object":
             api_messages = self._ensure_json_word(api_messages)
@@ -331,3 +335,8 @@ class DeepSeekProvider:
             self.metrics["prompt_cache_hit_tokens"] = hit
             self.metrics["prompt_cache_miss_tokens"] = miss
             self.metrics["cached_tokens"] = hit
+
+            # reasoning_tokens
+            completion_details = getattr(usage, "completion_tokens_details", None)
+            reasoning = getattr(completion_details, "reasoning_tokens", 0) if completion_details else 0
+            self.metrics["reasoning_tokens"] = reasoning or 0
