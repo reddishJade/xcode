@@ -601,5 +601,232 @@ class FakeStreamFunction:
         self.arguments = arguments
 
 
+class XcodeChatGLMProviderTests(unittest.TestCase):
+    """ChatGLM provider 边界测试：thinking 清理、tool_stream、参数组合。"""
+
+    def _make_provider(self, **overrides) -> ChatGLMProvider:
+        from xcode.ai.providers.chatglm import ChatGLMProvider
+
+        kwargs = dict(
+            api_key="test-key",
+            model="glm-4-flash",
+            thinking=True,
+            clear_thinking=False,
+            tool_stream=True,
+            client=FakeGLMClient(),
+        )
+        kwargs.update(overrides)
+        return ChatGLMProvider(**kwargs)
+
+    def test_thinking_disabled_sets_extra_body(self) -> None:
+        """thinking=False 时 extra_body 为 disabled。"""
+        provider = self._make_provider(thinking=False, client=FakeGLMClient())
+        # 消费生成器以触发 _stream_sync 内部代码
+        list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
+        kwargs = provider.client.chat.completions.kwargs
+        extra = kwargs.get("extra_body", {})
+        self.assertEqual(extra.get("thinking", {}).get("type"), "disabled")
+
+    def test_thinking_enabled_clear_false(self) -> None:
+        """clear_thinking=False 时 extra_body 包含 clear_thinking=false。"""
+        provider = self._make_provider(clear_thinking=False, client=FakeGLMClient())
+        list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
+        kwargs = provider.client.chat.completions.kwargs
+        extra = kwargs.get("extra_body", {})
+        thinking = extra.get("thinking", {})
+        self.assertEqual(thinking.get("type"), "enabled")
+        self.assertIs(thinking.get("clear_thinking"), False)
+
+    def test_thinking_enabled_clear_true(self) -> None:
+        """clear_thinking=True 时 extra_body 包含 clear_thinking=true。"""
+        provider = self._make_provider(clear_thinking=True, client=FakeGLMClient())
+        list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
+        kwargs = provider.client.chat.completions.kwargs
+        extra = kwargs.get("extra_body", {})
+        thinking = extra.get("thinking", {})
+        self.assertEqual(thinking.get("type"), "enabled")
+        self.assertIs(thinking.get("clear_thinking"), True)
+
+    def test_tool_stream_disabled(self) -> None:
+        """tool_stream=False 时不传 tool_stream 参数。"""
+        provider = self._make_provider(tool_stream=False, client=FakeGLMClient())
+        list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
+        kwargs = provider.client.chat.completions.kwargs
+        self.assertNotIn("tool_stream", kwargs)
+
+    def test_tool_stream_enabled(self) -> None:
+        """tool_stream=True 时传 tool_stream=true。"""
+        provider = self._make_provider(tool_stream=True, client=FakeGLMClient())
+        list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
+        kwargs = provider.client.chat.completions.kwargs
+        self.assertIs(kwargs.get("tool_stream"), True)
+
+    def test_clean_reasoning_no_tool_loop(self) -> None:
+        """非工具循环：清除所有历史 reasoning_content。"""
+        provider = self._make_provider()
+        messages = [
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
+            {"role": "user", "content": "q2"},
+        ]
+        cleaned = provider._clean_reasoning_content(messages)
+        for msg in cleaned:
+            self.assertNotIn("reasoning_content", msg)
+
+    def test_clean_reasoning_in_tool_loop_retains_current(self) -> None:
+        """工具循环中保留当前轮次的 reasoning_content。"""
+        provider = self._make_provider()
+        messages = [
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
+            {"role": "user", "content": "q2"},
+            {"role": "assistant",
+             "content": "a2",
+             "reasoning_content": "think2",
+             "tool_calls": []},
+            {"role": "tool", "tool_call_id": "t1", "content": "result"},
+        ]
+        cleaned = provider._clean_reasoning_content(messages)
+        # 倒数第二条（当前轮 assistant）应保留 reasoning_content
+        for i, msg in enumerate(cleaned):
+            if i == len(cleaned) - 2:  # 当前轮次 assistant
+                self.assertIn("reasoning_content", msg,
+                              f"msg[{i}] should retain reasoning_content")
+                self.assertEqual(msg["reasoning_content"], "think2")
+            elif msg.get("role") == "assistant":
+                self.assertNotIn("reasoning_content", msg,
+                                 f"msg[{i}] should not have reasoning_content")
+
+    def test_clean_reasoning_pre_tool_loop_cleared(self) -> None:
+        """工具循环中，当前轮之前的所有 assistant reasoning_content 都被清除。"""
+        provider = self._make_provider()
+        messages = [
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
+            {"role": "user", "content": "q2"},
+            {"role": "assistant",
+             "content": "",
+             "reasoning_content": "think2",
+             "tool_calls": [{"id": "t1", "function": {"name": "echo", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "t1", "content": "result"},
+        ]
+        cleaned = provider._clean_reasoning_content(messages)
+        # 第一个 assistant (index 1) 的 reasoning 应被清除
+        self.assertNotIn("reasoning_content", cleaned[1])
+        # 第二个 assistant (index 3, 当前轮) 保留
+        self.assertIn("reasoning_content", cleaned[3])
+
+    def test_thinking_true_streams_reasoning(self) -> None:
+        """thinking=True 时流包含 reasoning delta。"""
+        from xcode.harness.agent_runtime.events import ReasoningDelta
+
+        client = FakeGLMClient(stream_chunks=[
+            FakeGLMChunk(content="hello", reasoning="thinking..."),
+            FakeGLMChunk(content=" world"),
+        ])
+        provider = self._make_provider(client=client)
+        events = list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
+        reasoning_events = [e for e in events if isinstance(e, ReasoningDelta)]
+        self.assertEqual(len(reasoning_events), 1)
+        self.assertEqual(reasoning_events[0].chunk, "thinking...")
+
+    def test_combo_tool_stream_plus_clear_thinking(self) -> None:
+        """tool_stream=True + clear_thinking=True 组合参数正确传递。"""
+        provider = self._make_provider(
+            tool_stream=True, clear_thinking=True, client=FakeGLMClient()
+        )
+        list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
+        kwargs = provider.client.chat.completions.kwargs
+        self.assertIs(kwargs["tool_stream"], True)
+        self.assertIs(kwargs["extra_body"]["thinking"]["clear_thinking"], True)
+
+    def test_record_usage_cached_and_reasoning_tokens(self) -> None:
+        """usage 统计记录 cached_tokens 和 reasoning_tokens。"""
+        from collections import namedtuple
+
+        FakeUsage = namedtuple("FakeUsage", ["prompt_tokens", "completion_tokens",
+                                              "prompt_tokens_details", "completion_tokens_details"])
+        FakePromptDetails = namedtuple("FakePromptDetails", ["cached_tokens"])
+        FakeCompletionDetails = namedtuple("FakeCompletionDetails", ["reasoning_tokens"])
+
+        class FakeResponse:
+            usage = FakeUsage(
+                prompt_tokens=100,
+                completion_tokens=50,
+                prompt_tokens_details=FakePromptDetails(cached_tokens=20),
+                completion_tokens_details=FakeCompletionDetails(reasoning_tokens=10),
+            )
+
+        provider = self._make_provider()
+        provider._record_usage(FakeResponse(), sent_messages=2)
+        self.assertEqual(provider.metrics["cached_tokens"], 20)
+        self.assertEqual(provider.metrics["reasoning_tokens"], 10)
+        self.assertEqual(provider.metrics["sent_messages"], 2)
+
+    def test_record_usage_none_details_degradation(self) -> None:
+        """prompt_tokens_details / completion_tokens_details 为 None 时降级为 0。"""
+        from collections import namedtuple
+
+        FakeUsage = namedtuple("FakeUsage", ["prompt_tokens", "completion_tokens",
+                                              "prompt_tokens_details", "completion_tokens_details"])
+
+        class FakeResponseNoDetails:
+            usage = FakeUsage(
+                prompt_tokens=50,
+                completion_tokens=30,
+                prompt_tokens_details=None,
+                completion_tokens_details=None,
+            )
+
+        provider = self._make_provider()
+        provider._record_usage(FakeResponseNoDetails(), sent_messages=1)
+        self.assertEqual(provider.metrics["cached_tokens"], 0)
+        self.assertEqual(provider.metrics["reasoning_tokens"], 0)
+
+    def test_transport_is_chatglm(self) -> None:
+        provider = self._make_provider()
+        self.assertEqual(provider.transport, "chatglm")
+
+
+class FakeGLMClient:
+    """模拟 OpenAI Chat Completion 客户端，用于 ChatGLM provider 测试。"""
+
+    def __init__(self, stream_chunks=None) -> None:
+        self.chat = FakeGLMChat(stream_chunks or [])
+
+
+class FakeGLMChat:
+    def __init__(self, stream_chunks) -> None:
+        self.completions = FakeGLMCompletions(stream_chunks)
+
+
+class FakeGLMCompletions:
+    def __init__(self, stream_chunks) -> None:
+        self.stream_chunks = stream_chunks
+        self.kwargs: dict[str, Any] = {}
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return iter(self.stream_chunks or [FakeGLMChunk(content="ok")])
+
+
+class FakeGLMChunk:
+    def __init__(self, content="", reasoning=None) -> None:
+        self.choices = [FakeGLMChoice(content, reasoning)]
+        self.usage = None
+
+
+class FakeGLMChoice:
+    def __init__(self, content, reasoning) -> None:
+        self.delta = FakeGLMDelta(content, reasoning)
+
+
+class FakeGLMDelta:
+    def __init__(self, content, reasoning) -> None:
+        self.content = content
+        self.reasoning_content = reasoning
+        self.tool_calls = []
+
+
 if __name__ == "__main__":
     unittest.main()
