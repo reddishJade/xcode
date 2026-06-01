@@ -11,7 +11,7 @@ from typing import Any
 from xcode.harness.app import XcodeApp
 from xcode.harness.agent_runtime import StructuredAgentEvent
 
-from .graders import grade_events
+from .graders import grade_events, run_llm_judge
 from .reporting import write_report_files
 from .schema import EvalReport, EvalTask, GraderResult, TrialResult
 from .tracing import TraceRecorder
@@ -88,6 +88,15 @@ class EvalRunner:
         after_evidence = _collect_file_evidence(task, project_root)
         evidence_graders = _grade_file_evidence(task, before_evidence, after_evidence)
         graders = grade_events(task, events, answer, runtime_error) + evidence_graders
+
+        # LLM-as-judge：当 task.llm_judge_criteria 非空时执行
+        if task.llm_judge_criteria:
+            judge_provider = getattr(app.agent, "provider", None)
+            judge_graders = run_llm_judge(
+                task, answer, events, judge_provider=judge_provider
+            )
+            graders = graders + judge_graders
+
         success = all(grader.passed for grader in graders)
         metrics: dict[str, Any] = {
             "event_count": len(events),

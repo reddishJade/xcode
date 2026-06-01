@@ -20,6 +20,8 @@ class EvalTask:
     max_tool_errors: int = 0
     tags: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
+    # LLM-as-judge 评判标准：每条是一个描述性句子，如 "代码编译通过" 或 "方案考虑了边界情况"
+    llm_judge_criteria: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
