@@ -206,6 +206,9 @@ class ReplState:
     verbose: bool = False
     approved_plan: str | None = None
     exit_pending: float = 0.0
+    answer_mode: str = "interrupt"  # "interrupt" or "queue"
+    pending_partial: tuple[str, str] | None = None  # (reasoning, text) captured on interrupt
+    pending_inject: str | None = None  # user message to inject after interrupt
 
 
 class ReplHITLHandler:
@@ -370,24 +373,28 @@ def run_repl(
         _resume_interactively(store, session)
 
     while True:
-        try:
-            prompt_text: PromptText = (
-                ""
-                if state.exit_pending and time.time() - state.exit_pending < 1.5
-                else _input_prompt()
-            )
-            text = session.prompt(prompt_text).strip()
-        except (EOFError, KeyboardInterrupt):
-            now = time.time()
-            if state.exit_pending and now - state.exit_pending < 1.5:
+        if state.pending_inject is not None:
+            text = state.pending_inject
+            state.pending_inject = None
+        else:
+            try:
+                prompt_text: PromptText = (
+                    ""
+                    if state.exit_pending and time.time() - state.exit_pending < 1.5
+                    else _input_prompt()
+                )
+                text = session.prompt(prompt_text).strip()
+            except (EOFError, KeyboardInterrupt):
+                now = time.time()
+                if state.exit_pending and now - state.exit_pending < 1.5:
+                    print()
+                    _print_saved_conversation(store)
+                    return 0
+                state.exit_pending = now
                 print()
-                _print_saved_conversation(store)
-                return 0
-            state.exit_pending = now
-            print()
-            sys.stdout.write("\033[90m(press Ctrl+C again to exit)\033[0m\n")
-            sys.stdout.flush()
-            continue
+                sys.stdout.write("\033[90m(press Ctrl+C again to exit)\033[0m\n")
+                sys.stdout.flush()
+                continue
         if not text:
             continue
         state.exit_pending = 0.0
@@ -525,6 +532,18 @@ def run_repl(
             reasoning_started_at = None
             reasoning_text = ""
 
+        # 引导模式：steer 负责消息顺序，question 只传占位符
+        if state.pending_partial is not None:
+            _, partial_text = state.pending_partial
+            state.pending_partial = None
+            if partial_text:
+                agent_text = (
+                    f"[Context: assistant was interrupted mid-response]\n"
+                    f"{partial_text}\n"
+                    f"[end of partial response]\n"
+                    f"{agent_text}"
+                )
+
         try:
             for event in _ask_stream(app, agent_text, state.mode):
                 store.append("event", _event_to_dict(event))
@@ -590,7 +609,30 @@ def run_repl(
             store.append(
                 "event", {"type": "interrupted", "data": "interrupted by user"}
             )
-            print("[interrupted] current run cancelled; session is still active.")
+            has_partial = bool(reasoning_text or current_step_thoughts or step_answers)
+            if state.answer_mode == "interrupt" and has_partial:
+                state.pending_partial = (
+                    reasoning_text,
+                    "".join(current_step_thoughts)
+                    or ("".join(step_answers) if step_answers else ""),
+                )
+                print(
+                    "[interrupted] type your message below to inject into context"
+                )
+                try:
+                    inject_text = session.prompt(
+                        [("class:prompt-marker", "interrupt> "), ("", "")]
+                    ).strip()
+                except (EOFError, KeyboardInterrupt):
+                    inject_text = ""
+                if inject_text:
+                    state.pending_inject = inject_text
+                    store.append("user", inject_text)
+                else:
+                    state.pending_partial = None
+                    print("[interrupt cancelled]")
+            else:
+                print("[interrupted] current run cancelled; session is still active.")
             continue
         finally:
             _finish_reasoning_preview()
@@ -633,6 +675,14 @@ def create_prompt_session(
     except ValueError:
         pass
     bindings.add("escape", "enter")(insert_newline)
+
+    @bindings.add("c-c")
+    def handle_ctrl_c(event) -> None:
+        buf = event.current_buffer
+        if buf.text:
+            buf.reset()
+        else:
+            event.app.exit(exception=KeyboardInterrupt())
 
     completer = ReplCompleter(project_root or Path.cwd(), registry)
 
