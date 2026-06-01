@@ -176,6 +176,9 @@ HELP_TEXT = """Commands:
   /effort    Show current reasoning effort.
   /effort <level>
              Set reasoning effort (off/minimal/low/medium/high/max).
+  /thinking  Show current thinking state (on/off).
+  /thinking on|off
+             Enable or disable thinking mode.
   /plan      Enter Plan Mode: read-only inspection tools, no edits or shell.
   /review    Enter Review Mode: read-only review, guarded validation.
   /act       Enter Act Mode and allow normal tool use within policy.
@@ -827,6 +830,42 @@ def _handle_effort_command(command: str, app) -> None:
         print(f"Failed to set reasoning effort: {e}")
 
 
+def _handle_thinking_command(command: str, app) -> None:
+    parts = command.split(maxsplit=1)
+    if len(parts) == 1:
+        info = app.get_model_info() if hasattr(app, "get_model_info") else {}
+        thinking = info.get("thinking", "unknown") if info else "unknown"
+        print(f"  Thinking: {thinking}")
+        return
+
+    state = parts[1].lower()
+    if state not in ("on", "off"):
+        print("Usage: /thinking on|off")
+        return
+
+    if not hasattr(app, "set_model"):
+        print("Model switching is not supported in this app.")
+        return
+
+    info = app.get_model_info() if hasattr(app, "get_model_info") else {}
+    current_model = info.get("model", "unknown") if info else "unknown"
+    current_effort = info.get("reasoning_effort", "high") if info else "high"
+
+    try:
+        if state == "off":
+            app.set_model(model=current_model, thinking=False, reasoning_effort=None)
+            print("Thinking disabled.")
+        else:
+            app.set_model(
+                model=current_model,
+                thinking=True,
+                reasoning_effort=current_effort,
+            )
+            print(f"Thinking enabled (effort: {current_effort}).")
+    except Exception as e:
+        print(f"Failed to set thinking: {e}")
+
+
 def _handle_command(
     command: str,
     store: SessionStore,
@@ -892,6 +931,9 @@ def _handle_command(
         return False
     if command == "/effort" or command.startswith("/effort "):
         _handle_effort_command(command, app)
+        return False
+    if command == "/thinking" or command.startswith("/thinking "):
+        _handle_thinking_command(command, app)
         return False
     if command == "/plan":
         state.mode = "plan"
