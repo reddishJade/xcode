@@ -252,6 +252,8 @@ uv run python -m xcode.evals.cli --real --project-root . --tasks examples/eval/c
 | [AGENTS.md](AGENTS.md) | 本仓库 Agent 开发入口和约束 |
 | [CLAUDE.md](CLAUDE.md) | 编码行为规则和提交格式 |
 | [CONFIG.md](CONFIG.md) | 运行时配置参考 |
+| [docs/code-standards.md](docs/code-standards.md) | 详细代码质量、依赖、验证规则 |
+| [docs/git-workflow.md](docs/git-workflow.md) | 多会话 Git 工作流和提交边界 |
 | [docs/code-organization.md](docs/code-organization.md) | 模块职责与工具组映射 |
 | [docs/source-review.md](docs/source-review.md) | 源码级架构审查 |
 | [docs/evaluation-guide.md](docs/evaluation-guide.md) | 测试和 eval 工作流 |
