@@ -52,7 +52,45 @@ def _builders(base_tmp: Path) -> list[tuple[str, Callable[[], Any]]]:
                 TaskStore(base_tmp),
             ),
         ),
+        (
+            "mcp",
+            lambda: _build_mcp_catalog(base_tmp),
+        ),
+        (
+            "mailbox",
+            lambda: _build_mailbox_catalog(base_tmp),
+        ),
+        (
+            "progress",
+            lambda: _build_progress_catalog(base_tmp),
+        ),
     ]
+
+
+def _build_mcp_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
+    """在 temp dir 中构造空 MCP 配置并扫描工具名。
+
+    副作用限制在临时目录内；空配置下不应连接任何 MCP server。
+    """
+    from xcode.experimental.mcp import build_mcp_tools
+
+    mcp_config = base_tmp / "mcp_config.json"
+    if not mcp_config.exists():
+        mcp_config.write_text("{}", encoding="utf-8")
+    return build_mcp_tools(base_tmp)
+
+
+def _build_mailbox_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
+    from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
+
+    return build_mailbox_tools(AgentMailbox(base_tmp))
+
+
+def _build_progress_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
+    from xcode.experimental.progress import build_progress_tools
+    from xcode.experimental.tasks import TaskStore
+
+    return build_progress_tools(TaskStore(base_tmp))
 
 
 def build_tool_catalog() -> dict[str, set[str]]:
