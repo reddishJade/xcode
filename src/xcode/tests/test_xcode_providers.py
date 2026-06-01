@@ -337,10 +337,15 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         llm.transport = "responses_stateful"
         llm.prompt_cache_key = None
         llm.previous_response_id = None
+        llm.reasoning_effort = None
         llm.metrics = {}
+        llm._last_sent_message_index = 0
+        llm._pending_sent_message_index = 0
 
-        first = list(llm._stream_sync([{"role": "user", "content": "one"}], ()))
-        second = list(llm._stream_sync([{"role": "user", "content": "two"}], ()))
+        messages = [{"role": "user", "content": "one"}]
+        first = list(llm._stream_sync(messages, ()))
+        messages.append({"role": "user", "content": "two"})
+        second = list(llm._stream_sync(messages, ()))
 
         self.assertEqual(
             [event.chunk for event in first if isinstance(event, TextDelta)],
@@ -356,6 +361,137 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         calls = llm.client.responses.calls
         self.assertNotIn("previous_response_id", calls[0])
         self.assertEqual(calls[1]["previous_response_id"], "r1")
+
+    def test_responses_stream_yields_text_delta_immediately(self) -> None:
+        """验证 streaming 行为：TextDelta 在流迭代过程中立即产出，
+        而不是等底层 iterator 全部耗尽后才产出。"""
+        llm = OpenAIResponsesProvider.__new__(OpenAIResponsesProvider)
+        llm.model = "model"
+        llm.thinking = True
+        llm.reasoning_effort = None
+        llm.client = FakeOpenAIClient(
+            response_outputs=[
+                [
+                    FakeResponsesStreamEvent(
+                        "response.output_text.delta", delta="he"
+                    ),
+                    FakeResponsesStreamEvent(
+                        "response.output_text.delta", delta="llo"
+                    ),
+                    FakeResponsesStreamEvent(
+                        "response.completed", FakeResponsesResponse("r1")
+                    ),
+                ],
+            ]
+        )
+        llm.runtime = ProviderRuntime()
+        llm.transport = "responses_stateful"
+        llm.prompt_cache_key = None
+        llm.previous_response_id = None
+        llm.metrics = {}
+        llm._last_sent_message_index = 0
+        llm._pending_sent_message_index = 0
+
+        events = llm._stream_sync([{"role": "user", "content": "hi"}], ())
+
+        # 第一个事件应该是 TextDelta，立即产出（completed 事件尚未到达）
+        first = next(events)
+        self.assertIsInstance(first, TextDelta)
+        self.assertEqual(first.chunk, "he")
+
+        # 第二个事件也是 TextDelta，在 completed 之前产出
+        second = next(events)
+        self.assertIsInstance(second, TextDelta)
+        self.assertEqual(second.chunk, "llo")
+
+        # 第三个事件应该是 FinalMessage（completed 已处理）
+        third = next(events)
+        self.assertIsInstance(third, FinalMessage)
+
+        # 迭代器已耗尽
+        with self.assertRaises(StopIteration):
+            next(events)
+
+    def test_responses_tool_loop_does_not_resend_function_call(self) -> None:
+        """第二轮 messages 包含 assistant tool_calls 和 tool result 时，
+        实际发给 responses.create() 的 input 只有 function_call_output，
+        没有重复的 function_call。"""
+        llm = OpenAIResponsesProvider.__new__(OpenAIResponsesProvider)
+        llm.model = "model"
+        llm.thinking = True
+        llm.reasoning_effort = None
+        llm.client = FakeOpenAIClient(
+            response_outputs=[
+                # 第一轮：返回 function_call 的流
+                [
+                    FakeResponsesStreamEvent(
+                        "response.completed", FakeResponsesResponse("r1")
+                    ),
+                ],
+                # 第二轮：返回文本的流
+                [
+                    FakeResponsesStreamEvent(
+                        "response.output_text.delta", delta="done"
+                    ),
+                    FakeResponsesStreamEvent(
+                        "response.completed", FakeResponsesResponse("r2")
+                    ),
+                ],
+            ]
+        )
+        llm.runtime = ProviderRuntime()
+        llm.transport = "responses_stateful"
+        llm.prompt_cache_key = None
+        llm.previous_response_id = None
+        llm.metrics = {}
+        llm._last_sent_message_index = 0
+        llm._pending_sent_message_index = 0
+
+        # 第一轮：用户消息
+        messages: list[dict[str, Any]] = [
+            {"role": "user", "content": "call tool"},
+        ]
+        list(llm._stream_sync(messages, ()))
+        self.assertEqual(len(llm.client.responses.calls), 1)
+        first_call = llm.client.responses.calls[0]
+        self.assertNotIn("previous_response_id", first_call)
+
+        # 第二轮：包含 assistant tool_calls + tool result
+        messages.append({
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call1",
+                    "type": "function",
+                    "function": {"name": "echo", "arguments": "{}"},
+                }
+            ],
+        })
+        messages.append({
+            "role": "tool",
+            "tool_call_id": "call1",
+            "content": "tool output",
+        })
+
+        list(llm._stream_sync(messages, ()))
+        self.assertEqual(len(llm.client.responses.calls), 2)
+        second_call = llm.client.responses.calls[1]
+        self.assertEqual(second_call["previous_response_id"], "r1")
+
+        # input 中只能有 function_call_output，不能有 function_call
+        input_items = second_call["input"]
+        self.assertTrue(all(
+            item.get("type") != "function_call"
+            for item in input_items
+        ))
+        function_call_outputs = [
+            item for item in input_items
+            if item.get("type") == "function_call_output"
+        ]
+        self.assertEqual(len(function_call_outputs), 1)
+        self.assertEqual(function_call_outputs[0]["call_id"], "call1")
+        self.assertEqual(function_call_outputs[0]["output"], "tool output")
 
 
 class FakeOpenAIClient:

@@ -203,9 +203,10 @@ def to_responses_tool(
     }
 
 
-def to_openai_messages(
+def to_chat_messages(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    """转换为 Chat Completions API 格式。tool result 使用 role:"tool"。"""
     converted: list[dict[str, Any]] = []
     for message in messages:
         role = str(message.get("role", "user"))
@@ -220,7 +221,7 @@ def to_openai_messages(
 
         if isinstance(content, list):
             converted.extend(
-                _content_blocks_to_openai_messages(
+                _content_blocks_to_chat_messages(
                     role,
                     content,
                     reasoning_content=message.get("reasoning_content"),
@@ -241,6 +242,69 @@ def to_openai_messages(
             if "prefix" in message:
                 result["prefix"] = message["prefix"]
             converted.append(result)
+    return converted
+
+
+def to_responses_input(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """转换为 Responses API 格式。tool result 使用 type:"function_call_output"。"""
+    converted: list[dict[str, Any]] = []
+    for message in messages:
+        role = str(message.get("role", "user"))
+        content = message.get("content")
+
+        # tool result 转换为 function_call_output
+        if role == "tool" and "tool_call_id" in message:
+            converted.append({
+                "type": "function_call_output",
+                "call_id": message["tool_call_id"],
+                "output": str(content) if content is not None else "",
+            })
+            continue
+
+        # assistant 消息带 tool_calls
+        if role == "assistant" and "tool_calls" in message:
+            # 先添加文本内容
+            text_content = str(content) if content else None
+            if text_content:
+                converted.append({
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text_content}],
+                })
+            # 再添加 tool_calls
+            for call in message["tool_calls"]:
+                if isinstance(call, dict):
+                    func = call.get("function", {})
+                    converted.append({
+                        "type": "function_call",
+                        "call_id": call.get("id", ""),
+                        "name": func.get("name", ""),
+                        "arguments": func.get("arguments", "{}"),
+                    })
+            continue
+
+        # 普通消息
+        if isinstance(content, list):
+            converted.extend(
+                _content_blocks_to_responses_input(role, content)
+            )
+        else:
+            text = str(content) if content is not None else ""
+            if role == "assistant":
+                converted.append({
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text}],
+                })
+            else:
+                converted.append({
+                    "type": "message",
+                    "role": role,
+                    "content": [{"type": "input_text", "text": text}],
+                })
+
     return converted
 
 
@@ -274,12 +338,13 @@ def parse_tool_arguments(raw_arguments: str) -> dict[str, Any]:
         return {"input": raw_arguments}
 
 
-def _content_blocks_to_openai_messages(
+def _content_blocks_to_chat_messages(
     role: str,
     content: list,
     reasoning_content: str | None = None,
     prefix: bool | None = None,
 ) -> list[dict[str, Any]]:
+    """将内容块转换为 Chat Completions 格式。"""
     converted: list[dict[str, Any]] = []
     assistant_tool_calls = []
     text_parts = []
@@ -329,6 +394,61 @@ def _content_blocks_to_openai_messages(
         if prefix is not None and role == "assistant":
             msg["prefix"] = prefix
         converted.insert(0, msg)
+    return converted
+
+
+def _content_blocks_to_responses_input(
+    role: str,
+    content: list,
+) -> list[dict[str, Any]]:
+    """将内容块转换为 Responses API 格式。"""
+    converted: list[dict[str, Any]] = []
+    function_calls = []
+    text_parts = []
+
+    for part in content:
+        if not isinstance(part, dict):
+            text_parts.append(str(part))
+            continue
+
+        part_type = part.get("type")
+        if part_type == "tool_result":
+            # tool result -> function_call_output
+            converted.append({
+                "type": "function_call_output",
+                "call_id": str(part.get("tool_use_id", "")),
+                "output": str(part.get("content", "")),
+            })
+        elif part_type == "tool_use":
+            # tool_use -> function_call
+            function_calls.append({
+                "type": "function_call",
+                "call_id": str(part.get("id", "")),
+                "name": str(part.get("name", "")),
+                "arguments": json.dumps(part.get("input", {}), ensure_ascii=False),
+            })
+        elif part_type == "text":
+            text_parts.append(str(part.get("text", "")))
+
+    # 添加文本消息
+    if text_parts:
+        text = "".join(text_parts)
+        if role == "assistant":
+            converted.append({
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text}],
+            })
+        else:
+            converted.append({
+                "type": "message",
+                "role": role,
+                "content": [{"type": "input_text", "text": text}],
+            })
+
+    # 添加 function_call
+    converted.extend(function_calls)
+
     return converted
 
 
@@ -399,19 +519,96 @@ def chat_stream_to_events(
 
 def responses_stream_to_events(
     stream: Iterable[_ResponseStreamEvent],
-) -> Iterator[TextDelta | FinalMessage | ToolCallReady]:
+) -> Iterator[TextDelta | ReasoningDelta | ToolCallReady | UsageUpdate | FinalMessage]:
+    """处理 Responses API 流式事件。
+
+    支持的事件类型：
+    - response.output_text.delta: 文本增量
+    - response.function_call_arguments.delta: 工具调用参数增量
+    - response.function_call_arguments.done: 工具调用参数完成
+    - response.output_item.done: 输出项完成（包含 function_call）
+    - response.completed: 响应完成（包含 usage 和 FinalMessage）
+
+    只有在收到 response.completed 后才会 yield FinalMessage，
+    避免异常断流被伪装成正常 end_turn。
+    """
+    # 累积工具调用和文本
+    pending_calls: dict[int, dict[str, str]] = {}
+    accumulated_text = ""
+    completed = False
+    response_text = ""  # 从 completed 响应中提取的完整 output_text
+
     for event in stream:
         event_type = event.type
-        if event_type.endswith(".delta"):
+
+        # 文本增量
+        if event_type == "response.output_text.delta":
             text = event.delta
             if text:
+                accumulated_text += str(text)
                 yield TextDelta(str(text))
-        elif event_type.endswith(".completed"):
-            response = event.response
+
+        # reasoning 增量（部分模型支持）
+        elif event_type == "response.reasoning_summary_text.delta":
+            text = event.delta
+            if text:
+                yield ReasoningDelta(str(text))
+
+        # 工具调用参数增量
+        elif event_type == "response.function_call_arguments.delta":
+            # 从 event 中提取 index 和 delta
+            index = getattr(event, "output_index", 0)
+            delta = getattr(event, "delta", "")
+            if index not in pending_calls:
+                pending_calls[index] = {"id": "", "name": "", "arguments": ""}
+            pending_calls[index]["arguments"] += delta
+
+        # 输出项完成
+        elif event_type == "response.output_item.done":
+            item = getattr(event, "item", None)
+            if item is not None:
+                item_type = getattr(item, "type", "")
+                if item_type == "function_call":
+                    index = getattr(event, "output_index", 0)
+                    if index not in pending_calls:
+                        pending_calls[index] = {"id": "", "name": "", "arguments": ""}
+                    call_id = getattr(item, "call_id", "") or getattr(item, "id", "")
+                    name = getattr(item, "name", "")
+                    arguments = getattr(item, "arguments", "")
+                    pending_calls[index]["id"] = str(call_id)
+                    pending_calls[index]["name"] = str(name)
+                    if arguments:
+                        pending_calls[index]["arguments"] = str(arguments)
+
+        # 响应完成
+        elif event_type == "response.completed":
+            completed = True
+            response = getattr(event, "response", None)
             if response is not None:
-                for provider_event in responses_to_events(response):
-                    if not isinstance(provider_event, TextDelta):
-                        yield provider_event
+                # 捕获 output_text，优先用于 FinalMessage
+                response_text = str(getattr(response, "output_text", "") or "")
+                # 提取 usage
+                usage = getattr(response, "usage", None)
+                if usage:
+                    input_tokens = getattr(usage, "input_tokens", 0) or getattr(usage, "prompt_tokens", 0)
+                    output_tokens = getattr(usage, "output_tokens", 0) or getattr(usage, "completion_tokens", 0)
+                    yield UsageUpdate(int(input_tokens), int(output_tokens))
+
+    # 输出累积的工具调用
+    if pending_calls:
+        ready = [
+            ToolCall(
+                id=call["id"],
+                name=call["name"],
+                input=parse_tool_arguments(call["arguments"]),
+            )
+            for _, call in sorted(pending_calls.items())
+        ]
+        yield ToolCallReady(ready)
+    elif completed:
+        # 优先使用 response.output_text，回退到 accumulated_text
+        final_text = response_text or accumulated_text
+        yield FinalMessage(final_text, "end_turn")
 
 
 def responses_to_events(
