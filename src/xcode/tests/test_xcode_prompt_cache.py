@@ -116,7 +116,5 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
         self.assertNotIn("Notice 1", second_prompt)
 
 
-from unittest.mock import patch  # noqa: E402
-
 if __name__ == "__main__":
     unittest.main()

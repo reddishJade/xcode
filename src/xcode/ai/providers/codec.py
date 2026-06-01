@@ -399,7 +399,7 @@ def chat_stream_to_events(
 
 def responses_stream_to_events(
     stream: Iterable[_ResponseStreamEvent],
-) -> Iterator[TextDelta | FinalMessage | ToolCallReady]:  # noqa: C901
+) -> Iterator[TextDelta | FinalMessage | ToolCallReady]:
     for event in stream:
         event_type = event.type
         if event_type.endswith(".delta"):

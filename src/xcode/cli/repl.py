@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict, dataclass, is_dataclass
+import importlib.util
 import json
 from pathlib import Path
 import shutil
@@ -14,6 +15,7 @@ from .completion import ReplCompleter
 from .file_refs import FileReference, expand_file_references
 from .markdown import MarkdownRenderer, TerminalMarkdownRenderer
 from .session import FORK_TYPES, SessionMetadataView, SessionStore
+from .tool_catalog import build_tool_catalog
 from xcode.harness.observability import (
     HITLResult,
     PersistentPermissionStore,
@@ -266,12 +268,7 @@ class ReplHITLHandler:
 
 
 def _has_radiolist() -> bool:
-    try:
-        from prompt_toolkit.shortcuts.dialogs import radiolist_dialog  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec("prompt_toolkit.shortcuts.dialogs") is not None
 
 
 def _should_use_radiolist(prompt: PromptLike | None) -> bool:
@@ -1072,9 +1069,6 @@ def _print_saved_conversation(store: SessionStore) -> None:
 
 def _ask_stream(app, text: str, mode: str):
     return app.ask_stream(text, mode=mode)
-
-
-from xcode.cli.tool_catalog import build_tool_catalog  # noqa: E402
 
 
 def _run_tool_command(command: str, app) -> str:

@@ -22,7 +22,7 @@ from ..harness.agent_runtime.events import (
     ReasoningDelta,
     ToolCallReady,
 )
-from .types import (  # noqa: E402
+from .types import (
     AfterToolCallContext,
     AgentContext,
     AgentEvent,

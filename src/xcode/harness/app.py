@@ -41,6 +41,7 @@ from xcode.ai.providers.factory import (
 )
 
 if TYPE_CHECKING:
+    from xcode.ai.providers.factory import ModelProfileProto
     from xcode.experimental.daemon import HeartbeatDaemon
     from xcode.experimental.mailbox import AgentMailbox
     from xcode.experimental.progress import TaskProgress
@@ -88,7 +89,7 @@ class XcodeApp:
         reasoning_effort: str | None = None,
     ) -> str:
         from xcode.ai.providers import build_provider_bundle, ProviderSettings
-        from xcode.ai.providers.factory import ModelProfileConfig, ModelProfileProto  # noqa: F401
+        from xcode.ai.providers.factory import ModelProfileConfig
 
         if not self._model_profiles:
             return getattr(self.agent.provider, "model", "unknown")
@@ -166,8 +167,6 @@ class XcodeApp:
 
 
 def _build_providers(runtime_config: XcodeRuntimeConfig, env_files: tuple[Path, ...]):
-    from xcode.ai.providers.factory import ModelProfileProto  # noqa: F401
-
     model_profiles = cast(
         "dict[str, ModelProfileProto]", runtime_config.provider.model_profiles
     )

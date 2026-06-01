@@ -23,6 +23,7 @@ from .types import (
     TurnEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionEndEvent,
+    UserMessage,
 )
 
 EMPTY_USAGE = {
@@ -372,5 +373,3 @@ class Agent:
             self._active_run = None
 
 
-# 避免循环 import 的转发
-from .types import UserMessage  # noqa: E402

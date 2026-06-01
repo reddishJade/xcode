@@ -3,17 +3,21 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from xcode.harness.skills import ToolSpec
 
 """REPL 命令、工具名和 @file 引用补全。"""
 
-try:
+if TYPE_CHECKING:
     from prompt_toolkit.completion import Completer
-except ImportError:
+else:
+    try:
+        from prompt_toolkit.completion import Completer
+    except ImportError:
 
-    class Completer:  # type: ignore[no-redef]
-        pass
+        class Completer:
+            pass
 
 
 COMMANDS = (

@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 from xcode.harness.app import XcodeApp, _build_project_scoped_registry, build_app
 from xcode.harness.agent_runtime import StructuredAgent
+from xcode.harness.agent_runtime.events import TextDelta, FinalMessage
+from xcode.harness.agent_runtime.provider import ModelProvider
 from xcode.harness.config import (
     AgentRuntimeConfig,
     DaemonRuntimeConfig,
@@ -474,10 +476,6 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 self.fail("subagent did not finish")
 
         self.assertEqual(seen_reads, ["worktree"])
-
-
-from xcode.harness.agent_runtime.provider import ModelProvider  # noqa: E402
-from xcode.harness.agent_runtime.events import TextDelta, FinalMessage  # noqa: E402
 
 
 class MockProvider(ModelProvider):

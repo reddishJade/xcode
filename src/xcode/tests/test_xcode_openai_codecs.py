@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-# mypy: disable-error-code="list-item"
-
 import unittest
 from typing import cast
 
@@ -150,7 +148,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
 class OpenAIStreamCodecTest(unittest.TestCase):
     def test_chat_stream_aggregates_tool_call_arguments(self) -> None:
         events = list(
-            chat_stream_to_events(  # type: ignore
+            chat_stream_to_events(
                 [
                     FakeStreamChunk(content="he"),
                     FakeStreamChunk(content="llo"),
@@ -173,7 +171,7 @@ class OpenAIStreamCodecTest(unittest.TestCase):
 
     def test_chat_stream_extracts_reasoning_content(self) -> None:
         events = list(
-            chat_stream_to_events(  # type: ignore
+            chat_stream_to_events(
                 [
                     FakeStreamChunk(reasoning_content="I am thinking"),
                     FakeStreamChunk(reasoning_content=" deeply"),
@@ -194,34 +192,59 @@ class OpenAIStreamCodecTest(unittest.TestCase):
 
 
 class FakeStreamChunk:
-    def __init__(self, tool_call=None, content=None, reasoning_content=None) -> None:
-        self.choices = [FakeStreamChoice(content, tool_call, reasoning_content)]
-        self.usage = None
+    def __init__(
+        self,
+        tool_call: FakeStreamToolCall | None = None,
+        content: str | None = None,
+        reasoning_content: str | None = None,
+    ) -> None:
+        self.choices: list[FakeStreamChoice] = [
+            FakeStreamChoice(content, tool_call, reasoning_content)
+        ]
+        self.usage: None = None
 
 
 class FakeStreamChoice:
-    def __init__(self, content, tool_call, reasoning_content=None) -> None:
+    def __init__(
+        self,
+        content: str | None,
+        tool_call: FakeStreamToolCall | None,
+        reasoning_content: str | None = None,
+    ) -> None:
         self.delta = FakeStreamDelta(content, tool_call, reasoning_content)
 
 
 class FakeStreamDelta:
-    def __init__(self, content, tool_call, reasoning_content=None) -> None:
-        self.content = content
-        self.tool_calls = [tool_call] if tool_call is not None else []
-        self.reasoning_content = reasoning_content
+    def __init__(
+        self,
+        content: str | None,
+        tool_call: FakeStreamToolCall | None,
+        reasoning_content: str | None = None,
+    ) -> None:
+        self.content: str | None = content
+        self.tool_calls: list[FakeStreamToolCall] | None = (
+            [tool_call] if tool_call is not None else []
+        )
+        self.reasoning_content: str | None = reasoning_content
 
 
 class FakeStreamToolCall:
-    def __init__(self, index, call_id=None, name=None, arguments=None) -> None:
-        self.index = index
-        self.id = call_id
-        self.function = FakeStreamFunction(name, arguments)
+    def __init__(
+        self,
+        index: int,
+        call_id: str | None = None,
+        name: str | None = None,
+        arguments: str | None = None,
+    ) -> None:
+        self.index: int = index
+        self.id: str | None = call_id
+        self.function: FakeStreamFunction | None = FakeStreamFunction(name, arguments)
 
 
 class FakeStreamFunction:
-    def __init__(self, name, arguments) -> None:
-        self.name = name
-        self.arguments = arguments
+    def __init__(self, name: str | None, arguments: str | None) -> None:
+        self.name: str | None = name
+        self.arguments: str | None = arguments
 
 
 if __name__ == "__main__":

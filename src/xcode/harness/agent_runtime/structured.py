@@ -737,8 +737,6 @@ class StructuredAgent:
     ) -> Generator[StructuredAgentEvent, None, None]:
         if self.speculation_planner is None:
             return
-        from xcode.experimental.speculation import SpeculationPlanner  # noqa: F401
-
         event = self.speculation_planner.plan(tool_name, status)
         if event is not None:
             yield StructuredAgentEvent("speculation", step, event)
