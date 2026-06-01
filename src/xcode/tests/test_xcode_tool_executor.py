@@ -5,12 +5,18 @@ import unittest
 from pathlib import Path
 
 from xcode.harness.agent_runtime.events import ToolCall
-from xcode.harness.agent_runtime.execution_modes import PlanPolicy, ReviewPolicy
+from xcode.harness.agent_runtime.execution_modes import (
+    ActPolicy,
+    PlanPolicy,
+    ReviewPolicy,
+)
 from xcode.harness.agent_runtime.tool_executor import (
     ExecutionCancelled,
     ToolExecutor,
+    partition_tool_calls,
     tool_result_message,
 )
+from xcode.cli.repl import ReplHITLHandler
 from xcode.harness.observability import (
     AuditRecord,
     HITLResult,
@@ -229,8 +235,6 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(audit_records[0].approved)
 
     def test_partition_tool_calls(self) -> None:
-        from xcode.harness.agent_runtime.tool_executor import partition_tool_calls
-
         # Define some tools
         t_read = ToolSpec(
             "read",
@@ -289,16 +293,11 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
 class ExecutionModeTests(unittest.TestCase):
     def test_act_validation_requires_approval(self) -> None:
-        from xcode.harness.agent_runtime.execution_modes import ActPolicy
-        from xcode.harness.agent_runtime.events import ToolCall
-
         policy = ActPolicy()
         result = policy.check_call(ToolCall("t1", "run_validation", {}))
         self.assertEqual(result, "require_approval")
 
     def test_act_bash_still_allowed(self) -> None:
-        from xcode.harness.agent_runtime.execution_modes import ActPolicy
-
         policy = ActPolicy()
         result = policy.check_call(ToolCall("t1", "bash", {"command": "echo hello"}))
         self.assertEqual(result, "allow")
@@ -306,8 +305,6 @@ class ExecutionModeTests(unittest.TestCase):
 
 class ReplHITLHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
-        from xcode.cli.repl import ReplHITLHandler
-
         self.session_policy = SessionPermissionPolicy()
         self.persistent_store = PersistentPermissionStore(Path(""))
         self.handler = ReplHITLHandler(self.session_policy, self.persistent_store)
@@ -331,8 +328,6 @@ class ReplHITLHandlerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             store = PersistentPermissionStore(Path(tmp) / "hitl.json")
-            from xcode.cli.repl import ReplHITLHandler
-
             handler = ReplHITLHandler(SessionPermissionPolicy(), store)
             result = handler._apply_choice("3", self.tool, {"command": "git push"})
             self.assertEqual(result.decision, "allow")
@@ -385,8 +380,6 @@ class ReplHITLHandlerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             persistent_store = PersistentPermissionStore(Path(tmp) / "hitl.json")
             persistent_store.grant("bash", "allow", "git push")
-            from xcode.cli.repl import ReplHITLHandler
-
             handler = ReplHITLHandler(SessionPermissionPolicy(), persistent_store)
             result = handler(self.tool, {"command": "git push origin main"})
             self.assertEqual(result.decision, "allow")

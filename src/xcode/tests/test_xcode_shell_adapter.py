@@ -13,6 +13,8 @@ from xcode.harness.tools.shell_adapter import (
     detect_shell,
 )
 from xcode.harness.tools.shell_adapter import _KNOWN_SHELLS
+from xcode.harness.tools import build_bash_tool
+from xcode.harness.skills import run_tool
 
 
 class XcodeShellAdapterTests(unittest.TestCase):
@@ -120,9 +122,6 @@ class XcodeShellAdapterTests(unittest.TestCase):
 
     def test_bash_tool_default_detects_shell(self) -> None:
         """真实执行只走 auto-detect 路径，不强制显式 shell。"""
-        from xcode.harness.tools import build_bash_tool
-        from xcode.harness.skills import run_tool
-
         with tempfile.TemporaryDirectory() as tmp:
             tool = build_bash_tool(Path(tmp))
             registry = {tool.name: tool}
@@ -135,9 +134,6 @@ class XcodeShellAdapterTests(unittest.TestCase):
         self, mock_popen: mock.MagicMock
     ) -> None:
         """验证显式 shell_spec 时 Popen 使用 shell=False 和正确的 argv。"""
-        from xcode.harness.tools import build_bash_tool
-        from xcode.harness.tools.shell_adapter import _KNOWN_SHELLS
-
         mock_proc = mock.MagicMock()
         mock_proc.poll.return_value = 0
         mock_proc.stdout.readline.return_value = b""

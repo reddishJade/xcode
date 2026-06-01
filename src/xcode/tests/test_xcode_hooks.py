@@ -9,6 +9,7 @@ from xcode.harness.agent_runtime import StructuredAgent
 
 from xcode.tests.fixtures import FakeProvider
 from xcode.harness.agent_runtime.events import (
+    ProviderEvent,
     TextDelta,
     FinalMessage,
     ToolCallReady,
@@ -26,8 +27,6 @@ class XcodeHookTests(unittest.TestCase):
         hooks.register(
             "post_tool", lambda record: seen.append((record.event, record.output))
         )
-        from xcode.harness.agent_runtime.events import ProviderEvent
-
         responses: list[list[ProviderEvent]] = [
             [
                 ToolCallReady([ToolCall("x", "echo", {"input": "hi"})]),
@@ -50,8 +49,6 @@ class XcodeHookTests(unittest.TestCase):
         seen = []
         hooks = HookManager()
         hooks.register("on_error", lambda record: seen.append(record.error))
-        from xcode.harness.agent_runtime.events import ProviderEvent
-
         responses: list[list[ProviderEvent]] = [
             [
                 ToolCallReady([ToolCall("x", "boom", {})]),

@@ -12,6 +12,7 @@ from xcode.harness.agent_runtime import StructuredAgent
 
 from xcode.tests.fixtures import FakeProvider
 from xcode.harness.agent_runtime.events import (
+    ProviderEvent,
     TextDelta,
     FinalMessage,
     ToolCallReady,
@@ -39,8 +40,6 @@ class XcodeAuditTests(unittest.TestCase):
     def test_structured_agent_writes_audit_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "audit.jsonl"
-            from xcode.harness.agent_runtime.events import ProviderEvent
-
             responses: list[list[ProviderEvent]] = [
                 [
                     ToolCallReady(
@@ -100,8 +99,6 @@ class XcodeAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "audit.jsonl"
             # Tool with high risk that returns output resembling old approval prefix
-            from xcode.harness.agent_runtime.events import ProviderEvent
-
             responses: list[list[ProviderEvent]] = [
                 [
                     ToolCallReady([ToolCall("t1", "danger", {"input": "go"})]),
