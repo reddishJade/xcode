@@ -206,7 +206,6 @@ class ReplState:
     verbose: bool = False
     approved_plan: str | None = None
     exit_pending: float = 0.0
-    answer_mode: str = "interrupt"  # "interrupt" or "queue"
     pending_partial: tuple[str, str] | None = None  # (reasoning, text) captured on interrupt
     pending_inject: str | None = None  # user message to inject after interrupt
 
@@ -610,7 +609,7 @@ def run_repl(
                 "event", {"type": "interrupted", "data": "interrupted by user"}
             )
             has_partial = bool(reasoning_text or current_step_thoughts or step_answers)
-            if state.answer_mode == "interrupt" and has_partial:
+            if has_partial:
                 state.pending_partial = (
                     reasoning_text,
                     "".join(current_step_thoughts)

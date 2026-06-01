@@ -32,6 +32,14 @@
 
 ### 有场景再动（依赖实际需求驱动）
 
+#### 0. 队列模式（REPL 异步化前置）
+
+- **当前能力**：引导中断模式已实现。Ctrl+C 中断 LLM 回复后保存 partial response 并允许注入新消息。
+- **缺口**：用户不能在 LLM 回复时直接打字输入（sync `for event in _ask_stream(...)` 阻塞了主线程）。队列模式需要输入事件和流事件双路复用，当前 sync REPL 架构不支持。
+- **触发条件**：REPL 主体改为 asyncio 双路架构后再实现。队列模式本身逻辑简单——`agent.follow_up()` 已就绪，只差让 REPL 在流式期间接受输入。
+
+### 有场景再动（依赖实际需求驱动）
+
 #### 1. Tasks + Progress 编排能力增强
 
 - **当前能力**：`tasks` 提供依赖排序和 Kanban 视图，`progress` 提供 checklist 保存/恢复。能表达任务图和进度。
