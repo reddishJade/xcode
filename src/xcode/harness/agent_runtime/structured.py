@@ -11,6 +11,7 @@ from time import perf_counter
 from typing import Any, AsyncIterator, Generator, Iterator, cast
 
 from ...agent.messages import convert_to_llm
+from ...agent.provider_response import provider_events_to_response
 from ...agent.types import (
     AgentMessage,
     AssistantMessage,
@@ -32,10 +33,7 @@ from .compaction import (
 from xcode.ai.events import (
     FinalMessage,
     ProviderEvent,
-    TextDelta,
-    ToolCallEvent,
     ToolCall as ToolUseBlock,
-    ReasoningDelta,
 )
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.harness.adapters.tool_schema import tool_definitions_from_specs
@@ -90,6 +88,24 @@ def _blocks_to_typed(blocks: list[dict[str, Any]]) -> list[ContentBlock]:
                     name=str(b.get("name", "")),
                     arguments=b.get("input", {}),
                 )
+            )
+    return result
+
+
+def _typed_blocks_to_raw(blocks: list[ContentBlock]) -> list[dict[str, Any]]:
+    """将 Agent ContentBlock 转为 StructuredAgent 运行状态使用的 raw block。"""
+    result: list[dict[str, Any]] = []
+    for block in blocks:
+        if isinstance(block, TextContent):
+            result.append({"type": "text", "text": block.text})
+        elif isinstance(block, ToolCallBlock):
+            result.append(
+                {
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.arguments or {},
+                }
             )
     return result
 
@@ -556,44 +572,17 @@ class StructuredAgent:
     ]:
         events = await self._provider_events(messages, registry)
 
-        text_parts: list[str] = []
-        reasoning_parts: list[str] = []
-        blocks: list[dict[str, Any]] = []
-        stop_reason: str | None = None
-        stream_events: list[StructuredAgentEvent] = []
-        for event in events:
-            if isinstance(event, ReasoningDelta):
-                if event.chunk:
-                    reasoning_parts.append(event.chunk)
-                    stream_events.append(
-                        StructuredAgentEvent("reasoning_delta", step, event.chunk)
-                    )
-            elif isinstance(event, TextDelta):
-                if event.chunk:
-                    text_parts.append(event.chunk)
-                    stream_events.append(
-                        StructuredAgentEvent("text_delta", step, event.chunk)
-                    )
-            elif isinstance(event, ToolCallEvent):
-                blocks.extend(
-                    {
-                        "type": "tool_use",
-                        "id": call.id,
-                        "name": call.name,
-                        "input": call.input,
-                    }
-                    for call in event.calls
-                )
-            elif isinstance(event, FinalMessage):
-                if event.content and not text_parts:
-                    text_parts.append(event.content)
-                if event.stop_reason:
-                    stop_reason = event.stop_reason
-
-        if text_parts:
-            blocks.insert(0, {"type": "text", "text": "".join(text_parts)})
-        reasoning_content = "".join(reasoning_parts) if reasoning_parts else None
-        return blocks, stop_reason, stream_events, reasoning_content
+        response = provider_events_to_response(events)
+        stream_events = [
+            StructuredAgentEvent(f"{delta.kind}_delta", step, delta.chunk)
+            for delta in response.deltas
+        ]
+        return (
+            _typed_blocks_to_raw(response.content),
+            response.stop_reason,
+            stream_events,
+            response.reasoning_content,
+        )
 
     async def _provider_events(
         self,

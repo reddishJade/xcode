@@ -5,6 +5,7 @@ import unittest
 
 from xcode.agent.agent_loop import run_agent_loop
 from xcode.agent.messages import convert_to_llm
+from xcode.agent.provider_response import provider_events_to_response
 from xcode.agent.types import (
     AgentContext,
     AgentEvent,
@@ -15,7 +16,14 @@ from xcode.agent.types import (
     ToolResultMessage,
     UserMessage,
 )
-from xcode.ai.events import Message, TextDelta, ToolCall, ToolCallEvent
+from xcode.ai.events import (
+    FinalMessage,
+    Message,
+    ReasoningDelta,
+    TextDelta,
+    ToolCall,
+    ToolCallEvent,
+)
 from xcode.ai.types import ToolDefinition
 
 
@@ -66,6 +74,23 @@ class EchoTool:
 
 
 class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
+    def test_provider_events_to_response_keeps_core_stream_semantics(self) -> None:
+        response = provider_events_to_response(
+            [
+                ReasoningDelta("why"),
+                TextDelta("hel"),
+                TextDelta("lo"),
+                ToolCallEvent([ToolCall("call-1", "echo", {"text": "hello"})]),
+                FinalMessage("", stop_reason="tool_use"),
+            ]
+        )
+
+        self.assertEqual(response.reasoning_content, "why")
+        self.assertEqual(response.stop_reason, "tool_use")
+        self.assertEqual(response.deltas[0].kind, "reasoning")
+        self.assertEqual(response.deltas[1].chunk, "hel")
+        self.assertEqual(response.content[0], TextContent(text="hello"))
+
     async def test_streams_text_from_injected_provider(self) -> None:
         provider = TextProvider()
         events: list[AgentEvent] = []
