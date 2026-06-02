@@ -108,6 +108,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
                                 reasoning_effort=None,
                                 clear_thinking=True,
                                 tool_stream=False,
+                                response_format={"type": "json_object"},
                             ),
                         },
                     )
@@ -120,6 +121,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 self.assertEqual(provider.model, "glm-4.7")
                 self.assertTrue(provider.clear_thinking)
                 self.assertFalse(provider.tool_stream)
+                self.assertEqual(provider.response_format, {"type": "json_object"})
 
     def test_explicit_profile_api_key_overrides_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -676,6 +678,55 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         self.assertEqual(thinking.get("type"), "enabled")
         self.assertIs(thinking.get("clear_thinking"), True)
 
+    def test_turn_level_thinking_override_is_per_request(self) -> None:
+        """单次请求可覆盖 thinking，不改变 provider 默认值。"""
+        provider = self._make_provider(thinking=True, client=FakeGLMClient())
+
+        list(
+            provider._stream_sync(
+                [{"role": "user", "content": "quick"}],
+                (),
+                thinking=False,
+            )
+        )
+        first = provider.client.chat.completions.kwargs["extra_body"]["thinking"]
+        self.assertEqual(first["type"], "disabled")
+        self.assertTrue(provider.thinking)
+
+        list(provider._stream_sync([{"role": "user", "content": "hard"}], ()))
+        second = provider.client.chat.completions.kwargs["extra_body"]["thinking"]
+        self.assertEqual(second["type"], "enabled")
+
+    def test_structured_output_response_format_is_sent(self) -> None:
+        """结构化输出透传 response_format。"""
+        provider = self._make_provider(
+            response_format={"type": "json_object"},
+            client=FakeGLMClient(),
+        )
+        list(provider._stream_sync([{"role": "user", "content": "json"}], ()))
+
+        kwargs = provider.client.chat.completions.kwargs
+        self.assertEqual(kwargs["response_format"], {"type": "json_object"})
+
+    def test_complete_accepts_per_request_response_format(self) -> None:
+        """非流式调用支持单次 response_format 覆盖。"""
+        provider = self._make_provider(
+            response_format={"type": "text"},
+            client=FakeGLMClient(content='{"ok": true}'),
+        )
+
+        result = provider.complete(
+            [{"role": "user", "content": "json"}],
+            response_format={"type": "json_object"},
+            thinking=False,
+        )
+
+        kwargs = provider.client.chat.completions.kwargs
+        self.assertFalse(kwargs["stream"])
+        self.assertEqual(kwargs["response_format"], {"type": "json_object"})
+        self.assertEqual(kwargs["extra_body"]["thinking"]["type"], "disabled")
+        self.assertEqual(result["content"], '{"ok": true}')
+
     def test_tool_stream_disabled(self) -> None:
         """tool_stream=False 时不传 tool_stream 参数。"""
         provider = self._make_provider(tool_stream=False, client=FakeGLMClient())
@@ -810,7 +861,11 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
 
         provider = self._make_provider()
         provider._record_usage(FakeResponse(), sent_messages=2)
+        self.assertEqual(provider.metrics["prompt_tokens"], 100)
+        self.assertEqual(provider.metrics["completion_tokens"], 50)
+        self.assertEqual(provider.metrics["total_tokens"], 150)
         self.assertEqual(provider.metrics["cached_tokens"], 20)
+        self.assertEqual(provider.metrics["cache_hit_ratio"], 0.2)
         self.assertEqual(provider.metrics["reasoning_tokens"], 10)
         self.assertEqual(provider.metrics["sent_messages"], 2)
 
@@ -849,23 +904,45 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
 class FakeGLMClient:
     """模拟 OpenAI Chat Completion 客户端，用于 ChatGLM provider 测试。"""
 
-    def __init__(self, stream_chunks=None) -> None:
-        self.chat = FakeGLMChat(stream_chunks or [])
+    def __init__(self, stream_chunks=None, content="ok", reasoning=None) -> None:
+        self.chat = FakeGLMChat(stream_chunks or [], content, reasoning)
 
 
 class FakeGLMChat:
-    def __init__(self, stream_chunks) -> None:
-        self.completions = FakeGLMCompletions(stream_chunks)
+    def __init__(self, stream_chunks, content, reasoning) -> None:
+        self.completions = FakeGLMCompletions(stream_chunks, content, reasoning)
 
 
 class FakeGLMCompletions:
-    def __init__(self, stream_chunks) -> None:
+    def __init__(self, stream_chunks, content, reasoning) -> None:
         self.stream_chunks = stream_chunks
+        self.content = content
+        self.reasoning = reasoning
         self.kwargs: dict[str, Any] = {}
 
     def create(self, **kwargs):
         self.kwargs = kwargs
-        return iter(self.stream_chunks or [FakeGLMChunk(content="ok")])
+        if kwargs.get("stream"):
+            return iter(self.stream_chunks or [FakeGLMChunk(content="ok")])
+        return FakeGLMResponse(self.content, self.reasoning)
+
+
+class FakeGLMResponse:
+    def __init__(self, content, reasoning) -> None:
+        self.choices = [FakeGLMResponseChoice(content, reasoning)]
+        self.usage = None
+
+
+class FakeGLMResponseChoice:
+    def __init__(self, content, reasoning) -> None:
+        self.message = FakeGLMMessage(content, reasoning)
+
+
+class FakeGLMMessage:
+    def __init__(self, content, reasoning) -> None:
+        self.content = content
+        self.reasoning_content = reasoning
+        self.tool_calls: list[Any] = []
 
 
 class FakeGLMChunk:

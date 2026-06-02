@@ -97,7 +97,8 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
                 '"thinking":false,'
                 '"reasoning_effort":null,'
                 '"clear_thinking":true,'
-                '"tool_stream":false'
+                '"tool_stream":false,'
+                '"response_format":{"type":"json_object"}'
                 "}}}}",
                 encoding="utf-8",
             )
@@ -111,6 +112,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             self.assertIsNone(profile.reasoning_effort)
             self.assertTrue(profile.clear_thinking)
             self.assertFalse(profile.tool_stream)
+            self.assertEqual(profile.response_format, {"type": "json_object"})
 
     def test_discovers_project_root_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

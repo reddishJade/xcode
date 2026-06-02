@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from .protocol import ModelProvider
 from .runtime import ProviderRuntime, RetryPolicy, RateLimitPolicy
@@ -52,6 +52,8 @@ class ModelProfileProto(Protocol):
     def clear_thinking(self) -> bool: ...
     @property
     def tool_stream(self) -> bool: ...
+    @property
+    def response_format(self) -> dict[str, Any] | None: ...
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,7 @@ class ModelProfileConfig:
     reasoning_effort: str | None = None
     clear_thinking: bool = False
     tool_stream: bool = True
+    response_format: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -173,6 +176,7 @@ def _build_llm_profile(
     if transport == "chatglm_chat":
         kwargs["clear_thinking"] = profile.clear_thinking
         kwargs["tool_stream"] = profile.tool_stream
+        kwargs["response_format"] = profile.response_format
     return provider_cls(**kwargs)
 
 

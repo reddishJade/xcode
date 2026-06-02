@@ -13,14 +13,14 @@ from typing import Any, TYPE_CHECKING
 from xcode.harness.config import ExecutionMode
 from xcode.harness.agent_runtime import ContextualRetrievalState, StructuredAgent
 from xcode.harness.skills import ToolSpec
+from xcode.harness.tools import build_bash_tool  # noqa: F401 — test mock target
+
 from . import assembly as _assembly
 from .assembly import (
-    ResolvedConfig,
-    SharedInfra,
-    ExperimentalServices,
     build_agent,
     build_shared_infra,
 )
+
 # re-export for test backward compatibility (mock targets)
 _build_providers = _assembly.build_providers
 _build_tool_registry = _assembly.build_tool_registry
@@ -29,7 +29,6 @@ _effective_enabled_groups = _assembly.effective_enabled_groups
 _load_experimental_services = _assembly.load_experimental_services
 _resolve_config = _assembly.resolve_config
 _build_worktree_runner = _assembly._build_worktree_runner
-from xcode.harness.tools import build_bash_tool  # noqa: F401 — test mock target
 
 if TYPE_CHECKING:
     from xcode.experimental.daemon import HeartbeatDaemon
@@ -77,12 +76,22 @@ class XcodeApp:
             base_url=base_url or profile_config.base_url,
             api_key=api_key or profile_config.api_key,
             thinking=thinking if thinking is not None else profile_config.thinking,
-            reasoning_effort=reasoning_effort if reasoning_effort is not None else profile_config.reasoning_effort,
+            reasoning_effort=reasoning_effort
+            if reasoning_effort is not None
+            else profile_config.reasoning_effort,
+            clear_thinking=profile_config.clear_thinking,
+            tool_stream=profile_config.tool_stream,
+            response_format=profile_config.response_format,
         )
-        bundle = build_provider_bundle(ProviderSettings(
-            env_files=self._env_files, model_profiles={profile: new_cfg},
-        ))
-        self.agent.provider = bundle.llm if profile == "main" else bundle.llms.get("subagent", bundle.llm)
+        bundle = build_provider_bundle(
+            ProviderSettings(
+                env_files=self._env_files,
+                model_profiles={profile: new_cfg},
+            )
+        )
+        self.agent.provider = (
+            bundle.llm if profile == "main" else bundle.llms.get("subagent", bundle.llm)
+        )
         self._model_profiles[profile] = new_cfg
         return model
 
@@ -92,7 +101,11 @@ class XcodeApp:
         base_url = getattr(provider, "base_url", "") if provider else ""
         thinking = getattr(provider, "thinking", None)
         reasoning_effort = getattr(provider, "reasoning_effort", None)
-        info: dict[str, str] = {"model": model_name, "base_url": base_url, "profile": "main"}
+        info: dict[str, str] = {
+            "model": model_name,
+            "base_url": base_url,
+            "profile": "main",
+        }
         if thinking is not None:
             info["thinking"] = str(thinking)
         if reasoning_effort:
@@ -105,10 +118,14 @@ class XcodeApp:
     async def aask(self, question: str) -> str:
         return (await self.agent.run_async(question)).answer
 
-    def ask_stream(self, question: str, mode: ExecutionMode | None = None) -> Iterator[Any]:
+    def ask_stream(
+        self, question: str, mode: ExecutionMode | None = None
+    ) -> Iterator[Any]:
         yield from self.agent.run_stream(question, mode=mode)
 
-    async def aask_stream(self, question: str, mode: ExecutionMode | None = None) -> AsyncIterator[Any]:
+    async def aask_stream(
+        self, question: str, mode: ExecutionMode | None = None
+    ) -> AsyncIterator[Any]:
         async for event in self.agent.arun_stream(question, mode=mode):
             yield event
 
@@ -132,8 +149,12 @@ def build_app(
     runtime_config: Any | None = None,
 ) -> XcodeApp:
     """装配完整的 Xcode 应用。"""
-    cfg = _assembly.resolve_config(project_root, env_files, agent_config, skills_dir, audit_path, runtime_config)
-    enabled = _assembly.effective_enabled_groups(cfg.runtime_config.tools.enabled_groups)
+    cfg = _assembly.resolve_config(
+        project_root, env_files, agent_config, skills_dir, audit_path, runtime_config
+    )
+    enabled = _assembly.effective_enabled_groups(
+        cfg.runtime_config.tools.enabled_groups
+    )
     infra = build_shared_infra(project_root, cfg.runtime_config, enabled)
 
     providers = _assembly.build_providers(cfg.runtime_config, cfg.env_files)
@@ -141,17 +162,24 @@ def build_app(
     plugins_data: dict[str, Any] = {"tools": [], "hooks": {}, "skills": []}
     if "plugins" in enabled:
         from xcode.experimental.plugins import PluginManager
+
         plugins_data = PluginManager(project_root).scan_and_load()
 
     speculation_planner = None
     if "speculation" in enabled:
         from xcode.experimental.speculation import SpeculationPlanner
+
         speculation_planner = SpeculationPlanner()
 
     registry, skill_loader, shell_spec, closers = _assembly.build_tool_registry(
-        project_root=project_root, llm=providers.llm, llm_profiles=providers.llms,
-        config=cfg.agent_config, runtime_config=cfg.runtime_config, skills_dir=cfg.skills_dir,
-        contextual_state=infra.contextual_state, compact_controller=infra.compact_controller,
+        project_root=project_root,
+        llm=providers.llm,
+        llm_profiles=providers.llms,
+        config=cfg.agent_config,
+        runtime_config=cfg.runtime_config,
+        skills_dir=cfg.skills_dir,
+        contextual_state=infra.contextual_state,
+        compact_controller=infra.compact_controller,
         cancel_event=infra.cancellation_token.event,
     )
 
@@ -160,19 +188,35 @@ def build_app(
 
     fallback_provider = providers.llms.get("fallback")
     agent = build_agent(
-        project_root=project_root, llm=providers.llm, registry=registry,
-        config=cfg.agent_config, audit_path=cfg.audit_path, runtime_config=cfg.runtime_config,
-        skill_loader=skill_loader, contextual_state=infra.contextual_state, shell_spec=shell_spec,
-        compactor=infra.compactor, compact_controller=infra.compact_controller,
-        cancellation_token=infra.cancellation_token, fallback_provider=fallback_provider,
-        speculation_planner=speculation_planner, plugins_hooks=plugins_data.get("hooks"),
+        project_root=project_root,
+        llm=providers.llm,
+        registry=registry,
+        config=cfg.agent_config,
+        audit_path=cfg.audit_path,
+        runtime_config=cfg.runtime_config,
+        skill_loader=skill_loader,
+        contextual_state=infra.contextual_state,
+        shell_spec=shell_spec,
+        compactor=infra.compactor,
+        compact_controller=infra.compact_controller,
+        cancellation_token=infra.cancellation_token,
+        fallback_provider=fallback_provider,
+        speculation_planner=speculation_planner,
+        plugins_hooks=plugins_data.get("hooks"),
     )
 
-    experimental_services = _assembly.load_experimental_services(project_root, cfg.runtime_config, enabled)
+    experimental_services = _assembly.load_experimental_services(
+        project_root, cfg.runtime_config, enabled
+    )
 
     return XcodeApp(
-        agent=agent, registry=registry, contextual_state=infra.contextual_state,
-        daemon=experimental_services.daemon, mailbox=experimental_services.mailbox,
-        progress=experimental_services.progress, _env_files=cfg.env_files,
-        _model_profiles=cfg.runtime_config.provider.model_profiles, _closers=closers,
+        agent=agent,
+        registry=registry,
+        contextual_state=infra.contextual_state,
+        daemon=experimental_services.daemon,
+        mailbox=experimental_services.mailbox,
+        progress=experimental_services.progress,
+        _env_files=cfg.env_files,
+        _model_profiles=cfg.runtime_config.provider.model_profiles,
+        _closers=closers,
     )

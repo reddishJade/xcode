@@ -38,6 +38,7 @@ class ModelProfileRuntimeConfig:
     reasoning_effort: str | None = "high"
     clear_thinking: bool = False
     tool_stream: bool = True
+    response_format: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -253,6 +254,9 @@ def _load_model_profiles(provider: dict) -> dict[str, ModelProfileRuntimeConfig]
                 raw.get("clear_thinking", profiles["main"].clear_thinking)
             ),
             tool_stream=bool(raw.get("tool_stream", profiles["main"].tool_stream)),
+            response_format=_optional_dict(
+                raw.get("response_format", profiles["main"].response_format)
+            ),
         )
     main = profiles["main"]
     profiles.setdefault("subagent", main)
@@ -268,3 +272,7 @@ def _normalize_transport(value: object) -> ProviderTransport:
     }
     raw = str(value)
     return aliases.get(raw, raw)  # type: ignore[return-value]
+
+
+def _optional_dict(value: object) -> dict[str, Any] | None:
+    return dict(value) if isinstance(value, dict) else None

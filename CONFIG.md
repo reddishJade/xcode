@@ -24,6 +24,7 @@
 | `api_key` | string | `""` | 显式 API key；留空时按 profile 环境变量和通用环境变量查找。 |
 | `thinking` | bool | `true` | 传给支持 thinking 的 provider。 |
 | `reasoning_effort` | string/null | `"high"` | 传给支持 reasoning effort 的 provider（DeepSeek）。可选值：`high`、`max`。 |
+| `response_format` | object/null | `null` | 传给支持结构化输出的 provider，例如 ChatGLM 的 `{"type":"json_object"}`。 |
 
 #### Provider 默认 base_url
 
@@ -55,6 +56,10 @@
 | --- | --- | --- | --- |
 | `clear_thinking` | bool | `false` | 保留式思考开关。`false` 保留历史 reasoning_content，官方推荐 Coding/Agent 场景使用。 |
 | `tool_stream` | bool | `true` | 工具流式输出。实时流式传输工具调用参数，减少延迟，仅 `glm-4.6`/`glm-4.7` 支持。 |
+| `response_format` | object/null | `null` | 结构化输出格式，常用 `{"type":"json_object"}`。 |
+
+- **轮级思考**：ChatGLM provider 支持单次调用覆盖 `thinking`，不改变 profile 默认值。
+- **上下文缓存**：ChatGLM 官方接口按请求内容自动命中缓存；xcode 记录 `cached_tokens`、`cache_hit_ratio`、`prompt_tokens` 等 usage 指标。
 
 示例（DeepSeek）：
 
