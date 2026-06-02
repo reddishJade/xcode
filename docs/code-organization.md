@@ -111,6 +111,16 @@ src/xcode/main.py
 | `providers/faux.py` | 测试用 provider |
 | `providers/runtime.py` | retry/rate limit 运行期控制 |
 
+### `src/xcode/agent/`
+
+纯 Agent core 层，负责中性消息类型、消息转换和可注入的 Agent 循环合约。该层可以依赖 `ai/` provider 协议，但不依赖 `harness/`、`cli/` 或 Xcode 运行时配置。
+
+| 文件 | 职责 |
+| --- | --- |
+| `types.py` | Agent 消息、事件、工具运行时协议、loop callback 合约 |
+| `messages.py` | Agent message 到 LLM message 的转换 |
+| `agent_loop.py` | 无状态 Agent loop，provider、工具执行、turn hooks 均通过合约注入 |
+
 ### `src/xcode/evals/`
 
 评估框架。

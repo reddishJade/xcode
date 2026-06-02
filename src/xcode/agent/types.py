@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable, Literal, Protocol
+from typing import Any, Callable, Literal, Protocol
+
+from xcode.ai.providers.protocol import ModelProvider
 
 """Agent 核心类型。
 
@@ -146,6 +148,14 @@ class AgentToolResult[T]:
 type ToolUpdateCallback = Callable[[AgentToolResult[Any]], None]
 
 
+class CancellationSignal(Protocol):
+    """Agent core 可见的取消信号。"""
+
+    reason: str
+
+    def is_cancelled(self) -> bool: ...
+
+
 class AgentTool[Details](Protocol):
     """Agent core 可调用的工具运行时接口。"""
 
@@ -159,7 +169,7 @@ class AgentTool[Details](Protocol):
         self,
         tool_call_id: str,
         params: dict[str, Any],
-        signal: Any | None = None,
+        signal: CancellationSignal | None = None,
         on_update: ToolUpdateCallback | None = None,
     ) -> AgentToolResult[Details]: ...
 
@@ -316,40 +326,39 @@ class AgentEventSink(Protocol):
     async def __call__(self, event: AgentEvent) -> None: ...
 
 
-type StreamFn = Callable[..., AsyncIterator[Any]]
+type MessageConverter = Callable[[list[AgentMessage]], list[dict[str, Any]]]
+type ContextTransformer = Callable[
+    [list[AgentMessage], CancellationSignal | None], list[AgentMessage]
+]
+type BeforeToolCallHook = Callable[
+    [BeforeToolCallContext, CancellationSignal | None], BeforeToolCallResult | None
+]
+type AfterToolCallHook = Callable[
+    [AfterToolCallContext, CancellationSignal | None], AfterToolCallResult | None
+]
+type PrepareNextTurnHook = Callable[[], AgentLoopTurnUpdate | None]
+type ShouldStopAfterTurnHook = Callable[[ShouldStopAfterTurnContext], bool]
+type MessageQueueGetter = Callable[[], list[AgentMessage]]
 
 
 @dataclass
 class AgentLoopConfig:
-    model: Any  # Model object
-    reasoning: str | None = None
-    session_id: str | None = None
-    transport: str = "auto"
-    thinking_budgets: Any = None
-    max_retry_delay_ms: int | None = None
+    provider: ModelProvider | None = None
     tool_execution: ToolExecutionMode = "parallel"
-    api_key: str | None = None
 
     # 转换函数
-    convert_to_llm: Callable[[list[AgentMessage]], list[dict[str, Any]]] | None = None
-    transform_context: (
-        Callable[[list[AgentMessage], Any], list[AgentMessage]] | None
-    ) = None
-    get_api_key: Callable[[str], str | None] | None = None
+    convert_to_llm: MessageConverter | None = None
+    transform_context: ContextTransformer | None = None
 
     # 钩子
-    before_tool_call: (
-        Callable[[BeforeToolCallContext, Any], BeforeToolCallResult | None] | None
-    ) = None
-    after_tool_call: (
-        Callable[[AfterToolCallContext, Any], AfterToolCallResult | None] | None
-    ) = None
-    prepare_next_turn: Callable[[], AgentLoopTurnUpdate | None] | None = None
-    should_stop_after_turn: Callable[[ShouldStopAfterTurnContext], bool] | None = None
+    before_tool_call: BeforeToolCallHook | None = None
+    after_tool_call: AfterToolCallHook | None = None
+    prepare_next_turn: PrepareNextTurnHook | None = None
+    should_stop_after_turn: ShouldStopAfterTurnHook | None = None
 
     # 队列
-    get_steering_messages: Callable[[], list[AgentMessage]] | None = None
-    get_follow_up_messages: Callable[[], list[AgentMessage]] | None = None
+    get_steering_messages: MessageQueueGetter | None = None
+    get_follow_up_messages: MessageQueueGetter | None = None
 
 
 # ── Agent State ──
