@@ -17,7 +17,7 @@ from .commands import (
     ReplState,
     PromptLike,
     PromptText,
-    COMMAND_NAMES,
+    command_names,
     generate_help_text,
 )
 from .completion import ReplCompleter
@@ -381,15 +381,18 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         handler=_cmd_fork,
         desc="Fork current session into an independent branch.",
         args_desc="[explore|verify|isolate]",
+        accepts_args=True,
     ),
     "/rewind": CommandEntry(
         handler=_cmd_rewind,
         desc="Remove the last N user turns from the transcript.",
         args_desc="N",
+        accepts_args=True,
     ),
     "/resume": CommandEntry(
         handler=_cmd_resume,
         desc="Choose a recent conversation to resume.",
+        accepts_args=True,
     ),
     "/sessions": CommandEntry(
         handler=_cmd_sessions, desc="List recent conversations."
@@ -398,16 +401,19 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         handler=_cmd_model,
         desc="Show current model info.",
         args_desc="<name> [--thinking <level>]",
+        accepts_args=True,
     ),
     "/effort": CommandEntry(
         handler=_cmd_effort,
         desc="Show current reasoning effort.",
         args_desc="<level>",
+        accepts_args=True,
     ),
     "/thinking": CommandEntry(
         handler=_cmd_thinking,
         desc="Show current thinking state (on/off).",
         args_desc="on|off",
+        accepts_args=True,
     ),
     "/plan": CommandEntry(
         handler=_cmd_plan,
@@ -420,11 +426,13 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/act": CommandEntry(
         handler=_cmd_act,
         desc="Enter Act Mode and allow normal tool use within policy.",
+        accepts_args=True,
     ),
     "/verbose": CommandEntry(
         handler=_cmd_verbose,
         desc="Show or hide tool call ids and result details.",
         args_desc="on|off",
+        accepts_args=True,
     ),
     "/compact": CommandEntry(
         handler=_cmd_compact,
@@ -433,15 +441,19 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/permissions": CommandEntry(
         handler=_cmd_permissions,
         desc="List / revoke / clear permission rules.",
+        accepts_args=True,
     ),
     "/tool": CommandEntry(
         handler=_cmd_tool,
         desc="Run one registered tool directly, or list tools.",
         args_desc="NAME INPUT|list",
+        accepts_args=True,
     ),
     "/exit": CommandEntry(handler=_cmd_exit, desc="Exit the REPL."),
+    "/quit": CommandEntry(handler=_cmd_exit, desc="Exit the REPL.", visible=False),
 }
 
+COMMAND_NAMES = command_names(COMMAND_REGISTRY)
 HELP_TEXT = generate_help_text(COMMAND_REGISTRY)
 
 
@@ -918,7 +930,7 @@ def create_prompt_session(
         else:
             event.app.exit(exception=KeyboardInterrupt())
 
-    completer = ReplCompleter(project_root or Path.cwd(), registry)
+    completer = ReplCompleter(project_root or Path.cwd(), registry, COMMAND_NAMES)
 
     history = None
     try:
@@ -1118,8 +1130,11 @@ def _handle_command(
         persistent_store=persistent_store,
     )
     for prefix in sorted(COMMAND_REGISTRY, key=len, reverse=True):
-        if command == prefix or command.startswith(prefix + " "):
-            return COMMAND_REGISTRY[prefix].handler(command, ctx)
+        entry = COMMAND_REGISTRY[prefix]
+        if command == prefix or (
+            entry.accepts_args and command.startswith(prefix + " ")
+        ):
+            return entry.handler(command, ctx)
     print(f"Unknown command: {command}")
     return False
 

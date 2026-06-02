@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .markdown import MarkdownRenderer
@@ -48,36 +48,20 @@ class CommandEntry:
     handler: CommandHandler
     desc: str
     args_desc: str = ""
+    accepts_args: bool = False
+    visible: bool = True
 
 
-# 单一事实来源：所有斜杠命令名在此注册
-COMMAND_NAMES: tuple[str, ...] = (
-    "/help",
-    "/clear",
-    "/fork",
-    "/rewind",
-    "/resume",
-    "/sessions",
-    "/model",
-    "/effort",
-    "/thinking",
-    "/plan",
-    "/review",
-    "/act",
-    "/verbose",
-    "/compact",
-    "/permissions",
-    "/tool",
-    "/exit",
-)
+def command_names(registry: dict[str, CommandEntry]) -> tuple[str, ...]:
+    """从注册表派生可补全命令名。"""
+    return tuple(name for name, entry in registry.items() if entry.visible)
 
 
 def generate_help_text(registry: dict[str, CommandEntry]) -> str:
     """从注册表生成 HELP_TEXT。"""
     lines = ["Commands:"]
-    for name in COMMAND_NAMES:
-        entry = registry.get(name)
-        if entry is None:
+    for name, entry in registry.items():
+        if not entry.visible:
             continue
         lines.append(f"  {name:<11} {entry.desc}")
         if entry.args_desc:

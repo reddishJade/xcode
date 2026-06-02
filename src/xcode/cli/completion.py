@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING
 
 from xcode.harness.skills import ToolSpec
 
-from .commands import COMMAND_NAMES
-
 """REPL 命令、工具名和 @file 引用补全。"""
 
 if TYPE_CHECKING:
@@ -34,9 +32,15 @@ class CompletionItem:
 
 
 class ReplCompleter(Completer):
-    def __init__(self, project_root: Path, registry: Iterable[ToolSpec] = ()) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        registry: Iterable[ToolSpec] = (),
+        command_names: Iterable[str] = (),
+    ) -> None:
         self.project_root = project_root.resolve()
         self.tool_names = tuple(sorted(tool.name for tool in registry))
+        self.command_names = tuple(command_names)
         self._directory_cache: dict[Path, tuple[str, ...]] = {}
 
     def get_completions(self, document, _complete_event):
@@ -65,7 +69,7 @@ class ReplCompleter(Completer):
     def _complete_command(self, text: str) -> list[CompletionItem]:
         return [
             CompletionItem(command, -len(text), "command")
-            for command in COMMAND_NAMES
+            for command in self.command_names
             if command.startswith(text)
         ]
 

@@ -11,8 +11,11 @@ from unittest.mock import patch
 
 from xcode.cli.completion import ReplCompleter
 from xcode.cli.repl import (
+    COMMAND_NAMES,
     PromptText,
+    ReplState,
     _brief_input,
+    _handle_command,
     _reasoning_preview_lines,
     run_repl,
 )
@@ -376,11 +379,53 @@ class XcodeReplTests(unittest.TestCase):
             self.assertIn("Resumed conversation: first conversation", text)
 
     def test_repl_completer_suggests_slash_commands(self) -> None:
-        completer = ReplCompleter(Path.cwd())
+        completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
         items = completer.complete("/pl")
 
         self.assertEqual([item.text for item in items], ["/plan"])
+
+    def test_repl_completer_hides_quit_alias(self) -> None:
+        completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
+
+        items = completer.complete("/q")
+
+        self.assertEqual(items, [])
+
+    def test_handle_command_keeps_quit_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+
+            handled = _handle_command(
+                "/quit",
+                store,
+                FakeApp(),
+                FakeRenderer(),
+                ReplState(),
+                FakePrompt([]),
+            )
+
+            self.assertTrue(handled)
+
+    def test_handle_command_rejects_unexpected_args(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "keep me")
+            output = StringIO()
+
+            with redirect_stdout(output):
+                handled = _handle_command(
+                    "/clear now",
+                    store,
+                    FakeApp(),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+            self.assertFalse(handled)
+            self.assertIn("Unknown command: /clear now", output.getvalue())
+            self.assertEqual(len(store.load_records()), 1)
 
     def test_repl_completer_suggests_tool_names(self) -> None:
         completer = ReplCompleter(
@@ -413,7 +458,7 @@ class XcodeReplTests(unittest.TestCase):
             self.assertEqual([item.text for item in items], ["docs/"])
 
     def test_repl_completer_ignores_empty_file_marker(self) -> None:
-        completer = ReplCompleter(Path.cwd())
+        completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
         self.assertEqual(completer.complete("@"), [])
 
@@ -453,7 +498,7 @@ class XcodeReplTests(unittest.TestCase):
         except ImportError:
             self.skipTest("prompt_toolkit is not installed")
 
-        completer = ReplCompleter(Path.cwd())
+        completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
         async def collect():
             return [
