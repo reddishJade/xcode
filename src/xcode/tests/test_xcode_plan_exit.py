@@ -7,8 +7,10 @@ from unittest.mock import MagicMock
 import io
 from contextlib import redirect_stdout
 
-from xcode.cli.session import SessionStore
-from xcode.cli.repl import run_repl, ReplState, _handle_command
+from xcode.cli.commands import ReplState
+from xcode.cli.repl import run_repl
+from xcode.cli.repl_commands import handle_command
+from xcode.harness.session import SessionStore
 from xcode.tests.test_xcode_repl import FakePrompt
 
 
@@ -58,7 +60,7 @@ class XcodePlanExitTests(unittest.TestCase):
 
             renderer = TerminalMarkdownRenderer()
 
-            retval = _handle_command(
+            retval = handle_command(
                 "/act --clear",
                 store,
                 MagicMock(),

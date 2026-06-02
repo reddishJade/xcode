@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from xcode.cli.repl import parse_tool_input
+from xcode.cli.repl_tools import parse_tool_input
 from xcode.harness.observability import HITLResult
 from xcode.harness.skills import run_tool
 from xcode.harness.tools import build_file_tools

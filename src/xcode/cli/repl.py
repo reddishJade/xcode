@@ -1,601 +1,53 @@
 from __future__ import annotations
 
-import asyncio
-from dataclasses import asdict, is_dataclass
-import importlib.util
-import json
 from pathlib import Path
-import shutil
 import sys
-import textwrap
 import time
 from typing import Any
 
-from .commands import (
-    CommandContext,
-    CommandEntry,
-    ReplState,
-    PromptLike,
-    PromptText,
-    command_names,
-    generate_help_text,
-)
-from .completion import ReplCompleter
-from .file_refs import FileReference, expand_file_references
+from rich.console import Console
+from rich.text import Text
+
+from .commands import PromptLike, PromptText, ReplState
+from .file_refs import expand_file_references
 from .markdown import MarkdownRenderer, TerminalMarkdownRenderer
-from .session import FORK_TYPES, SessionMetadataView, SessionStore
-from .tool_catalog import build_tool_catalog
+from .repl_commands import COMMAND_NAMES, handle_command
+from .repl_hitl import ReplHITLHandler
+from .repl_rendering import (
+    CLI_COLOR_ERROR,
+    CLI_COLOR_SUCCESS,
+    CLI_COLOR_THINKING,
+    CLI_COLOR_TOOL,
+    LiveMarkdownStream,
+    LiveReasoningPreview,
+    create_prompt_session,
+    format_elapsed,
+    input_prompt,
+    print_startup_banner,
+    reasoning_preview_lines,
+    should_print_reasoning_summary,
+    single_line_preview,
+)
+from .repl_sessions import print_saved_conversation, resume_interactively
+from .repl_tools import (
+    brief_input,
+    event_to_dict,
+    file_reference_event,
+    final_stop_reason,
+    print_tool_call_rich,
+    print_tool_result_rich,
+    summarize_intents,
+    tool_intent,
+)
 from xcode.harness.observability import (
-    HITLResult,
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
-from xcode.harness.skills import (
-    ToolInput,
-    ToolSpec,
-    run_tool_result,
-    stringify_tool_input,
-)
-
-from rich.console import Console
-from rich.live import Live
-from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
-
-_console = Console(file=sys.stdout)
-_MIN_REASONING_SUMMARY_SECONDS = 0.5
-_MIN_REASONING_SUMMARY_CHARS = 24
-CLI_COLOR_TITLE = "bold"
-CLI_COLOR_DIM = "grey50"
-CLI_COLOR_USER = "green bold"
-CLI_COLOR_ASSISTANT = "cyan"
-CLI_COLOR_THINKING = "grey50"
-CLI_COLOR_TOOL = "yellow"
-CLI_COLOR_SUCCESS = "green"
-CLI_COLOR_ERROR = "red"
-CLI_COLOR_WARNING = "yellow"
-CLI_COLOR_INFO = "blue"
-CLI_PROMPT_MARKER_STYLE = "ansigreen bold"
-class PromptSessionAdapter:
-    def __init__(self, session: Any) -> None:
-        self.session = session
-
-    def prompt(self, prompt_text: PromptText) -> str:
-        return str(self.session.prompt(prompt_text))
-
-
-def _reasoning_preview_lines(text: str, width: int | None = None) -> list[str]:
-    width = width or max(20, shutil.get_terminal_size((100, 20)).columns - 4)
-    lines: list[str] = []
-    for line in text.splitlines() or [text]:
-        wrapped = textwrap.wrap(
-            line,
-            width=width,
-            replace_whitespace=False,
-            drop_whitespace=False,
-        )
-        lines.extend(wrapped or [""])
-    return lines[-3:]
-
-
-def _format_elapsed(seconds: float) -> str:
-    if seconds < 1:
-        return f"{seconds * 1000:.0f}ms"
-    return f"{seconds:.1f}s"
-
-
-def _single_line_preview(text: str, width: int | None = None) -> str:
-    width = width or max(20, shutil.get_terminal_size((100, 20)).columns - 6)
-    preview = " ".join(text.split())
-    if len(preview) <= width:
-        return preview
-    return f"{preview[: max(0, width - 1)]}…"
-
-
-def _should_print_reasoning_summary(text: str, elapsed: float) -> bool:
-    preview = " ".join(text.split())
-    return bool(preview) and (
-        elapsed >= _MIN_REASONING_SUMMARY_SECONDS
-        or len(preview) >= _MIN_REASONING_SUMMARY_CHARS
-    )
-
-
-def _answer_renderable(text: str) -> Table:
-    layout = Table.grid(padding=(0, 1), expand=True)
-    layout.add_column(width=1)
-    layout.add_column(ratio=1)
-    layout.add_row(Text("●", style=CLI_COLOR_ASSISTANT), Markdown(text or ""))
-    return layout
-
-
-class _LiveMarkdownStream:
-    def __init__(self, console: Console) -> None:
-        self.console = console
-        self.live: Live | None = None
-
-    def update(self, text: str) -> None:
-        renderable = _answer_renderable(text)
-        if self.live is None:
-            self.live = Live(
-                renderable,
-                console=self.console,
-                refresh_per_second=12,
-                transient=False,
-            )
-            self.live.start(refresh=True)
-            return
-        self.live.update(renderable, refresh=True)
-
-    def stop(self) -> None:
-        if self.live is None:
-            return
-        self.live.stop()
-        self.live = None
-
-
-class _LiveReasoningPreview:
-    def __init__(self, console: Console) -> None:
-        self.console = console
-        self.live: Live | None = None
-
-    def update(self, lines: list[str]) -> None:
-        text = Text("\n".join(lines), style=CLI_COLOR_THINKING)
-        if self.live is None:
-            self.live = Live(
-                text,
-                console=self.console,
-                refresh_per_second=12,
-                transient=True,
-            )
-            self.live.start(refresh=True)
-            return
-        self.live.update(text, refresh=True)
-
-    def stop(self) -> None:
-        if self.live is None:
-            return
-        self.live.stop()
-        self.live = None
-
-
-# ── 命令处理函数 ──
-
-
-def _cmd_help(cmd: str, ctx: CommandContext) -> bool:
-    print(HELP_TEXT)
-    return False
-
-
-def _cmd_clear(cmd: str, ctx: CommandContext) -> bool:
-    ctx.store.clear()
-    if ctx.session_policy is not None:
-        ctx.session_policy.clear()
-    print("New session started.")
-    return False
-
-
-def _cmd_fork(cmd: str, ctx: CommandContext) -> bool:
-    parts = cmd.split(maxsplit=1)
-    fork_type = parts[1].strip() if len(parts) == 2 else None
-    if fork_type is not None and fork_type not in FORK_TYPES:
-        print(f"fork_type must be one of {sorted(FORK_TYPES)}, got {fork_type!r}")
-        return False
-    meta = ctx.store.fork_into(fork_type)
-    if ctx.session_policy is not None:
-        ctx.session_policy.clear()
-    label = f" ({fork_type})" if fork_type else ""
-    print(f'Forked: "{meta.title}"{label}')
-    return False
-
-
-def _cmd_rewind(cmd: str, ctx: CommandContext) -> bool:
-    parts = cmd.split()
-    turns = int(parts[1]) if len(parts) > 1 else 1
-    removed = ctx.store.rewind_turns(turns)
-    print(f"Rewound {removed} transcript records.")
-    return False
-
-
-def _cmd_resume(cmd: str, ctx: CommandContext) -> bool:
-    parts = cmd.split(maxsplit=1)
-    if len(parts) == 2:
-        target = parts[1].strip()
-        if target == "last":
-            view = _resume_latest(ctx.store)
-            if view:
-                print(_resumed_message(view))
-                _print_loaded_history(ctx.store)
-            else:
-                print("No conversations found.")
-            return False
-        ctx.store.resume(target)
-        print(_resumed_message(_current_view(ctx.store)))
-        _print_loaded_history(ctx.store)
-        return False
-    _resume_interactively(ctx.store, ctx.prompt_session)
-    return False
-
-
-def _cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
-    _print_sessions(ctx.store.list_session_infos())
-    return False
-
-
-def _cmd_model(cmd: str, ctx: CommandContext) -> bool:
-    _handle_model_command(cmd, ctx.app)
-    return False
-
-
-def _cmd_effort(cmd: str, ctx: CommandContext) -> bool:
-    _handle_effort_command(cmd, ctx.app)
-    return False
-
-
-def _cmd_thinking(cmd: str, ctx: CommandContext) -> bool:
-    _handle_thinking_command(cmd, ctx.app)
-    return False
-
-
-def _cmd_plan(cmd: str, ctx: CommandContext) -> bool:
-    ctx.state.mode = "plan"
-    print(
-        "Plan Mode enabled. Read-only inspection tools are available; edits and shell are blocked."
-    )
-    return False
-
-
-def _cmd_review(cmd: str, ctx: CommandContext) -> bool:
-    ctx.state.mode = "review"
-    print(
-        "Review Mode enabled. Edits are blocked; validation requires approval."
-    )
-    return False
-
-
-def _cmd_act(cmd: str, ctx: CommandContext) -> bool:
-    is_clear = False
-    parts = cmd.split(maxsplit=1)
-    if len(parts) == 2 and parts[1].strip() == "--clear":
-        is_clear = True
-
-    choice = "1" if is_clear else None
-    if choice is None:
-        print("\nSelect action:")
-        print("  1) Clear and Act (Clear context, keep plan, and act)")
-        print("  2) Keep and Act (Keep current context and act directly)")
-        print("  3) Review Mode")
-        print("  4) Continue in Plan Mode")
-        try:
-            choice = ctx.prompt_session.prompt("Choice (1-4): ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nCancelled.")
-            return False
-
-    if choice == "1":
-        records = ctx.store.load_records()
-        last_assistant_content = None
-        for r in reversed(records):
-            if r.type == "assistant":
-                last_assistant_content = r.content
-                break
-
-        if not last_assistant_content or not str(last_assistant_content).strip():
-            print(
-                "Error: No plan found in the last assistant reply. Cannot Clear and Act."
-            )
-            return False
-
-        parent_id = ctx.store.current_path.stem.removeprefix("session-")
-        from datetime import datetime
-
-        plan_text = f"# Approved Plan (Forked from {parent_id})\nDate: {datetime.now().isoformat(timespec='seconds')}\n\n{last_assistant_content}"
-
-        plan_file = ctx.store.artifacts_dir / f"plan-{parent_id}.md"
-        try:
-            plan_file.write_text(plan_text, encoding="utf-8")
-        except OSError as e:
-            print(f"Warning: Failed to write plan artifact: {e}")
-
-        meta = ctx.store.fork_clean_into(
-            "isolate", title=f"Act Continuation of Plan {parent_id}"
-        )
-        if ctx.session_policy is not None:
-            ctx.session_policy.clear()
-
-        ctx.state.approved_plan = str(last_assistant_content)
-        ctx.state.mode = "act"
-        print(f'Clean Fork created: "{meta.title}"')
-        print("Act Mode enabled with approved plan.")
-    elif choice == "2":
-        ctx.state.mode = "act"
-        print("Act Mode enabled. Normal tool use restored within policy.")
-    elif choice == "3":
-        ctx.state.mode = "review"
-        print(
-            "Review Mode enabled. Edits are blocked; validation requires approval."
-        )
-    elif choice == "4":
-        print("Continuing in Plan Mode.")
-    else:
-        print(f"Invalid choice: {choice}")
-    return False
-
-
-def _cmd_verbose(cmd: str, ctx: CommandContext) -> bool:
-    parts = cmd.split(maxsplit=1)
-    if len(parts) == 2 and parts[1] == "on":
-        ctx.state.verbose = True
-        print("Verbose mode on: tool call ids and result details will be shown.")
-    elif len(parts) == 2 and parts[1] == "off":
-        ctx.state.verbose = False
-        print("Verbose mode off.")
-    else:
-        print("Usage: /verbose on|off")
-    return False
-
-
-def _cmd_compact(cmd: str, ctx: CommandContext) -> bool:
-    agent = getattr(ctx.app, "agent", None)
-    if agent is not None and hasattr(agent, "request_compaction"):
-        agent.request_compaction()
-        print("Active context compaction requested for the next agent run.")
-    else:
-        print(
-            "Context compaction is not supported or not configured in the current agent."
-        )
-    compacted = ctx.store.compact_current_session(max_tool_result_chars=200)
-    if compacted > 0:
-        print(f"Compacted {compacted} large tool results in the session log.")
-    else:
-        print("No large tool results to compact in the session log.")
-    return False
-
-
-def _cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
-    _handle_permissions(cmd, ctx.session_policy, ctx.persistent_store)
-    return False
-
-
-def _cmd_tool(cmd: str, ctx: CommandContext) -> bool:
-    output = _run_tool_command(cmd, ctx.app)
-    ctx.store.append("event", {"type": "tool_command", "data": cmd})
-    ctx.store.append("event", {"type": "tool_result", "data": output})
-    ctx.renderer.render(output)
-    return False
-
-
-def _cmd_exit(cmd: str, ctx: CommandContext) -> bool:
-    return True
-
-
-# ── 命令注册表（单一事实来源）──
-
-COMMAND_REGISTRY: dict[str, CommandEntry] = {
-    "/help": CommandEntry(handler=_cmd_help, desc="Show this help."),
-    "/clear": CommandEntry(
-        handler=_cmd_clear, desc="Start a new session transcript."
-    ),
-    "/fork": CommandEntry(
-        handler=_cmd_fork,
-        desc="Fork current session into an independent branch.",
-        args_desc="[explore|verify|isolate]",
-        accepts_args=True,
-    ),
-    "/rewind": CommandEntry(
-        handler=_cmd_rewind,
-        desc="Remove the last N user turns from the transcript.",
-        args_desc="N",
-        accepts_args=True,
-    ),
-    "/resume": CommandEntry(
-        handler=_cmd_resume,
-        desc="Choose a recent conversation to resume.",
-        accepts_args=True,
-    ),
-    "/sessions": CommandEntry(
-        handler=_cmd_sessions, desc="List recent conversations."
-    ),
-    "/model": CommandEntry(
-        handler=_cmd_model,
-        desc="Show current model info.",
-        args_desc="<name> [--thinking <level>]",
-        accepts_args=True,
-    ),
-    "/effort": CommandEntry(
-        handler=_cmd_effort,
-        desc="Show current reasoning effort.",
-        args_desc="<level>",
-        accepts_args=True,
-    ),
-    "/thinking": CommandEntry(
-        handler=_cmd_thinking,
-        desc="Show current thinking state (on/off).",
-        args_desc="on|off",
-        accepts_args=True,
-    ),
-    "/plan": CommandEntry(
-        handler=_cmd_plan,
-        desc="Enter Plan Mode: read-only inspection tools, no edits or shell.",
-    ),
-    "/review": CommandEntry(
-        handler=_cmd_review,
-        desc="Enter Review Mode: read-only review, guarded validation.",
-    ),
-    "/act": CommandEntry(
-        handler=_cmd_act,
-        desc="Enter Act Mode and allow normal tool use within policy.",
-        accepts_args=True,
-    ),
-    "/verbose": CommandEntry(
-        handler=_cmd_verbose,
-        desc="Show or hide tool call ids and result details.",
-        args_desc="on|off",
-        accepts_args=True,
-    ),
-    "/compact": CommandEntry(
-        handler=_cmd_compact,
-        desc="Manually request context compaction and shrink the session log.",
-    ),
-    "/permissions": CommandEntry(
-        handler=_cmd_permissions,
-        desc="List / revoke / clear permission rules.",
-        accepts_args=True,
-    ),
-    "/tool": CommandEntry(
-        handler=_cmd_tool,
-        desc="Run one registered tool directly, or list tools.",
-        args_desc="NAME INPUT|list",
-        accepts_args=True,
-    ),
-    "/exit": CommandEntry(handler=_cmd_exit, desc="Exit the REPL."),
-    "/quit": CommandEntry(handler=_cmd_exit, desc="Exit the REPL.", visible=False),
-}
-
-COMMAND_NAMES = command_names(COMMAND_REGISTRY)
-HELP_TEXT = generate_help_text(COMMAND_REGISTRY)
-
-
-class ReplHITLHandler:
-    def __init__(
-        self,
-        session_policy: SessionPermissionPolicy,
-        persistent_store: PersistentPermissionStore,
-        prompt: PromptLike | None = None,
-    ) -> None:
-        self.session_policy = session_policy
-        self.persistent_store = persistent_store
-        self.prompt = prompt
-
-    def __call__(self, tool: ToolSpec, action_input: ToolInput) -> HITLResult:
-        action_input_text = stringify_tool_input(action_input)
-        session_decision = self.session_policy.decide(tool.name, action_input_text)
-        if session_decision is not None and session_decision != "ask":
-            return HITLResult(session_decision, "session")
-        persistent_policy = self.persistent_store.load()
-        pers_decision = persistent_policy.decide(tool.name, action_input_text)
-        if pers_decision is not None and pers_decision != "ask":
-            return HITLResult(pers_decision, "permanent")
-        if _should_use_radiolist(self.prompt):
-            choice = _radiolist_prompt(tool, action_input)
-        elif self.prompt is not None and not _is_prompt_toolkit_prompt(self.prompt):
-            choice = self.prompt.prompt(self._prompt_text(tool, action_input)).strip()
-        else:
-            choice = input(self._terminal_prompt_text(tool, action_input)).strip()
-        return self._apply_choice(choice, tool, action_input)
-
-    def _prompt_text(self, tool: ToolSpec, action_input: ToolInput) -> str:
-        brief = _brief_input(tool.name, action_input)
-        return (
-            f"需要授权：{tool.name}"
-            f"\n  指令：{brief}"
-            f"\n  风险：{tool.risk}"
-            f"\n  选项："
-            f"\n    1) 允许（仅本次）"
-            f"\n    2) 此次对话中允许"
-            f"\n    3) 始终允许"
-            f"\n    4) 拒绝"
-        )
-
-    def _terminal_prompt_text(self, tool: ToolSpec, action_input: ToolInput) -> str:
-        return f"\r\033[K\n{self._prompt_text(tool, action_input)}\napprove [1-4]> "
-
-    def _apply_choice(
-        self, choice: str, tool: ToolSpec, action_input: ToolInput
-    ) -> HITLResult:
-        action_input_text = stringify_tool_input(action_input)
-        if choice == "1":
-            return HITLResult("allow", "once")
-        if choice == "2":
-            self.session_policy.grant(tool.name, "allow", action_input_text)
-            return HITLResult("allow", "session")
-        if choice == "3":
-            self.persistent_store.grant(tool.name, "allow", action_input_text)
-            return HITLResult("allow", "permanent")
-        return HITLResult("deny", "once")
-
-
-def _has_radiolist() -> bool:
-    return importlib.util.find_spec("prompt_toolkit.shortcuts.dialogs") is not None
-
-
-def _should_use_radiolist(prompt: PromptLike | None) -> bool:
-    if _is_async_loop_running():
-        return False
-    if prompt is not None and _is_prompt_toolkit_prompt(prompt):
-        return False
-    return _has_radiolist()
-
-
-def _is_async_loop_running() -> bool:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return False
-    return True
-
-
-def _is_prompt_toolkit_prompt(prompt: PromptLike | None) -> bool:
-    if prompt is None:
-        return False
-    module = type(prompt).__module__
-    return module.startswith("prompt_toolkit.")
-
-
-def _print_startup_banner(app, root: Path) -> None:
-    console = Console(file=sys.stdout)
-    info = app.get_model_info() if hasattr(app, "get_model_info") else {}
-    model = str(info.get("model", "unknown")) if info else "unknown"
-    thinking = _format_thinking(info.get("thinking") if info else None)
-    effort = str(info.get("reasoning_effort") or "not set") if info else "not set"
-    lines = Text()
-    lines.append("XCode\n", style=CLI_COLOR_TITLE)
-    lines.append(f"model:    {model}\n", style=CLI_COLOR_DIM)
-    lines.append(f"thinking: {thinking}\n", style=CLI_COLOR_DIM)
-    lines.append(f"effort:   {effort}\n", style=CLI_COLOR_DIM)
-    lines.append(f"cwd:      {root}", style=CLI_COLOR_DIM)
-    console.print(
-        Panel(lines, border_style=CLI_COLOR_DIM, padding=(0, 1), expand=False)
-    )
-    console.print(Text("Type /help for commands.", style=CLI_COLOR_DIM))
-
-
-def _input_prompt() -> PromptText:
-    return [("class:prompt-marker", "❯ "), ("", "")]
-
-
-def _format_thinking(value: object) -> str:
-    if isinstance(value, bool):
-        return "enabled" if value else "disabled"
-    text = str(value).strip().lower() if value is not None else ""
-    if text in {"true", "1", "yes", "on", "enabled"}:
-        return "enabled"
-    if text in {"false", "0", "no", "off", "disabled"}:
-        return "disabled"
-    return "unknown"
-
-
-def _radiolist_prompt(tool: ToolSpec, action_input: ToolInput) -> str:
-    from prompt_toolkit.shortcuts.dialogs import radiolist_dialog
-
-    brief = _brief_input(tool.name, action_input)
-    result = radiolist_dialog(
-        title=f"需要授权：{tool.name}",
-        text=f"指令：{brief}    风险：{tool.risk}",
-        values=[
-            ("1", "允许（仅本次）"),
-            ("2", "此次对话中允许"),
-            ("3", "始终允许"),
-            ("4", "拒绝"),
-        ],
-        default=None,
-    ).run()
-    return result or "4"
+from xcode.harness.session import SessionStore
 
 
 def run_repl(
-    app,
+    app: Any,
     sessions_dir: Path,
     prompt_session: PromptLike | None = None,
     resume_latest: bool = False,
@@ -606,7 +58,7 @@ def run_repl(
     store = SessionStore(sessions_dir, project_root=root)
     markdown_renderer = renderer or TerminalMarkdownRenderer()
     registry = tuple(getattr(app, "registry", ()) or ())
-    session = prompt_session or create_prompt_session(root, registry)
+    session = prompt_session or create_prompt_session(root, registry, COMMAND_NAMES)
     state = ReplState()
     session_policy = SessionPermissionPolicy()
     persistent_store = PersistentPermissionStore(root / ".local" / "hitl_policy.json")
@@ -614,9 +66,9 @@ def run_repl(
     agent = getattr(app, "agent", None)
     if agent is not None:
         agent.approval_callback = hitl_handler
-    _print_startup_banner(app, root)
+    print_startup_banner(app, root)
     if resume_latest:
-        _resume_interactively(store, session)
+        resume_interactively(store, session)
 
     while True:
         if state.pending_inject is not None:
@@ -627,14 +79,14 @@ def run_repl(
                 prompt_text: PromptText = (
                     ""
                     if state.exit_pending and time.time() - state.exit_pending < 1.5
-                    else _input_prompt()
+                    else input_prompt()
                 )
                 text = session.prompt(prompt_text).strip()
             except (EOFError, KeyboardInterrupt):
                 now = time.time()
                 if state.exit_pending and now - state.exit_pending < 1.5:
                     print()
-                    _print_saved_conversation(store)
+                    print_saved_conversation(store)
                     return 0
                 state.exit_pending = now
                 print()
@@ -645,7 +97,7 @@ def run_repl(
             continue
         state.exit_pending = 0.0
         if text.startswith("/"):
-            if _handle_command(
+            if handle_command(
                 text,
                 store,
                 app,
@@ -655,809 +107,250 @@ def run_repl(
                 session_policy,
                 persistent_store,
             ):
-                _print_saved_conversation(store)
+                print_saved_conversation(store)
                 return 0
             continue
 
         store.append("user", text)
         expanded_text, references = expand_file_references(text, root)
         if references:
-            store.append("event", _file_reference_event(references))
+            store.append("event", file_reference_event(references))
         agent_text = expanded_text
         if state.approved_plan is not None:
-            agent_text = f"<approved-plan>\n{state.approved_plan}\n</approved-plan>\n{expanded_text}"
-            state.approved_plan = None
-        step_answers: list[str] = []
-        current_step_thoughts: list[str] = []
-        stopped_reason: str | None = None
-        interrupted = False
-        live_console = Console(file=sys.stdout)
-
-        def _safe_write(text: str) -> None:
-            try:
-                sys.stdout.write(text)
-                sys.stdout.flush()
-            except UnicodeEncodeError:
-                safe_text = (
-                    text.replace("•", "*")
-                    .replace("×", "x")
-                    .replace("✘", "x")
-                    .replace("⊘", "o")
-                )
-                encoding = sys.stdout.encoding or "utf-8"
-                sys.stdout.write(
-                    safe_text.encode(encoding, errors="replace").decode(encoding)
-                )
-                sys.stdout.flush()
-
-        def _clear_line() -> None:
-            _safe_write("\r\033[K")
-
-        reasoning_started_at: float | None = None
-        reasoning_text = ""
-        reasoning_preview = _LiveReasoningPreview(live_console)
-        answer_stream = _LiveMarkdownStream(live_console)
-        streamed_text = False
-        tool_group: dict[str, Any] | None = None
-        tool_call_labels: dict[str, str] = {}
-
-        def _record_tool_call(event_data: Any) -> None:
-            nonlocal tool_group
-            label = _brief_input(event_data.name, event_data.input)
-            intent = _tool_intent(event_data.name, event_data.input)
-            tool_call_labels[event_data.id] = label
-            if state.verbose:
-                _print_tool_call_rich(label, live_console)
-                return
-            if tool_group is None:
-                tool_group = {
-                    "intents": [],
-                    "calls": 0,
-                    "ok": 0,
-                    "errors": [],
-                }
-            tool_group["calls"] += 1
-            if intent not in tool_group["intents"]:
-                tool_group["intents"].append(intent)
-
-        def _record_tool_result(event_data: Any) -> None:
-            if state.verbose:
-                _print_tool_result_rich(event_data, state.verbose, live_console)
-                return
-            if tool_group is None:
-                return
-            if event_data.status == "ok":
-                tool_group["ok"] += 1
-                return
-            label = tool_call_labels.get(event_data.tool_use_id, event_data.tool_use_id)
-            tool_group["errors"].append((label, event_data))
-
-        def _flush_tool_group() -> None:
-            nonlocal tool_group
-            if tool_group is None:
-                return
-            calls = int(tool_group["calls"])
-            errors = list(tool_group["errors"])
-            intents = list(tool_group["intents"])
-            title = _summarize_intents(intents)
-            status = "failed" if errors else "done"
-            style = CLI_COLOR_ERROR if errors else CLI_COLOR_SUCCESS
-            live_console.print(Text(f"  • Explore: {title}", style=CLI_COLOR_TOOL))
-            live_console.print(Text(f"    {status}: {calls} tools", style=style))
-            for label, result in errors:
-                summary = _single_line_preview(str(result.content), width=120)
-                live_console.print(
-                    Text(f"    error: {label}: {summary}", style=CLI_COLOR_ERROR)
-                )
-            tool_group = None
-
-        def _render_reasoning_preview() -> None:
-            lines = _reasoning_preview_lines(reasoning_text)
-            if lines:
-                reasoning_preview.update(lines)
-
-        def _finish_reasoning_preview() -> None:
-            nonlocal reasoning_started_at, reasoning_text
-            if reasoning_started_at is None:
-                return
-            elapsed = time.perf_counter() - reasoning_started_at
-            reasoning_preview.stop()
-            if not _should_print_reasoning_summary(reasoning_text, elapsed):
-                reasoning_started_at = None
-                reasoning_text = ""
-                return
-            preview = _single_line_preview(reasoning_text)
-            live_console.print(
-                Text(
-                    f"  • thinked for {_format_elapsed(elapsed)}",
-                    style=CLI_COLOR_THINKING,
-                )
+            agent_text = (
+                f"<approved-plan>\n{state.approved_plan}\n</approved-plan>\n"
+                f"{expanded_text}"
             )
-            if preview:
-                live_console.print(Text(f"    {preview}", style=CLI_COLOR_THINKING))
+            state.approved_plan = None
+        _run_agent_turn(app, store, markdown_renderer, state, session, agent_text)
+
+
+def _run_agent_turn(
+    app: Any,
+    store: SessionStore,
+    markdown_renderer: MarkdownRenderer,
+    state: ReplState,
+    session: PromptLike,
+    agent_text: str,
+) -> None:
+    step_answers: list[str] = []
+    current_step_thoughts: list[str] = []
+    stopped_reason: str | None = None
+    interrupted = False
+    live_console = Console(file=sys.stdout)
+    reasoning_started_at: float | None = None
+    reasoning_text = ""
+    reasoning_preview = LiveReasoningPreview(live_console)
+    answer_stream = LiveMarkdownStream(live_console)
+    streamed_text = False
+    tool_group: dict[str, Any] | None = None
+    tool_call_labels: dict[str, str] = {}
+
+    def safe_write(text: str) -> None:
+        try:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        except UnicodeEncodeError:
+            safe_text = (
+                text.replace("•", "*")
+                .replace("×", "x")
+                .replace("✘", "x")
+                .replace("⊘", "o")
+            )
+            encoding = sys.stdout.encoding or "utf-8"
+            sys.stdout.write(
+                safe_text.encode(encoding, errors="replace").decode(encoding)
+            )
+            sys.stdout.flush()
+
+    def clear_line() -> None:
+        safe_write("\r\033[K")
+
+    def record_tool_call(event_data: Any) -> None:
+        nonlocal tool_group
+        label = brief_input(event_data.name, event_data.input)
+        intent = tool_intent(event_data.name, event_data.input)
+        tool_call_labels[event_data.id] = label
+        if state.verbose:
+            print_tool_call_rich(label, live_console)
+            return
+        if tool_group is None:
+            tool_group = {
+                "intents": [],
+                "calls": 0,
+                "ok": 0,
+                "errors": [],
+            }
+        tool_group["calls"] += 1
+        if intent not in tool_group["intents"]:
+            tool_group["intents"].append(intent)
+
+    def record_tool_result(event_data: Any) -> None:
+        if state.verbose:
+            print_tool_result_rich(event_data, state.verbose, live_console)
+            return
+        if tool_group is None:
+            return
+        if event_data.status == "ok":
+            tool_group["ok"] += 1
+            return
+        label = tool_call_labels.get(event_data.tool_use_id, event_data.tool_use_id)
+        tool_group["errors"].append((label, event_data))
+
+    def flush_tool_group() -> None:
+        nonlocal tool_group
+        if tool_group is None:
+            return
+        calls = int(tool_group["calls"])
+        errors = list(tool_group["errors"])
+        intents = list(tool_group["intents"])
+        title = summarize_intents(intents)
+        status = "failed" if errors else "done"
+        style = CLI_COLOR_ERROR if errors else CLI_COLOR_SUCCESS
+        live_console.print(Text(f"  • Explore: {title}", style=CLI_COLOR_TOOL))
+        live_console.print(Text(f"    {status}: {calls} tools", style=style))
+        for label, result in errors:
+            summary = single_line_preview(str(result.content), width=120)
+            live_console.print(
+                Text(f"    error: {label}: {summary}", style=CLI_COLOR_ERROR)
+            )
+        tool_group = None
+
+    def render_reasoning_preview() -> None:
+        lines = reasoning_preview_lines(reasoning_text)
+        if lines:
+            reasoning_preview.update(lines)
+
+    def finish_reasoning_preview() -> None:
+        nonlocal reasoning_started_at, reasoning_text
+        if reasoning_started_at is None:
+            return
+        elapsed = time.perf_counter() - reasoning_started_at
+        reasoning_preview.stop()
+        if not should_print_reasoning_summary(reasoning_text, elapsed):
             reasoning_started_at = None
             reasoning_text = ""
-
-        # 引导模式：steer 负责消息顺序，question 只传占位符
-        if state.pending_partial is not None:
-            _, partial_text = state.pending_partial
-            state.pending_partial = None
-            if partial_text:
-                agent_text = (
-                    f"[Context: assistant was interrupted mid-response]\n"
-                    f"{partial_text}\n"
-                    f"[end of partial response]\n"
-                    f"{agent_text}"
-                )
-
-        try:
-            for event in _ask_stream(app, agent_text, state.mode):
-                store.append("event", _event_to_dict(event))
-                if event.type in {"reasoning_delta", "thinking_delta"}:
-                    _flush_tool_group()
-                    if reasoning_started_at is None:
-                        reasoning_started_at = time.perf_counter()
-                    reasoning_text += str(event.data)
-                    _render_reasoning_preview()
-                    continue
-
-                _finish_reasoning_preview()
-
-                if event.type == "text_delta":
-                    _flush_tool_group()
-                    chunk = str(event.data)
-                    current_step_thoughts.append(chunk)
-                    streamed_text = True
-                    answer_stream.update("".join(current_step_thoughts))
-                elif event.type == "assistant":
-                    has_tool_calls = False
-                    if isinstance(event.data, list):
-                        has_tool_calls = any(
-                            isinstance(block, dict) and block.get("type") == "tool_use"
-                            for block in event.data
-                        )
-                    if has_tool_calls:
-                        thoughts = "".join(current_step_thoughts).strip()
-                        if thoughts:
-                            answer_stream.stop()
-                            if step_answers:
-                                print()
-                            step_answers.append(thoughts)
-                        current_step_thoughts = []
-                        streamed_text = False
-                elif event.type == "tool_use":
-                    _record_tool_call(event.data)
-                elif event.type == "tool_result":
-                    _record_tool_result(event.data)
-                elif event.type == "final":
-                    _flush_tool_group()
-                    final_answer = "".join(current_step_thoughts).strip()
-                    if not final_answer and getattr(event.data, "answer", None):
-                        final_answer = str(event.data.answer).strip()
-                    if final_answer:
-                        step_answers.append(final_answer)
-                        if streamed_text:
-                            answer_stream.stop()
-                        elif len(step_answers) > 1:
-                            print()
-                            markdown_renderer.render(final_answer)
-                        else:
-                            markdown_renderer.render(final_answer)
-                        streamed_text = False
-                    stopped_reason = _final_stop_reason(event.data)
-        except KeyboardInterrupt:
-            interrupted = True
-            token = getattr(getattr(app, "agent", None), "cancellation_token", None)
-            if token is not None:
-                token.cancel("interrupted by user")
-            tool_group = None
-            _clear_line()
-            store.append(
-                "event", {"type": "interrupted", "data": "interrupted by user"}
-            )
-            has_partial = bool(reasoning_text or current_step_thoughts or step_answers)
-            if has_partial:
-                state.pending_partial = (
-                    reasoning_text,
-                    "".join(current_step_thoughts)
-                    or ("".join(step_answers) if step_answers else ""),
-                )
-                print(
-                    "[interrupted] type your message below to inject into context"
-                )
-                try:
-                    inject_text = session.prompt(
-                        [("class:prompt-marker", "interrupt> "), ("", "")]
-                    ).strip()
-                except (EOFError, KeyboardInterrupt):
-                    inject_text = ""
-                if inject_text:
-                    state.pending_inject = inject_text
-                    store.append("user", inject_text)
-                else:
-                    state.pending_partial = None
-                    print("[interrupt cancelled]")
-            else:
-                print("[interrupted] current run cancelled; session is still active.")
-            continue
-        finally:
-            _finish_reasoning_preview()
-            answer_stream.stop()
-            if not interrupted:
-                _flush_tool_group()
-
-        if stopped_reason:
-            print(stopped_reason)
-        if step_answers:
-            answer = "\n\n".join(step_answers)
-            store.append("assistant", answer)
-            store.update_summary()
-
-
-def create_prompt_session(
-    project_root: Path | None = None,
-    registry: tuple[ToolSpec, ...] = (),
-) -> PromptLike:
-    try:
-        from prompt_toolkit import PromptSession
-        from prompt_toolkit.key_binding import KeyBindings
-        from prompt_toolkit.styles import Style
-    except ImportError as exc:
-        raise RuntimeError(
-            "prompt_toolkit is required for REPL mode. Install it in .venv first."
-        ) from exc
-
-    bindings = KeyBindings()
-
-    @bindings.add("enter")
-    def _(event) -> None:
-        event.current_buffer.validate_and_handle()
-
-    def insert_newline(event) -> None:
-        event.current_buffer.insert_text("\n")
-
-    try:
-        bindings.add("s-enter")(insert_newline)
-    except ValueError:
-        pass
-    bindings.add("escape", "enter")(insert_newline)
-
-    @bindings.add("c-c")
-    def handle_ctrl_c(event) -> None:
-        buf = event.current_buffer
-        if buf.text:
-            buf.reset()
-        else:
-            event.app.exit(exception=KeyboardInterrupt())
-
-    completer = ReplCompleter(project_root or Path.cwd(), registry, COMMAND_NAMES)
-
-    history = None
-    try:
-        from prompt_toolkit.history import FileHistory
-
-        history_dir = (project_root or Path.cwd()) / ".local"
-        history_dir.mkdir(parents=True, exist_ok=True)
-        history = FileHistory(str(history_dir / "repl_history"))
-    except OSError:
-        pass
-    style = Style.from_dict(
-        {
-            "prompt-marker": CLI_PROMPT_MARKER_STYLE,
-        }
-    )
-
-    return PromptSessionAdapter(
-        PromptSession(
-            multiline=True,
-            key_bindings=bindings,
-            completer=completer,
-            complete_while_typing=True,
-            history=history,
-            style=style,
-        )
-    )
-
-
-def _handle_permissions(
-    command: str,
-    session_policy: SessionPermissionPolicy | None,
-    persistent_store: PersistentPermissionStore | None,
-) -> None:
-    parts = command.split(maxsplit=2)
-    sub = parts[1] if len(parts) >= 2 else ""
-    if sub == "revoke" and len(parts) >= 3 and persistent_store is not None:
-        tool_name = parts[2]
-        persistent_store.revoke(tool_name)
-        print(f"Revoked persistent permission for: {tool_name}")
-        return
-    if sub == "clear" and session_policy is not None:
-        session_policy.clear()
-        print("Session permissions cleared.")
-        return
-    _list_permissions(session_policy, persistent_store)
-
-
-def _list_permissions(
-    session_policy: SessionPermissionPolicy | None,
-    persistent_store: PersistentPermissionStore | None,
-) -> None:
-    lines = ["<permissions>"]
-    if session_policy is not None:
-        rules = list(session_policy._rules)
-        if rules:
-            lines.append("  session:")
-            for r in rules:
-                ic = f" (input: {r.input_contains})" if r.input_contains else ""
-                lines.append(f"    {r.tool} = {r.decision}{ic}")
-    if persistent_store is not None:
-        policy = persistent_store.load()
-        if policy.rules:
-            lines.append("  persistent:")
-            for r in policy.rules:
-                ic = f" (input: {r.input_contains})" if r.input_contains else ""
-                lines.append(f"    {r.tool} = {r.decision}{ic}")
-    if len(lines) == 1:
-        lines.append("  (none)")
-    lines.append("</permissions>")
-    print("\n".join(lines))
-
-
-def _handle_model_command(command: str, app) -> None:
-    parts = command.split(maxsplit=3)
-    if len(parts) == 1:
-        info = app.get_model_info() if hasattr(app, "get_model_info") else {}
-        if info:
-            print(f"  Model    : {info.get('model', 'unknown')}")
-            print(f"  Base URL : {info.get('base_url', '')}")
-        else:
-            print("Model info not available.")
-        return
-
-    model_name = parts[1]
-    kwargs: dict[str, object] = {"model": model_name}
-
-    # 解析 --thinking <level> 选项
-    if len(parts) >= 4 and parts[2] == "--thinking":
-        level = parts[3].lower()
-        if level not in ("off", "minimal", "low", "medium", "high", "xhigh"):
-            print(
-                f"Invalid thinking level: {level}. Use off/minimal/low/medium/high/xhigh."
-            )
             return
-        if level == "off":
-            kwargs["thinking"] = False
-            kwargs["reasoning_effort"] = None
-        else:
-            kwargs["thinking"] = True
-            kwargs["reasoning_effort"] = level
-
-    if not hasattr(app, "set_model"):
-        print("Model switching is not supported in this app.")
-        return
-
-    try:
-        new_model = app.set_model(**kwargs)
-        print(f"Switched to model: {new_model}")
-    except Exception as e:
-        print(f"Failed to switch model: {e}")
-
-
-def _handle_effort_command(command: str, app) -> None:
-    parts = command.split(maxsplit=1)
-    if len(parts) == 1:
-        info = app.get_model_info() if hasattr(app, "get_model_info") else {}
-        current = info.get("reasoning_effort", "not set") if info else "unknown"
-        print(f"  Reasoning effort: {current}")
-        return
-
-    level = parts[1].lower()
-    if level not in ("off", "minimal", "low", "medium", "high", "max"):
-        print("Invalid effort level. Use: off/minimal/low/medium/high/max")
-        return
-
-    if not hasattr(app, "set_model"):
-        print("Model switching is not supported in this app.")
-        return
-
-    info = app.get_model_info() if hasattr(app, "get_model_info") else {}
-    current_model = info.get("model", "unknown") if info else "unknown"
-
-    try:
-        if level == "off":
-            app.set_model(model=current_model, thinking=False, reasoning_effort=None)
-            print("Reasoning effort disabled.")
-        else:
-            app.set_model(model=current_model, thinking=True, reasoning_effort=level)
-            print(f"Reasoning effort set to: {level}")
-    except Exception as e:
-        print(f"Failed to set reasoning effort: {e}")
-
-
-def _handle_thinking_command(command: str, app) -> None:
-    parts = command.split(maxsplit=1)
-    if len(parts) == 1:
-        info = app.get_model_info() if hasattr(app, "get_model_info") else {}
-        thinking = info.get("thinking", "unknown") if info else "unknown"
-        print(f"  Thinking: {thinking}")
-        return
-
-    state = parts[1].lower()
-    if state not in ("on", "off"):
-        print("Usage: /thinking on|off")
-        return
-
-    if not hasattr(app, "set_model"):
-        print("Model switching is not supported in this app.")
-        return
-
-    info = app.get_model_info() if hasattr(app, "get_model_info") else {}
-    current_model = info.get("model", "unknown") if info else "unknown"
-    current_effort = info.get("reasoning_effort", "high") if info else "high"
-
-    try:
-        if state == "off":
-            app.set_model(model=current_model, thinking=False, reasoning_effort=None)
-            print("Thinking disabled.")
-        else:
-            app.set_model(
-                model=current_model,
-                thinking=True,
-                reasoning_effort=current_effort,
+        preview = single_line_preview(reasoning_text)
+        live_console.print(
+            Text(
+                f"  • thinked for {format_elapsed(elapsed)}",
+                style=CLI_COLOR_THINKING,
             )
-            print(f"Thinking enabled (effort: {current_effort}).")
-    except Exception as e:
-        print(f"Failed to set thinking: {e}")
-
-
-def _handle_command(
-    command: str,
-    store: SessionStore,
-    app,
-    renderer: MarkdownRenderer,
-    state: ReplState,
-    prompt_session: PromptLike,
-    session_policy: SessionPermissionPolicy | None = None,
-    persistent_store: PersistentPermissionStore | None = None,
-) -> bool:
-    ctx = CommandContext(
-        store=store,
-        app=app,
-        renderer=renderer,
-        state=state,
-        prompt_session=prompt_session,
-        session_policy=session_policy,
-        persistent_store=persistent_store,
-    )
-    for prefix in sorted(COMMAND_REGISTRY, key=len, reverse=True):
-        entry = COMMAND_REGISTRY[prefix]
-        if command == prefix or (
-            entry.accepts_args and command.startswith(prefix + " ")
-        ):
-            return entry.handler(command, ctx)
-    print(f"Unknown command: {command}")
-    return False
-
-
-def _resume_interactively(store: SessionStore, prompt_session: PromptLike) -> None:
-    sessions = store.list_session_infos()
-    if not sessions:
-        print("No conversations found.")
-        return
-    _print_sessions(sessions)
-    choice = prompt_session.prompt("resume> ").strip()
-    if not choice:
-        print("Resume cancelled.")
-        return
-    selected = _select_session(sessions, choice)
-    if selected is None:
-        print(f"No conversation matched: {choice}")
-        return
-    store.resume(selected.id)
-    print(_resumed_message(selected))
-    _print_loaded_history(store)
-
-
-def _resume_latest(store: SessionStore) -> SessionMetadataView | None:
-    sessions = store.list_session_infos(limit=1)
-    if not sessions:
-        return None
-    store.resume(sessions[0].id)
-    return sessions[0]
-
-
-def _select_session(
-    sessions: list[SessionMetadataView],
-    choice: str,
-) -> SessionMetadataView | None:
-    if choice.isdigit():
-        index = int(choice) - 1
-        if 0 <= index < len(sessions):
-            return sessions[index]
-    for item in sessions:
-        if choice in {item.id, item.title}:
-            return item
-    return None
-
-
-def _print_sessions(sessions: list[SessionMetadataView]) -> None:
-    id_to_index = {s.id: str(i) for i, s in enumerate(sessions, 1)}
-    for index, item in enumerate(sessions, start=1):
-        suffix = ""
-        if item.parent_id and item.parent_id in id_to_index:
-            suffix = f" (forked from #{id_to_index[item.parent_id]})"
-        print(f"{index}. {item.title}{suffix}")
-        if item.summary:
-            print(f"   {item.summary}")
-
-
-def _current_view(store: SessionStore) -> SessionMetadataView:
-    metadata = store.current_metadata()
-    if metadata is not None:
-        return SessionMetadataView(
-            id=metadata.id,
-            title=metadata.title,
-            summary=metadata.summary,
-            updated_at=metadata.updated_at,
-            path=store.current_path,
         )
-    session_id = store.current_path.stem.removeprefix("session-")
-    return SessionMetadataView(
-        id=session_id,
-        title=f"Session {session_id}",
-        summary="No summary available.",
-        updated_at="",
-        path=store.current_path,
-    )
+        if preview:
+            live_console.print(Text(f"    {preview}", style=CLI_COLOR_THINKING))
+        reasoning_started_at = None
+        reasoning_text = ""
 
-
-def _resumed_message(view: SessionMetadataView) -> str:
-    return f"Resumed conversation: {view.title}"
-
-
-def _print_loaded_history(store: SessionStore) -> None:
-    console = Console(file=sys.stdout)
-    records = [
-        record
-        for record in store.load_records()
-        if record.type in {"user", "assistant"} and str(record.content).strip()
-    ]
-    if not records:
-        return
-    console.print(
-        Text(
-            f"  • loaded {len(records)} message(s) from this session branch",
-            style=CLI_COLOR_INFO,
-        )
-    )
-    for record in records:
-        if record.type == "assistant":
-            console.print(Text("assistant:", style=CLI_COLOR_ASSISTANT))
-            console.print(Markdown(str(record.content)))
-        else:
-            console.print(Text(f"user: {record.content}", style=CLI_COLOR_USER))
-
-
-def _print_saved_conversation(store: SessionStore) -> None:
-    metadata = store.update_summary()
-    if metadata is not None:
-        print(f"Conversation saved: {metadata.title}")
-
-
-def _ask_stream(app, text: str, mode: str):
-    return app.ask_stream(text, mode=mode)
-
-
-def _run_tool_command(command: str, app) -> str:
-    parts = command.split(maxsplit=2)
-    if len(parts) < 2:
-        return "usage: /tool NAME INPUT\n/tool list — show enabled tools by group"
-    name = parts[1]
-    registry: tuple[ToolSpec, ...] = tuple(getattr(app, "registry", ()) or ())
-    if name == "list":
-        catalog = build_tool_catalog()
-        enabled_names = {t.name for t in registry}
-
-        lines = ["<visible tools>"]
-        core_names = sorted(t.name for t in registry if t.group == "core")
-        if core_names:
-            lines.append("  core:")
-            lines.extend(f"    {n}" for n in core_names)
-
-        noncore_groups = sorted({t.group for t in registry if t.group != "core"})
-        for g in noncore_groups:
-            lines.append(f"  {g}:")
-            tools_in_group = sorted(
-                (t for t in registry if t.group == g), key=lambda x: x.name
+    if state.pending_partial is not None:
+        _, partial_text = state.pending_partial
+        state.pending_partial = None
+        if partial_text:
+            agent_text = (
+                f"[Context: assistant was interrupted mid-response]\n"
+                f"{partial_text}\n"
+                f"[end of partial response]\n"
+                f"{agent_text}"
             )
-            for t in tools_in_group:
-                suffix = ""
-                if t.group == "mcp":
-                    if "[mcp: " in t.description:
-                        server_name = t.description.split("[mcp: ")[-1].split("]")[0]
-                        suffix = f" [mcp: {server_name}]"
-                lines.append(f"    {t.name}{suffix}")
-        lines.append("</visible tools>")
 
-        all_known = set()
-        for group_names in catalog.values():
-            all_known.update(group_names)
-        hidden = sorted(all_known - enabled_names)
-        if hidden:
-            lines.append("<hidden tools (enable via tools.enabled_groups)>")
-            for g in sorted(catalog):
-                group_hidden = sorted(catalog[g] & set(hidden))
-                if group_hidden:
-                    lines.append(f"  {g}:")
-                    lines.extend(f"    {n}" for n in group_hidden)
-            lines.append("</hidden tools>")
-
-        available_groups = sorted(catalog.keys() - {t.group for t in registry})
-        if available_groups:
-            lines.append("<available groups>")
-            lines.extend(f"  {g}" for g in available_groups)
-            lines.append("</available groups>")
-        return "\n".join(lines)
-    tool_map = {tool.name: tool for tool in registry}
-    tool = tool_map.get(name)
-    if tool is None:
-        return f"unknown tool: {name}"
-    raw_input = parts[2] if len(parts) == 3 else ""
     try:
-        action_input = parse_tool_input(tool, raw_input)
-    except ValueError as exc:
-        return str(exc)
-    result = run_tool_result(
-        tool_map,
-        name,
-        action_input,
-    )
-    return result.content
-
-
-def parse_tool_input(tool: ToolSpec, raw_input: str) -> ToolInput:
-    """解析 `/tool` 命令的人类输入；核心工具协议只接收 dict。"""
-    text = raw_input.strip()
-    if text.startswith(("{", "[")):
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid JSON input: {exc.msg}") from exc
-        if not isinstance(data, dict):
-            raise ValueError("JSON input must be an object")
-        return data
-    key = _cli_shorthand_key(tool)
-    return {key: text} if key else {}
-
-
-def _cli_shorthand_key(tool: ToolSpec) -> str:
-    schema = tool.schema or {}
-    required = schema.get("required")
-    if (
-        isinstance(required, list)
-        and len(required) == 1
-        and isinstance(required[0], str)
-    ):
-        return required[0]
-    return "input"
-
-
-def _brief_input(name: str, raw_input: Any) -> str:
-    """从工具输入中提取简短的人类可读摘要。"""
-    if isinstance(raw_input, dict):
-        if name == "bash":
-            command = raw_input.get("command") or raw_input.get("input")
-            return _single_line_preview(f"bash: {command}") if command else name
-        parts = []
-        for key, value in raw_input.items():
-            if value in (None, "", [], {}):
+        for event in app.ask_stream(agent_text, mode=state.mode):
+            store.append("event", event_to_dict(event))
+            if event.type in {"reasoning_delta", "thinking_delta"}:
+                flush_tool_group()
+                if reasoning_started_at is None:
+                    reasoning_started_at = time.perf_counter()
+                reasoning_text += str(event.data)
+                render_reasoning_preview()
                 continue
-            parts.append(f"{key}={json.dumps(value, ensure_ascii=False)}")
-        if parts:
-            return _single_line_preview(f"{name}: {', '.join(parts)}")
-        if raw_input:
-            key, val = next(iter(raw_input.items()))
-            return _single_line_preview(f"{name}: {key}={val}")
-        return name
-    if isinstance(raw_input, str) and raw_input:
-        return _single_line_preview(f"{name}: {raw_input}")
-    return name
 
+            finish_reasoning_preview()
 
-def _tool_intent(name: str, raw_input: Any) -> str:
-    if not isinstance(raw_input, dict):
-        return _single_line_preview(f"Run {name}")
-    if name == "grep_search":
-        pattern = (
-            raw_input.get("pattern") or raw_input.get("query") or raw_input.get("input")
-        )
-        path = raw_input.get("path") or raw_input.get("include") or "workspace"
-        if pattern:
-            return _single_line_preview(f"Search {path} for {pattern}")
-    if name == "glob_files":
-        pattern = (
-            raw_input.get("pattern") or raw_input.get("path") or raw_input.get("input")
-        )
-        path = raw_input.get("path") if raw_input.get("pattern") else "workspace"
-        if pattern:
-            return _single_line_preview(f"Find {pattern} in {path}")
-    if name == "read_file":
-        path = raw_input.get("path") or raw_input.get("input")
-        if path:
-            return _single_line_preview(f"Read {path}")
-    if name in {"write_file", "edit_file"}:
-        path = raw_input.get("path") or raw_input.get("input")
-        if path:
-            return _single_line_preview(f"Edit {path}")
-    if name == "bash":
-        command = raw_input.get("command") or raw_input.get("input")
-        if command:
-            return _single_line_preview(f"Run {command}")
-    return _single_line_preview(f"Run {name}")
-
-
-def _summarize_intents(intents: list[str]) -> str:
-    if not intents:
-        return "workspace"
-    if len(intents) == 1:
-        return intents[0]
-    first = intents[0]
-    return _single_line_preview(f"{first} and {len(intents) - 1} more")
-
-
-def _event_to_dict(event) -> dict[str, Any]:
-    data = event.data
-    if is_dataclass(data) and not isinstance(data, type):
-        payload = asdict(data)
-    else:
-        payload = data
-    return {"type": event.type, "step": event.step, "data": payload}
-
-
-def _print_tool_call_rich(label: str, console: Console | None = None) -> None:
-    target = console or _console
-    target.print(Text(f"  • {label}", style=CLI_COLOR_TOOL))
-
-
-def _print_tool_result_rich(
-    data,
-    verbose: bool,
-    console: Console | None = None,
-) -> None:
-    if data.status == "ok" and not verbose:
+            if event.type == "text_delta":
+                flush_tool_group()
+                chunk = str(event.data)
+                current_step_thoughts.append(chunk)
+                streamed_text = True
+                answer_stream.update("".join(current_step_thoughts))
+            elif event.type == "assistant":
+                if _assistant_has_tool_calls(event.data):
+                    thoughts = "".join(current_step_thoughts).strip()
+                    if thoughts:
+                        answer_stream.stop()
+                        if step_answers:
+                            print()
+                        step_answers.append(thoughts)
+                    current_step_thoughts = []
+                    streamed_text = False
+            elif event.type == "tool_use":
+                record_tool_call(event.data)
+            elif event.type == "tool_result":
+                record_tool_result(event.data)
+            elif event.type == "final":
+                flush_tool_group()
+                final_answer = "".join(current_step_thoughts).strip()
+                if not final_answer and getattr(event.data, "answer", None):
+                    final_answer = str(event.data.answer).strip()
+                if final_answer:
+                    step_answers.append(final_answer)
+                    if streamed_text:
+                        answer_stream.stop()
+                    elif len(step_answers) > 1:
+                        print()
+                        markdown_renderer.render(final_answer)
+                    else:
+                        markdown_renderer.render(final_answer)
+                    streamed_text = False
+                stopped_reason = final_stop_reason(event.data)
+    except KeyboardInterrupt:
+        interrupted = True
+        token = getattr(getattr(app, "agent", None), "cancellation_token", None)
+        if token is not None:
+            token.cancel("interrupted by user")
+        tool_group = None
+        clear_line()
+        store.append("event", {"type": "interrupted", "data": "interrupted by user"})
+        has_partial = bool(reasoning_text or current_step_thoughts or step_answers)
+        if has_partial:
+            state.pending_partial = (
+                reasoning_text,
+                "".join(current_step_thoughts)
+                or ("".join(step_answers) if step_answers else ""),
+            )
+            print("[interrupted] type your message below to inject into context")
+            try:
+                inject_text = session.prompt(
+                    [("class:prompt-marker", "interrupt> "), ("", "")]
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                inject_text = ""
+            if inject_text:
+                state.pending_inject = inject_text
+                store.append("user", inject_text)
+            else:
+                state.pending_partial = None
+                print("[interrupt cancelled]")
+        else:
+            print("[interrupted] current run cancelled; session is still active.")
         return
-    target = console or _console
-    border = {
-        "error": CLI_COLOR_ERROR,
-        "denied": CLI_COLOR_ERROR,
-        "approval_required": CLI_COLOR_WARNING,
-    }.get(data.status, CLI_COLOR_SUCCESS if data.status == "ok" else CLI_COLOR_INFO)
-    mark = {"error": "✘", "denied": "⊘", "approval_required": "?"}.get(
-        data.status, data.status
+    finally:
+        finish_reasoning_preview()
+        answer_stream.stop()
+        if not interrupted:
+            flush_tool_group()
+
+    if stopped_reason:
+        print(stopped_reason)
+    if step_answers:
+        answer = "\n\n".join(step_answers)
+        store.append("assistant", answer)
+        store.update_summary()
+
+
+def _assistant_has_tool_calls(data: Any) -> bool:
+    if not isinstance(data, list):
+        return False
+    return any(
+        isinstance(block, dict) and block.get("type") == "tool_use" for block in data
     )
-    limit = 600 if verbose else 200
-    summary = _single_line_preview(str(data.content), width=limit)
-    target.print(Text(f"  ← {mark} {summary}", style=border))
-
-
-def _final_stop_reason(data) -> str | None:
-    if getattr(data, "stopped_by_limit", False):
-        return "[stopped] step limit reached"
-    if getattr(data, "stopped_by_watchdog", False):
-        reason = getattr(data, "watchdog_reason", "repeated tool calls detected")
-        return f"[stopped] {reason}"
-    return None
-
-
-def _file_reference_event(references: list[FileReference]) -> dict[str, Any]:
-    return {
-        "type": "file_references",
-        "data": [
-            {
-                "path": reference.path,
-                "status": reference.status,
-                "error": reference.error,
-            }
-            for reference in references
-        ],
-    }

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .markdown import MarkdownRenderer
-from .session import SessionStore
+from xcode.harness.session import SessionStore
 from xcode.harness.observability import (
     PersistentPermissionStore,
     SessionPermissionPolicy,
@@ -66,10 +66,12 @@ def generate_help_text(registry: dict[str, CommandEntry]) -> str:
         lines.append(f"  {name:<11} {entry.desc}")
         if entry.args_desc:
             lines.append(f"  {name} {entry.args_desc}")
-    lines.extend([
-        "",
-        "Press Shift+Enter for a newline. If your terminal does not send Shift+Enter,",
-        "use Esc Enter as the fallback accepted by prompt_toolkit.",
-        "Use Tab to complete slash commands, /tool names, and @file references.",
-    ])
+    lines.extend(
+        [
+            "",
+            "Press Shift+Enter for a newline. If your terminal does not send Shift+Enter,",
+            "use Esc Enter as the fallback accepted by prompt_toolkit.",
+            "Use Tab to complete slash commands, /tool names, and @file references.",
+        ]
+    )
     return "\n".join(lines)

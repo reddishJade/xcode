@@ -10,16 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from xcode.cli.completion import ReplCompleter
-from xcode.cli.repl import (
-    COMMAND_NAMES,
-    PromptText,
-    ReplState,
-    _brief_input,
-    _handle_command,
-    _reasoning_preview_lines,
-    run_repl,
-)
-from xcode.cli.session import SessionStore
+from xcode.cli.commands import PromptText, ReplState
+from xcode.cli.repl import run_repl
+from xcode.cli.repl_commands import COMMAND_NAMES, handle_command
+from xcode.cli.repl_rendering import reasoning_preview_lines
+from xcode.cli.repl_tools import brief_input
+from xcode.harness.session import SessionStore
 from xcode.harness.agent_runtime import (
     CancellationToken,
     StructuredAgentEvent,
@@ -214,7 +210,7 @@ class XcodeReplTests(unittest.TestCase):
 
     def test_reasoning_preview_lines_keep_latest_three_visual_lines(self) -> None:
         self.assertEqual(
-            _reasoning_preview_lines("one\ntwo\nthree\nfour", width=80),
+            reasoning_preview_lines("one\ntwo\nthree\nfour", width=80),
             ["two", "three", "four"],
         )
 
@@ -300,7 +296,7 @@ class XcodeReplTests(unittest.TestCase):
             renderer = FakeRenderer()
 
             with patch(
-                "xcode.cli.repl.build_tool_catalog",
+                "xcode.cli.repl_tools.build_tool_catalog",
                 return_value={
                     "core": {"read_file"},
                     "subagent": {"submit_subagent"},
@@ -317,16 +313,16 @@ class XcodeReplTests(unittest.TestCase):
 
     def test_brief_input_shows_bash_command_and_file_paths(self) -> None:
         self.assertEqual(
-            _brief_input("bash", {"command": "Remove-Item tmp\\hello.c"}),
+            brief_input("bash", {"command": "Remove-Item tmp\\hello.c"}),
             "bash: Remove-Item tmp\\hello.c",
         )
-        write_summary = _brief_input(
+        write_summary = brief_input(
             "write_file", {"path": "tmp/hello.py", "content": "x" * 200}
         )
         self.assertTrue(write_summary.startswith('write_file: path="tmp/hello.py"'))
         self.assertTrue(write_summary.endswith("…"))
         self.assertEqual(
-            _brief_input("grep_search", {"pattern": "**/*mcp*", "path": "src/xcode"}),
+            brief_input("grep_search", {"pattern": "**/*mcp*", "path": "src/xcode"}),
             'grep_search: pattern="**/*mcp*", path="src/xcode"',
         )
 
@@ -396,7 +392,7 @@ class XcodeReplTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))
 
-            handled = _handle_command(
+            handled = handle_command(
                 "/quit",
                 store,
                 FakeApp(),
@@ -414,7 +410,7 @@ class XcodeReplTests(unittest.TestCase):
             output = StringIO()
 
             with redirect_stdout(output):
-                handled = _handle_command(
+                handled = handle_command(
                     "/clear now",
                     store,
                     FakeApp(),
@@ -630,7 +626,9 @@ class XcodeReplForkTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             app = CompactFakeApp()
-            prompt = FakePrompt(["/compact", "/exit"])
+            prompt = FakePrompt([])
+            renderer = FakeRenderer()
+            state = ReplState()
             store = SessionStore(Path(temp_dir))
             store.append(
                 "event",
@@ -645,12 +643,17 @@ class XcodeReplForkTests(unittest.TestCase):
                     },
                 },
             )
-            with patch("xcode.cli.repl.SessionStore") as mock_store_cls:
-                mock_store_cls.return_value = store
-                with redirect_stdout(StringIO()):
-                    code = run_repl(app, Path(temp_dir), prompt)
+            with redirect_stdout(StringIO()):
+                handled = handle_command(
+                    "/compact",
+                    store,
+                    app,
+                    renderer,
+                    state,
+                    prompt,
+                )
 
-            self.assertEqual(code, 0)
+            self.assertFalse(handled)
             self.assertTrue(app.agent.compact_requested)
             records = store.load_records()
             tool_results = [

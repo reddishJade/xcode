@@ -63,8 +63,13 @@ src/xcode/main.py
 
 | 文件 | 职责 |
 | --- | --- |
-| `repl.py` | REPL 主循环、slash command、模式切换、session transcript 落盘 |
-| `session.py` | REPL 会话索引、resume、fork、plan artifact |
+| `repl.py` | REPL 主循环和事件流展示编排 |
+| `repl_commands.py` | slash command 注册表和命令处理 |
+| `repl_hitl.py` | REPL 人工授权提示 |
+| `repl_rendering.py` | 终端渲染、prompt session、推理预览 |
+| `repl_sessions.py` | REPL 会话恢复和历史展示 |
+| `repl_settings.py` | 模型、thinking、effort、权限命令处理 |
+| `repl_tools.py` | `/tool` 输入解析、工具意图摘要、事件序列化 |
 | `completion.py` | 命令、工具名和 `@file` 补全 |
 | `file_refs.py` | `@relative/path` 解析和文件内容注入 |
 | `markdown.py` | 终端 markdown/diff 渲染 |
@@ -79,6 +84,7 @@ src/xcode/main.py
 | --- | --- |
 | `app.py` | 应用装配、工具组展开、experimental opt-in、provider/agent 连接 |
 | `config.py` | runtime config dataclass、配置读取、相对路径解析 |
+| `session.py` | JSONL 会话存储、索引、resume、fork、plan artifact |
 | `skills.py` | `ToolSpec`、工具输入解析、HITL 执行和脱敏入口 |
 | `skill_loader.py` | `SKILL.md` catalog 扫描和 `load_skill` 工具 |
 | `agent_runtime/` | `StructuredAgent`、事件协议、工具执行、subagent、prompt、compaction、cancellation |

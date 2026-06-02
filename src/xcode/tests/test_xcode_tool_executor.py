@@ -16,7 +16,7 @@ from xcode.harness.agent_runtime.tool_executor import (
     partition_tool_calls,
     tool_result_message,
 )
-from xcode.cli.repl import ReplHITLHandler
+from xcode.cli.repl_hitl import ReplHITLHandler
 from xcode.harness.observability import (
     AuditRecord,
     HITLResult,
@@ -350,7 +350,7 @@ class ReplHITLHandlerTests(unittest.TestCase):
 
         async def main() -> HITLResult:
             with (
-                patch("xcode.cli.repl._has_radiolist", return_value=True),
+                patch("xcode.cli.repl_hitl.has_radiolist", return_value=True),
                 patch.object(
                     builtins,
                     "input",
