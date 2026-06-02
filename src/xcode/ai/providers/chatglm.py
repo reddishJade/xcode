@@ -4,8 +4,8 @@ import copy
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
-from ...agent.types import ToolDefinition
-from ...harness.agent_runtime.events import ProviderEvent
+from xcode.ai.events import ProviderEvent
+from xcode.ai.types import ToolDefinition
 from .codec import chat_stream_to_events, to_chat_messages, to_chat_tool
 from .runtime import ProviderRuntime
 
@@ -74,9 +74,7 @@ class ChatGLMProvider:
         kwargs: dict[str, object] = {
             "model": self.model,
             "messages": openai_messages,
-            "tools": [
-                to_chat_tool(t.name, t.description, t.schema) for t in tools
-            ],
+            "tools": [to_chat_tool(t.name, t.description, t.schema) for t in tools],
             "stream": True,
         }
 
@@ -103,9 +101,7 @@ class ChatGLMProvider:
                     self._record_usage(chunk, len(openai_messages))
                 yield chunk
 
-        stream = self.runtime.run(
-            lambda: self.client.chat.completions.create(**kwargs)
-        )
+        stream = self.runtime.run(lambda: self.client.chat.completions.create(**kwargs))
         self.metrics["sent_messages"] = len(openai_messages)
         yield from chat_stream_to_events(intercept_usage(stream))
 
@@ -149,5 +145,9 @@ class ChatGLMProvider:
             self.metrics["cached_tokens"] = cached or 0
 
             completion_details = getattr(usage, "completion_tokens_details", None)
-            reasoning = getattr(completion_details, "reasoning_tokens", 0) if completion_details else 0
+            reasoning = (
+                getattr(completion_details, "reasoning_tokens", 0)
+                if completion_details
+                else 0
+            )
             self.metrics["reasoning_tokens"] = reasoning or 0

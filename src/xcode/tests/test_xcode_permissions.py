@@ -17,10 +17,10 @@ from xcode.harness.agent_runtime import StructuredAgent
 
 
 from xcode.tests.fixtures import FakeProvider
-from xcode.harness.agent_runtime.events import (
+from xcode.ai.events import (
     TextDelta,
     FinalMessage,
-    ToolCallReady,
+    ToolCallEvent,
     ToolCall,
 )
 
@@ -70,11 +70,11 @@ class XcodePermissionsTests(unittest.TestCase):
         self.assertEqual(output, "go")
 
     def test_structured_agent_uses_permission_policy(self) -> None:
-        from xcode.harness.agent_runtime.events import ProviderEvent
+        from xcode.ai.events import ProviderEvent
 
         responses: list[list[ProviderEvent]] = [
             [
-                ToolCallReady([ToolCall("x", "echo", {"input": "hello"})]),
+                ToolCallEvent([ToolCall("x", "echo", {"input": "hello"})]),
                 FinalMessage("", "end_turn"),
             ],
             [TextDelta("done"), FinalMessage("", "end_turn")],

@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 from xcode.harness.app import XcodeApp, _build_project_scoped_registry, build_app
 from xcode.harness.agent_runtime import StructuredAgent
-from xcode.harness.agent_runtime.events import TextDelta, FinalMessage
-from xcode.harness.agent_runtime.provider import ModelProvider
+from xcode.ai.events import FinalMessage, TextDelta, ToolCall, ToolCallEvent
+from xcode.ai.providers.protocol import ModelProvider
 from xcode.harness.config import (
     AgentRuntimeConfig,
     DaemonRuntimeConfig,
@@ -271,11 +271,11 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 self.calls = 0
 
             async def stream(self, messages, tools):
-                from xcode.harness.agent_runtime.events import ToolCall, ToolCallReady
+                from xcode.ai.events import ToolCall, ToolCallEvent
 
                 self.calls += 1
                 if self.calls == 1:
-                    yield ToolCallReady(
+                    yield ToolCallEvent(
                         [ToolCall("read-1", "read_file", {"path": "a.txt"})]
                     )
                 else:
@@ -415,10 +415,16 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         class ReadingProvider(ModelProvider):
             async def stream(self, messages, tools):
-                read_file = {tool.name: tool for tool in tools}["read_file"]
-                seen_reads.append(read_file.handler({"path": "marker.txt"}))
+                if messages and isinstance(messages[-1].get("content"), list):
+                    result_block = messages[-1]["content"][0]
+                    seen_reads.append(str(result_block.get("content", "")))
+                    yield TextDelta("child done")
+                    yield FinalMessage("", "end_turn")
+                    return
                 yield TextDelta("child done")
-                yield FinalMessage("", "end_turn")
+                yield ToolCallEvent(
+                    [ToolCall("read-1", "read_file", {"path": "marker.txt"})]
+                )
 
             def complete(self, prompt: str) -> str:
                 return "done"

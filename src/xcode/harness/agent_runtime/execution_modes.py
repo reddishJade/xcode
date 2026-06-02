@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Protocol
 
-from .events import ToolCall
+from xcode.ai.events import ToolCall
 from ..config import ExecutionMode
 from ..skills import ToolSpec
 

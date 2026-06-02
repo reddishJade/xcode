@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias
 
-"""Agent runtime 与 provider 之间的内部事件协议。"""
+"""Provider 流式事件协议。"""
 
 Message: TypeAlias = dict[str, Any]
 StopReason: TypeAlias = Literal[
@@ -19,20 +19,12 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
-class ToolResult:
-    tool_call_id: str
-    content: str
-    status: str = "ok"
-    elapsed_ms: float | None = None
-
-
-@dataclass(frozen=True)
 class TextDelta:
     chunk: str
 
 
 @dataclass(frozen=True)
-class ToolCallReady:
+class ToolCallEvent:
     calls: list[ToolCall]
 
 
@@ -54,5 +46,5 @@ class ReasoningDelta:
 
 
 ProviderEvent: TypeAlias = (
-    TextDelta | ToolCallReady | UsageUpdate | FinalMessage | ReasoningDelta
+    TextDelta | ToolCallEvent | UsageUpdate | FinalMessage | ReasoningDelta
 )

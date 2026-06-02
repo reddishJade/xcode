@@ -22,7 +22,7 @@ from xcode.harness.agent_runtime import (
     StructuredAgentResult,
 )
 from xcode.harness.agent_runtime.structured import ToolResultBlock
-from xcode.harness.agent_runtime.events import ToolCall
+from xcode.ai.events import ToolCall
 from xcode.harness.skills import ToolSpec
 
 

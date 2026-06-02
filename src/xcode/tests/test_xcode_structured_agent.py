@@ -9,10 +9,10 @@ from unittest.mock import patch
 
 from typing import cast, Iterator
 from xcode.harness.config import AgentConfig
-from xcode.harness.agent_runtime.events import (
+from xcode.ai.events import (
     FinalMessage,
     TextDelta,
-    ToolCallReady,
+    ToolCallEvent,
     ToolCall,
     ProviderEvent,
 )
@@ -76,7 +76,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallReady(
+                    ToolCallEvent(
                         [
                             ToolCall("a", "echo", {"text": "one"}),
                             ToolCall("b", "echo", {"text": "two"}),
@@ -113,7 +113,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallReady([ToolCall("x", "missing", {})]),
+                    ToolCallEvent([ToolCall("x", "missing", {})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("saw error"), FinalMessage("", "end_turn")],
@@ -135,7 +135,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
     def test_step_limit(self) -> None:
         events: list[ProviderEvent] = [
-            ToolCallReady([ToolCall("x", "missing", {})]),
+            ToolCallEvent([ToolCall("x", "missing", {})]),
             FinalMessage("", "end_turn"),
         ]
         agent = StructuredAgent(
@@ -156,7 +156,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 lambda _m, _t: cast(
                     list[ProviderEvent],
                     [
-                        ToolCallReady([ToolCall("x", "echo", {"input": "same"})]),
+                        ToolCallEvent([ToolCall("x", "echo", {"input": "same"})]),
                         FinalMessage("", "end_turn"),
                     ],
                 )
@@ -176,11 +176,11 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallReady([ToolCall("x", "echo", {"a": 1, "b": 2})]),
+                    ToolCallEvent([ToolCall("x", "echo", {"a": 1, "b": 2})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [
-                    ToolCallReady([ToolCall("y", "echo", {"b": 2, "a": 1})]),
+                    ToolCallEvent([ToolCall("y", "echo", {"b": 2, "a": 1})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -200,7 +200,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
     def test_idle_watchdog_allows_successful_read_only_steps(self) -> None:
         mock_response_list: list[list[ProviderEvent]] = [
             [
-                ToolCallReady(
+                ToolCallEvent(
                     [ToolCall(f"r{index}", "read_file", {"path": f"notes-{index}.md"})]
                 ),
                 FinalMessage("", "end_turn"),
@@ -258,7 +258,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         def factory(_messages, tools) -> list[ProviderEvent]:
             seen_tools.append([tool.name for tool in tools])
             return [
-                ToolCallReady([ToolCall("x", "edit_file", {"input": "hello"})]),
+                ToolCallEvent([ToolCall("x", "edit_file", {"input": "hello"})]),
                 FinalMessage("", "end_turn"),
             ]
 
@@ -306,13 +306,13 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallReady(
+                    ToolCallEvent(
                         [ToolCall("a", "bash", {"command": "git diff --stat"})]
                     ),
                     FinalMessage("", "end_turn"),
                 ],
                 [
-                    ToolCallReady(
+                    ToolCallEvent(
                         [ToolCall("b", "bash", {"command": "python script.py"})]
                     ),
                     FinalMessage("", "end_turn"),
@@ -355,7 +355,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallReady([ToolCall("a", "echo", {"input": "hello"})]),
+                    ToolCallEvent([ToolCall("a", "echo", {"input": "hello"})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -540,7 +540,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallReady(
+                    ToolCallEvent(
                         [
                             ToolCall("a", "first", {}),
                             ToolCall("b", "second", {}),
@@ -579,7 +579,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallReady([ToolCall("x", "boom", {})]),
+                    ToolCallEvent([ToolCall("x", "boom", {})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("recovered"), FinalMessage("", "end_turn")],
@@ -607,7 +607,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         def factory(_messages, _tools) -> list[ProviderEvent]:
             token.cancel()
             return [
-                ToolCallReady([ToolCall("x", "echo", {})]),
+                ToolCallEvent([ToolCall("x", "echo", {})]),
                 FinalMessage("", "end_turn"),
             ]
 

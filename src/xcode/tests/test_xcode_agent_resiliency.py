@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from xcode.harness.agent_runtime.events import (
+from xcode.ai.events import (
     FinalMessage,
     ToolCall,
-    ToolCallReady,
+    ToolCallEvent,
     TextDelta,
 )
 from xcode.harness.agent_runtime.structured import StructuredAgent
@@ -54,19 +54,19 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallReady([ToolCall("call_1", "read_file", {"path": "a.txt"})]),
+                    ToolCallEvent([ToolCall("call_1", "read_file", {"path": "a.txt"})]),
                     FinalMessage("", "tool_use"),
                 ],
                 [
-                    ToolCallReady([ToolCall("call_2", "read_file", {"path": "b.txt"})]),
+                    ToolCallEvent([ToolCall("call_2", "read_file", {"path": "b.txt"})]),
                     FinalMessage("", "tool_use"),
                 ],
                 [
-                    ToolCallReady([ToolCall("call_3", "read_file", {"path": "c.txt"})]),
+                    ToolCallEvent([ToolCall("call_3", "read_file", {"path": "c.txt"})]),
                     FinalMessage("", "tool_use"),
                 ],
                 [
-                    ToolCallReady([ToolCall("call_4", "read_file", {"path": "d.txt"})]),
+                    ToolCallEvent([ToolCall("call_4", "read_file", {"path": "d.txt"})]),
                     FinalMessage("", "tool_use"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -100,19 +100,19 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallReady([ToolCall("call_1", "read_file", {"path": "a.txt"})]),
+                    ToolCallEvent([ToolCall("call_1", "read_file", {"path": "a.txt"})]),
                     FinalMessage("", "tool_use"),
                 ],
                 [
-                    ToolCallReady([ToolCall("call_2", "read_file", {"path": "b.txt"})]),
+                    ToolCallEvent([ToolCall("call_2", "read_file", {"path": "b.txt"})]),
                     FinalMessage("", "tool_use"),
                 ],
                 [
-                    ToolCallReady([ToolCall("call_3", "read_file", {"path": "c.txt"})]),
+                    ToolCallEvent([ToolCall("call_3", "read_file", {"path": "c.txt"})]),
                     FinalMessage("", "tool_use"),
                 ],
                 [
-                    ToolCallReady([ToolCall("call_4", "read_file", {"path": "d.txt"})]),
+                    ToolCallEvent([ToolCall("call_4", "read_file", {"path": "d.txt"})]),
                     FinalMessage("", "tool_use"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],

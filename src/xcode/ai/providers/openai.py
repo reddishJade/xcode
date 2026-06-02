@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterable, Iterator
-from typing import Any
+from typing import Any, cast
 
-from ...agent.types import ToolDefinition
-from ...harness.agent_runtime.events import ProviderEvent
+from xcode.ai.events import ProviderEvent
+from xcode.ai.types import ToolDefinition
 
 from .codec import (
     chat_stream_to_events,
@@ -107,12 +107,18 @@ class OpenAIChatProvider:
         if usage:
             # cached_tokens
             prompt_details = getattr(usage, "prompt_tokens_details", None)
-            cached = getattr(prompt_details, "cached_tokens", 0) if prompt_details else 0
+            cached = (
+                getattr(prompt_details, "cached_tokens", 0) if prompt_details else 0
+            )
             self.metrics["cached_tokens"] = cached or 0
 
             # reasoning_tokens
             completion_details = getattr(usage, "completion_tokens_details", None)
-            reasoning = getattr(completion_details, "reasoning_tokens", 0) if completion_details else 0
+            reasoning = (
+                getattr(completion_details, "reasoning_tokens", 0)
+                if completion_details
+                else 0
+            )
             self.metrics["reasoning_tokens"] = reasoning or 0
 
     def _ensure_metrics(self) -> None:
@@ -190,12 +196,16 @@ class OpenAIResponsesProvider:
                         response_id = getattr(response, "id", None)
                         if response_id:
                             self.previous_response_id = str(response_id)
-                            self.metrics["previous_response_id"] = self.previous_response_id
-                            self._last_sent_message_index = self._pending_sent_message_index
+                            self.metrics["previous_response_id"] = (
+                                self.previous_response_id
+                            )
+                            self._last_sent_message_index = (
+                                self._pending_sent_message_index
+                            )
                         self._record_usage(response, len(kwargs["input"]))
                 yield raw_event
 
-        yield from responses_stream_to_events(intercept_events(stream))
+        yield from responses_stream_to_events(cast(Any, intercept_events(stream)))
 
     def _responses_kwargs(
         self,
@@ -208,7 +218,7 @@ class OpenAIResponsesProvider:
         if self.previous_response_id is None:
             raw_input_messages = messages
         else:
-            raw_input_messages = messages[self._last_sent_message_index:]
+            raw_input_messages = messages[self._last_sent_message_index :]
 
         converted = to_responses_input(raw_input_messages)
 
@@ -217,7 +227,8 @@ class OpenAIResponsesProvider:
         # 下一轮只需要追加函数结果或新的用户输入。
         if self.previous_response_id is not None:
             converted = [
-                item for item in converted
+                item
+                for item in converted
                 if item.get("type") == "function_call_output"
                 or item.get("role") in {"user", "system", "developer"}
             ]
@@ -263,5 +274,7 @@ class OpenAIResponsesProvider:
         self.metrics["cached_tokens"] = cached or 0
 
         output_details = getattr(usage, "output_tokens_details", None)
-        reasoning = getattr(output_details, "reasoning_tokens", 0) if output_details else 0
+        reasoning = (
+            getattr(output_details, "reasoning_tokens", 0) if output_details else 0
+        )
         self.metrics["reasoning_tokens"] = reasoning or 0

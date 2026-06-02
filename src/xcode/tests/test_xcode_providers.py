@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from typing import Any
-from xcode.agent.types import tool_definition_from_spec
-from xcode.harness.agent_runtime.events import TextDelta, ToolCallReady, FinalMessage
+from xcode.ai.events import TextDelta, ToolCallEvent, FinalMessage
+from xcode.harness.adapters.tool_schema import tool_definition_from_spec
 from xcode.ai.providers.factory import (
     ProviderRuntime,
     ProviderSettings,
@@ -215,8 +215,8 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             )
         )
         tool_call = events[-1]
-        self.assertIsInstance(tool_call, ToolCallReady)
-        assert isinstance(tool_call, ToolCallReady)
+        self.assertIsInstance(tool_call, ToolCallEvent)
+        assert isinstance(tool_call, ToolCallEvent)
         self.assertEqual(tool_call.calls[0].name, "echo")
         self.assertEqual(tool_call.calls[0].input, {"text": "hello"})
         sent_tool = llm.client.chat.completions.kwargs["tools"][0]
@@ -305,8 +305,8 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         self.assertIsInstance(events[1], TextDelta)
         assert isinstance(events[1], TextDelta)
         self.assertEqual(events[1].chunk, "llo")
-        self.assertIsInstance(events[-1], ToolCallReady)
-        assert isinstance(events[-1], ToolCallReady)
+        self.assertIsInstance(events[-1], ToolCallEvent)
+        assert isinstance(events[-1], ToolCallEvent)
         self.assertEqual(events[-1].calls[0].id, "call-1")
         self.assertEqual(events[-1].calls[0].name, "echo")
         self.assertEqual(events[-1].calls[0].input, {"text": "hi"})
@@ -372,12 +372,8 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         llm.client = FakeOpenAIClient(
             response_outputs=[
                 [
-                    FakeResponsesStreamEvent(
-                        "response.output_text.delta", delta="he"
-                    ),
-                    FakeResponsesStreamEvent(
-                        "response.output_text.delta", delta="llo"
-                    ),
+                    FakeResponsesStreamEvent("response.output_text.delta", delta="he"),
+                    FakeResponsesStreamEvent("response.output_text.delta", delta="llo"),
                     FakeResponsesStreamEvent(
                         "response.completed", FakeResponsesResponse("r1")
                     ),
@@ -457,22 +453,26 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         self.assertNotIn("previous_response_id", first_call)
 
         # 第二轮：包含 assistant tool_calls + tool result
-        messages.append({
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": "call1",
-                    "type": "function",
-                    "function": {"name": "echo", "arguments": "{}"},
-                }
-            ],
-        })
-        messages.append({
-            "role": "tool",
-            "tool_call_id": "call1",
-            "content": "tool output",
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call1",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": "call1",
+                "content": "tool output",
+            }
+        )
 
         list(llm._stream_sync(messages, ()))
         self.assertEqual(len(llm.client.responses.calls), 2)
@@ -481,13 +481,11 @@ class XcodeStructuredProviderTests(unittest.TestCase):
 
         # input 中只能有 function_call_output，不能有 function_call
         input_items = second_call["input"]
-        self.assertTrue(all(
-            item.get("type") != "function_call"
-            for item in input_items
-        ))
+        self.assertTrue(
+            all(item.get("type") != "function_call" for item in input_items)
+        )
         function_call_outputs = [
-            item for item in input_items
-            if item.get("type") == "function_call_output"
+            item for item in input_items if item.get("type") == "function_call_output"
         ]
         self.assertEqual(len(function_call_outputs), 1)
         self.assertEqual(function_call_outputs[0]["call_id"], "call1")
@@ -604,7 +602,7 @@ class FakeStreamFunction:
 class XcodeChatGLMProviderTests(unittest.TestCase):
     """ChatGLM provider 边界测试：thinking 清理、tool_stream、参数组合。"""
 
-    def _make_provider(self, **overrides) -> ChatGLMProvider:
+    def _make_provider(self, **overrides):
         from xcode.ai.providers.chatglm import ChatGLMProvider
 
         kwargs = dict(
@@ -680,22 +678,30 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
             {"role": "user", "content": "q2"},
-            {"role": "assistant",
-             "content": "a2",
-             "reasoning_content": "think2",
-             "tool_calls": []},
+            {
+                "role": "assistant",
+                "content": "a2",
+                "reasoning_content": "think2",
+                "tool_calls": [],
+            },
             {"role": "tool", "tool_call_id": "t1", "content": "result"},
         ]
         cleaned = provider._clean_reasoning_content(messages)
         # 倒数第二条（当前轮 assistant）应保留 reasoning_content
         for i, msg in enumerate(cleaned):
             if i == len(cleaned) - 2:  # 当前轮次 assistant
-                self.assertIn("reasoning_content", msg,
-                              f"msg[{i}] should retain reasoning_content")
+                self.assertIn(
+                    "reasoning_content",
+                    msg,
+                    f"msg[{i}] should retain reasoning_content",
+                )
                 self.assertEqual(msg["reasoning_content"], "think2")
             elif msg.get("role") == "assistant":
-                self.assertNotIn("reasoning_content", msg,
-                                 f"msg[{i}] should not have reasoning_content")
+                self.assertNotIn(
+                    "reasoning_content",
+                    msg,
+                    f"msg[{i}] should not have reasoning_content",
+                )
 
     def test_clean_reasoning_pre_tool_loop_cleared(self) -> None:
         """工具循环中，当前轮之前的所有 assistant reasoning_content 都被清除。"""
@@ -704,10 +710,14 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
             {"role": "user", "content": "q2"},
-            {"role": "assistant",
-             "content": "",
-             "reasoning_content": "think2",
-             "tool_calls": [{"id": "t1", "function": {"name": "echo", "arguments": "{}"}}]},
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "think2",
+                "tool_calls": [
+                    {"id": "t1", "function": {"name": "echo", "arguments": "{}"}}
+                ],
+            },
             {"role": "tool", "tool_call_id": "t1", "content": "result"},
         ]
         cleaned = provider._clean_reasoning_content(messages)
@@ -718,12 +728,14 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
 
     def test_thinking_true_streams_reasoning(self) -> None:
         """thinking=True 时流包含 reasoning delta。"""
-        from xcode.harness.agent_runtime.events import ReasoningDelta
+        from xcode.ai.events import ReasoningDelta
 
-        client = FakeGLMClient(stream_chunks=[
-            FakeGLMChunk(content="hello", reasoning="thinking..."),
-            FakeGLMChunk(content=" world"),
-        ])
+        client = FakeGLMClient(
+            stream_chunks=[
+                FakeGLMChunk(content="hello", reasoning="thinking..."),
+                FakeGLMChunk(content=" world"),
+            ]
+        )
         provider = self._make_provider(client=client)
         events = list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         reasoning_events = [e for e in events if isinstance(e, ReasoningDelta)]
@@ -744,10 +756,19 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         """usage 统计记录 cached_tokens 和 reasoning_tokens。"""
         from collections import namedtuple
 
-        FakeUsage = namedtuple("FakeUsage", ["prompt_tokens", "completion_tokens",
-                                              "prompt_tokens_details", "completion_tokens_details"])
+        FakeUsage = namedtuple(
+            "FakeUsage",
+            [
+                "prompt_tokens",
+                "completion_tokens",
+                "prompt_tokens_details",
+                "completion_tokens_details",
+            ],
+        )
         FakePromptDetails = namedtuple("FakePromptDetails", ["cached_tokens"])
-        FakeCompletionDetails = namedtuple("FakeCompletionDetails", ["reasoning_tokens"])
+        FakeCompletionDetails = namedtuple(
+            "FakeCompletionDetails", ["reasoning_tokens"]
+        )
 
         class FakeResponse:
             usage = FakeUsage(
@@ -767,8 +788,15 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         """prompt_tokens_details / completion_tokens_details 为 None 时降级为 0。"""
         from collections import namedtuple
 
-        FakeUsage = namedtuple("FakeUsage", ["prompt_tokens", "completion_tokens",
-                                              "prompt_tokens_details", "completion_tokens_details"])
+        FakeUsage = namedtuple(
+            "FakeUsage",
+            [
+                "prompt_tokens",
+                "completion_tokens",
+                "prompt_tokens_details",
+                "completion_tokens_details",
+            ],
+        )
 
         class FakeResponseNoDetails:
             usage = FakeUsage(

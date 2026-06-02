@@ -18,10 +18,10 @@ from xcode.harness.agent_runtime.structured import _budget_messages_for_provider
 
 
 from xcode.tests.fixtures import FakeProvider
-from xcode.harness.agent_runtime.events import (
+from xcode.ai.events import (
     TextDelta,
     FinalMessage,
-    ToolCallReady,
+    ToolCallEvent,
     ToolCall,
 )
 
@@ -66,7 +66,7 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallReady([ToolCall("c", "compact", {})]),
+                    ToolCallEvent([ToolCall("c", "compact", {})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],
@@ -96,7 +96,7 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallReady([ToolCall("c", "compact", {})]),
+                    ToolCallEvent([ToolCall("c", "compact", {})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ...harness.agent_runtime.provider import ModelProvider
+from .protocol import ModelProvider
 from .runtime import ProviderRuntime, RetryPolicy, RateLimitPolicy
 
 

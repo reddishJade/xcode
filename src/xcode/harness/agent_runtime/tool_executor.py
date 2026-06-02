@@ -5,7 +5,8 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 
-from .events import ToolCall, ToolResult
+from xcode.ai.events import ToolCall
+from .tool_events import ToolResult
 from .execution_modes import ActPolicy, ExecutionPolicy
 from ..config import ExecutionMode
 from ..observability import (

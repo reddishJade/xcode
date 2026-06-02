@@ -12,7 +12,7 @@ from xcode.agent.types import (
     ToolCallBlock,
     ToolResultMessage,
 )
-from xcode.harness.agent_runtime.events import ReasoningDelta, TextDelta, ToolCallReady
+from xcode.ai.events import ReasoningDelta, TextDelta, ToolCallEvent
 from xcode.ai.providers.codec import (
     chat_stream_to_events,
     to_chat_messages,
@@ -165,8 +165,8 @@ class OpenAIStreamCodecTest(unittest.TestCase):
         self.assertIsInstance(events[0], TextDelta)
         first_text = cast(TextDelta, events[0])
         self.assertEqual(first_text.chunk, "he")
-        self.assertIsInstance(events[-1], ToolCallReady)
-        final_call = cast(ToolCallReady, events[-1])
+        self.assertIsInstance(events[-1], ToolCallEvent)
+        final_call = cast(ToolCallEvent, events[-1])
         self.assertEqual(final_call.calls[0].input, {"text": "hi"})
 
     def test_chat_stream_extracts_reasoning_content(self) -> None:

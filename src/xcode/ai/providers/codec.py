@@ -5,12 +5,12 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator
 from typing import Any, Protocol
 
-from ...harness.agent_runtime.events import (
+from xcode.ai.events import (
     FinalMessage,
     ReasoningDelta,
     TextDelta,
     ToolCall,
-    ToolCallReady,
+    ToolCallEvent,
     UsageUpdate,
 )
 
@@ -254,11 +254,13 @@ def to_responses_input(
 
         # tool result 转换为 function_call_output
         if role == "tool" and "tool_call_id" in message:
-            converted.append({
-                "type": "function_call_output",
-                "call_id": message["tool_call_id"],
-                "output": str(content) if content is not None else "",
-            })
+            converted.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": message["tool_call_id"],
+                    "output": str(content) if content is not None else "",
+                }
+            )
             continue
 
         # assistant 消息带 tool_calls
@@ -266,42 +268,48 @@ def to_responses_input(
             # 先添加文本内容
             text_content = str(content) if content else None
             if text_content:
-                converted.append({
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": text_content}],
-                })
+                converted.append(
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": text_content}],
+                    }
+                )
             # 再添加 tool_calls
             for call in message["tool_calls"]:
                 if isinstance(call, dict):
                     func = call.get("function", {})
-                    converted.append({
-                        "type": "function_call",
-                        "call_id": call.get("id", ""),
-                        "name": func.get("name", ""),
-                        "arguments": func.get("arguments", "{}"),
-                    })
+                    converted.append(
+                        {
+                            "type": "function_call",
+                            "call_id": call.get("id", ""),
+                            "name": func.get("name", ""),
+                            "arguments": func.get("arguments", "{}"),
+                        }
+                    )
             continue
 
         # 普通消息
         if isinstance(content, list):
-            converted.extend(
-                _content_blocks_to_responses_input(role, content)
-            )
+            converted.extend(_content_blocks_to_responses_input(role, content))
         else:
             text = str(content) if content is not None else ""
             if role == "assistant":
-                converted.append({
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": text}],
-                })
+                converted.append(
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": text}],
+                    }
+                )
             else:
-                converted.append({
-                    "type": "message",
-                    "role": role,
-                    "content": [{"type": "input_text", "text": text}],
-                })
+                converted.append(
+                    {
+                        "type": "message",
+                        "role": role,
+                        "content": [{"type": "input_text", "text": text}],
+                    }
+                )
 
     return converted
 
@@ -412,19 +420,23 @@ def _content_blocks_to_responses_input(
         part_type = part.get("type")
         if part_type == "tool_result":
             # tool result -> function_call_output
-            converted.append({
-                "type": "function_call_output",
-                "call_id": str(part.get("tool_use_id", "")),
-                "output": str(part.get("content", "")),
-            })
+            converted.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": str(part.get("tool_use_id", "")),
+                    "output": str(part.get("content", "")),
+                }
+            )
         elif part_type == "tool_use":
             # tool_use -> function_call
-            function_calls.append({
-                "type": "function_call",
-                "call_id": str(part.get("id", "")),
-                "name": str(part.get("name", "")),
-                "arguments": json.dumps(part.get("input", {}), ensure_ascii=False),
-            })
+            function_calls.append(
+                {
+                    "type": "function_call",
+                    "call_id": str(part.get("id", "")),
+                    "name": str(part.get("name", "")),
+                    "arguments": json.dumps(part.get("input", {}), ensure_ascii=False),
+                }
+            )
         elif part_type == "text":
             text_parts.append(str(part.get("text", "")))
 
@@ -432,17 +444,21 @@ def _content_blocks_to_responses_input(
     if text_parts:
         text = "".join(text_parts)
         if role == "assistant":
-            converted.append({
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": text}],
-            })
+            converted.append(
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text}],
+                }
+            )
         else:
-            converted.append({
-                "type": "message",
-                "role": role,
-                "content": [{"type": "input_text", "text": text}],
-            })
+            converted.append(
+                {
+                    "type": "message",
+                    "role": role,
+                    "content": [{"type": "input_text", "text": text}],
+                }
+            )
 
     # 添加 function_call
     converted.extend(function_calls)
@@ -468,8 +484,8 @@ def tool_call_from_response_item(item: _ResponseOutputItem) -> dict[str, Any]:
 
 def chat_stream_to_events(
     stream: Iterable[_ChatCompletionChunk],
-) -> Iterator[TextDelta | ReasoningDelta | ToolCallReady | UsageUpdate]:
-    """Yields provider events dicts: TextDelta, ReasoningDelta, ToolCallReady, UsageUpdate."""
+) -> Iterator[TextDelta | ReasoningDelta | ToolCallEvent | UsageUpdate]:
+    """Yields provider events dicts: TextDelta, ReasoningDelta, ToolCallEvent, UsageUpdate."""
     calls: dict[int, dict[str, str]] = defaultdict(
         lambda: {"id": "", "name": "", "arguments": ""}
     )
@@ -485,7 +501,9 @@ def chat_stream_to_events(
             continue
         choice = choices[0]
         delta = choice.delta
-        reasoning = getattr(delta, "reasoning_content", None)  # DeepSeek 非标准扩展字段，部分模型不返回
+        reasoning = getattr(
+            delta, "reasoning_content", None
+        )  # DeepSeek 非标准扩展字段，部分模型不返回
         if reasoning:
             yield ReasoningDelta(str(reasoning))
         text = delta.content
@@ -512,12 +530,12 @@ def chat_stream_to_events(
         for index, current in sorted(calls.items())
     ]
     if ready:
-        yield ToolCallReady(ready)
+        yield ToolCallEvent(ready)
 
 
 def responses_stream_to_events(
     stream: Iterable[_ResponseStreamEvent],
-) -> Iterator[TextDelta | ReasoningDelta | ToolCallReady | UsageUpdate | FinalMessage]:
+) -> Iterator[TextDelta | ReasoningDelta | ToolCallEvent | UsageUpdate | FinalMessage]:
     """处理 Responses API 流式事件。
 
     支持的事件类型：
@@ -588,8 +606,12 @@ def responses_stream_to_events(
                 # 提取 usage
                 usage = getattr(response, "usage", None)
                 if usage:
-                    input_tokens = getattr(usage, "input_tokens", 0) or getattr(usage, "prompt_tokens", 0)
-                    output_tokens = getattr(usage, "output_tokens", 0) or getattr(usage, "completion_tokens", 0)
+                    input_tokens = getattr(usage, "input_tokens", 0) or getattr(
+                        usage, "prompt_tokens", 0
+                    )
+                    output_tokens = getattr(usage, "output_tokens", 0) or getattr(
+                        usage, "completion_tokens", 0
+                    )
                     yield UsageUpdate(int(input_tokens), int(output_tokens))
 
     # 输出累积的工具调用
@@ -602,7 +624,7 @@ def responses_stream_to_events(
             )
             for _, call in sorted(pending_calls.items())
         ]
-        yield ToolCallReady(ready)
+        yield ToolCallEvent(ready)
     elif completed:
         # 优先使用 response.output_text，回退到 accumulated_text
         final_text = response_text or accumulated_text
@@ -611,8 +633,8 @@ def responses_stream_to_events(
 
 def responses_to_events(
     response: _Response,
-) -> list[TextDelta | FinalMessage | ToolCallReady]:
-    events: list[TextDelta | FinalMessage | ToolCallReady] = []
+) -> list[TextDelta | FinalMessage | ToolCallEvent]:
+    events: list[TextDelta | FinalMessage | ToolCallEvent] = []
     text = response.output_text
     if text:
         events.append(TextDelta(str(text)))
@@ -627,7 +649,7 @@ def responses_to_events(
         elif item_type in {"function_call", "tool_call"}:
             calls.append(tool_call_from_response_item(item))
     if calls:
-        events.append(ToolCallReady([ToolCall(**c) for c in calls]))
+        events.append(ToolCallEvent([ToolCall(**c) for c in calls]))
     else:
         events.append(FinalMessage(str(text or ""), "end_turn"))
     return events

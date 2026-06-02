@@ -9,10 +9,10 @@ from xcode.experimental.speculation import SpeculationPlanner
 
 
 from xcode.tests.fixtures import FakeProvider
-from xcode.harness.agent_runtime.events import (
+from xcode.ai.events import (
     TextDelta,
     FinalMessage,
-    ToolCallReady,
+    ToolCallEvent,
     ToolCall,
 )
 
@@ -26,11 +26,11 @@ class XcodeSpeculationTests(unittest.TestCase):
         self.assertEqual(event.kind, "prepare_diff_view")
 
     def test_structured_agent_emits_speculation_event(self) -> None:
-        from xcode.harness.agent_runtime.events import ProviderEvent
+        from xcode.ai.events import ProviderEvent
 
         mock_events: list[list[ProviderEvent]] = [
             [
-                ToolCallReady([ToolCall("e", "edit_file", {})]),
+                ToolCallEvent([ToolCall("e", "edit_file", {})]),
                 FinalMessage("", "end_turn"),
             ],
             [TextDelta("done"), FinalMessage("", "end_turn")],

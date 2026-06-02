@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from typing import Any, Iterator, Union, cast
-from xcode.agent.types import ToolDefinition
-from xcode.harness.agent_runtime.provider import ModelProvider
-from xcode.harness.agent_runtime.events import ProviderEvent
+from xcode.ai.events import ProviderEvent
+from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.types import ToolDefinition
 
 
 class FakeProvider(ModelProvider):

@@ -8,11 +8,11 @@ from xcode.ai.providers.codec import (
     to_chat_tool,
 )
 from xcode.ai.providers.deepseek import DeepSeekProvider
-from xcode.harness.agent_runtime.events import (
+from xcode.ai.events import (
     TextDelta,
     ReasoningDelta,
     UsageUpdate,
-    ToolCallReady,
+    ToolCallEvent,
 )
 from xcode.harness.skills import ToolSpec
 
@@ -258,9 +258,9 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
             provider._stream_sync([{"role": "user", "content": "Run tool"}], ())
         )
 
-        # Verify that the last event is ToolCallReady with correctly concatenated args {"text": "hi"}
-        self.assertIsInstance(events[-1], ToolCallReady)
-        ready_call = cast(ToolCallReady, events[-1])
+        # Verify that the last event is ToolCallEvent with correctly concatenated args {"text": "hi"}
+        self.assertIsInstance(events[-1], ToolCallEvent)
+        ready_call = cast(ToolCallEvent, events[-1])
         self.assertEqual(ready_call.calls[0].name, "echo")
         self.assertEqual(ready_call.calls[0].input, {"text": "hi"})
 

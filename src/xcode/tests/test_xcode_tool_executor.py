@@ -4,7 +4,7 @@ import asyncio
 import unittest
 from pathlib import Path
 
-from xcode.harness.agent_runtime.events import ToolCall
+from xcode.ai.events import ToolCall
 from xcode.harness.agent_runtime.execution_modes import (
     ActPolicy,
     PlanPolicy,

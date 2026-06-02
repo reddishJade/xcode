@@ -132,3 +132,12 @@ class ToolResultContent:
     tool_use_id: str = ""
     content: str = ""
     status: str = "ok"
+
+
+@dataclass(frozen=True)
+class ToolDefinition:
+    """LLM 可见的工具 schema。"""
+
+    name: str
+    description: str
+    schema: dict[str, Any]

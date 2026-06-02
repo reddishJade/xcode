@@ -23,7 +23,7 @@ from xcode.harness.agent_runtime import (
     build_runtime_context_provider,
 )
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
-from xcode.harness.agent_runtime.provider import ModelProvider
+from xcode.ai.providers.protocol import ModelProvider
 from xcode.harness.observability import JsonlAuditLogger, HookManager
 from xcode.harness.observability.hooks import HookEvent
 from xcode.harness.skills import ToolSpec

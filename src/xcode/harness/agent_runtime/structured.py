@@ -29,15 +29,17 @@ from .compaction import (
     estimate_text_tokens,
     latest_read_file_tool_result_ids,
 )
-from .events import (
+from xcode.ai.events import (
     FinalMessage,
     ProviderEvent,
     TextDelta,
-    ToolCallReady,
+    ToolCallEvent,
     ToolCall as ToolUseBlock,
-    ToolResult,
     ReasoningDelta,
 )
+from xcode.ai.providers.protocol import ModelProvider
+from xcode.harness.adapters.tool_schema import tool_definitions_from_specs
+from .tool_events import ToolResult
 from .execution_modes import mode_notice, policy_for_mode
 from .tool_executor import (
     ExecutionCancelled,
@@ -47,7 +49,6 @@ from .tool_executor import (
 )
 from ..config import AgentConfig, ExecutionMode
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
-from .provider import ModelProvider
 from ..skills import ApprovalCallback, ToolSpec
 from .async_worker import IsolatedAsyncWorker
 
@@ -573,7 +574,7 @@ class StructuredAgent:
                     stream_events.append(
                         StructuredAgentEvent("text_delta", step, event.chunk)
                     )
-            elif isinstance(event, ToolCallReady):
+            elif isinstance(event, ToolCallEvent):
                 blocks.extend(
                     {
                         "type": "tool_use",
@@ -880,6 +881,7 @@ async def _collect_provider_events(
     registry: tuple[ToolSpec, ...],
 ) -> list[ProviderEvent]:
     events = []
-    async for event in provider.stream(messages, cast(Any, list(registry))):
+    tool_definitions = tool_definitions_from_specs(registry)
+    async for event in provider.stream(messages, tool_definitions):
         events.append(event)
     return events

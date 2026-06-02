@@ -17,10 +17,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..harness.agent_runtime.cancellation import CancellationToken
-from ..harness.agent_runtime.events import (
+from xcode.ai.events import (
     TextDelta,
     ReasoningDelta,
-    ToolCallReady,
+    ToolCallEvent,
 )
 from .types import (
     AfterToolCallContext,
@@ -465,7 +465,7 @@ async def _stream_assistant_response(
             elif isinstance(event, ReasoningDelta):
                 et = "reasoning_delta"
                 reasoning_delta = event.chunk
-            elif isinstance(event, ToolCallReady):
+            elif isinstance(event, ToolCallEvent):
                 et = "tool_call_ready"
                 calls_list = event.calls
 

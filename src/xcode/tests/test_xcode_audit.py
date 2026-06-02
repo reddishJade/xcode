@@ -11,11 +11,11 @@ from xcode.harness.agent_runtime import StructuredAgent
 
 
 from xcode.tests.fixtures import FakeProvider
-from xcode.harness.agent_runtime.events import (
+from xcode.ai.events import (
     ProviderEvent,
     TextDelta,
     FinalMessage,
-    ToolCallReady,
+    ToolCallEvent,
     ToolCall,
 )
 
@@ -42,7 +42,7 @@ class XcodeAuditTests(unittest.TestCase):
             path = Path(temp_dir) / "audit.jsonl"
             responses: list[list[ProviderEvent]] = [
                 [
-                    ToolCallReady(
+                    ToolCallEvent(
                         [ToolCall("t1", "echo", {"input": "sk-1234567890abcdef"})]
                     ),
                     FinalMessage("", "end_turn"),
@@ -101,7 +101,7 @@ class XcodeAuditTests(unittest.TestCase):
             # Tool with high risk that returns output resembling old approval prefix
             responses: list[list[ProviderEvent]] = [
                 [
-                    ToolCallReady([ToolCall("t1", "danger", {"input": "go"})]),
+                    ToolCallEvent([ToolCall("t1", "danger", {"input": "go"})]),
                     FinalMessage("", "end_turn"),
                 ],
                 [TextDelta("done"), FinalMessage("", "end_turn")],

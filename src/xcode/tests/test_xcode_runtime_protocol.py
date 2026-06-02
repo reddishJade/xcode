@@ -3,23 +3,22 @@ from __future__ import annotations
 import unittest
 from typing import get_type_hints
 
-from xcode.harness.agent_runtime import events
-from xcode.harness.agent_runtime.provider import ModelProvider
+from xcode.ai import events
+from xcode.ai.providers.protocol import ModelProvider
 
 
 class RuntimeProtocolTest(unittest.TestCase):
-    def test_provider_events_are_runtime_owned(self) -> None:
+    def test_provider_events_are_ai_owned(self) -> None:
         names = {
             "TextDelta",
-            "ToolCallReady",
+            "ToolCallEvent",
             "UsageUpdate",
             "FinalMessage",
             "ToolCall",
-            "ToolResult",
         }
         for name in names:
             self.assertTrue(hasattr(events, name), name)
-        self.assertFalse(hasattr(events, "ToolResultsReady"))
+        self.assertFalse(hasattr(events, "ToolResult"))
 
     def test_provider_protocol_is_stream(self) -> None:
         hints = get_type_hints(ModelProvider.stream)

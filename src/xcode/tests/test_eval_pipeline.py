@@ -7,12 +7,12 @@ import tempfile
 import unittest
 
 from xcode.harness.agent_runtime import StructuredAgent
-from xcode.harness.agent_runtime.events import (
+from xcode.ai.events import (
     FinalMessage,
     ProviderEvent,
     TextDelta,
     ToolCall,
-    ToolCallReady,
+    ToolCallEvent,
 )
 from xcode.harness.app import XcodeApp
 from xcode.harness.config import AgentConfig
@@ -174,7 +174,7 @@ class EvalPipelineTests(unittest.TestCase):
 def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
     responses: list[list[ProviderEvent]] = [
         [
-            ToolCallReady([ToolCall("a", "echo", {"input": "hello"})]),
+            ToolCallEvent([ToolCall("a", "echo", {"input": "hello"})]),
             FinalMessage("", "end_turn"),
         ],
         [TextDelta("finished"), FinalMessage("", "end_turn")],
@@ -215,7 +215,7 @@ def _editing_app(project_root: Path) -> XcodeApp:
     tool = ToolSpec("edit_file", "Edit file.", "text", edit_file)
     responses: list[list[ProviderEvent]] = [
         [
-            ToolCallReady([ToolCall("edit", "edit_file", {"path": "math_utils.py"})]),
+            ToolCallEvent([ToolCall("edit", "edit_file", {"path": "math_utils.py"})]),
             FinalMessage("", "end_turn"),
         ],
         [TextDelta("done"), FinalMessage("", "end_turn")],

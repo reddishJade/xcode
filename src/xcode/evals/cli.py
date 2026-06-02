@@ -8,16 +8,16 @@ import shutil
 from typing import Any
 
 from xcode.harness.agent_runtime import StructuredAgent
-from xcode.harness.agent_runtime.events import (
+from xcode.ai.events import (
     FinalMessage,
     Message,
     ProviderEvent,
     TextDelta,
     ToolCall,
-    ToolCallReady,
+    ToolCallEvent,
 )
-from xcode.agent.types import ToolDefinition
-from xcode.harness.agent_runtime.provider import ModelProvider
+from xcode.ai.types import ToolDefinition
+from xcode.ai.providers.protocol import ModelProvider
 from xcode.harness.app import XcodeApp, build_app as build_real_app
 from xcode.harness.config import AgentConfig
 from xcode.harness.config import discover_runtime_config
@@ -176,12 +176,12 @@ def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
         provider = _StaticProvider(
             [
                 [
-                    ToolCallReady(
+                    ToolCallEvent(
                         [
                             ToolCall(
                                 id=f"{task.id}-call-1",
                                 name=tool_name,
-                                input=task.prompt,
+                                input={"input": task.prompt},
                             )
                         ]
                     ),
@@ -195,7 +195,7 @@ def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
                 name=tool_name,
                 description="Offline eval echo tool.",
                 input_hint="text",
-                handler=lambda value: value,
+                handler=lambda value: str(value.get("input", "")),
                 read_only=True,
                 concurrency_safe=True,
             ),

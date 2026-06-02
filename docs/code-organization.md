@@ -87,7 +87,8 @@ src/xcode/main.py
 | `session.py` | JSONL 会话存储、索引、resume、fork、plan artifact |
 | `skills.py` | `ToolSpec`、工具输入解析、HITL 执行和脱敏入口 |
 | `skill_loader.py` | `SKILL.md` catalog 扫描和 `load_skill` 工具 |
-| `agent_runtime/` | `StructuredAgent`、事件协议、工具执行、subagent、prompt、compaction、cancellation |
+| `adapters/` | harness 类型到下层协议的适配，例如 `ToolSpec` -> provider tool schema |
+| `agent_runtime/` | `StructuredAgent`、工具执行结果、subagent、prompt、compaction、cancellation |
 | `tools/` | core file/search/bash tools |
 | `observability/` | audit、permission policy、hook manager |
 
@@ -97,9 +98,11 @@ src/xcode/main.py
 
 | 模块 | 职责 |
 | --- | --- |
-| `types.py` | 共享模型接口类型 |
+| `types.py` | LLM 可见的共享接口类型，例如 provider tool schema |
+| `events.py` | provider stream 输出事件协议 |
 | `stream.py` | provider response 到 agent event 的流式适配 |
 | `providers/factory.py` | 根据 profile 构造 provider bundle |
+| `providers/protocol.py` | `ModelProvider` 协议 |
 | `providers/codec.py` | OpenAI-compatible schema 和 delta 编解码 |
 | `providers/openai.py` | OpenAI Chat Completions 和 stateful Responses |
 | `providers/deepseek.py` | DeepSeek thinking mode 适配 |

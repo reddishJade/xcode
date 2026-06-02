@@ -6,7 +6,7 @@ import unittest
 
 from xcode.agent.agent import Agent
 from xcode.agent.types import AssistantMessage, MessageUpdateEvent
-from xcode.harness.agent_runtime.events import TextDelta
+from xcode.ai.events import TextDelta
 
 
 class StreamingProvider:

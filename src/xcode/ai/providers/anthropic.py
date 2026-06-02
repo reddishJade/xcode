@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
-from ...harness.agent_runtime.events import ProviderEvent
+from xcode.ai.events import ProviderEvent
 
 """Anthropic Messages API provider（占位，可直接迁入实际实现）。"""
 

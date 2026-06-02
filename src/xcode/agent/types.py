@@ -135,18 +135,6 @@ type AgentMessage = (
     | BranchSummaryMessage
 )
 
-# ── 工具定义 ──
-
-
-@dataclass
-class ToolDefinition:
-    """工具 schema 定义：LLM 可见的部分（名称、描述、参数 schema）。"""
-
-    name: str
-    description: str
-    schema: dict[str, Any]  # JSON Schema（与 ToolSpec 保持一致的字段名）
-    execution_mode: ToolExecutionMode | None = None
-
 
 @dataclass
 class AgentToolResult[T]:
@@ -159,7 +147,7 @@ type ToolUpdateCallback = Callable[[AgentToolResult[Any]], None]
 
 
 class AgentTool[Details](Protocol):
-    """工具运行时：在 ToolDefinition 基础上增加执行上下文。"""
+    """Agent core 可调用的工具运行时接口。"""
 
     name: str
     label: str
@@ -174,32 +162,6 @@ class AgentTool[Details](Protocol):
         signal: Any | None = None,
         on_update: ToolUpdateCallback | None = None,
     ) -> AgentToolResult[Details]: ...
-
-
-class ToolSpecLike(Protocol):
-    """工具规格的最小接口，供 tool_definition_from_spec 使用。"""
-
-    @property
-    def name(self) -> str: ...
-
-    @property
-    def description(self) -> str: ...
-
-    @property
-    def schema(self) -> dict[str, Any] | None: ...
-
-    @property
-    def execution_mode(self) -> ToolExecutionMode | None: ...
-
-
-def tool_definition_from_spec(spec: ToolSpecLike) -> ToolDefinition:
-    """从 ToolSpec 提取 ToolDefinition。"""
-    return ToolDefinition(
-        name=spec.name,
-        description=spec.description,
-        schema=spec.schema or {},
-        execution_mode=spec.execution_mode,
-    )
 
 
 # ── 上下文 ──
