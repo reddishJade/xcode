@@ -214,7 +214,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             return ToolSpec("bash", "Run shell.", "command", lambda _data: "ok")
 
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
-            with patch("xcode.harness.app.build_bash_tool", side_effect=fake_bash_tool):
+            with patch("xcode.harness.assembly.build_bash_tool", side_effect=fake_bash_tool):
                 app = build_app(
                     project_root=Path(tmp),
                     runtime_config=XcodeRuntimeConfig(),
@@ -297,7 +297,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "a.txt").write_text("hello", encoding="utf-8")
-            with patch("xcode.harness.app._build_providers", return_value=bundle):
+            with patch("xcode.harness.assembly.build_providers", return_value=bundle):
                 app = build_app(project_root=root, runtime_config=XcodeRuntimeConfig())
             app.ask("read it")
 
@@ -458,9 +458,9 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             root = Path(tmp)
             (root / "marker.txt").write_text("root", encoding="utf-8")
             with (
-                patch("xcode.harness.app._build_providers", return_value=bundle),
+                patch("xcode.harness.assembly.build_providers", return_value=bundle),
                 patch(
-                    "xcode.harness.app._build_worktree_runner",
+                    "xcode.harness.assembly._build_worktree_runner",
                     lambda project_root: FakeWorktreeRunner(project_root),
                 ),
             ):
@@ -512,7 +512,7 @@ def _patched_provider_bundle(seen_child_tools: list[list[str]]):
         },
         embedding=object(),
     )
-    return patch("xcode.harness.app._build_providers", return_value=bundle)
+    return patch("xcode.harness.assembly.build_providers", return_value=bundle)
 
 
 if __name__ == "__main__":

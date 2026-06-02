@@ -201,7 +201,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
             }
         ]
 
-        with patch("xcode.experimental.mcp.McpClient", return_value=mock_client):
+        with patch("xcode.experimental.mcp_client.McpClient", return_value=mock_client):
             result = bootstrap_tool.handler({})
             self.assertIn("Successfully fetched 1 tools", result)
             self.assertTrue(self.cache_path.exists())

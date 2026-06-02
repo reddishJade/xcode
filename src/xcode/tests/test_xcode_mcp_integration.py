@@ -61,7 +61,7 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
             get_mcp_tool_risk("process_message", "Handle a generic message"), "medium"
         )
 
-    @patch("xcode.experimental.mcp.McpClient")
+    @patch("xcode.experimental.mcp_client.McpClient")
     def test_build_mcp_tools_cache_hit_and_miss(
         self, mock_client_class: MagicMock
     ) -> None:
@@ -134,7 +134,7 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
             ["python", "fetch_server.py", "--verbose"], {}
         )
 
-    @patch("xcode.experimental.mcp.McpClient")
+    @patch("xcode.experimental.mcp_client.McpClient")
     def test_build_mcp_tools_lazy_initialization(
         self, mock_client_class: MagicMock
     ) -> None:
