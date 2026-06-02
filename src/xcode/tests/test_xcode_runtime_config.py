@@ -86,6 +86,32 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             self.assertTrue(config.daemon.enabled)
             self.assertEqual(config.daemon.interval_seconds, 15)
 
+    def test_loads_chatglm_profile_options(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "xcode.config.json"
+            path.write_text(
+                '{"provider":{"model_profiles":{"main":{'
+                '"transport":"chatglm",'
+                '"chat_model":"glm-4.7",'
+                '"base_url":"https://open.bigmodel.cn/api/paas/v4/",'
+                '"thinking":false,'
+                '"reasoning_effort":null,'
+                '"clear_thinking":true,'
+                '"tool_stream":false'
+                "}}}}",
+                encoding="utf-8",
+            )
+
+            config = load_runtime_config(path)
+            profile = config.provider.model_profiles["main"]
+
+            self.assertEqual(profile.transport, "chatglm_chat")
+            self.assertEqual(profile.chat_model, "glm-4.7")
+            self.assertFalse(profile.thinking)
+            self.assertIsNone(profile.reasoning_effort)
+            self.assertTrue(profile.clear_thinking)
+            self.assertFalse(profile.tool_stream)
+
     def test_discovers_project_root_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

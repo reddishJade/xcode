@@ -40,6 +40,14 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "env_key": "MIMO_API_KEY",
         "env_base_url": "MIMO_BASE_URL",
     },
+    "chatglm": {
+        "label": "ChatGLM",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+        "models": ["glm-4.7", "glm-4-flash", "glm-5", "glm-5.1"],
+        "default_model": "glm-4.7",
+        "env_key": "CHATGLM_API_KEY",
+        "env_base_url": "CHATGLM_BASE_URL",
+    },
 }
 
 
@@ -84,6 +92,9 @@ def has_valid_config(project_root: Path) -> bool:
             "ANTHROPIC_API_KEY",
             "DEEPSEEK_API_KEY",
             "MIMO_API_KEY",
+            "CHATGLM_API_KEY",
+            "ZHIPUAI_API_KEY",
+            "BIGMODEL_API_KEY",
             "API_KEY",
         ):
             if env.get(key):
@@ -94,6 +105,9 @@ def has_valid_config(project_root: Path) -> bool:
         "ANTHROPIC_API_KEY",
         "DEEPSEEK_API_KEY",
         "MIMO_API_KEY",
+        "CHATGLM_API_KEY",
+        "ZHIPUAI_API_KEY",
+        "BIGMODEL_API_KEY",
         "API_KEY",
     ):
         if os.environ.get(key):
@@ -180,6 +194,8 @@ def run_setup_wizard(project_root: Path) -> None:
         transport = "deepseek_chat"
     elif provider_key == "mimo":
         transport = "mimo_chat"
+    elif provider_key == "chatglm":
+        transport = "chatglm_chat"
 
     config_data = {
         "provider": {

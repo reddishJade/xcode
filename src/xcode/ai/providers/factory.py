@@ -48,6 +48,10 @@ class ModelProfileProto(Protocol):
     def thinking(self) -> bool: ...
     @property
     def reasoning_effort(self) -> str | None: ...
+    @property
+    def clear_thinking(self) -> bool: ...
+    @property
+    def tool_stream(self) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,8 @@ class ModelProfileConfig:
     api_key: str = ""
     thinking: bool = True
     reasoning_effort: str | None = None
+    clear_thinking: bool = False
+    tool_stream: bool = True
 
 
 @dataclass(frozen=True)
@@ -90,11 +96,20 @@ def _resolve_api_key(
     configured: str,
     profile_name: str,
     env_files: tuple[Path, ...],
+    transport: str = "",
 ) -> str:
     if configured:
         return configured
+    provider_candidates = {
+        "anthropic_messages": ("ANTHROPIC_API_KEY",),
+        "chatglm": ("CHATGLM_API_KEY", "ZHIPUAI_API_KEY", "BIGMODEL_API_KEY"),
+        "chatglm_chat": ("CHATGLM_API_KEY", "ZHIPUAI_API_KEY", "BIGMODEL_API_KEY"),
+        "deepseek_chat": ("DEEPSEEK_API_KEY",),
+        "mimo_chat": ("MIMO_API_KEY",),
+    }
     candidates = [
         f"{profile_name.upper()}_API_KEY",
+        *provider_candidates.get(transport, ()),
         "OPENAI_API_KEY",
         "API_KEY",
     ]
@@ -105,7 +120,7 @@ def _resolve_api_key(
     raise RuntimeError(
         f"Missing API key for '{profile_name}'. "
         f"Set via 'api_key' in profile config, or env var: "
-        f"{' / '.join(candidates[:3])}."
+        f"{' / '.join(candidates)}."
     )
 
 
@@ -130,19 +145,41 @@ def _build_llm_profile(
     env_files: tuple[Path, ...],
     runtime: ProviderRuntime,
 ) -> ModelProvider:
-    api_key = _resolve_api_key(profile.api_key, profile_name, env_files)
+    transport = _canonical_transport(profile.transport)
+    api_key = _resolve_api_key(profile.api_key, profile_name, env_files, transport)
     from . import PROVIDER_REGISTRY
 
-    provider_cls = PROVIDER_REGISTRY.get(profile.transport)
+    provider_cls = PROVIDER_REGISTRY.get(transport)
     if provider_cls is None:
         raise ValueError(
             f"Unknown transport '{profile.transport}'. Available: {', '.join(PROVIDER_REGISTRY)}"
         )
-    return provider_cls(
-        api_key=api_key,
-        base_url=profile.base_url,
-        model=profile.chat_model,
-        thinking=profile.thinking,
-        reasoning_effort=profile.reasoning_effort,
-        runtime=runtime,
+    kwargs: dict[str, object] = {
+        "api_key": api_key,
+        "model": profile.chat_model,
+    }
+    if transport == "anthropic_messages":
+        return provider_cls(**kwargs)
+
+    kwargs.update(
+        {
+            "base_url": profile.base_url,
+            "thinking": profile.thinking,
+            "runtime": runtime,
+        }
     )
+    if transport in {"openai_chat", "openai_responses", "deepseek_chat"}:
+        kwargs["reasoning_effort"] = profile.reasoning_effort
+    if transport == "chatglm_chat":
+        kwargs["clear_thinking"] = profile.clear_thinking
+        kwargs["tool_stream"] = profile.tool_stream
+    return provider_cls(**kwargs)
+
+
+def _canonical_transport(transport: str) -> str:
+    aliases = {
+        "chat_completions": "openai_chat",
+        "responses_stateful": "openai_responses",
+        "chatglm": "chatglm_chat",
+    }
+    return aliases.get(transport, transport)

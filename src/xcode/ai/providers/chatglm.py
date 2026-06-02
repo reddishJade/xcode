@@ -48,6 +48,7 @@ class ChatGLMProvider:
         self.thinking = thinking
         self.clear_thinking = clear_thinking
         self.tool_stream = tool_stream
+        self.reasoning_effort = None
         self.runtime = runtime or ProviderRuntime()
         self.transport = "chatglm_chat"
         self.metrics: dict[str, object] = {
@@ -79,7 +80,7 @@ class ChatGLMProvider:
         }
 
         # 工具流式输出（仅 glm-4.6/4.7 支持）
-        if self.tool_stream:
+        if self.tool_stream and _supports_tool_stream(self.model):
             kwargs["tool_stream"] = True
 
         # thinking 配置
@@ -108,30 +109,18 @@ class ChatGLMProvider:
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """清理 reasoning_content，保留当前轮次的思考内容。
+        """按 clear_thinking 策略处理 reasoning_content。
 
-        保留式思考（clear_thinking=False）时需要返回历史 reasoning_content。
+        保留式思考需要原样返回历史 reasoning_content。
         """
         if not messages:
             return messages
+        if not self.clear_thinking:
+            return copy.deepcopy(messages)
 
         cleaned = copy.deepcopy(messages)
-        in_tool_loop = cleaned[-1].get("role") == "tool"
-
-        if not in_tool_loop:
-            # 非工具循环：清除所有历史 reasoning_content
-            for msg in cleaned:
-                msg.pop("reasoning_content", None)
-        else:
-            # 工具循环：保留当前轮次的 reasoning_content
-            last_user_idx = -1
-            for i in range(len(cleaned) - 1, -1, -1):
-                if cleaned[i].get("role") == "user":
-                    last_user_idx = i
-                    break
-            for i in range(last_user_idx):
-                if cleaned[i].get("role") == "assistant":
-                    cleaned[i].pop("reasoning_content", None)
+        for msg in cleaned:
+            msg.pop("reasoning_content", None)
 
         return cleaned
 
@@ -151,3 +140,7 @@ class ChatGLMProvider:
                 else 0
             )
             self.metrics["reasoning_tokens"] = reasoning or 0
+
+
+def _supports_tool_stream(model: str) -> bool:
+    return model.startswith("glm-4.6") or model.startswith("glm-4.7")

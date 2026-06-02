@@ -19,6 +19,7 @@ from xcode.ai.providers.factory import (
     _resolve_api_key,
 )
 from xcode.ai.providers.openai import OpenAIChatProvider, OpenAIResponsesProvider
+from xcode.ai.providers.chatglm import ChatGLMProvider
 from xcode.harness.config import ModelProfileRuntimeConfig
 from xcode.harness.skills import ToolSpec
 
@@ -89,6 +90,36 @@ class XcodeProviderEnvTests(unittest.TestCase):
 
             with patch.dict("os.environ", {}, clear=True):
                 self.assertEqual(_resolve_api_key("", "main", (env_file,)), "generic")
+
+    def test_provider_factory_builds_chatglm_from_provider_env(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text("ZHIPUAI_API_KEY=glm-key\n", encoding="utf-8")
+
+            with patch.dict("os.environ", {}, clear=True):
+                bundle = build_provider_bundle(
+                    ProviderSettings(
+                        env_files=(env_file,),
+                        model_profiles={
+                            "main": ModelProfileRuntimeConfig(
+                                transport="chatglm",
+                                chat_model="glm-4.7",
+                                base_url="",
+                                reasoning_effort=None,
+                                clear_thinking=True,
+                                tool_stream=False,
+                            ),
+                        },
+                    )
+                )
+
+                provider = bundle.llm
+                self.assertIsInstance(provider, ChatGLMProvider)
+                assert isinstance(provider, ChatGLMProvider)
+                self.assertEqual(provider.client.api_key, "glm-key")
+                self.assertEqual(provider.model, "glm-4.7")
+                self.assertTrue(provider.clear_thinking)
+                self.assertFalse(provider.tool_stream)
 
     def test_explicit_profile_api_key_overrides_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -652,16 +683,27 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         kwargs = provider.client.chat.completions.kwargs
         self.assertNotIn("tool_stream", kwargs)
 
-    def test_tool_stream_enabled(self) -> None:
-        """tool_stream=True 时传 tool_stream=true。"""
-        provider = self._make_provider(tool_stream=True, client=FakeGLMClient())
+    def test_tool_stream_enabled_for_supported_model(self) -> None:
+        """支持的模型开启 tool_stream 时传 tool_stream=true。"""
+        provider = self._make_provider(
+            model="glm-4.7", tool_stream=True, client=FakeGLMClient()
+        )
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         kwargs = provider.client.chat.completions.kwargs
         self.assertIs(kwargs.get("tool_stream"), True)
 
+    def test_tool_stream_omitted_for_unsupported_model(self) -> None:
+        """不支持的模型不传 tool_stream 参数。"""
+        provider = self._make_provider(
+            model="glm-4-flash", tool_stream=True, client=FakeGLMClient()
+        )
+        list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
+        kwargs = provider.client.chat.completions.kwargs
+        self.assertNotIn("tool_stream", kwargs)
+
     def test_clean_reasoning_no_tool_loop(self) -> None:
-        """非工具循环：清除所有历史 reasoning_content。"""
-        provider = self._make_provider()
+        """clear_thinking=True 时清除所有历史 reasoning_content。"""
+        provider = self._make_provider(clear_thinking=True)
         messages = [
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
@@ -671,9 +713,9 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         for msg in cleaned:
             self.assertNotIn("reasoning_content", msg)
 
-    def test_clean_reasoning_in_tool_loop_retains_current(self) -> None:
-        """工具循环中保留当前轮次的 reasoning_content。"""
-        provider = self._make_provider()
+    def test_clean_reasoning_retains_all_when_clear_false(self) -> None:
+        """clear_thinking=False 时保留所有 reasoning_content。"""
+        provider = self._make_provider(clear_thinking=False)
         messages = [
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
@@ -687,25 +729,12 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             {"role": "tool", "tool_call_id": "t1", "content": "result"},
         ]
         cleaned = provider._clean_reasoning_content(messages)
-        # 倒数第二条（当前轮 assistant）应保留 reasoning_content
-        for i, msg in enumerate(cleaned):
-            if i == len(cleaned) - 2:  # 当前轮次 assistant
-                self.assertIn(
-                    "reasoning_content",
-                    msg,
-                    f"msg[{i}] should retain reasoning_content",
-                )
-                self.assertEqual(msg["reasoning_content"], "think2")
-            elif msg.get("role") == "assistant":
-                self.assertNotIn(
-                    "reasoning_content",
-                    msg,
-                    f"msg[{i}] should not have reasoning_content",
-                )
+        self.assertEqual(cleaned[1]["reasoning_content"], "think1")
+        self.assertEqual(cleaned[3]["reasoning_content"], "think2")
 
-    def test_clean_reasoning_pre_tool_loop_cleared(self) -> None:
-        """工具循环中，当前轮之前的所有 assistant reasoning_content 都被清除。"""
-        provider = self._make_provider()
+    def test_clean_reasoning_clear_true_removes_tool_loop_reasoning(self) -> None:
+        """clear_thinking=True 时工具循环也清除 reasoning_content。"""
+        provider = self._make_provider(clear_thinking=True)
         messages = [
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
@@ -721,10 +750,8 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             {"role": "tool", "tool_call_id": "t1", "content": "result"},
         ]
         cleaned = provider._clean_reasoning_content(messages)
-        # 第一个 assistant (index 1) 的 reasoning 应被清除
         self.assertNotIn("reasoning_content", cleaned[1])
-        # 第二个 assistant (index 3, 当前轮) 保留
-        self.assertIn("reasoning_content", cleaned[3])
+        self.assertNotIn("reasoning_content", cleaned[3])
 
     def test_thinking_true_streams_reasoning(self) -> None:
         """thinking=True 时流包含 reasoning delta。"""
@@ -745,7 +772,10 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
     def test_combo_tool_stream_plus_clear_thinking(self) -> None:
         """tool_stream=True + clear_thinking=True 组合参数正确传递。"""
         provider = self._make_provider(
-            tool_stream=True, clear_thinking=True, client=FakeGLMClient()
+            model="glm-4.7",
+            tool_stream=True,
+            clear_thinking=True,
+            client=FakeGLMClient(),
         )
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         kwargs = provider.client.chat.completions.kwargs
@@ -853,7 +883,7 @@ class FakeGLMDelta:
     def __init__(self, content, reasoning) -> None:
         self.content = content
         self.reasoning_content = reasoning
-        self.tool_calls = []
+        self.tool_calls: list[Any] = []
 
 
 if __name__ == "__main__":

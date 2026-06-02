@@ -9,6 +9,7 @@ ProviderTransport = Literal[
     "openai_chat",
     "openai_responses",
     "anthropic_messages",
+    "chatglm",
     "chatglm_chat",
     "deepseek_chat",
     "mimo_chat",
@@ -35,6 +36,8 @@ class ModelProfileRuntimeConfig:
     api_key: str = ""
     thinking: bool = True
     reasoning_effort: str | None = "high"
+    clear_thinking: bool = False
+    tool_stream: bool = True
 
 
 @dataclass(frozen=True)
@@ -236,12 +239,32 @@ def _load_model_profiles(provider: dict) -> dict[str, ModelProfileRuntimeConfig]
         if not isinstance(raw, dict):
             continue
         profiles[profile_name] = ModelProfileRuntimeConfig(
-            transport=raw.get("transport", profiles["main"].transport),
+            transport=_normalize_transport(
+                raw.get("transport", profiles["main"].transport)
+            ),
             chat_model=raw.get("chat_model", profiles["main"].chat_model),
             base_url=raw.get("base_url", profiles["main"].base_url),
             api_key=raw.get("api_key", profiles["main"].api_key),
+            thinking=bool(raw.get("thinking", profiles["main"].thinking)),
+            reasoning_effort=raw.get(
+                "reasoning_effort", profiles["main"].reasoning_effort
+            ),
+            clear_thinking=bool(
+                raw.get("clear_thinking", profiles["main"].clear_thinking)
+            ),
+            tool_stream=bool(raw.get("tool_stream", profiles["main"].tool_stream)),
         )
     main = profiles["main"]
     profiles.setdefault("subagent", main)
     profiles.setdefault("fallback", main)
     return profiles
+
+
+def _normalize_transport(value: object) -> ProviderTransport:
+    aliases = {
+        "chat_completions": "openai_chat",
+        "responses_stateful": "openai_responses",
+        "chatglm": "chatglm_chat",
+    }
+    raw = str(value)
+    return aliases.get(raw, raw)  # type: ignore[return-value]

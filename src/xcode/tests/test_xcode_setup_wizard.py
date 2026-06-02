@@ -16,6 +16,7 @@ class XcodeSetupWizardTests(unittest.TestCase):
             ("2", "anthropic_messages"),
             ("3", "deepseek_chat"),
             ("4", "mimo_chat"),
+            ("5", "chatglm_chat"),
         ]
         for provider_choice, expected_transport in cases:
             with self.subTest(provider_choice=provider_choice):
@@ -28,9 +29,7 @@ class XcodeSetupWizardTests(unittest.TestCase):
                             run_setup_wizard(Path(temp_dir))
 
                     data = json.loads(path.read_text(encoding="utf-8"))
-                    transport = data["provider"]["model_profiles"]["main"][
-                        "transport"
-                    ]
+                    transport = data["provider"]["model_profiles"]["main"]["transport"]
                     self.assertEqual(transport, expected_transport)
 
 
