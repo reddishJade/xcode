@@ -402,15 +402,26 @@ def _build_agent(
     )
 
 
-def build_app(
+@dataclass(frozen=True)
+class ResolvedConfig:
+    """配置解析结果。"""
+
+    runtime_config: XcodeRuntimeConfig
+    agent_config: AgentConfig
+    skills_dir: Path | None
+    audit_path: Path | None
+    env_files: tuple[Path, ...]
+
+
+def _resolve_config(
     project_root: Path,
-    env_files: tuple[Path, ...] | None = None,
-    agent_config: AgentConfig | None = None,
-    skills_dir: Path | None = None,
-    audit_path: Path | None = None,
-    runtime_config: XcodeRuntimeConfig | None = None,
-) -> XcodeApp:
-    """装配完整的 Xcode 应用。"""
+    env_files: tuple[Path, ...] | None,
+    agent_config: AgentConfig | None,
+    skills_dir: Path | None,
+    audit_path: Path | None,
+    runtime_config: XcodeRuntimeConfig | None,
+) -> ResolvedConfig:
+    """解析并填充所有配置默认值。"""
     runtime_config = runtime_config or discover_runtime_config(project_root)
     agent_config = agent_config or to_agent_config(runtime_config)
     skills_dir = skills_dir or resolve_config_path(
@@ -425,8 +436,31 @@ def build_app(
         project_root / ".env",
         project_root / "xcode" / ".env",
     )
+    return ResolvedConfig(
+        runtime_config=runtime_config,
+        agent_config=agent_config,
+        skills_dir=skills_dir,
+        audit_path=audit_path,
+        env_files=env_files,
+    )
 
-    providers = _build_providers(runtime_config, env_files)
+
+@dataclass(frozen=True)
+class SharedInfra:
+    """共享运行时基础设施。"""
+
+    contextual_state: ContextualRetrievalState
+    cancellation_token: CancellationToken
+    compact_controller: CompactController
+    compactor: LayeredCompactor
+
+
+def _build_shared_infra(
+    project_root: Path,
+    runtime_config: XcodeRuntimeConfig,
+    enabled: set[str],
+) -> SharedInfra:
+    """构建 ContextualRetrievalState、CancellationToken、CompactController、LayeredCompactor。"""
     contextual_state = ContextualRetrievalState(project_root)
     cancellation_token = CancellationToken()
     compact_controller = CompactController()
@@ -437,7 +471,6 @@ def build_app(
         else project_root / ".local" / "sessions"
     )
 
-    enabled = _effective_enabled_groups(runtime_config.tools.enabled_groups)
     on_compact = None
     if "memory" in enabled:
         from xcode.experimental.memory import MemoryManager
@@ -449,6 +482,29 @@ def build_app(
         max_recent_messages=runtime_config.agent.max_recent_messages,
         on_compact=on_compact,
     )
+
+    return SharedInfra(
+        contextual_state=contextual_state,
+        cancellation_token=cancellation_token,
+        compact_controller=compact_controller,
+        compactor=compactor,
+    )
+
+
+def build_app(
+    project_root: Path,
+    env_files: tuple[Path, ...] | None = None,
+    agent_config: AgentConfig | None = None,
+    skills_dir: Path | None = None,
+    audit_path: Path | None = None,
+    runtime_config: XcodeRuntimeConfig | None = None,
+) -> XcodeApp:
+    """装配完整的 Xcode 应用。"""
+    cfg = _resolve_config(project_root, env_files, agent_config, skills_dir, audit_path, runtime_config)
+    enabled = _effective_enabled_groups(cfg.runtime_config.tools.enabled_groups)
+    infra = _build_shared_infra(project_root, cfg.runtime_config, enabled)
+
+    providers = _build_providers(cfg.runtime_config, cfg.env_files)
 
     plugins_data: dict[str, Any] = {"tools": [], "hooks": {}, "skills": []}
     if "plugins" in enabled:
@@ -466,12 +522,12 @@ def build_app(
         project_root=project_root,
         llm=providers.llm,
         llm_profiles=providers.llms,
-        config=agent_config,
-        runtime_config=runtime_config,
-        skills_dir=skills_dir,
-        contextual_state=contextual_state,
-        compact_controller=compact_controller,
-        cancel_event=cancellation_token.event,
+        config=cfg.agent_config,
+        runtime_config=cfg.runtime_config,
+        skills_dir=cfg.skills_dir,
+        contextual_state=infra.contextual_state,
+        compact_controller=infra.compact_controller,
+        cancel_event=infra.cancellation_token.event,
     )
 
     if plugins_data.get("tools"):
@@ -482,15 +538,15 @@ def build_app(
         project_root=project_root,
         llm=providers.llm,
         registry=registry,
-        config=agent_config,
-        audit_path=audit_path,
-        runtime_config=runtime_config,
+        config=cfg.agent_config,
+        audit_path=cfg.audit_path,
+        runtime_config=cfg.runtime_config,
         skill_loader=skill_loader,
-        contextual_state=contextual_state,
+        contextual_state=infra.contextual_state,
         shell_spec=shell_spec,
-        compactor=compactor,
-        compact_controller=compact_controller,
-        cancellation_token=cancellation_token,
+        compactor=infra.compactor,
+        compact_controller=infra.compact_controller,
+        cancellation_token=infra.cancellation_token,
         fallback_provider=fallback_provider,
         speculation_planner=speculation_planner,
         plugins_hooks=plugins_data.get("hooks"),
@@ -498,18 +554,18 @@ def build_app(
 
     experimental_services = _load_experimental_services(
         project_root=project_root,
-        runtime_config=runtime_config,
+        runtime_config=cfg.runtime_config,
         enabled=enabled,
     )
 
     return XcodeApp(
         agent=agent,
         registry=registry,
-        contextual_state=contextual_state,
+        contextual_state=infra.contextual_state,
         daemon=experimental_services.daemon,
         mailbox=experimental_services.mailbox,
         progress=experimental_services.progress,
-        _env_files=env_files,
-        _model_profiles=runtime_config.provider.model_profiles,
+        _env_files=cfg.env_files,
+        _model_profiles=cfg.runtime_config.provider.model_profiles,
         _closers=closers,
     )
