@@ -163,6 +163,13 @@ class XcodeApp:
         self.close()
 
 
+@dataclass(frozen=True)
+class ExperimentalServices:
+    daemon: HeartbeatDaemon | None = None
+    mailbox: AgentMailbox | None = None
+    progress: type[TaskProgress] | None = None
+
+
 # ── 应用装配 ──
 
 
@@ -306,6 +313,35 @@ def _build_worktree_runner(project_root: Path):
     from xcode.experimental.worktree import WorktreeTaskRunner
 
     return WorktreeTaskRunner(project_root)
+
+
+def _load_experimental_services(
+    project_root: Path,
+    runtime_config: XcodeRuntimeConfig,
+    enabled: set[str],
+) -> ExperimentalServices:
+    daemon = None
+    if "daemon" in enabled:
+        from xcode.experimental.daemon import HeartbeatDaemon
+
+        daemon = HeartbeatDaemon(
+            project_root=project_root,
+            interval_seconds=runtime_config.daemon.interval_seconds,
+        )
+
+    mailbox = None
+    if "mailbox" in enabled:
+        from xcode.experimental.mailbox import AgentMailbox
+
+        mailbox = AgentMailbox(project_root)
+
+    progress = None
+    if "progress" in enabled:
+        from xcode.experimental.progress import TaskProgress
+
+        progress = TaskProgress
+
+    return ExperimentalServices(daemon=daemon, mailbox=mailbox, progress=progress)
 
 
 def _build_agent(
@@ -460,34 +496,19 @@ def build_app(
         plugins_hooks=plugins_data.get("hooks"),
     )
 
-    daemon = None
-    if "daemon" in enabled:
-        from xcode.experimental.daemon import HeartbeatDaemon
-
-        daemon = HeartbeatDaemon(
-            project_root=project_root,
-            interval_seconds=runtime_config.daemon.interval_seconds,
-        )
-
-    mailbox = None
-    if "mailbox" in enabled:
-        from xcode.experimental.mailbox import AgentMailbox
-
-        mailbox = AgentMailbox(project_root)
-
-    progress = None
-    if "progress" in enabled:
-        from xcode.experimental.progress import TaskProgress
-
-        progress = TaskProgress
+    experimental_services = _load_experimental_services(
+        project_root=project_root,
+        runtime_config=runtime_config,
+        enabled=enabled,
+    )
 
     return XcodeApp(
         agent=agent,
         registry=registry,
         contextual_state=contextual_state,
-        daemon=daemon,
-        mailbox=mailbox,
-        progress=progress,
+        daemon=experimental_services.daemon,
+        mailbox=experimental_services.mailbox,
+        progress=experimental_services.progress,
         _env_files=env_files,
         _model_profiles=runtime_config.provider.model_profiles,
         _closers=closers,
