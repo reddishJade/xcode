@@ -48,7 +48,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
                             "main": ModelProfileRuntimeConfig(
                                 chat_model="main-model",
                                 base_url="https://main.test",
-                                transport="responses_stateful",
+                                transport="openai_responses",
                             ),
                             "subagent": ModelProfileRuntimeConfig(
                                 chat_model="small-model",
@@ -59,7 +59,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 )
 
                 self.assertIsInstance(bundle.llm, OpenAIResponsesProvider)
-                self.assertEqual(bundle.llm.transport, "responses_stateful")
+                self.assertEqual(bundle.llm.transport, "openai_responses")
                 self.assertEqual(bundle.llm.model, "main-model")
                 self.assertEqual(bundle.llms["subagent"].model, "small-model")
                 self.assertEqual(bundle.llms["judge"].model, "main-model")
@@ -195,7 +195,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             ]
         )
         llm.runtime = ProviderRuntime()
-        llm.transport = "chat_completions"
+        llm.transport = "openai_chat"
         tool = ToolSpec(
             name="echo",
             description="Echo input.",
@@ -231,7 +231,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             stream_chunks=[FakeStreamChunk(content="done")],
         )
         llm.runtime = ProviderRuntime()
-        llm.transport = "chat_completions"
+        llm.transport = "openai_chat"
 
         events = list(
             llm._stream_sync(
@@ -295,7 +295,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             ]
         )
         llm.runtime = ProviderRuntime()
-        llm.transport = "chat_completions"
+        llm.transport = "openai_chat"
 
         events = list(llm._stream_sync([{"role": "user", "content": "go"}], ()))
 
@@ -334,7 +334,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             ]
         )
         llm.runtime = ProviderRuntime()
-        llm.transport = "responses_stateful"
+        llm.transport = "openai_responses"
         llm.prompt_cache_key = None
         llm.previous_response_id = None
         llm.reasoning_effort = None
@@ -385,7 +385,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             ]
         )
         llm.runtime = ProviderRuntime()
-        llm.transport = "responses_stateful"
+        llm.transport = "openai_responses"
         llm.prompt_cache_key = None
         llm.previous_response_id = None
         llm.metrics = {}
@@ -440,7 +440,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             ]
         )
         llm.runtime = ProviderRuntime()
-        llm.transport = "responses_stateful"
+        llm.transport = "openai_responses"
         llm.prompt_cache_key = None
         llm.previous_response_id = None
         llm.metrics = {}
@@ -785,7 +785,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
 
     def test_transport_is_chatglm(self) -> None:
         provider = self._make_provider()
-        self.assertEqual(provider.transport, "chatglm")
+        self.assertEqual(provider.transport, "chatglm_chat")
 
 
 class FakeGLMClient:

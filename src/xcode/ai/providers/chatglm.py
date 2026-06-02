@@ -49,7 +49,7 @@ class ChatGLMProvider:
         self.clear_thinking = clear_thinking
         self.tool_stream = tool_stream
         self.runtime = runtime or ProviderRuntime()
-        self.transport = "chatglm"
+        self.transport = "chatglm_chat"
         self.metrics: dict[str, object] = {
             "transport": self.transport,
             "sent_messages": 0,

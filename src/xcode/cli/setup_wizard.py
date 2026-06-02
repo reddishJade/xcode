@@ -173,11 +173,11 @@ def run_setup_wizard(project_root: Path) -> None:
         print("  Setup skipped. You can configure later by editing xcode.config.json.")
         return
 
-    transport = "chat_completions"
+    transport = "openai_chat"
     if provider_key == "anthropic":
-        transport = "responses_stateful"
+        transport = "anthropic_messages"
     elif provider_key == "deepseek":
-        transport = "chat_completions"
+        transport = "deepseek_chat"
     elif provider_key == "mimo":
         transport = "mimo_chat"
 

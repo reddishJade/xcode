@@ -52,7 +52,7 @@ class ModelProfileProto(Protocol):
 
 @dataclass(frozen=True)
 class ModelProfileConfig:
-    transport: str = "chat_completions"
+    transport: str = "openai_chat"
     chat_model: str = ""
     base_url: str = ""
     api_key: str = ""

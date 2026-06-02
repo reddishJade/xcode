@@ -5,7 +5,14 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-ProviderTransport = Literal["chat_completions", "responses_stateful"]
+ProviderTransport = Literal[
+    "openai_chat",
+    "openai_responses",
+    "anthropic_messages",
+    "chatglm_chat",
+    "deepseek_chat",
+    "mimo_chat",
+]
 ExecutionMode = Literal["plan", "review", "act"]
 
 
@@ -22,7 +29,7 @@ class AgentConfig:
 
 @dataclass(frozen=True)
 class ModelProfileRuntimeConfig:
-    transport: ProviderTransport = "chat_completions"
+    transport: ProviderTransport = "openai_chat"
     chat_model: str = "deepseek-v4-flash"
     base_url: str = "https://api.deepseek.com"
     api_key: str = ""

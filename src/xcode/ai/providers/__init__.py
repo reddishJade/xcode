@@ -9,10 +9,10 @@ from .mimo import MiMoProvider
 from .openai import OpenAIChatProvider, OpenAIResponsesProvider
 
 PROVIDER_REGISTRY: dict[str, type] = {
-    "chat_completions": OpenAIChatProvider,
-    "responses_stateful": OpenAIResponsesProvider,
+    "openai_chat": OpenAIChatProvider,
+    "openai_responses": OpenAIResponsesProvider,
     "anthropic_messages": AnthropicProvider,
-    "chatglm": ChatGLMProvider,
+    "chatglm_chat": ChatGLMProvider,
     "deepseek_chat": DeepSeekProvider,
     "mimo_chat": MiMoProvider,
 }

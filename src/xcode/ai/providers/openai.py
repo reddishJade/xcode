@@ -49,7 +49,7 @@ class OpenAIChatProvider:
         self.reasoning_effort = reasoning_effort
         self.runtime = runtime or ProviderRuntime()
         self.prompt_cache_key = prompt_cache_key
-        self.transport = "chat_completions"
+        self.transport = "openai_chat"
         self.metrics: dict[str, object] = {
             "transport": self.transport,
             "previous_response_id": None,
@@ -118,7 +118,7 @@ class OpenAIChatProvider:
     def _ensure_metrics(self) -> None:
         if not hasattr(self, "metrics"):
             self.metrics = {
-                "transport": getattr(self, "transport", "chat_completions"),
+                "transport": getattr(self, "transport", "openai_chat"),
                 "previous_response_id": None,
                 "sent_messages": 0,
                 "cached_tokens": 0,
@@ -154,7 +154,7 @@ class OpenAIResponsesProvider:
         self.reasoning_effort = reasoning_effort
         self.runtime = runtime or ProviderRuntime()
         self.prompt_cache_key = prompt_cache_key
-        self.transport = "responses_stateful"
+        self.transport = "openai_responses"
         self.previous_response_id: str | None = None
         self._last_sent_message_index: int = 0
         self._pending_sent_message_index: int = 0
