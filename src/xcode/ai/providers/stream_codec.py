@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any, Protocol
 
 from xcode.ai.events import (
@@ -51,7 +51,7 @@ class _ChoiceDelta(Protocol):
     @property
     def content(self) -> str | None: ...
     @property
-    def tool_calls(self) -> list[_ChoiceDeltaToolCall] | None: ...
+    def tool_calls(self) -> Sequence[_ChoiceDeltaToolCall] | None: ...
 
 
 class _Choice(Protocol):
@@ -63,7 +63,7 @@ class _ChatCompletionChunk(Protocol):
     @property
     def usage(self) -> _Usage | None: ...
     @property
-    def choices(self) -> list[_Choice]: ...
+    def choices(self) -> Sequence[_Choice]: ...
 
 
 class _ResponseContent(Protocol):
@@ -217,13 +217,19 @@ def responses_stream_to_events(
                 response_text = str(getattr(response, "output_text", "") or "")
                 usage = getattr(response, "usage", None)
                 if usage:
-                    input_tokens = getattr(usage, "input_tokens", 0) or getattr(usage, "prompt_tokens", 0)
-                    output_tokens = getattr(usage, "output_tokens", 0) or getattr(usage, "completion_tokens", 0)
+                    input_tokens = getattr(usage, "input_tokens", 0) or getattr(
+                        usage, "prompt_tokens", 0
+                    )
+                    output_tokens = getattr(usage, "output_tokens", 0) or getattr(
+                        usage, "completion_tokens", 0
+                    )
                     yield UsageUpdate(int(input_tokens), int(output_tokens))
 
     if pending_calls:
         ready = [
-            ToolCall(id=c["id"], name=c["name"], input=parse_tool_arguments(c["arguments"]))
+            ToolCall(
+                id=c["id"], name=c["name"], input=parse_tool_arguments(c["arguments"])
+            )
             for _, c in sorted(pending_calls.items())
         ]
         yield ToolCallEvent(ready)

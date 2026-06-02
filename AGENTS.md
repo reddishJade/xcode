@@ -39,7 +39,7 @@ If instructions conflict, ask for explicit confirmation before proceeding.
 ## Validation
 
 - After code changes, run formatting, lint, type checks, and tests only for modified files or related functionality.
-- Run `ruff format` in write mode before final delivery when Python files are modified.
+- Use the Python validation commands in `docs/code-standards.md`.
 - Use mocks or fake providers for external services. Do not call real paid APIs in tests.
 - For documentation-only changes, run `git diff --check` and targeted tests when the docs describe code behavior.
 
@@ -66,9 +66,4 @@ uv run python -m unittest discover src\xcode\tests
 # Compile check
 uv run python -m compileall src
 
-# Python formatting/lint/type checks
-uv run ruff format <modified-files>
-uv run ruff check <modified-files>
-uv run ruff format --check <modified-files>
-uv run mypy <modified-files>
 ```

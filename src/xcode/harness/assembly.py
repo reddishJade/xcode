@@ -10,7 +10,7 @@ import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast
 
 from xcode.harness.config import (
     AgentConfig,
@@ -52,10 +52,19 @@ if TYPE_CHECKING:
     from xcode.experimental.speculation import SpeculationPlanner
 
 
-EXPERIMENTAL_FEATURE_GROUPS = frozenset({
-    "worktree", "mcp", "tasks", "memory", "plugins",
-    "daemon", "mailbox", "progress", "speculation",
-})
+EXPERIMENTAL_FEATURE_GROUPS = frozenset(
+    {
+        "worktree",
+        "mcp",
+        "tasks",
+        "memory",
+        "plugins",
+        "daemon",
+        "mailbox",
+        "progress",
+        "speculation",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -95,13 +104,24 @@ def resolve_config(
 ) -> ResolvedConfig:
     runtime_config = runtime_config or discover_runtime_config(project_root)
     agent_config = agent_config or to_agent_config(runtime_config)
-    skills_dir = skills_dir or resolve_config_path(project_root, runtime_config.paths.skills_dir)
-    audit_path = audit_path or resolve_config_path(project_root, runtime_config.observability.audit_path)
+    skills_dir = skills_dir or resolve_config_path(
+        project_root, runtime_config.paths.skills_dir
+    )
+    audit_path = audit_path or resolve_config_path(
+        project_root, runtime_config.observability.audit_path
+    )
     _pkg_root = Path(__file__).resolve().parent.parent
-    env_files = env_files or (_pkg_root / ".env", project_root / ".env", project_root / "xcode" / ".env")
+    env_files = env_files or (
+        _pkg_root / ".env",
+        project_root / ".env",
+        project_root / "xcode" / ".env",
+    )
     return ResolvedConfig(
-        runtime_config=runtime_config, agent_config=agent_config,
-        skills_dir=skills_dir, audit_path=audit_path, env_files=env_files,
+        runtime_config=runtime_config,
+        agent_config=agent_config,
+        skills_dir=skills_dir,
+        audit_path=audit_path,
+        env_files=env_files,
     )
 
 
@@ -132,6 +152,7 @@ def build_shared_infra(
     on_compact = None
     if "memory" in enabled:
         from xcode.experimental.memory import MemoryManager
+
         on_compact = MemoryManager(project_root).consolidate
 
     compactor = LayeredCompactor(
@@ -140,8 +161,10 @@ def build_shared_infra(
         on_compact=on_compact,
     )
     return SharedInfra(
-        contextual_state=contextual_state, cancellation_token=cancellation_token,
-        compact_controller=compact_controller, compactor=compactor,
+        contextual_state=contextual_state,
+        cancellation_token=cancellation_token,
+        compact_controller=compact_controller,
+        compactor=compactor,
     )
 
 
@@ -149,8 +172,12 @@ def build_shared_infra(
 
 
 def build_providers(runtime_config: XcodeRuntimeConfig, env_files: tuple[Path, ...]):
-    model_profiles = cast("dict[str, ModelProfileProto]", runtime_config.provider.model_profiles)
-    return build_provider_bundle(ProviderSettings(env_files=env_files, model_profiles=model_profiles))
+    model_profiles = cast(
+        "dict[str, ModelProfileProto]", runtime_config.provider.model_profiles
+    )
+    return build_provider_bundle(
+        ProviderSettings(env_files=env_files, model_profiles=model_profiles)
+    )
 
 
 # ── 工具注册 ──
@@ -166,31 +193,41 @@ def build_tool_registry(
     contextual_state: ContextualRetrievalState | None = None,
     compact_controller: CompactController | None = None,
     cancel_event: threading.Event | None = None,
-) -> tuple[tuple[ToolSpec, ...], SkillLoader | None, ShellSpec, tuple[Callable[[], None], ...]]:
+) -> tuple[
+    tuple[ToolSpec, ...], SkillLoader | None, ShellSpec, tuple[Callable[[], None], ...]
+]:
     from xcode.harness.tools.shell_adapter import detect_shell
 
     enabled = effective_enabled_groups(runtime_config.tools.enabled_groups)
     closers: list[Callable[[], None]] = []
     shell_spec = detect_shell(runtime_config.tools.shell)
     registry = build_project_scoped_registry(
-        project_root=project_root, enabled=enabled,
-        contextual_state=contextual_state, shell_spec=shell_spec, cancel_event=cancel_event,
+        project_root=project_root,
+        enabled=enabled,
+        contextual_state=contextual_state,
+        shell_spec=shell_spec,
+        cancel_event=cancel_event,
     )
     if "worktree" in enabled:
         from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
+
         registry += build_worktree_tools(WorktreeTaskRunner(project_root))
     if "mcp" in enabled:
         from xcode.experimental.mcp import build_mcp_tools
+
         registry += build_mcp_tools(project_root)
     if "tasks" in enabled:
         from xcode.experimental.tasks import TaskStore, build_task_tools
+
         registry += build_task_tools(TaskStore(project_root))
     if "mailbox" in enabled:
         from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
+
         registry += build_mailbox_tools(AgentMailbox(project_root))
     if "progress" in enabled:
         from xcode.experimental.progress import build_progress_tools
         from xcode.experimental.tasks import TaskStore
+
         registry += build_progress_tools(TaskStore(project_root))
 
     skills_dir = skills_dir or project_root / "xcode" / "skills"
@@ -207,18 +244,27 @@ def build_tool_registry(
             effective_registry = child_registry
             if cwd_override is not None:
                 effective_registry = build_project_scoped_registry(
-                    project_root=Path(cwd_override), enabled=enabled,
-                    contextual_state=contextual_state, shell_spec=shell_spec, cancel_event=cancel_event,
+                    project_root=Path(cwd_override),
+                    enabled=enabled,
+                    contextual_state=contextual_state,
+                    shell_spec=shell_spec,
+                    cancel_event=cancel_event,
                 )
             result = await StructuredAgent(
-                provider=child_llms[model_profile], registry=effective_registry, config=config,
+                provider=child_llms[model_profile],
+                registry=effective_registry,
+                config=config,
             ).run_async(prompt)
             return result.answer
 
-        worktree_runner = _build_worktree_runner(project_root) if "worktree" in enabled else None
+        worktree_runner = (
+            _build_worktree_runner(project_root) if "worktree" in enabled else None
+        )
         managed_runner = ManagedSubagentRunner(
-            run_child, available_profiles=tuple(child_llms),
-            default_profile="subagent", worktree_runner=worktree_runner,
+            run_child,
+            available_profiles=tuple(child_llms),
+            default_profile="subagent",
+            worktree_runner=worktree_runner,
         )
         closers.append(managed_runner.shutdown)
         if "subagent" in enabled:
@@ -234,10 +280,13 @@ def build_project_scoped_registry(
     cancel_event: threading.Event | None = None,
 ) -> tuple[ToolSpec, ...]:
     from xcode.harness.skills import BASE_REGISTRY
+
     registry = BASE_REGISTRY
     registry += build_file_tools(project_root, context_state=contextual_state)
     registry += build_code_tools(project_root)
-    registry += (build_bash_tool(project_root, shell_spec=shell_spec, cancel_event=cancel_event),)
+    registry += (
+        build_bash_tool(project_root, shell_spec=shell_spec, cancel_event=cancel_event),
+    )
     return tuple(t for t in registry if t.group in enabled)
 
 
@@ -253,6 +302,7 @@ def llm_profiles_dict(
 
 def _build_worktree_runner(project_root: Path):
     from xcode.experimental.worktree import WorktreeTaskRunner
+
     return WorktreeTaskRunner(project_root)
 
 
@@ -260,19 +310,27 @@ def _build_worktree_runner(project_root: Path):
 
 
 def load_experimental_services(
-    project_root: Path, runtime_config: XcodeRuntimeConfig, enabled: set[str],
+    project_root: Path,
+    runtime_config: XcodeRuntimeConfig,
+    enabled: set[str],
 ) -> ExperimentalServices:
     daemon = None
     if "daemon" in enabled:
         from xcode.experimental.daemon import HeartbeatDaemon
-        daemon = HeartbeatDaemon(project_root=project_root, interval_seconds=runtime_config.daemon.interval_seconds)
+
+        daemon = HeartbeatDaemon(
+            project_root=project_root,
+            interval_seconds=runtime_config.daemon.interval_seconds,
+        )
     mailbox = None
     if "mailbox" in enabled:
         from xcode.experimental.mailbox import AgentMailbox
+
         mailbox = AgentMailbox(project_root)
     progress = None
     if "progress" in enabled:
         from xcode.experimental.progress import TaskProgress
+
         progress = TaskProgress
     return ExperimentalServices(daemon=daemon, mailbox=mailbox, progress=progress)
 
@@ -315,15 +373,23 @@ def build_agent(
                 hook_manager.register(cast("HookEvent", event), cb)
 
     return StructuredAgent(
-        provider=llm, registry=registry, config=config,
+        provider=llm,
+        registry=registry,
+        config=config,
         audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
         hook_manager=hook_manager,
         runtime_context_provider=build_runtime_context_provider(
-            project_root, registry, skill_loader,
-            shell_spec=shell_spec, contextual_state=contextual_state,
+            project_root,
+            registry,
+            skill_loader,
+            shell_spec=shell_spec,
+            contextual_state=contextual_state,
             modules=runtime_config.prompt.modules,
         ),
-        compactor=compactor, compact_controller=compact_controller,
-        cancellation_token=cancellation_token, speculation_planner=speculation_planner,
-        fallback_provider=fallback_provider, project_root=project_root,
+        compactor=compactor,
+        compact_controller=compact_controller,
+        cancellation_token=cancellation_token,
+        speculation_planner=speculation_planner,
+        fallback_provider=fallback_provider,
+        project_root=project_root,
     )

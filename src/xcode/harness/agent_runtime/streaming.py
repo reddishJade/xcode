@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import random
-from pathlib import Path
 from typing import Any
 
 from xcode.ai.events import (
@@ -18,27 +17,23 @@ from xcode.ai.events import (
 )
 from xcode.ai.providers.protocol import ModelProvider
 from .agent_helpers import (
-    blocks_to_typed,
     collect_provider_events,
-    reasoning_for_assistant,
     typed_blocks_to_raw,
 )
 from .cancellation import CancellationToken
-from .compaction import estimate_text_tokens
 from .tool_events import ToolResult
 from .tool_executor import (
     ExecutionCancelled,
     ToolExecutor,
-    tool_result_message,
 )
-from ..config import AgentConfig, ExecutionMode
-from ..observability import AuditRecord, HookManager, PermissionPolicy
+from ..config import ExecutionMode
+from ..observability import HookManager, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .structured import StructuredAgentEvent, StructuredAgentResult
+    from .structured import StructuredAgentEvent
 
 
 # ── provider 重试 + fallback ──

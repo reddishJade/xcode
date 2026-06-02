@@ -39,14 +39,7 @@ uv run python -m unittest src.xcode.tests.test_eval_pipeline src.xcode.tests.tes
 
 ## 2. 格式、Lint 和类型检查
 
-修改 Python 文件后，按 AGENTS 规则对修改文件运行：
-
-```powershell
-uv run ruff format path\to\file.py
-uv run ruff check path\to\file.py
-uv run ruff format --check path\to\file.py
-uv run mypy path\to\file.py
-```
+修改 Python 文件后，按 `docs/code-standards.md` 的 Python 验证命令对修改文件运行。
 
 修改多个文件时把文件列表显式传入命令。不要默认扩大到全仓库，除非任务需要。
 
@@ -220,10 +213,7 @@ uv run python -m unittest src.xcode.tests.test_eval_pipeline src.xcode.tests.tes
 针对代码和文档混合变更：
 
 ```powershell
-uv run ruff format <modified-python-files>
-uv run ruff check <modified-python-files>
-uv run ruff format --check <modified-python-files>
-uv run mypy <modified-python-files>
+# Run the Python validation commands from docs/code-standards.md on modified Python files.
 uv run python -m unittest <targeted-test-modules>
 git diff --check -- <modified-files>
 ```

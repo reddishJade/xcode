@@ -6,14 +6,8 @@ from typing import Any, cast
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import ToolDefinition
 
-from .codec import (
-    chat_stream_to_events,
-    responses_stream_to_events,
-    to_chat_messages,
-    to_chat_tool,
-    to_responses_input,
-    to_responses_tool,
-)
+from .codec import to_chat_messages, to_chat_tool, to_responses_input, to_responses_tool
+from .stream_codec import chat_stream_to_events, responses_stream_to_events
 from .runtime import ProviderRuntime
 
 
@@ -46,6 +40,7 @@ class OpenAIChatProvider:
             client = OpenAI(api_key=api_key, base_url=base_url)
         self.client = client
         self.model = model
+        self.thinking = thinking
         self.reasoning_effort = reasoning_effort
         self.runtime = runtime or ProviderRuntime()
         self.prompt_cache_key = prompt_cache_key
@@ -95,7 +90,8 @@ class OpenAIChatProvider:
                     self._record_usage(chunk, len(chat_messages))
                 yield chunk
 
-        stream = self.runtime.run(lambda: self.client.chat.completions.create(**kwargs))
+        create = cast(Any, self.client.chat.completions.create)
+        stream = self.runtime.run(lambda: create(**kwargs))
         self._ensure_metrics()
         self.metrics["sent_messages"] = len(chat_messages)
         yield from chat_stream_to_events(intercept_usage(stream))
@@ -184,7 +180,8 @@ class OpenAIResponsesProvider:
         self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...]
     ) -> Iterator[ProviderEvent]:
         kwargs = self._responses_kwargs(messages, tools, stream=True)
-        stream = self.runtime.run(lambda: self.client.responses.create(**kwargs))
+        create = cast(Any, self.client.responses.create)
+        stream = self.runtime.run(lambda: create(**kwargs))
         self.metrics["sent_messages"] = len(kwargs["input"])
 
         def intercept_events(events: Iterable[object]) -> Iterator[object]:

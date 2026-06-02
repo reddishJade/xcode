@@ -7,6 +7,7 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 from xcode.cli.completion import ReplCompleter
@@ -501,7 +502,7 @@ class XcodeReplTests(unittest.TestCase):
                 completion.text
                 async for completion in completer.get_completions_async(
                     Document("/pl"),
-                    None,
+                    cast(Any, None),
                 )
             ]
 
@@ -671,7 +672,7 @@ class FakePrompt:
     def __init__(self, values: list[str]) -> None:
         self.values = iter(values)
 
-    def prompt(self, _prompt_text: PromptText) -> str:
+    def prompt(self, prompt_text: PromptText) -> str:
         return next(self.values)
 
 

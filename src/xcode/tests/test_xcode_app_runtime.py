@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from xcode.harness.app import XcodeApp, _build_project_scoped_registry, build_app
+from xcode.harness.assembly import build_project_scoped_registry
+from xcode.harness.app import XcodeApp, build_app
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.ai.events import FinalMessage, TextDelta, ToolCall, ToolCallEvent
 from xcode.ai.providers.protocol import ModelProvider
@@ -18,6 +19,7 @@ from xcode.harness.config import (
     ToolsRuntimeConfig,
     XcodeRuntimeConfig,
 )
+from xcode.harness.agent_runtime.compaction import LayeredCompactor
 from xcode.harness.tools.shell_adapter import detect_shell
 from xcode.harness.skills import ToolSpec
 
@@ -51,7 +53,8 @@ class XcodeAppRuntimeTests(unittest.TestCase):
     def test_default_tool_groups_do_not_construct_optional_groups(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             with patch(
-                "xcode.harness.app._build_worktree_runner", side_effect=AssertionError
+                "xcode.harness.assembly._build_worktree_runner",
+                side_effect=AssertionError,
             ):
                 app = build_app(
                     project_root=Path(tmp),
@@ -92,7 +95,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         names = {tool.name for tool in app.registry}
         self.assertNotIn("plugin_tool", names)
-        self.assertIsNone(app.agent.compactor.on_compact)
+        self.assertIsNone(_layered_compactor(app).on_compact)
         self.assertIsNone(app.agent.speculation_planner)
         self.assertIsNone(app.daemon)
         self.assertIsNone(app.mailbox)
@@ -123,7 +126,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertIn("send_mailbox_message", names)
         self.assertIn("save_task_progress", names)
         self.assertIn("plugin_tool", names)
-        self.assertIsNotNone(app.agent.compactor.on_compact)
+        self.assertIsNotNone(_layered_compactor(app).on_compact)
         self.assertIsNotNone(app.agent.speculation_planner)
         self.assertIsNotNone(app.daemon)
         self.assertIsNotNone(app.mailbox)
@@ -144,7 +147,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         names = {tool.name for tool in app.registry}
         self.assertNotIn("create_worktree_task", names)
         self.assertNotIn("create_task", names)
-        self.assertIsNotNone(app.agent.compactor.on_compact)
+        self.assertIsNotNone(_layered_compactor(app).on_compact)
         self.assertIsNone(app.agent.speculation_planner)
         self.assertIsNone(app.daemon)
         self.assertIsNone(app.mailbox)
@@ -165,7 +168,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertIn("read_mailbox_messages", names)
         self.assertIn("acknowledge_mailbox_message", names)
         self.assertNotIn("save_task_progress", names)
-        self.assertIsNone(app.agent.compactor.on_compact)
+        self.assertIsNone(_layered_compactor(app).on_compact)
         self.assertIsNotNone(app.mailbox)
         self.assertIsNone(app.progress)
 
@@ -183,7 +186,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertIn("save_task_progress", names)
         self.assertIn("resume_task_progress", names)
         self.assertNotIn("send_mailbox_message", names)
-        self.assertIsNone(app.agent.compactor.on_compact)
+        self.assertIsNone(_layered_compactor(app).on_compact)
         self.assertIsNone(app.mailbox)
         self.assertIsNotNone(app.progress)
 
@@ -200,7 +203,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         names = {tool.name for tool in app.registry}
         self.assertNotIn("create_worktree_task", names)
         self.assertNotIn("create_task", names)
-        self.assertIsNone(app.agent.compactor.on_compact)
+        self.assertIsNone(_layered_compactor(app).on_compact)
         self.assertIsNotNone(app.agent.speculation_planner)
         self.assertIsNone(app.daemon)
         self.assertIsNone(app.mailbox)
@@ -214,7 +217,9 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             return ToolSpec("bash", "Run shell.", "command", lambda _data: "ok")
 
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
-            with patch("xcode.harness.assembly.build_bash_tool", side_effect=fake_bash_tool):
+            with patch(
+                "xcode.harness.assembly.build_bash_tool", side_effect=fake_bash_tool
+            ):
                 app = build_app(
                     project_root=Path(tmp),
                     runtime_config=XcodeRuntimeConfig(),
@@ -301,7 +306,9 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 app = build_app(project_root=root, runtime_config=XcodeRuntimeConfig())
             app.ask("read it")
 
-            rendered = app.contextual_state.render()
+            contextual_state = app.contextual_state
+            assert contextual_state is not None
+            rendered = contextual_state.render()
 
         self.assertIn("recent_tool_results:", rendered)
         self.assertIn("- read_file:", rendered)
@@ -361,7 +368,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
             tools = {
                 tool.name: tool
-                for tool in _build_project_scoped_registry(
+                for tool in build_project_scoped_registry(
                     project_root=worktree,
                     enabled={"core", "subagent", "worktree"},
                     contextual_state=None,
@@ -398,7 +405,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             worktree.mkdir()
             tools = {
                 tool.name: tool
-                for tool in _build_project_scoped_registry(
+                for tool in build_project_scoped_registry(
                     project_root=worktree,
                     enabled={"core", "subagent", "worktree"},
                     contextual_state=None,
@@ -513,6 +520,12 @@ def _patched_provider_bundle(seen_child_tools: list[list[str]]):
         embedding=object(),
     )
     return patch("xcode.harness.assembly.build_providers", return_value=bundle)
+
+
+def _layered_compactor(app: XcodeApp) -> LayeredCompactor:
+    compactor = app.agent.compactor
+    assert isinstance(compactor, LayeredCompactor)
+    return compactor
 
 
 if __name__ == "__main__":

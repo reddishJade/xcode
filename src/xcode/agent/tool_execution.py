@@ -9,14 +9,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 from .types import (
     AfterToolCallContext,
     AgentContext,
     AgentEvent,
     AgentLoopConfig,
-    AgentTool,
     AgentToolResult,
     AssistantMessage,
     BeforeToolCallContext,
@@ -75,8 +73,14 @@ async def _execute_sequential(
     for tc in tool_calls:
         if not isinstance(tc, ToolCallBlock):
             continue
-        emit(ToolExecutionStartEvent(tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments))
-        result = await _execute_one(current_context, assistant_message, tc, config, signal, emit)
+        emit(
+            ToolExecutionStartEvent(
+                tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
+            )
+        )
+        result = await _execute_one(
+            current_context, assistant_message, tc, config, signal, emit
+        )
         results.append(result)
         if _is_cancelled(signal):
             break
@@ -95,11 +99,19 @@ async def _execute_parallel(
     for tc in tool_calls:
         if not isinstance(tc, ToolCallBlock):
             continue
-        emit(ToolExecutionStartEvent(tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments))
-        tasks.append(_execute_one(current_context, assistant_message, tc, config, signal, emit))
+        emit(
+            ToolExecutionStartEvent(
+                tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
+            )
+        )
+        tasks.append(
+            _execute_one(current_context, assistant_message, tc, config, signal, emit)
+        )
 
     raw = await asyncio.gather(*tasks, return_exceptions=True)
-    results: list[ToolResultMessage] = [r for r in raw if isinstance(r, ToolResultMessage)]
+    results: list[ToolResultMessage] = [
+        r for r in raw if isinstance(r, ToolResultMessage)
+    ]
     return ExecutedToolBatch(results=results, terminate=False)
 
 
@@ -119,28 +131,36 @@ async def _execute_one(
 
     if tool is None:
         return ToolResultMessage(
-            tool_call_id=tool_call.id, tool_name=tool_call.name,
-            content=f"Tool {tool_call.name} not found", is_error=True,
+            tool_call_id=tool_call.id,
+            tool_name=tool_call.name,
+            content=f"Tool {tool_call.name} not found",
+            is_error=True,
         )
 
     args = tool_call.arguments or {}
 
     if _is_cancelled(signal):
         return ToolResultMessage(
-            tool_call_id=tool_call.id, tool_name=tool_call.name,
-            content=_cancel_reason(signal), is_error=True,
+            tool_call_id=tool_call.id,
+            tool_name=tool_call.name,
+            content=_cancel_reason(signal),
+            is_error=True,
         )
 
     if config.before_tool_call:
         ctx = BeforeToolCallContext(
-            assistant_message=assistant_message, tool_call=tool_call,
-            args=args, context=current_context,
+            assistant_message=assistant_message,
+            tool_call=tool_call,
+            args=args,
+            context=current_context,
         )
         before_result = config.before_tool_call(ctx, signal)
         if before_result and before_result.block:
             return ToolResultMessage(
-                tool_call_id=tool_call.id, tool_name=tool_call.name,
-                content=before_result.reason or "Tool execution was blocked", is_error=True,
+                tool_call_id=tool_call.id,
+                tool_name=tool_call.name,
+                content=before_result.reason or "Tool execution was blocked",
+                is_error=True,
             )
 
     try:
@@ -154,8 +174,12 @@ async def _execute_one(
 
     if config.after_tool_call:
         after_ctx = AfterToolCallContext(
-            assistant_message=assistant_message, tool_call=tool_call,
-            args=args, result=tool_result, is_error=is_error, context=current_context,
+            assistant_message=assistant_message,
+            tool_call=tool_call,
+            args=args,
+            result=tool_result,
+            is_error=is_error,
+            context=current_context,
         )
         after_result = config.after_tool_call(after_ctx, signal)
         if after_result:
@@ -165,14 +189,21 @@ async def _execute_one(
                 is_error = after_result.is_error
 
     result_msg = ToolResultMessage(
-        tool_call_id=tool_call.id, tool_name=tool_call.name,
-        content="".join(c.text for c in content if isinstance(c, TextContent)) if content else "",
+        tool_call_id=tool_call.id,
+        tool_name=tool_call.name,
+        content="".join(c.text for c in content if isinstance(c, TextContent))
+        if content
+        else "",
         is_error=is_error,
     )
-    emit(ToolExecutionEndEvent(
-        tool_call_id=tool_call.id, tool_name=tool_call.name,
-        result=result_msg, is_error=is_error,
-    ))
+    emit(
+        ToolExecutionEndEvent(
+            tool_call_id=tool_call.id,
+            tool_name=tool_call.name,
+            result=result_msg,
+            is_error=is_error,
+        )
+    )
     return result_msg
 
 

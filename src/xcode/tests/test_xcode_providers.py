@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from typing import Any
+from typing import Any, cast
 from xcode.ai.events import TextDelta, ToolCallEvent, FinalMessage
 from xcode.harness.adapters.tool_schema import tool_definition_from_spec
 from xcode.ai.providers.factory import (
@@ -60,10 +60,13 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 )
 
                 self.assertIsInstance(bundle.llm, OpenAIResponsesProvider)
-                self.assertEqual(bundle.llm.transport, "openai_responses")
-                self.assertEqual(bundle.llm.model, "main-model")
-                self.assertEqual(bundle.llms["subagent"].model, "small-model")
-                self.assertEqual(bundle.llms["judge"].model, "main-model")
+                llm = cast(OpenAIResponsesProvider, bundle.llm)
+                subagent = cast(OpenAIChatProvider, bundle.llms["subagent"])
+                judge = cast(OpenAIResponsesProvider, bundle.llms["judge"])
+                self.assertEqual(llm.transport, "openai_responses")
+                self.assertEqual(llm.model, "main-model")
+                self.assertEqual(subagent.model, "small-model")
+                self.assertEqual(judge.model, "main-model")
 
     def test_api_key_resolution_follows_documented_order(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -145,7 +148,8 @@ class XcodeProviderEnvTests(unittest.TestCase):
                     )
                 )
 
-                self.assertEqual(bundle.llm.client.api_key, "configured")
+                llm = cast(OpenAIChatProvider, bundle.llm)
+                self.assertEqual(llm.client.api_key, "configured")
 
     def test_profile_api_key_overrides_openai_api_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -172,8 +176,10 @@ class XcodeProviderEnvTests(unittest.TestCase):
                     )
                 )
 
-                self.assertEqual(bundle.llms["main"].client.api_key, "openai")
-                self.assertEqual(bundle.llms["subagent"].client.api_key, "subagent")
+                main = cast(OpenAIChatProvider, bundle.llms["main"])
+                subagent = cast(OpenAIChatProvider, bundle.llms["subagent"])
+                self.assertEqual(main.client.api_key, "openai")
+                self.assertEqual(subagent.client.api_key, "subagent")
 
 
 class XcodeProviderRuntimeTests(unittest.TestCase):
@@ -426,11 +432,13 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         # 第一个事件应该是 TextDelta，立即产出（completed 事件尚未到达）
         first = next(events)
         self.assertIsInstance(first, TextDelta)
+        assert isinstance(first, TextDelta)
         self.assertEqual(first.chunk, "he")
 
         # 第二个事件也是 TextDelta，在 completed 之前产出
         second = next(events)
         self.assertIsInstance(second, TextDelta)
+        assert isinstance(second, TextDelta)
         self.assertEqual(second.chunk, "llo")
 
         # 第三个事件应该是 FinalMessage（completed 已处理）
@@ -632,13 +640,18 @@ class FakeStreamFunction:
         self.arguments = arguments
 
 
+def _glm_kwargs(provider: ChatGLMProvider) -> dict[str, Any]:
+    client = cast(FakeGLMClient, provider.client)
+    return client.chat.completions.kwargs
+
+
 class XcodeChatGLMProviderTests(unittest.TestCase):
     """ChatGLM provider 边界测试：thinking 清理、tool_stream、参数组合。"""
 
-    def _make_provider(self, **overrides):
+    def _make_provider(self, **overrides: Any) -> ChatGLMProvider:
         from xcode.ai.providers.chatglm import ChatGLMProvider
 
-        kwargs = dict(
+        kwargs: dict[str, Any] = dict(
             api_key="test-key",
             model="glm-4-flash",
             thinking=True,
@@ -654,7 +667,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         provider = self._make_provider(thinking=False, client=FakeGLMClient())
         # 消费生成器以触发 _stream_sync 内部代码
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = provider.client.chat.completions.kwargs
+        kwargs = _glm_kwargs(provider)
         extra = kwargs.get("extra_body", {})
         self.assertEqual(extra.get("thinking", {}).get("type"), "disabled")
 
@@ -662,7 +675,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         """clear_thinking=False 时 extra_body 包含 clear_thinking=false。"""
         provider = self._make_provider(clear_thinking=False, client=FakeGLMClient())
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = provider.client.chat.completions.kwargs
+        kwargs = _glm_kwargs(provider)
         extra = kwargs.get("extra_body", {})
         thinking = extra.get("thinking", {})
         self.assertEqual(thinking.get("type"), "enabled")
@@ -672,7 +685,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         """clear_thinking=True 时 extra_body 包含 clear_thinking=true。"""
         provider = self._make_provider(clear_thinking=True, client=FakeGLMClient())
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = provider.client.chat.completions.kwargs
+        kwargs = _glm_kwargs(provider)
         extra = kwargs.get("extra_body", {})
         thinking = extra.get("thinking", {})
         self.assertEqual(thinking.get("type"), "enabled")
@@ -689,12 +702,12 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
                 thinking=False,
             )
         )
-        first = provider.client.chat.completions.kwargs["extra_body"]["thinking"]
+        first = _glm_kwargs(provider)["extra_body"]["thinking"]
         self.assertEqual(first["type"], "disabled")
         self.assertTrue(provider.thinking)
 
         list(provider._stream_sync([{"role": "user", "content": "hard"}], ()))
-        second = provider.client.chat.completions.kwargs["extra_body"]["thinking"]
+        second = _glm_kwargs(provider)["extra_body"]["thinking"]
         self.assertEqual(second["type"], "enabled")
 
     def test_structured_output_response_format_is_sent(self) -> None:
@@ -705,7 +718,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         )
         list(provider._stream_sync([{"role": "user", "content": "json"}], ()))
 
-        kwargs = provider.client.chat.completions.kwargs
+        kwargs = _glm_kwargs(provider)
         self.assertEqual(kwargs["response_format"], {"type": "json_object"})
 
     def test_complete_accepts_per_request_response_format(self) -> None:
@@ -721,7 +734,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             thinking=False,
         )
 
-        kwargs = provider.client.chat.completions.kwargs
+        kwargs = _glm_kwargs(provider)
         self.assertFalse(kwargs["stream"])
         self.assertEqual(kwargs["response_format"], {"type": "json_object"})
         self.assertEqual(kwargs["extra_body"]["thinking"]["type"], "disabled")
@@ -731,7 +744,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         """tool_stream=False 时不传 tool_stream 参数。"""
         provider = self._make_provider(tool_stream=False, client=FakeGLMClient())
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = provider.client.chat.completions.kwargs
+        kwargs = _glm_kwargs(provider)
         self.assertNotIn("tool_stream", kwargs)
 
     def test_tool_stream_enabled_for_supported_model(self) -> None:
@@ -740,7 +753,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             model="glm-4.7", tool_stream=True, client=FakeGLMClient()
         )
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = provider.client.chat.completions.kwargs
+        kwargs = _glm_kwargs(provider)
         self.assertIs(kwargs.get("tool_stream"), True)
 
     def test_tool_stream_omitted_for_unsupported_model(self) -> None:
@@ -749,13 +762,13 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             model="glm-4-flash", tool_stream=True, client=FakeGLMClient()
         )
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = provider.client.chat.completions.kwargs
+        kwargs = _glm_kwargs(provider)
         self.assertNotIn("tool_stream", kwargs)
 
     def test_clean_reasoning_no_tool_loop(self) -> None:
         """clear_thinking=True 时清除所有历史 reasoning_content。"""
         provider = self._make_provider(clear_thinking=True)
-        messages = [
+        messages: list[dict[str, Any]] = [
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
             {"role": "user", "content": "q2"},
@@ -767,7 +780,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
     def test_clean_reasoning_retains_all_when_clear_false(self) -> None:
         """clear_thinking=False 时保留所有 reasoning_content。"""
         provider = self._make_provider(clear_thinking=False)
-        messages = [
+        messages: list[dict[str, Any]] = [
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
             {"role": "user", "content": "q2"},
@@ -786,7 +799,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
     def test_clean_reasoning_clear_true_removes_tool_loop_reasoning(self) -> None:
         """clear_thinking=True 时工具循环也清除 reasoning_content。"""
         provider = self._make_provider(clear_thinking=True)
-        messages = [
+        messages: list[dict[str, Any]] = [
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
             {"role": "user", "content": "q2"},
@@ -829,7 +842,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             client=FakeGLMClient(),
         )
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = provider.client.chat.completions.kwargs
+        kwargs = _glm_kwargs(provider)
         self.assertIs(kwargs["tool_stream"], True)
         self.assertIs(kwargs["extra_body"]["thinking"]["clear_thinking"], True)
 

@@ -181,6 +181,8 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tools = self._tools(Path(tmp))
 
+            assert tools["write_file"].schema is not None
+            assert tools["edit_file"].schema is not None
             self.assertEqual(
                 tools["write_file"].schema["required"], ["path", "content"]
             )

@@ -25,7 +25,6 @@ from .memory_parsing import (
     extract_title,
     parse_fields,
     parse_memory_record,
-    tokenize,
     tokenize_set,
     with_metadata,
 )
@@ -66,13 +65,18 @@ class MemoryManager:
 
     # ── 检索 ──
 
-    def search_memory(self, query: str, limit: int = 3, scope: str | None = None) -> list[str]:
+    def search_memory(
+        self, query: str, limit: int = 3, scope: str | None = None
+    ) -> list[str]:
         records = self.search_memory_records(query, limit=limit, scope=scope)
         self._touch_lru(records)
         return [record.block for record in records]
 
     def search_memory_records(
-        self, query: str, limit: int = 3, scope: str | None = None,
+        self,
+        query: str,
+        limit: int = 3,
+        scope: str | None = None,
     ) -> list[MemoryRecord]:
         records = self.read_memory_records()
         blocks = [record.block for record in records]
@@ -81,9 +85,23 @@ class MemoryManager:
 
         corpus = []
         for block in blocks:
-            words = [w.lower() for w in __import__("re").sub(r"[^\w\s-]", "", block).replace("-", " ").split() if len(w) >= 2]
+            words = [
+                w.lower()
+                for w in __import__("re")
+                .sub(r"[^\w\s-]", "", block)
+                .replace("-", " ")
+                .split()
+                if len(w) >= 2
+            ]
             corpus.append(words)
-        query_words = [w.lower() for w in __import__("re").sub(r"[^\w\s-]", "", query).replace("-", " ").split() if len(w) >= 2]
+        query_words = [
+            w.lower()
+            for w in __import__("re")
+            .sub(r"[^\w\s-]", "", query)
+            .replace("-", " ")
+            .split()
+            if len(w) >= 2
+        ]
 
         bm25 = BM25Okapi(corpus)
         scores = bm25.get_scores(query_words)
@@ -92,29 +110,39 @@ class MemoryManager:
         for score, record in zip(scores, records, strict=True):
             adjusted = adjust_score(score, record, query, scope)
             if adjusted > 0:
-                ranked.append(MemoryRecord(
-                    block=record.block, title=record.title,
-                    fields=record.fields, score=round(adjusted, 6),
-                ))
+                ranked.append(
+                    MemoryRecord(
+                        block=record.block,
+                        title=record.title,
+                        fields=record.fields,
+                        score=round(adjusted, 6),
+                    )
+                )
         ranked.sort(key=lambda r: (-r.score, r.title))
         return ranked[:limit]
 
     # ── 评测 ──
 
     def evaluate_search(
-        self, cases: list[MemorySearchEvalCase], limit: int = 3,
+        self,
+        cases: list[MemorySearchEvalCase],
+        limit: int = 3,
     ) -> list[MemorySearchEvalResult]:
         results: list[MemorySearchEvalResult] = []
         for case in cases:
-            records = self.search_memory_records(case.query, limit=limit, scope=case.scope)
+            records = self.search_memory_records(
+                case.query, limit=limit, scope=case.scope
+            )
             titles = tuple(r.title for r in records)
             expected = case.expected_title_contains
-            results.append(MemorySearchEvalResult(
-                query=case.query,
-                passed=any(expected in title for title in titles),
-                expected_title_contains=expected,
-                matched_titles=titles,
-            ))
+            results.append(
+                MemorySearchEvalResult(
+                    query=case.query,
+                    passed=any(expected in title for title in titles),
+                    expected_title_contains=expected,
+                    matched_titles=titles,
+                )
+            )
         return results
 
     # ── 校验 ──
@@ -134,11 +162,16 @@ class MemoryManager:
             return False
         for field_name in ("Context/Query", "Solution", "Files", "Takeaways"):
             field_value = extract_field_content(content, field_name)
-            if field_value is None or len(field_value.strip()) < _MIN_FIELD_CONTENT_LENGTH:
+            if (
+                field_value is None
+                or len(field_value.strip()) < _MIN_FIELD_CONTENT_LENGTH
+            ):
                 return False
         return True
 
-    def _quality_check(self, block: str, existing_records: list[MemoryRecord] | None = None) -> bool:
+    def _quality_check(
+        self, block: str, existing_records: list[MemoryRecord] | None = None
+    ) -> bool:
         if not self._content_quality_check(block):
             return False
         if existing_records and len(existing_records) > 0:
@@ -154,7 +187,9 @@ class MemoryManager:
             old_tokens = tokenize_set(record.block)
             if not old_tokens:
                 continue
-            overlap = len(new_tokens & old_tokens) / min(len(new_tokens), len(old_tokens))
+            overlap = len(new_tokens & old_tokens) / min(
+                len(new_tokens), len(old_tokens)
+            )
             if overlap >= _NOVELTY_THRESHOLD:
                 return True
         return False
@@ -162,8 +197,12 @@ class MemoryManager:
     # ── 合并与写入 ──
 
     def add_memory_block(
-        self, block: str, *, source: str | None = None,
-        scope: str | None = None, confidence: float | None = None,
+        self,
+        block: str,
+        *,
+        source: str | None = None,
+        scope: str | None = None,
+        confidence: float | None = None,
     ) -> bool:
         if not self.validate_memory_block(block):
             self._archive_block(block)
@@ -209,7 +248,10 @@ class MemoryManager:
         self.memory_file.write_text("".join(updated), encoding="utf-8")
 
     def _merge_with_existing(
-        self, new_block: str, new_title: str, existing_records: list[MemoryRecord],
+        self,
+        new_block: str,
+        new_title: str,
+        existing_records: list[MemoryRecord],
     ) -> str | None:
         new_lower = new_title.lower()
         for record in existing_records:
@@ -221,7 +263,9 @@ class MemoryManager:
                 for key, value in new_fields.items():
                     if value.strip():
                         merged[key] = value
-                merged["last_modified"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+                merged["last_modified"] = time.strftime(
+                    "%Y-%m-%dT%H:%M:%S", time.localtime()
+                )
 
                 lines = [f"## {new_title}"]
                 mandatory = ["Context/Query", "Solution", "Files", "Takeaways"]
@@ -245,13 +289,19 @@ class MemoryManager:
             for field in ["Context/Query", "Solution", "Files", "Takeaways"]:
                 block = block.replace(f" - {field}", f"\n- {field}")
                 block = block.replace(f"- {field}", f"\n- {field}")
-            block = "\n".join(line.strip() for line in block.splitlines() if line.strip())
+            block = "\n".join(
+                line.strip() for line in block.splitlines() if line.strip()
+            )
             if self._is_memory_attempt(block):
                 self.add_memory_block(block)
 
     def _is_memory_attempt(self, block: str) -> bool:
-        has_field = any(f in block for f in ["Context/Query", "Solution", "Files", "Takeaways"])
-        return block.strip().startswith("## ") and (has_field or "incident" in block.lower())
+        has_field = any(
+            f in block for f in ["Context/Query", "Solution", "Files", "Takeaways"]
+        )
+        return block.strip().startswith("## ") and (
+            has_field or "incident" in block.lower()
+        )
 
     def _archive_block(self, block: str) -> None:
         self.archive_dir.mkdir(parents=True, exist_ok=True)
@@ -319,7 +369,8 @@ class MemoryManager:
     def _write_lru(self, lru: dict[str, float]) -> None:
         self.lru_file.parent.mkdir(parents=True, exist_ok=True)
         self.lru_file.write_text(
-            json.dumps(lru, ensure_ascii=False, indent=2), encoding="utf-8",
+            json.dumps(lru, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
     def _write_blocks(self, blocks: list[str]) -> None:

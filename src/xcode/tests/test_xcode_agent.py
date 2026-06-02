@@ -13,6 +13,7 @@ from xcode.agent.types import (
     AgentToolResult,
     AssistantMessage,
     TextContent,
+    ToolExecutionMode,
     ToolResultMessage,
     UserMessage,
 )
@@ -57,7 +58,7 @@ class EchoTool:
     label = "Echo"
     description = "Echo text."
     parameters = {"type": "object"}
-    execution_mode = "sequential"
+    execution_mode: ToolExecutionMode | None = "sequential"
 
     def __init__(self) -> None:
         self.seen_signal: Any | None = None

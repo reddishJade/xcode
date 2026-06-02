@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import copy
 from collections.abc import AsyncIterator, Iterator, Iterable
-from typing import Any
+from typing import Any, cast
 
-from .codec import chat_stream_to_events, to_chat_messages, to_chat_tool
+from .codec import to_chat_messages, to_chat_tool
+from .stream_codec import chat_stream_to_events
 from .runtime import ProviderRuntime
 
 """DeepSeek provider（兼容 OpenAI Chat API，带 reasoning_content 支持）。"""
@@ -114,9 +115,8 @@ class DeepSeekProvider:
             if k not in params:
                 params[k] = v
 
-        response = self.runtime.run(
-            lambda: self.client.chat.completions.create(**params)
-        )
+        create = cast(Any, self.client.chat.completions.create)
+        response = self.runtime.run(lambda: create(**params))
         self._record_usage(response, len(params["messages"]))
 
         choice = response.choices[0]
@@ -133,9 +133,7 @@ class DeepSeekProvider:
             and response_format.get("type") == "json_object"
             and is_empty_res
         ):
-            response = self.runtime.run(
-                lambda: self.client.chat.completions.create(**params)
-            )
+            response = self.runtime.run(lambda: create(**params))
             self._record_usage(response, len(params["messages"]))
             choice = response.choices[0]
             message = choice.message
@@ -231,7 +229,8 @@ class DeepSeekProvider:
             if k not in params:
                 params[k] = v
 
-        stream = self.runtime.run(lambda: self.client.chat.completions.create(**params))
+        create = cast(Any, self.client.chat.completions.create)
+        stream = self.runtime.run(lambda: create(**params))
 
         # We must NOT call chat_stream_to_events on single chunks since it resets the arguments
         # aggregation state dict. Instead, we use an interceptor generator to capture usage
@@ -338,5 +337,9 @@ class DeepSeekProvider:
 
             # reasoning_tokens
             completion_details = getattr(usage, "completion_tokens_details", None)
-            reasoning = getattr(completion_details, "reasoning_tokens", 0) if completion_details else 0
+            reasoning = (
+                getattr(completion_details, "reasoning_tokens", 0)
+                if completion_details
+                else 0
+            )
             self.metrics["reasoning_tokens"] = reasoning or 0

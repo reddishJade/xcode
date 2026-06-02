@@ -16,7 +16,11 @@ from xcode.ai.events import (
     ToolCall,
     ProviderEvent,
 )
-from xcode.harness.agent_runtime import CancellationToken, StructuredAgent
+from xcode.harness.agent_runtime import (
+    CancellationToken,
+    StructuredAgent,
+    StructuredAgentEvent,
+)
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
 
@@ -494,10 +498,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 provider=FakeProvider(events),
                 registry=(),
             )
-            events = []
+            stream_events: list[StructuredAgentEvent] = []
             async for event in agent.arun_stream("go"):
-                events.append(event)
-            return events
+                stream_events.append(event)
+            return stream_events
 
         events = asyncio.run(main())
 

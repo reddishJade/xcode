@@ -14,7 +14,7 @@ from xcode.harness.agent_runtime.compaction import (
 )
 from xcode.harness.config import AgentConfig
 from xcode.harness.agent_runtime import StructuredAgent
-from xcode.harness.agent_runtime.structured import _budget_messages_for_provider
+from xcode.harness.agent_runtime.agent_helpers import budget_messages_for_provider
 
 
 from xcode.tests.fixtures import FakeProvider
@@ -165,7 +165,7 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             },
         ]
 
-        budgeted = _budget_messages_for_provider(messages)
+        budgeted = budget_messages_for_provider(messages)
 
         content = budgeted[2]["content"][0]["content"]
         self.assertLess(len(content), 10_000)

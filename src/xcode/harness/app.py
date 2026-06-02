@@ -13,22 +13,11 @@ from typing import Any, TYPE_CHECKING
 from xcode.harness.config import ExecutionMode
 from xcode.harness.agent_runtime import ContextualRetrievalState, StructuredAgent
 from xcode.harness.skills import ToolSpec
-from xcode.harness.tools import build_bash_tool  # noqa: F401 — test mock target
-
 from . import assembly as _assembly
 from .assembly import (
     build_agent,
     build_shared_infra,
 )
-
-# re-export for test backward compatibility (mock targets)
-_build_providers = _assembly.build_providers
-_build_tool_registry = _assembly.build_tool_registry
-_build_project_scoped_registry = _assembly.build_project_scoped_registry
-_effective_enabled_groups = _assembly.effective_enabled_groups
-_load_experimental_services = _assembly.load_experimental_services
-_resolve_config = _assembly.resolve_config
-_build_worktree_runner = _assembly._build_worktree_runner
 
 if TYPE_CHECKING:
     from xcode.experimental.daemon import HeartbeatDaemon

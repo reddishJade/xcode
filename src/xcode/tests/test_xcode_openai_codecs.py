@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Sequence
 from typing import cast
 
 from xcode.agent.messages import convert_to_llm
@@ -13,11 +14,8 @@ from xcode.agent.types import (
     ToolResultMessage,
 )
 from xcode.ai.events import ReasoningDelta, TextDelta, ToolCallEvent
-from xcode.ai.providers.codec import (
-    chat_stream_to_events,
-    to_chat_messages,
-    to_chat_tool,
-)
+from xcode.ai.providers.codec import to_chat_messages, to_chat_tool
+from xcode.ai.providers.stream_codec import chat_stream_to_events
 from xcode.harness.skills import ToolSpec
 
 
@@ -198,10 +196,16 @@ class FakeStreamChunk:
         content: str | None = None,
         reasoning_content: str | None = None,
     ) -> None:
-        self.choices: list[FakeStreamChoice] = [
-            FakeStreamChoice(content, tool_call, reasoning_content)
-        ]
-        self.usage: None = None
+        self._choices = [FakeStreamChoice(content, tool_call, reasoning_content)]
+        self._usage: None = None
+
+    @property
+    def choices(self) -> Sequence[FakeStreamChoice]:
+        return self._choices
+
+    @property
+    def usage(self) -> None:
+        return self._usage
 
 
 class FakeStreamChoice:
@@ -211,7 +215,11 @@ class FakeStreamChoice:
         tool_call: FakeStreamToolCall | None,
         reasoning_content: str | None = None,
     ) -> None:
-        self.delta = FakeStreamDelta(content, tool_call, reasoning_content)
+        self._delta = FakeStreamDelta(content, tool_call, reasoning_content)
+
+    @property
+    def delta(self) -> FakeStreamDelta:
+        return self._delta
 
 
 class FakeStreamDelta:
@@ -221,11 +229,19 @@ class FakeStreamDelta:
         tool_call: FakeStreamToolCall | None,
         reasoning_content: str | None = None,
     ) -> None:
-        self.content: str | None = content
-        self.tool_calls: list[FakeStreamToolCall] | None = (
+        self._content: str | None = content
+        self._tool_calls: list[FakeStreamToolCall] | None = (
             [tool_call] if tool_call is not None else []
         )
         self.reasoning_content: str | None = reasoning_content
+
+    @property
+    def content(self) -> str | None:
+        return self._content
+
+    @property
+    def tool_calls(self) -> Sequence[FakeStreamToolCall] | None:
+        return self._tool_calls
 
 
 class FakeStreamToolCall:
@@ -236,15 +252,35 @@ class FakeStreamToolCall:
         name: str | None = None,
         arguments: str | None = None,
     ) -> None:
-        self.index: int = index
-        self.id: str | None = call_id
-        self.function: FakeStreamFunction | None = FakeStreamFunction(name, arguments)
+        self._index: int = index
+        self._id: str | None = call_id
+        self._function: FakeStreamFunction | None = FakeStreamFunction(name, arguments)
+
+    @property
+    def index(self) -> int:
+        return self._index
+
+    @property
+    def id(self) -> str | None:
+        return self._id
+
+    @property
+    def function(self) -> FakeStreamFunction | None:
+        return self._function
 
 
 class FakeStreamFunction:
     def __init__(self, name: str | None, arguments: str | None) -> None:
-        self.name: str | None = name
-        self.arguments: str | None = arguments
+        self._name: str | None = name
+        self._arguments: str | None = arguments
+
+    @property
+    def name(self) -> str | None:
+        return self._name
+
+    @property
+    def arguments(self) -> str | None:
+        return self._arguments
 
 
 if __name__ == "__main__":

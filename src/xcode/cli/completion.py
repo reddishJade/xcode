@@ -43,7 +43,7 @@ class ReplCompleter(Completer):
         self.command_names = tuple(command_names)
         self._directory_cache: dict[Path, tuple[str, ...]] = {}
 
-    def get_completions(self, document, _complete_event):
+    def get_completions(self, document, complete_event):
         try:
             from prompt_toolkit.completion import Completion
         except ImportError:

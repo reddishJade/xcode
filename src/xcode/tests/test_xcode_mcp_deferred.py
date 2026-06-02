@@ -177,7 +177,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
         }
 
         with patch(
-            "xcode.experimental.mcp.LazyClientRef.get_or_create",
+            "xcode.experimental.mcp_client.LazyClientRef.get_or_create",
             return_value=mock_client,
         ):
             output = stub_tool.handler({"factor": 5})

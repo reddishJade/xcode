@@ -152,11 +152,11 @@ class PluginManager:
                 return None
 
             module = type(sys)(module_name)
-            module.exposed_tools = exposed_tools
-            module.exposed_hooks = exposed_hooks
-            module.exposed_skills = exposed_skills
+            setattr(module, "exposed_tools", exposed_tools)
+            setattr(module, "exposed_hooks", exposed_hooks)
+            setattr(module, "exposed_skills", exposed_skills)
             if manifest:
-                module.__manifest__ = manifest
+                setattr(module, "__manifest__", manifest)
             self.loaded_modules[path.stem] = module
 
             return {

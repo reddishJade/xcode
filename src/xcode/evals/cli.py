@@ -221,8 +221,8 @@ class _StaticProvider(ModelProvider):
 
     async def stream(
         self,
-        _messages: list[Message],
-        _tools: list[ToolDefinition],
+        messages: list[Message],
+        tools: list[ToolDefinition],
     ) -> AsyncIterator[ProviderEvent]:
         try:
             events = next(self._turns)

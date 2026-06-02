@@ -1,10 +1,31 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Protocol, TypeGuard
 
 from xcode.harness.agent_runtime import StructuredAgentEvent
 
 from .schema import EvalTask, GraderResult
+
+
+class JudgeAskProvider(Protocol):
+    def ask(self, prompt: str) -> str: ...
+
+
+class JudgeRunResult(Protocol):
+    answer: str
+
+
+class JudgeRunProvider(Protocol):
+    def run(self, prompt: str) -> JudgeRunResult: ...
+
+
+def _has_ask(provider: object) -> TypeGuard[JudgeAskProvider]:
+    return hasattr(provider, "ask")
+
+
+def _has_run(provider: object) -> TypeGuard[JudgeRunProvider]:
+    return hasattr(provider, "run")
+
 
 # ── 确定性 grader ──
 
@@ -139,7 +160,7 @@ def run_llm_judge(
     tool_calls_text = "\n".join(tool_calls) if tool_calls else "（无工具调用）"
 
     criteria_list = "\n".join(
-        f"{i+1}. {criterion}" for i, criterion in enumerate(task.llm_judge_criteria)
+        f"{i + 1}. {criterion}" for i, criterion in enumerate(task.llm_judge_criteria)
     )
 
     prompt = JUDGE_PROMPT_TEMPLATE.format(
@@ -150,12 +171,12 @@ def run_llm_judge(
     )
 
     try:
-        if hasattr(judge_provider, "ask"):
+        if _has_ask(judge_provider):
             judge_response = judge_provider.ask(prompt)
-        elif hasattr(judge_provider, "run"):
+        elif _has_run(judge_provider):
             # StructuredAgent.run() 返回具有 .answer 属性的对象
             result = judge_provider.run(prompt)
-            judge_response = getattr(result, "answer", str(result))
+            judge_response = result.answer
         else:
             return ()
     except Exception:

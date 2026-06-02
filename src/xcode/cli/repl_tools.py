@@ -28,9 +28,9 @@ def run_tool_command(command: str, app: Any) -> str:
     parts = command.split(maxsplit=2)
     if len(parts) < 2:
         return "usage: /tool NAME INPUT\n/tool list - show enabled tools by group"
-    name = parts[1]
+    tool_name = parts[1]
     registry: tuple[ToolSpec, ...] = tuple(getattr(app, "registry", ()) or ())
-    if name == "list":
+    if tool_name == "list":
         catalog = build_tool_catalog()
         enabled_names = {t.name for t in registry}
 
@@ -74,16 +74,16 @@ def run_tool_command(command: str, app: Any) -> str:
             lines.append("</available groups>")
         return "\n".join(lines)
 
-    tool_map = {tool.name: tool for tool in registry}
-    selected_tool = tool_map.get(name)
+    tool_map: dict[str, ToolSpec] = {tool.name: tool for tool in registry}
+    selected_tool = tool_map.get(tool_name)
     if selected_tool is None:
-        return f"unknown tool: {name}"
+        return f"unknown tool: {tool_name}"
     raw_input = parts[2] if len(parts) == 3 else ""
     try:
         action_input = parse_tool_input(selected_tool, raw_input)
     except ValueError as exc:
         return str(exc)
-    result = run_tool_result(tool_map, name, action_input)
+    result = run_tool_result(tool_map, tool_name, action_input)
     return result.content
 
 

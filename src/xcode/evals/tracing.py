@@ -3,13 +3,9 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 import json
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Any, cast
 
 from xcode.harness.agent_runtime import StructuredAgentEvent
-
-
-def _is_dataclass_instance(obj: Any) -> TypeGuard[object]:
-    return is_dataclass(obj) and not isinstance(obj, type)
 
 
 class TraceRecorder:
@@ -57,8 +53,8 @@ class TraceRecorder:
 
 
 def _jsonable(value: Any) -> Any:
-    if _is_dataclass_instance(value):
-        return _jsonable(asdict(value))
+    if is_dataclass(value) and not isinstance(value, type):
+        return _jsonable(asdict(cast(Any, value)))
     if isinstance(value, dict):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

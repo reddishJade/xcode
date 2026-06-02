@@ -6,7 +6,8 @@ from typing import Any, cast
 
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import ToolDefinition
-from .codec import chat_stream_to_events, to_chat_messages, to_chat_tool
+from .codec import to_chat_messages, to_chat_tool
+from .stream_codec import chat_stream_to_events
 from .runtime import ProviderRuntime
 
 """智谱 AI ChatGLM provider（兼容 OpenAI Chat API）。
@@ -81,9 +82,8 @@ class ChatGLMProvider:
             thinking=thinking,
         )
         openai_messages = cast(list[dict[str, Any]], kwargs["messages"])
-        response = self.runtime.run(
-            lambda: self.client.chat.completions.create(**kwargs)
-        )
+        create = cast(Any, self.client.chat.completions.create)
+        response = self.runtime.run(lambda: create(**kwargs))
         self._record_usage(response, len(openai_messages))
         message = response.choices[0].message
         result = {
@@ -145,7 +145,8 @@ class ChatGLMProvider:
                     self._record_usage(chunk, len(openai_messages))
                 yield chunk
 
-        stream = self.runtime.run(lambda: self.client.chat.completions.create(**kwargs))
+        create = cast(Any, self.client.chat.completions.create)
+        stream = self.runtime.run(lambda: create(**kwargs))
         self.metrics["sent_messages"] = len(openai_messages)
         yield from chat_stream_to_events(intercept_usage(stream))
 

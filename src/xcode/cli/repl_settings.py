@@ -1,9 +1,34 @@
 from __future__ import annotations
 
+from typing import Protocol, TypeGuard
+
 from xcode.harness.observability import (
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
+
+
+class ModelControlApp(Protocol):
+    def get_model_info(self) -> dict[str, str]: ...
+
+    def set_model(
+        self,
+        *,
+        model: str,
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str: ...
+
+
+def _is_model_control_app(app: object) -> TypeGuard[ModelControlApp]:
+    return hasattr(app, "get_model_info") and hasattr(app, "set_model")
+
+
+def _model_info(app: object) -> dict[str, str]:
+    return app.get_model_info() if _is_model_control_app(app) else {}
 
 
 def handle_permissions(
@@ -57,7 +82,7 @@ def list_permissions(
 def handle_model_command(command: str, app: object) -> None:
     parts = command.split(maxsplit=3)
     if len(parts) == 1:
-        info = app.get_model_info() if hasattr(app, "get_model_info") else {}
+        info = _model_info(app)
         if info:
             print(f"  Model    : {info.get('model', 'unknown')}")
             print(f"  Base URL : {info.get('base_url', '')}")
@@ -66,7 +91,8 @@ def handle_model_command(command: str, app: object) -> None:
         return
 
     model_name = parts[1]
-    kwargs: dict[str, object] = {"model": model_name}
+    thinking: bool | None = None
+    reasoning_effort: str | None = None
 
     if len(parts) >= 4 and parts[2] == "--thinking":
         level = parts[3].lower()
@@ -76,18 +102,22 @@ def handle_model_command(command: str, app: object) -> None:
             )
             return
         if level == "off":
-            kwargs["thinking"] = False
-            kwargs["reasoning_effort"] = None
+            thinking = False
+            reasoning_effort = None
         else:
-            kwargs["thinking"] = True
-            kwargs["reasoning_effort"] = level
+            thinking = True
+            reasoning_effort = level
 
-    if not hasattr(app, "set_model"):
+    if not _is_model_control_app(app):
         print("Model switching is not supported in this app.")
         return
 
     try:
-        new_model = app.set_model(**kwargs)
+        new_model = app.set_model(
+            model=model_name,
+            thinking=thinking,
+            reasoning_effort=reasoning_effort,
+        )
         print(f"Switched to model: {new_model}")
     except Exception as exc:
         print(f"Failed to switch model: {exc}")
@@ -96,7 +126,7 @@ def handle_model_command(command: str, app: object) -> None:
 def handle_effort_command(command: str, app: object) -> None:
     parts = command.split(maxsplit=1)
     if len(parts) == 1:
-        info = app.get_model_info() if hasattr(app, "get_model_info") else {}
+        info = _model_info(app)
         current = info.get("reasoning_effort", "not set") if info else "unknown"
         print(f"  Reasoning effort: {current}")
         return
@@ -106,11 +136,11 @@ def handle_effort_command(command: str, app: object) -> None:
         print("Invalid effort level. Use: off/minimal/low/medium/high/max")
         return
 
-    if not hasattr(app, "set_model"):
+    if not _is_model_control_app(app):
         print("Model switching is not supported in this app.")
         return
 
-    info = app.get_model_info() if hasattr(app, "get_model_info") else {}
+    info = app.get_model_info()
     current_model = info.get("model", "unknown") if info else "unknown"
 
     try:
@@ -127,7 +157,7 @@ def handle_effort_command(command: str, app: object) -> None:
 def handle_thinking_command(command: str, app: object) -> None:
     parts = command.split(maxsplit=1)
     if len(parts) == 1:
-        info = app.get_model_info() if hasattr(app, "get_model_info") else {}
+        info = _model_info(app)
         thinking = info.get("thinking", "unknown") if info else "unknown"
         print(f"  Thinking: {thinking}")
         return
@@ -137,11 +167,11 @@ def handle_thinking_command(command: str, app: object) -> None:
         print("Usage: /thinking on|off")
         return
 
-    if not hasattr(app, "set_model"):
+    if not _is_model_control_app(app):
         print("Model switching is not supported in this app.")
         return
 
-    info = app.get_model_info() if hasattr(app, "get_model_info") else {}
+    info = app.get_model_info()
     current_model = info.get("model", "unknown") if info else "unknown"
     current_effort = info.get("reasoning_effort", "high") if info else "high"
 

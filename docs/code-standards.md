@@ -21,7 +21,9 @@ This document contains detailed implementation rules for coding agents. `AGENTS.
 
 - Use modern Python syntax supported by the project runtime.
 - Prefer typed dataclasses and explicit type annotations.
+- Tests serve the code, not the other way around. Do not preserve awkward production APIs only to keep existing tests unchanged.
 - Do not maintain backward compatibility unless the user asks for it.
+- Do not keep compatibility layers for their own sake. When a boundary is wrong, clean it up directly.
 - Never remove or downgrade code to fix type errors caused by old dependencies; upgrade dependency metadata instead when that is the intended fix.
 - Never hardcode key or secret checks; place configurable checks in config constants or policy code.
 
@@ -62,10 +64,10 @@ Follow `CLAUDE.md`:
 After modifying Python files:
 
 ```powershell
+uv run ruff check <modified-files> --fix
 uv run ruff format <modified-files>
-uv run ruff check <modified-files>
-uv run ruff format --check <modified-files>
 uv run mypy <modified-files>
+uv run pyright <modified-files>
 ```
 
 After modifying tests:

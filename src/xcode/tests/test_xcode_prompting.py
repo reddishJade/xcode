@@ -17,12 +17,16 @@ from xcode.harness.skill_loader import SkillLoader
 from xcode.harness.skills import ToolSpec
 
 
+def _echo_handler(text: dict[str, object]) -> str:
+    return str(text)
+
+
 class XcodePromptingTests(unittest.TestCase):
     def test_builder_includes_stable_modules_in_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("Use tests.", encoding="utf-8")
-            tool = ToolSpec("echo", "Echo input.", "text", lambda text: text)
+            tool = ToolSpec("echo", "Echo input.", "text", _echo_handler)
 
             prompt = SystemPromptBuilder().build(
                 PromptContext(project_root=root, registry=(tool,), question="hello")
@@ -49,7 +53,7 @@ class XcodePromptingTests(unittest.TestCase):
     def test_volatile_context_changes_do_not_rewrite_stable_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            tool = ToolSpec("echo", "Echo input.", "text", lambda text: text)
+            tool = ToolSpec("echo", "Echo input.", "text", _echo_handler)
             first_state = ContextualRetrievalState(root)
             first_state.record_file("src/xcode/main.py")
             second_state = ContextualRetrievalState(root)

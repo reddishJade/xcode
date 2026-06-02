@@ -76,9 +76,9 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
         }
 
     if isinstance(m, CustomMessage):
-        content = m.content
-        if isinstance(content, str):
-            content = [{"type": "text", "text": content}]
+        content: Any = m.content
+        if isinstance(m.content, str):
+            content = [{"type": "text", "text": m.content}]
         return {"role": "user", "content": content}
 
     if isinstance(m, BranchSummaryMessage):

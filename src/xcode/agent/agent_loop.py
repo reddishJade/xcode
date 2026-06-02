@@ -46,29 +46,37 @@ from .tool_execution import (
 
 # ── 事件辅助构造 ──
 
+
 def _agent_start_event() -> AgentStartEvent:
     return AgentStartEvent()
+
 
 def _agent_end_event(messages=None) -> AgentEndEvent:
     return AgentEndEvent(messages=messages or [])
 
+
 def _turn_start_event() -> TurnStartEvent:
     return TurnStartEvent()
+
 
 def _turn_end_event(message=None, tool_results=None) -> TurnEndEvent:
     return TurnEndEvent(message=message, tool_results=tool_results or [])
 
+
 def _message_start_event(message) -> MessageStartEvent:
     return MessageStartEvent(message=message)
 
+
 def _message_end_event(message) -> MessageEndEvent:
     return MessageEndEvent(message=message)
+
 
 def _message_update_event(message) -> MessageUpdateEvent:
     return MessageUpdateEvent(message=message)
 
 
 # ── 公共 API ──
+
 
 async def run_agent_loop(
     prompts: list[AgentMessage],
@@ -118,6 +126,7 @@ async def run_agent_loop_continue(
 
 # ── 内部循环 ──
 
+
 async def _run_loop(
     initial_context: AgentContext,
     new_messages: list[AgentMessage],
@@ -156,7 +165,9 @@ async def _run_loop(
                     new_messages.append(msg)
                 pending_messages = []
 
-            message = await _stream_assistant_response(current_context, config, signal, emit)
+            message = await _stream_assistant_response(
+                current_context, config, signal, emit
+            )
             new_messages.append(message)
 
             if message.stop_reason in ("error", "aborted"):
@@ -187,8 +198,10 @@ async def _run_loop(
 
             if config.should_stop_after_turn:
                 ctx = ShouldStopAfterTurnContext(
-                    message=message, tool_results=tool_results,
-                    context=current_context, new_messages=new_messages,
+                    message=message,
+                    tool_results=tool_results,
+                    context=current_context,
+                    new_messages=new_messages,
                 )
                 if config.should_stop_after_turn(ctx):
                     emit(_agent_end_event(new_messages))
@@ -210,6 +223,7 @@ async def _run_loop(
 
 
 # ── 流式响应 ──
+
 
 async def _stream_assistant_response(
     context: AgentContext,
@@ -245,16 +259,24 @@ async def _stream_assistant_response(
 
             if isinstance(event, TextDelta):
                 text_parts.append(event.chunk)
-                emit(_message_update_event(AssistantMessage(
-                    content=[TextContent(text="".join(text_parts))],
-                )))
+                emit(
+                    _message_update_event(
+                        AssistantMessage(
+                            content=[TextContent(text="".join(text_parts))],
+                        )
+                    )
+                )
             elif isinstance(event, ReasoningDelta):
                 reasoning_parts.append(event.chunk)
             elif isinstance(event, ToolCallEvent):
                 for call in event.calls:
-                    tool_calls_found.append(ToolCallBlock(
-                        id=call.id, name=call.name, arguments=dict(call.input),
-                    ))
+                    tool_calls_found.append(
+                        ToolCallBlock(
+                            id=call.id,
+                            name=call.name,
+                            arguments=dict(call.input),
+                        )
+                    )
 
         final_text = "".join(text_parts)
         content_blocks: list[ContentBlock] = [TextContent(text=final_text)]
@@ -289,5 +311,7 @@ def _tools_to_definitions(tools: list[AgentTool[Any]] | None) -> list[ToolDefini
 
 def _cancelled_message(signal: CancellationSignal | None) -> AssistantMessage:
     return AssistantMessage(
-        content=[], stop_reason="aborted", error_message=_cancel_reason(signal),
+        content=[],
+        stop_reason="aborted",
+        error_message=_cancel_reason(signal),
     )

@@ -7,10 +7,8 @@ watchdog、sync/async 桥接、provider 事件收集。
 from __future__ import annotations
 
 import asyncio
-import json
 import queue
 from collections.abc import AsyncIterator, Iterator
-from pathlib import Path
 from time import perf_counter
 from typing import Any
 
@@ -30,8 +28,6 @@ from xcode.harness.adapters.tool_schema import tool_definitions_from_specs
 from .cancellation import CancellationToken
 from .compaction import (
     budget_large_tool_outputs,
-    estimate_message_tokens,
-    estimate_text_tokens,
     latest_read_file_tool_result_ids,
 )
 from .tool_executor import stringify_tool_input

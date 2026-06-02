@@ -31,11 +31,6 @@ from .agent_helpers import (
     to_tool_use,
 )
 
-# re-export for test backward compatibility
-_budget_messages_for_provider = budget_messages_for_provider
-_check_repeated_tool_watchdog = check_repeated_tool_watchdog
-_finalize_metrics = finalize_metrics
-_elapsed_ms = elapsed_ms
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens, estimate_text_tokens
 from xcode.ai.events import ToolCall as ToolUseBlock
@@ -85,7 +80,7 @@ class StructuredAgentEvent:
 class RunState:
     def __init__(self, messages: list[dict[str, Any]], mode: ExecutionMode) -> None:
         self.messages = messages
-        self.mode = mode
+        self.mode: ExecutionMode = mode
         self.tool_calls: list[ToolUseBlock] = []
         self.last_tool_signature: str | None = None
         self.repeated_tool_count: int = 0
@@ -125,7 +120,7 @@ class StructuredAgent:
         fallback_provider: ModelProvider | None = None,
         project_root: Path | None = None,
     ) -> None:
-        self.provider = provider
+        self.provider: ModelProvider = provider
         self.fallback_provider = fallback_provider
         self.project_root = project_root
         self.registry = registry
@@ -364,6 +359,7 @@ class StructuredAgent:
             )
             state.consecutive_errors = new_err
             if switched:
+                assert self.fallback_provider is not None
                 self.provider = self.fallback_provider  # 永久切换
                 self._consecutive_errors = 0
             state.metrics["model_latencies_ms"].append(elapsed_ms(started))
