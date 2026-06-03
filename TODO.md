@@ -16,9 +16,22 @@
 
 ## 待实现
 
-### 类型层迁移：agent/types.py → ai/types.py（Pi 架构对齐）
+---
 
-**Done**: Content block types, ThinkingLevel consolidated to ai/types.py. ProviderResponse dead code removed from ai/types.py. agent/types.py imports from ai/types.py, no duplicates.
+### 1. Session 并发安全（借鉴 Pi-mono Phase 锁）
+
+- **当前**：`SessionStore` 无任何并发保护，多 CLI/daemon 同时操作同一 session 会产生竞态。
+- **做法**：引入轻量 `session.lock()` 上下文管理器（`filelock`），在 `fork_into`、`compact_current_session`、`rewind_turns` 等写操作前获取锁。不引入 pi-mono 完整 phase 状态机，只解决实际的 session 竞态。
+
+### 2. 分支摘要自动压缩
+
+- **当前**：有 `BranchSummaryMessage` 类型和 session fork，但无自动压缩非活跃分支的机制。分支上下文只会在被显式引用时加入，不会自动摘要后替换原始消息来释放 token。
+- **做法**：在 `LayeredCompactor` 中增加分支摘要层。当上下文紧张时（超过 token 阈值），定位不活跃分支，调用 LLM 生成摘要，以 `BranchSummaryMessage` 替换原始分支内容。
+
+### 3. Turn Snapshot 隔离
+
+- **当前**：turn 执行中修改 model/config/skills 可能影响进行中的 turn，产生不一致行为。
+- **做法**：`StructuredAgent.execute_turn()` 在 turn 开始时冻结当前 config/tools/skills 快照，turn 内使用快照而非全局引用。pi-mono 称此为 "Turn Snapshot"。
 
 ---
 
@@ -29,8 +42,6 @@
 - **当前能力**：引导中断模式已实现。Ctrl+C 中断 LLM 回复后保存 partial response 并允许注入新消息。
 - **缺口**：用户不能在 LLM 回复时直接打字输入（sync `for event in _ask_stream(...)` 阻塞了主线程）。队列模式需要输入事件和流事件双路复用，当前 sync REPL 架构不支持。
 - **触发条件**：REPL 主体改为 asyncio 双路架构后再实现。队列模式本身逻辑简单——`agent.follow_up()` 已就绪，只差让 REPL 在流式期间接受输入。
-
-### 有场景再动（依赖实际需求驱动）
 
 #### 1. Tasks + Progress 编排能力增强
 
@@ -43,6 +54,24 @@
 - **当前能力**：`HeartbeatDaemon` 由 `build_app()` 构造，但启动/停止需调用方在 `main.py` 中手动调用。
 - **缺口**：缺少健康检查、自动重启、生命周期回调注册机制。
 - **触发条件**：daemon 在真实场景中长期运行暴露出稳定性问题时再优化。
+
+#### 3. 模型模式解析（`model:thinking_level` 三段式）
+
+- **当前**：CLI 模型切换只支持 `--thinking` flag，不能将 thinking level 编码到模型名中。无 fuzzy match，无用户自定义模型注册表。
+- **做法**：在 `repl_settings.py` 中增加 `sonnet:high`、`anthropic/claude-sonnet-4-5` 模式解析，分离 provider / model ID / thinking level 三段。
+- **触发条件**：用户反馈当前模型切换方式不方便时再做。
+
+#### 4. 类型化事件流
+
+- **当前**：`HookManager` 用字符串回调名分派事件，类型约束弱，扩展者需知道回调名。
+- **做法**：定义统一 `HarnessEvent` union 类型（`MessageStart | ToolCall | QueueUpdate | ResourcesUpdate`），提供 `subscribe()` 强类型订阅。保留 `HookManager` 做内部桥接。
+- **触发条件**：TUI/Web UI 需要消费 harness 事件流时再做。
+
+#### 5. ExecutionEnv 抽象（跨平台 FS/Shell）
+
+- **当前**：tool 实现直接调用 `subprocess` / `pathlib`，非本地场景（web sandbox）难复用。
+- **做法**：定义 `ExecutionEnv` protocol（`read_file`/`write_file`/`exec_shell`），实际 tool 通过它操作。默认实现调 `subprocess`，web sandbox 可注入 mock。
+- **触发条件**：有 web sandbox 或远程执行场景需求时再动。
 
 ---
 
