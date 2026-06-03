@@ -10,7 +10,6 @@
 .
 ├── pyproject.toml
 ├── AGENTS.md
-├── CLAUDE.md
 ├── CONFIG.md
 ├── README.md
 ├── TODO.md

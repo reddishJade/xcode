@@ -1,5 +1,7 @@
 .local/
 .claude/
+.crush/
+.antigravitycli/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -13,3 +15,7 @@ build/
 .env
 .venv/
 uv.lock
+.uv-cache/
+packages/
+diff.log
+

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xcode-agent"
-version = "0.1.0"
+version = "0.1.1"
 description = "A lightweight Python coding agent harness."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -15,6 +15,9 @@ dependencies = [
     "tiktoken>=0.7.0",
     "tenacity>=8.0.0",
     "filelock>=3.0.0",
+    "mypy>=2.1.0",
+    "pyright>=1.1.410",
+    "ruff>=0.15.15",
 ]
 
 [project.scripts]

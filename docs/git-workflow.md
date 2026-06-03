@@ -45,7 +45,7 @@ The staged set must contain only files for the current task.
 
 ## Commit Message Format
 
-Use the repository format from `CLAUDE.md`. Commit messages must be written in English.
+Use the commit format from @AGENTS.md. Commit messages must be written in English.
 
 ```text
 [type]: [one-line short title describing major feature in lowercase and imperative]
@@ -58,32 +58,14 @@ Key changes:
 - [Brief grouped change]
 ```
 
-Example:
-
-```text
-docs: split agent workflow guidance
-
-Move detailed implementation and Git workflow rules out of AGENTS.md so the agent entry file stays short and points to focused reference documents.
-
-Key changes:
-
-- Add code standards and Git workflow reference docs
-- Reduce AGENTS.md to required reading, priority, validation, and safety rules
-```
-
 ---
 
 ## Commit Command
 
-Use normal commit after exact staging:
+Use normal commit after exact staging. Follow the format described in [Commit Message Format](#commit-message-format):
 
 ```powershell
-git commit -m "type: title" -m "Body paragraph.
-
-Key changes:
-
-- Change one
-- Change two"
+git commit -m "type: title" -m "body"
 ```
 
 If using `git commit --only`, place all `-m` flags before the pathspec:

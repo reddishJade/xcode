@@ -1,22 +1,23 @@
 # Xcode Agent Guide
 
-Entry point for coding agents working in this repository. Keep this file short; read linked documents for details.
+Entry point for coding agents working in this repository. Keep this file short; read linked documents for details. `CLAUDE.md` only contains `@AGENTS.md` and is covered by this file.
 
 ## Required Reading
 
 | Document | Purpose |
 | --- | --- |
-| [CLAUDE.md](CLAUDE.md) | General coding behavior, commit format, comment/docstring rules |
-| [docs/code-standards.md](docs/code-standards.md) | Detailed code quality, dependency, test, and validation rules |
-| [docs/git-workflow.md](docs/git-workflow.md) | Multi-session Git workflow and commit boundaries |
+| [docs/code-standards.md](docs/code-standards.md) | General coding behavior, comment/docstring rules, code quality, dependency, test, and validation rules |
+| [docs/git-workflow.md](docs/git-workflow.md) | Multi-session Git workflow, commit message format, and commit boundaries |
 | [docs/code-organization.md](docs/code-organization.md) | Current module mapping and tool group layout |
+| [docs/evaluation-guide.md](docs/evaluation-guide.md) | Test, lint, type check, compile, and eval workflow commands |
+| [docs/source-review.md](docs/source-review.md) | Source-level architecture review and module boundaries |
 
 ## Priority
 
 1. Follow the user's latest explicit instruction.
 2. Follow this file for repository-specific agent behavior.
-3. Follow `CLAUDE.md` for general coding behavior.
-4. Follow detailed docs linked above for implementation, validation, and Git workflow.
+3. Follow `docs/code-standards.md` for detailed coding behavior rules.
+4. Follow other docs linked above for implementation, validation, and Git workflow.
 
 If instructions conflict, ask for explicit confirmation before proceeding.
 

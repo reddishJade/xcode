@@ -1,6 +1,6 @@
 # Xcode Code Standards
 
-This document contains detailed implementation rules for coding agents. `AGENTS.md` is the short entry point; `CLAUDE.md` contains general coding behavior.
+This document contains detailed implementation rules for coding agents. `AGENTS.md` is the short entry point; this file covers general coding behavior, comment/docstring rules, code quality, dependency, test, and validation rules.
 
 ---
 
@@ -31,12 +31,11 @@ This document contains detailed implementation rules for coding agents. `AGENTS.
 
 ## Comments And Docstrings
 
-Follow `CLAUDE.md`:
-
 - Runtime comments, inline notes, and docstrings must use Simplified Chinese.
 - Comments must be restrained and factual.
 - Avoid teaching-demo wording, marketing claims, or assertions of production quality.
 - Add comments only where they clarify non-obvious constraints or logic.
+- Do not add unnecessary comments. Let the code speak for itself.
 
 ---
 

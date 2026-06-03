@@ -14,20 +14,6 @@
 
 ---
 
-## 已完成（等待按 patch 合入）
-
-| 模块 | 改动 | 合入建议 |
-|------|------|----------|
-| ChatGLM tests | 新增 14 条边界测试；补 reasoning delta + usage None 降级 | patch 1 |
-| LLM judge | 语义修正：不可用时不返回 passed、except Exception、run() 无 .answer 保护 | patch 2 |
-| Memory | merge-before-novelty 顺序、Jaccard containment 替代 BM25 去重、LRU 先归档再淘汰 | patch 3 |
-| Plugins | 移除安全沙箱声明、DENY_IMPORTS/DENY_BUILTINS、改为受限加载器（非安全边界） | patch 4 |
-| tool_catalog | 新增 mcp/mailbox/progress builder 到目录扫描 | 单独 |
-
-详情见会话记录。
-
----
-
 ## 待实现
 
 ### 有场景再动（依赖实际需求驱动）
