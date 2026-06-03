@@ -7,11 +7,12 @@ from xcode.ai.events import ProviderEvent
 from xcode.ai.types import ToolDefinition
 
 from .codec import to_chat_messages, to_chat_tool, to_responses_input, to_responses_tool
+from .metrics import ProviderMetricsMixin
 from .stream_codec import chat_stream_to_events, responses_stream_to_events
 from .runtime import ProviderRuntime
 
 
-class OpenAIChatProvider:
+class OpenAIChatProvider(ProviderMetricsMixin):
     """OpenAI Chat Completions provider（兼容所有 OpenAI API 兼容服务）。
 
     只发送 OpenAI Chat Completions 标准参数。
@@ -45,13 +46,13 @@ class OpenAIChatProvider:
         self.runtime = runtime or ProviderRuntime()
         self.prompt_cache_key = prompt_cache_key
         self.transport = "openai_chat"
-        self.metrics: dict[str, object] = {
-            "transport": self.transport,
-            "previous_response_id": None,
-            "sent_messages": 0,
-            "cached_tokens": 0,
-            "reasoning_tokens": 0,
-        }
+        self._ensure_metrics()
+        self.metrics["previous_response_id"] = None
+
+    def _default_metrics(self) -> dict[str, object]:
+        base = super()._default_metrics()
+        base["transport"] = "openai_chat"
+        return base
 
     async def stream(
         self,
@@ -83,52 +84,14 @@ class OpenAIChatProvider:
         if self.reasoning_effort:
             kwargs["reasoning_effort"] = self.reasoning_effort
 
-        def intercept_usage(chunks):
-            for chunk in chunks:
-                usage = getattr(chunk, "usage", None)
-                if usage:
-                    self._record_usage(chunk, len(chat_messages))
-                yield chunk
-
         create = cast(Any, self.client.chat.completions.create)
         stream = self.runtime.run(lambda: create(**kwargs))
         self._ensure_metrics()
         self.metrics["sent_messages"] = len(chat_messages)
-        yield from chat_stream_to_events(intercept_usage(stream))
-
-    def _record_usage(self, response, sent_messages: int) -> None:
-        self._ensure_metrics()
-        self.metrics["sent_messages"] = sent_messages
-        usage = getattr(response, "usage", None)
-        if usage:
-            # cached_tokens
-            prompt_details = getattr(usage, "prompt_tokens_details", None)
-            cached = (
-                getattr(prompt_details, "cached_tokens", 0) if prompt_details else 0
-            )
-            self.metrics["cached_tokens"] = cached or 0
-
-            # reasoning_tokens
-            completion_details = getattr(usage, "completion_tokens_details", None)
-            reasoning = (
-                getattr(completion_details, "reasoning_tokens", 0)
-                if completion_details
-                else 0
-            )
-            self.metrics["reasoning_tokens"] = reasoning or 0
-
-    def _ensure_metrics(self) -> None:
-        if not hasattr(self, "metrics"):
-            self.metrics = {
-                "transport": getattr(self, "transport", "openai_chat"),
-                "previous_response_id": None,
-                "sent_messages": 0,
-                "cached_tokens": 0,
-                "reasoning_tokens": 0,
-            }
+        yield from chat_stream_to_events(self._intercept_usage(stream, len(chat_messages)))
 
 
-class OpenAIResponsesProvider:
+class OpenAIResponsesProvider(ProviderMetricsMixin):
     """OpenAI Responses API provider（stateful 模式）。"""
 
     def __init__(
@@ -160,13 +123,13 @@ class OpenAIResponsesProvider:
         self.previous_response_id: str | None = None
         self._last_sent_message_index: int = 0
         self._pending_sent_message_index: int = 0
-        self.metrics: dict[str, object] = {
-            "transport": self.transport,
-            "previous_response_id": None,
-            "sent_messages": 0,
-            "cached_tokens": 0,
-            "reasoning_tokens": 0,
-        }
+        self._ensure_metrics()
+        self.metrics["previous_response_id"] = None
+
+    def _default_metrics(self) -> dict[str, object]:
+        base = super()._default_metrics()
+        base["transport"] = "openai_responses"
+        return base
 
     async def stream(
         self,

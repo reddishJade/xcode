@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import AsyncIterator, Iterator, Iterable
+from collections.abc import AsyncIterator, Iterator
 from typing import Any, cast
 
 from .codec import to_chat_messages, to_chat_tool
+from .metrics import ProviderMetricsMixin
 from .stream_codec import chat_stream_to_events
 from .runtime import ProviderRuntime
 
@@ -14,7 +15,7 @@ from .runtime import ProviderRuntime
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 
-class DeepSeekProvider:
+class DeepSeekProvider(ProviderMetricsMixin):
     """DeepSeek Chat API 适配。
 
     和 OpenAIChatProvider 基本一致，额外处理 reasoning_content 字段。
@@ -44,14 +45,14 @@ class DeepSeekProvider:
         self.runtime = runtime or ProviderRuntime()
         self.strict_tools = strict_tools
         self.transport = "deepseek_chat"
-        self.metrics: dict[str, object] = {
-            "transport": self.transport,
-            "sent_messages": 0,
-            "cached_tokens": 0,
-            "prompt_cache_hit_tokens": 0,
-            "prompt_cache_miss_tokens": 0,
-            "reasoning_tokens": 0,
-        }
+        self._ensure_metrics()
+        self.metrics["prompt_cache_hit_tokens"] = 0
+        self.metrics["prompt_cache_miss_tokens"] = 0
+
+    def _default_metrics(self) -> dict[str, object]:
+        base = super()._default_metrics()
+        base["transport"] = "deepseek_chat"
+        return base
 
     async def stream(
         self,
@@ -126,18 +127,9 @@ class DeepSeekProvider:
 
         create = cast(Any, self.client.chat.completions.create)
         stream = self.runtime.run(lambda: create(**params))
-
-        # We must NOT call chat_stream_to_events on single chunks since it resets the arguments
-        # aggregation state dict. Instead, we use an interceptor generator to capture usage
-        # metrics lazily while passing the entire stream forward to the decoder intact.
-        def intercept_usage(chunks: Iterable[Any]) -> Iterator[Any]:
-            for chunk in chunks:
-                usage = getattr(chunk, "usage", None)
-                if usage:
-                    self._record_usage(chunk, len(params["messages"]))
-                yield chunk
-
-        yield from chat_stream_to_events(intercept_usage(stream))
+        self._ensure_metrics()
+        self.metrics["sent_messages"] = len(params["messages"])
+        yield from chat_stream_to_events(self._intercept_usage(stream, len(params["messages"])))
 
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]

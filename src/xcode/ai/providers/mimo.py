@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator, Iterable
+from collections.abc import AsyncIterator, Iterator
 from typing import Any, cast
 
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import ToolDefinition
 
 from .codec import to_chat_messages, to_chat_tool
+from .metrics import ProviderMetricsMixin
 from .stream_codec import chat_stream_to_events
 from .runtime import ProviderRuntime
 
@@ -20,7 +21,7 @@ API 文档：https://platform.xiaomimimo.com/
 MIMO_BASE_URL = "https://api.xiaomimimo.com/v1"
 
 
-class MiMoProvider:
+class MiMoProvider(ProviderMetricsMixin):
     """Xiaomi MiMo Chat API 适配。
 
     使用 OpenAI 兼容接口，支持 thinking 模式和 reasoning_content。
@@ -47,12 +48,12 @@ class MiMoProvider:
         self.thinking = thinking
         self.runtime = runtime or ProviderRuntime()
         self.transport = "mimo_chat"
-        self.metrics: dict[str, object] = {
-            "transport": self.transport,
-            "sent_messages": 0,
-            "cached_tokens": 0,
-            "reasoning_tokens": 0,
-        }
+        self._ensure_metrics()
+
+    def _default_metrics(self) -> dict[str, object]:
+        base = super()._default_metrics()
+        base["transport"] = "mimo_chat"
+        return base
 
     async def stream(
         self,
@@ -84,35 +85,7 @@ class MiMoProvider:
         if extra_body:
             kwargs["extra_body"] = extra_body
 
-        def intercept_usage(chunks: Iterable[Any]) -> Iterator[Any]:
-            for chunk in chunks:
-                usage = getattr(chunk, "usage", None)
-                if usage:
-                    self._record_usage(chunk, len(openai_messages))
-                yield chunk
-
         create = cast(Any, self.client.chat.completions.create)
         stream = self.runtime.run(lambda: create(**kwargs))
         self.metrics["sent_messages"] = len(openai_messages)
-        yield from chat_stream_to_events(intercept_usage(stream))
-
-    def _record_usage(self, response, sent_messages: int) -> None:
-        """记录 usage 指标，包含缓存 Token 和 reasoning_tokens 统计。"""
-        self.metrics["sent_messages"] = sent_messages
-        usage = getattr(response, "usage", None)
-        if usage:
-            # 缓存 Token
-            prompt_details = getattr(usage, "prompt_tokens_details", None)
-            cached = (
-                getattr(prompt_details, "cached_tokens", 0) if prompt_details else 0
-            )
-            self.metrics["cached_tokens"] = cached or 0
-
-            # reasoning_tokens
-            completion_details = getattr(usage, "completion_tokens_details", None)
-            reasoning = (
-                getattr(completion_details, "reasoning_tokens", 0)
-                if completion_details
-                else 0
-            )
-            self.metrics["reasoning_tokens"] = reasoning or 0
+        yield from chat_stream_to_events(self._intercept_usage(stream, len(openai_messages)))

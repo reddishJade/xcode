@@ -7,6 +7,7 @@ from typing import Any, cast
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import ToolDefinition
 from .codec import to_chat_messages, to_chat_tool
+from .metrics import ProviderMetricsMixin
 from .stream_codec import chat_stream_to_events
 from .runtime import ProviderRuntime
 
@@ -21,7 +22,7 @@ API 文档：https://docs.bigmodel.cn/
 CHATGLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 
 
-class ChatGLMProvider:
+class ChatGLMProvider(ProviderMetricsMixin):
     """智谱 AI ChatGLM API 适配。
 
     使用 OpenAI 兼容接口，支持 thinking 模式和保留式思考。
@@ -55,16 +56,16 @@ class ChatGLMProvider:
         self.base_url = base_url or CHATGLM_BASE_URL
         self.runtime = runtime or ProviderRuntime()
         self.transport = "chatglm_chat"
-        self.metrics: dict[str, object] = {
-            "transport": self.transport,
-            "sent_messages": 0,
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-            "cached_tokens": 0,
-            "cache_hit_ratio": 0.0,
-            "reasoning_tokens": 0,
-        }
+        self._ensure_metrics()
+        self.metrics["prompt_tokens"] = 0
+        self.metrics["completion_tokens"] = 0
+        self.metrics["total_tokens"] = 0
+        self.metrics["cache_hit_ratio"] = 0.0
+
+    def _default_metrics(self) -> dict[str, object]:
+        base = super()._default_metrics()
+        base["transport"] = "chatglm_chat"
+        return base
 
     async def stream(
         self,
@@ -98,17 +99,10 @@ class ChatGLMProvider:
         )
         openai_messages = cast(list[dict[str, Any]], kwargs["messages"])
 
-        def intercept_usage(chunks):
-            for chunk in chunks:
-                usage = getattr(chunk, "usage", None)
-                if usage:
-                    self._record_usage(chunk, len(openai_messages))
-                yield chunk
-
         create = cast(Any, self.client.chat.completions.create)
         stream = self.runtime.run(lambda: create(**kwargs))
         self.metrics["sent_messages"] = len(openai_messages)
-        yield from chat_stream_to_events(intercept_usage(stream))
+        yield from chat_stream_to_events(self._intercept_usage(stream, len(openai_messages)))
 
     def _chat_kwargs(
         self,
