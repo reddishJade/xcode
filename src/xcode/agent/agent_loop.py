@@ -236,6 +236,7 @@ async def _run_loop(
                 current_context.messages = config.compact(current_context.messages)
 
         # ── 内层循环：模型调用 + 重试 + max_tokens ──
+        ctx_len_before = len(current_context.messages)
         inner_result = await _run_inner_loop(
             current_context,
             config,
@@ -261,6 +262,10 @@ async def _run_loop(
 
         message, stop_reason, new_provider = inner_result
         active_provider = new_provider
+
+        # 同步内层循环添加的中间消息（如 max_tokens 续写的 "continue"）
+        for msg in current_context.messages[ctx_len_before:-1]:
+            new_messages.append(msg)
 
         # ── 更新步骤重试状态 ──
         if stop_reason == "error":
@@ -291,7 +296,14 @@ async def _run_loop(
                 if follow_up:
                     pending_messages = follow_up
                     continue
-            break
+            result = AgentLoopResult(
+                messages=new_messages,
+                steps=step,
+                metrics=metrics,
+                active_provider=active_provider,
+            )
+            emit(_agent_end_event(new_messages, result))
+            return result
 
         # ── 工具执行 ──
         executed: ExecutedToolBatch = await execute_tool_calls(
@@ -318,8 +330,8 @@ async def _run_loop(
             and repeated_tool_count >= config.watchdog_repeated_tool_limit
         ):
             reason = (
-                f"Watchdog triggered: same tool call repeated "
-                f"{repeated_tool_count} times consecutively."
+                f"watchdog stopped repeated tool call: "
+                f"{tool_calls[0].name}"
             )
             result = AgentLoopResult(
                 messages=new_messages,
@@ -464,9 +476,6 @@ async def _run_inner_loop(
         stop_reason = "end_turn"
 
         for event in events:
-            if _is_cancelled(signal):
-                return _cancelled_message(signal), "aborted", provider
-
             if isinstance(event, TextDelta):
                 text_parts.append(event.chunk)
                 emit(

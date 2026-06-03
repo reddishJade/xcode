@@ -133,7 +133,7 @@ async def _execute_one(
         return ToolResultMessage(
             tool_call_id=tool_call.id,
             tool_name=tool_call.name,
-            content=f"Tool {tool_call.name} not found",
+            content=f"unknown tool: {tool_call.name}",
             is_error=True,
         )
 

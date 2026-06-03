@@ -98,13 +98,8 @@ class ToolSpecAdapter:
                     )
 
         # 执行 handler（同步 → 异步）
-        try:
-            content = await asyncio.to_thread(self._spec.handler, params)
-            return AgentToolResult(content=[TextContent(text=redact_text(content))])
-        except Exception as e:
-            return AgentToolResult(
-                content=[TextContent(text=f"tool error: {e}")]
-            )
+        content = await asyncio.to_thread(self._spec.handler, params)
+        return AgentToolResult(content=[TextContent(text=redact_text(content))])
 
 
 def adapt_tool_specs(

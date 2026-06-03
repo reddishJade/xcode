@@ -63,10 +63,20 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
         return _convert_assistant(m)
 
     if isinstance(m, ToolResultMessage):
+        status = "ok"
+        if m.is_error:
+            status = "interrupted" if "interrupted" in str(m.content) else "error"
         return {
             "role": "tool",
             "tool_call_id": m.tool_call_id,
-            "content": m.content,
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_call_id,
+                    "content": m.content,
+                    "status": status,
+                }
+            ],
         }
 
     if isinstance(m, BashExecutionMessage):
