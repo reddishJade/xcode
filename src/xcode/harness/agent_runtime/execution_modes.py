@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from xcode.ai.events import ToolCall
 from ..config import ExecutionMode
+from ..observability.permissions import PermissionDecision
 from ..skills import ToolSpec
 
 """Plan / Review / Act 的工具可见性策略。"""
-
-ExecutionDecision = Literal["allow", "deny", "require_approval"]
 
 
 class ExecutionPolicy(Protocol):
     def filter_tools(self, tools: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]: ...
 
-    def check_call(self, call: ToolCall) -> ExecutionDecision: ...
+    def check_call(self, call: ToolCall) -> PermissionDecision: ...
 
 
 PLAN_TOOL_NAMES = {
@@ -45,7 +44,7 @@ class PlanPolicy:
     def filter_tools(self, tools: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]:
         return tuple(tool for tool in tools if tool.name in PLAN_TOOL_NAMES)
 
-    def check_call(self, call: ToolCall) -> ExecutionDecision:
+    def check_call(self, call: ToolCall) -> PermissionDecision:
         return "allow" if call.name in PLAN_TOOL_NAMES else "deny"
 
 
@@ -54,14 +53,14 @@ class ReviewPolicy:
         allowed = PLAN_TOOL_NAMES | REVIEW_EXTRA_TOOL_NAMES
         return tuple(tool for tool in tools if tool.name in allowed)
 
-    def check_call(self, call: ToolCall) -> ExecutionDecision:
+    def check_call(self, call: ToolCall) -> PermissionDecision:
         if call.name in PLAN_TOOL_NAMES:
             return "allow"
         if call.name == "run_validation":
-            return "require_approval"
+            return "ask"
         if call.name == "bash":
             return (
-                "allow" if _is_review_bash_allowed(call.input) else "require_approval"
+                "allow" if _is_review_bash_allowed(call.input) else "ask"
             )
         return "deny"
 
@@ -70,9 +69,9 @@ class ActPolicy:
     def filter_tools(self, tools: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]:
         return tools
 
-    def check_call(self, call: ToolCall) -> ExecutionDecision:
+    def check_call(self, call: ToolCall) -> PermissionDecision:
         if call.name == "run_validation":
-            return "require_approval"
+            return "ask"
         return "allow"
 
 

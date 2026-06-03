@@ -348,7 +348,7 @@ class StructuredAgent:
                 return BeforeToolCallResult(
                     block=True, reason=f"permission denied for tool: {tc.name}"
                 )
-            if decision == "require_approval":
+            if decision == "ask":
                 tool_spec = self.tool_map.get(tc.name)
                 perm_result = check_tool_permission(
                     tc.name,
@@ -359,7 +359,7 @@ class StructuredAgent:
                 )
                 if perm_result.blocked:
                     return BeforeToolCallResult(block=True, reason=perm_result.reason)
-                # require_approval 但无 approval_callback 或无 tool_spec 时也阻断
+                # ask 但无 approval_callback 或无 tool_spec 时也阻断
                 if self.approval_callback is None or tool_spec is None:
                     return BeforeToolCallResult(
                         block=True, reason=f"permission denied for tool: {tc.name}"

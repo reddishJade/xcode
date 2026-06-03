@@ -87,7 +87,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0].status, "denied")
         self.assertEqual(called, [])
 
-    async def test_require_approval_without_callback_returns_result(self) -> None:
+    async def test_ask_without_callback_returns_result(self) -> None:
         executor = ToolExecutor(
             (
                 ToolSpec(
@@ -295,7 +295,7 @@ class ExecutionModeTests(unittest.TestCase):
     def test_act_validation_requires_approval(self) -> None:
         policy = ActPolicy()
         result = policy.check_call(ToolCall("t1", "run_validation", {}))
-        self.assertEqual(result, "require_approval")
+        self.assertEqual(result, "ask")
 
     def test_act_bash_still_allowed(self) -> None:
         policy = ActPolicy()
