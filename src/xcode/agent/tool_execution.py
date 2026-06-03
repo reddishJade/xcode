@@ -20,7 +20,7 @@ from .types import (
     BeforeToolCallContext,
     CancellationSignal,
     TextContent,
-    ToolCallBlock,
+    ToolCallContent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolResultMessage,
@@ -36,7 +36,7 @@ class ExecutedToolBatch:
 async def execute_tool_calls(
     current_context: AgentContext,
     assistant_message: AssistantMessage,
-    tool_calls: list[ToolCallBlock],
+    tool_calls: list[ToolCallContent],
     config: AgentLoopConfig,
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
@@ -44,7 +44,7 @@ async def execute_tool_calls(
     """根据 execution_mode 调度串行或并行工具执行。"""
     has_sequential = False
     for tc in tool_calls:
-        if isinstance(tc, ToolCallBlock):
+        if isinstance(tc, ToolCallContent):
             for t in current_context.tools or []:
                 if t.name == tc.name and t.execution_mode == "sequential":
                     has_sequential = True
@@ -64,14 +64,14 @@ async def execute_tool_calls(
 async def _execute_sequential(
     current_context: AgentContext,
     assistant_message: AssistantMessage,
-    tool_calls: list[ToolCallBlock],
+    tool_calls: list[ToolCallContent],
     config: AgentLoopConfig,
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
     results: list[ToolResultMessage] = []
     for tc in tool_calls:
-        if not isinstance(tc, ToolCallBlock):
+        if not isinstance(tc, ToolCallContent):
             continue
         emit(
             ToolExecutionStartEvent(
@@ -90,14 +90,14 @@ async def _execute_sequential(
 async def _execute_parallel(
     current_context: AgentContext,
     assistant_message: AssistantMessage,
-    tool_calls: list[ToolCallBlock],
+    tool_calls: list[ToolCallContent],
     config: AgentLoopConfig,
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
     tasks = []
     for tc in tool_calls:
-        if not isinstance(tc, ToolCallBlock):
+        if not isinstance(tc, ToolCallContent):
             continue
         emit(
             ToolExecutionStartEvent(
@@ -118,7 +118,7 @@ async def _execute_parallel(
 async def _execute_one(
     current_context: AgentContext,
     assistant_message: AssistantMessage,
-    tool_call: ToolCallBlock,
+    tool_call: ToolCallContent,
     config: AgentLoopConfig,
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],

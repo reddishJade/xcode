@@ -12,8 +12,8 @@ from .types import (
     CustomMessage,
     SystemMessage,
     TextContent,
-    ThinkingBlock,
-    ToolCallBlock,
+    ThinkingContent,
+    ToolCallContent,
     ToolResultMessage,
     UserMessage,
 )
@@ -112,7 +112,7 @@ def _convert_block(block: ContentBlock) -> dict[str, Any] | None:
     """将单个 ContentBlock 转为 dict（text/tool_call/thinking）。"""
     if isinstance(block, TextContent):
         return {"type": "text", "text": block.text}
-    if isinstance(block, ToolCallBlock):
+    if isinstance(block, ToolCallContent):
         return {
             "id": block.id,
             "type": "function",
@@ -121,7 +121,7 @@ def _convert_block(block: ContentBlock) -> dict[str, Any] | None:
                 "arguments": block.arguments or {},
             },
         }
-    if isinstance(block, ThinkingBlock):
+    if isinstance(block, ThinkingContent):
         return {"type": "text", "text": block.thinking}
     # ImageContent 在 LLM 输出中不直接转换为 text
     return None

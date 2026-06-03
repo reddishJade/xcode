@@ -4,6 +4,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Protocol
 
 from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.types import (
+    ImageContent,
+    TextContent,
+    ThinkingContent,
+    ToolCallContent,
+)
 
 """Agent 核心类型。
 
@@ -17,37 +23,9 @@ type ToolExecutionMode = Literal["sequential", "parallel"]
 type ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 type StopReason = Literal["end_turn", "max_tokens", "stop_sequence", "error", "aborted"]
 
-# ── 内容块 ──
+# ── 内容块（来自 ai/types.py）──
 
-
-@dataclass(frozen=True)
-class TextContent:
-    type: str = "text"
-    text: str = ""
-
-
-@dataclass(frozen=True)
-class ImageContent:
-    type: str = "image"
-    source: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class ToolCallBlock:
-    type: str = "tool_call"
-    id: str = ""
-    name: str = ""
-    arguments: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class ThinkingBlock:
-    type: str = "thinking"
-    thinking: str = ""
-    signature: str | None = None
-
-
-type ContentBlock = TextContent | ImageContent | ToolCallBlock | ThinkingBlock
+type ContentBlock = TextContent | ImageContent | ToolCallContent | ThinkingContent
 
 # ── 消息 ──
 
@@ -277,7 +255,7 @@ type AgentListener = Callable[[AgentEvent, Any], None]
 @dataclass
 class BeforeToolCallContext:
     assistant_message: AssistantMessage
-    tool_call: ToolCallBlock
+    tool_call: ToolCallContent
     args: dict[str, Any]
     context: AgentContext
 
@@ -291,7 +269,7 @@ class BeforeToolCallResult:
 @dataclass
 class AfterToolCallContext:
     assistant_message: AssistantMessage
-    tool_call: ToolCallBlock
+    tool_call: ToolCallContent
     args: dict[str, Any]
     result: AgentToolResult[Any]
     is_error: bool
@@ -342,7 +320,7 @@ type MessageQueueGetter = Callable[[], list[AgentMessage]]
 type ShouldCompactHook = Callable[[list[AgentMessage]], bool]
 type CompactHook = Callable[[list[AgentMessage]], list[AgentMessage]]
 type IsToolProductiveHook = Callable[
-    [list[ToolCallBlock], list[ToolResultMessage]], bool
+    [list[ToolCallContent], list[ToolResultMessage]], bool
 ]
 
 

@@ -17,7 +17,7 @@ from ...agent.types import (
     AgentMessage,
     ContentBlock,
     TextContent,
-    ToolCallBlock,
+    ToolCallContent,
 )
 from xcode.ai.events import (
     ToolCall as ToolUseBlock,
@@ -56,7 +56,7 @@ def blocks_to_typed(blocks: list[dict[str, Any]]) -> list[ContentBlock]:
             result.append(TextContent(text=str(b.get("text", ""))))
         elif b.get("type") == "tool_use":
             result.append(
-                ToolCallBlock(
+                ToolCallContent(
                     id=str(b.get("id", "")),
                     name=str(b.get("name", "")),
                     arguments=b.get("input", {}),
@@ -71,7 +71,7 @@ def typed_blocks_to_raw(blocks: list[ContentBlock]) -> list[dict[str, Any]]:
     for block in blocks:
         if isinstance(block, TextContent):
             result.append({"type": "text", "text": block.text})
-        elif isinstance(block, ToolCallBlock):
+        elif isinstance(block, ToolCallContent):
             result.append(
                 {
                     "type": "tool_use",

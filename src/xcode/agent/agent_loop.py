@@ -33,7 +33,7 @@ from .types import (
     ContentBlock,
     ShouldStopAfterTurnContext,
     TextContent,
-    ToolCallBlock,
+    ToolCallContent,
     ToolResultMessage,
     UserMessage,
     AgentStartEvent,
@@ -92,7 +92,7 @@ def _message_update_event(message: AgentMessage) -> MessageUpdateEvent:
 # ── 工具签名（用于重复工具看门狗）──
 
 
-def _tool_signature(calls: list[ToolCallBlock]) -> str:
+def _tool_signature(calls: list[ToolCallContent]) -> str:
     """生成工具调用签名，用于检测重复调用。"""
     parts = []
     for c in calls:
@@ -102,7 +102,7 @@ def _tool_signature(calls: list[ToolCallBlock]) -> str:
 
 
 def _is_tool_productive_default(
-    tool_calls: list[ToolCallBlock],
+    tool_calls: list[ToolCallContent],
     tool_results: list[ToolResultMessage],
 ) -> bool:
     """默认生产力检查：有任何非错误结果即视为有生产力。"""
@@ -281,7 +281,7 @@ async def _run_loop(
             return AgentLoopResult(messages=new_messages, steps=step, metrics=metrics, active_provider=active_provider)
 
         # ── 提取工具调用 ──
-        tool_calls = [b for b in message.content if isinstance(b, ToolCallBlock)]
+        tool_calls = [b for b in message.content if isinstance(b, ToolCallContent)]
 
         if not tool_calls:
             # 模型没有请求工具 → 本轮结束
@@ -472,7 +472,7 @@ async def _run_inner_loop(
         # ── 组装响应 ──
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
-        tool_calls_found: list[ToolCallBlock] = []
+        tool_calls_found: list[ToolCallContent] = []
         stop_reason = "end_turn"
 
         for event in events:
@@ -493,7 +493,7 @@ async def _run_inner_loop(
             elif isinstance(event, ToolCallEvent):
                 for call in event.calls:
                     tool_calls_found.append(
-                        ToolCallBlock(
+                        ToolCallContent(
                             id=call.id,
                             name=call.name,
                             arguments=dict(call.input),

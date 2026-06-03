@@ -28,7 +28,7 @@ from ...agent.types import (
     MessageUpdateEvent,
     SystemMessage,
     TextContent,
-    ToolCallBlock,
+    ToolCallContent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     UserMessage,
@@ -253,7 +253,7 @@ class StructuredAgent:
             return messages
 
         def is_tool_productive(
-            tool_calls: list[ToolCallBlock],
+            tool_calls: list[ToolCallContent],
             tool_results: list[Any],
         ) -> bool:
             # plan 模式不做空闲检测（阅读即探索，不算空转）
@@ -390,7 +390,7 @@ def _assistant_to_raw_blocks(msg: AssistantMessage) -> list[dict[str, Any]]:
     for block in msg.content:
         if isinstance(block, TextContent):
             blocks.append({"type": "text", "text": block.text})
-        elif isinstance(block, ToolCallBlock):
+        elif isinstance(block, ToolCallContent):
             blocks.append({
                 "type": "tool_use",
                 "id": block.id,
@@ -418,7 +418,7 @@ def _build_structured_result(
     for msg in result.messages:
         if isinstance(msg, AssistantMessage):
             for block in msg.content:
-                if isinstance(block, ToolCallBlock):
+                if isinstance(block, ToolCallContent):
                     tool_calls.append(
                         ToolUseBlock(
                             id=block.id,
@@ -454,7 +454,7 @@ def _build_structured_result(
 
 
 def _is_productive_from_results(
-    tool_calls: list[ToolCallBlock], tool_results: list[Any]
+    tool_calls: list[ToolCallContent], tool_results: list[Any]
 ) -> bool:
     """从工具调用和结果判断是否有生产力。
 

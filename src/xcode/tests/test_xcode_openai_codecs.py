@@ -10,7 +10,7 @@ from xcode.agent.types import (
     BashExecutionMessage,
     BranchSummaryMessage,
     CompactionSummaryMessage,
-    ToolCallBlock,
+    ToolCallContent,
     ToolResultMessage,
 )
 from xcode.ai.events import ReasoningDelta, TextDelta, ToolCallEvent
@@ -109,7 +109,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
             [
                 AssistantMessage(
                     content=[
-                        ToolCallBlock(
+                        ToolCallContent(
                             id="t1",
                             name="grep_search",
                             arguments={"input": "skill"},
@@ -125,7 +125,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
         self.assertEqual(messages[0]["reasoning_content"], "")
 
     def test_agent_message_discriminators_are_pythonic_inside_boundary(self) -> None:
-        tool_call = ToolCallBlock(id="t1", name="grep_search")
+        tool_call = ToolCallContent(id="t1", name="grep_search")
         self.assertEqual(tool_call.type, "tool_call")
         self.assertEqual(ToolResultMessage().role, "tool_result")
         self.assertEqual(BashExecutionMessage().role, "bash_execution")

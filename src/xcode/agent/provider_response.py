@@ -12,7 +12,7 @@ from xcode.ai.events import (
     ToolCallEvent,
 )
 
-from .types import ContentBlock, TextContent, ToolCallBlock
+from .types import ContentBlock, TextContent, ToolCallContent
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ def provider_events_to_response(events: Iterable[ProviderEvent]) -> ProviderResp
                 deltas.append(ProviderOutputDelta("text", event.chunk))
         elif isinstance(event, ToolCallEvent):
             content.extend(
-                ToolCallBlock(
+                ToolCallContent(
                     id=call.id,
                     name=call.name,
                     arguments=dict(call.input),

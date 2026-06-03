@@ -16,6 +16,16 @@
 
 ## 待实现
 
+### 类型层迁移：agent/types.py → ai/types.py（Pi 架构对齐）
+
+**Phase 1 (done)**: agent/types.py 已改为从 ai/types.py 导入内容块类型，保留 `ToolCallBlock`/`ThinkingBlock` 作为向后兼容别名。所有 24 个测试通过。
+
+**Phase 2 (pending)**: 更新消费者使用规范名称 `ToolCallContent`/`ThinkingContent`，移除别名。涉及文件：agent_loop.py, tool_execution.py, messages.py, provider_response.py, structured.py, agent_helpers.py, tests。
+
+**Phase 3 (pending)**: 处理 `ProviderResponse`（ai/ 和 agent/provider_response.py 字段不同）和 `ThinkingLevel`（agent/ 用 `type` 语句，ai/ 用赋值）。
+
+---
+
 ### 有场景再动（依赖实际需求驱动）
 
 #### 0. 队列模式（REPL 异步化前置）
