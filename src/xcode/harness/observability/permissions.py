@@ -206,17 +206,23 @@ class CompositePermissionPolicy:
 
 # ── 统一权限决策 ──
 
+DENIED_BY_USER_GUIDANCE = "; use read-only checks (e.g. git status/git diff) or request manual execution"
+
 
 @dataclass(frozen=True)
 class PermissionCheckResult:
     """权限决策结果。
 
-    blocked=True 时 reason 描述拦截原因；
-    blocked=False 时允许执行。
+    decision 取值：
+    - "allow"  — 放行
+    - "deny"   — 硬性拒绝（策略或 risk_evaluator 返回 deny）
+    - "ask"    — 需要人工审批但无 approval_callback 可用
     """
 
     blocked: bool
     reason: str = ""
+    decision: Literal["allow", "deny", "ask"] = "allow"
+    metadata: dict[str, Any] | None = None
 
 
 def check_tool_permission(
@@ -227,45 +233,105 @@ def check_tool_permission(
     approval_callback: Any | None = None,
     tool_spec: Any | None = None,
     tool_input: dict[str, Any] | None = None,
+    high_risk_requires_approval: bool = False,
 ) -> PermissionCheckResult:
     """统一权限决策入口。
 
-    合并 PermissionPolicy.decide() 和 risk_evaluator 两层检查：
+    合并 PermissionPolicy.decide()、risk_evaluator 以及 high-risk 默认规则：
     1. PermissionPolicy 返回 "deny" → 阻断
-    2. PermissionPolicy 返回 "ask" 或 risk_evaluator 返回 "ask" → 需要 approval
+    2. PermissionPolicy 返回 "ask" → 需要 approval
     3. risk_evaluator 返回 "deny" → 阻断
-    4. 否则放行
+    4. risk_evaluator 返回 "ask" → 需要 approval
+    5. high_risk_requires_approval=True 且 tool.risk=="high" → 需要 approval
+    6. 否则放行
+
+    当需要 approval 但无 approval_callback 时返回 decision="ask"。
+    当 approval_callback 授权通过时 metadata 包含 user_decision 和 approval_scope。
     """
     if permission_policy is not None:
-        decision = permission_policy.decide(tool_name, action_input)
-        if decision == "deny":
+        policy_decision = permission_policy.decide(tool_name, action_input)
+        if policy_decision == "deny":
             return PermissionCheckResult(
-                blocked=True, reason=f"permission denied for tool: {tool_name}"
+                blocked=True,
+                reason=f"permission denied for tool: {tool_name}",
+                decision="deny",
             )
-        if decision == "ask":
+        if policy_decision == "ask":
             if approval_callback is not None and tool_spec is not None:
                 hitl = approval_callback(tool_spec, tool_input or {})
                 if hitl.decision == "deny":
                     return PermissionCheckResult(
-                        blocked=True, reason=f"tool {tool_name} denied by user"
+                        blocked=True,
+                        reason=f"tool {tool_name} denied by user{DENIED_BY_USER_GUIDANCE}",
+                        decision="deny",
+                        metadata={"user_decision": "deny", "approval_scope": hitl.scope},
                     )
+                return PermissionCheckResult(
+                    blocked=False,
+                    decision="allow",
+                    metadata={"user_decision": "allow", "approval_scope": hitl.scope},
+                )
             else:
                 return PermissionCheckResult(
-                    blocked=True, reason=f"permission denied for tool: {tool_name}"
+                    blocked=True,
+                    reason=f"tool requires approval: {tool_name}",
+                    decision="ask",
                 )
+        if policy_decision == "allow":
+            return PermissionCheckResult(blocked=False, decision="allow")
 
     if tool_spec is not None and tool_spec.risk_evaluator:
         risk_decision = tool_spec.risk_evaluator(tool_input or {})
         if risk_decision == "deny":
             return PermissionCheckResult(
-                blocked=True, reason=f"permission denied for tool: {tool_name}"
+                blocked=True,
+                reason=f"permission denied for tool: {tool_name}",
+                decision="deny",
             )
         if risk_decision == "ask":
             if approval_callback is not None:
                 hitl = approval_callback(tool_spec, tool_input or {})
                 if hitl.decision == "deny":
                     return PermissionCheckResult(
-                        blocked=True, reason=f"tool {tool_name} denied by user"
+                        blocked=True,
+                        reason=f"tool {tool_name} denied by user{DENIED_BY_USER_GUIDANCE}",
+                        decision="deny",
+                        metadata={"user_decision": "deny", "approval_scope": hitl.scope},
                     )
+                return PermissionCheckResult(
+                    blocked=False,
+                    decision="allow",
+                    metadata={"user_decision": "allow", "approval_scope": hitl.scope},
+                )
+            else:
+                return PermissionCheckResult(
+                    blocked=True,
+                    reason=f"tool requires approval: {tool_name}",
+                    decision="ask",
+                )
+        if risk_decision == "allow":
+            return PermissionCheckResult(blocked=False, decision="allow")
 
-    return PermissionCheckResult(blocked=False)
+    if high_risk_requires_approval and tool_spec is not None and tool_spec.risk == "high":
+        if approval_callback is not None:
+            hitl = approval_callback(tool_spec, tool_input or {})
+            if hitl.decision == "deny":
+                return PermissionCheckResult(
+                    blocked=True,
+                    reason=f"tool {tool_name} denied by user{DENIED_BY_USER_GUIDANCE}",
+                    decision="deny",
+                    metadata={"user_decision": "deny", "approval_scope": hitl.scope},
+                )
+            return PermissionCheckResult(
+                blocked=False,
+                decision="allow",
+                metadata={"user_decision": "allow", "approval_scope": hitl.scope},
+            )
+        else:
+            return PermissionCheckResult(
+                blocked=True,
+                reason=f"tool requires approval: {tool_name}",
+                decision="ask",
+            )
+
+    return PermissionCheckResult(blocked=False, decision="allow")

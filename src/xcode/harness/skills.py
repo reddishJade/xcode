@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ..agent.types import ToolExecutionMode
-from .observability import HITLResult, PermissionPolicy, redact_text
+from .observability import HITLResult, PermissionPolicy, check_tool_permission, redact_text
 
 """工具注册表与 HITL 执行门禁。
 
@@ -95,14 +95,6 @@ def build_tool_prompt(registry: tuple[ToolSpec, ...]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def should_require_approval(
-    tool: ToolSpec, action_input: ToolInput | None = None
-) -> bool:
-    if tool.risk_evaluator is not None:
-        return tool.risk_evaluator(action_input or {}) == "ask"
-    return tool.risk == "high"
-
-
 def run_tool(
     registry: dict[str, ToolSpec],
     action: str,
@@ -135,52 +127,31 @@ def run_tool_result(
     tool = registry.get(action)
     if tool is None:
         return ToolExecutionResult(
-            "error",
+            STATUS_ERROR,
             f"unknown tool: {action}. available tools: {', '.join(sorted(registry))}",
         )
     action_input_text = stringify_tool_input(action_input)
-    decision = (
-        permission_policy.decide(action, action_input_text)
-        if permission_policy
-        else None
+    perm_result = check_tool_permission(
+        action,
+        action_input_text,
+        permission_policy=permission_policy,
+        approval_callback=approval_callback,
+        tool_spec=tool,
+        tool_input=action_input,
+        high_risk_requires_approval=True,
     )
-    tool_decision = tool.risk_evaluator(action_input) if tool.risk_evaluator else None
-    if tool_decision == "deny":
-        return ToolExecutionResult(STATUS_DENIED, f"permission denied for tool: {action}")
-    if decision == "deny":
-        return ToolExecutionResult(STATUS_DENIED, f"permission denied for tool: {action}")
-    requires_approval = (
-        decision == "ask"
-        or tool_decision == "ask"
-        or (
-            decision != "allow"
-            and tool_decision != "allow"
-            and should_require_approval(tool, action_input)
-        )
-    )
-    if requires_approval:
-        if approval_callback is None:
-            return ToolExecutionResult(STATUS_APPROVAL_REQUIRED, f"tool requires approval: {action}")
-        hitl = approval_callback(tool, action_input)
-        if hitl.decision == "deny":
-            return ToolExecutionResult(
-                STATUS_DENIED,
-                f"tool {action} denied by user; use read-only checks (e.g. git status/git diff)"
-                f" or request manual execution.",
-                metadata={"user_decision": "deny", "approval_scope": hitl.scope},
-            )
-        approval_meta = {"user_decision": "allow", "approval_scope": hitl.scope}
-    else:
-        approval_meta = None
+    if perm_result.blocked:
+        status = STATUS_APPROVAL_REQUIRED if perm_result.decision == "ask" else STATUS_DENIED
+        return ToolExecutionResult(status, perm_result.reason, metadata=perm_result.metadata)
     try:
         content = redact_text(tool.handler(action_input))
         return ToolExecutionResult(
-            STATUS_OK, content, metadata=dict(approval_meta) if approval_meta else None
+            STATUS_OK, content, metadata=perm_result.metadata
         )
     except Exception as exc:
         meta = {"error": str(exc)}
-        if approval_meta:
-            meta.update(approval_meta)
+        if perm_result.metadata:
+            meta.update(perm_result.metadata)
         return ToolExecutionResult(STATUS_ERROR, f"tool error: {exc}", meta)
 
 

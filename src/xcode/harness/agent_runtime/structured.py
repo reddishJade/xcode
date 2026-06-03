@@ -50,7 +50,7 @@ from xcode.ai.providers.protocol import ModelProvider
 from .execution_modes import mode_notice, policy_for_mode
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
-from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy, check_tool_permission
+from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 __all__ = ["StructuredAgent", "StructuredAgentEvent", "StructuredAgentResult"]
@@ -349,20 +349,14 @@ class StructuredAgent:
                     block=True, reason=f"permission denied for tool: {tc.name}"
                 )
             if decision == "ask":
-                tool_spec = self.tool_map.get(tc.name)
-                perm_result = check_tool_permission(
-                    tc.name,
-                    action_input,
-                    approval_callback=self.approval_callback,
-                    tool_spec=tool_spec,
-                    tool_input=args,
-                )
-                if perm_result.blocked:
-                    return BeforeToolCallResult(block=True, reason=perm_result.reason)
-                # ask 但无 approval_callback 或无 tool_spec 时也阻断
-                if self.approval_callback is None or tool_spec is None:
+                if self.approval_callback is None or self.tool_map.get(tc.name) is None:
                     return BeforeToolCallResult(
-                        block=True, reason=f"permission denied for tool: {tc.name}"
+                        block=True, reason=f"tool requires approval: {tc.name}"
+                    )
+                hitl = self.approval_callback(self.tool_map[tc.name], args)
+                if hitl.decision == "deny":
+                    return BeforeToolCallResult(
+                        block=True, reason=f"tool {tc.name} denied by user"
                     )
 
             # pre_tool 钩子
