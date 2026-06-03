@@ -45,7 +45,7 @@ The staged set must contain only files for the current task.
 
 ## Commit Message Format
 
-Use the repository format from `CLAUDE.md`:
+Use the repository format from `CLAUDE.md`. Commit messages must be written in English.
 
 ```text
 [type]: [one-line short title describing major feature in lowercase and imperative]
@@ -91,6 +91,8 @@ If using `git commit --only`, place all `-m` flags before the pathspec:
 ```powershell
 git commit --only -m "type: title" -m "body" -- path\to\file
 ```
+
+> **PowerShell note**: When using `@'...'@` single-quoted here-strings, the `@` delimiters are not passed to the command. However, `@"..."@` double-quoted here-strings expand `$` variables and backtick escapes. Prefer `@'...'@` for multi-line commit messages to avoid accidental variable expansion.
 
 ---
 
