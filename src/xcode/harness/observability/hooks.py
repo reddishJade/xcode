@@ -3,9 +3,12 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+import logging
 from typing import Any, Literal
 
 """类型安全的执行框架事件钩子系统。"""
+
+logger = logging.getLogger("xcode.harness.observability.hooks")
 
 HookEvent = Literal[
     "pre_tool",
@@ -62,5 +65,5 @@ class HookManager:
                 result = callback(record)
                 results.append(result)
             except Exception:
-                pass
+                logger.debug("hook callback %s raised", callback, exc_info=True)
         return results

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -78,7 +79,7 @@ def _load_cache(cache_path: Path) -> dict[str, Any]:
         try:
             return json.loads(cache_path.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            logging.warning("failed to load MCP cache from %s", cache_path, exc_info=True)
     return {"servers": {}}
 
 

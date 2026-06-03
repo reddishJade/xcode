@@ -106,7 +106,7 @@ class HeartbeatDaemon:
                     }
                 ]
         except Exception:
-            pass
+            logger.warning("mailbox check failed", exc_info=True)
         return None
 
     def check_git_status(self) -> list[dict[str, Any]] | None:
@@ -133,7 +133,7 @@ class HeartbeatDaemon:
                     }
                 ]
         except Exception:
-            pass
+            logger.warning("git status check failed", exc_info=True)
         return None
 
     def check_background_tasks(self) -> list[dict[str, Any]] | None:
@@ -153,5 +153,5 @@ class HeartbeatDaemon:
                     }
                 ]
         except Exception:
-            pass
+            logger.warning("background task check failed", exc_info=True)
         return None

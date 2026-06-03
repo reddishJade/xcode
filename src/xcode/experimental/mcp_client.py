@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import atexit
 import json
+import logging
 import os
 import subprocess
 import threading
 import time
 from typing import Any, BinaryIO, cast
+
+logger = logging.getLogger("xcode.experimental.mcp_client")
 
 
 class McpClient:
@@ -100,7 +103,7 @@ class McpClient:
                         raw_err = self.process.stderr.read()
                         err_content = raw_err.decode("utf-8", errors="replace")
                     except Exception:
-                        pass
+                        logger.debug("failed to read MCP server stderr", exc_info=True)
                 raise RuntimeError(
                     f"MCP server process exited unexpectedly. Stderr: {err_content}"
                 )
@@ -155,7 +158,7 @@ class McpClient:
                     try:
                         stream.close()
                     except Exception:
-                        pass
+                        logger.debug("failed to close MCP server stream %s", stream_attr, exc_info=True)
             try:
                 self.process.terminate()
                 self.process.wait(timeout=1.0)
@@ -163,7 +166,7 @@ class McpClient:
                 try:
                     self.process.kill()
                 except Exception:
-                    pass
+                    logger.debug("failed to kill MCP server process", exc_info=True)
             self.process = None
 
 
@@ -214,7 +217,7 @@ def _cleanup_clients() -> None:
         try:
             client.stop()
         except Exception:
-            pass
+            logger.debug("failed to stop MCP client during atexit cleanup", exc_info=True)
 
 
 atexit.register(_cleanup_clients)

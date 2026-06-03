@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import subprocess
@@ -12,6 +13,8 @@ from typing import Any
 
 from ..skills import ToolInput, ToolSpec
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
+
+logger = logging.getLogger("xcode.harness.tools.bash")
 
 MAX_OUTPUT_BYTES = 50_000
 MAX_OUTPUT_LINES = 2_000
@@ -115,7 +118,7 @@ class OutputAccumulator:
                 if self._full_path:
                     os.unlink(self._full_path)
             except Exception:
-                pass
+                logger.debug("failed to clean up temp file %s", self._full_path, exc_info=True)
 
 
 def _kill_process(proc: subprocess.Popen) -> None:
@@ -160,7 +163,7 @@ def _close_pipes(proc: subprocess.Popen) -> None:
             try:
                 pipe.close()
             except Exception:
-                pass
+                logger.debug("failed to close process pipe", exc_info=True)
 
 
 def build_bash_tool(
@@ -198,7 +201,7 @@ def build_bash_tool(
                 for raw in pipe:
                     acc.append(raw)
             except Exception:
-                pass
+                logger.debug("error draining process output", exc_info=True)
 
         out_thread = threading.Thread(target=_drain, args=(proc.stdout,), daemon=True)
         err_thread = threading.Thread(target=_drain, args=(proc.stderr,), daemon=True)

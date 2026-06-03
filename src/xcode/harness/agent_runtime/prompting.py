@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from collections.abc import Callable
 from dataclasses import dataclass
 import platform
@@ -191,7 +193,7 @@ class SystemPromptBuilder:
                         task_info += f" [Blocked by: {blocked_by}]"
                     active_tasks.append(task_info)
         except Exception:
-            pass
+            logging.warning("failed to build active-tasks graph", exc_info=True)
         if active_tasks:
             metadata_parts.append(
                 "<active-tasks-graph>\n"
