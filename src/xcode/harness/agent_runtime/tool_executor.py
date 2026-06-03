@@ -89,7 +89,10 @@ class ToolExecutor:
         for call in calls:
             if cancel.is_set():
                 raise ExecutionCancelled("tool execution cancelled")
-            result, elapsed = self._timed_run_tool(call, active_tool_map, mode)
+            # 将同步工具执行卸载到线程池，避免阻塞事件循环
+            result, elapsed = await asyncio.to_thread(
+                self._timed_run_tool, call, active_tool_map, mode
+            )
             results.append(_to_tool_result(call, result, elapsed))
         return results
 
