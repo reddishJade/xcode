@@ -7,6 +7,7 @@ from typing import Any
 
 from ..agent_runtime.contextual import ContextualRetrievalState
 from ..skills import ToolInput, ToolSpec, resolve_project_path
+from .path_utils import BLOCKED_PARTS, MAX_RETURN_CHARS, is_path_blocked, truncate_output, display_path
 
 """受沙箱约束的本地文件工具。
 
@@ -15,8 +16,6 @@ from ..skills import ToolInput, ToolSpec, resolve_project_path
 """
 
 MAX_READ_BYTES = 1_000_000
-MAX_RETURN_CHARS = 50_000
-BLOCKED_PARTS = {".git", ".venv", "__pycache__"}
 
 
 def build_file_tools(
@@ -197,44 +196,17 @@ def read_project_text_file(project_root: Path, raw_path: str) -> str:
 
 def _safe_path(root: Path, raw_path: str) -> Path:
     path = resolve_project_path(root, raw_path)
-    if _is_blocked(root, path):
-        raise ValueError(f"path is blocked: {_display(root, path)}")
+    if is_path_blocked(root, path):
+        raise ValueError(f"path is blocked: {display_path(root, path)}")
     return path
 
 
 def _is_blocked(root: Path, path: Path) -> bool:
-    try:
-        relative = path.resolve().relative_to(root)
-    except ValueError:
-        return True
-    parts = set(relative.parts)
-    if parts & BLOCKED_PARTS:
-        return True
-    if ".env" in relative.parts or relative.name == ".env":
-        return True
-    if (
-        len(relative.parts) >= 2
-        and relative.parts[0] == ".local"
-        and relative.parts[1] == "chroma_db"
-    ):
-        return True
-    return (
-        len(relative.parts) >= 3
-        and relative.parts[0] == "xcode"
-        and relative.parts[1] == ".local"
-        and relative.parts[2] == "chroma_db"
-    )
+    return is_path_blocked(root, path)
 
 
 def _truncate(text: str) -> str:
-    if len(text) <= MAX_RETURN_CHARS:
-        return text
-    keep = (MAX_RETURN_CHARS - 80) // 2
-    return (
-        text[:keep]
-        + f"\n\n[... truncated {len(text) - keep * 2} chars ...]\n\n"
-        + text[-keep:]
-    )
+    return truncate_output(text)
 
 
 def _read_text(path: Path) -> tuple[str, str]:
@@ -262,10 +234,7 @@ def _diff_preview(path: str, before: str, after: str) -> str:
 
 
 def _display(root: Path, path: Path) -> str:
-    try:
-        return path.resolve().relative_to(root).as_posix()
-    except ValueError:
-        return str(path)
+    return display_path(root, path)
 
 
 def _prepare_edits(data: dict[str, Any]) -> list[dict[str, str]]:

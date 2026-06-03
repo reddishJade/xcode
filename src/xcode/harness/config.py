@@ -79,16 +79,6 @@ class PromptRuntimeConfig:
 
 
 @dataclass(frozen=True)
-class AgentRuntimeConfig:
-    max_steps: int = 20
-    compact_threshold: int = 0
-    compact_token_threshold: int = 0
-    max_recent_messages: int = 10
-    tool_workers: int = 4
-    watchdog_repeated_tool_limit: int = 3
-
-
-@dataclass(frozen=True)
 class PathsRuntimeConfig:
     sessions_dir: Path | None = None
     skills_dir: Path | None = None
@@ -108,7 +98,7 @@ class DaemonRuntimeConfig:
 @dataclass(frozen=True)
 class XcodeRuntimeConfig:
     provider: ProviderRuntimeConfig = ProviderRuntimeConfig()
-    agent: AgentRuntimeConfig = AgentRuntimeConfig()
+    agent: AgentConfig = AgentConfig()
     tools: ToolsRuntimeConfig = ToolsRuntimeConfig()
     skills: SkillsRuntimeConfig = SkillsRuntimeConfig()
     prompt: PromptRuntimeConfig = PromptRuntimeConfig()
@@ -159,7 +149,7 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
         provider=ProviderRuntimeConfig(
             model_profiles=_load_model_profiles(provider),
         ),
-        agent=AgentRuntimeConfig(
+        agent=AgentConfig(
             max_steps=int(agent.get("max_steps", 20)),
             compact_threshold=int(agent.get("compact_threshold", 0)),
             compact_token_threshold=int(agent.get("compact_token_threshold", 0)),
@@ -195,15 +185,7 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
 
 
 def to_agent_config(config: XcodeRuntimeConfig) -> AgentConfig:
-    agent = config.agent
-    return AgentConfig(
-        max_steps=agent.max_steps,
-        compact_threshold=agent.compact_threshold,
-        compact_token_threshold=agent.compact_token_threshold,
-        max_recent_messages=agent.max_recent_messages,
-        tool_workers=agent.tool_workers,
-        watchdog_repeated_tool_limit=agent.watchdog_repeated_tool_limit,
-    )
+    return config.agent
 
 
 def resolve_config_path(project_root: Path, path: Path | None) -> Path | None:

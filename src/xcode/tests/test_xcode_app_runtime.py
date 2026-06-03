@@ -12,7 +12,7 @@ from xcode.harness.agent_runtime import StructuredAgent
 from xcode.ai.events import FinalMessage, TextDelta, ToolCall, ToolCallEvent
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.harness.config import (
-    AgentRuntimeConfig,
+    AgentConfig,
     DaemonRuntimeConfig,
     ObservabilityRuntimeConfig,
     PathsRuntimeConfig,
@@ -242,7 +242,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
     def test_build_app_consumes_runtime_config_defaults(self) -> None:
         runtime_config = XcodeRuntimeConfig(
-            agent=AgentRuntimeConfig(max_steps=7, tool_workers=2),
+            agent=AgentConfig(max_steps=7, tool_workers=2),
             paths=PathsRuntimeConfig(sessions_dir=Path("sessions")),
             observability=ObservabilityRuntimeConfig(audit_path=Path("audit.jsonl")),
         )

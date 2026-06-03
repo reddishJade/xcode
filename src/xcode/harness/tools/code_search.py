@@ -5,14 +5,13 @@ import shutil
 import subprocess
 
 from ..skills import ToolInput, ToolSpec, resolve_project_path
-from .file import MAX_RETURN_CHARS
+from .path_utils import BLOCKED_PARTS, MAX_RETURN_CHARS, is_path_blocked, truncate_output, display_path
 
 """供编码 Agent 使用的只读代码搜索工具。"""
 
 MAX_GREP_RESULTS = 100
 MAX_GLOB_RESULTS = 200
 MAX_LS_ENTRIES = 500
-BLOCKED_PARTS = {".git", ".venv", "__pycache__"}
 _RG_MISSING_HINT_EMITTED = False
 
 
@@ -202,42 +201,12 @@ def _safe_path(root: Path, raw_path: str) -> Path:
 
 
 def _is_blocked(root: Path, path: Path) -> bool:
-    try:
-        relative = path.resolve().relative_to(root)
-    except ValueError:
-        return True
-    parts = set(relative.parts)
-    if parts & BLOCKED_PARTS:
-        return True
-    if ".env" in relative.parts or relative.name == ".env":
-        return True
-    if (
-        len(relative.parts) >= 2
-        and relative.parts[0] == ".local"
-        and relative.parts[1] == "chroma_db"
-    ):
-        return True
-    return (
-        len(relative.parts) >= 3
-        and relative.parts[0] == "xcode"
-        and relative.parts[1] == ".local"
-        and relative.parts[2] == "chroma_db"
-    )
+    return is_path_blocked(root, path)
 
 
 def _truncate(text: str) -> str:
-    if len(text) <= MAX_RETURN_CHARS:
-        return text
-    keep = (MAX_RETURN_CHARS - 80) // 2
-    return (
-        text[:keep]
-        + f"\n\n[... truncated {len(text) - keep * 2} chars ...]\n\n"
-        + text[-keep:]
-    )
+    return truncate_output(text)
 
 
 def _display(root: Path, path: Path) -> str:
-    try:
-        return path.resolve().relative_to(root).as_posix()
-    except ValueError:
-        return str(path)
+    return display_path(root, path)
