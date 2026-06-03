@@ -18,11 +18,15 @@ from typing import Any, AsyncIterator, Generator, Iterator, cast
 from ...agent.agent import Agent
 from ...agent.messages import convert_to_llm
 from ...agent.types import (
+    AfterToolCallContext,
+    AfterToolCallResult,
     AgentEvent,
     AgentLoopConfig,
     AgentLoopResult,
     AgentMessage,
     AssistantMessage,
+    BeforeToolCallContext,
+    BeforeToolCallResult,
     MessageEndEvent,
     MessageUpdateEvent,
     SystemMessage,
@@ -30,6 +34,7 @@ from ...agent.types import (
     ToolCallContent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
+    ToolResultMessage,
     UserMessage,
 )
 from .agent_helpers import (
@@ -46,7 +51,7 @@ from .execution_modes import mode_notice, policy_for_mode
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
-from ..skills import ApprovalCallback, ToolSpec
+from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 __all__ = ["StructuredAgent", "StructuredAgentEvent", "StructuredAgentResult"]
 
@@ -262,6 +267,16 @@ class StructuredAgent:
             if translated is not None:
                 for te in translated if isinstance(translated, list) else [translated]:
                     yield te
+                    # 工具执行完成后发射推测事件
+                    if (
+                        isinstance(event, ToolExecutionEndEvent)
+                        and te.type == "tool_result"
+                    ):
+                        status = te.data.status if hasattr(te.data, "status") else "ok"
+                        for spec_event in self._emit_speculation(
+                            event.tool_name, status, step_counter[0]
+                        ):
+                            yield spec_event
 
         # 循环结束，从 Agent 获取结果
         result = self._agent._last_result
@@ -287,6 +302,7 @@ class StructuredAgent:
         队列 drain（get_steering_messages / get_follow_up_messages）
         由 Agent 层注入，此处不设置。
         """
+        policy = policy_for_mode(mode)
 
         def should_compact(messages: list[AgentMessage]) -> bool:
             return self._should_compact([to_dict(m) for m in messages])
@@ -304,12 +320,109 @@ class StructuredAgent:
 
         def is_tool_productive(
             tool_calls: list[ToolCallContent],
-            tool_results: list[Any],
+            tool_results: list[ToolResultMessage],
         ) -> bool:
-            # plan 模式不做空闲检测（阅读即探索，不算空转）
             if mode == "plan":
                 return True
-            return _is_productive_from_results(tool_calls, tool_results)
+            return _is_productive(
+                [
+                    ToolUseBlock(id="", name=tc.name, input=tc.arguments or {})
+                    for tc in tool_calls
+                ],
+                tool_results,
+                self.tool_map,
+            )
+
+        def before_tool(
+            ctx: BeforeToolCallContext, signal: Any
+        ) -> BeforeToolCallResult | None:
+            tc = ctx.tool_call
+            args = ctx.args
+
+            # 执行模式策略检查
+            decision = policy.check_call(
+                ToolUseBlock(id=tc.id, name=tc.name, input=args)
+            )
+            if decision == "deny":
+                return BeforeToolCallResult(
+                    block=True, reason=f"permission denied for tool: {tc.name}"
+                )
+            if decision == "require_approval":
+                tool = self.tool_map.get(tc.name)
+                if tool is not None and self.approval_callback is not None:
+                    hitl = self.approval_callback(tool, args)
+                    if hitl.decision == "deny":
+                        return BeforeToolCallResult(
+                            block=True, reason=f"用户拒绝了 {tc.name}"
+                        )
+                else:
+                    return BeforeToolCallResult(
+                        block=True, reason=f"permission denied for tool: {tc.name}"
+                    )
+
+            # pre_tool 钩子
+            if self.hook_manager is not None:
+                self.hook_manager.emit(
+                    HookRecord(
+                        "pre_tool", tool=tc.name, input=stringify_tool_input(args)
+                    )
+                )
+            return None
+
+        def after_tool(
+            ctx: AfterToolCallContext, signal: Any
+        ) -> AfterToolCallResult | None:
+            tc = ctx.tool_call
+            args = ctx.args
+            action_input = stringify_tool_input(args)
+
+            result_content_text = ""
+            if ctx.result and ctx.result.content:
+                result_content_text = "".join(
+                    c.text for c in ctx.result.content if hasattr(c, "text")
+                )
+
+            if ctx.is_error:
+                if self.hook_manager is not None:
+                    self.hook_manager.emit(
+                        HookRecord(
+                            "on_error",
+                            tool=tc.name,
+                            input=action_input,
+                            error=result_content_text,
+                        )
+                    )
+            else:
+                if self.hook_manager is not None:
+                    self.hook_manager.emit(
+                        HookRecord(
+                            "post_tool",
+                            tool=tc.name,
+                            input=action_input,
+                            output=result_content_text,
+                        )
+                    )
+
+            if self.audit_logger is not None:
+                from ..observability.audit import redact_text
+
+                self.audit_logger(
+                    AuditRecord(
+                        session_id=self.session_id,
+                        tool=tc.name,
+                        static_risk=self.tool_map.get(
+                            tc.name, ToolSpec("", "", "", lambda _: "")
+                        ).risk
+                        or "low",
+                        dynamic_decision="allow",
+                        policy_decision=None,
+                        final_status="error" if ctx.is_error else "ok",
+                        approved=True,
+                        redacted_input=redact_text(action_input),
+                        redacted_output=redact_text(result_content_text),
+                    )
+                )
+            return None
 
         return AgentLoopConfig(
             provider=self.provider,
@@ -325,6 +438,8 @@ class StructuredAgent:
             should_compact=should_compact if self.compactor else None,
             compact=compact if self.compactor else None,
             is_tool_productive=is_tool_productive,
+            before_tool_call=before_tool,
+            after_tool_call=after_tool,
         )
 
     # ── 辅助方法 ──
@@ -391,11 +506,20 @@ def _translate_event(
     if isinstance(event, MessageUpdateEvent):
         msg = event.message
         if isinstance(msg, AssistantMessage) and msg.content:
-            blocks = _assistant_to_raw_blocks(msg)
-            return StructuredAgentEvent("assistant", step_counter[0], blocks)
+            # 流式文本增量：提取纯文本块
+            for block in msg.content:
+                if isinstance(block, TextContent) and block.text:
+                    return StructuredAgentEvent(
+                        "text_delta", step_counter[0], block.text
+                    )
         return None
 
     if isinstance(event, MessageEndEvent):
+        msg = event.message
+        if isinstance(msg, AssistantMessage) and msg.content:
+            blocks = _assistant_to_raw_blocks(msg)
+            if blocks:
+                return StructuredAgentEvent("assistant", step_counter[0], blocks)
         return None
 
     if isinstance(event, ToolExecutionStartEvent):
@@ -427,12 +551,14 @@ def _assistant_to_raw_blocks(msg: AssistantMessage) -> list[dict[str, Any]]:
         if isinstance(block, TextContent):
             blocks.append({"type": "text", "text": block.text})
         elif isinstance(block, ToolCallContent):
-            blocks.append({
-                "type": "tool_use",
-                "id": block.id,
-                "name": block.name,
-                "input": block.arguments or {},
-            })
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.arguments or {},
+                }
+            )
     return blocks
 
 
@@ -440,14 +566,21 @@ def _build_structured_result(
     result: AgentLoopResult, max_steps: int
 ) -> StructuredAgentResult:
     """将 AgentLoopResult 转换为 StructuredAgentResult。"""
-    # 提取文本答案
-    answer = ""
+    # 提取文本答案（拼接所有 AssistantMessage 中的文本）
+    answer_parts: list[str] = []
     for msg in result.messages:
         if isinstance(msg, AssistantMessage):
-            answer = text_from_blocks(
-                [{"type": "text", "text": b.text} if isinstance(b, TextContent) else {}
-                 for b in msg.content]
+            extracted = text_from_blocks(
+                [
+                    {"type": "text", "text": b.text}
+                    if isinstance(b, TextContent)
+                    else {}
+                    for b in msg.content
+                ]
             )
+            if extracted:
+                answer_parts.append(extracted)
+    answer = " ".join(answer_parts)
 
     # 提取工具调用
     tool_calls: list[ToolUseBlock] = []
@@ -477,6 +610,15 @@ def _build_structured_result(
             "tool_latencies_ms": result.metrics.tool_latencies_ms,
         }
 
+    # 当 agent 被看门狗或步骤限制停止时，追加原因
+    if result.stopped_by_watchdog and result.watchdog_reason:
+        if answer:
+            answer = answer + " " + result.watchdog_reason
+        else:
+            answer = result.watchdog_reason
+    elif result.stopped_by_limit and not answer:
+        answer = "step limit reached"
+
     return StructuredAgentResult(
         answer=answer,
         messages=messages,
@@ -487,28 +629,6 @@ def _build_structured_result(
         stopped_by_watchdog=result.stopped_by_watchdog,
         watchdog_reason=result.watchdog_reason,
     )
-
-
-def _is_productive_from_results(
-    tool_calls: list[ToolCallContent], tool_results: list[Any]
-) -> bool:
-    """从工具调用和结果判断是否有生产力。
-
-    与 _is_productive 逻辑一致：只有写操作（write_file、edit_file、bash 等）
-    才算有生产力，read_file/glob/grep 等只读操作不算。
-    """
-    _write_tools = {
-        "write_file", "edit_file", "write_to_file",
-        "replace_file_content", "multi_replace_file_content", "bash",
-    }
-    for tc, res in zip(tool_calls, tool_results, strict=False):
-        is_ok = (
-            (hasattr(res, "is_error") and not res.is_error)
-            or (hasattr(res, "status") and res.status == "ok")
-        )
-        if is_ok and tc.name in _write_tools:
-            return True
-    return False
 
 
 # ── 模块级辅助 ──
@@ -537,19 +657,23 @@ def _is_productive(
     uses: list[ToolUseBlock], results: list[Any], tool_map: dict[str, ToolSpec]
 ) -> bool:
     for tu, res in zip(uses, results, strict=True):
-        if hasattr(res, "status") and res.status == "ok":
-            spec = tool_map.get(tu.name)
-            if spec and spec.read_only:
-                return True
-            if tu.name in (
-                "write_file",
-                "edit_file",
-                "write_to_file",
-                "replace_file_content",
-                "multi_replace_file_content",
-                "bash",
-            ):
-                return True
+        is_ok = (hasattr(res, "is_error") and not res.is_error) or (
+            hasattr(res, "status") and res.status == "ok"
+        )
+        if not is_ok:
+            continue
+        spec = tool_map.get(tu.name)
+        if spec and spec.read_only:
+            return True
+        if tu.name in (
+            "write_file",
+            "edit_file",
+            "write_to_file",
+            "replace_file_content",
+            "multi_replace_file_content",
+            "bash",
+        ):
+            return True
     return False
 
 

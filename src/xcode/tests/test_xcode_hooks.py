@@ -69,8 +69,8 @@ class XcodeHookTests(unittest.TestCase):
 
         result = agent.run("go")
 
-        self.assertEqual(seen, ["bad"])
-        self.assertIn("tool error: bad", result.messages[2]["content"][0]["content"])
+        self.assertEqual(seen, ["Tool error: bad"])
+        self.assertIn("Tool error: bad", result.messages[2]["content"][0]["content"])
 
 
 if __name__ == "__main__":

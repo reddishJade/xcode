@@ -296,7 +296,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         self.assertEqual(seen_tools, [["read_file"]])
         self.assertEqual(called, [])
         self.assertIn(
-            "permission denied for tool: edit_file",
+            "unknown tool: edit_file",
             result.messages[3]["content"][0]["content"],
         )
 
@@ -448,7 +448,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         )
 
         with patch(
-            "xcode.harness.agent_runtime.structured.asyncio.run",
+            "xcode.harness.agent_runtime.agent_helpers.asyncio.run",
             side_effect=AssertionError("asyncio.run should not be used by run_stream"),
         ):
             events = list(agent.run_stream("go"))
@@ -577,7 +577,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         result = agent.run("go")
 
         self.assertEqual(result.messages[2]["content"][0]["content"], "one")
-        self.assertEqual(result.messages[2]["content"][1]["content"], "two")
+        self.assertEqual(result.messages[3]["content"][0]["content"], "two")
 
     def test_tool_exception_is_error_result_and_agent_continues(self) -> None:
         responses: Iterator[list[ProviderEvent]] = iter(
