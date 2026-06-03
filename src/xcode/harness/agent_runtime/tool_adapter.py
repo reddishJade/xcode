@@ -18,7 +18,6 @@ from ...agent.types import (
 )
 from ..skills import ToolSpec, stringify_tool_input
 from ..observability import PermissionPolicy, PermissionCheckResult, check_tool_permission, redact_text
-from ..observability import HITLResult
 
 
 class ToolSpecAdapter:
