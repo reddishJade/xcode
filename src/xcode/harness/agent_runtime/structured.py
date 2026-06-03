@@ -41,7 +41,7 @@ from .agent_helpers import (
 )
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
-from xcode.ai.events import ToolCall as ToolUseBlock
+from xcode.ai.events import ProviderEvent, ToolCall as ToolUseBlock
 from xcode.ai.providers.protocol import ModelProvider
 from .execution_modes import mode_notice, policy_for_mode
 from .tool_adapter import adapt_tool_specs
@@ -53,6 +53,53 @@ __all__ = ["StructuredAgent", "StructuredAgentEvent", "StructuredAgentResult"]
 
 StructuredCompactor = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
 RuntimeContextProvider = Callable[[str], list[str]]
+
+
+class _FallbackSwitchingProvider:
+    """Provider wrapper that switches to fallback after consecutive errors.
+
+    Tracks consecutive error count across calls and switches to fallback_provider
+    when the threshold is reached. Used by harness layer for model fallback.
+    """
+
+    def __init__(
+        self,
+        primary: ModelProvider,
+        fallback: ModelProvider,
+        error_threshold: int = 3,
+    ) -> None:
+        self._primary = primary
+        self._fallback = fallback
+        self._error_threshold = error_threshold
+        self._consecutive_errors: int = 0
+        self._using_fallback: bool = False
+
+    @property
+    def active_provider(self) -> ModelProvider:
+        return self._fallback if self._using_fallback else self._primary
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[Any],
+    ) -> AsyncIterator[ProviderEvent]:
+        provider = self._fallback if self._using_fallback else self._primary
+        try:
+            async for event in provider.stream(messages, tools):
+                self._consecutive_errors = 0
+                yield event
+        except Exception:
+            self._consecutive_errors += 1
+            if (
+                not self._using_fallback
+                and self._consecutive_errors >= self._error_threshold
+                and self._fallback is not None
+            ):
+                self._using_fallback = True
+                async for event in self._fallback.stream(messages, tools):
+                    yield event
+            else:
+                raise
 
 
 @dataclass(frozen=True)
@@ -111,7 +158,9 @@ class StructuredAgent:
         project_root: Path | None = None,
     ) -> None:
         self.provider: ModelProvider = provider
-        self.fallback_provider = fallback_provider
+        if fallback_provider is not None:
+            self.provider = _FallbackSwitchingProvider(provider, fallback_provider)
+        self._original_provider = provider
         self.project_root = project_root
         self.registry = registry
         self.tool_map = {t.name: t for t in registry}
@@ -221,9 +270,13 @@ class StructuredAgent:
             signal=self.cancellation_token,  # type: ignore[arg-type]
         )
 
-        # 同步 provider 状态（核心循环可能切换了 fallback）
-        if result.active_provider is not None and result.active_provider is not self.provider:
-            self.provider = result.active_provider
+        # 同步 provider 状态（wrapper 可能已切换到 fallback）
+        if isinstance(self.provider, _FallbackSwitchingProvider):
+            wrapper = self.provider
+            if wrapper._using_fallback:
+                self._original_provider = wrapper._fallback
+            else:
+                self._original_provider = wrapper._primary
 
         # yield 所有翻译后的事件
         for event in translated_events:
@@ -272,8 +325,6 @@ class StructuredAgent:
             min_continuation_tokens=500,
             watchdog_repeated_tool_limit=self.config.watchdog_repeated_tool_limit,
             max_consecutive_idle_steps=4,
-            fallback_provider=self.fallback_provider,
-            consecutive_error_threshold=3,
             should_compact=should_compact if self.compactor else None,
             compact=compact if self.compactor else None,
             is_tool_productive=is_tool_productive,

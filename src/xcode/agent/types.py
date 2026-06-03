@@ -383,10 +383,6 @@ class AgentLoopConfig:
     watchdog_repeated_tool_limit: int = 3
     max_consecutive_idle_steps: int = 4
 
-    # Fallback provider
-    fallback_provider: ModelProvider | None = None
-    consecutive_error_threshold: int = 3
-
     # 压缩钩子
     should_compact: ShouldCompactHook | None = None
     compact: CompactHook | None = None

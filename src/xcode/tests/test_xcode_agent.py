@@ -374,27 +374,6 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(compact_called)
 
-    async def test_fallback_provider_switches(self) -> None:
-        primary = ErrorProvider(fail_count=10, error=RuntimeError("rate limit 429"))
-        fallback = TextProvider()
-
-        await run_agent_loop(
-            prompts=[UserMessage(content="hello")],
-            context=AgentContext(),
-            config=AgentLoopConfig(
-                provider=primary,
-                convert_to_llm=convert_to_llm,
-                fallback_provider=fallback,
-                consecutive_error_threshold=1,
-                max_step_retries=0,
-                retry_backoff_base=0.01,
-            ),
-            emit=lambda e: None,
-        )
-
-        # 应该切换到 fallback
-        self.assertIsNotNone(fallback.messages)
-
     async def test_metrics_collected(self) -> None:
         provider = ToolProvider()
         tool = EchoTool()

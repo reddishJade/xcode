@@ -187,12 +187,10 @@ async def _run_loop(
     repeated_tool_count: int = 0
     consecutive_idle_steps: int = 0
     consecutive_continuations: int = 0
-    consecutive_errors: int = 0
     step_retries: int = 0
 
-    # Provider 状态（fallback 切换后更新）
+    # Provider 状态
     active_provider = config.provider
-    active_fallback = config.fallback_provider
 
     for step in range(1, config.max_steps + 1):
         metrics.steps = step
@@ -246,8 +244,6 @@ async def _run_loop(
             metrics,
             step,
             active_provider,
-            active_fallback,
-            consecutive_errors,
             step_retries,
             consecutive_continuations,
         )
@@ -263,13 +259,15 @@ async def _run_loop(
             emit(_agent_end_event(new_messages, result))
             return result
 
-        message, stop_reason, new_consecutive_errors, new_provider, new_fallback = (
-            inner_result
-        )
-        consecutive_errors = new_consecutive_errors
-        if new_provider is not active_provider:
-            active_provider = new_provider
-            active_fallback = new_fallback
+        message, stop_reason, new_provider = inner_result
+        active_provider = new_provider
+
+        # ── 更新步骤重试状态 ──
+        if stop_reason == "error":
+            step_retries += 1
+        else:
+            step_retries = 0
+            consecutive_continuations = 0
 
         new_messages.append(message)
         metrics.llm_calls += 1
@@ -415,19 +413,16 @@ async def _run_inner_loop(
     metrics: AgentLoopMetrics,
     step: int,
     provider: Any,
-    fallback_provider: Any,
-    consecutive_errors: int,
     step_retries: int,
     consecutive_continuations: int,
-) -> tuple[AssistantMessage, str, int, Any, Any] | None:
+) -> tuple[AssistantMessage, str, Any] | None:
     """内层循环：模型调用 → 错误重试 → max_tokens 续写。
 
-    返回 (message, stop_reason, consecutive_errors, provider, fallback_provider)，
-    或 None 表示应提前退出。
+    返回 (message, stop_reason, provider)，或 None 表示应提前退出。
     """
     while True:
         if _is_cancelled(signal):
-            return _cancelled_message(signal), "aborted", consecutive_errors, provider, fallback_provider
+            return _cancelled_message(signal), "aborted", provider
 
         # ── 上下文变换 ──
         messages = context.messages
@@ -438,7 +433,7 @@ async def _run_inner_loop(
         convert_fn = config.convert_to_llm or (lambda msgs: [])
         llm_messages = convert_fn(messages)
 
-        # ── 调用 provider（含重试和 fallback）──
+        # ── 调用 provider（含重试）──
         tool_definitions = _tools_to_definitions(context.tools)
         started = perf_counter()
 
@@ -449,22 +444,15 @@ async def _run_inner_loop(
             )
             emit(_message_start_event(msg))
             emit(_message_end_event(msg))
-            return msg, "end_turn", consecutive_errors, provider, fallback_provider
+            return msg, "end_turn", provider
 
-        events, active_provider, consecutive_errors = await call_provider_with_retry(
+        events = await call_provider_with_retry(
             provider,
             llm_messages,
             tool_definitions,
-            fallback_provider=fallback_provider,
             max_retries=config.max_step_retries,
             backoff_base=config.retry_backoff_base,
-            error_threshold=config.consecutive_error_threshold,
-            consecutive_errors=consecutive_errors,
         )
-
-        # 如果 provider 被切换（fallback），更新引用
-        if active_provider is not provider:
-            provider = active_provider
 
         elapsed = round((perf_counter() - started) * 1000, 3)
         metrics.model_latencies_ms.append(elapsed)
@@ -477,7 +465,7 @@ async def _run_inner_loop(
 
         for event in events:
             if _is_cancelled(signal):
-                return _cancelled_message(signal), "aborted", consecutive_errors, provider, fallback_provider
+                return _cancelled_message(signal), "aborted", provider
 
             if isinstance(event, TextDelta):
                 text_parts.append(event.chunk)
@@ -534,7 +522,7 @@ async def _run_inner_loop(
                 emit(_message_end_event(msg))
                 return None
             emit(_message_end_event(message))
-            return message, stop_reason, consecutive_errors, provider, fallback_provider
+            return message, stop_reason, provider
 
         # ── max_tokens 续写 ──
         if stop_reason == "max_tokens" and config.max_tokens_continuation:
@@ -562,7 +550,7 @@ async def _run_inner_loop(
         emit(_message_end_event(message))
         step_retries = 0
         consecutive_continuations = 0
-        return message, stop_reason, consecutive_errors, provider, fallback_provider
+        return message, stop_reason, provider
 
 
 # ── 辅助函数 ──

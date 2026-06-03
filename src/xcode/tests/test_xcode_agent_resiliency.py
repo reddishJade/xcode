@@ -8,7 +8,10 @@ from xcode.ai.events import (
     ToolCallEvent,
     TextDelta,
 )
-from xcode.harness.agent_runtime.structured import StructuredAgent
+from xcode.harness.agent_runtime.structured import (
+    StructuredAgent,
+    _FallbackSwitchingProvider,
+)
 from xcode.harness.config import AgentConfig
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
@@ -165,9 +168,10 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         self.assertEqual(result.answer, "fallback done")
         self.assertEqual(primary_calls, 3)  # Overloaded failed 3 times
         self.assertEqual(fallback_calls, 1)  # Fallback succeeded
-        self.assertEqual(
-            agent.provider, agent.fallback_provider
-        )  # Permanent session fallback
+        # After fallback, the wrapper should be using the fallback provider
+        wrapper = agent.provider
+        self.assertIsInstance(wrapper, _FallbackSwitchingProvider)
+        self.assertTrue(wrapper._using_fallback)
 
 
 if __name__ == "__main__":
