@@ -339,6 +339,34 @@ type AfterToolCallHook = Callable[
 type PrepareNextTurnHook = Callable[[], AgentLoopTurnUpdate | None]
 type ShouldStopAfterTurnHook = Callable[[ShouldStopAfterTurnContext], bool]
 type MessageQueueGetter = Callable[[], list[AgentMessage]]
+type ShouldCompactHook = Callable[[list[AgentMessage]], bool]
+type CompactHook = Callable[[list[AgentMessage]], list[AgentMessage]]
+type IsToolProductiveHook = Callable[
+    [list[ToolCallBlock], list[ToolResultMessage]], bool
+]
+
+
+@dataclass
+class AgentLoopMetrics:
+    """Agent 循环运行指标。"""
+
+    llm_calls: int = 0
+    tool_calls: int = 0
+    steps: int = 0
+    model_latencies_ms: list[float] = field(default_factory=list)
+    tool_latencies_ms: list[float] = field(default_factory=list)
+
+
+@dataclass
+class AgentLoopResult:
+    """Agent 循环执行结果。"""
+
+    messages: list[AgentMessage] = field(default_factory=list)
+    steps: int = 0
+    stopped_by_limit: bool = False
+    stopped_by_watchdog: bool = False
+    watchdog_reason: str | None = None
+    metrics: AgentLoopMetrics | None = None
 
 
 @dataclass
@@ -359,6 +387,33 @@ class AgentLoopConfig:
     # 队列
     get_steering_messages: MessageQueueGetter | None = None
     get_follow_up_messages: MessageQueueGetter | None = None
+
+    # 步骤控制
+    max_steps: int = 50
+
+    # 错误重试
+    max_step_retries: int = 3
+    retry_backoff_base: float = 0.5
+
+    # max_tokens 续写
+    max_tokens_continuation: bool = True
+    max_consecutive_continuations: int = 3
+    min_continuation_tokens: int = 500
+
+    # 看门狗
+    watchdog_repeated_tool_limit: int = 3
+    max_consecutive_idle_steps: int = 4
+
+    # Fallback provider
+    fallback_provider: ModelProvider | None = None
+    consecutive_error_threshold: int = 3
+
+    # 压缩钩子
+    should_compact: ShouldCompactHook | None = None
+    compact: CompactHook | None = None
+
+    # 生产力检查（空闲步骤看门狗）
+    is_tool_productive: IsToolProductiveHook | None = None
 
 
 # ── Agent State ──
