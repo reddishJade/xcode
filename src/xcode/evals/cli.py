@@ -22,6 +22,7 @@ from xcode.harness.app import XcodeApp, build_app as build_real_app
 from xcode.harness.config import AgentConfig
 from xcode.harness.config import discover_runtime_config
 from xcode.harness.skills import ToolSpec
+from xcode.harness.observability import HITLResult
 
 from .runner import EvalRunner
 from .schema import EvalTask
@@ -42,9 +43,34 @@ def main(argv: list[str] | None = None) -> int:
     report = runner.run()
     print(f"Eval run: {report.run_id}")
     print(f"Status: {'PASS' if report.success else 'FAIL'}")
+    _print_summary(report)
     print(f"Report JSON: {report.output_dir / 'report.json'}")
     print(f"Report HTML: {report.output_dir / 'report.html'}")
     return 0 if report.success else 1
+
+
+def _print_summary(report) -> None:
+    """打印量化摘要：grader 通过率、LLM 调用、token、延迟。"""
+    m = report.metrics
+    # grader 统计
+    grader_rate = m.get("grader_pass_rate")
+    if grader_rate is not None:
+        all_graders = [g for t in report.trials for g in t.graders]
+        passed_g = sum(1 for g in all_graders if g.passed)
+        print(f"Graders: {passed_g}/{len(all_graders)} passed ({grader_rate * 100:.1f}%)")
+    # LLM 和延迟
+    parts = []
+    total_llm = m.get("total_llm_calls", 0)
+    if total_llm:
+        parts.append(f"{total_llm} LLM calls")
+    total_tokens = m.get("total_estimated_tokens", 0)
+    if total_tokens:
+        parts.append(f"~{total_tokens:,} tokens")
+    total_ms = m.get("total_model_ms", 0.0)
+    if total_ms:
+        parts.append(f"{total_ms / 1000:.1f}s model time")
+    if parts:
+        print(f"Metrics: {', '.join(parts)}")
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -138,13 +164,21 @@ def _real_app_factory(
             base_root=base_root,
             output_dir=output_dir,
         )
-        return build_real_app(
+        app = build_real_app(
             project_root=effective_root,
             runtime_config=runtime_config,
             env_files=env_files,
         )
+        # eval 模式下自动批准所有工具调用，避免 approval_required 阻塞
+        app.agent.approval_callback = _auto_approve
+        return app
 
     return build
+
+
+def _auto_approve(tool, input):
+    """eval 专用：自动批准所有需要审批的工具调用。"""
+    return HITLResult(decision="allow", scope="session")
 
 
 def _trial_project_root(

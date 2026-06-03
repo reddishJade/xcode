@@ -49,11 +49,7 @@ class EvalRunner:
             for trial_index in range(self.trials_per_task):
                 trials.append(await self._run_trial(task, trial_index))
         success = all(trial.success for trial in trials)
-        metrics = {
-            "task_count": len(self.tasks),
-            "trial_count": len(trials),
-            "passed_trials": sum(1 for trial in trials if trial.success),
-        }
+        metrics = _build_run_metrics(self.tasks, trials)
         report = EvalReport(
             run_id=self.run_id,
             success=success,
@@ -98,16 +94,22 @@ class EvalRunner:
             graders = graders + judge_graders
 
         success = all(grader.passed for grader in graders)
+        tool_call_count = sum(1 for event in events if event.type == "tool_use")
+        tool_error_count = sum(
+            1
+            for event in events
+            if event.type == "tool_result"
+            and getattr(event.data, "status", "ok") not in {"ok", "interrupted"}
+        )
         metrics: dict[str, Any] = {
             "event_count": len(events),
-            "tool_calls": sum(1 for event in events if event.type == "tool_use"),
-            "tool_errors": sum(
-                1
-                for event in events
-                if event.type == "tool_result"
-                and getattr(event.data, "status", "ok") not in {"ok", "interrupted"}
-            ),
+            "tool_calls": tool_call_count,
+            "tool_errors": tool_error_count,
         }
+        # 从 final event 提取运行级指标
+        agent_metrics = _extract_agent_metrics(events)
+        if agent_metrics:
+            metrics.update(agent_metrics)
         if after_evidence:
             metrics["file_evidence"] = after_evidence
         return TrialResult(
@@ -257,3 +259,66 @@ def _string_tuple(value: object) -> tuple[str, ...]:
     if isinstance(value, list | tuple):
         return tuple(str(item) for item in value)
     return ()
+
+
+def _extract_agent_metrics(events: list[StructuredAgentEvent]) -> dict[str, Any]:
+    """从 final event 的 metrics 中提取运行级指标。"""
+    for event in events:
+        if event.type == "final" and hasattr(event.data, "metrics"):
+            agent_m = event.data.metrics
+            if not isinstance(agent_m, dict):
+                return {}
+            return {
+                k: agent_m[k]
+                for k in (
+                    "llm_calls",
+                    "estimated_prompt_tokens",
+                    "model_latencies_ms",
+                    "tool_latencies_ms",
+                    "model_total_ms",
+                    "tool_total_ms",
+                    "total_observed_ms",
+                )
+                if k in agent_m
+            }
+    return {}
+
+
+def _build_run_metrics(
+    tasks: Sequence[EvalTask], trials: list[TrialResult]
+) -> dict[str, Any]:
+    """构建 run 级汇总指标：基础计数 + 跨 trial 聚合 + grader 统计。"""
+    passed = sum(1 for t in trials if t.success)
+    metrics: dict[str, Any] = {
+        "task_count": len(tasks),
+        "trial_count": len(trials),
+        "passed_trials": passed,
+    }
+    # 跨 trial 聚合延迟和 token
+    total_llm = 0
+    total_tokens = 0
+    total_model_ms = 0.0
+    for t in trials:
+        total_llm += t.metrics.get("llm_calls", 0)
+        total_tokens += t.metrics.get("estimated_prompt_tokens", 0)
+        total_model_ms += t.metrics.get("model_total_ms", 0.0)
+    if total_llm:
+        metrics["total_llm_calls"] = total_llm
+    if total_tokens:
+        metrics["total_estimated_tokens"] = total_tokens
+    if total_model_ms:
+        metrics["total_model_ms"] = round(total_model_ms, 1)
+    # grader 统计
+    all_graders = [g for t in trials for g in t.graders]
+    if all_graders:
+        total_g = len(all_graders)
+        passed_g = sum(1 for g in all_graders if g.passed)
+        metrics["grader_pass_rate"] = round(passed_g / total_g, 4)
+        # 按 grader name 分组统计
+        by_name: dict[str, list[bool]] = {}
+        for g in all_graders:
+            by_name.setdefault(g.name, []).append(g.passed)
+        metrics["per_grader_pass_rate"] = {
+            name: round(sum(v) / len(v), 4) for name, v in by_name.items()
+        }
+    return metrics
