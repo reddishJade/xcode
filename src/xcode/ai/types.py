@@ -26,7 +26,7 @@ KnownProvider = Literal[
 
 Provider = KnownProvider | str
 
-ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
+type ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 ModelThinkingLevel = ThinkingLevel | str
 Transport = Literal["sse", "websocket", "auto"]
 CacheRetention = Literal["none", "short", "long"]
@@ -71,12 +71,6 @@ class ThinkingBudgets:
     low: int = 0
     medium: int = 0
     high: int = 0
-
-
-@dataclass(frozen=True)
-class ProviderResponse:
-    status: int
-    headers: dict[str, str]
 
 
 @dataclass(frozen=True)

@@ -8,6 +8,7 @@ from xcode.ai.types import (
     ImageContent,
     TextContent,
     ThinkingContent,
+    ThinkingLevel,
     ToolCallContent,
 )
 
@@ -20,7 +21,6 @@ from xcode.ai.types import (
 
 type QueueMode = Literal["all", "one-at-a-time"]
 type ToolExecutionMode = Literal["sequential", "parallel"]
-type ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 type StopReason = Literal["end_turn", "max_tokens", "stop_sequence", "error", "aborted"]
 
 # ── 内容块（来自 ai/types.py）──
