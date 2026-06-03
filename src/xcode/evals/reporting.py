@@ -187,7 +187,7 @@ def _trial_row(trial) -> str:
     )
 
 
-def _fmt_metric_value(key: str, value: object) -> str:
+def _fmt_metric_value(key: str, value: str | int | float) -> str:
     """格式化单个指标值用于展示。"""
     if key in ("model_total_ms", "tool_total_ms", "total_observed_ms"):
         return _fmt_ms(float(value))
@@ -205,7 +205,6 @@ def _file_evidence_html(evidence: list | None) -> str:
         path = ev.get("path", "?")
         contains = ev.get("contains", {})
         not_contains = ev.get("not_contains", {})
-        changed = ev.get("sha1")
         items = []
         for k, v in contains.items():
             cls = "evidence-contains" if v else "evidence-missing"
