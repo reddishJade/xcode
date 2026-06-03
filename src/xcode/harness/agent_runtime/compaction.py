@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import datetime
 import json
 from pathlib import Path
+import re
 from typing import Any, Callable
 
 from ..skills import ToolSpec
@@ -93,8 +94,6 @@ class LayeredCompactor:
 
 def context_collapse_clean(content: str) -> str:
     """提取 <summary> 标签中的纯净摘要，剥离思考区与分析块。"""
-    import re
-
     content_str = str(content).strip()
 
     # 提取 <summary> 标签中的内容

@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ..agent.types import ToolExecutionMode
 from .observability import HITLResult, PermissionPolicy, redact_text
@@ -43,9 +43,12 @@ class ToolSpec:
     execution_mode: ToolExecutionMode | None = None
 
 
+ToolExecutionStatus = Literal["ok", "denied", "error", "approval_required"]
+
+
 @dataclass(frozen=True)
 class ToolExecutionResult:
-    status: str
+    status: ToolExecutionStatus
     content: str
     metadata: dict[str, Any] | None = None
 
