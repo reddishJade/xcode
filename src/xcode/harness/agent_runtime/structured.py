@@ -3,9 +3,9 @@
 本模块把模型响应看作 content blocks：text、tool_use、tool_result，并在
 事件流中暴露模型输出、工具调用、工具结果和最终答案。
 
-StructuredAgent 是 harness 层对 agent 核心循环的适配：将 Xcode 特定的
+StructuredAgent 是 harness 层对 agent/Agent 的适配：将 Xcode 特定的
 ToolSpec、权限、审计、压缩等配置映射为 AgentLoopConfig，委托给
-agent/agent_loop.py 的 run_agent_loop 执行。
+agent/Agent.run() 执行。
 """
 
 from __future__ import annotations
@@ -15,10 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator, Generator, Iterator, cast
 
-from ...agent.agent_loop import run_agent_loop
+from ...agent.agent import Agent
 from ...agent.messages import convert_to_llm
 from ...agent.types import (
-    AgentContext,
     AgentEvent,
     AgentLoopConfig,
     AgentLoopResult,
@@ -181,16 +180,22 @@ class StructuredAgent:
         self.cancellation_token = cancellation_token or CancellationToken()
         self.speculation_planner = speculation_planner
         self._consecutive_errors: int = 0
-        self.steer_queue: list[AgentMessage] = []
-        self.followup_queue: list[AgentMessage] = []
+
+        # 适配 ToolSpec → AgentTool，创建 Agent 实例
+        adapted_tools: list[Any] = adapt_tool_specs(
+            registry,
+            approval_callback=approval_callback,
+            permission_policy=self.permission_policy,
+        )
+        self._agent = Agent(adapted_tools)
 
     # ── 公共 API ──
 
     def steer(self, msg: AgentMessage) -> None:
-        self.steer_queue.append(msg)
+        self._agent.steer(msg)
 
     def follow_up(self, msg: AgentMessage) -> None:
-        self.followup_queue.append(msg)
+        self._agent.follow_up(msg)
 
     def request_compaction(self) -> None:
         if self._compact_controller is not None:
@@ -234,41 +239,33 @@ class StructuredAgent:
         # 构建初始消息
         initial_messages = self._initial_messages(question, effective_mode)
 
-        # 适配 ToolSpec → AgentTool
+        # 重新适配工具（执行模式可能过滤了工具集）
         adapted_tools: list[Any] = adapt_tool_specs(
             active_registry,
             approval_callback=self.approval_callback,
             permission_policy=self.permission_policy,
         )
+        self._agent = Agent(adapted_tools)
 
-        # 构建 AgentLoopConfig
+        # 构建 AgentLoopConfig（含 harness 钩子）
         loop_config = self._build_loop_config(effective_mode)
 
-        # 构建 AgentContext
-        context = AgentContext(
-            messages=[],
-            tools=adapted_tools,
-        )
-
-        # 事件翻译：收集事件并 yield
-        translated_events: list[StructuredAgentEvent] = []
+        # 实时流式：消费 Agent.run_stream()，边跑边翻译边 yield
         step_counter = [0]
 
-        def translate_emit(event: AgentEvent) -> None:
+        async for event in self._agent.run_stream(
+            initial_messages,
+            loop_config,
+            signal=self.cancellation_token,  # type: ignore[arg-type]
+        ):
             translated = _translate_event(event, step_counter)
             if translated is not None:
-                translated_events.extend(
-                    translated if isinstance(translated, list) else [translated]
-                )
+                for te in translated if isinstance(translated, list) else [translated]:
+                    yield te
 
-        # 委托给 agent 核心循环
-        result = await run_agent_loop(
-            prompts=initial_messages,
-            context=context,
-            config=loop_config,
-            emit=translate_emit,
-            signal=self.cancellation_token,  # type: ignore[arg-type]
-        )
+        # 循环结束，从 Agent 获取结果
+        result = self._agent._last_result
+        assert result is not None
 
         # 同步 provider 状态（wrapper 可能已切换到 fallback）
         if isinstance(self.provider, _FallbackSwitchingProvider):
@@ -278,10 +275,6 @@ class StructuredAgent:
             else:
                 self._original_provider = wrapper._primary
 
-        # yield 所有翻译后的事件
-        for event in translated_events:
-            yield event
-
         # 构建最终结果
         final = _build_structured_result(result, self.config.max_steps)
         yield _final_event(result.steps, final)
@@ -289,7 +282,11 @@ class StructuredAgent:
     # ── 配置构建 ──
 
     def _build_loop_config(self, mode: ExecutionMode) -> AgentLoopConfig:
-        """将 harness 配置映射为 AgentLoopConfig。"""
+        """将 harness 配置映射为 AgentLoopConfig。
+
+        队列 drain（get_steering_messages / get_follow_up_messages）
+        由 Agent 层注入，此处不设置。
+        """
 
         def should_compact(messages: list[AgentMessage]) -> bool:
             return self._should_compact([to_dict(m) for m in messages])
@@ -328,19 +325,7 @@ class StructuredAgent:
             should_compact=should_compact if self.compactor else None,
             compact=compact if self.compactor else None,
             is_tool_productive=is_tool_productive,
-            get_steering_messages=self._drain_steer_queue,
-            get_follow_up_messages=self._drain_followup_queue,
         )
-
-    def _drain_steer_queue(self) -> list[AgentMessage]:
-        msgs = list(self.steer_queue)
-        self.steer_queue.clear()
-        return msgs
-
-    def _drain_followup_queue(self) -> list[AgentMessage]:
-        msgs = list(self.followup_queue)
-        self.followup_queue.clear()
-        return msgs
 
     # ── 辅助方法 ──
 
