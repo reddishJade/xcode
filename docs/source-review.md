@@ -99,8 +99,8 @@ worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress, speculation
 所有工具调用应走 `run_tool_result()` 或 `ToolExecutor`。执行路径会统一处理：
 
 - 未知工具错误
-- permission policy
-- tool risk evaluator
+- 统一权限决策（`check_tool_permission`）
+- execution mode policy（`PermissionDecision`: allow/deny/ask）
 - HITL approval
 - secret redaction
 - structured audit record
@@ -115,11 +115,13 @@ worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress, speculation
 
 ### Permission policy
 
-`PermissionPolicy` 支持 allow、deny、ask 三态。`SettingsSandboxPermissionPolicy` 可从 `.local/settings.json` 或 `settings.json` 读取规则，与调用方传入 policy 组合。
+`PermissionDecision` 统一了 execution mode 和 permission policy 的三态决策：`allow`、`deny`、`ask`。`check_tool_permission()` 合并 `PermissionPolicy.decide()` 和 `risk_evaluator` 两层检查，返回 `PermissionCheckResult(blocked, reason)`。
+
+`SettingsSandboxPermissionPolicy` 可从 `.local/settings.json` 或 `settings.json` 读取规则，与调用方传入 policy 组合。
 
 ### HITL
 
-高风险工具或 policy 判定为 ask 时，会要求 approval callback。没有 callback 时，工具返回 `approval_required`，不会执行 handler。
+高风险工具或 policy 判定为 `ask` 时，会要求 approval callback。没有 callback 时，工具返回 `approval_required`，不会执行 handler。
 
 ### Redaction
 
@@ -351,6 +353,8 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 - `daemon` 当前由 app 构造，但生命周期启动仍需要调用方控制。
 - `tasks` + `progress` 能表达任务和 checklist，但还不是完整可重入长任务编排器。
 - eval 仍以确定性 grader 为主，没有 LLM-as-judge、Pass@k 和外部 benchmark 接入。
+- `intercept_usage` closure 和 `_record_usage`/`_ensure_metrics` 在 4-5 个 provider 中有重复，可抽取到基类或工具函数。
+- Provider 层仍缺少 OpenAI-compatible 基类抽取（~200 行重复横跨 deepseek/chatglm/openai/structured）。
 
 ---
 
