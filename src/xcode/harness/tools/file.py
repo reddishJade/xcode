@@ -7,7 +7,7 @@ from typing import Any
 
 from ..agent_runtime.contextual import ContextualRetrievalState
 from ..skills import ToolInput, ToolSpec, resolve_project_path
-from .path_utils import BLOCKED_PARTS, MAX_RETURN_CHARS, is_path_blocked, truncate_output, display_path
+from .path_utils import is_path_blocked, truncate_output, display_path
 
 """受沙箱约束的本地文件工具。
 
