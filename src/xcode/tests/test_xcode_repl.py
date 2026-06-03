@@ -278,7 +278,7 @@ class XcodeReplTests(unittest.TestCase):
                 code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
 
             self.assertEqual(code, 0)
-            self.assertIn("需要授权", renderer.rendered[0])
+            self.assertIn("requires approval", renderer.rendered[0])
 
     def test_run_repl_tool_list_shows_visible_and_hidden_groups(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

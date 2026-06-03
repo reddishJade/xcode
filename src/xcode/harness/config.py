@@ -16,6 +16,10 @@ ProviderTransport = Literal[
 ]
 ExecutionMode = Literal["plan", "review", "act"]
 
+PROFILE_MAIN = "main"
+PROFILE_SUBAGENT = "subagent"
+PROFILE_FALLBACK = "fallback"
+
 
 @dataclass(frozen=True)
 class AgentConfig:
@@ -45,9 +49,9 @@ class ModelProfileRuntimeConfig:
 class ProviderRuntimeConfig:
     model_profiles: dict[str, ModelProfileRuntimeConfig] = field(
         default_factory=lambda: {
-            "main": ModelProfileRuntimeConfig(),
-            "subagent": ModelProfileRuntimeConfig(),
-            "fallback": ModelProfileRuntimeConfig(),
+            PROFILE_MAIN: ModelProfileRuntimeConfig(),
+            PROFILE_SUBAGENT: ModelProfileRuntimeConfig(),
+            PROFILE_FALLBACK: ModelProfileRuntimeConfig(),
         }
     )
 
@@ -203,7 +207,7 @@ def _optional_path(value: object) -> Path | None:
 
 
 def _load_model_profiles(provider: dict) -> dict[str, ModelProfileRuntimeConfig]:
-    profiles = {"main": ModelProfileRuntimeConfig()}
+    profiles = {PROFILE_MAIN: ModelProfileRuntimeConfig()}
     raw_profiles = provider.get("model_profiles", {})
     if not isinstance(raw_profiles, dict):
         return profiles
@@ -213,36 +217,36 @@ def _load_model_profiles(provider: dict) -> dict[str, ModelProfileRuntimeConfig]
             continue
         if isinstance(raw, str):
             profiles[profile_name] = ModelProfileRuntimeConfig(
-                transport=profiles["main"].transport,
+                transport=profiles[PROFILE_MAIN].transport,
                 chat_model=raw,
-                base_url=profiles["main"].base_url,
-                api_key=profiles["main"].api_key,
+                base_url=profiles[PROFILE_MAIN].base_url,
+                api_key=profiles[PROFILE_MAIN].api_key,
             )
             continue
         if not isinstance(raw, dict):
             continue
         profiles[profile_name] = ModelProfileRuntimeConfig(
             transport=_normalize_transport(
-                raw.get("transport", profiles["main"].transport)
+                raw.get("transport", profiles[PROFILE_MAIN].transport)
             ),
-            chat_model=raw.get("chat_model", profiles["main"].chat_model),
-            base_url=raw.get("base_url", profiles["main"].base_url),
-            api_key=raw.get("api_key", profiles["main"].api_key),
-            thinking=bool(raw.get("thinking", profiles["main"].thinking)),
+            chat_model=raw.get("chat_model", profiles[PROFILE_MAIN].chat_model),
+            base_url=raw.get("base_url", profiles[PROFILE_MAIN].base_url),
+            api_key=raw.get("api_key", profiles[PROFILE_MAIN].api_key),
+            thinking=bool(raw.get("thinking", profiles[PROFILE_MAIN].thinking)),
             reasoning_effort=raw.get(
-                "reasoning_effort", profiles["main"].reasoning_effort
+                "reasoning_effort", profiles[PROFILE_MAIN].reasoning_effort
             ),
             clear_thinking=bool(
-                raw.get("clear_thinking", profiles["main"].clear_thinking)
+                raw.get("clear_thinking", profiles[PROFILE_MAIN].clear_thinking)
             ),
-            tool_stream=bool(raw.get("tool_stream", profiles["main"].tool_stream)),
+            tool_stream=bool(raw.get("tool_stream", profiles[PROFILE_MAIN].tool_stream)),
             response_format=_optional_dict(
-                raw.get("response_format", profiles["main"].response_format)
+                raw.get("response_format", profiles[PROFILE_MAIN].response_format)
             ),
         )
-    main = profiles["main"]
-    profiles.setdefault("subagent", main)
-    profiles.setdefault("fallback", main)
+    main = profiles[PROFILE_MAIN]
+    profiles.setdefault(PROFILE_SUBAGENT, main)
+    profiles.setdefault(PROFILE_FALLBACK, main)
     return profiles
 
 

@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, cast
 
 from xcode.harness.config import (
     AgentConfig,
+    PROFILE_MAIN,
+    PROFILE_SUBAGENT,
     XcodeRuntimeConfig,
     discover_runtime_config,
     resolve_config_path,
@@ -240,7 +242,7 @@ def build_tool_registry(
     if "subagent" in enabled or "experimental" in enabled:
         child_llms = llm_profiles_dict(llm, llm_profiles)
 
-        async def run_child(prompt, model_profile="subagent", cwd_override=None):
+        async def run_child(prompt, model_profile=PROFILE_SUBAGENT, cwd_override=None):
             effective_registry = child_registry
             if cwd_override is not None:
                 effective_registry = build_project_scoped_registry(
@@ -263,7 +265,7 @@ def build_tool_registry(
         managed_runner = ManagedSubagentRunner(
             run_child,
             available_profiles=tuple(child_llms),
-            default_profile="subagent",
+            default_profile=PROFILE_SUBAGENT,
             worktree_runner=worktree_runner,
         )
         closers.append(managed_runner.shutdown)
@@ -295,8 +297,8 @@ def llm_profiles_dict(
 ) -> dict[str, ModelProvider]:
     profiles = dict(llm_profiles or {})
     if not profiles:
-        profiles["main"] = llm
-    profiles.setdefault("subagent", profiles["main"])
+        profiles[PROFILE_MAIN] = llm
+    profiles.setdefault(PROFILE_SUBAGENT, profiles[PROFILE_MAIN])
     return profiles
 
 

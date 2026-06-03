@@ -350,7 +350,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         ]
         self.assertTrue(
             any(
-                "需要授权" in item or "permission denied" in item
+                "requires approval" in item or "permission denied" in item
                 for item in tool_results
             )
         )

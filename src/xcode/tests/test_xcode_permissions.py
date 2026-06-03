@@ -55,7 +55,7 @@ class XcodePermissionsTests(unittest.TestCase):
             {"echo": tool}, "echo", {"input": "hello"}, permission_policy=policy
         )
 
-        self.assertEqual(output, "工具需要授权：echo")
+        self.assertEqual(output, "tool requires approval: echo")
 
     def test_permission_policy_allow_skips_high_risk_approval(self) -> None:
         tool = ToolSpec(
@@ -198,7 +198,7 @@ class HITLPermissionModelTests(unittest.TestCase):
             approval_callback=lambda _t, _i: HITLResult("deny", "once"),
         )
         self.assertEqual(result.status, "denied")
-        self.assertIn("改用只读检查", result.content)
+        self.assertIn("read-only checks", result.content)
 
     def test_hitl_result_metadata_in_denied_result(self) -> None:
         tool = ToolSpec(

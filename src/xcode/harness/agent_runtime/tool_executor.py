@@ -19,6 +19,10 @@ from ..observability import (
 )
 from ..skills import (
     ApprovalCallback,
+    STATUS_APPROVAL_REQUIRED,
+    STATUS_DENIED,
+    STATUS_ERROR,
+    STATUS_OK,
     ToolExecutionResult,
     ToolSpec,
     stringify_tool_input,
@@ -163,13 +167,13 @@ class ToolExecutor:
         if decision == "ask":
             if self.approval_callback is None or tool_spec is None:
                 return ToolExecutionResult(
-                    "approval_required", f"工具需要授权：{call.name}"
+                    STATUS_APPROVAL_REQUIRED, f"tool requires approval: {call.name}"
                 )
             hitl = self.approval_callback(tool_spec, dict(call.input))
             if hitl.decision == "deny":
                 return ToolExecutionResult(
-                    "denied",
-                    f"用户拒绝了 {call.name}。请改用只读检查或请用户手动执行。",
+                    STATUS_DENIED,
+                    f"tool {call.name} denied by user; use read-only checks or request manual execution.",
                     metadata={"user_decision": "deny", "approval_scope": hitl.scope},
                 )
             return None
@@ -183,8 +187,8 @@ class ToolExecutor:
             tool_input=dict(call.input),
         )
         if perm_result.blocked:
-            return ToolExecutionResult("denied", perm_result.reason)
-        return ToolExecutionResult("denied", f"permission denied for tool: {call.name}")
+            return ToolExecutionResult(STATUS_DENIED, perm_result.reason)
+        return ToolExecutionResult(STATUS_DENIED, f"permission denied for tool: {call.name}")
 
     def _run_tool_with_hooks(
         self,
@@ -196,7 +200,7 @@ class ToolExecutor:
         action_input = stringify_tool_input(tool_input)
         if call.name not in active_tool_map and call.name in self.tool_map:
             return ToolExecutionResult(
-                "denied",
+                STATUS_DENIED,
                 f"tool unavailable in {mode} mode: {call.name}",
             )
         self._emit_hook(HookRecord("pre_tool", tool=call.name, input=action_input))
@@ -213,8 +217,8 @@ class ToolExecutor:
             self._emit_hook(
                 HookRecord("on_error", tool=call.name, input=action_input, error=error)
             )
-            return ToolExecutionResult("error", f"tool error: {error}")
-        if result.status == "error":
+            return ToolExecutionResult(STATUS_ERROR, f"tool error: {error}")
+        if result.status == STATUS_ERROR:
             error = result.content
             if result.metadata and "error" in result.metadata:
                 error = str(result.metadata["error"])
@@ -251,7 +255,7 @@ class ToolExecutor:
         meta = result.metadata or {}
         user_decision = meta.get("user_decision")
         approval_scope = meta.get("approval_scope")
-        approved = result.status == "ok" or user_decision == "allow"
+        approved = result.status == STATUS_OK or user_decision == "allow"
         self.audit_logger(
             AuditRecord(
                 session_id=self.session_id,

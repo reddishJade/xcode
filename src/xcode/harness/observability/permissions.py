@@ -247,7 +247,7 @@ def check_tool_permission(
                 hitl = approval_callback(tool_spec, tool_input or {})
                 if hitl.decision == "deny":
                     return PermissionCheckResult(
-                        blocked=True, reason=f"用户拒绝了 {tool_name}"
+                        blocked=True, reason=f"tool {tool_name} denied by user"
                     )
             else:
                 return PermissionCheckResult(
@@ -265,7 +265,7 @@ def check_tool_permission(
                 hitl = approval_callback(tool_spec, tool_input or {})
                 if hitl.decision == "deny":
                     return PermissionCheckResult(
-                        blocked=True, reason=f"用户拒绝了 {tool_name}"
+                        blocked=True, reason=f"tool {tool_name} denied by user"
                     )
 
     return PermissionCheckResult(blocked=False)

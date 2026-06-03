@@ -45,6 +45,19 @@ class ToolSpec:
 
 ToolExecutionStatus = Literal["ok", "denied", "error", "approval_required"]
 
+STATUS_OK: ToolExecutionStatus = "ok"
+STATUS_DENIED: ToolExecutionStatus = "denied"
+STATUS_ERROR: ToolExecutionStatus = "error"
+STATUS_APPROVAL_REQUIRED: ToolExecutionStatus = "approval_required"
+
+RISK_LOW = "low"
+RISK_HIGH = "high"
+
+STATUS_OK: ToolExecutionStatus = "ok"
+STATUS_DENIED: ToolExecutionStatus = "denied"
+STATUS_ERROR: ToolExecutionStatus = "error"
+STATUS_APPROVAL_REQUIRED: ToolExecutionStatus = "approval_required"
+
 
 @dataclass(frozen=True)
 class ToolExecutionResult:
@@ -133,9 +146,9 @@ def run_tool_result(
     )
     tool_decision = tool.risk_evaluator(action_input) if tool.risk_evaluator else None
     if tool_decision == "deny":
-        return ToolExecutionResult("denied", f"permission denied for tool: {action}")
+        return ToolExecutionResult(STATUS_DENIED, f"permission denied for tool: {action}")
     if decision == "deny":
-        return ToolExecutionResult("denied", f"permission denied for tool: {action}")
+        return ToolExecutionResult(STATUS_DENIED, f"permission denied for tool: {action}")
     requires_approval = (
         decision == "ask"
         or tool_decision == "ask"
@@ -147,13 +160,13 @@ def run_tool_result(
     )
     if requires_approval:
         if approval_callback is None:
-            return ToolExecutionResult("approval_required", f"工具需要授权：{action}")
+            return ToolExecutionResult(STATUS_APPROVAL_REQUIRED, f"tool requires approval: {action}")
         hitl = approval_callback(tool, action_input)
         if hitl.decision == "deny":
             return ToolExecutionResult(
-                "denied",
-                f"用户拒绝了 {action}。请改用只读检查（如 git status/git diff）"
-                f"或要求用户手动执行。",
+                STATUS_DENIED,
+                f"tool {action} denied by user; use read-only checks (e.g. git status/git diff)"
+                f" or request manual execution.",
                 metadata={"user_decision": "deny", "approval_scope": hitl.scope},
             )
         approval_meta = {"user_decision": "allow", "approval_scope": hitl.scope}
@@ -162,13 +175,13 @@ def run_tool_result(
     try:
         content = redact_text(tool.handler(action_input))
         return ToolExecutionResult(
-            "ok", content, metadata=dict(approval_meta) if approval_meta else None
+            STATUS_OK, content, metadata=dict(approval_meta) if approval_meta else None
         )
     except Exception as exc:
         meta = {"error": str(exc)}
         if approval_meta:
             meta.update(approval_meta)
-        return ToolExecutionResult("error", f"tool error: {exc}", meta)
+        return ToolExecutionResult(STATUS_ERROR, f"tool error: {exc}", meta)
 
 
 def stringify_tool_input(action_input: ToolInput) -> str:

@@ -16,7 +16,7 @@ class XcodeBashToolTests(unittest.TestCase):
             output = run_tool(
                 {tool.name: tool}, "bash", {"command": "git status --short"}
             )
-            self.assertNotIn("需要授权", output)
+            self.assertNotIn("requires approval", output)
 
     def test_bash_runs_command_and_returns_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
