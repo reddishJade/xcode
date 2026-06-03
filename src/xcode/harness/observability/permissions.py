@@ -202,3 +202,70 @@ class CompositePermissionPolicy:
         if self.inner is not None:
             return self.inner.decide(tool_name, action_input)
         return None
+
+
+# ── 统一权限决策 ──
+
+
+@dataclass(frozen=True)
+class PermissionCheckResult:
+    """权限决策结果。
+
+    blocked=True 时 reason 描述拦截原因；
+    blocked=False 时允许执行。
+    """
+
+    blocked: bool
+    reason: str = ""
+
+
+def check_tool_permission(
+    tool_name: str,
+    action_input: str,
+    *,
+    permission_policy: PermissionPolicy | None = None,
+    approval_callback: Any | None = None,
+    tool_spec: Any | None = None,
+    tool_input: dict[str, Any] | None = None,
+) -> PermissionCheckResult:
+    """统一权限决策入口。
+
+    合并 PermissionPolicy.decide() 和 risk_evaluator 两层检查：
+    1. PermissionPolicy 返回 "deny" → 阻断
+    2. PermissionPolicy 返回 "ask" 或 risk_evaluator 返回 "ask" → 需要 approval
+    3. risk_evaluator 返回 "deny" → 阻断
+    4. 否则放行
+    """
+    if permission_policy is not None:
+        decision = permission_policy.decide(tool_name, action_input)
+        if decision == "deny":
+            return PermissionCheckResult(
+                blocked=True, reason=f"permission denied for tool: {tool_name}"
+            )
+        if decision == "ask":
+            if approval_callback is not None and tool_spec is not None:
+                hitl = approval_callback(tool_spec, tool_input or {})
+                if hitl.decision == "deny":
+                    return PermissionCheckResult(
+                        blocked=True, reason=f"用户拒绝了 {tool_name}"
+                    )
+            else:
+                return PermissionCheckResult(
+                    blocked=True, reason=f"permission denied for tool: {tool_name}"
+                )
+
+    if tool_spec is not None and tool_spec.risk_evaluator:
+        risk_decision = tool_spec.risk_evaluator(tool_input or {})
+        if risk_decision == "deny":
+            return PermissionCheckResult(
+                blocked=True, reason=f"permission denied for tool: {tool_name}"
+            )
+        if risk_decision == "ask":
+            if approval_callback is not None:
+                hitl = approval_callback(tool_spec, tool_input or {})
+                if hitl.decision == "deny":
+                    return PermissionCheckResult(
+                        blocked=True, reason=f"用户拒绝了 {tool_name}"
+                    )
+
+    return PermissionCheckResult(blocked=False)

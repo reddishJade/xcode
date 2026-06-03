@@ -14,6 +14,7 @@ from ..observability import (
     HookManager,
     HookRecord,
     PermissionPolicy,
+    check_tool_permission,
     redact_text,
 )
 from ..skills import (
@@ -157,13 +158,14 @@ class ToolExecutor:
         decision = self.policy.check_call(call)
         if decision == "allow":
             return None
-        tool = self.tool_map.get(call.name)
+        tool_spec = self.tool_map.get(call.name)
+        action_input = stringify_tool_input(dict(call.input))
         if decision == "require_approval":
-            if self.approval_callback is None or tool is None:
+            if self.approval_callback is None or tool_spec is None:
                 return ToolExecutionResult(
                     "approval_required", f"工具需要授权：{call.name}"
                 )
-            hitl = self.approval_callback(tool, dict(call.input))
+            hitl = self.approval_callback(tool_spec, dict(call.input))
             if hitl.decision == "deny":
                 return ToolExecutionResult(
                     "denied",
@@ -171,6 +173,17 @@ class ToolExecutor:
                     metadata={"user_decision": "deny", "approval_scope": hitl.scope},
                 )
             return None
+        # decision == "deny" — 还需检查 risk_evaluator
+        perm_result = check_tool_permission(
+            call.name,
+            action_input,
+            permission_policy=self.permission_policy,
+            approval_callback=self.approval_callback,
+            tool_spec=tool_spec,
+            tool_input=dict(call.input),
+        )
+        if perm_result.blocked:
+            return ToolExecutionResult("denied", perm_result.reason)
         return ToolExecutionResult("denied", f"permission denied for tool: {call.name}")
 
     def _run_tool_with_hooks(

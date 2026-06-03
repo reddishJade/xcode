@@ -50,7 +50,7 @@ from xcode.ai.providers.protocol import ModelProvider
 from .execution_modes import mode_notice, policy_for_mode
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
-from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
+from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy, check_tool_permission
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 __all__ = ["StructuredAgent", "StructuredAgentEvent", "StructuredAgentResult"]
@@ -338,6 +338,7 @@ class StructuredAgent:
         ) -> BeforeToolCallResult | None:
             tc = ctx.tool_call
             args = ctx.args
+            action_input = stringify_tool_input(args)
 
             # 执行模式策略检查
             decision = policy.check_call(
@@ -348,14 +349,18 @@ class StructuredAgent:
                     block=True, reason=f"permission denied for tool: {tc.name}"
                 )
             if decision == "require_approval":
-                tool = self.tool_map.get(tc.name)
-                if tool is not None and self.approval_callback is not None:
-                    hitl = self.approval_callback(tool, args)
-                    if hitl.decision == "deny":
-                        return BeforeToolCallResult(
-                            block=True, reason=f"用户拒绝了 {tc.name}"
-                        )
-                else:
+                tool_spec = self.tool_map.get(tc.name)
+                perm_result = check_tool_permission(
+                    tc.name,
+                    action_input,
+                    approval_callback=self.approval_callback,
+                    tool_spec=tool_spec,
+                    tool_input=args,
+                )
+                if perm_result.blocked:
+                    return BeforeToolCallResult(block=True, reason=perm_result.reason)
+                # require_approval 但无 approval_callback 或无 tool_spec 时也阻断
+                if self.approval_callback is None or tool_spec is None:
                     return BeforeToolCallResult(
                         block=True, reason=f"permission denied for tool: {tc.name}"
                     )
@@ -364,7 +369,7 @@ class StructuredAgent:
             if self.hook_manager is not None:
                 self.hook_manager.emit(
                     HookRecord(
-                        "pre_tool", tool=tc.name, input=stringify_tool_input(args)
+                        "pre_tool", tool=tc.name, input=action_input
                     )
                 )
             return None

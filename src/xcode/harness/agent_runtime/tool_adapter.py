@@ -16,8 +16,8 @@ from ...agent.types import (
     ToolExecutionMode,
     ToolUpdateCallback,
 )
-from ..skills import ToolSpec
-from ..observability import PermissionPolicy, redact_text
+from ..skills import ToolSpec, stringify_tool_input
+from ..observability import PermissionPolicy, PermissionCheckResult, check_tool_permission, redact_text
 from ..observability import HITLResult
 
 
@@ -66,38 +66,18 @@ class ToolSpecAdapter:
         signal: CancellationSignal | None = None,
         on_update: ToolUpdateCallback | None = None,
     ) -> AgentToolResult[None]:
-        # 权限检查
-        if self._permission_policy:
-            from ..skills import stringify_tool_input
+        action_input = stringify_tool_input(params)
+        result: PermissionCheckResult = check_tool_permission(
+            self._spec.name,
+            action_input,
+            permission_policy=self._permission_policy,
+            approval_callback=self._approval_callback,
+            tool_spec=self._spec,
+            tool_input=params,
+        )
+        if result.blocked:
+            return AgentToolResult(content=[TextContent(text=result.reason)])
 
-            action_input = stringify_tool_input(params)
-            decision = self._permission_policy.decide(self._spec.name, action_input)
-            if decision == "deny":
-                return AgentToolResult(
-                    content=[TextContent(text=f"permission denied for tool: {self._spec.name}")]
-                )
-            if decision == "ask" and self._approval_callback:
-                hitl: HITLResult = self._approval_callback(self._spec, params)
-                if hitl.decision == "deny":
-                    return AgentToolResult(
-                        content=[TextContent(text=f"用户拒绝了 {self._spec.name}")]
-                    )
-
-        # risk_evaluator 检查
-        if self._spec.risk_evaluator:
-            risk_decision = self._spec.risk_evaluator(params)
-            if risk_decision == "deny":
-                return AgentToolResult(
-                    content=[TextContent(text=f"permission denied for tool: {self._spec.name}")]
-                )
-            if risk_decision == "ask" and self._approval_callback:
-                hitl = self._approval_callback(self._spec, params)
-                if hitl.decision == "deny":
-                    return AgentToolResult(
-                        content=[TextContent(text=f"用户拒绝了 {self._spec.name}")]
-                    )
-
-        # 执行 handler（同步 → 异步）
         content = await asyncio.to_thread(self._spec.handler, params)
         return AgentToolResult(content=[TextContent(text=redact_text(content))])
 

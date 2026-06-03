@@ -8,6 +8,7 @@ from .audit import AuditRecord, JsonlAuditLogger, redact_text
 from .hooks import HookManager, HookRecord
 from .permissions import (
     HITLResult,
+    PermissionCheckResult,
     PermissionDecision,
     PermissionPolicy,
     PermissionRule,
@@ -15,6 +16,7 @@ from .permissions import (
     SessionPermissionPolicy,
     SettingsSandboxPermissionPolicy,
     CompositePermissionPolicy,
+    check_tool_permission,
 )
 
 __all__ = [
@@ -23,6 +25,7 @@ __all__ = [
     "HookManager",
     "HookRecord",
     "JsonlAuditLogger",
+    "PermissionCheckResult",
     "PermissionDecision",
     "PermissionPolicy",
     "PermissionRule",
@@ -30,5 +33,6 @@ __all__ = [
     "SessionPermissionPolicy",
     "SettingsSandboxPermissionPolicy",
     "CompositePermissionPolicy",
+    "check_tool_permission",
     "redact_text",
 ]
