@@ -2,43 +2,49 @@
 
 本模块把模型响应看作 content blocks：text、tool_use、tool_result，并在
 事件流中暴露模型输出、工具调用、工具结果和最终答案。
+
+StructuredAgent 是 harness 层对 agent 核心循环的适配：将 Xcode 特定的
+ToolSpec、权限、审计、压缩等配置映射为 AgentLoopConfig，委托给
+agent/agent_loop.py 的 run_agent_loop 执行。
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-import json
 from pathlib import Path
-from time import perf_counter
 from typing import Any, AsyncIterator, Generator, Iterator, cast
 
+from ...agent.agent_loop import run_agent_loop
 from ...agent.messages import convert_to_llm
-from ...agent.types import AgentMessage, AssistantMessage, SystemMessage, UserMessage
+from ...agent.types import (
+    AgentContext,
+    AgentEvent,
+    AgentLoopConfig,
+    AgentLoopResult,
+    AgentMessage,
+    AssistantMessage,
+    MessageEndEvent,
+    MessageUpdateEvent,
+    SystemMessage,
+    TextContent,
+    ToolCallBlock,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+    UserMessage,
+)
 from .agent_helpers import (
-    budget_messages_for_provider,
-    blocks_to_typed,
-    check_repeated_tool_watchdog,
-    elapsed_ms,
-    finalize_metrics,
-    is_tool_use,
-    reasoning_for_assistant,
     run_coro_sync,
     aiter_to_sync_iter,
     text_from_blocks,
     to_dict,
-    to_tool_use,
 )
-
 from .cancellation import CancellationToken
-from .compaction import CompactController, estimate_message_tokens, estimate_text_tokens
+from .compaction import CompactController, estimate_message_tokens
 from xcode.ai.events import ToolCall as ToolUseBlock
 from xcode.ai.providers.protocol import ModelProvider
-from .tool_events import ToolResult
 from .execution_modes import mode_notice, policy_for_mode
-from .streaming import call_model_streaming, execute_tool_uses
-from .tool_executor import tool_result_message
+from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec
@@ -77,29 +83,13 @@ class StructuredAgentEvent:
     data: Any
 
 
-class RunState:
-    def __init__(self, messages: list[dict[str, Any]], mode: ExecutionMode) -> None:
-        self.messages = messages
-        self.mode: ExecutionMode = mode
-        self.tool_calls: list[ToolUseBlock] = []
-        self.last_tool_signature: str | None = None
-        self.repeated_tool_count: int = 0
-        self.step: int = 1
-        self.consecutive_continuations: int = 0
-        self.consecutive_idle_steps: int = 0
-        self.step_retries: int = 0
-        self.consecutive_errors: int = 0
-        self.metrics: dict[str, Any] = {
-            "llm_calls": 0,
-            "tool_calls": 0,
-            "estimated_prompt_tokens": 0,
-            "model_latencies_ms": [],
-            "tool_latencies_ms": [],
-        }
-
-
 class StructuredAgent:
-    """与 provider 解耦的结构化工具调用循环。"""
+    """与 provider 解耦的结构化工具调用循环。
+
+    harness 层适配器：将 Xcode 特定配置映射为 AgentLoopConfig，
+    委托 agent 核心循环执行，通过事件翻译保持 StructuredAgentEvent
+    接口不变。
+    """
 
     def __init__(
         self,
@@ -190,230 +180,116 @@ class StructuredAgent:
         effective_mode = mode or self.config.execution_mode
         policy = policy_for_mode(effective_mode)
         active_registry = policy.filter_tools(self.registry)
-        active_tool_map = {t.name: t for t in active_registry}
         self.cancellation_token.reset()
-        state = RunState(
-            self._initial_messages(question, effective_mode), effective_mode
+
+        # 构建初始消息
+        initial_messages = self._initial_messages(question, effective_mode)
+
+        # 适配 ToolSpec → AgentTool
+        adapted_tools: list[Any] = adapt_tool_specs(
+            active_registry,
+            approval_callback=self.approval_callback,
+            permission_policy=self.permission_policy,
         )
 
-        for step in range(1, self.config.max_steps + 1):
-            state.step = step
-            if self.cancellation_token.is_cancelled():
-                yield _final_event(
-                    state.step,
-                    StructuredAgentResult(
-                        answer=self.cancellation_token.reason,
-                        messages=state.messages,
-                        steps=state.step,
-                        tool_calls=state.tool_calls,
-                    ),
-                )
-                return
+        # 构建 AgentLoopConfig
+        loop_config = self._build_loop_config(effective_mode)
 
-            while self.steer_queue:
-                state.messages.append(to_dict(self.steer_queue.pop(0)))
-
-            inner_events: list[StructuredAgentEvent] = []
-            accumulated = await self._run_inner_loop(
-                state, active_registry, inner_events
-            )
-            for e in inner_events:
-                yield e
-            if accumulated is None:
-                return
-
-            uses = [to_tool_use(b) for b in accumulated if is_tool_use(b)]
-            if not uses:
-                yield _final_event(
-                    state.step,
-                    StructuredAgentResult(
-                        answer=text_from_blocks(accumulated),
-                        messages=state.messages,
-                        steps=state.step,
-                        tool_calls=state.tool_calls,
-                        metrics=finalize_metrics(state.metrics),
-                    ),
-                )
-                return
-
-            wd_reason, state.last_tool_signature, state.repeated_tool_count = (
-                check_repeated_tool_watchdog(
-                    uses,
-                    state.last_tool_signature,
-                    state.repeated_tool_count,
-                    self.config.watchdog_repeated_tool_limit,
-                )
-            )
-            if wd_reason is not None:
-                yield _final_event(
-                    state.step,
-                    StructuredAgentResult(
-                        answer=wd_reason,
-                        messages=state.messages,
-                        steps=state.step,
-                        tool_calls=state.tool_calls,
-                        metrics=finalize_metrics(state.metrics),
-                        stopped_by_watchdog=True,
-                        watchdog_reason=wd_reason,
-                    ),
-                )
-                return
-
-            for tu in uses:
-                state.tool_calls.append(tu)
-                yield StructuredAgentEvent("tool_use", state.step, tu)
-
-            results = await execute_tool_uses(
-                uses=uses,
-                registry=self.registry,
-                tool_workers=self.config.tool_workers,
-                approval_callback=self.approval_callback,
-                permission_policy=self.permission_policy,
-                hook_manager=self.hook_manager,
-                audit_logger=self.audit_logger,
-                session_id=self.session_id,
-                policy=policy,
-                cancellation_token=self.cancellation_token,
-                active_tool_map=active_tool_map,
-                mode=state.mode,
-            )
-            for tu, res in zip(uses, results, strict=True):
-                state.metrics["tool_calls"] += 1
-                if res.elapsed_ms is not None:
-                    state.metrics["tool_latencies_ms"].append(res.elapsed_ms)
-                yield StructuredAgentEvent(
-                    "tool_result",
-                    state.step,
-                    ToolResultBlock(res.tool_call_id, res.content, res.status),
-                )
-                for spec_event in self._emit_speculation(
-                    tu.name, res.status, state.step
-                ):
-                    yield spec_event
-            state.messages.append(
-                {"role": "user", "content": [tool_result_message(r) for r in results]}
-            )
-
-            if _is_productive(uses, results, active_tool_map):
-                state.consecutive_idle_steps = 0
-            elif state.mode == "act":
-                state.consecutive_idle_steps += 1
-            if state.consecutive_idle_steps >= 4:
-                raise RuntimeError(
-                    "Watchdog triggered: 4 consecutive steps without productive tool calls."
-                )
-
-            while self.followup_queue:
-                state.messages.append(to_dict(self.followup_queue.pop(0)))
-
-        yield _final_event(
-            self.config.max_steps,
-            StructuredAgentResult(
-                answer="step limit reached",
-                messages=state.messages,
-                steps=self.config.max_steps,
-                tool_calls=state.tool_calls,
-                stopped_by_limit=True,
-                metrics=finalize_metrics(state.metrics),
-            ),
+        # 构建 AgentContext
+        context = AgentContext(
+            messages=[],
+            tools=adapted_tools,
         )
 
-    # ── 内层循环 ──
+        # 事件翻译：收集事件并 yield
+        translated_events: list[StructuredAgentEvent] = []
+        step_counter = [0]
 
-    async def _run_inner_loop(
-        self,
-        state: RunState,
-        active_registry: tuple[ToolSpec, ...],
-        out_events: list[StructuredAgentEvent],
-    ) -> list[dict[str, Any]] | None:
-        """内层循环：compact → model call → retry/max_tokens。返回 accumulated 或 None（提前退出）。"""
-        accumulated: list[dict[str, Any]] = []
-        while True:
-            if self._should_compact(state.messages):
-                self._emit_hook(
-                    HookRecord("on_compact", metadata={"messages": len(state.messages)})
+        def translate_emit(event: AgentEvent) -> None:
+            translated = _translate_event(event, step_counter)
+            if translated is not None:
+                translated_events.extend(
+                    translated if isinstance(translated, list) else [translated]
                 )
-                assert self.compactor is not None
-                state.messages = self.compactor(state.messages)
-            state.messages = budget_messages_for_provider(state.messages)
-            state.metrics["llm_calls"] += 1
-            state.metrics["estimated_prompt_tokens"] += estimate_message_tokens(
-                state.messages
+
+        # 委托给 agent 核心循环
+        result = await run_agent_loop(
+            prompts=initial_messages,
+            context=context,
+            config=loop_config,
+            emit=translate_emit,
+            signal=self.cancellation_token,  # type: ignore[arg-type]
+        )
+
+        # 同步 provider 状态（核心循环可能切换了 fallback）
+        if result.active_provider is not None and result.active_provider is not self.provider:
+            self.provider = result.active_provider
+
+        # yield 所有翻译后的事件
+        for event in translated_events:
+            yield event
+
+        # 构建最终结果
+        final = _build_structured_result(result, self.config.max_steps)
+        yield _final_event(result.steps, final)
+
+    # ── 配置构建 ──
+
+    def _build_loop_config(self, mode: ExecutionMode) -> AgentLoopConfig:
+        """将 harness 配置映射为 AgentLoopConfig。"""
+
+        def should_compact(messages: list[AgentMessage]) -> bool:
+            return self._should_compact([to_dict(m) for m in messages])
+
+        def compact(messages: list[AgentMessage]) -> list[AgentMessage]:
+            self._emit_hook(
+                HookRecord("on_compact", metadata={"messages": len(messages)})
             )
-            started = perf_counter()
+            if self.compactor is None:
+                return messages
+            dict_messages = [to_dict(m) for m in messages]
+            self.compactor(dict_messages)
+            # compactor 通过 dict 操作，返回值由 harness 层管理
+            return messages
 
-            (
-                blocks,
-                stop_reason,
-                events,
-                reasoning,
-                new_err,
-                switched,
-            ) = await call_model_streaming(
-                self.provider,
-                self.fallback_provider,
-                state.messages,
-                active_registry,
-                state.consecutive_errors,
-                state.step,
-            )
-            state.consecutive_errors = new_err
-            if switched:
-                assert self.fallback_provider is not None
-                self.provider = self.fallback_provider  # 永久切换
-                self._consecutive_errors = 0
-            state.metrics["model_latencies_ms"].append(elapsed_ms(started))
-            out_events.extend(events)
-            out_events.append(StructuredAgentEvent("assistant", state.step, blocks))
-            accumulated.extend(blocks)
-            state.messages.append(
-                to_dict(
-                    AssistantMessage(
-                        content=blocks_to_typed(blocks),
-                        reasoning_content=reasoning_for_assistant(blocks, reasoning),
-                    )
-                )
-            )
+        def is_tool_productive(
+            tool_calls: list[ToolCallBlock],
+            tool_results: list[Any],
+        ) -> bool:
+            # plan 模式不做空闲检测（阅读即探索，不算空转）
+            if mode == "plan":
+                return True
+            return _is_productive_from_results(tool_calls, tool_results)
 
-            if stop_reason == "error":
-                retries = state.step_retries + 1
-                state.step_retries = retries
-                if retries <= 3:
-                    await asyncio.sleep(0.5 * (2 ** (retries - 1)))
-                    continue
-                if not accumulated:
-                    out_events.append(
-                        _final_event(
-                            state.step,
-                            StructuredAgentResult(
-                                answer="I encountered an error."
-                                if not state.messages
-                                else "I encountered an error. Please try again.",
-                                messages=state.messages,
-                                steps=state.step,
-                                tool_calls=state.tool_calls,
-                            ),
-                        )
-                    )
-                    return None
-                return accumulated
+        return AgentLoopConfig(
+            provider=self.provider,
+            convert_to_llm=convert_to_llm,
+            max_steps=self.config.max_steps,
+            max_step_retries=3,
+            retry_backoff_base=0.5,
+            max_tokens_continuation=True,
+            max_consecutive_continuations=3,
+            min_continuation_tokens=500,
+            watchdog_repeated_tool_limit=self.config.watchdog_repeated_tool_limit,
+            max_consecutive_idle_steps=4,
+            fallback_provider=self.fallback_provider,
+            consecutive_error_threshold=3,
+            should_compact=should_compact if self.compactor else None,
+            compact=compact if self.compactor else None,
+            is_tool_productive=is_tool_productive,
+            get_steering_messages=self._drain_steer_queue,
+            get_follow_up_messages=self._drain_followup_queue,
+        )
 
-            if stop_reason == "max_tokens":
-                inc = estimate_text_tokens(
-                    json.dumps(blocks, ensure_ascii=False, default=str)
-                )
-                state.consecutive_continuations = (
-                    state.consecutive_continuations + 1 if inc < 500 else 0
-                )
-                if state.consecutive_continuations >= 3:
-                    raise RuntimeError(
-                        "Diminishing Returns: consecutive output token increments below 500 limit."
-                    )
-                state.messages.append(to_dict(UserMessage(content="continue")))
-                continue
+    def _drain_steer_queue(self) -> list[AgentMessage]:
+        msgs = list(self.steer_queue)
+        self.steer_queue.clear()
+        return msgs
 
-            state.consecutive_continuations = 0
-            return accumulated
+    def _drain_followup_queue(self) -> list[AgentMessage]:
+        msgs = list(self.followup_queue)
+        self.followup_queue.clear()
+        return msgs
 
     # ── 辅助方法 ──
 
@@ -436,7 +312,7 @@ class StructuredAgent:
 
     def _initial_messages(
         self, question: str, mode: ExecutionMode = "act"
-    ) -> list[dict[str, Any]]:
+    ) -> list[AgentMessage]:
         typed: list[AgentMessage] = []
         notice = mode_notice(mode)
         if self.runtime_context_provider is not None:
@@ -448,7 +324,7 @@ class StructuredAgent:
         elif notice:
             typed.append(SystemMessage(content=notice))
         typed.append(UserMessage(content=question))
-        return convert_to_llm(typed)
+        return typed
 
     def _emit_speculation(
         self, tool_name: str | None, status: str, step: int
@@ -458,6 +334,145 @@ class StructuredAgent:
         event = self.speculation_planner.plan(tool_name, status)
         if event is not None:
             yield StructuredAgentEvent("speculation", step, event)
+
+
+# ── 事件翻译 ──
+
+
+def _translate_event(
+    event: AgentEvent, step_counter: list[int]
+) -> StructuredAgentEvent | list[StructuredAgentEvent] | None:
+    """将 AgentEvent 翻译为 StructuredAgentEvent。"""
+    from ...agent.types import AgentStartEvent, TurnStartEvent
+
+    if isinstance(event, AgentStartEvent):
+        return None
+
+    if isinstance(event, TurnStartEvent):
+        step_counter[0] += 1
+        return None
+
+    if isinstance(event, MessageUpdateEvent):
+        msg = event.message
+        if isinstance(msg, AssistantMessage) and msg.content:
+            blocks = _assistant_to_raw_blocks(msg)
+            return StructuredAgentEvent("assistant", step_counter[0], blocks)
+        return None
+
+    if isinstance(event, MessageEndEvent):
+        return None
+
+    if isinstance(event, ToolExecutionStartEvent):
+        tu = ToolUseBlock(
+            id=event.tool_call_id,
+            name=event.tool_name,
+            input=event.args or {},
+        )
+        return StructuredAgentEvent("tool_use", step_counter[0], tu)
+
+    if isinstance(event, ToolExecutionEndEvent):
+        return StructuredAgentEvent(
+            "tool_result",
+            step_counter[0],
+            ToolResultBlock(
+                tool_use_id=event.tool_call_id,
+                content=str(event.result.content) if event.result else "",
+                status="error" if event.is_error else "ok",
+            ),
+        )
+
+    return None
+
+
+def _assistant_to_raw_blocks(msg: AssistantMessage) -> list[dict[str, Any]]:
+    """将 AssistantMessage 转换为 raw block 列表。"""
+    blocks: list[dict[str, Any]] = []
+    for block in msg.content:
+        if isinstance(block, TextContent):
+            blocks.append({"type": "text", "text": block.text})
+        elif isinstance(block, ToolCallBlock):
+            blocks.append({
+                "type": "tool_use",
+                "id": block.id,
+                "name": block.name,
+                "input": block.arguments or {},
+            })
+    return blocks
+
+
+def _build_structured_result(
+    result: AgentLoopResult, max_steps: int
+) -> StructuredAgentResult:
+    """将 AgentLoopResult 转换为 StructuredAgentResult。"""
+    # 提取文本答案
+    answer = ""
+    for msg in result.messages:
+        if isinstance(msg, AssistantMessage):
+            answer = text_from_blocks(
+                [{"type": "text", "text": b.text} if isinstance(b, TextContent) else {}
+                 for b in msg.content]
+            )
+
+    # 提取工具调用
+    tool_calls: list[ToolUseBlock] = []
+    for msg in result.messages:
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, ToolCallBlock):
+                    tool_calls.append(
+                        ToolUseBlock(
+                            id=block.id,
+                            name=block.name,
+                            input=block.arguments or {},
+                        )
+                    )
+
+    # 转换消息为 dict
+    messages = [to_dict(m) for m in result.messages]
+
+    # 构建指标
+    metrics = None
+    if result.metrics:
+        metrics = {
+            "llm_calls": result.metrics.llm_calls,
+            "tool_calls": result.metrics.tool_calls,
+            "estimated_prompt_tokens": 0,
+            "model_latencies_ms": result.metrics.model_latencies_ms,
+            "tool_latencies_ms": result.metrics.tool_latencies_ms,
+        }
+
+    return StructuredAgentResult(
+        answer=answer,
+        messages=messages,
+        steps=result.steps,
+        tool_calls=tool_calls,
+        stopped_by_limit=result.stopped_by_limit,
+        metrics=metrics,
+        stopped_by_watchdog=result.stopped_by_watchdog,
+        watchdog_reason=result.watchdog_reason,
+    )
+
+
+def _is_productive_from_results(
+    tool_calls: list[ToolCallBlock], tool_results: list[Any]
+) -> bool:
+    """从工具调用和结果判断是否有生产力。
+
+    与 _is_productive 逻辑一致：只有写操作（write_file、edit_file、bash 等）
+    才算有生产力，read_file/glob/grep 等只读操作不算。
+    """
+    _write_tools = {
+        "write_file", "edit_file", "write_to_file",
+        "replace_file_content", "multi_replace_file_content", "bash",
+    }
+    for tc, res in zip(tool_calls, tool_results, strict=False):
+        is_ok = (
+            (hasattr(res, "is_error") and not res.is_error)
+            or (hasattr(res, "status") and res.status == "ok")
+        )
+        if is_ok and tc.name in _write_tools:
+            return True
+    return False
 
 
 # ── 模块级辅助 ──
@@ -483,10 +498,10 @@ def _resolve_permission_policy(
 
 
 def _is_productive(
-    uses: list[ToolUseBlock], results: list[ToolResult], tool_map: dict[str, ToolSpec]
+    uses: list[ToolUseBlock], results: list[Any], tool_map: dict[str, ToolSpec]
 ) -> bool:
     for tu, res in zip(uses, results, strict=True):
-        if res.status == "ok":
+        if hasattr(res, "status") and res.status == "ok":
             spec = tool_map.get(tu.name)
             if spec and spec.read_only:
                 return True

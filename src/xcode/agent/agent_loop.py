@@ -203,6 +203,7 @@ async def _run_loop(
                 messages=new_messages,
                 steps=step,
                 metrics=metrics,
+                active_provider=active_provider,
             )
             emit(_agent_end_event(new_messages, result))
             return result
@@ -257,6 +258,7 @@ async def _run_loop(
                 messages=new_messages,
                 steps=step,
                 metrics=metrics,
+                active_provider=active_provider,
             )
             emit(_agent_end_event(new_messages, result))
             return result
@@ -276,7 +278,7 @@ async def _run_loop(
         if stop_reason in ("error", "aborted"):
             emit(_turn_end_event(message, []))
             emit(_agent_end_event(new_messages))
-            return AgentLoopResult(messages=new_messages, steps=step, metrics=metrics)
+            return AgentLoopResult(messages=new_messages, steps=step, metrics=metrics, active_provider=active_provider)
 
         # ── 提取工具调用 ──
         tool_calls = [b for b in message.content if isinstance(b, ToolCallBlock)]
@@ -327,6 +329,7 @@ async def _run_loop(
                 stopped_by_watchdog=True,
                 watchdog_reason=reason,
                 metrics=metrics,
+                active_provider=active_provider,
             )
             emit(_agent_end_event(new_messages, result))
             return result
@@ -352,6 +355,7 @@ async def _run_loop(
                 stopped_by_watchdog=True,
                 watchdog_reason=reason,
                 metrics=metrics,
+                active_provider=active_provider,
             )
             emit(_agent_end_event(new_messages, result))
             return result
@@ -372,7 +376,7 @@ async def _run_loop(
             )
             if config.should_stop_after_turn(ctx):
                 result = AgentLoopResult(
-                    messages=new_messages, steps=step, metrics=metrics
+                    messages=new_messages, steps=step, metrics=metrics, active_provider=active_provider
                 )
                 emit(_agent_end_event(new_messages, result))
                 return result
@@ -394,6 +398,7 @@ async def _run_loop(
         steps=config.max_steps,
         stopped_by_limit=True,
         metrics=metrics,
+        active_provider=active_provider,
     )
     emit(_agent_end_event(new_messages, result))
     return result
@@ -503,10 +508,13 @@ async def _run_inner_loop(
         final_text = "".join(text_parts)
         content_blocks: list[ContentBlock] = [TextContent(text=final_text)]
         content_blocks.extend(tool_calls_found)
+
+        valid_stop_reasons = ("end_turn", "max_tokens", "stop_sequence", "error", "aborted")
+        final_stop_reason = stop_reason if stop_reason in valid_stop_reasons else "end_turn"
         message = AssistantMessage(
             content=content_blocks,
             reasoning_content="".join(reasoning_parts) if reasoning_parts else None,
-            stop_reason=stop_reason,
+            stop_reason=final_stop_reason,  # type: ignore[arg-type]
         )
 
         # ── 检查是否为 FinalMessage 的错误 ──

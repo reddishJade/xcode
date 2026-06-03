@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import AsyncIterator
-
 from xcode.ai.events import FinalMessage, ProviderEvent
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import ToolDefinition

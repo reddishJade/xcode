@@ -20,18 +20,14 @@ from ...agent.types import (
     ToolCallBlock,
 )
 from xcode.ai.events import (
-    ProviderEvent,
     ToolCall as ToolUseBlock,
 )
-from xcode.ai.providers.protocol import ModelProvider
-from xcode.harness.adapters.tool_schema import tool_definitions_from_specs
 from .cancellation import CancellationToken
 from .compaction import (
     budget_large_tool_outputs,
     latest_read_file_tool_result_ids,
 )
 from .tool_executor import stringify_tool_input
-from ..skills import ToolSpec
 from .async_worker import IsolatedAsyncWorker
 
 from typing import TYPE_CHECKING
@@ -232,15 +228,3 @@ def aiter_to_sync_iter(
 
 
 # ── provider 事件收集 ──
-
-
-async def collect_provider_events(
-    provider: ModelProvider,
-    messages: list[dict[str, Any]],
-    registry: tuple[ToolSpec, ...],
-) -> list[ProviderEvent]:
-    events = []
-    tool_definitions = tool_definitions_from_specs(registry)
-    async for event in provider.stream(messages, tool_definitions):
-        events.append(event)
-    return events

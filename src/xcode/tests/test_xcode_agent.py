@@ -14,7 +14,6 @@ from xcode.agent.types import (
     AgentToolResult,
     AssistantMessage,
     TextContent,
-    ToolCallBlock,
     ToolExecutionMode,
     ToolResultMessage,
     UserMessage,
@@ -248,7 +247,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
     async def test_error_retry_exhausted(self) -> None:
         provider = ErrorProvider(fail_count=10)
 
-        result = await run_agent_loop(
+        await run_agent_loop(
             prompts=[UserMessage(content="hello")],
             context=AgentContext(),
             config=AgentLoopConfig(
@@ -302,6 +301,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result.stopped_by_watchdog)
         self.assertIsNotNone(result.watchdog_reason)
+        assert result.watchdog_reason is not None
         self.assertIn("repeated", result.watchdog_reason.lower())
 
     async def test_idle_step_watchdog(self) -> None:
@@ -342,6 +342,8 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(result.stopped_by_watchdog)
+        self.assertIsNotNone(result.watchdog_reason)
+        assert result.watchdog_reason is not None
         self.assertIn("consecutive steps", result.watchdog_reason.lower())
 
     async def test_compaction_hook_called(self) -> None:
@@ -358,7 +360,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
 
         provider = TextProvider()
 
-        result = await run_agent_loop(
+        await run_agent_loop(
             prompts=[UserMessage(content="hello")],
             context=AgentContext(),
             config=AgentLoopConfig(
@@ -376,7 +378,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
         primary = ErrorProvider(fail_count=10, error=RuntimeError("rate limit 429"))
         fallback = TextProvider()
 
-        result = await run_agent_loop(
+        await run_agent_loop(
             prompts=[UserMessage(content="hello")],
             context=AgentContext(),
             config=AgentLoopConfig(

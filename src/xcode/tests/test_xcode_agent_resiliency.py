@@ -84,9 +84,11 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         )
 
         # Act mode should trigger Watchdog after 4 consecutive idle steps
-        with self.assertRaises(RuntimeError) as ctx:
-            agent.run("test idle act", mode="act")
-        self.assertIn("Watchdog triggered: 4 consecutive steps", str(ctx.exception))
+        result = agent.run("test idle act", mode="act")
+        self.assertTrue(result.stopped_by_watchdog)
+        self.assertIsNotNone(result.watchdog_reason)
+        assert result.watchdog_reason is not None
+        self.assertIn("consecutive steps", result.watchdog_reason.lower())
 
     def test_semantic_idle_failsafe_does_not_trigger_in_plan_mode(self) -> None:
         read_tool = ToolSpec(

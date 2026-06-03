@@ -7,25 +7,22 @@
 from __future__ import annotations
 
 import asyncio
-import random
 from typing import Any
 
 from xcode.ai.events import (
-    FinalMessage,
     ProviderEvent,
     ToolCall as ToolUseBlock,
 )
 from xcode.ai.providers.protocol import ModelProvider
-from .agent_helpers import (
-    collect_provider_events,
-    typed_blocks_to_raw,
-)
+from xcode.agent.provider_retry import call_provider_with_retry
+from .agent_helpers import typed_blocks_to_raw
 from .cancellation import CancellationToken
 from .tool_events import ToolResult
 from .tool_executor import (
     ExecutionCancelled,
     ToolExecutor,
 )
+from ..adapters.tool_schema import tool_definitions_from_specs
 from ..config import ExecutionMode
 from ..observability import HookManager, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec
@@ -39,73 +36,37 @@ if TYPE_CHECKING:
 # ── provider 重试 + fallback ──
 
 
-async def call_provider_with_retry(
+async def call_provider_with_retry_harness(
     provider: ModelProvider,
     fallback_provider: ModelProvider | None,
     messages: list[dict[str, Any]],
     registry: tuple[ToolSpec, ...],
     consecutive_errors: int,
 ) -> tuple[list[ProviderEvent], int, bool]:
-    """调用 provider，含指数退避和 fallback。返回 (events, new_consecutive_errors, switched_to_fallback)。"""
+    """调用 provider，含指数退避和 fallback。返回 (events, new_consecutive_errors, switched_to_fallback)。
+
+    委托给 agent/ 层的 call_provider_with_retry。
+    """
     if provider is None:
+        from xcode.ai.events import FinalMessage
+
         return [FinalMessage("StructuredAgent requires a provider", "error")], 0, False
 
-    max_retries = 3
-    last_error: Exception | None = None
-    for attempt in range(max_retries + 1):
-        try:
-            events = await collect_provider_events(provider, messages, registry)
-            return events, 0, False
-        except Exception as e:
-            last_error = e
-            name = type(e).__name__
-            msg = str(e).lower()
-            is_transient = (
-                "ratelimit" in name.lower()
-                or "429" in msg
-                or "overloaded" in name.lower()
-                or "529" in msg
-                or "overloaded" in msg
-            )
-            if not is_transient:
-                return (
-                    [FinalMessage(f"Provider error: {e}", "error")],
-                    consecutive_errors,
-                    False,
-                )
+    tool_definitions = tool_definitions_from_specs(registry)
 
-            consecutive_errors += 1
-
-            if consecutive_errors >= 3 and fallback_provider is not None:
-                try:
-                    events = await collect_provider_events(
-                        fallback_provider, messages, registry
-                    )
-                    return events, 0, True
-                except Exception as e2:
-                    return (
-                        [FinalMessage(f"Fallback provider error: {e2}", "error")],
-                        0,
-                        True,
-                    )
-
-            if attempt >= max_retries:
-                return (
-                    [FinalMessage(f"Provider repeatedly unavailable: {e}", "error")],
-                    consecutive_errors,
-                    False,
-                )
-
-            base_delay = 0.5 * (2**attempt)
-            base = min(base_delay, 32.0)
-            jitter = random.uniform(0, base * 0.25)
-            delay = base + jitter
-            await asyncio.sleep(delay)
-    return (
-        [FinalMessage(f"Provider unavailable: {last_error}", "error")],
-        consecutive_errors,
-        False,
+    events, active_provider, new_consecutive_errors = await call_provider_with_retry(
+        provider,
+        messages,
+        tool_definitions,
+        fallback_provider=fallback_provider,
+        max_retries=3,
+        backoff_base=0.5,
+        error_threshold=3,
+        consecutive_errors=consecutive_errors,
     )
+
+    switched = active_provider is not provider
+    return events, new_consecutive_errors, switched
 
 
 # ── 流式响应组装 ──
@@ -127,7 +88,7 @@ async def call_model_streaming(
     bool,
 ]:
     """调用模型并组装为 raw blocks + stop_reason + stream events。返回 (blocks, stop_reason, events, reasoning, new_errors, switched_to_fallback)。"""
-    events, new_errors, switched = await call_provider_with_retry(
+    events, new_errors, switched = await call_provider_with_retry_harness(
         provider, fallback_provider, messages, registry, consecutive_errors
     )
 

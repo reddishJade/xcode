@@ -367,6 +367,7 @@ class AgentLoopResult:
     stopped_by_watchdog: bool = False
     watchdog_reason: str | None = None
     metrics: AgentLoopMetrics | None = None
+    active_provider: Any = None
 
 
 @dataclass
