@@ -18,9 +18,7 @@
 
 ### 类型层迁移：agent/types.py → ai/types.py（Pi 架构对齐）
 
-**Phase 1+2 (done)**: Content block types consolidated to ai/types.py. ToolCallBlock→ToolCallContent, ThinkingBlock→ThinkingContent. All consumers updated, all tests pass.
-
-**Phase 3 (pending)**: 处理 `ProviderResponse`（ai/ 和 agent/provider_response.py 字段不同）和 `ThinkingLevel`（agent/ 用 `type` 语句，ai/ 用赋值）。
+**Done**: Content block types, ThinkingLevel consolidated to ai/types.py. ProviderResponse dead code removed from ai/types.py. agent/types.py imports from ai/types.py, no duplicates.
 
 ---
 
