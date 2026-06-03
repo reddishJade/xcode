@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 ProviderTransport = Literal[
     "openai_chat",
@@ -253,7 +253,7 @@ def _normalize_transport(value: object) -> ProviderTransport:
         "chatglm": "chatglm_chat",
     }
     raw = str(value)
-    return aliases.get(raw, raw)  # type: ignore[return-value]
+    return cast(ProviderTransport, aliases.get(raw, raw))
 
 
 def _optional_dict(value: object) -> dict[str, Any] | None:

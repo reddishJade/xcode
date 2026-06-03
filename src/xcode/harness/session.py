@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 import logging
@@ -55,7 +55,7 @@ class SessionStore:
             created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         )
         with self.current_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record.__dict__, ensure_ascii=False) + "\n")
+            handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
         if record_type == "user":
             self.ensure_metadata(str(content))
 
@@ -149,7 +149,7 @@ class SessionStore:
         kept = records[:keep_until]
         with self.current_path.open("w", encoding="utf-8") as handle:
             for record in kept:
-                handle.write(json.dumps(record.__dict__, ensure_ascii=False) + "\n")
+                handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
         return len(records) - len(kept)
 
     def compact_current_session(self, max_tool_result_chars: int = 200) -> int:
@@ -176,7 +176,7 @@ class SessionStore:
         if compacted_count > 0:
             with self.current_path.open("w", encoding="utf-8") as handle:
                 for record in new_records:
-                    handle.write(json.dumps(record.__dict__, ensure_ascii=False) + "\n")
+                    handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
         return compacted_count
 
     def list_sessions(self, limit: int = 10) -> list[Path]:
@@ -288,7 +288,7 @@ class SessionStore:
 
     def _write_metadata(self, items: list[SessionMetadata]) -> None:
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"sessions": [item.__dict__ for item in items]}
+        payload = {"sessions": [asdict(item) for item in items]}
         self.index_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
