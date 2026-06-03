@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from xcode.ai.providers.factory import load_env_file
+
 CONFIG_FILENAME = "xcode.config.json"
 
 PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
@@ -49,22 +51,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "env_base_url": "CHATGLM_BASE_URL",
     },
 }
-
-
-def load_env_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.exists():
-        return values
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key:
-            values[key] = value
-    return values
 
 
 def has_valid_config(project_root: Path) -> bool:

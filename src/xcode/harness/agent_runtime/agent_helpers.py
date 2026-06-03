@@ -1,7 +1,6 @@
 """StructuredAgent 工具函数。
 
-从 structured.py 提取的纯函数和辅助逻辑：block 转换、指标聚合、
-watchdog、sync/async 桥接、provider 事件收集。
+从 structured.py 提取的纯函数和辅助逻辑：消息转换、预算裁剪、sync/async 桥接。
 """
 
 from __future__ import annotations
@@ -9,25 +8,15 @@ from __future__ import annotations
 import asyncio
 import queue
 from collections.abc import AsyncIterator, Iterator
-from time import perf_counter
 from typing import Any
 
 from ...agent.messages import convert_to_llm
-from ...agent.types import (
-    AgentMessage,
-    ContentBlock,
-    TextContent,
-    ToolCallContent,
-)
-from xcode.ai.events import (
-    ToolCall as ToolUseBlock,
-)
+from ...agent.types import AgentMessage
 from .cancellation import CancellationToken
 from .compaction import (
     budget_large_tool_outputs,
     latest_read_file_tool_result_ids,
 )
-from .tool_executor import stringify_tool_input
 from .async_worker import IsolatedAsyncWorker
 
 from typing import TYPE_CHECKING
@@ -46,58 +35,6 @@ def to_dict(msg: AgentMessage) -> dict[str, Any]:
     return result[0]
 
 
-def blocks_to_typed(blocks: list[dict[str, Any]]) -> list[ContentBlock]:
-    """将 raw dict content blocks 转为类型化 ContentBlock。"""
-    result: list[ContentBlock] = []
-    for b in blocks:
-        if not isinstance(b, dict):
-            continue
-        if b.get("type") == "text":
-            result.append(TextContent(text=str(b.get("text", ""))))
-        elif b.get("type") == "tool_use":
-            result.append(
-                ToolCallContent(
-                    id=str(b.get("id", "")),
-                    name=str(b.get("name", "")),
-                    arguments=b.get("input", {}),
-                )
-            )
-    return result
-
-
-def typed_blocks_to_raw(blocks: list[ContentBlock]) -> list[dict[str, Any]]:
-    """将 Agent ContentBlock 转为 StructuredAgent 运行状态使用的 raw block。"""
-    result: list[dict[str, Any]] = []
-    for block in blocks:
-        if isinstance(block, TextContent):
-            result.append({"type": "text", "text": block.text})
-        elif isinstance(block, ToolCallContent):
-            result.append(
-                {
-                    "type": "tool_use",
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.arguments or {},
-                }
-            )
-    return result
-
-
-# ── block 查询 ──
-
-
-def is_tool_use(block: dict[str, Any]) -> bool:
-    return block.get("type") == "tool_use"
-
-
-def to_tool_use(block: dict[str, Any]) -> ToolUseBlock:
-    return ToolUseBlock(
-        id=str(block.get("id", "")),
-        name=str(block.get("name", "")),
-        input=block.get("input", {}),
-    )
-
-
 def text_from_blocks(blocks: list[dict[str, Any]]) -> str:
     parts = []
     for block in blocks:
@@ -108,18 +45,7 @@ def text_from_blocks(blocks: list[dict[str, Any]]) -> str:
     return "".join(parts).strip()
 
 
-def reasoning_for_assistant(
-    blocks: list[dict[str, Any]],
-    reasoning_content: str | None,
-) -> str | None:
-    if reasoning_content is not None:
-        return reasoning_content
-    if any(is_tool_use(block) for block in blocks):
-        return ""
-    return None
-
-
-# ── 预算/指标 ──
+# ── 预算 ──
 
 
 def budget_messages_for_provider(
@@ -136,49 +62,6 @@ def budget_messages_for_provider(
         budget_trigger_token_ratio=0,
         preserve_tool_result_ids=preserved_tool_results,
     )
-
-
-def elapsed_ms(started: float) -> float:
-    return round((perf_counter() - started) * 1000, 3)
-
-
-def finalize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
-    finalized = dict(metrics)
-    finalized["model_total_ms"] = round(sum(metrics["model_latencies_ms"]), 3)
-    finalized["tool_total_ms"] = round(sum(metrics["tool_latencies_ms"]), 3)
-    finalized["total_observed_ms"] = round(
-        finalized["model_total_ms"] + finalized["tool_total_ms"],
-        3,
-    )
-    return finalized
-
-
-# ── watchdog ──
-
-
-def check_repeated_tool_watchdog(
-    uses: list[ToolUseBlock],
-    last_signature: str | None,
-    repeated_count: int,
-    limit: int,
-) -> tuple[str | None, str | None, int]:
-    if limit <= 0 or len(uses) != 1:
-        return None, None, 0
-    signature = f"{uses[0].name}:{stringify_tool_input(uses[0].input)}"
-    if signature == last_signature:
-        repeated_count += 1
-    else:
-        repeated_count = 1
-    if repeated_count > limit:
-        return (
-            f"watchdog stopped repeated tool call: {uses[0].name}",
-            signature,
-            repeated_count,
-        )
-    return None, signature, repeated_count
-
-
-# ── sync/async 桥接 ──
 
 
 def run_coro_sync(coro):
@@ -225,6 +108,3 @@ def aiter_to_sync_iter(
             cancellation_token.cancel("sync stream consumer stopped")
             future.cancel()
         worker.close()
-
-
-# ── provider 事件收集 ──
