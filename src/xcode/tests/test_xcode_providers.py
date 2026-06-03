@@ -721,25 +721,6 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         kwargs = _glm_kwargs(provider)
         self.assertEqual(kwargs["response_format"], {"type": "json_object"})
 
-    def test_complete_accepts_per_request_response_format(self) -> None:
-        """非流式调用支持单次 response_format 覆盖。"""
-        provider = self._make_provider(
-            response_format={"type": "text"},
-            client=FakeGLMClient(content='{"ok": true}'),
-        )
-
-        result = provider.complete(
-            [{"role": "user", "content": "json"}],
-            response_format={"type": "json_object"},
-            thinking=False,
-        )
-
-        kwargs = _glm_kwargs(provider)
-        self.assertFalse(kwargs["stream"])
-        self.assertEqual(kwargs["response_format"], {"type": "json_object"})
-        self.assertEqual(kwargs["extra_body"]["thinking"]["type"], "disabled")
-        self.assertEqual(result["content"], '{"ok": true}')
-
     def test_tool_stream_disabled(self) -> None:
         """tool_stream=False 时不传 tool_stream 参数。"""
         provider = self._make_provider(tool_stream=False, client=FakeGLMClient())
@@ -917,45 +898,23 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
 class FakeGLMClient:
     """模拟 OpenAI Chat Completion 客户端，用于 ChatGLM provider 测试。"""
 
-    def __init__(self, stream_chunks=None, content="ok", reasoning=None) -> None:
-        self.chat = FakeGLMChat(stream_chunks or [], content, reasoning)
+    def __init__(self, stream_chunks=None) -> None:
+        self.chat = FakeGLMChat(stream_chunks or [])
 
 
 class FakeGLMChat:
-    def __init__(self, stream_chunks, content, reasoning) -> None:
-        self.completions = FakeGLMCompletions(stream_chunks, content, reasoning)
+    def __init__(self, stream_chunks) -> None:
+        self.completions = FakeGLMCompletions(stream_chunks)
 
 
 class FakeGLMCompletions:
-    def __init__(self, stream_chunks, content, reasoning) -> None:
+    def __init__(self, stream_chunks) -> None:
         self.stream_chunks = stream_chunks
-        self.content = content
-        self.reasoning = reasoning
         self.kwargs: dict[str, Any] = {}
 
     def create(self, **kwargs):
         self.kwargs = kwargs
-        if kwargs.get("stream"):
-            return iter(self.stream_chunks or [FakeGLMChunk(content="ok")])
-        return FakeGLMResponse(self.content, self.reasoning)
-
-
-class FakeGLMResponse:
-    def __init__(self, content, reasoning) -> None:
-        self.choices = [FakeGLMResponseChoice(content, reasoning)]
-        self.usage = None
-
-
-class FakeGLMResponseChoice:
-    def __init__(self, content, reasoning) -> None:
-        self.message = FakeGLMMessage(content, reasoning)
-
-
-class FakeGLMMessage:
-    def __init__(self, content, reasoning) -> None:
-        self.content = content
-        self.reasoning_content = reasoning
-        self.tool_calls: list[Any] = []
+        return iter(self.stream_chunks or [FakeGLMChunk(content="ok")])
 
 
 class FakeGLMChunk:

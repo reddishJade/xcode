@@ -167,7 +167,7 @@ def _collect_file_evidence(
             continue
         if path.is_file():
             data = path.read_bytes()
-            record["sha1"] = hashlib.sha1(data).hexdigest()
+            record["sha256"] = hashlib.sha256(data).hexdigest()
             try:
                 text = data.decode("utf-8")
             except UnicodeDecodeError:
@@ -229,8 +229,8 @@ def _grade_file_evidence(
                 )
             )
         if "changed" in spec:
-            before_sha = before_by_path.get(rel_path, {}).get("sha1")
-            after_sha = record.get("sha1")
+            before_sha = before_by_path.get(rel_path, {}).get("sha256")
+            after_sha = record.get("sha256")
             changed = before_sha != after_sha
             expected_changed = bool(spec["changed"])
             graders.append(

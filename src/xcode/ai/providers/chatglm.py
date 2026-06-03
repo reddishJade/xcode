@@ -66,46 +66,6 @@ class ChatGLMProvider:
             "reasoning_tokens": 0,
         }
 
-    def complete(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[ToolDefinition] | None = None,
-        response_format: dict[str, Any] | None = None,
-        thinking: bool | None = None,
-    ) -> dict[str, Any]:
-        """非流式 ChatGLM 调用，支持结构化输出。"""
-        kwargs = self._chat_kwargs(
-            messages,
-            tuple(tools or ()),
-            stream=False,
-            response_format=response_format,
-            thinking=thinking,
-        )
-        openai_messages = cast(list[dict[str, Any]], kwargs["messages"])
-        create = cast(Any, self.client.chat.completions.create)
-        response = self.runtime.run(lambda: create(**kwargs))
-        self._record_usage(response, len(openai_messages))
-        message = response.choices[0].message
-        result = {
-            "role": "assistant",
-            "content": getattr(message, "content", "") or "",
-        }
-        if getattr(message, "reasoning_content", None) is not None:
-            result["reasoning_content"] = message.reasoning_content
-        if getattr(message, "tool_calls", None):
-            result["tool_calls"] = [
-                {
-                    "id": call.id,
-                    "type": "function",
-                    "function": {
-                        "name": call.function.name,
-                        "arguments": call.function.arguments,
-                    },
-                }
-                for call in message.tool_calls
-            ]
-        return result
-
     async def stream(
         self,
         messages: list[dict[str, Any]],

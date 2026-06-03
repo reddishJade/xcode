@@ -1,3 +1,8 @@
+"""Anthropic Messages API provider（尚未实现）。
+
+注册在 PROVIDER_REGISTRY 中供后续实现，选择此 provider 会立即报错。
+"""
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -5,17 +10,16 @@ from typing import Any
 
 from xcode.ai.events import ProviderEvent
 
-"""Anthropic Messages API provider（占位，可直接迁入实际实现）。"""
+NOT_IMPLEMENTED_MSG = (
+    "AnthropicProvider is not implemented. "
+    "Select a different provider in your configuration."
+)
 
 
 class AnthropicProvider:
-    """Anthropic Messages API 适配。"""
+    """Anthropic Messages API 占位。选择此 provider 会立即抛出 RuntimeError。"""
 
-    def __init__(
-        self,
-        api_key: str,
-        model: str,
-    ) -> None:
+    def __init__(self, api_key: str, model: str) -> None:
         self.api_key = api_key
         self.model = model
 
@@ -24,5 +28,4 @@ class AnthropicProvider:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> AsyncIterator[ProviderEvent]:
-        # TODO: 实现真实 Anthropic Messages API 流式调用
-        raise NotImplementedError("AnthropicProvider 尚未实现")
+        raise RuntimeError(NOT_IMPLEMENTED_MSG)

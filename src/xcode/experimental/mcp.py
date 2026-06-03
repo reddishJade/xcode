@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from xcode.harness.skills import ToolInput, ToolSpec
+from ..harness.skills import ToolInput, ToolSpec
 
 from . import mcp_client as _mcp_mod
 
@@ -25,7 +25,7 @@ def compute_config_hash(server_config: dict[str, Any]) -> str:
         "env": server_config.get("env", {}),
     }
     serialized = json.dumps(data, sort_keys=True)
-    return hashlib.md5(serialized.encode("utf-8")).hexdigest()
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def get_mcp_tool_risk(name: str, description: str) -> str:

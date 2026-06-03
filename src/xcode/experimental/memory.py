@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-from ..experimental.bm25 import BM25Okapi
+from .bm25 import BM25Okapi
 from .memory_parsing import (
     MemoryRecord,
     MemorySearchEvalCase,
@@ -25,6 +25,7 @@ from .memory_parsing import (
     extract_title,
     parse_fields,
     parse_memory_record,
+    tokenize,
     tokenize_set,
     with_metadata,
 )
@@ -83,25 +84,8 @@ class MemoryManager:
         if not blocks:
             return []
 
-        corpus = []
-        for block in blocks:
-            words = [
-                w.lower()
-                for w in __import__("re")
-                .sub(r"[^\w\s-]", "", block)
-                .replace("-", " ")
-                .split()
-                if len(w) >= 2
-            ]
-            corpus.append(words)
-        query_words = [
-            w.lower()
-            for w in __import__("re")
-            .sub(r"[^\w\s-]", "", query)
-            .replace("-", " ")
-            .split()
-            if len(w) >= 2
-        ]
+        corpus = [tokenize(block) for block in blocks]
+        query_words = tokenize(query)
 
         bm25 = BM25Okapi(corpus)
         scores = bm25.get_scores(query_words)
