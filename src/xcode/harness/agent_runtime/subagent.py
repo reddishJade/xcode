@@ -9,6 +9,7 @@ import itertools
 from pathlib import Path
 from typing import Literal
 
+from ..config import PROFILE_SUBAGENT
 from ..skills import ToolInput, ToolSpec
 from .async_worker import IsolatedAsyncWorker
 
@@ -52,8 +53,8 @@ class ManagedSubagentRunner:
         self,
         run_child: RunChild,
         timeout_seconds: float | None = 120,
-        available_profiles: tuple[str, ...] = ("subagent",),
-        default_profile: str = "subagent",
+        available_profiles: tuple[str, ...] = (PROFILE_SUBAGENT,),
+        default_profile: str = PROFILE_SUBAGENT,
         worktree_runner=None,
         worker: IsolatedAsyncWorker | None = None,
     ) -> None:

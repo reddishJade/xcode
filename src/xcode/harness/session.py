@@ -9,6 +9,10 @@ from pathlib import Path
 import shutil
 from typing import Any
 
+SUMMARY_USER_CHARS = 120
+SUMMARY_ASSISTANT_CHARS = 180
+SUMMARY_TITLE_CHARS = 160
+
 
 FORK_TYPES = frozenset(["explore", "verify", "isolate"])
 
@@ -368,14 +372,14 @@ def _make_initial_summary(text: str | None) -> str:
     cleaned = _collapse_text(text or "")
     if not cleaned:
         return "Conversation started."
-    return f"First request: {_truncate(cleaned, 160)}"
+    return f"First request: {_truncate(cleaned, SUMMARY_TITLE_CHARS)}"
 
 
 def _make_conversation_summary(user: str, assistant: str | None) -> str:
-    user_text = _truncate(_collapse_text(user), 120)
+    user_text = _truncate(_collapse_text(user), SUMMARY_USER_CHARS)
     if not assistant:
         return f"First request: {user_text}"
-    assistant_text = _truncate(_collapse_text(assistant), 180)
+    assistant_text = _truncate(_collapse_text(assistant), SUMMARY_ASSISTANT_CHARS)
     return f"First request: {user_text} Answer preview: {assistant_text}"
 
 

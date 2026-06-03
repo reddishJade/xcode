@@ -20,6 +20,9 @@ CORE_IDENTITY = (
     "Use tools deliberately, respect the project sandbox, and keep answers grounded in observed results."
 )
 
+MAX_CWD_ENTRIES = 12
+MAX_INSTRUCTION_CHARS = 4000
+
 TOOL_DISCIPLINE = """<tool-discipline>
 Tools must serve the current response. If no external facts or workspace evidence
 are needed — simple greetings, capability questions, conceptual explanations,
@@ -286,7 +289,7 @@ def _cwd_info(project_root: Path) -> str:
         if path.name in {".git", ".venv", "__pycache__"}:
             continue
         names.append(path.name + ("/" if path.is_dir() else ""))
-        if len(names) >= 12:
+        if len(names) >= MAX_CWD_ENTRIES:
             break
     return "<cwd-info>\n" + "\n".join(names) + "\n</cwd-info>"
 
@@ -298,5 +301,5 @@ def _project_instructions(project_root: Path) -> str:
         if path.is_file():
             text = path.read_text(encoding="utf-8", errors="replace").strip()
             if text:
-                parts.append(f"<{name}>\n{text[:4000]}\n</{name}>")
+                parts.append(f"<{name}>\n{text[:MAX_INSTRUCTION_CHARS]}\n</{name}>")
     return "\n\n".join(parts)

@@ -19,6 +19,7 @@ logger = logging.getLogger("xcode.harness.tools.bash")
 MAX_OUTPUT_BYTES = 50_000
 MAX_OUTPUT_LINES = 2_000
 DEFAULT_TIMEOUT_SECONDS = 30
+MAX_TIMEOUT_SECONDS = 120
 POLL_INTERVAL = 0.1
 TERMINATE_GRACE_SECONDS = 3
 
@@ -256,7 +257,7 @@ def build_bash_tool(
                     "type": "integer",
                     "description": "Timeout in seconds. Default 30.",
                     "minimum": 1,
-                    "maximum": 120,
+                    "maximum": MAX_TIMEOUT_SECONDS,
                 },
             },
             "required": ["command"],
