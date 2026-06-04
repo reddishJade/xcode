@@ -285,6 +285,74 @@ def resolve_task_dependencies(tasks: list[TaskRecord]) -> list[TaskRecord]:
     return result
 
 
+def resolve_blocked(tasks: list[TaskRecord]) -> list[dict[str, Any]]:
+    """找出所有被阻塞的任务及其阻塞依赖。"""
+    task_map = {t.id: t for t in tasks}
+    completed_ids = {t.id for t in tasks if t.status == "completed"}
+    blocked: list[dict[str, Any]] = []
+    for t in tasks:
+        if t.status == "completed":
+            continue
+        blocked_by = _parse_blocked_by(t)
+        blocking = [dep for dep in blocked_by if dep not in completed_ids]
+        if blocking:
+            blocking_names = [
+                task_map[d].title if d in task_map else f"#{d}"
+                for d in blocking
+            ]
+            blocked.append({
+                "task_id": t.id,
+                "task_title": t.title,
+                "blocked_by_ids": blocking,
+                "blocked_by_titles": blocking_names,
+            })
+    return blocked
+
+
+def advance_task(store: TaskStore, task_id: int | str) -> list[TaskRecord]:
+    """完成任务并自动解除下游依赖阻塞。
+
+    将 task_id 标记为 completed，然后查找所有 blocked_by 包含此任务的
+    待办任务，将它们的 block 状态移除（如果已无其他阻塞则解除阻塞）。
+    返回所有受影响的任务列表。
+    """
+    with store._locked():
+        current = store.get(task_id)
+        updated = store.update(task_id, status="completed")
+        affected = [updated]
+
+        all_tasks = store.list()
+        for t in all_tasks:
+            if t.status == "completed" or t.id == int(task_id):
+                continue
+            blocked_by = _parse_blocked_by(t)
+            if int(task_id) in blocked_by:
+                remaining = [d for d in blocked_by if d != int(task_id)]
+                if remaining:
+                    new_payload = dict(t.payload)
+                    new_payload["blocked_by"] = remaining
+                    store.update(t.id, payload=new_payload)
+                else:
+                    new_payload = dict(t.payload)
+                    new_payload.pop("blocked_by", None)
+                    store.update(t.id, payload=new_payload)
+                affected.append(store.get(t.id))
+
+    return affected
+
+
+def _parse_blocked_by(task: TaskRecord) -> list[int]:
+    """从 TaskRecord payload 中提取 blocked_by 依赖列表。"""
+    blocked_by = task.payload.get("blocked_by")
+    if isinstance(blocked_by, int):
+        return [blocked_by]
+    if isinstance(blocked_by, list):
+        return [int(x) for x in blocked_by if str(x).isdigit()]
+    if isinstance(blocked_by, str) and blocked_by.isdigit():
+        return [int(blocked_by)]
+    return []
+
+
 def render_kanban_view(tasks: list[TaskRecord]) -> str:
     """输出美化的终端看板视图。"""
     categories: dict[str, list[TaskRecord]] = {
@@ -375,6 +443,49 @@ def _list_tasks(store: TaskStore, args: ToolInput) -> str:
     return "\n".join(lines)
 
 
+ADVANCE_TASK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "integer", "description": "ID of the task to mark as completed"},
+    },
+    "required": ["id"],
+    "additionalProperties": False,
+}
+
+RESOLVE_BLOCKED_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "view": {
+            "type": "string",
+            "enum": ["summary", "detail"],
+            "description": "Summary or detailed view of blocked tasks",
+        }
+    },
+    "additionalProperties": False,
+}
+
+
+def _advance_task(store: TaskStore, args: ToolInput) -> str:
+    task_id = args.get("id")
+    if task_id is None:
+        raise ValueError("id is required")
+    affected = advance_task(store, task_id)
+    names = [f"#{t.id} ({t.status}): {t.title}" for t in affected]
+    return f"Advanced task #{task_id}.\nAffected:\n" + "\n".join(names)
+
+
+def _resolve_blocked(store: TaskStore, args: ToolInput) -> str:
+    tasks = store.list()
+    blocked = resolve_blocked(tasks)
+    if not blocked:
+        return "No blocked tasks. All dependencies are satisfied."
+    lines = ["=== BLOCKED TASKS ==="]
+    for b in blocked:
+        blockers = ", ".join(b["blocked_by_titles"])
+        lines.append(f"  - #{b['task_id']} {b['task_title']} [Blocked by: {blockers}]")
+    return "\n".join(lines)
+
+
 def _get_task(store: TaskStore, args: ToolInput) -> str:
     task_id = args.get("id")
     if task_id is None:
@@ -407,6 +518,15 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
             group="tasks",
         ),
         ToolSpec(
+            name="advance_task",
+            description="Mark a task as completed and auto-unblock its dependents. Use instead of update_task for completing tasks with dependencies.",
+            input_hint='{"id": 1}',
+            handler=partial(_advance_task, store),
+            risk="low",
+            schema=ADVANCE_TASK_SCHEMA,
+            group="tasks",
+        ),
+        ToolSpec(
             name="list_tasks",
             description="List task graph nodes. Supports 'kanban', 'topological', or 'raw' views.",
             input_hint='{"view": "kanban"}',
@@ -423,6 +543,16 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
             handler=partial(_get_task, store),
             risk="low",
             schema=GET_TASK_SCHEMA,
+            read_only=True,
+            group="tasks",
+        ),
+        ToolSpec(
+            name="resolve_blocked",
+            description="Show which tasks are blocked by unfinished dependencies.",
+            input_hint='{}',
+            handler=partial(_resolve_blocked, store),
+            risk="low",
+            schema=RESOLVE_BLOCKED_SCHEMA,
             read_only=True,
             group="tasks",
         ),
