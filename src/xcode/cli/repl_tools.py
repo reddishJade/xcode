@@ -181,6 +181,8 @@ def event_to_dict(event: Any) -> dict[str, Any]:
     data = event.data
     if is_dataclass(data) and not isinstance(data, type):
         payload = asdict(data)
+        if event.type == "final" and "messages" in payload:
+            payload = {k: v for k, v in payload.items() if k != "messages"}
     else:
         payload = data
     return {"type": event.type, "step": event.step, "data": payload}

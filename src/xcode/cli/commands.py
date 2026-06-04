@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .markdown import MarkdownRenderer
+from xcode.harness.config import ExecutionMode
 from xcode.harness.session import SessionStore
 from xcode.harness.observability import (
     PersistentPermissionStore,
@@ -21,7 +22,7 @@ class PromptLike(Protocol):
 
 @dataclass
 class ReplState:
-    mode: str = "act"
+    mode: ExecutionMode = "act"
     verbose: bool = False
     approved_plan: str | None = None
     exit_pending: float = 0.0

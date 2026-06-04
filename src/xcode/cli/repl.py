@@ -257,7 +257,7 @@ def _run_agent_turn(
     try:
         for event in app.ask_stream(agent_text, mode=state.mode):
             store.append("event", event_to_dict(event))
-            if event.type in {"reasoning_delta", "thinking_delta"}:
+            if event.type == "reasoning_delta":
                 flush_tool_group()
                 if reasoning_started_at is None:
                     reasoning_started_at = time.perf_counter()

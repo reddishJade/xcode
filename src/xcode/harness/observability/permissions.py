@@ -71,6 +71,10 @@ class SessionPermissionPolicy:
             return rule.decision
         return None
 
+    @property
+    def rules(self) -> list[PermissionRule]:
+        return list(self._rules)
+
     def clear(self) -> None:
         self._rules.clear()
 

@@ -56,7 +56,7 @@ def list_permissions(
 ) -> None:
     lines = ["<permissions>"]
     if session_policy is not None:
-        rules = list(session_policy._rules)
+        rules = session_policy.rules
         if rules:
             lines.append("  session:")
             for rule in rules:
@@ -94,6 +94,8 @@ def handle_model_command(command: str, app: object) -> None:
     thinking: bool | None = None
     reasoning_effort: str | None = None
 
+    if len(parts) >= 4 and parts[2] != "--thinking":
+        print(f"Warning: unrecognized option '{parts[2]}' ignored.")
     if len(parts) >= 4 and parts[2] == "--thinking":
         level = parts[3].lower()
         if level not in ("off", "minimal", "low", "medium", "high", "xhigh"):
@@ -132,8 +134,8 @@ def handle_effort_command(command: str, app: object) -> None:
         return
 
     level = parts[1].lower()
-    if level not in ("off", "minimal", "low", "medium", "high", "max"):
-        print("Invalid effort level. Use: off/minimal/low/medium/high/max")
+    if level not in ("off", "minimal", "low", "medium", "high", "xhigh"):
+        print("Invalid effort level. Use: off/minimal/low/medium/high/xhigh")
         return
 
     if not _is_model_control_app(app):
