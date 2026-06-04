@@ -173,7 +173,9 @@ def _build_volatile_region(context: PromptContext, enabled: set[str]) -> list[st
         if rendered.strip():
             volatile_parts.append(rendered)
     if "skills" in enabled and context.skill_loader is not None:
-        volatile_parts.append(context.skill_loader.get_catalog())
+        volatile_parts.append(
+            context.skill_loader.get_catalog(question=context.question)
+        )
     if "notices" in enabled:
         notices = [context.resumed_notice, context.interrupted_notice]
         notice_text = "\n".join(notice for notice in notices if notice)

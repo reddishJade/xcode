@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+import re
 
 from ..harness.skills import ToolInput, ToolSpec
 
 """按需加载 skill 的轻量目录。"""
+
+
+@dataclass(frozen=True)
+class SkillMatch:
+    name: str
+    score: float
+    matched_use_when: tuple[str, ...] = ()
+    matched_dont_use_when: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -18,6 +27,62 @@ class SkillMetadata:
     dont_use_when: tuple[str, ...] = ()
     risk: str = "low"
     tools: tuple[str, ...] = ()
+
+
+def route_skills(
+    question: str,
+    skills: dict[str, SkillMetadata],
+) -> list[SkillMatch]:
+    """根据问题文本对 skill 进行 use_when/dont_use_when 模式匹配。
+
+    返回按匹配分数降序排列的 SkillMatch 列表。
+    """
+    q_lower = question.lower()
+    results: list[SkillMatch] = []
+
+    for name, skill in skills.items():
+        matched_use: list[str] = []
+        matched_dont: list[str] = []
+        for pattern in skill.use_when:
+            if _pattern_matches(pattern, q_lower):
+                matched_use.append(pattern)
+        for pattern in skill.dont_use_when:
+            if _pattern_matches(pattern, q_lower):
+                matched_dont.append(pattern)
+
+        if matched_dont:
+            continue
+
+        if matched_use:
+            score = len(matched_use) / max(len(skill.use_when), 1)
+            results.append(SkillMatch(
+                name=name,
+                score=score,
+                matched_use_when=tuple(matched_use),
+            ))
+
+    results.sort(key=lambda m: m.score, reverse=True)
+    return results
+
+
+def _pattern_matches(pattern: str, text: str) -> bool:
+    """检查模式是否匹配文本。
+
+    支持：
+    - 简单子串匹配（默认）
+    - 双引号短语精确匹配
+    - 通配符 * 匹配任意内容
+    """
+    p = pattern.lower().strip()
+    if not p:
+        return False
+    if p.startswith('"') and p.endswith('"'):
+        return p[1:-1] in text
+    if "*" in p:
+        parts = [re.escape(part) for part in p.split("*")]
+        regex = "^.*" + ".*".join(parts) + ".*$"
+        return bool(re.match(regex, text))
+    return p in text
 
 
 class SkillLoader:
@@ -33,13 +98,22 @@ class SkillLoader:
             for name, skill in sorted(self.skills.items())
         )
 
-    def get_catalog(self) -> str:
+    def get_catalog(self, question: str | None = None) -> str:
         if not self.skills:
             return "<skill-catalog>No skills available.</skill-catalog>"
         blocks = [
             "<skill-catalog>",
             "These are skill summaries, not full instructions. Call load_skill with a skill name before following a skill.",
         ]
+        matched: list[SkillMatch] = []
+        if question:
+            matched = route_skills(question, self.skills)
+            if matched:
+                top = matched[0]
+                blocks.append(
+                    f'<skill-routing match="{top.name}" confidence="{top.score:.0%}"/>'
+                )
+
         for name, skill in sorted(self.skills.items()):
             blocks.append(
                 f'<skill name="{name}" path="{skill.path.as_posix()}" risk="{skill.risk}">'
