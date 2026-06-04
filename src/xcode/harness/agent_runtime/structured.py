@@ -257,13 +257,14 @@ class StructuredAgent:
 
         # 实时流式：消费 Agent.run_stream()，边跑边翻译边 yield
         step_counter = [0]
+        text_seen: dict[int, str] = {}
 
         async for event in self._agent.run_stream(
             initial_messages,
             loop_config,
             signal=self.cancellation_token,  # type: ignore[arg-type]
         ):
-            translated = _translate_event(event, step_counter)
+            translated = _translate_event(event, step_counter, text_seen)
             if translated is not None:
                 for te in translated if isinstance(translated, list) else [translated]:
                     yield te
@@ -490,7 +491,9 @@ class StructuredAgent:
 
 
 def _translate_event(
-    event: AgentEvent, step_counter: list[int]
+    event: AgentEvent,
+    step_counter: list[int],
+    _text_seen: dict[int, str] | None = None,
 ) -> StructuredAgentEvent | list[StructuredAgentEvent] | None:
     """将 AgentEvent 翻译为 StructuredAgentEvent。"""
     from ...agent.types import AgentStartEvent, TurnStartEvent
@@ -505,12 +508,17 @@ def _translate_event(
     if isinstance(event, MessageUpdateEvent):
         msg = event.message
         if isinstance(msg, AssistantMessage) and msg.content:
-            # 流式文本增量：提取纯文本块
             for block in msg.content:
                 if isinstance(block, TextContent) and block.text:
-                    return StructuredAgentEvent(
-                        "text_delta", step_counter[0], block.text
-                    )
+                    step = step_counter[0]
+                    prev = _text_seen.get(step, "") if _text_seen is not None else ""
+                    full = block.text
+                    delta = full[len(prev):]
+                    if not delta:
+                        return None
+                    if _text_seen is not None:
+                        _text_seen[step] = full
+                    return StructuredAgentEvent("text_delta", step, delta)
         return None
 
     if isinstance(event, MessageEndEvent):
