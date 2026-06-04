@@ -60,6 +60,7 @@ class ToolExecutor:
         self.registry = registry
         self.tool_map = {tool.name: tool for tool in registry}
         self.tool_workers = tool_workers
+        self._thread_pool = ThreadPoolExecutor(max_workers=tool_workers)
         self.approval_callback = approval_callback
         self.permission_policy = permission_policy
         self.hook_manager = hook_manager
@@ -116,37 +117,35 @@ class ToolExecutor:
                 result, elapsed = self._timed_run_tool(batch[0], active_tool_map, mode)
                 results.append(_to_tool_result(batch[0], result, elapsed))
                 continue
-            workers = max(1, min(self.tool_workers, len(batch)))
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                tasks = [
-                    asyncio.wrap_future(
-                        executor.submit(
-                            self._timed_run_tool, call, active_tool_map, mode
+            tasks = [
+                asyncio.wrap_future(
+                    self._thread_pool.submit(
+                        self._timed_run_tool, call, active_tool_map, mode
+                    )
+                )
+                for call in batch
+            ]
+            done, pending = await asyncio.wait(
+                tasks,
+                return_when=asyncio.FIRST_EXCEPTION,
+            )
+            if cancel.is_set():
+                for task in pending:
+                    task.cancel()
+                raise ExecutionCancelled("tool execution cancelled")
+            for call, task in zip(batch, tasks, strict=True):
+                try:
+                    result, elapsed = await task
+                    results.append(_to_tool_result(call, result, elapsed))
+                except Exception as exc:
+                    results.append(
+                        ToolResult(
+                            tool_call_id=call.id,
+                            content=f"tool error: {exc}",
+                            status=STATUS_ERROR,
+                            elapsed_ms=None,
                         )
                     )
-                    for call in batch
-                ]
-                done, pending = await asyncio.wait(
-                    tasks,
-                    return_when=asyncio.FIRST_EXCEPTION,
-                )
-                if cancel.is_set():
-                    for task in pending:
-                        task.cancel()
-                    raise ExecutionCancelled("tool execution cancelled")
-                for call, task in zip(batch, tasks, strict=True):
-                    try:
-                        result, elapsed = await task
-                        results.append(_to_tool_result(call, result, elapsed))
-                    except Exception as exc:
-                        results.append(
-                            ToolResult(
-                                tool_call_id=call.id,
-                                content=f"tool error: {exc}",
-                                status=STATUS_ERROR,
-                                elapsed_ms=None,
-                            )
-                        )
         return results
 
     def _timed_run_tool(
