@@ -78,7 +78,8 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
                 "desc changed",
                 "hint a",
                 lambda x: "a",
-                examples=[{"input": "new"}],
+                prompt_snippet="snippet changed",
+                prompt_guidelines=("Use tool_a for cache tests.",),
             ),
         )
 
@@ -89,8 +90,8 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
         second_prompt = self.builder.build(context_2)
 
         self.assertNotEqual(first_prompt, second_prompt)
-        self.assertIn("desc changed", second_prompt)
-        self.assertIn('Example: {"input": "new"}', second_prompt)
+        self.assertIn("snippet changed", second_prompt)
+        self.assertIn("Use tool_a for cache tests.", second_prompt)
 
     def test_stable_cache_invalidates_when_instructions_change(self) -> None:
         """测试当 AGENTS.md 或 CLAUDE.md 等配置文件修改时间变化时，静态缓存正确失效。"""

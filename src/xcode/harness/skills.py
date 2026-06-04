@@ -31,8 +31,8 @@ ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
 class ToolSpec:
     """工具的可复用描述。
 
-    name/description/input_hint 进入 prompt，handler 负责执行，risk 决定是否
-    需要人工确认。
+    prompt_snippet/prompt_guidelines 进入 system prompt，description/input_hint
+    保留为工具协议说明，handler 负责执行，risk 决定是否需要人工确认。
     """
 
     name: str
@@ -48,6 +48,8 @@ class ToolSpec:
     execution_mode: ToolExecutionMode | None = None
     counts_as_progress: bool | None = None
     examples: list[dict[str, Any]] = field(default_factory=list)
+    prompt_snippet: str | None = None
+    prompt_guidelines: tuple[str, ...] = ()
 
 
 ToolExecutionStatus = Literal["ok", "denied", "error", "approval_required"]
@@ -84,21 +86,23 @@ def resolve_project_path(project_root: Path, raw_path: str) -> Path:
 
 def build_tool_prompt(registry: tuple[ToolSpec, ...]) -> str:
     lines = []
-    for index, tool in enumerate(registry, 1):
-        lines.extend(
-            [
-                f"{index}. {tool.name}",
-                f"   Description: {tool.description}",
-                f"   Action Input: {tool.input_hint}",
-                f"   Risk: {tool.risk}",
-            ]
-        )
-        for example in tool.examples:
-            lines.append(
-                "   Example: " + json.dumps(example, ensure_ascii=False, sort_keys=True)
-            )
-        lines.append("")
-    return "\n".join(lines).rstrip()
+    for tool in registry:
+        snippet = tool.prompt_snippet or tool.description
+        if snippet.strip():
+            lines.append(f"- {tool.name}: {snippet.strip()}")
+    return "\n".join(lines) if lines else "(none)"
+
+
+def build_tool_guidelines(registry: tuple[ToolSpec, ...]) -> str:
+    guidelines: list[str] = []
+    seen: set[str] = set()
+    for tool in registry:
+        for guideline in tool.prompt_guidelines:
+            normalized = guideline.strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                guidelines.append(f"- {normalized}")
+    return "\n".join(guidelines)
 
 
 def run_tool(

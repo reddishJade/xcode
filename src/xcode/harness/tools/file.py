@@ -99,6 +99,7 @@ def build_file_tools(
             read_only=True,
             concurrency_safe=True,
             group="core",
+            prompt_snippet="Read a text file inside the project sandbox",
         ),
         ToolSpec(
             name="write_file",
@@ -113,6 +114,10 @@ def build_file_tools(
             schema=WRITE_FILE_SCHEMA,
             group="core",
             counts_as_progress=True,
+            prompt_snippet="Create new files or deliberately replace entire files",
+            prompt_guidelines=(
+                "Use write_file only for new files or deliberate full-file rewrites.",
+            ),
             examples=[
                 {
                     "path": "notes.md",
@@ -133,6 +138,16 @@ def build_file_tools(
             schema=EDIT_FILE_SCHEMA,
             group="core",
             counts_as_progress=True,
+            prompt_snippet=(
+                "Make precise file edits with exact old_text/new_text replacements"
+            ),
+            prompt_guidelines=(
+                "Use edit_file for precise changes to existing files.",
+                "When changing multiple separate locations in one file, use one edit_file call with multiple entries in edits.",
+                "Each edit_file edits[].old_text is matched against the original file, not after earlier edits are applied.",
+                "Keep edit_file edits[].old_text as small as possible while still unique in the file.",
+                "Do not emit overlapping or nested edit_file edits; merge nearby changes into one edit.",
+            ),
             examples=[
                 {
                     "path": "src/main.py",

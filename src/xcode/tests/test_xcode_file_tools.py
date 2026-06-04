@@ -218,6 +218,27 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             )
             self.assertEqual(tools["edit_file"].schema["required"], ["path"])
 
+    def test_file_tools_have_prompt_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tools = self._tools(Path(tmp))
+
+            write_snippet = tools["write_file"].prompt_snippet
+            edit_snippet = tools["edit_file"].prompt_snippet
+            assert write_snippet is not None
+            assert edit_snippet is not None
+            self.assertIn("replace entire files", write_snippet)
+            self.assertIn(
+                "Use write_file only for new files",
+                tools["write_file"].prompt_guidelines[0],
+            )
+            self.assertIn("precise file edits", edit_snippet)
+            self.assertTrue(
+                any(
+                    "multiple entries in edits" in guideline
+                    for guideline in tools["edit_file"].prompt_guidelines
+                )
+            )
+
     def test_file_tool_invalid_json_is_clear_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tool = self._tools(Path(tmp))["write_file"]

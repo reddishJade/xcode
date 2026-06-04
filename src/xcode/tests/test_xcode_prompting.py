@@ -31,7 +31,8 @@ class XcodePromptingTests(unittest.TestCase):
                 "Echo input.",
                 "text",
                 _echo_handler,
-                examples=[{"input": "hello"}],
+                prompt_snippet="Echo text",
+                prompt_guidelines=("Use echo for echo tests.",),
             )
 
             prompt = SystemPromptBuilder().build(
@@ -42,8 +43,9 @@ class XcodePromptingTests(unittest.TestCase):
                 prompt.index("You are Xcode"), prompt.index("Available tools")
             )
             self.assertIn("echo", prompt)
-            self.assertIn('Example: {"input": "hello"}', prompt)
-            self.assertIn("prefer edit_file", prompt)
+            self.assertIn("- echo: Echo text", prompt)
+            self.assertIn("Guidelines:", prompt)
+            self.assertIn("- Use echo for echo tests.", prompt)
             self.assertIn("<environment>", prompt)
             self.assertIn("<git-preflight>", prompt)
             self.assertIn("<search-strategy>", prompt)

@@ -12,7 +12,7 @@ from .git_preflight import build_git_preflight
 from .contextual import ContextualRetrievalState
 from ...experimental.tasks import TaskStore
 from ...harness.skill_loader import SkillLoader
-from ..skills import ToolSpec, build_tool_prompt
+from ..skills import ToolSpec, build_tool_guidelines, build_tool_prompt
 from ...harness.tools.shell_adapter import ShellSpec
 
 
@@ -32,9 +32,6 @@ Code changes, file operations, diagnostics, validation, and command execution
 require tools. The <git-preflight> block is already injected; do not manually
 repeat git status/diff commands unless the user asks or the task specifically
 requires a fresh check.
-When modifying an existing file, prefer edit_file with exact old_text and
-new_text replacements. Use write_file for new files or deliberate full-file
-replacement.
 </tool-discipline>"""
 
 SEARCH_STRATEGY = """<search-strategy>
@@ -121,7 +118,8 @@ class SystemPromptBuilder:
                     t.description,
                     t.input_hint,
                     t.risk,
-                    tuple(tuple(sorted(example.items())) for example in t.examples),
+                    t.prompt_snippet,
+                    t.prompt_guidelines,
                 )
                 for t in context.registry
             ),
@@ -138,9 +136,7 @@ class SystemPromptBuilder:
         if "tool_discipline" in enabled:
             stable_parts.append(TOOL_DISCIPLINE)
         if "tools" in enabled:
-            stable_parts.append(
-                "Available tools:\n" + build_tool_prompt(context.registry)
-            )
+            stable_parts.append(_tool_prompt_section(context.registry))
         if "search_strategy" in enabled:
             stable_parts.append(SEARCH_STRATEGY)
         if "instructions" in enabled:
@@ -176,6 +172,14 @@ class SystemPromptBuilder:
         self._dynamic_cache = dynamic_prompt
         self._dynamic_key = dynamic_key
         return dynamic_prompt
+
+
+def _tool_prompt_section(registry: tuple[ToolSpec, ...]) -> str:
+    parts = ["Available tools:\n" + build_tool_prompt(registry)]
+    guidelines = build_tool_guidelines(registry)
+    if guidelines:
+        parts.append("Guidelines:\n" + guidelines)
+    return "\n\n".join(parts)
 
 
 def _build_volatile_region(context: PromptContext, enabled: set[str]) -> list[str]:
