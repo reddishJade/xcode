@@ -261,44 +261,6 @@ type AgentEvent = (
     | CompactionEvent
 )
 
-# ── 监听器 ──
-
-type AgentListener = Callable[[AgentEvent], None]
-
-# ── 任务状态 ──
-
-
-TaskStatus = Literal["pending", "in_progress", "completed", "failed"]
-
-
-@dataclass
-class TaskItem:
-    id: str
-    desc: str
-    status: TaskStatus = "pending"
-
-
-@dataclass
-class TaskGraph:
-    tasks: list[TaskItem] = field(default_factory=list)
-
-    @property
-    def in_progress_count(self) -> int:
-        return sum(1 for t in self.tasks if t.status == "in_progress")
-
-    @property
-    def completed_count(self) -> int:
-        return sum(1 for t in self.tasks if t.status == "completed")
-
-    @property
-    def progress(self) -> str:
-        total = len(self.tasks)
-        if total == 0:
-            return "0/0"
-        done = self.completed_count
-        return f"{done}/{total}"
-
-
 # ── 循环配置 ──
 
 
@@ -364,13 +326,16 @@ type CompactPriority = Literal[
 @dataclass
 class CompactInstructions:
     """压缩保留优先级与不可变标识符保护规则。"""
-    priorities: list[CompactPriority] = field(default_factory=lambda: [
-        "architecture_decision",
-        "modified_file",
-        "verification_status",
-        "todo",
-        "tool_output",
-    ])
+
+    priorities: list[CompactPriority] = field(
+        default_factory=lambda: [
+            "architecture_decision",
+            "modified_file",
+            "verification_status",
+            "todo",
+            "tool_output",
+        ]
+    )
     frozen_identifiers: list[str] = field(default_factory=list)
     """LLM 可观测摘要时不可变动的标识符列表（UUID, hash, PR编号等）。"""
 
@@ -473,6 +438,3 @@ class AgentLoopConfig:
 
     # 每请求 provider 选项
     options: StreamOptions | None = None
-
-
-

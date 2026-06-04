@@ -5,7 +5,6 @@ import unittest
 
 from xcode.agent.agent_loop import run_agent_loop
 from xcode.agent.messages import convert_to_llm
-from xcode.agent.provider_response import provider_events_to_response
 from xcode.agent.types import (
     AgentContext,
     AgentEvent,
@@ -21,7 +20,6 @@ from xcode.agent.types import (
 from xcode.ai.events import (
     FinalMessage,
     Message,
-    ReasoningDelta,
     TextDelta,
     ToolCall,
     ToolCallEvent,
@@ -72,6 +70,7 @@ class EchoTool:
     description = "Echo text."
     parameters = {"type": "object"}
     execution_mode: ToolExecutionMode | None = "sequential"
+    examples: list[dict[str, Any]] = []
 
     def __init__(self) -> None:
         self.seen_signal: Any | None = None
@@ -88,23 +87,6 @@ class EchoTool:
 
 
 class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
-    def test_provider_events_to_response_keeps_core_stream_semantics(self) -> None:
-        response = provider_events_to_response(
-            [
-                ReasoningDelta("why"),
-                TextDelta("hel"),
-                TextDelta("lo"),
-                ToolCallEvent([ToolCall("call-1", "echo", {"text": "hello"})]),
-                FinalMessage("", stop_reason="tool_use"),
-            ]
-        )
-
-        self.assertEqual(response.reasoning_content, "why")
-        self.assertEqual(response.stop_reason, "tool_use")
-        self.assertEqual(response.deltas[0].kind, "reasoning")
-        self.assertEqual(response.deltas[1].chunk, "hel")
-        self.assertEqual(response.content[0], TextContent(text="hello"))
-
     async def test_streams_text_from_injected_provider(self) -> None:
         provider = TextProvider()
         events: list[AgentEvent] = []
@@ -163,7 +145,9 @@ class StepLimitProvider:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
+    async def stream(
+        self, messages, tools, options: StreamOptions | None = None, **kwargs: Any
+    ):
         self.calls += 1
         yield ToolCallEvent([ToolCall(f"call-{self.calls}", "noop", {})])
 
@@ -174,6 +158,7 @@ class NoopTool:
     description = "Does nothing."
     parameters = {"type": "object"}
     execution_mode: ToolExecutionMode | None = None
+    examples: list[dict[str, Any]] = []
 
     async def execute(self, tool_call_id, params, signal=None, on_update=None):
         return AgentToolResult(content=[TextContent(text="ok")])
@@ -187,7 +172,9 @@ class ErrorProvider:
         self.calls = 0
         self.error = error or RuntimeError("transient error: rate limit")
 
-    async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
+    async def stream(
+        self, messages, tools, options: StreamOptions | None = None, **kwargs: Any
+    ):
         self.calls += 1
         if self.calls <= self.fail_count:
             raise self.error
@@ -201,7 +188,9 @@ class MaxTokensProvider:
         self.max_tokens_count = max_tokens_count
         self.calls = 0
 
-    async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
+    async def stream(
+        self, messages, tools, options: StreamOptions | None = None, **kwargs: Any
+    ):
         self.calls += 1
         if self.calls <= self.max_tokens_count:
             yield TextDelta("partial" * 100)
@@ -213,7 +202,9 @@ class MaxTokensProvider:
 class RepeatedToolProvider:
     """始终返回相同的工具调用，用于测试重复工具看门狗。"""
 
-    async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
+    async def stream(
+        self, messages, tools, options: StreamOptions | None = None, **kwargs: Any
+    ):
         yield ToolCallEvent([ToolCall("same-call", "echo", {"text": "hi"})])
 
 
@@ -327,6 +318,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
             description = "Always fails."
             parameters = {"type": "object"}
             execution_mode: ToolExecutionMode | None = None
+            examples: list[dict[str, Any]] = []
 
             async def execute(self, tool_call_id, params, signal=None, on_update=None):
                 raise RuntimeError("tool failed")
@@ -335,7 +327,13 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.call_count = 0
 
-            async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
+            async def stream(
+                self,
+                messages,
+                tools,
+                options: StreamOptions | None = None,
+                **kwargs: Any,
+            ):
                 self.call_count += 1
                 yield ToolCallEvent([ToolCall(f"call-{self.call_count}", "fail", {})])
 

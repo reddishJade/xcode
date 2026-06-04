@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from typing import Any, cast
 from xcode.ai.events import TextDelta, ToolCallEvent, FinalMessage
-from xcode.harness.adapters.tool_schema import tool_definition_from_spec
+from xcode.ai.types import ToolDefinition
 from dotenv import dotenv_values
 from xcode.ai.providers.factory import (
     ProviderRuntime,
@@ -21,7 +21,6 @@ from xcode.ai.providers.factory import (
 from xcode.ai.providers.openai import OpenAIChatProvider, OpenAIResponsesProvider
 from xcode.ai.providers.chatglm import ChatGLMProvider
 from xcode.harness.config import ModelProfileRuntimeConfig
-from xcode.harness.skills import ToolSpec
 
 
 class XcodeProviderEnvTests(unittest.TestCase):
@@ -235,11 +234,9 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         )
         llm.runtime = ProviderRuntime()
         llm.transport = "openai_chat"
-        tool = ToolSpec(
+        tool = ToolDefinition(
             name="echo",
             description="Echo input.",
-            input_hint='JSON: {"text": "..."}',
-            handler=lambda data: data["text"],
             schema={
                 "type": "object",
                 "properties": {"text": {"type": "string"}},
@@ -250,7 +247,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         events = list(
             llm._stream_sync(
                 [{"role": "user", "content": "echo"}],
-                (tool_definition_from_spec(tool),),
+                (tool,),
             )
         )
         tool_call = events[-1]

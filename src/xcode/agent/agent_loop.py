@@ -149,30 +149,6 @@ async def run_agent_loop(
     return await _run_loop(current_context, new_messages, config, emit, signal)
 
 
-async def run_agent_loop_continue(
-    context: AgentContext,
-    config: AgentLoopConfig,
-    emit: Callable[[AgentEvent], None],
-    signal: CancellationSignal | None = None,
-) -> AgentLoopResult:
-    """从已有上下文继续运行 agent 循环。"""
-    if not context.messages:
-        raise ValueError("Cannot continue: no messages in context")
-    last = context.messages[-1]
-    if isinstance(last, AssistantMessage):
-        raise ValueError("Cannot continue from message role: assistant")
-
-    new_messages: list[AgentMessage] = []
-    current_context = AgentContext(
-        system_prompt=context.system_prompt,
-        messages=list(context.messages),
-        tools=list(context.tools) if context.tools else [],
-    )
-    emit(_agent_start_event())
-    emit(_turn_start_event())
-    return await _run_loop(current_context, new_messages, config, emit, signal)
-
-
 # ── 内部循环 ──
 
 
@@ -247,13 +223,15 @@ async def _run_loop(
                     archive_path = config.archive_writer(messages_before)
                     if archive_path:
                         archive = CompactionArchive(path=archive_path, status="summary")
-                emit(CompactionEvent(
-                    messages_removed=before - after,
-                    messages_after=after,
-                    summary_token_estimate=0,
-                    trigger="token_limit",
-                    archive=archive,
-                ))
+                emit(
+                    CompactionEvent(
+                        messages_removed=before - after,
+                        messages_after=after,
+                        summary_token_estimate=0,
+                        trigger="token_limit",
+                        archive=archive,
+                    )
+                )
 
         # ── 内层循环：模型调用 + 重试 + max_tokens ──
         ctx_len_before = len(current_context.messages)
@@ -779,10 +757,12 @@ def _tools_to_definitions(tools: list[AgentTool[Any]] | None) -> list[ToolDefini
                 example_lines.append(
                     f"  - {ex.get('name', '')}: "
                     f"input={json.dumps(ex.get('input', {}), ensure_ascii=False)}, "
-                    f"output=\"{ex.get('output', '')}\""
+                    f'output="{ex.get("output", "")}"'
                 )
             desc += "\n".join(example_lines)
-        result.append(ToolDefinition(name=t.name, description=desc, schema=t.parameters))
+        result.append(
+            ToolDefinition(name=t.name, description=desc, schema=t.parameters)
+        )
     return result
 
 

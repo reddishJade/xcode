@@ -89,7 +89,6 @@ src/xcode/main.py
 | `session.py` | JSONL 会话存储、索引、resume、fork、plan artifact |
 | `skills.py` | `ToolSpec`、工具输入解析、HITL 执行和脱敏入口 |
 | `skill_loader.py` | `SKILL.md` catalog 扫描和 `load_skill` 工具 |
-| `adapters/` | harness 类型到下层协议的适配，例如 `ToolSpec` -> provider tool schema |
 | `agent_runtime/` | `StructuredAgent`、工具执行结果、subagent、prompt、compaction、cancellation |
 | `tools/` | core file/search/bash tools |
 | `observability/` | audit、permission policy、hook manager |
@@ -126,7 +125,6 @@ src/xcode/main.py
 | `messages.py` | Agent message 到 LLM message 的转换 |
 | `agent.py` | Agent 薄封装，包装 `run_agent_loop` |
 | `agent_loop.py` | 无状态 Agent loop，provider、工具执行、turn hooks 均通过合约注入 |
-| `provider_response.py` | Provider 响应类型 |
 | `tool_execution.py` | 工具执行逻辑，从 `agent_loop.py` 提取 |
 
 ### `src/xcode/evals/`
