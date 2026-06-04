@@ -477,6 +477,40 @@ class XcodeReplTests(unittest.TestCase):
             ["read_file", "run_validation"],
         )
 
+    def test_repl_completer_does_not_suggest_shell_commands(self) -> None:
+        completer = ReplCompleter(Path.cwd())
+
+        items = completer.complete("!g")
+
+        self.assertEqual(items, [])
+
+    def test_repl_completer_suggests_shell_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "src").mkdir()
+            (root / "src" / "main.py").write_text("print('ok')", encoding="utf-8")
+            (root / "space dir").mkdir()
+            (root / "space dir" / "note.txt").write_text("ok", encoding="utf-8")
+            completer = ReplCompleter(root)
+
+            items = completer.complete("!ls sr")
+            spaced_items = completer.complete("!cat space\\ d")
+
+        self.assertEqual([item.text for item in items], ["src/"])
+        self.assertEqual(items[0].start_position, -2)
+        self.assertEqual([item.text for item in spaced_items], ["space\\ dir/"])
+
+    def test_repl_completer_filters_shell_sensitive_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / ".env").write_text("secret", encoding="utf-8")
+            (root / "public.txt").write_text("ok", encoding="utf-8")
+            completer = ReplCompleter(root)
+
+            items = completer.complete("!cat ")
+
+        self.assertEqual([item.text for item in items], ["public.txt"])
+
     def test_repl_completer_suggests_file_references(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

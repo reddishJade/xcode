@@ -64,6 +64,8 @@ class ReplCompleter(Completer):
             return self._complete_tool_name(text_before_cursor)
         if text_before_cursor.startswith("/"):
             return self._complete_command(text_before_cursor)
+        if text_before_cursor.startswith("!"):
+            return self._complete_shell(text_before_cursor)
         return self._complete_file_reference(text_before_cursor)
 
     def _complete_command(self, text: str) -> list[CompletionItem]:
@@ -96,6 +98,24 @@ class ReplCompleter(Completer):
             )
         ]
 
+    def _complete_shell(self, text: str) -> list[CompletionItem]:
+        marker = _active_shell_word(text)
+        if marker is None:
+            return []
+        word, start_position, word_index = marker
+        if word_index == 0:
+            return []
+
+        partial = _unescape_shell_word(word)
+        if any(char in partial for char in "*?[]$"):
+            return []
+        return [
+            CompletionItem(_escape_shell_path(path), start_position, "file")
+            for path in _matching_files(
+                self.project_root, partial, self._directory_cache
+            )
+        ]
+
 
 def _active_file_marker(text: str) -> tuple[str, int] | None:
     token_start = max(text.rfind(" "), text.rfind("\n"), text.rfind("\t")) + 1
@@ -108,6 +128,91 @@ def _active_file_marker(text: str) -> tuple[str, int] | None:
     if any(char in partial for char in "*?[]"):
         return None
     return partial, -len(partial)
+
+
+def _active_shell_word(text: str) -> tuple[str, int, int] | None:
+    shell_text = text[1:]
+    words = _shell_words(shell_text)
+    if not words:
+        return "", 0, 0
+    last = words[-1]
+    if shell_text and shell_text[-1].isspace():
+        return "", 0, len(words)
+    return last[0], -(len(shell_text) - last[1]), len(words) - 1
+
+
+def _shell_words(text: str) -> list[tuple[str, int]]:
+    words: list[tuple[str, int]] = []
+    current: list[str] = []
+    start: int | None = None
+    quote: str | None = None
+    escaped = False
+
+    for index, char in enumerate(text):
+        if escaped:
+            if start is None:
+                start = index - 1
+            current.append("\\" + char)
+            escaped = False
+            continue
+        if char == "\\":
+            if start is None:
+                start = index
+            escaped = True
+            continue
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            if start is None:
+                start = index
+            quote = char
+            current.append(char)
+            continue
+        if char.isspace():
+            if start is not None:
+                words.append(("".join(current), start))
+                current = []
+                start = None
+            continue
+        if start is None:
+            start = index
+        current.append(char)
+
+    if escaped:
+        current.append("\\")
+    if start is not None:
+        words.append(("".join(current), start))
+    return words
+
+
+def _unescape_shell_word(word: str) -> str:
+    if len(word) >= 1 and word[0] in {"'", '"'}:
+        word = word[1:]
+    if len(word) >= 1 and word[-1] in {"'", '"'}:
+        word = word[:-1]
+
+    result = []
+    escaped = False
+    for char in word:
+        if escaped:
+            result.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        else:
+            result.append(char)
+    if escaped:
+        result.append("\\")
+    return "".join(result)
+
+
+def _escape_shell_path(path: str) -> str:
+    return "".join(
+        "\\" + char if char in " \t\n'\"\\$`!&;()<>|" else char for char in path
+    )
 
 
 def _matching_files(

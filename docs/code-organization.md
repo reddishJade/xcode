@@ -70,8 +70,8 @@ src/xcode/main.py
 | `repl_rendering.py` | 终端渲染、prompt session、推理预览 |
 | `repl_sessions.py` | REPL 会话恢复和历史展示 |
 | `repl_settings.py` | 模型、thinking、effort、权限命令处理 |
-| `repl_tools.py` | `/tool` 输入解析、工具意图摘要、事件序列化 |
-| `completion.py` | 命令、工具名和 `@file` 补全 |
+| `repl_tools.py` | `/tool` 输入解析、`!COMMAND` shell 快捷入口、工具意图摘要、事件序列化 |
+| `completion.py` | 命令、工具名、`@file` 和 `!COMMAND` 路径补全 |
 | `file_refs.py` | `@relative/path` 解析和文件内容注入 |
 | `markdown.py` | 终端 markdown/diff 渲染 |
 | `tool_catalog.py` | 构造 REPL 可见工具目录 |

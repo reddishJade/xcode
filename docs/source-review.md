@@ -93,6 +93,8 @@ worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress, speculation
 
 `bash` 通过 `ShellAdapter` 选择宿主 shell，并使用 `Popen` 生命周期控制、超时和 cancellation token。命令风险由 `CommandRiskEvaluator` 判定。
 
+REPL 中的 `!COMMAND` 是 `bash` 工具的快捷入口，输出按原始终端文本展示；它不绕过 `run_tool_result()` 的权限判定和脱敏路径。
+
 ### Tool execution
 
 所有工具调用应走 `run_tool_result()` 或 `ToolExecutor`。执行路径会统一处理：
