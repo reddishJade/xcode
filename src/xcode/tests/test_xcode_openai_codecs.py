@@ -81,7 +81,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
 
         arguments = messages[0]["tool_calls"][0]["function"]["arguments"]
         self.assertIsInstance(arguments, str)
-        self.assertEqual(arguments, '{"path": "src/xcode"}')
+        self.assertEqual(arguments, '{"path":"src/xcode"}')
 
     def test_reasoning_content_is_preserved_for_thinking_mode(self) -> None:
         messages = to_chat_messages(

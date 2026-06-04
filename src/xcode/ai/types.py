@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+import orjson
+
 """AI 层类型定义：Model、Transport、Thinking、Usage 等核心类型。"""
 
 KnownApi = Literal[
@@ -160,27 +162,14 @@ def dump_context(
     system_prompt: str | None,
     messages: list[dict[str, Any]],
 ) -> str:
-    """将会话上下文序列化为 JSON 字符串。
-
-    结果可写入文件、数据库或传输给另一个进程。
-    使用 ``load_context()`` 恢复。
-    """
-    import json
-
     obj: dict[str, Any] = {"messages": messages}
     if system_prompt:
         obj["system_prompt"] = system_prompt
-    return json.dumps(obj, ensure_ascii=False, default=str)
+    return orjson.dumps(obj, default=str).decode()
 
 
 def load_context(data: str) -> tuple[str | None, list[dict[str, Any]]]:
-    """从 JSON 字符串恢复会话上下文。
-
-    返回 (system_prompt, messages)。
-    """
-    import json
-
-    obj = json.loads(data)
+    obj = orjson.loads(data.encode())
     messages = obj.get("messages", [])
     system_prompt: str | None = obj.get("system_prompt")
     return system_prompt, messages

@@ -17,9 +17,8 @@ from collections.abc import Callable
 from time import perf_counter
 from typing import Any
 
-from xcode.ai.events import FinalMessage, StopReason, TextDelta, ReasoningDelta, ToolCallEvent, UsageUpdate
+from xcode.ai.events import FinalMessage, ProviderEvent, StopReason, TextDelta, ReasoningDelta, ToolCallEvent, UsageUpdate
 from xcode.ai.types import ToolDefinition
-from .provider_retry import call_provider_with_retry
 from .types import (
     AgentContext,
     AgentEvent,
@@ -463,14 +462,15 @@ async def _run_inner_loop(
             emit(_message_end_event(msg))
             return msg, "end_turn", provider
 
-        events = await call_provider_with_retry(
-            provider,
-            llm_messages,
-            tool_definitions,
-            max_retries=config.max_step_retries,
-            backoff_base=config.retry_backoff_base,
-            options=config.options,
-        )
+        try:
+            events: list[ProviderEvent] = []
+            kwargs = {}
+            if config.options is not None:
+                kwargs["options"] = config.options
+            async for event in provider.stream(llm_messages, tool_definitions, **kwargs):
+                events.append(event)
+        except Exception as e:
+            events = [FinalMessage(f"Provider error: {e}", "error")]
 
         elapsed = round((perf_counter() - started) * 1000, 3)
         metrics.model_latencies_ms.append(elapsed)

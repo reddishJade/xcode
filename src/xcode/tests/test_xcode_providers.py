@@ -8,6 +8,7 @@ from unittest.mock import patch
 from typing import Any, cast
 from xcode.ai.events import TextDelta, ToolCallEvent, FinalMessage
 from xcode.harness.adapters.tool_schema import tool_definition_from_spec
+from dotenv import dotenv_values
 from xcode.ai.providers.factory import (
     ProviderRuntime,
     ProviderSettings,
@@ -15,7 +16,6 @@ from xcode.ai.providers.factory import (
     RetryPolicy,
     build_provider_bundle,
     get_config_value,
-    load_env_file,
     _resolve_api_key,
 )
 from xcode.ai.providers.openai import OpenAIChatProvider, OpenAIResponsesProvider
@@ -30,7 +30,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
             env_file = Path(temp_dir) / ".env"
             env_file.write_text("A=from_file\nQUOTED='value'\n", encoding="utf-8")
 
-            self.assertEqual(load_env_file(env_file)["A"], "from_file")
+            self.assertEqual(dotenv_values(env_file)["A"], "from_file")
             self.assertEqual(get_config_value("QUOTED", (env_file,)), "value")
 
     def test_provider_factory_reads_env_and_builds_providers(self) -> None:

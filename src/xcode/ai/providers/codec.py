@@ -6,7 +6,9 @@ Schema 转换、消息格式转换（Chat Completions / Responses API）。
 
 from __future__ import annotations
 
-import json
+import copy
+
+import orjson
 from typing import Any, Protocol
 
 from . import stream_codec
@@ -27,8 +29,6 @@ class _ChatToolCall(Protocol):
 
 
 def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
-    import copy
-
     s = copy.deepcopy(schema)
 
     def process(node: Any) -> Any:
@@ -124,22 +124,11 @@ def normalize_cross_provider_messages(
     messages: list[dict[str, Any]],
     target_transport: str,
 ) -> list[dict[str, Any]]:
-    """跨 provider 消息归一化。
-
-    当消息中包含 provider 专有字段（如 reasoning_content），
-    且目标 provider 不原生支持时，将其转为通用格式。
-
-    当前转换：
-    - reasoning_content → 在 content 中插入 <thinking> 文本块（如果目标 transport
-      不在 _REASONING_CONTENT_TRANSPORTS 中）
-    """
     if not _has_reasoning_content(messages):
         return messages
 
     if target_transport in _REASONING_CONTENT_TRANSPORTS:
         return messages
-
-    import copy
 
     result: list[dict[str, Any]] = []
     for msg in messages:
@@ -273,7 +262,7 @@ def _normalize_chat_tool_calls(tool_calls: object) -> list[dict[str, Any]]:
             fixed_function = dict(function)
             arguments = fixed_function.get("arguments", "")
             if not isinstance(arguments, str):
-                fixed_function["arguments"] = json.dumps(arguments, ensure_ascii=False)
+                fixed_function["arguments"] = orjson.dumps(arguments).decode()
             fixed_call["function"] = fixed_function
         normalized.append(fixed_call)
     return normalized
@@ -308,9 +297,9 @@ def _content_blocks_to_chat_messages(
                     "type": "function",
                     "function": {
                         "name": str(part.get("name", "")),
-                        "arguments": json.dumps(
-                            part.get("input", {}), ensure_ascii=False
-                        ),
+                        "arguments": orjson.dumps(
+                            part.get("input", {}),
+                        ).decode(),
                     },
                 }
             )
@@ -364,7 +353,7 @@ def _content_blocks_to_responses_input(
                     "type": "function_call",
                     "call_id": str(part.get("id", "")),
                     "name": str(part.get("name", "")),
-                    "arguments": json.dumps(part.get("input", {}), ensure_ascii=False),
+                    "arguments": orjson.dumps(part.get("input", {})).decode(),
                 }
             )
         elif part_type == "text":

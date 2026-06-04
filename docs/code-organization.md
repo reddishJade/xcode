@@ -127,7 +127,6 @@ src/xcode/main.py
 | `agent.py` | Agent 薄封装，包装 `run_agent_loop` |
 | `agent_loop.py` | 无状态 Agent loop，provider、工具执行、turn hooks 均通过合约注入 |
 | `provider_response.py` | Provider 响应类型 |
-| `provider_retry.py` | Provider retry 逻辑 |
 | `tool_execution.py` | 工具执行逻辑，从 `agent_loop.py` 提取 |
 
 ### `src/xcode/evals/`

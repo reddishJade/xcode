@@ -5,24 +5,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from dotenv import dotenv_values
+
 from .protocol import ModelProvider
 from .runtime import ProviderRuntime, RetryPolicy, RateLimitPolicy
 
 
-def load_env_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.exists():
-        return values
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key:
-            values[key] = value
-    return values
+def load_env_file(path: Path) -> dict[str, str | None]:
+    return dotenv_values(path)
 
 
 def get_config_value(name: str, env_files: tuple[Path, ...] = ()) -> str | None:

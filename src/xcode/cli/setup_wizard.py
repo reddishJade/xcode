@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from xcode.ai.providers.factory import load_env_file
+from dotenv import dotenv_values
 
 CONFIG_FILENAME = "xcode.config.json"
 
@@ -72,7 +72,7 @@ def has_valid_config(project_root: Path) -> bool:
         project_root / "xcode" / ".env",
     ]
     for env_path in env_paths:
-        env = load_env_file(env_path)
+        env = dotenv_values(env_path)
         for key in (
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",

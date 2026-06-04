@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-import json
+import orjson
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Any, Protocol
@@ -109,9 +109,9 @@ class _ResponseStreamEvent(Protocol):
 
 def parse_tool_arguments(raw_arguments: str) -> dict[str, Any]:
     try:
-        result = json.loads(raw_arguments or "{}")
+        result = orjson.loads((raw_arguments or "{}").encode())
         return result if isinstance(result, dict) else {"input": str(result)}
-    except json.JSONDecodeError:
+    except orjson.JSONDecodeError:
         return {"input": raw_arguments}
 
 

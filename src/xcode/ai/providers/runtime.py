@@ -5,6 +5,8 @@ from time import monotonic, sleep
 from collections.abc import Callable
 from typing import TypeVar
 
+import tenacity
+
 """Provider 运行时：重试、限速、API 错误处理。"""
 
 T = TypeVar("T")
@@ -100,8 +102,6 @@ class ProviderRuntime:
         self._last_call_at: float | None = None
 
     def run(self, operation: Callable[[], T]) -> T:
-        import tenacity
-
         retry_policy = tenacity.retry_if_exception(is_transient_provider_error)
 
         retrier = tenacity.Retrying(
