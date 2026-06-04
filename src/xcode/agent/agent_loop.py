@@ -175,6 +175,12 @@ async def run_agent_loop_continue(
 
 
 @dataclass
+class _ProviderResponse:
+    message: AssistantMessage
+    stop_reason: StopReason
+
+
+@dataclass
 class _LoopRunState:
     first_turn: bool = True
     pending_messages: list[AgentMessage] = field(default_factory=list)
@@ -545,19 +551,6 @@ async def _run_inner_loop(
         if _is_cancelled(signal):
             return _cancelled_message(signal), "aborted", provider
 
-        # ── 上下文变换 ──
-        messages = context.messages
-        if config.transform_context:
-            messages = config.transform_context(messages, signal)
-
-        # ── 转换为 LLM 消息格式 ──
-        convert_fn = config.convert_to_llm or (lambda msgs: [])
-        llm_messages = convert_fn(messages)
-
-        # ── 调用 provider（含重试）──
-        tool_definitions = _tools_to_definitions(context.tools)
-        started = perf_counter()
-
         if provider is None:
             msg = AssistantMessage(
                 content=[TextContent(text="No provider configured")],
@@ -567,107 +560,36 @@ async def _run_inner_loop(
             emit(_message_end_event(msg))
             return msg, "end_turn", provider
 
-        try:
-            events: list[ProviderEvent] = []
-            kwargs = {}
-            if config.options is not None:
-                kwargs["options"] = config.options
-            async for event in provider.stream(
-                llm_messages, tool_definitions, **kwargs
-            ):
-                events.append(event)
-        except Exception as e:
-            events = [FinalMessage(f"Provider error: {e}", "error")]
-
-        elapsed = round((perf_counter() - started) * 1000, 3)
-        metrics.model_latencies_ms.append(elapsed)
-
-        # ── 组装响应 ──
-        text_parts: list[str] = []
-        reasoning_parts: list[str] = []
-        tool_calls_found: list[ToolCallContent] = []
-        stop_reason: StopReason = "end_turn"
-
-        for event in events:
-            if isinstance(event, TextDelta):
-                text_parts.append(event.chunk)
-                emit(
-                    _message_update_event(
-                        AssistantMessage(
-                            content=[TextContent(text="".join(text_parts))],
-                        )
-                    )
-                )
-            elif isinstance(event, ReasoningDelta):
-                reasoning_parts.append(event.chunk)
-                emit(ThinkingUpdateEvent(reasoning_content=event.chunk))
-            elif isinstance(event, ToolCallEvent):
-                for call in event.calls:
-                    tool_calls_found.append(
-                        ToolCallContent(
-                            id=call.id,
-                            name=call.name,
-                            arguments=dict(call.input),
-                        )
-                    )
-            elif isinstance(event, UsageUpdate):
-                metrics.input_tokens += event.input_tokens
-                metrics.output_tokens += event.output_tokens
-            # FinalMessage 设置 stop_reason
-            if isinstance(event, FinalMessage):
-                stop_reason = event.stop_reason or "end_turn"
-
-        final_text = "".join(text_parts)
-        content_blocks: list[ContentBlock] = [TextContent(text=final_text)]
-        content_blocks.extend(tool_calls_found)
-
-        message = AssistantMessage(
-            content=content_blocks,
-            reasoning_content="".join(reasoning_parts) if reasoning_parts else None,
-            stop_reason=stop_reason,
+        response = await _call_provider(
+            context,
+            config,
+            emit,
+            signal,
+            metrics,
+            provider,
         )
+        message = response.message
+        stop_reason = response.stop_reason
 
         # ── 检查是否为 FinalMessage 的错误 ──
         if stop_reason == "error":
             step_retries += 1
-            if step_retries <= config.max_step_retries:
-                delay = config.retry_backoff_base * (2 ** (step_retries - 1))
-                await asyncio.sleep(delay)
+            should_retry, fallback_message = await _handle_provider_error(
+                message, step_retries, config, emit
+            )
+            if should_retry:
                 continue
-            # 重试耗尽
-            if not content_blocks or (
-                len(content_blocks) == 1
-                and isinstance(content_blocks[0], TextContent)
-                and not content_blocks[0].text
-            ):
-                msg = AssistantMessage(
-                    content=[TextContent(text="I encountered an error.")],
-                    stop_reason="error",
-                )
-                emit(_message_start_event(msg))
-                emit(_message_end_event(msg))
+            if fallback_message is not None:
                 return None
             emit(_message_end_event(message))
             return message, stop_reason, provider
 
         # ── max_tokens 续写 ──
-        if stop_reason == "max_tokens" and config.max_tokens_continuation:
-            inc = _estimate_text_tokens(
-                json.dumps(content_blocks, ensure_ascii=False, default=str)
+        if _should_continue_max_tokens(stop_reason, config):
+            consecutive_continuations = _update_continuation_count(
+                message, consecutive_continuations, config
             )
-            consecutive_continuations = (
-                consecutive_continuations + 1
-                if inc < config.min_continuation_tokens
-                else 0
-            )
-            if consecutive_continuations >= config.max_consecutive_continuations:
-                raise RuntimeError(
-                    "Diminishing Returns: consecutive output token increments "
-                    f"below {config.min_continuation_tokens} limit."
-                )
-            # 将当前消息加入 context，追加 "continue"，重新循环
-            context.messages.append(message)
-            context.messages.append(UserMessage(content="continue"))
+            _append_continuation_prompt(context, message)
             continue
 
         # ── 正常结束 ──
@@ -676,6 +598,178 @@ async def _run_inner_loop(
         step_retries = 0
         consecutive_continuations = 0
         return message, stop_reason, provider
+
+
+async def _call_provider(
+    context: AgentContext,
+    config: AgentLoopConfig,
+    emit: Callable[[AgentEvent], None],
+    signal: CancellationSignal | None,
+    metrics: AgentLoopMetrics,
+    provider: Any,
+) -> _ProviderResponse:
+    messages = context.messages
+    if config.transform_context:
+        messages = config.transform_context(messages, signal)
+
+    convert_fn = config.convert_to_llm or (lambda msgs: [])
+    llm_messages = convert_fn(messages)
+    tool_definitions = _tools_to_definitions(context.tools)
+
+    started = perf_counter()
+    events = await _collect_provider_events(
+        provider,
+        llm_messages,
+        tool_definitions,
+        config,
+    )
+    elapsed = round((perf_counter() - started) * 1000, 3)
+    metrics.model_latencies_ms.append(elapsed)
+    return _provider_events_to_response(events, metrics, emit)
+
+
+async def _collect_provider_events(
+    provider: Any,
+    llm_messages: list[Any],
+    tool_definitions: list[ToolDefinition],
+    config: AgentLoopConfig,
+) -> list[ProviderEvent]:
+    try:
+        events: list[ProviderEvent] = []
+        kwargs = {}
+        if config.options is not None:
+            kwargs["options"] = config.options
+        async for event in provider.stream(llm_messages, tool_definitions, **kwargs):
+            events.append(event)
+        return events
+    except Exception as e:
+        return [FinalMessage(f"Provider error: {e}", "error")]
+
+
+def _provider_events_to_response(
+    events: list[ProviderEvent],
+    metrics: AgentLoopMetrics,
+    emit: Callable[[AgentEvent], None],
+) -> _ProviderResponse:
+    text_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    tool_calls_found: list[ToolCallContent] = []
+    stop_reason: StopReason = "end_turn"
+
+    for event in events:
+        if isinstance(event, TextDelta):
+            _append_text_delta(text_parts, event, emit)
+        elif isinstance(event, ReasoningDelta):
+            reasoning_parts.append(event.chunk)
+            emit(ThinkingUpdateEvent(reasoning_content=event.chunk))
+        elif isinstance(event, ToolCallEvent):
+            tool_calls_found.extend(_tool_call_content_blocks(event))
+        elif isinstance(event, UsageUpdate):
+            metrics.input_tokens += event.input_tokens
+            metrics.output_tokens += event.output_tokens
+        if isinstance(event, FinalMessage):
+            stop_reason = event.stop_reason or "end_turn"
+
+    content_blocks: list[ContentBlock] = [TextContent(text="".join(text_parts))]
+    content_blocks.extend(tool_calls_found)
+    return _ProviderResponse(
+        message=AssistantMessage(
+            content=content_blocks,
+            reasoning_content="".join(reasoning_parts) if reasoning_parts else None,
+            stop_reason=stop_reason,
+        ),
+        stop_reason=stop_reason,
+    )
+
+
+def _append_text_delta(
+    text_parts: list[str],
+    event: TextDelta,
+    emit: Callable[[AgentEvent], None],
+) -> None:
+    text_parts.append(event.chunk)
+    emit(
+        _message_update_event(
+            AssistantMessage(
+                content=[TextContent(text="".join(text_parts))],
+            )
+        )
+    )
+
+
+def _tool_call_content_blocks(event: ToolCallEvent) -> list[ToolCallContent]:
+    return [
+        ToolCallContent(
+            id=call.id,
+            name=call.name,
+            arguments=dict(call.input),
+        )
+        for call in event.calls
+    ]
+
+
+async def _handle_provider_error(
+    message: AssistantMessage,
+    step_retries: int,
+    config: AgentLoopConfig,
+    emit: Callable[[AgentEvent], None],
+) -> tuple[bool, AssistantMessage | None]:
+    if step_retries <= config.max_step_retries:
+        delay = config.retry_backoff_base * (2 ** (step_retries - 1))
+        await asyncio.sleep(delay)
+        return True, None
+    if _has_empty_text_response(message):
+        msg = AssistantMessage(
+            content=[TextContent(text="I encountered an error.")],
+            stop_reason="error",
+        )
+        emit(_message_start_event(msg))
+        emit(_message_end_event(msg))
+        return False, msg
+    return False, None
+
+
+def _has_empty_text_response(message: AssistantMessage) -> bool:
+    content_blocks = message.content
+    return not content_blocks or (
+        len(content_blocks) == 1
+        and isinstance(content_blocks[0], TextContent)
+        and not content_blocks[0].text
+    )
+
+
+def _should_continue_max_tokens(
+    stop_reason: str,
+    config: AgentLoopConfig,
+) -> bool:
+    return stop_reason == "max_tokens" and config.max_tokens_continuation
+
+
+def _update_continuation_count(
+    message: AssistantMessage,
+    consecutive_continuations: int,
+    config: AgentLoopConfig,
+) -> int:
+    inc = _estimate_text_tokens(
+        json.dumps(message.content, ensure_ascii=False, default=str)
+    )
+    updated = (
+        consecutive_continuations + 1 if inc < config.min_continuation_tokens else 0
+    )
+    if updated >= config.max_consecutive_continuations:
+        raise RuntimeError(
+            "Diminishing Returns: consecutive output token increments "
+            f"below {config.min_continuation_tokens} limit."
+        )
+    return updated
+
+
+def _append_continuation_prompt(
+    context: AgentContext,
+    message: AssistantMessage,
+) -> None:
+    context.messages.append(message)
+    context.messages.append(UserMessage(content="continue"))
 
 
 # ── 辅助函数 ──
