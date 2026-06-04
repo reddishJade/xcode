@@ -24,18 +24,23 @@ from ...agent.types import (
     AgentLoopConfig,
     AgentLoopResult,
     AgentMessage,
+    AgentStartEvent,
     AssistantMessage,
     BeforeToolCallContext,
     BeforeToolCallResult,
     MessageEndEvent,
+    MessageStartEvent,
     MessageUpdateEvent,
     SystemMessage,
     TextContent,
-    ThinkingUpdateEvent,
     ToolCallContent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
+    ThinkingUpdateEvent,
     ToolResultMessage,
+    TurnEndEvent,
+    TurnStartEvent,
     UserMessage,
 )
 from .agent_helpers import (
@@ -534,7 +539,6 @@ def _translate_event(
     _text_seen: dict[int, str] | None = None,
 ) -> StructuredAgentEvent | list[StructuredAgentEvent] | None:
     """将 AgentEvent 翻译为 StructuredAgentEvent。"""
-    from ...agent.types import AgentStartEvent, TurnStartEvent
 
     if isinstance(event, AgentStartEvent):
         return None
@@ -559,6 +563,21 @@ def _translate_event(
                     return StructuredAgentEvent("text_delta", step, delta)
         return None
 
+    if isinstance(event, MessageStartEvent):
+        return StructuredAgentEvent("message_start", step_counter[0], event.message)
+
+    if isinstance(event, TurnEndEvent):
+        return StructuredAgentEvent(
+            "turn_end",
+            step_counter[0],
+            {
+                "tool_results": [
+                    {"tool_call_id": r.tool_call_id, "content": str(r.content)}
+                    for r in event.tool_results
+                ]
+            },
+        )
+
     if isinstance(event, ThinkingUpdateEvent):
         return StructuredAgentEvent(
             "reasoning_delta", step_counter[0], event.reasoning_content
@@ -579,6 +598,17 @@ def _translate_event(
             input=event.args or {},
         )
         return StructuredAgentEvent("tool_use", step_counter[0], tu)
+
+    if isinstance(event, ToolExecutionUpdateEvent):
+        return StructuredAgentEvent(
+            "tool_update",
+            step_counter[0],
+            {
+                "tool_call_id": event.tool_call_id,
+                "tool_name": event.tool_name,
+                "partial_result": str(event.partial_result) if event.partial_result else "",
+            },
+        )
 
     if isinstance(event, ToolExecutionEndEvent):
         return StructuredAgentEvent(

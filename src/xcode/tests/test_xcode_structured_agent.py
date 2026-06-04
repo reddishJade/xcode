@@ -382,11 +382,14 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         self.assertEqual(
             [event.type for event in events],
             [
+                "message_start",
                 "assistant",
                 "tool_use",
                 "tool_result",
+                "turn_end",
                 "text_delta",
                 "assistant",
+                "turn_end",
                 "final",
             ],
         )
@@ -407,9 +410,9 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         self.assertEqual(
             [event.type for event in events],
-            ["text_delta", "text_delta", "assistant", "final"],
+            ["message_start", "text_delta", "text_delta", "assistant", "turn_end", "final"],
         )
-        self.assertEqual(events[0].data, "he")
+        self.assertEqual(events[1].data, "he")
         self.assertEqual(events[-1].data.answer, "hello")
 
     def test_run_stream_uses_windows_selector_worker(self) -> None:
@@ -507,7 +510,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         self.assertEqual(
             [event.type for event in events],
-            ["text_delta", "text_delta", "assistant", "final"],
+            ["message_start", "text_delta", "text_delta", "assistant", "turn_end", "final"],
         )
         self.assertEqual(events[-1].data.answer, "hello")
 
