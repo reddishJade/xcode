@@ -10,10 +10,10 @@ agent/Agent.run() 执行。
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Generator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Generator, Iterator, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from ...agent.agent import Agent
 from ...agent.messages import convert_to_llm
@@ -606,7 +606,9 @@ def _translate_event(
             {
                 "tool_call_id": event.tool_call_id,
                 "tool_name": event.tool_name,
-                "partial_result": str(event.partial_result) if event.partial_result else "",
+                "partial_result": str(event.partial_result)
+                if event.partial_result
+                else "",
             },
         )
 

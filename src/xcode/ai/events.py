@@ -5,8 +5,8 @@ from typing import Any, Literal, TypeAlias
 
 """Provider 流式事件协议。"""
 
-Message: TypeAlias = dict[str, Any]
-StopReason: TypeAlias = Literal[
+type Message = dict[str, Any]
+type StopReason = Literal[
     "end_turn",
     "max_tokens",
     "tool_use",
@@ -52,6 +52,6 @@ class ReasoningDelta:
     chunk: str
 
 
-ProviderEvent: TypeAlias = (
+type ProviderEvent = (
     TextDelta | ToolCallEvent | UsageUpdate | FinalMessage | ReasoningDelta
 )

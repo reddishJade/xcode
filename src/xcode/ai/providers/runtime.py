@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from time import monotonic, sleep
-from typing import Callable, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 
 """Provider 运行时：重试、限速、API 错误处理。"""
 

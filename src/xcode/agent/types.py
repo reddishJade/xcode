@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Protocol
+from collections.abc import Callable
+from typing import Any, Literal, Protocol
 
 from xcode.ai.events import StopReason
 from xcode.ai.providers.protocol import ModelProvider

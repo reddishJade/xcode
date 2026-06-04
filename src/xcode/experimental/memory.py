@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
 
 from .bm25 import BM25Okapi
 from .memory_parsing import (

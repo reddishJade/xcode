@@ -3,7 +3,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 import json
 
 from ..harness.skills import ToolInput, ToolSpec

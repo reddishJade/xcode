@@ -7,7 +7,8 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from typing import cast, Iterator
+from collections.abc import Iterator
+from typing import cast
 from xcode.harness.config import AgentConfig
 from xcode.ai.events import (
     FinalMessage,
@@ -410,7 +411,14 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         self.assertEqual(
             [event.type for event in events],
-            ["message_start", "text_delta", "text_delta", "assistant", "turn_end", "final"],
+            [
+                "message_start",
+                "text_delta",
+                "text_delta",
+                "assistant",
+                "turn_end",
+                "final",
+            ],
         )
         self.assertEqual(events[1].data, "he")
         self.assertEqual(events[-1].data.answer, "hello")
@@ -510,7 +518,14 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         self.assertEqual(
             [event.type for event in events],
-            ["message_start", "text_delta", "text_delta", "assistant", "turn_end", "final"],
+            [
+                "message_start",
+                "text_delta",
+                "text_delta",
+                "assistant",
+                "turn_end",
+                "final",
+            ],
         )
         self.assertEqual(events[-1].data.answer, "hello")
 

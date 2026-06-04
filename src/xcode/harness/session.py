@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 import json
 import logging
 import os
@@ -56,7 +56,7 @@ class SessionStore:
         record = SessionRecord(
             type=record_type,
             content=content,
-            created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            created_at=datetime.now(UTC).isoformat(timespec="seconds"),
         )
         with self.current_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
@@ -75,7 +75,7 @@ class SessionStore:
         fork_path = self._new_path()
         if self.current_path.exists():
             shutil.copy2(self.current_path, fork_path)
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         meta = SessionMetadata(
             id=self._session_id(fork_path),
             title=f"Fork of {parent.title}",
@@ -100,7 +100,7 @@ class SessionStore:
             )
         parent = self.ensure_metadata()
         fork_path = self._new_path()
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         meta = SessionMetadata(
             id=self._session_id(fork_path),
             title=title or f"Clean Fork of {parent.title}",
@@ -198,7 +198,7 @@ class SessionStore:
         existing = self._metadata_for_path(self.current_path)
         if existing is not None:
             return existing
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         title = (
             _make_title(first_user_text) if first_user_text else "Untitled conversation"
         )
@@ -234,7 +234,7 @@ class SessionStore:
             project_path=current.project_path,
             transcript_path=current.transcript_path,
             created_at=current.created_at,
-            updated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            updated_at=datetime.now(UTC).isoformat(timespec="seconds"),
         )
         self._upsert_metadata(metadata)
         return metadata
@@ -303,7 +303,7 @@ class SessionStore:
         )
 
     def _new_path(self) -> Path:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         path = self.sessions_dir / f"session-{stamp}.jsonl"
         suffix = 1
         while path.exists():

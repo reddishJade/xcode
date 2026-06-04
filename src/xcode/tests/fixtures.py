@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
-from typing import Any, Iterator, Union, cast
+from collections.abc import AsyncIterator, Callable, Iterator
+from typing import Any, cast
 from xcode.ai.events import ProviderEvent
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import ToolDefinition
@@ -14,11 +14,9 @@ class FakeProvider(ModelProvider):
 
     def __init__(
         self,
-        events: Union[
-            list[ProviderEvent],
-            list[list[ProviderEvent]],
-            Callable[[list[Any], list[Any]], list[ProviderEvent]],
-        ],
+        events: list[ProviderEvent]
+        | list[list[ProviderEvent]]
+        | Callable[[list[Any], list[Any]], list[ProviderEvent]],
     ) -> None:
         self.events = events
         self._iterator = None

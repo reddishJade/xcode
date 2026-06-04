@@ -6,7 +6,8 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from ..skills import ToolSpec
 

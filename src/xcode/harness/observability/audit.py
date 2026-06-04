@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 import json
 from pathlib import Path
 import re
@@ -42,7 +42,7 @@ class JsonlAuditLogger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = asdict(record)
         if not payload["timestamp"]:
-            payload["timestamp"] = datetime.now(timezone.utc).isoformat()
+            payload["timestamp"] = datetime.now(UTC).isoformat()
         with self.path.open("a", encoding="utf-8") as file:
             file.write(json.dumps(payload, ensure_ascii=False) + "\n")
 

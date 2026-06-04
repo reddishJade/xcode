@@ -3,7 +3,8 @@ from __future__ import annotations
 import ast
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from ..harness.skills import ToolSpec
 
