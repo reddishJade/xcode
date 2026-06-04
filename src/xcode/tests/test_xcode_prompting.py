@@ -47,6 +47,7 @@ class XcodePromptingTests(unittest.TestCase):
             self.assertIn("<environment>", prompt)
             self.assertIn("<git-preflight>", prompt)
             self.assertIn("<search-strategy>", prompt)
+            self.assertIn("smallest targeted change", prompt)
             self.assertIn("<cwd-info>", prompt)
             self.assertIn("Use tests.", prompt)
             self.assertLess(

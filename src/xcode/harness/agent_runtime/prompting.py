@@ -41,6 +41,8 @@ SEARCH_STRATEGY = """<search-strategy>
 Code tasks use the following retrieval layers in order:
 1. lexical search: use glob_files for file/path discovery, grep_search for exact text, and read_file for known files.
 2. contextual retrieval: use explicit @file context, git preflight, recent files, and recent tool summaries only as task orientation.
+Bug fixes should identify the relevant code path, explain the root cause to
+yourself, make the smallest targeted change, and verify the changed behavior.
 </search-strategy>"""
 
 SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "<system-prompt-dynamic-boundary />"
