@@ -26,11 +26,23 @@ from xcode.harness.observability import HITLResult
 
 from .runner import EvalRunner
 from .schema import EvalTask
+from .tasks import SUITES
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    tasks = _load_tasks(args.tasks) if args.tasks else _offline_smoke_tasks()
+    tasks: tuple[EvalTask, ...]
+    if args.suite:
+        t = SUITES.get(args.suite)
+        if t is None:
+            available = ", ".join(sorted(SUITES))
+            print(f"Unknown suite: {args.suite}. Available: {available}")
+            return 1
+        tasks = t
+    elif args.tasks:
+        tasks = _load_tasks(args.tasks)
+    else:
+        tasks = SUITES.get("smoke", ())
     output_dir = args.output_dir or Path.cwd() / ".local" / "eval_runs"
     runner = EvalRunner(
         tasks=tasks,
@@ -50,9 +62,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _print_summary(report) -> None:
-    """打印量化摘要：grader 通过率、LLM 调用、token、延迟。"""
+    """打印量化摘要：grader 通过率、pass@k/pass^k、LLM 调用、token、延迟。"""
     m = report.metrics
-    # grader 统计
+    pass_at_k = m.get("pass@k")
+    pass_pow_k = m.get("pass^k")
+    if pass_at_k and pass_pow_k:
+        print(f"pass@k: {pass_at_k}   pass^k: {pass_pow_k}")
     grader_rate = m.get("grader_pass_rate")
     if grader_rate is not None:
         all_graders = [g for t in report.trials for g in t.graders]
@@ -78,9 +93,14 @@ def _print_summary(report) -> None:
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Xcode eval tasks.")
     parser.add_argument(
+        "--suite",
+        type=str,
+        help=f"Run a named task suite: {', '.join(sorted(SUITES))}",
+    )
+    parser.add_argument(
         "--tasks",
         type=Path,
-        help="JSON or JSONL EvalTask file. If omitted, runs offline smoke evals.",
+        help="JSON or JSONL EvalTask file. If omitted, runs smoke suite.",
     )
     parser.add_argument(
         "--real",

@@ -294,6 +294,18 @@ def _build_run_metrics(
         "trial_count": len(trials),
         "passed_trials": passed,
     }
+    # pass@k: k 次至少一次正确（探索能力上限）
+    # pass^k: k 次全部正确（上线回归）
+    from collections import defaultdict
+    task_trials: dict[str, list[bool]] = defaultdict(list)
+    for t in trials:
+        task_trials[t.task_id].append(t.success)
+    k = max(len(v) for v in task_trials.values()) if task_trials else 1
+    pass_at_k_count = sum(1 for v in task_trials.values() if any(v))
+    pass_pow_k_count = sum(1 for v in task_trials.values() if all(v))
+    metrics["trials_per_task"] = k
+    metrics["pass@k"] = f"{pass_at_k_count}/{len(task_trials)}"
+    metrics["pass^k"] = f"{pass_pow_k_count}/{len(task_trials)}"
     # 跨 trial 聚合延迟和 token
     total_llm = 0
     total_tokens = 0
