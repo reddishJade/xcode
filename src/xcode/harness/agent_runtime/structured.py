@@ -57,7 +57,13 @@ from xcode.ai.types import StreamOptions, ToolDefinition
 from .execution_modes import mode_notice, policy_for_mode
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
-from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
+from ..observability import (
+    AuditRecord,
+    HookManager,
+    HookRecord,
+    PermissionPolicy,
+    redact_text,
+)
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 if TYPE_CHECKING:
@@ -353,22 +359,44 @@ class StructuredAgent:
         队列 drain（get_steering_messages / get_follow_up_messages）
         由 Agent 层注入，此处不设置。
         """
-        policy = policy_for_mode(mode)
+        should_compact = self._loop_should_compact if self.compactor else None
+        compact = self._loop_compact if self.compactor else None
 
-        def should_compact(messages: list[AgentMessage]) -> bool:
-            return self._should_compact([to_dict(m) for m in messages])
+        return AgentLoopConfig(
+            provider=self.provider,
+            convert_to_llm=convert_to_llm,
+            max_steps=self.config.max_steps,
+            max_step_retries=3,
+            retry_backoff_base=0.5,
+            max_tokens_continuation=True,
+            max_consecutive_continuations=3,
+            min_continuation_tokens=500,
+            watchdog_repeated_tool_limit=self.config.watchdog_repeated_tool_limit,
+            max_consecutive_idle_steps=4,
+            should_compact=should_compact,
+            compact=compact,
+            is_tool_productive=self._loop_is_tool_productive(mode),
+            before_tool_call=self._loop_before_tool(mode),
+            after_tool_call=self._loop_after_tool,
+        )
 
-        def compact(messages: list[AgentMessage]) -> list[AgentMessage]:
-            self._emit_hook(
-                HookRecord("on_compact", metadata={"messages": len(messages)})
-            )
-            if self.compactor is None:
-                return messages
-            dict_messages = [to_dict(m) for m in messages]
-            self.compactor(dict_messages)
-            # compactor 通过 dict 操作，返回值由 harness 层管理
+    # ── 辅助方法 ──
+
+    def _loop_should_compact(self, messages: list[AgentMessage]) -> bool:
+        return self._should_compact([to_dict(m) for m in messages])
+
+    def _loop_compact(self, messages: list[AgentMessage]) -> list[AgentMessage]:
+        self._emit_hook(HookRecord("on_compact", metadata={"messages": len(messages)}))
+        if self.compactor is None:
             return messages
+        dict_messages = [to_dict(m) for m in messages]
+        self.compactor(dict_messages)
+        # compactor 通过 dict 操作，返回值由 harness 层管理。
+        return messages
 
+    def _loop_is_tool_productive(
+        self, mode: ExecutionMode
+    ) -> Callable[[list[ToolCallContent], list[ToolResultMessage]], bool]:
         def is_tool_productive(
             tool_calls: list[ToolCallContent],
             tool_results: list[ToolResultMessage],
@@ -388,14 +416,20 @@ class StructuredAgent:
                 self.tool_map,
             )
 
+        return is_tool_productive
+
+    def _loop_before_tool(
+        self, mode: ExecutionMode
+    ) -> Callable[[BeforeToolCallContext, Any], BeforeToolCallResult | None]:
+        policy = policy_for_mode(mode)
+
         def before_tool(
-            ctx: BeforeToolCallContext, signal: Any
+            ctx: BeforeToolCallContext, _signal: Any
         ) -> BeforeToolCallResult | None:
             tool_call = ctx.tool_call
             args = ctx.args
             action_input = stringify_tool_input(args)
 
-            # 执行模式策略检查
             decision = policy.check_call(
                 ToolUseBlock(id=tool_call.id, name=tool_call.name, input=args)
             )
@@ -405,102 +439,94 @@ class StructuredAgent:
                     reason=f"permission denied for tool: {tool_call.name}",
                 )
             if decision == "ask":
-                if (
-                    self.approval_callback is None
-                    or self.tool_map.get(tool_call.name) is None
-                ):
-                    return BeforeToolCallResult(
-                        block=True,
-                        reason=f"tool requires approval: {tool_call.name}",
-                    )
-                hitl = self.approval_callback(self.tool_map[tool_call.name], args)
-                if hitl.decision == "deny":
-                    return BeforeToolCallResult(
-                        block=True,
-                        reason=f"tool {tool_call.name} denied by user",
-                    )
+                approval = self._request_tool_approval(tool_call.name, args)
+                if approval is not None:
+                    return approval
 
-            # pre_tool 钩子
-            if self.hook_manager is not None:
-                self.hook_manager.emit(
-                    HookRecord("pre_tool", tool=tool_call.name, input=action_input)
-                )
+            self._emit_hook(
+                HookRecord("pre_tool", tool=tool_call.name, input=action_input)
+            )
             return None
 
-        def after_tool(
-            ctx: AfterToolCallContext, signal: Any
-        ) -> AfterToolCallResult | None:
-            tool_call = ctx.tool_call
-            args = ctx.args
-            action_input = stringify_tool_input(args)
+        return before_tool
 
-            result_content_text = ""
-            if ctx.result and ctx.result.content:
-                result_content_text = "".join(
-                    c.text for c in ctx.result.content if isinstance(c, TextContent)
+    def _request_tool_approval(
+        self, tool_name: str, args: dict[str, Any]
+    ) -> BeforeToolCallResult | None:
+        if self.approval_callback is None or self.tool_map.get(tool_name) is None:
+            return BeforeToolCallResult(
+                block=True,
+                reason=f"tool requires approval: {tool_name}",
+            )
+        hitl = self.approval_callback(self.tool_map[tool_name], args)
+        if hitl.decision == "deny":
+            return BeforeToolCallResult(
+                block=True,
+                reason=f"tool {tool_name} denied by user",
+            )
+        return None
+
+    def _loop_after_tool(
+        self, ctx: AfterToolCallContext, _signal: Any
+    ) -> AfterToolCallResult | None:
+        action_input = stringify_tool_input(ctx.args)
+        result_content_text = _tool_result_text(ctx)
+
+        self._emit_tool_hook(ctx, action_input, result_content_text)
+        self._emit_audit_record(ctx, action_input, result_content_text)
+        return None
+
+    def _emit_tool_hook(
+        self,
+        ctx: AfterToolCallContext,
+        action_input: str,
+        result_content_text: str,
+    ) -> None:
+        tool_call = ctx.tool_call
+        if ctx.is_error:
+            self._emit_hook(
+                HookRecord(
+                    "on_error",
+                    tool=tool_call.name,
+                    input=action_input,
+                    error=result_content_text,
                 )
-
-            if ctx.is_error:
-                if self.hook_manager is not None:
-                    self.hook_manager.emit(
-                        HookRecord(
-                            "on_error",
-                            tool=tool_call.name,
-                            input=action_input,
-                            error=result_content_text,
-                        )
-                    )
-            else:
-                if self.hook_manager is not None:
-                    self.hook_manager.emit(
-                        HookRecord(
-                            "post_tool",
-                            tool=tool_call.name,
-                            input=action_input,
-                            output=result_content_text,
-                        )
-                    )
-
-            if self.audit_logger is not None:
-                from ..observability.audit import redact_text
-
-                self.audit_logger(
-                    AuditRecord(
-                        session_id=self.session_id,
-                        tool=tool_call.name,
-                        static_risk=self.tool_map.get(
-                            tool_call.name, ToolSpec("", "", "", lambda _: "")
-                        ).risk
-                        or "low",
-                        dynamic_decision="allow",
-                        policy_decision=None,
-                        final_status="error" if ctx.is_error else "ok",
-                        approved=True,
-                        redacted_input=redact_text(action_input),
-                        redacted_output=redact_text(result_content_text),
-                    )
-                )
-            return None
-
-        return AgentLoopConfig(
-            provider=self.provider,
-            convert_to_llm=convert_to_llm,
-            max_steps=self.config.max_steps,
-            max_step_retries=3,
-            retry_backoff_base=0.5,
-            max_tokens_continuation=True,
-            max_consecutive_continuations=3,
-            min_continuation_tokens=500,
-            watchdog_repeated_tool_limit=self.config.watchdog_repeated_tool_limit,
-            max_consecutive_idle_steps=4,
-            should_compact=should_compact if self.compactor else None,
-            compact=compact if self.compactor else None,
-            is_tool_productive=is_tool_productive,
-            before_tool_call=before_tool,
-            after_tool_call=after_tool,
+            )
+            return
+        self._emit_hook(
+            HookRecord(
+                "post_tool",
+                tool=tool_call.name,
+                input=action_input,
+                output=result_content_text,
+            )
         )
 
-    # ── 辅助方法 ──
+    def _emit_audit_record(
+        self,
+        ctx: AfterToolCallContext,
+        action_input: str,
+        result_content_text: str,
+    ) -> None:
+        if self.audit_logger is None:
+            return
+        tool_call = ctx.tool_call
+        self.audit_logger(
+            AuditRecord(
+                session_id=self.session_id,
+                tool=tool_call.name,
+                static_risk=self.tool_map.get(
+                    tool_call.name, ToolSpec("", "", "", lambda _: "")
+                ).risk
+                or "low",
+                dynamic_decision="allow",
+                policy_decision=None,
+                final_status="error" if ctx.is_error else "ok",
+                approved=True,
+                redacted_input=redact_text(action_input),
+                redacted_output=redact_text(result_content_text),
+            )
+        )
 
     def _emit_hook(self, record: HookRecord) -> None:
         if self.hook_manager is not None:
@@ -765,6 +791,12 @@ def _tool_results_count_as_progress(
         if spec and spec.read_only:
             return True
     return False
+
+
+def _tool_result_text(ctx: AfterToolCallContext) -> str:
+    if not ctx.result or not ctx.result.content:
+        return ""
+    return "".join(c.text for c in ctx.result.content if isinstance(c, TextContent))
 
 
 def _final_event(step: int, result: StructuredAgentResult) -> StructuredAgentEvent:

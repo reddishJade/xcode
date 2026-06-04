@@ -22,6 +22,61 @@ import uuid
 PENDING = "pending"
 CLAIMED = "claimed"
 
+CREATE_TASK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string", "description": "Title of the task"},
+        "blocked_by": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "IDs of tasks that this task is blocked by",
+        },
+    },
+    "required": ["title"],
+    "additionalProperties": True,
+}
+
+UPDATE_TASK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "ID of the task to update",
+        },
+        "status": {
+            "type": "string",
+            "description": "New status of the task",
+        },
+        "title": {"type": "string", "description": "New title of the task"},
+        "blocked_by": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "IDs of tasks that this task is blocked by",
+        },
+    },
+    "required": ["id"],
+    "additionalProperties": True,
+}
+
+LIST_TASKS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "view": {
+            "type": "string",
+            "enum": ["kanban", "topological", "raw"],
+            "description": "View style to render the tasks",
+        }
+    },
+    "additionalProperties": False,
+}
+
+GET_TASK_SCHEMA = {
+    "type": "object",
+    "properties": {"id": {"type": "integer", "description": "Task ID"}},
+    "required": ["id"],
+    "additionalProperties": False,
+}
+
 
 @dataclass(frozen=True)
 class TaskRecord:
@@ -262,140 +317,101 @@ def render_kanban_view(tasks: list[TaskRecord]) -> str:
     return "\n".join(lines)
 
 
-def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
-    def create_task(args: ToolInput) -> str:
-        title = str(args.get("title", "")).strip()
-        if not title:
-            raise ValueError("title is required")
-        blocked_by = args.get("blocked_by") or args.get("dependencies")
-        payload = {}
-        if blocked_by:
-            payload["blocked_by"] = blocked_by
-        if "payload" in args and isinstance(args["payload"], dict):
-            payload.update(args["payload"])
-        task = store.create(title, payload)
-        return f"Created task #{task.id}: '{task.title}' (status: {task.status})"
+def _create_task(store: TaskStore, args: ToolInput) -> str:
+    title = str(args.get("title", "")).strip()
+    if not title:
+        raise ValueError("title is required")
+    blocked_by = args.get("blocked_by") or args.get("dependencies")
+    payload = {}
+    if blocked_by:
+        payload["blocked_by"] = blocked_by
+    if "payload" in args and isinstance(args["payload"], dict):
+        payload.update(args["payload"])
+    task = store.create(title, payload)
+    return f"Created task #{task.id}: '{task.title}' (status: {task.status})"
 
-    def update_task(args: ToolInput) -> str:
-        task_id = args.get("id")
-        if task_id is None:
-            raise ValueError("id is required")
-        title = args.get("title")
-        status = args.get("status")
-        payload_update = args.get("payload")
 
-        current = store.get(task_id)
-        payload = dict(current.payload)
-        if args.get("blocked_by"):
-            payload["blocked_by"] = args.get("blocked_by")
-        if isinstance(payload_update, dict):
-            payload.update(payload_update)
+def _update_task(store: TaskStore, args: ToolInput) -> str:
+    task_id = args.get("id")
+    if task_id is None:
+        raise ValueError("id is required")
+    title = args.get("title")
+    status = args.get("status")
+    payload_update = args.get("payload")
 
-        task = store.update(task_id, title=title, status=status, payload=payload)
-        return f"Updated task #{task.id}: status={task.status}, version={task.version}"
+    current = store.get(task_id)
+    payload = dict(current.payload)
+    if args.get("blocked_by"):
+        payload["blocked_by"] = args.get("blocked_by")
+    if isinstance(payload_update, dict):
+        payload.update(payload_update)
 
-    def list_tasks(args: ToolInput) -> str:
-        view = str(args.get("view", "kanban")).strip().lower()
-        tasks = store.list()
-        if not tasks:
-            return "No tasks in the store."
-        if view == "kanban":
-            return render_kanban_view(tasks)
-        elif view == "topological":
-            try:
-                sorted_tasks = resolve_task_dependencies(tasks)
-                lines = ["=== TOPOLOGICAL TASK LIST ==="]
-                for t in sorted_tasks:
-                    blocked_by = t.payload.get("blocked_by")
-                    block_info = f" [Blocked by: {blocked_by}]" if blocked_by else ""
-                    lines.append(f"  - #{t.id} ({t.status}): {t.title}{block_info}")
-                return "\n".join(lines)
-            except ValueError as e:
-                return f"Dependency Resolution Error: {e}"
-        else:
-            lines = ["=== TASK LIST ==="]
-            for t in tasks:
-                lines.append(f"  - #{t.id} [{t.status}]: {t.title}")
-            return "\n".join(lines)
+    task = store.update(task_id, title=title, status=status, payload=payload)
+    return f"Updated task #{task.id}: status={task.status}, version={task.version}"
 
-    def get_task(args: ToolInput) -> str:
-        task_id = args.get("id")
-        if task_id is None:
-            raise ValueError("id is required")
+
+def _list_tasks(store: TaskStore, args: ToolInput) -> str:
+    view = str(args.get("view", "kanban")).strip().lower()
+    tasks = store.list()
+    if not tasks:
+        return "No tasks in the store."
+    if view == "kanban":
+        return render_kanban_view(tasks)
+    if view == "topological":
         try:
-            task = store.get(task_id)
-            return json.dumps(asdict(task), ensure_ascii=False, indent=2)
-        except KeyError:
-            return f"Error: Task #{task_id} not found."
+            sorted_tasks = resolve_task_dependencies(tasks)
+            lines = ["=== TOPOLOGICAL TASK LIST ==="]
+            for t in sorted_tasks:
+                blocked_by = t.payload.get("blocked_by")
+                block_info = f" [Blocked by: {blocked_by}]" if blocked_by else ""
+                lines.append(f"  - #{t.id} ({t.status}): {t.title}{block_info}")
+            return "\n".join(lines)
+        except ValueError as e:
+            return f"Dependency Resolution Error: {e}"
+    lines = ["=== TASK LIST ==="]
+    for t in tasks:
+        lines.append(f"  - #{t.id} [{t.status}]: {t.title}")
+    return "\n".join(lines)
 
+
+def _get_task(store: TaskStore, args: ToolInput) -> str:
+    task_id = args.get("id")
+    if task_id is None:
+        raise ValueError("id is required")
+    try:
+        task = store.get(task_id)
+        return json.dumps(asdict(task), ensure_ascii=False, indent=2)
+    except KeyError:
+        return f"Error: Task #{task_id} not found."
+
+
+def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
     return (
         ToolSpec(
             name="create_task",
             description="Create a durable task graph node. Expose title, description, and dependencies/blocked_by.",
             input_hint='{"title": "Implement X", "blocked_by": [1]}',
-            handler=create_task,
+            handler=lambda args: _create_task(store, args),
             risk="low",
-            schema={
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string", "description": "Title of the task"},
-                    "blocked_by": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "IDs of tasks that this task is blocked by",
-                    },
-                },
-                "required": ["title"],
-                "additionalProperties": True,
-            },
+            schema=CREATE_TASK_SCHEMA,
             group="tasks",
         ),
         ToolSpec(
             name="update_task",
             description="Update task attributes, status (pending/claimed/completed), title, or dependencies.",
             input_hint='{"id": 1, "status": "completed"}',
-            handler=update_task,
+            handler=lambda args: _update_task(store, args),
             risk="low",
-            schema={
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "integer",
-                        "description": "ID of the task to update",
-                    },
-                    "status": {
-                        "type": "string",
-                        "description": "New status of the task",
-                    },
-                    "title": {"type": "string", "description": "New title of the task"},
-                    "blocked_by": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "IDs of tasks that this task is blocked by",
-                    },
-                },
-                "required": ["id"],
-                "additionalProperties": True,
-            },
+            schema=UPDATE_TASK_SCHEMA,
             group="tasks",
         ),
         ToolSpec(
             name="list_tasks",
             description="List task graph nodes. Supports 'kanban', 'topological', or 'raw' views.",
             input_hint='{"view": "kanban"}',
-            handler=list_tasks,
+            handler=lambda args: _list_tasks(store, args),
             risk="low",
-            schema={
-                "type": "object",
-                "properties": {
-                    "view": {
-                        "type": "string",
-                        "enum": ["kanban", "topological", "raw"],
-                        "description": "View style to render the tasks",
-                    }
-                },
-                "additionalProperties": False,
-            },
+            schema=LIST_TASKS_SCHEMA,
             read_only=True,
             group="tasks",
         ),
@@ -403,14 +419,9 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
             name="get_task",
             description="Retrieve detailed fields and full payload of a single task by its integer ID.",
             input_hint='{"id": 1}',
-            handler=get_task,
+            handler=lambda args: _get_task(store, args),
             risk="low",
-            schema={
-                "type": "object",
-                "properties": {"id": {"type": "integer", "description": "Task ID"}},
-                "required": ["id"],
-                "additionalProperties": False,
-            },
+            schema=GET_TASK_SCHEMA,
             read_only=True,
             group="tasks",
         ),
