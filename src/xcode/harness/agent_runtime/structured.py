@@ -31,6 +31,7 @@ from ...agent.types import (
     MessageUpdateEvent,
     SystemMessage,
     TextContent,
+    ThinkingUpdateEvent,
     ToolCallContent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
@@ -557,6 +558,11 @@ def _translate_event(
                         _text_seen[step] = full
                     return StructuredAgentEvent("text_delta", step, delta)
         return None
+
+    if isinstance(event, ThinkingUpdateEvent):
+        return StructuredAgentEvent(
+            "reasoning_delta", step_counter[0], event.reasoning_content
+        )
 
     if isinstance(event, MessageEndEvent):
         msg = event.message

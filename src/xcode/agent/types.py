@@ -233,6 +233,12 @@ class ToolExecutionEndEvent:
     is_error: bool = False
 
 
+@dataclass
+class ThinkingUpdateEvent:
+    type: str = "thinking_update"
+    reasoning_content: str = ""
+
+
 type AgentEvent = (
     AgentStartEvent
     | AgentEndEvent
@@ -244,6 +250,7 @@ type AgentEvent = (
     | ToolExecutionStartEvent
     | ToolExecutionUpdateEvent
     | ToolExecutionEndEvent
+    | ThinkingUpdateEvent
 )
 
 # ── 监听器 ──

@@ -43,6 +43,7 @@ from .types import (
     MessageStartEvent,
     MessageUpdateEvent,
     MessageEndEvent,
+    ThinkingUpdateEvent,
 )
 from .tool_execution import (
     ExecutedToolBatch,
@@ -492,6 +493,7 @@ async def _run_inner_loop(
                 )
             elif isinstance(event, ReasoningDelta):
                 reasoning_parts.append(event.chunk)
+                emit(ThinkingUpdateEvent(reasoning_content=event.chunk))
             elif isinstance(event, ToolCallEvent):
                 for call in event.calls:
                     tool_calls_found.append(
