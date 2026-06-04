@@ -7,12 +7,12 @@ from xcode.ai.events import ProviderEvent
 from xcode.ai.types import ToolDefinition
 
 from .codec import to_chat_messages, to_chat_tool, to_responses_input, to_responses_tool
-from .metrics import ProviderMetricsMixin
-from .stream_codec import chat_stream_to_events, responses_stream_to_events
+from .openai_compat import OpenAICompatProvider
+from .stream_codec import responses_stream_to_events
 from .runtime import ProviderRuntime
 
 
-class OpenAIChatProvider(ProviderMetricsMixin):
+class OpenAIChatProvider(OpenAICompatProvider):
     """OpenAI Chat Completions provider（兼容所有 OpenAI API 兼容服务）。
 
     只发送 OpenAI Chat Completions 标准参数。
@@ -31,38 +31,28 @@ class OpenAIChatProvider(ProviderMetricsMixin):
         prompt_cache_key: str | None = None,
         client=None,
     ) -> None:
-        if client is None:
-            try:
-                from openai import OpenAI
-            except ImportError as exc:
-                raise RuntimeError(
-                    "Missing dependency: openai. Install project requirements first."
-                ) from exc
-            client = OpenAI(api_key=api_key, base_url=base_url)
-        self.client = client
-        self.model = model
-        self.thinking = thinking
-        self.reasoning_effort = reasoning_effort
-        self.runtime = runtime or ProviderRuntime()
+        super().__init__(
+            api_key,
+            base_url,
+            model,
+            thinking=thinking,
+            reasoning_effort=reasoning_effort,
+            runtime=runtime,
+            client=client,
+            transport="openai_chat",
+            import_error_msg="Missing dependency: openai. Install project requirements first.",
+        )
         self.prompt_cache_key = prompt_cache_key
-        self.transport = "openai_chat"
-        self._ensure_metrics()
         self.metrics["previous_response_id"] = None
 
-    async def stream(
+    def _stream_sync(
         self,
         messages: list[dict[str, Any]],
-        tools: list[ToolDefinition],
-    ) -> AsyncIterator[ProviderEvent]:
-        for event in self._stream_sync(messages, tuple(tools)):
-            yield event
-
-    def _stream_sync(
-        self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...]
+        tools: tuple[ToolDefinition, ...],
+        **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
-        # 使用 to_chat_messages 转换为 Chat Completions 格式
         chat_messages = to_chat_messages(messages)
-        kwargs: dict[str, object] = {
+        params: dict[str, object] = {
             "model": self.model,
             "messages": chat_messages,
             "tools": [
@@ -77,16 +67,12 @@ class OpenAIChatProvider(ProviderMetricsMixin):
             "stream_options": {"include_usage": True},
         }
         if self.reasoning_effort:
-            kwargs["reasoning_effort"] = self.reasoning_effort
+            params["reasoning_effort"] = self.reasoning_effort
 
-        create = cast(Any, self.client.chat.completions.create)
-        stream = self.runtime.run(lambda: create(**kwargs))
-        self._ensure_metrics()
-        self.metrics["sent_messages"] = len(chat_messages)
-        yield from chat_stream_to_events(self._intercept_usage(stream, len(chat_messages)))
+        yield from self._call_chat_api(params, len(chat_messages))
 
 
-class OpenAIResponsesProvider(ProviderMetricsMixin):
+class OpenAIResponsesProvider(OpenAICompatProvider):
     """OpenAI Responses API provider（stateful 模式）。"""
 
     def __init__(
@@ -100,45 +86,41 @@ class OpenAIResponsesProvider(ProviderMetricsMixin):
         prompt_cache_key: str | None = None,
         client=None,
     ) -> None:
-        if client is None:
-            try:
-                from openai import OpenAI
-            except ImportError as exc:
-                raise RuntimeError(
-                    "Missing dependency: openai. Install project requirements first."
-                ) from exc
-            client = OpenAI(api_key=api_key, base_url=base_url)
-        self.client = client
-        self.model = model
-        self.thinking = thinking
-        self.reasoning_effort = reasoning_effort
-        self.runtime = runtime or ProviderRuntime()
+        super().__init__(
+            api_key,
+            base_url,
+            model,
+            thinking=thinking,
+            reasoning_effort=reasoning_effort,
+            runtime=runtime,
+            client=client,
+            transport="openai_responses",
+            import_error_msg="Missing dependency: openai. Install project requirements first.",
+        )
         self.prompt_cache_key = prompt_cache_key
-        self.transport = "openai_responses"
         self.previous_response_id: str | None = None
         self._last_sent_message_index: int = 0
         self._pending_sent_message_index: int = 0
-        self._ensure_metrics()
         self.metrics["previous_response_id"] = None
 
     async def stream(
         self,
         messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
+        **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
         for event in self._stream_sync(messages, tuple(tools)):
             yield event
 
     def _stream_sync(
-        self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...]
+        self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...], **kwargs: Any
     ) -> Iterator[ProviderEvent]:
-        kwargs = self._responses_kwargs(messages, tools, stream=True)
+        params = self._responses_kwargs(messages, tools, stream=True)
         create = cast(Any, self.client.responses.create)
-        stream = self.runtime.run(lambda: create(**kwargs))
-        self.metrics["sent_messages"] = len(kwargs["input"])
+        stream = self.runtime.run(lambda: create(**params))
+        self.metrics["sent_messages"] = len(params["input"])
 
         def intercept_events(events: Iterable[object]) -> Iterator[object]:
-            """拦截流以记录 metadata，同时保持 streaming 不缓存。"""
             for raw_event in events:
                 if str(getattr(raw_event, "type", "")).endswith(".completed"):
                     response = getattr(raw_event, "response", None)
@@ -152,7 +134,7 @@ class OpenAIResponsesProvider(ProviderMetricsMixin):
                             self._last_sent_message_index = (
                                 self._pending_sent_message_index
                             )
-                        self._record_usage(response, len(kwargs["input"]))
+                        self._record_usage(response, len(params["input"]))
                 yield raw_event
 
         yield from responses_stream_to_events(cast(Any, intercept_events(stream)))
@@ -163,8 +145,6 @@ class OpenAIResponsesProvider(ProviderMetricsMixin):
         tools: tuple[ToolDefinition, ...],
         stream: bool,
     ) -> dict:
-        # 按 raw message index 切片（不是 converted item index），
-        # 这样第二轮工具结果只发 function_call_output，不会重复发 assistant 的 function_call。
         if self.previous_response_id is None:
             raw_input_messages = messages
         else:
@@ -172,9 +152,6 @@ class OpenAIResponsesProvider(ProviderMetricsMixin):
 
         converted = to_responses_input(raw_input_messages)
 
-        # stateful 模式下过滤掉模型自己产生的 assistant items。
-        # previous_response_id 已经承接上一轮 response，
-        # 下一轮只需要追加函数结果或新的用户输入。
         if self.previous_response_id is not None:
             converted = [
                 item
@@ -199,8 +176,6 @@ class OpenAIResponsesProvider(ProviderMetricsMixin):
             "stream": stream,
         }
 
-        # reasoning 配置（Responses API 使用 reasoning 参数）
-        # 只在显式配置时传 reasoning 参数
         if self.reasoning_effort:
             kwargs["reasoning"] = {"effort": self.reasoning_effort}
         elif not self.thinking:
@@ -218,7 +193,6 @@ class OpenAIResponsesProvider(ProviderMetricsMixin):
         if not usage:
             return
 
-        # Responses API 使用 input_tokens_details / output_tokens_details
         input_details = getattr(usage, "input_tokens_details", None)
         cached = getattr(input_details, "cached_tokens", 0) if input_details else 0
         self.metrics["cached_tokens"] = cached or 0

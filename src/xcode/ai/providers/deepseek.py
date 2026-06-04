@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from typing import Any, cast
 
 from .codec import to_chat_messages, to_chat_tool
-from .metrics import ProviderMetricsMixin
+from .openai_compat import OpenAICompatProvider
 from .stream_codec import chat_stream_to_events
-from .runtime import ProviderRuntime
 
 """DeepSeek provider（兼容 OpenAI Chat API，带 reasoning_content 支持）。"""
 
-# DeepSeek API 地址
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 
-class DeepSeekProvider(ProviderMetricsMixin):
+class DeepSeekProvider(OpenAICompatProvider):
     """DeepSeek Chat API 适配。
 
     和 OpenAIChatProvider 基本一致，额外处理 reasoning_content 字段。
@@ -28,39 +26,24 @@ class DeepSeekProvider(ProviderMetricsMixin):
         model: str = "deepseek-v4-pro",
         thinking: bool = True,
         reasoning_effort: str | None = "high",
-        runtime: ProviderRuntime | None = None,
+        runtime=None,
         client=None,
         strict_tools: bool = False,
     ) -> None:
-        if client is None:
-            try:
-                from openai import OpenAI
-            except ImportError as exc:
-                raise RuntimeError("Missing dependency: openai.") from exc
-            client = OpenAI(api_key=api_key, base_url=base_url)
-        self.client = client
-        self.model = model
-        self.thinking = thinking
-        self.reasoning_effort = reasoning_effort
-        self.runtime = runtime or ProviderRuntime()
+        super().__init__(
+            api_key,
+            base_url,
+            model,
+            thinking=thinking,
+            reasoning_effort=reasoning_effort,
+            runtime=runtime,
+            client=client,
+            transport="deepseek_chat",
+            import_error_msg="Missing dependency: openai.",
+        )
         self.strict_tools = strict_tools
-        self.transport = "deepseek_chat"
-        self._ensure_metrics()
         self.metrics["prompt_cache_hit_tokens"] = 0
         self.metrics["prompt_cache_miss_tokens"] = 0
-
-    async def stream(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[Any],
-        response_format: dict[str, Any] | None = None,
-        max_tokens: int | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[Any]:
-        for event in self._stream_sync(
-            messages, tuple(tools), response_format, max_tokens, **kwargs
-        ):
-            yield event
 
     def _stream_sync(
         self,
@@ -76,7 +59,6 @@ class DeepSeekProvider(ProviderMetricsMixin):
             kwargs.pop("presence_penalty", None)
             kwargs.pop("frequency_penalty", None)
 
-        # Handle reasoning_content cleanup for tool loop and turns
         cleaned_messages = self._clean_reasoning_content(messages)
         api_messages = to_chat_messages(cleaned_messages)
 
@@ -120,6 +102,7 @@ class DeepSeekProvider(ProviderMetricsMixin):
             if k not in params:
                 params[k] = v
 
+        # DeepSeek has its own _call_chat_api pattern due to extra params
         create = cast(Any, self.client.chat.completions.create)
         stream = self.runtime.run(lambda: create(**params))
         self._ensure_metrics()
@@ -135,16 +118,6 @@ class DeepSeekProvider(ProviderMetricsMixin):
         cleaned = copy.deepcopy(messages)
         in_tool_loop = cleaned[-1].get("role") == "tool"
 
-        # Boundary condition handling:
-        # 1. When in_tool_loop is False:
-        #    This happens either at the start of a completely new session OR when the tool loop finishes,
-        #    the model returns the final answer, and then the user sends a new turn message (the last message
-        #    role becomes 'user'). In both cases, we strip all reasoning_content from past messages to
-        #    clean up the context and prevent API 400s or token wastes on historical completed thoughts.
-        # 2. When in_tool_loop is True:
-        #    This is inside an active tool loop turn. We only keep the reasoning_content for assistant
-        #    messages in the current loop (after the last user message) to fulfill DeepSeek API requirements.
-        #    All assistant thoughts prior to the last user message are stripped.
         if not in_tool_loop:
             for msg in cleaned:
                 msg.pop("reasoning_content", None)
@@ -217,7 +190,6 @@ class DeepSeekProvider(ProviderMetricsMixin):
             self.metrics["prompt_cache_miss_tokens"] = miss
             self.metrics["cached_tokens"] = hit
 
-            # reasoning_tokens
             completion_details = getattr(usage, "completion_tokens_details", None)
             reasoning = (
                 getattr(completion_details, "reasoning_tokens", 0)

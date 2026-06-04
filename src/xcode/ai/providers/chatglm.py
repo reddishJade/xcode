@@ -6,10 +6,10 @@ from typing import Any, cast
 
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import ToolDefinition
+
 from .codec import to_chat_messages, to_chat_tool
-from .metrics import ProviderMetricsMixin
+from .openai_compat import OpenAICompatProvider
 from .stream_codec import chat_stream_to_events
-from .runtime import ProviderRuntime
 
 """智谱 AI ChatGLM provider（兼容 OpenAI Chat API）。
 
@@ -18,11 +18,10 @@ GLM-4.7+ 默认开启 thinking，支持交错式思考和保留式思考。
 API 文档：https://docs.bigmodel.cn/
 """
 
-# 智谱 AI OpenAI 兼容 API 地址
 CHATGLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 
 
-class ChatGLMProvider(ProviderMetricsMixin):
+class ChatGLMProvider(OpenAICompatProvider):
     """智谱 AI ChatGLM API 适配。
 
     使用 OpenAI 兼容接口，支持 thinking 模式和保留式思考。
@@ -37,26 +36,24 @@ class ChatGLMProvider(ProviderMetricsMixin):
         clear_thinking: bool = False,
         tool_stream: bool = True,
         response_format: dict[str, Any] | None = None,
-        runtime: ProviderRuntime | None = None,
+        runtime=None,
         client=None,
     ) -> None:
-        if client is None:
-            try:
-                from openai import OpenAI
-            except ImportError as exc:
-                raise RuntimeError("Missing dependency: openai.") from exc
-            client = OpenAI(api_key=api_key, base_url=base_url or CHATGLM_BASE_URL)
-        self.client = client
-        self.model = model
-        self.thinking = thinking
+        super().__init__(
+            api_key,
+            base_url or CHATGLM_BASE_URL,
+            model,
+            thinking=thinking,
+            reasoning_effort=None,
+            runtime=runtime,
+            client=client,
+            transport="chatglm_chat",
+            import_error_msg="Missing dependency: openai.",
+        )
         self.clear_thinking = clear_thinking
         self.tool_stream = tool_stream
         self.response_format = response_format
-        self.reasoning_effort = None
         self.base_url = base_url or CHATGLM_BASE_URL
-        self.runtime = runtime or ProviderRuntime()
-        self.transport = "chatglm_chat"
-        self._ensure_metrics()
         self.metrics["prompt_tokens"] = 0
         self.metrics["completion_tokens"] = 0
         self.metrics["total_tokens"] = 0
@@ -69,6 +66,7 @@ class ChatGLMProvider(ProviderMetricsMixin):
         *,
         response_format: dict[str, Any] | None = None,
         thinking: bool | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
         for event in self._stream_sync(
             messages,
@@ -84,6 +82,7 @@ class ChatGLMProvider(ProviderMetricsMixin):
         tools: tuple[ToolDefinition, ...],
         response_format: dict[str, Any] | None = None,
         thinking: bool | None = None,
+        **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
         kwargs = self._chat_kwargs(
             messages,
@@ -122,11 +121,9 @@ class ChatGLMProvider(ProviderMetricsMixin):
         if effective_response_format:
             kwargs["response_format"] = effective_response_format
 
-        # 工具流式输出（仅 glm-4.6/4.7 支持）
         if stream and self.tool_stream and _supports_tool_stream(self.model):
             kwargs["tool_stream"] = True
 
-        # thinking 配置
         extra_body: dict[str, Any] = {}
         if not effective_thinking:
             extra_body["thinking"] = {"type": "disabled"}
@@ -142,10 +139,6 @@ class ChatGLMProvider(ProviderMetricsMixin):
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """按 clear_thinking 策略处理 reasoning_content。
-
-        保留式思考需要原样返回历史 reasoning_content。
-        """
         if not messages:
             return messages
         if not self.clear_thinking:
@@ -158,7 +151,6 @@ class ChatGLMProvider(ProviderMetricsMixin):
         return cleaned
 
     def _record_usage(self, response, sent_messages: int) -> None:
-        """记录 usage 指标，包含缓存 Token 和 reasoning_tokens 统计。"""
         self.metrics["sent_messages"] = sent_messages
         usage = getattr(response, "usage", None)
         if usage:
