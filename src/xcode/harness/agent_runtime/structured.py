@@ -320,7 +320,7 @@ class StructuredAgent:
                             yield spec_event
 
         # 循环结束，从 Agent 获取结果
-        result = self._agent._last_result
+        result = self._agent.last_result
         assert result is not None
 
         # 同步 provider 状态（wrapper 可能已切换到 fallback）

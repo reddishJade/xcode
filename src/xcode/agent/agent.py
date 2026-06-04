@@ -50,6 +50,10 @@ class Agent:
         """向 followup 队列注入消息（当前循环结束后追加）。"""
         self._followup_queue.append(msg)
 
+    @property
+    def last_result(self) -> AgentLoopResult | None:
+        return self._last_result
+
     # ── 执行 ──
 
     async def run(
