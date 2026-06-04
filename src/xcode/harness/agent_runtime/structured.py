@@ -104,8 +104,8 @@ class _FallbackSwitchingProvider:
     ) -> AsyncIterator[ProviderEvent]:
         provider = self._fallback if self._using_fallback else self._primary
         try:
-            async for event in provider.stream(
-                messages, tools, options=options, **kwargs
+            async for event in self._stream_with(
+                provider, messages, tools, options, kwargs
             ):
                 self._consecutive_errors = 0
                 yield event
@@ -117,12 +117,29 @@ class _FallbackSwitchingProvider:
                 and self._fallback is not None
             ):
                 self._using_fallback = True
-                async for event in self._fallback.stream(
-                    messages, tools, options=options, **kwargs
+                async for event in self._stream_with(
+                    self._fallback, messages, tools, options, kwargs
                 ):
                     yield event
             else:
                 raise
+
+    @staticmethod
+    async def _stream_with(
+        provider: Any,
+        messages: list[dict[str, Any]],
+        tools: list[Any],
+        options: StreamOptions | None,
+        kwargs: dict[str, Any],
+    ) -> AsyncIterator[ProviderEvent]:
+        try:
+            async for event in provider.stream(
+                messages, tools, options=options, **kwargs
+            ):
+                yield event
+        except TypeError:
+            async for event in provider.stream(messages, tools):
+                yield event
 
 
 @dataclass(frozen=True)
