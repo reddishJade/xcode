@@ -63,7 +63,9 @@ class WorktreeTaskRunner:
                 if status_out.strip():
                     return f"cannot remove worktree task {task_id}: worktree is dirty (has uncommitted changes)"
             except Exception:
-                logging.warning("git status check failed in worktree removal", exc_info=True)
+                logging.warning(
+                    "git status check failed in worktree removal", exc_info=True
+                )
             try:
                 has_upstream = True
                 try:
@@ -105,7 +107,10 @@ class WorktreeTaskRunner:
                 if unmerged_commits:
                     return f"cannot remove worktree task {task_id}: branch '{task.branch}' has unmerged/unpushed commits"
             except Exception:
-                logging.warning("git cherry/unmerged check failed in worktree removal", exc_info=True)
+                logging.warning(
+                    "git cherry/unmerged check failed in worktree removal",
+                    exc_info=True,
+                )
 
         cmd = ["git", "worktree", "remove"]
         if force:

@@ -169,7 +169,9 @@ def _trial_row(trial) -> str:
         if key in skip_keys:
             continue
         display = _fmt_metric_value(key, value)
-        pills.append(f'<span class="metric-pill">{escape(key)}: {escape(display)}</span>')
+        pills.append(
+            f'<span class="metric-pill">{escape(key)}: {escape(display)}</span>'
+        )
     # 文件证据
     evidence_html = _file_evidence_html(trial.metrics.get("file_evidence"))
     metrics_html = " ".join(pills)

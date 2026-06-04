@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Sequence
-from datetime import datetime, timezone, UTC
+from datetime import datetime, UTC
 from pathlib import Path
 import hashlib
 import uuid

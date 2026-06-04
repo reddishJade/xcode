@@ -158,7 +158,11 @@ class McpClient:
                     try:
                         stream.close()
                     except Exception:
-                        logger.debug("failed to close MCP server stream %s", stream_attr, exc_info=True)
+                        logger.debug(
+                            "failed to close MCP server stream %s",
+                            stream_attr,
+                            exc_info=True,
+                        )
             try:
                 self.process.terminate()
                 self.process.wait(timeout=1.0)
@@ -217,7 +221,9 @@ def _cleanup_clients() -> None:
         try:
             client.stop()
         except Exception:
-            logger.debug("failed to stop MCP client during atexit cleanup", exc_info=True)
+            logger.debug(
+                "failed to stop MCP client during atexit cleanup", exc_info=True
+            )
 
 
 atexit.register(_cleanup_clients)

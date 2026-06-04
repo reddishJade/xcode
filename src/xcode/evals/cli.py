@@ -57,7 +57,9 @@ def _print_summary(report) -> None:
     if grader_rate is not None:
         all_graders = [g for t in report.trials for g in t.graders]
         passed_g = sum(1 for g in all_graders if g.passed)
-        print(f"Graders: {passed_g}/{len(all_graders)} passed ({grader_rate * 100:.1f}%)")
+        print(
+            f"Graders: {passed_g}/{len(all_graders)} passed ({grader_rate * 100:.1f}%)"
+        )
     # LLM 和延迟
     parts = []
     total_llm = m.get("total_llm_calls", 0)

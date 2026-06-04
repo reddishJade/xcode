@@ -17,7 +17,9 @@ class XcodeSkillCoreTests(unittest.TestCase):
         )
         registry = {tool.name: tool}
 
-        self.assertIn("requires approval", skills.run_tool(registry, "danger", {"input": "x"}))
+        self.assertIn(
+            "requires approval", skills.run_tool(registry, "danger", {"input": "x"})
+        )
         self.assertIn(
             "denied by user",
             skills.run_tool(

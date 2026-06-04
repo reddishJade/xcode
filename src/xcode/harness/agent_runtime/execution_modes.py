@@ -59,9 +59,7 @@ class ReviewPolicy:
         if call.name == "run_validation":
             return "ask"
         if call.name == "bash":
-            return (
-                "allow" if _is_review_bash_allowed(call.input) else "ask"
-            )
+            return "allow" if _is_review_bash_allowed(call.input) else "ask"
         return "deny"
 
 

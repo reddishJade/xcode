@@ -132,7 +132,9 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(provider.calls, 2)
         self.assertIsNone(tool.seen_signal)
-        self.assertTrue(any(isinstance(msg, ToolResultMessage) for msg in result.messages))
+        self.assertTrue(
+            any(isinstance(msg, ToolResultMessage) for msg in result.messages)
+        )
         self.assertEqual(provider.messages[-1][-1]["role"], "tool")
         final = result.messages[-1]
         self.assertIsInstance(final, AssistantMessage)
