@@ -42,7 +42,7 @@ def coding() -> tuple[EvalTask, ...]:
             prompt=(
                 "Read src/xcode/evals/runner.py, find the function _build_run_metrics. "
                 "Add a new metric key 'total_steps' that sums trial.metrics['steps'] across all trials. "
-                "Write the change."
+                "Make this as a targeted edit to the existing file."
             ),
             expected_tool_calls=("read_file", "edit_file"),
             tags=("coding", "edit"),
