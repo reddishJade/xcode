@@ -11,7 +11,7 @@ agent/Agent.run() 执行。
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Generator, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -179,6 +179,12 @@ class StructuredAgentEvent:
     data: Any
 
 
+@dataclass
+class _StreamTranslationState:
+    step: int = 0
+    text_seen: dict[int, str] = field(default_factory=dict)
+
+
 class StructuredAgent:
     """与 provider 解耦的结构化工具调用循环。
 
@@ -301,15 +307,14 @@ class StructuredAgent:
         loop_config = self._build_loop_config(effective_mode)
 
         # 实时流式：消费 Agent.run_stream()，边跑边翻译边 yield
-        step_counter = [0]
-        text_seen: dict[int, str] = {}
+        translation_state = _StreamTranslationState()
 
         async for event in self._agent.run_stream(
             initial_messages,
             loop_config,
             signal=self.cancellation_token,
         ):
-            translated = _translate_event(event, step_counter, text_seen)
+            translated = _translate_event(event, translation_state)
             if translated is not None:
                 for te in translated if isinstance(translated, list) else [translated]:
                     yield te
@@ -320,7 +325,7 @@ class StructuredAgent:
                     ):
                         status = te.data.status if hasattr(te.data, "status") else "ok"
                         for spec_event in self._emit_speculation(
-                            event.tool_name, status, step_counter[0]
+                            event.tool_name, status, translation_state.step
                         ):
                             yield spec_event
 
@@ -370,10 +375,14 @@ class StructuredAgent:
         ) -> bool:
             if mode == "plan":
                 return True
-            return _is_productive(
+            return _tool_results_count_as_progress(
                 [
-                    ToolUseBlock(id="", name=tc.name, input=tc.arguments or {})
-                    for tc in tool_calls
+                    ToolUseBlock(
+                        id="",
+                        name=tool_call.name,
+                        input=tool_call.arguments or {},
+                    )
+                    for tool_call in tool_calls
                 ],
                 tool_results,
                 self.tool_map,
@@ -382,40 +391,46 @@ class StructuredAgent:
         def before_tool(
             ctx: BeforeToolCallContext, signal: Any
         ) -> BeforeToolCallResult | None:
-            tc = ctx.tool_call
+            tool_call = ctx.tool_call
             args = ctx.args
             action_input = stringify_tool_input(args)
 
             # 执行模式策略检查
             decision = policy.check_call(
-                ToolUseBlock(id=tc.id, name=tc.name, input=args)
+                ToolUseBlock(id=tool_call.id, name=tool_call.name, input=args)
             )
             if decision == "deny":
                 return BeforeToolCallResult(
-                    block=True, reason=f"permission denied for tool: {tc.name}"
+                    block=True,
+                    reason=f"permission denied for tool: {tool_call.name}",
                 )
             if decision == "ask":
-                if self.approval_callback is None or self.tool_map.get(tc.name) is None:
+                if (
+                    self.approval_callback is None
+                    or self.tool_map.get(tool_call.name) is None
+                ):
                     return BeforeToolCallResult(
-                        block=True, reason=f"tool requires approval: {tc.name}"
+                        block=True,
+                        reason=f"tool requires approval: {tool_call.name}",
                     )
-                hitl = self.approval_callback(self.tool_map[tc.name], args)
+                hitl = self.approval_callback(self.tool_map[tool_call.name], args)
                 if hitl.decision == "deny":
                     return BeforeToolCallResult(
-                        block=True, reason=f"tool {tc.name} denied by user"
+                        block=True,
+                        reason=f"tool {tool_call.name} denied by user",
                     )
 
             # pre_tool 钩子
             if self.hook_manager is not None:
                 self.hook_manager.emit(
-                    HookRecord("pre_tool", tool=tc.name, input=action_input)
+                    HookRecord("pre_tool", tool=tool_call.name, input=action_input)
                 )
             return None
 
         def after_tool(
             ctx: AfterToolCallContext, signal: Any
         ) -> AfterToolCallResult | None:
-            tc = ctx.tool_call
+            tool_call = ctx.tool_call
             args = ctx.args
             action_input = stringify_tool_input(args)
 
@@ -430,7 +445,7 @@ class StructuredAgent:
                     self.hook_manager.emit(
                         HookRecord(
                             "on_error",
-                            tool=tc.name,
+                            tool=tool_call.name,
                             input=action_input,
                             error=result_content_text,
                         )
@@ -440,7 +455,7 @@ class StructuredAgent:
                     self.hook_manager.emit(
                         HookRecord(
                             "post_tool",
-                            tool=tc.name,
+                            tool=tool_call.name,
                             input=action_input,
                             output=result_content_text,
                         )
@@ -452,9 +467,9 @@ class StructuredAgent:
                 self.audit_logger(
                     AuditRecord(
                         session_id=self.session_id,
-                        tool=tc.name,
+                        tool=tool_call.name,
                         static_risk=self.tool_map.get(
-                            tc.name, ToolSpec("", "", "", lambda _: "")
+                            tool_call.name, ToolSpec("", "", "", lambda _: "")
                         ).risk
                         or "low",
                         dynamic_decision="allow",
@@ -535,8 +550,7 @@ class StructuredAgent:
 
 def _translate_event(
     event: AgentEvent,
-    step_counter: list[int],
-    _text_seen: dict[int, str] | None = None,
+    state: _StreamTranslationState,
 ) -> StructuredAgentEvent | list[StructuredAgentEvent] | None:
     """将 AgentEvent 翻译为 StructuredAgentEvent。"""
 
@@ -544,7 +558,7 @@ def _translate_event(
         return None
 
     if isinstance(event, TurnStartEvent):
-        step_counter[0] += 1
+        state.step += 1
         return None
 
     if isinstance(event, MessageUpdateEvent):
@@ -552,24 +566,23 @@ def _translate_event(
         if isinstance(msg, AssistantMessage) and msg.content:
             for block in msg.content:
                 if isinstance(block, TextContent) and block.text:
-                    step = step_counter[0]
-                    prev = _text_seen.get(step, "") if _text_seen is not None else ""
+                    step = state.step
+                    prev = state.text_seen.get(step, "")
                     full = block.text
                     delta = full[len(prev) :]
                     if not delta:
                         return None
-                    if _text_seen is not None:
-                        _text_seen[step] = full
+                    state.text_seen[step] = full
                     return StructuredAgentEvent("text_delta", step, delta)
         return None
 
     if isinstance(event, MessageStartEvent):
-        return StructuredAgentEvent("message_start", step_counter[0], event.message)
+        return StructuredAgentEvent("message_start", state.step, event.message)
 
     if isinstance(event, TurnEndEvent):
         return StructuredAgentEvent(
             "turn_end",
-            step_counter[0],
+            state.step,
             {
                 "tool_results": [
                     {"tool_call_id": r.tool_call_id, "content": str(r.content)}
@@ -580,7 +593,7 @@ def _translate_event(
 
     if isinstance(event, ThinkingUpdateEvent):
         return StructuredAgentEvent(
-            "reasoning_delta", step_counter[0], event.reasoning_content
+            "reasoning_delta", state.step, event.reasoning_content
         )
 
     if isinstance(event, MessageEndEvent):
@@ -588,21 +601,21 @@ def _translate_event(
         if isinstance(msg, AssistantMessage) and msg.content:
             blocks = _assistant_to_raw_blocks(msg)
             if blocks:
-                return StructuredAgentEvent("assistant", step_counter[0], blocks)
+                return StructuredAgentEvent("assistant", state.step, blocks)
         return None
 
     if isinstance(event, ToolExecutionStartEvent):
-        tu = ToolUseBlock(
+        tool_use = ToolUseBlock(
             id=event.tool_call_id,
             name=event.tool_name,
             input=event.args or {},
         )
-        return StructuredAgentEvent("tool_use", step_counter[0], tu)
+        return StructuredAgentEvent("tool_use", state.step, tool_use)
 
     if isinstance(event, ToolExecutionUpdateEvent):
         return StructuredAgentEvent(
             "tool_update",
-            step_counter[0],
+            state.step,
             {
                 "tool_call_id": event.tool_call_id,
                 "tool_name": event.tool_name,
@@ -615,7 +628,7 @@ def _translate_event(
     if isinstance(event, ToolExecutionEndEvent):
         return StructuredAgentEvent(
             "tool_result",
-            step_counter[0],
+            state.step,
             ToolResultBlock(
                 tool_use_id=event.tool_call_id,
                 content=str(event.result.content) if event.result else "",
@@ -735,26 +748,21 @@ def _resolve_permission_policy(
     return CompositePermissionPolicy(sandbox, base)
 
 
-def _is_productive(
-    uses: list[ToolUseBlock], results: list[Any], tool_map: dict[str, ToolSpec]
+def _tool_results_count_as_progress(
+    tool_uses: list[ToolUseBlock],
+    tool_results: list[Any],
+    tool_map: dict[str, ToolSpec],
 ) -> bool:
-    for tu, res in zip(uses, results, strict=True):
-        is_ok = (hasattr(res, "is_error") and not res.is_error) or (
-            hasattr(res, "status") and res.status == "ok"
+    for tool_use, tool_result in zip(tool_uses, tool_results, strict=True):
+        is_ok = (hasattr(tool_result, "is_error") and not tool_result.is_error) or (
+            hasattr(tool_result, "status") and tool_result.status == "ok"
         )
         if not is_ok:
             continue
-        spec = tool_map.get(tu.name)
+        spec = tool_map.get(tool_use.name)
+        if spec and spec.counts_as_progress is not None:
+            return spec.counts_as_progress
         if spec and spec.read_only:
-            return True
-        if tu.name in (
-            "write_file",
-            "edit_file",
-            "write_to_file",
-            "replace_file_content",
-            "multi_replace_file_content",
-            "bash",
-        ):
             return True
     return False
 

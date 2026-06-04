@@ -7,7 +7,6 @@ from typing import cast
 from xcode.agent.messages import convert_to_llm
 from xcode.agent.types import (
     AssistantMessage,
-    BashExecutionMessage,
     BranchSummaryMessage,
     CompactionSummaryMessage,
     ToolCallContent,
@@ -128,7 +127,6 @@ class OpenAIToolCodecTest(unittest.TestCase):
         tool_call = ToolCallContent(id="t1", name="grep_search")
         self.assertEqual(tool_call.type, "tool_call")
         self.assertEqual(ToolResultMessage().role, "tool_result")
-        self.assertEqual(BashExecutionMessage().role, "bash_execution")
         self.assertEqual(BranchSummaryMessage().role, "branch_summary")
         self.assertEqual(CompactionSummaryMessage().role, "compaction_summary")
 

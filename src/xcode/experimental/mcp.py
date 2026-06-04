@@ -1,7 +1,7 @@
 """MCP 工具注册与配置。
 
 根据 mcp_config.json 加载 MCP 服务器工具，支持 defer_loading 延迟加载、
-缓存持久化和风险评估。
+缓存持久化和显式风险声明。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from ..harness.skills import ToolInput, ToolSpec
 
 from . import mcp_client as _mcp_mod
 
-# ── 配置与风险评估 ──
+# ── 配置与风险声明 ──
 
 
 def compute_config_hash(server_config: dict[str, Any]) -> str:
@@ -29,46 +29,22 @@ def compute_config_hash(server_config: dict[str, Any]) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def get_mcp_tool_risk(name: str, description: str) -> str:
-    name_lower = name.lower()
-    desc_lower = description.lower()
-
-    high_risk_keywords = {
-        "write",
-        "delete",
-        "remove",
-        "update",
-        "create",
-        "edit",
-        "run",
-        "exec",
-        "execute",
-        "shell",
-        "bash",
-        "command",
-        "modify",
-    }
-    if any(k in name_lower or k in desc_lower for k in high_risk_keywords):
-        return "high"
-
-    read_keywords = {
-        "read",
-        "view",
-        "get",
-        "list",
-        "search",
-        "find",
-        "show",
-        "query",
-        "info",
-        "status",
-        "check",
-        "inspect",
-    }
-    if any(k in name_lower or k in desc_lower for k in read_keywords):
-        return "low"
-
-    return "medium"
+def resolve_mcp_tool_risk(server_config: dict[str, Any], tool_name: str) -> str:
+    """从 server overrides 读取工具风险；未审核工具默认 high。"""
+    overrides = server_config.get("overrides", {})
+    risk = None
+    if isinstance(overrides, dict) and tool_name in overrides:
+        override = overrides[tool_name]
+        risk = (
+            override.get("risk")
+            if isinstance(override, dict)
+            else override
+            if isinstance(override, str)
+            else None
+        )
+    if risk in {"low", "medium", "high"}:
+        return risk
+    return "high"
 
 
 # ── 缓存工具 ──
@@ -79,7 +55,9 @@ def _load_cache(cache_path: Path) -> dict[str, Any]:
         try:
             return json.loads(cache_path.read_text(encoding="utf-8"))
         except Exception:
-            logging.warning("failed to load MCP cache from %s", cache_path, exc_info=True)
+            logging.warning(
+                "failed to load MCP cache from %s", cache_path, exc_info=True
+            )
     return {"servers": {}}
 
 
@@ -109,9 +87,7 @@ def build_fetch_tools_tool(
             client.stop()
 
             for tool in tools_list:
-                tool["risk"] = get_mcp_tool_risk(
-                    tool["name"], tool.get("description", "")
-                )
+                tool["risk"] = resolve_mcp_tool_risk(server_config, tool["name"])
 
             cache_path = project_root / ".local" / "mcp_cache.json"
             cache_data = _load_cache(cache_path)
@@ -223,51 +199,53 @@ def build_mcp_tool_search(project_root: Path, deferred_servers: set[str]) -> Too
 
 def _make_handler(
     ref: _mcp_mod.LazyClientRef,
-    t_name: str,
+    tool_name: str,
     deferred: bool,
-    s_name: str,
+    server_name: str,
     cache_path: Path,
 ) -> Any:
     def handler(args: ToolInput) -> str:
         if deferred:
             try:
-                c_data = json.loads(cache_path.read_text(encoding="utf-8"))
-                t_entry = next(
+                cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
+                tool_entry = next(
                     (
-                        t
-                        for t in c_data.get("servers", {})
-                        .get(s_name, {})
+                        cached_tool
+                        for cached_tool in cache_data.get("servers", {})
+                        .get(server_name, {})
                         .get("tools", [])
-                        if t["name"] == t_name
+                        if cached_tool["name"] == tool_name
                     ),
                     None,
                 )
-                if t_entry:
-                    real_schema = t_entry.get("inputSchema", {})
+                if tool_entry:
+                    real_schema = tool_entry.get("inputSchema", {})
                     missing = [
-                        f for f in real_schema.get("required", []) if f not in args
+                        field_name
+                        for field_name in real_schema.get("required", [])
+                        if field_name not in args
                     ]
                     if missing:
                         raise ValueError(
-                            f"Missing required parameters for deferred tool {t_name}: {', '.join(missing)}"
+                            f"Missing required parameters for deferred tool {tool_name}: {', '.join(missing)}"
                         )
-            except Exception as val_exc:
-                if isinstance(val_exc, ValueError):
+            except Exception as validation_error:
+                if isinstance(validation_error, ValueError):
                     raise
 
         client_instance = ref.get_or_create()
-        res = client_instance.call_tool(t_name, args)
-        if "content" in res:
+        response = client_instance.call_tool(tool_name, args)
+        if "content" in response:
             parts = [
                 block.get("text", "")
-                for block in res["content"]
+                for block in response["content"]
                 if isinstance(block, dict) and block.get("type") == "text"
             ]
             content_str = "\n".join(parts)
-            if res.get("isError", False):
+            if response.get("isError", False):
                 raise RuntimeError(content_str)
             return content_str
-        return str(res)
+        return str(response)
 
     return handler
 
@@ -327,8 +305,8 @@ def build_mcp_tools(project_root: Path) -> tuple[ToolSpec, ...]:
                     tools_list = client.list_tools()
                     client.stop()
                     for tool in tools_list:
-                        tool["risk"] = get_mcp_tool_risk(
-                            tool["name"], tool.get("description", "")
+                        tool["risk"] = resolve_mcp_tool_risk(
+                            server_config, tool["name"]
                         )
                     cache_data.setdefault("servers", {})[server_name] = {
                         "config_hash": config_hash,
@@ -354,23 +332,7 @@ def build_mcp_tools(project_root: Path) -> tuple[ToolSpec, ...]:
             ]
             input_hint = ", ".join(hints) if hints else "no arguments"
 
-            # 风险评估
-            risk = None
-            overrides = server_config.get("overrides", {})
-            if isinstance(overrides, dict) and name in overrides:
-                ov = overrides[name]
-                risk = (
-                    ov.get("risk")
-                    if isinstance(ov, dict)
-                    else ov
-                    if isinstance(ov, str)
-                    else None
-                )
-            if not risk:
-                risk = tool.get("risk")
-            if not risk:
-                risk = get_mcp_tool_risk(name, desc)
-                tool["risk"] = risk
+            risk = resolve_mcp_tool_risk(server_config, name)
 
             # 描述与 Schema
             if is_deferred:

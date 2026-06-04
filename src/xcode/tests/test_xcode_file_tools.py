@@ -177,6 +177,36 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "path is a directory: docs"):
                 tools["write_file"].handler({"path": "docs", "content": "hello"})
 
+    def test_write_file_rejects_large_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tools = self._tools(root)
+
+            with self.assertRaisesRegex(ValueError, "write content too large"):
+                tools["write_file"].handler(
+                    {"path": "large.txt", "content": "x" * 1_000_001}
+                )
+
+            self.assertFalse((root / "large.txt").exists())
+
+    def test_edit_file_rejects_large_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "a.txt"
+            path.write_text("small", encoding="utf-8")
+            tools = self._tools(root)
+
+            with self.assertRaisesRegex(ValueError, "write content too large"):
+                tools["edit_file"].handler(
+                    {
+                        "path": "a.txt",
+                        "old_text": "small",
+                        "new_text": "x" * 1_000_001,
+                    }
+                )
+
+            self.assertEqual(path.read_text(encoding="utf-8"), "small")
+
     def test_file_tools_have_structured_schemas(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tools = self._tools(Path(tmp))

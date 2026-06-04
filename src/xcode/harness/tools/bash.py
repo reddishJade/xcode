@@ -119,7 +119,9 @@ class OutputAccumulator:
                 if self._full_path:
                     os.unlink(self._full_path)
             except Exception:
-                logger.debug("failed to clean up temp file %s", self._full_path, exc_info=True)
+                logger.debug(
+                    "failed to clean up temp file %s", self._full_path, exc_info=True
+                )
 
 
 def _kill_process(proc: subprocess.Popen) -> None:
@@ -263,6 +265,7 @@ def build_bash_tool(
             "required": ["command"],
             "additionalProperties": False,
         },
+        counts_as_progress=True,
     )
 
 

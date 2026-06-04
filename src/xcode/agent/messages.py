@@ -5,7 +5,6 @@ from typing import Any
 from .types import (
     AgentMessage,
     AssistantMessage,
-    BashExecutionMessage,
     BranchSummaryMessage,
     CompactionSummaryMessage,
     ContentBlock,
@@ -24,22 +23,6 @@ COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was comp
 COMPACTION_SUMMARY_SUFFIX = "\n</summary>"
 BRANCH_SUMMARY_PREFIX = "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n"
 BRANCH_SUMMARY_SUFFIX = "\n</summary>"
-
-
-def bash_execution_to_text(msg: BashExecutionMessage) -> str:
-    """将 BashExecutionMessage 转为纯文本描述。"""
-    text = f"Ran `{msg.command}`\n"
-    if msg.output:
-        text += f"```\n{msg.output}\n```"
-    else:
-        text += "(no output)"
-    if msg.cancelled:
-        text += "\n\n(command cancelled)"
-    elif msg.exit_code is not None and msg.exit_code != 0:
-        text += f"\n\nCommand exited with code {msg.exit_code}"
-    if msg.truncated:
-        text += "\n\n[Output truncated]"
-    return text
 
 
 def convert_to_llm(messages: list[AgentMessage]) -> list[dict[str, Any]]:
@@ -77,12 +60,6 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
                     "status": status,
                 }
             ],
-        }
-
-    if isinstance(m, BashExecutionMessage):
-        return {
-            "role": "user",
-            "content": [{"type": "text", "text": bash_execution_to_text(m)}],
         }
 
     if isinstance(m, CustomMessage):

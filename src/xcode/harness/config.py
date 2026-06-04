@@ -111,21 +111,6 @@ class XcodeRuntimeConfig:
     daemon: DaemonRuntimeConfig = DaemonRuntimeConfig()
 
 
-@dataclass
-class HarnessConfig:
-    """轻量 harness 配置。"""
-
-    cwd: str = ""
-    system_prompt: str = ""
-    allow_dangerous_bash: bool = False
-    bash_timeout: float = 120.0
-    read_max_length: int = 10000
-    max_tool_retries: int = 3
-    session_id: str | None = None
-    verbose: bool = False
-    extra: dict[str, Any] = field(default_factory=dict)
-
-
 # ── 配置发现 ──
 
 
@@ -239,7 +224,9 @@ def _load_model_profiles(provider: dict) -> dict[str, ModelProfileRuntimeConfig]
             clear_thinking=bool(
                 raw.get("clear_thinking", profiles[PROFILE_MAIN].clear_thinking)
             ),
-            tool_stream=bool(raw.get("tool_stream", profiles[PROFILE_MAIN].tool_stream)),
+            tool_stream=bool(
+                raw.get("tool_stream", profiles[PROFILE_MAIN].tool_stream)
+            ),
             response_format=_optional_dict(
                 raw.get("response_format", profiles[PROFILE_MAIN].response_format)
             ),

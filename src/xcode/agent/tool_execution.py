@@ -44,23 +44,32 @@ async def execute_tool_calls(
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
     """根据 execution_mode 调度串行或并行工具执行。"""
-    has_sequential = False
-    for tc in tool_calls:
-        if isinstance(tc, ToolCallContent):
-            for t in current_context.tools or []:
-                if t.name == tc.name and t.execution_mode == "sequential":
-                    has_sequential = True
-                    break
-            if has_sequential:
-                break
-
-    if config.tool_execution == "sequential" or has_sequential:
+    if config.tool_execution == "sequential":
         return await _execute_sequential(
             current_context, assistant_message, tool_calls, config, signal, emit
         )
-    return await _execute_parallel(
-        current_context, assistant_message, tool_calls, config, signal, emit
-    )
+
+    results: list[ToolResultMessage] = []
+    terminate_flags: list[bool] = []
+    for batch in partition_tool_calls_for_execution(current_context, tool_calls):
+        if (
+            len(batch) == 1
+            and _tool_execution_mode(current_context, batch[0]) == "sequential"
+        ):
+            executed = await _execute_sequential(
+                current_context, assistant_message, batch, config, signal, emit
+            )
+        else:
+            executed = await _execute_parallel(
+                current_context, assistant_message, batch, config, signal, emit
+            )
+        results.extend(executed.results)
+        terminate_flags.append(executed.terminate)
+        if _is_cancelled(signal):
+            break
+
+    all_terminate = len(terminate_flags) > 0 and all(terminate_flags)
+    return ExecutedToolBatch(results=results, terminate=all_terminate)
 
 
 async def _execute_sequential(
@@ -73,16 +82,18 @@ async def _execute_sequential(
 ) -> ExecutedToolBatch:
     results: list[ToolResultMessage] = []
     terminate_flags: list[bool] = []
-    for tc in tool_calls:
-        if not isinstance(tc, ToolCallContent):
+    for tool_call in tool_calls:
+        if not isinstance(tool_call, ToolCallContent):
             continue
         emit(
             ToolExecutionStartEvent(
-                tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
+                tool_call_id=tool_call.id,
+                tool_name=tool_call.name,
+                args=tool_call.arguments,
             )
         )
         result, terminate = await _execute_one(
-            current_context, assistant_message, tc, config, signal, emit
+            current_context, assistant_message, tool_call, config, signal, emit
         )
         results.append(result)
         terminate_flags.append(terminate)
@@ -101,25 +112,29 @@ async def _execute_parallel(
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
     tasks = []
-    for tc in tool_calls:
-        if not isinstance(tc, ToolCallContent):
+    for tool_call in tool_calls:
+        if not isinstance(tool_call, ToolCallContent):
             continue
         emit(
             ToolExecutionStartEvent(
-                tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
+                tool_call_id=tool_call.id,
+                tool_name=tool_call.name,
+                args=tool_call.arguments,
             )
         )
         tasks.append(
-            _execute_one(current_context, assistant_message, tc, config, signal, emit)
+            _execute_one(
+                current_context, assistant_message, tool_call, config, signal, emit
+            )
         )
 
-    raw = await asyncio.gather(*tasks, return_exceptions=True)
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
     results: list[ToolResultMessage] = []
     terminate_flags: list[bool] = []
-    for r in raw:
-        if isinstance(r, tuple) and len(r) == 2:
-            results.append(r[0])
-            terminate_flags.append(r[1])
+    for raw_result in raw_results:
+        if isinstance(raw_result, tuple) and len(raw_result) == 2:
+            results.append(raw_result[0])
+            terminate_flags.append(raw_result[1])
     all_terminate = len(terminate_flags) > 0 and all(terminate_flags)
     return ExecutedToolBatch(results=results, terminate=all_terminate)
 
@@ -134,9 +149,9 @@ async def _execute_one(
 ) -> tuple[ToolResultMessage, bool]:
     """Execute a single tool call. Returns (result_message, terminate)."""
     tool = None
-    for t in current_context.tools or []:
-        if t.name == tool_call.name:
-            tool = t
+    for candidate_tool in current_context.tools or []:
+        if candidate_tool.name == tool_call.name:
+            tool = candidate_tool
             break
 
     if tool is None:
@@ -250,3 +265,35 @@ def _cancel_reason(signal: CancellationSignal | None) -> str:
     if signal is None:
         return "interrupted by user"
     return signal.reason
+
+
+def partition_tool_calls_for_execution(
+    current_context: AgentContext,
+    tool_calls: list[ToolCallContent],
+) -> list[list[ToolCallContent]]:
+    """按工具执行模式将连续并发调用分批。"""
+    batches: list[list[ToolCallContent]] = []
+    parallel_batch: list[ToolCallContent] = []
+    for tool_call in tool_calls:
+        if not isinstance(tool_call, ToolCallContent):
+            continue
+        if _tool_execution_mode(current_context, tool_call) == "parallel":
+            parallel_batch.append(tool_call)
+            continue
+        if parallel_batch:
+            batches.append(parallel_batch)
+            parallel_batch = []
+        batches.append([tool_call])
+    if parallel_batch:
+        batches.append(parallel_batch)
+    return batches
+
+
+def _tool_execution_mode(
+    current_context: AgentContext,
+    tool_call: ToolCallContent,
+) -> str:
+    for tool in current_context.tools or []:
+        if tool.name == tool_call.name:
+            return tool.execution_mode or "sequential"
+    return "sequential"

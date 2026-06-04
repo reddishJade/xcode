@@ -18,20 +18,17 @@ from xcode.experimental.tasks import (
 
 
 class XcodeMcpOverrideSecurityTests(unittest.TestCase):
-    def test_mcp_risk_override_and_cache_persistence(self) -> None:
+    def test_mcp_risk_override_and_default_high(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp)
 
-            # Setup manual risk override inside mcp_config.json
             mcp_config = {
                 "mcpServers": {
                     "test-server": {
                         "command": "node",
                         "args": ["a.js"],
                         "defer_loading": True,
-                        "overrides": {
-                            "high_risk_tool": "low"  # Override the tool's risk to low
-                        },
+                        "overrides": {"high_risk_tool": "low"},
                     }
                 }
             }
@@ -39,7 +36,6 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
                 json.dumps(mcp_config, indent=2), encoding="utf-8"
             )
 
-            # Setup pre-existing tool list in cache with high_risk_tool and default_low_tool
             mcp_cache = {
                 "servers": {
                     "test-server": {
@@ -79,13 +75,8 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
                 t for t in tools if t.name == "mcp__test-server__default_low_tool"
             )
 
-            # Verify overrides work correctly
-            self.assertEqual(
-                high_tool.risk, "low"
-            )  # Overridden from high (due to keyword 'run') to low
-            self.assertEqual(
-                low_tool.risk, "low"
-            )  # Automatically inferred as low (due to keyword 'read')
+            self.assertEqual(high_tool.risk, "low")
+            self.assertEqual(low_tool.risk, "high")
 
     def test_settings_sandbox_permissions_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

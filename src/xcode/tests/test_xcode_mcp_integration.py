@@ -10,7 +10,7 @@ import shutil
 from xcode.experimental.mcp import (
     build_mcp_tools,
     compute_config_hash,
-    get_mcp_tool_risk,
+    resolve_mcp_tool_risk,
 )
 
 
@@ -41,25 +41,19 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         self.assertEqual(compute_config_hash(config1), compute_config_hash(config2))
         self.assertNotEqual(compute_config_hash(config1), compute_config_hash(config3))
 
-    def test_get_mcp_tool_risk_classification(self) -> None:
-        # Read/query keywords -> low risk
-        self.assertEqual(get_mcp_tool_risk("read_data", "Read database content"), "low")
-        self.assertEqual(get_mcp_tool_risk("search_docs", "Look up documents"), "low")
-        self.assertEqual(get_mcp_tool_risk("list_files", "Show files"), "low")
+    def test_resolve_mcp_tool_risk_uses_explicit_override(self) -> None:
+        config = {
+            "overrides": {
+                "read_data": "low",
+                "process_message": {"risk": "medium"},
+                "invalid": "trusted",
+            }
+        }
 
-        # Write/edit/exec keywords -> high risk
-        self.assertEqual(
-            get_mcp_tool_risk("write_file", "Write content to file"), "high"
-        )
-        self.assertEqual(
-            get_mcp_tool_risk("delete_entry", "Remove a row from db"), "high"
-        )
-        self.assertEqual(get_mcp_tool_risk("run_command", "Run bash command"), "high")
-
-        # Default/other keywords -> medium risk
-        self.assertEqual(
-            get_mcp_tool_risk("process_message", "Handle a generic message"), "medium"
-        )
+        self.assertEqual(resolve_mcp_tool_risk(config, "read_data"), "low")
+        self.assertEqual(resolve_mcp_tool_risk(config, "process_message"), "medium")
+        self.assertEqual(resolve_mcp_tool_risk(config, "invalid"), "high")
+        self.assertEqual(resolve_mcp_tool_risk(config, "spreadsheet"), "high")
 
     @patch("xcode.experimental.mcp_client.McpClient")
     def test_build_mcp_tools_cache_hit_and_miss(
@@ -83,7 +77,12 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         # 1. Prepare config files
         mcp_config = {
             "mcpServers": {
-                "fetcher": {"command": "python", "args": ["fetch_server.py"], "env": {}}
+                "fetcher": {
+                    "command": "python",
+                    "args": ["fetch_server.py"],
+                    "env": {},
+                    "overrides": {"read_data": "low"},
+                }
             }
         }
         local_dir = self.project_root / ".local"
@@ -97,7 +96,7 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0].name, "mcp__fetcher__read_data")
         self.assertEqual(tools[0].description, "Read remote data [mcp: fetcher]")
-        self.assertEqual(tools[0].risk, "low")  # "Read" implies read/query -> low
+        self.assertEqual(tools[0].risk, "low")
         self.assertTrue(tools[0].read_only)
         self.assertEqual(tools[0].group, "mcp")
 
@@ -159,7 +158,12 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         }
 
         mcp_config = {
-            "mcpServers": {"db_editor": {"command": "python", "args": ["db_server.py"]}}
+            "mcpServers": {
+                "db_editor": {
+                    "command": "python",
+                    "args": ["db_server.py"],
+                }
+            }
         }
         local_dir = self.project_root / ".local"
         local_dir.mkdir(parents=True)
@@ -173,7 +177,7 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         self.assertEqual(tools[0].name, "mcp__db_editor__edit_record")
         tool = tools[0]
         self.assertEqual(tool.name, "mcp__db_editor__edit_record")
-        self.assertEqual(tool.risk, "high")  # edit keyword -> high risk
+        self.assertEqual(tool.risk, "high")
         self.assertFalse(tool.read_only)
 
         # Reset mocks to verify lazy loading on execution
@@ -185,8 +189,8 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         mock_client_class.assert_not_called()
 
         # Invoke handler
-        res = tool.handler({"id": 42, "value": "new_val"})
-        self.assertEqual(res, "Success")
+        response = tool.handler({"id": 42, "value": "new_val"})
+        self.assertEqual(response, "Success")
 
         # Now connection should be created and started, and call_tool invoked
         mock_client_class.assert_called_once_with(["python", "db_server.py"], None)

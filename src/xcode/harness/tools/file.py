@@ -16,6 +16,7 @@ from .path_utils import is_path_blocked, truncate_output, display_path
 """
 
 MAX_READ_BYTES = 1_000_000
+MAX_WRITE_BYTES = 1_000_000
 
 
 def build_file_tools(
@@ -59,6 +60,7 @@ def build_file_tools(
         if "content" not in data:
             raise ValueError("content is required")
         content = str(data.get("content", ""))
+        _ensure_write_size(content)
         path.parent.mkdir(parents=True, exist_ok=True)
         _write_text(path, content, "utf-8")
         if context_state is not None:
@@ -86,6 +88,7 @@ def build_file_tools(
             _display(root, path),
             replace_all=bool(data.get("replace_all", False)),
         )
+        _ensure_write_size(updated)
         _write_text(path, updated, encoding)
         if context_state is not None:
             context_state.record_file(path)
@@ -140,6 +143,7 @@ def build_file_tools(
                 "additionalProperties": False,
             },
             group="core",
+            counts_as_progress=True,
         ),
         ToolSpec(
             name="edit_file",
@@ -178,6 +182,7 @@ def build_file_tools(
                 "additionalProperties": False,
             },
             group="core",
+            counts_as_progress=True,
         ),
     )
 
@@ -221,6 +226,12 @@ def _read_text(path: Path) -> tuple[str, str]:
 
 def _write_text(path: Path, text: str, encoding: str) -> None:
     path.write_bytes(text.encode(encoding))
+
+
+def _ensure_write_size(text: str) -> None:
+    size = len(text.encode("utf-8"))
+    if size > MAX_WRITE_BYTES:
+        raise ValueError(f"write content too large: {size} bytes")
 
 
 def _diff_preview(path: str, before: str, after: str) -> str:

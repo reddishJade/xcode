@@ -93,22 +93,32 @@ worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress, speculation
 
 `bash` 通过 `ShellAdapter` 选择宿主 shell，并使用 `Popen` 生命周期控制、超时和 cancellation token。命令风险由 `CommandRiskEvaluator` 判定。
 
-REPL 中的 `!COMMAND` 是 `bash` 工具的快捷入口，输出按原始终端文本展示；它不绕过 `run_tool_result()` 的权限判定和脱敏路径。
+REPL 中的 `!COMMAND` 是 `bash` 工具的快捷入口，输出按原始终端文本展示；它不绕过工具适配器的权限判定和脱敏路径。
 
 ### Tool execution
 
-所有工具调用应走 `run_tool_result()` 或 `ToolExecutor`。执行路径会统一处理：
+生产工具调用路径是：
+
+```text
+StructuredAgent
+  -> Agent
+  -> agent/tool_execution.py
+  -> ToolSpecAdapter
+  -> ToolSpec.handler
+```
+
+执行路径会统一处理：
 
 - 未知工具错误
 - 统一权限决策（`check_tool_permission`）
 - execution mode policy（`PermissionDecision`: allow/deny/ask）
 - HITL approval
 - secret redaction
-- structured audit record
+- structured audit record 和 hook
 
 ### Tool partitioning
 
-`ToolExecutor` 会把只读且并发安全的工具分区并行执行；写工具、高风险工具和不可并发工具按模型原始顺序串行执行。
+`agent/tool_execution.py` 会把连续的并发安全工具分区并行执行。`ToolSpecAdapter.execution_mode` 根据工具声明决定调度方式：只读、并发安全且非 high risk 的工具默认并行；其他工具默认串行。这样写工具、高风险工具和不可并发工具按模型原始顺序串行执行。
 
 ---
 
@@ -200,11 +210,12 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 - `.local/mcp_cache.json` schema cache
 - `defer_loading` bootstrap/search flow
 - dynamic `mcp__server__tool` registration
-- tool risk inference and config overrides
+- explicit tool risk overrides
 
 边界：
 
 - 只在启用 `mcp` 或 `experimental` 后读取 MCP 配置。
+- MCP 工具风险必须通过 server `overrides` 显式声明；未声明工具默认 high risk。
 - 只支持当前实现里的 stdio 传输；SSE/WebSocket 仍属于后续方向。
 
 ### `tasks`
@@ -302,7 +313,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 边界：
 
-- 使用动态 Python module loading，必须保持 opt-in。
+- 使用 in-process `exec()` 动态加载，插件等同宿主代码，必须保持 opt-in 且只加载已审核可信插件。
 
 ### `daemon`
 
@@ -360,7 +371,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 ## 11. 维护规则
 
-1. 不要绕过 `run_tool_result()` 或 `ToolExecutor` 直接执行工具 handler。
+1. 不要绕过 `ToolSpecAdapter` 和 `agent/tool_execution.py` 直接执行工具 handler。
 2. 不要默认启用 `src/xcode/experimental/` 中的能力。
 3. 新 experimental 能力必须有独立 group；`experimental` 总开关应同步展开它。
 4. 新工具必须声明 group、risk、schema 和 read-only/concurrency 属性。

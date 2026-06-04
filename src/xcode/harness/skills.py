@@ -46,6 +46,7 @@ class ToolSpec:
     risk_evaluator: RiskEvaluator | None = None
     group: str = "core"
     execution_mode: ToolExecutionMode | None = None
+    counts_as_progress: bool | None = None
 
 
 ToolExecutionStatus = Literal["ok", "denied", "error", "approval_required"]

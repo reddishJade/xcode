@@ -80,17 +80,6 @@ class CustomMessage:
 
 
 @dataclass
-class BashExecutionMessage:
-    role: str = "bash_execution"
-    command: str = ""
-    output: str = ""
-    exit_code: int | None = None
-    cancelled: bool = False
-    truncated: bool = False
-    timestamp: int = 0
-
-
-@dataclass
 class CompactionSummaryMessage:
     role: str = "compaction_summary"
     summary: str = ""
@@ -112,7 +101,6 @@ type AgentMessage = (
     | AssistantMessage
     | ToolResultMessage
     | CustomMessage
-    | BashExecutionMessage
     | CompactionSummaryMessage
     | BranchSummaryMessage
 )

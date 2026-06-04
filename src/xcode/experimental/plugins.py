@@ -63,7 +63,7 @@ def _build_plugin_globals(manifest: PluginManifest) -> dict[str, Any]:
     """构造插件执行用的全局命名空间。
 
     这是 in-process exec 的便利设施，不是安全边界。
-    插件代码与宿主共享进程空间，可访问文件系统和网络。
+    插件代码与宿主共享进程空间，可导入模块、访问文件系统和网络。
     """
     restricted = {
         "__builtins__": __builtins__,
@@ -80,16 +80,16 @@ def _build_plugin_globals(manifest: PluginManifest) -> dict[str, Any]:
 
 
 class PluginManager:
-    """受限插件加载器。
+    """受信任插件加载器。
 
     从 .local/plugins/*.py 加载 Python 文件，按约定收集
     exposed_tools / exposed_hooks / exposed_skills。
 
     注意：
-    - 这是 in-process exec 加载，不是安全沙箱。
-    - 插件代码可访问宿主全部文件系统和网络。
+    - 这是 in-process exec 加载，不是安全沙箱，也不是权限边界。
+    - 插件代码等同于宿主代码，可导入模块、访问文件系统、发起网络请求并修改进程状态。
     - 仅在用户显式启用 plugins 或 experimental group 时加载。
-    - 建议仅在受信任环境中使用。
+    - 只能加载已经人工审核并完全信任的插件。
     """
 
     def __init__(self, project_root: Path) -> None:

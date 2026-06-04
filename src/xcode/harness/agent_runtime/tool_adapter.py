@@ -17,7 +17,12 @@ from ...agent.types import (
     ToolUpdateCallback,
 )
 from ..skills import ToolSpec, stringify_tool_input
-from ..observability import PermissionPolicy, PermissionCheckResult, check_tool_permission, redact_text
+from ..observability import (
+    PermissionCheckResult,
+    PermissionPolicy,
+    check_tool_permission,
+    redact_text,
+)
 
 
 class ToolSpecAdapter:
@@ -56,7 +61,15 @@ class ToolSpecAdapter:
 
     @property
     def execution_mode(self) -> ToolExecutionMode | None:
-        return self._spec.execution_mode
+        if self._spec.execution_mode is not None:
+            return self._spec.execution_mode
+        if (
+            self._spec.read_only
+            and self._spec.concurrency_safe
+            and self._spec.risk != "high"
+        ):
+            return "parallel"
+        return "sequential"
 
     async def execute(
         self,
