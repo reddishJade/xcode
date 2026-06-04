@@ -134,11 +134,19 @@ class ToolExecutor:
                     for task in pending:
                         task.cancel()
                     raise ExecutionCancelled("tool execution cancelled")
-                for task in pending:
-                    done.add(task)
                 for call, task in zip(batch, tasks, strict=True):
-                    result, elapsed = await task
-                    results.append(_to_tool_result(call, result, elapsed))
+                    try:
+                        result, elapsed = await task
+                        results.append(_to_tool_result(call, result, elapsed))
+                    except Exception as exc:
+                        results.append(
+                            ToolResult(
+                                tool_call_id=call.id,
+                                content=f"tool error: {exc}",
+                                status=STATUS_ERROR,
+                                elapsed_ms=None,
+                            )
+                        )
         return results
 
     def _timed_run_tool(
@@ -176,7 +184,9 @@ class ToolExecutor:
                 )
             return None
         # decision == "deny"
-        return ToolExecutionResult(STATUS_DENIED, f"permission denied for tool: {call.name}")
+        return ToolExecutionResult(
+            STATUS_DENIED, f"permission denied for tool: {call.name}"
+        )
 
     def _run_tool_with_hooks(
         self,

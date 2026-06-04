@@ -83,6 +83,18 @@ class _FallbackSwitchingProvider:
     def active_provider(self) -> ModelProvider:
         return self._fallback if self._using_fallback else self._primary
 
+    @property
+    def model(self) -> str:
+        return getattr(self.active_provider, "model", "unknown")
+
+    @property
+    def thinking(self) -> bool:
+        return getattr(self.active_provider, "thinking", True)
+
+    @property
+    def reasoning_effort(self) -> str | None:
+        return getattr(self.active_provider, "reasoning_effort", None)
+
     async def stream(
         self,
         messages: list[dict[str, Any]],
