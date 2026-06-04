@@ -130,7 +130,8 @@ type ToolUpdateCallback = Callable[[AgentToolResult[Any]], None]
 class CancellationSignal(Protocol):
     """Agent core 可见的取消信号。"""
 
-    reason: str
+    @property
+    def reason(self) -> str: ...
 
     def is_cancelled(self) -> bool: ...
 

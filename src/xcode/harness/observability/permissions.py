@@ -192,12 +192,13 @@ class SettingsSandboxPermissionPolicy:
         return None
 
 
-class CompositePermissionPolicy:
+class CompositePermissionPolicy(PermissionPolicy):
     """组合权限策略，优先校验 settings.json 安全沙箱，然后回退到内层策略。"""
 
     def __init__(
         self, sandbox: SettingsSandboxPermissionPolicy, inner: PermissionPolicy | None
     ) -> None:
+        super().__init__()
         self.sandbox = sandbox
         self.inner = inner
 

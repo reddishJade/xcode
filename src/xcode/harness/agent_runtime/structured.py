@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Generator, Iterator, TYPE_CHECKING, cast
+from typing import Any, AsyncIterator, Generator, Iterator, TYPE_CHECKING
 
 from ...agent.agent import Agent
 from ...agent.messages import convert_to_llm
@@ -302,7 +302,7 @@ class StructuredAgent:
         async for event in self._agent.run_stream(
             initial_messages,
             loop_config,
-            signal=self.cancellation_token,  # type: ignore[arg-type]
+            signal=self.cancellation_token,
         ):
             translated = _translate_event(event, step_counter, text_seen)
             if translated is not None:
@@ -700,7 +700,7 @@ def _resolve_permission_policy(
     )
 
     sandbox = SettingsSandboxPermissionPolicy(settings_path)
-    return cast(PermissionPolicy, CompositePermissionPolicy(sandbox, base))
+    return CompositePermissionPolicy(sandbox, base)
 
 
 def _is_productive(
