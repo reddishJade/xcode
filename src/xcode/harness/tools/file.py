@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..agent_runtime.contextual import ContextualRetrievalState
-from ..skills import ToolInput, ToolSpec, resolve_project_path
+from ..skills import ToolInput, ToolOutput, ToolSpec, resolve_project_path
 from .path_utils import is_path_blocked, truncate_output, display_path
 
 """受沙箱约束的本地文件工具。
@@ -247,7 +247,13 @@ def _edit_file(
     if context_state is not None:
         context_state.record_file(path)
     diff = _diff_preview(_display(root, path), content, updated)
-    return f"edited file: {_display(root, path)} replacements={edit_count}\n{diff}"
+    return ToolOutput(
+        f"edited file: {_display(root, path)} replacements={edit_count}\n{diff}",
+        metadata={
+            "patch": diff,
+            "first_changed_line": _first_changed_line(content, updated),
+        },
+    )
 
 
 def _parse_optional_int(value: Any, name: str) -> int:
@@ -351,6 +357,19 @@ def _diff_preview(path: str, before: str, after: str) -> str:
         tofile=f"b/{path}",
     )
     return "".join(lines)
+
+
+def _first_changed_line(before: str, after: str) -> int | None:
+    before_lines = before.splitlines()
+    after_lines = after.splitlines()
+    for index, (before_line, after_line) in enumerate(
+        zip(before_lines, after_lines), start=1
+    ):
+        if before_line != after_line:
+            return index
+    if len(before_lines) != len(after_lines):
+        return min(len(before_lines), len(after_lines)) + 1
+    return None
 
 
 def _display(root: Path, path: Path) -> str:

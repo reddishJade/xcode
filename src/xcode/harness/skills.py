@@ -27,6 +27,21 @@ RiskEvaluator = Callable[[ToolInput], str]
 ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
 
 
+class ToolOutput(str):
+    """带结构化元数据的工具输出文本。"""
+
+    metadata: dict[str, Any]
+
+    def __new__(
+        cls,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> "ToolOutput":
+        output = str.__new__(cls, content)
+        output.metadata = metadata or {}
+        return output
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     """工具的可复用描述。
@@ -158,13 +173,35 @@ def run_tool_result(
             status, perm_result.reason, metadata=perm_result.metadata
         )
     try:
-        content = redact_text(tool.handler(action_input))
-        return ToolExecutionResult(STATUS_OK, content, metadata=perm_result.metadata)
+        raw_content = tool.handler(action_input)
+        content = redact_text(str(raw_content))
+        metadata = _merge_metadata(
+            _tool_output_metadata(raw_content),
+            perm_result.metadata,
+        )
+        return ToolExecutionResult(STATUS_OK, content, metadata=metadata)
     except Exception as exc:
         meta = {"error": str(exc)}
         if perm_result.metadata:
             meta.update(perm_result.metadata)
         return ToolExecutionResult(STATUS_ERROR, f"tool error: {exc}", meta)
+
+
+def _tool_output_metadata(output: str) -> dict[str, Any] | None:
+    metadata = getattr(output, "metadata", None)
+    if isinstance(metadata, dict) and metadata:
+        return metadata
+    return None
+
+
+def _merge_metadata(
+    *items: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    merged: dict[str, Any] = {}
+    for item in items:
+        if item:
+            merged.update(item)
+    return merged or None
 
 
 def stringify_tool_input(action_input: ToolInput) -> str:

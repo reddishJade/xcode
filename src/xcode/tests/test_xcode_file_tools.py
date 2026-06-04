@@ -6,7 +6,7 @@ import unittest
 
 from xcode.cli.repl_tools import parse_tool_input
 from xcode.harness.observability import HITLResult
-from xcode.harness.skills import run_tool
+from xcode.harness.skills import run_tool, run_tool_result
 from xcode.harness.tools import build_file_tools
 
 
@@ -329,6 +329,27 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
 
             self.assertIn("replacements=1", output)
             self.assertEqual(path.read_text(encoding="utf-8"), "hi world")
+
+    def test_edit_file_result_includes_patch_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "a.txt"
+            path.write_text("one\ntwo\n", encoding="utf-8")
+            tools = self._tools(root)
+
+            result = run_tool_result(
+                tools,
+                "edit_file",
+                {"path": "a.txt", "old_text": "two", "new_text": "three"},
+                lambda _tool, _input: HITLResult("allow", "once"),
+            )
+
+            metadata = result.metadata or {}
+            self.assertEqual(result.status, "ok")
+            self.assertIn("-two", metadata.get("patch", ""))
+            self.assertIn("+three", metadata.get("patch", ""))
+            self.assertEqual(metadata.get("first_changed_line"), 2)
+            self.assertEqual(path.read_text(encoding="utf-8"), "one\nthree\n")
 
     def test_edit_file_requires_new_text_key_but_allows_empty_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
