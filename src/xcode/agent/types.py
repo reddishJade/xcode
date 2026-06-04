@@ -341,6 +341,8 @@ class AgentLoopMetrics:
     steps: int = 0
     model_latencies_ms: list[float] = field(default_factory=list)
     tool_latencies_ms: list[float] = field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @dataclass
