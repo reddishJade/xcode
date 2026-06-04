@@ -7,6 +7,7 @@ from typing import Any, cast
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import ToolDefinition
 
+from .codec import normalize_cross_provider_messages
 from .metrics import ProviderMetricsMixin
 from .runtime import ProviderRuntime
 from .stream_codec import chat_stream_to_events
@@ -65,6 +66,7 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         tools: list[ToolDefinition],
         **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
+        messages = self._normalize_messages(messages)
         for event in self._stream_sync(messages, tuple(tools), **kwargs):
             yield event
 
@@ -120,6 +122,18 @@ class OpenAICompatProvider(ProviderMetricsMixin):
             params["extra_body"] = existing
         if effective and self.reasoning_effort:
             params["reasoning_effort"] = self.reasoning_effort
+
+    def _normalize_messages(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """跨 provider 消息归一化。
+
+        当消息来自不同 provider 时（如 DeepSeek → MiMo），
+        将 provider 专有字段（如 reasoning_content）转为通用文本格式。
+        子类可重写以添加额外转换。
+        """
+        return normalize_cross_provider_messages(messages, self.transport)
 
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]

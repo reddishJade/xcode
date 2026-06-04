@@ -106,6 +106,57 @@ def to_responses_tool(
     }
 
 
+# Provider 之间无需转换的目标列表（共享 reasoning_content 协议）
+_REASONING_CONTENT_TRANSPORTS = {"deepseek_chat", "chatglm_chat", "mimo_chat"}
+
+# 通过 reasoning_content 字段流式传输思考内容的 provider 列表
+# （来自这些 provider 的消息保留 reasoning_content；发往非这些 provider 时需转为文本）
+
+
+def _has_reasoning_content(messages: list[dict[str, Any]]) -> bool:
+    for msg in messages:
+        if msg.get("reasoning_content"):
+            return True
+    return False
+
+
+def normalize_cross_provider_messages(
+    messages: list[dict[str, Any]],
+    target_transport: str,
+) -> list[dict[str, Any]]:
+    """跨 provider 消息归一化。
+
+    当消息中包含 provider 专有字段（如 reasoning_content），
+    且目标 provider 不原生支持时，将其转为通用格式。
+
+    当前转换：
+    - reasoning_content → 在 content 中插入 <thinking> 文本块（如果目标 transport
+      不在 _REASONING_CONTENT_TRANSPORTS 中）
+    """
+    if not _has_reasoning_content(messages):
+        return messages
+
+    if target_transport in _REASONING_CONTENT_TRANSPORTS:
+        return messages
+
+    import copy
+
+    result: list[dict[str, Any]] = []
+    for msg in messages:
+        rc = msg.get("reasoning_content")
+        if rc:
+            msg = copy.deepcopy(msg)
+            text = str(rc)
+            existing = msg.get("content")
+            if existing is None or existing == "":
+                msg["content"] = f"<thinking>{text}</thinking>"
+            elif isinstance(existing, str):
+                msg["content"] = f"<thinking>{text}</thinking>\n\n{existing}"
+            msg.pop("reasoning_content", None)
+        result.append(msg)
+    return result
+
+
 def to_chat_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """转换为 Chat Completions API 格式。tool result 使用 role:"tool"。"""
     converted: list[dict[str, Any]] = []
