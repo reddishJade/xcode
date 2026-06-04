@@ -151,12 +151,6 @@ def build_app(
 
         plugins_data = PluginManager(project_root).scan_and_load()
 
-    speculation_planner = None
-    if "speculation" in enabled:
-        from xcode.experimental.speculation import SpeculationPlanner
-
-        speculation_planner = SpeculationPlanner()
-
     registry, skill_loader, shell_spec, closers = _assembly.build_tool_registry(
         project_root=project_root,
         llm=providers.llm,
@@ -187,7 +181,6 @@ def build_app(
         compact_controller=infra.compact_controller,
         cancellation_token=infra.cancellation_token,
         fallback_provider=fallback_provider,
-        speculation_planner=speculation_planner,
         plugins_hooks=plugins_data.get("hooks"),
     )
 

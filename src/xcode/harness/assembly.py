@@ -52,8 +52,6 @@ if TYPE_CHECKING:
     from xcode.experimental.daemon import HeartbeatDaemon
     from xcode.experimental.mailbox import AgentMailbox
     from xcode.experimental.progress import TaskProgress
-    from xcode.experimental.speculation import SpeculationPlanner
-
 
 EXPERIMENTAL_FEATURE_GROUPS = frozenset(
     {
@@ -65,7 +63,6 @@ EXPERIMENTAL_FEATURE_GROUPS = frozenset(
         "daemon",
         "mailbox",
         "progress",
-        "speculation",
     }
 )
 
@@ -399,7 +396,6 @@ def build_agent(
     compact_controller: CompactController | None = None,
     cancellation_token: CancellationToken | None = None,
     compactor: LayeredCompactor | None = None,
-    speculation_planner: SpeculationPlanner | None = None,
     fallback_provider: ModelProvider | None = None,
     plugins_hooks: dict[str, list[Callable]] | None = None,
 ) -> StructuredAgent:
@@ -441,7 +437,6 @@ def build_agent(
         compactor=compactor,
         compact_controller=compact_controller,
         cancellation_token=cancellation_token,
-        speculation_planner=speculation_planner,
         fallback_provider=fallback_provider,
         project_root=project_root,
     )

@@ -159,7 +159,6 @@ src/xcode/main.py
 | `bm25.py` | internal | `memory` 使用的纯 Python BM25Okapi，不单独作为启用入口 |
 | `plugins.py` | `plugins` | `.local/plugins/*.py` 动态加载，收集 tools/hooks/skills |
 | `daemon.py` | `daemon` | `HeartbeatDaemon`，轮询 mailbox/git/tasks |
-| `speculation.py` | `speculation` | 无副作用 UI 预热事件规划 |
 
 ---
 
@@ -190,7 +189,6 @@ experimental group：
 - `memory`
 - `plugins`
 - `daemon`
-- `speculation`
 - `experimental`：展开为全部 experimental group
 
 ---

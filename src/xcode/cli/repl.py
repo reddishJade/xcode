@@ -211,6 +211,7 @@ class _ReplTurnRenderer:
         self.streamed_text = False
         self.tool_group: dict[str, Any] | None = None
         self.tool_call_labels: dict[str, str] = {}
+        self._progress_tool_id: str | None = None
 
     def handle_event(self, event: Any) -> None:
         if event.type == "reasoning_delta":
@@ -224,8 +225,11 @@ class _ReplTurnRenderer:
             self._handle_assistant_event(event.data)
         elif event.type == "tool_use":
             self._record_tool_call(event.data)
+        elif event.type == "tool_update":
+            self._handle_tool_update(event.data)
         elif event.type == "tool_result":
             self._record_tool_result(event.data)
+            self._clear_progress()
         elif event.type == "final":
             self._handle_final_event(event.data)
 
@@ -322,9 +326,30 @@ class _ReplTurnRenderer:
         )
         self.tool_group["errors"].append((label, event_data))
 
+    def _clear_progress(self) -> None:
+        if self._progress_tool_id is not None:
+            self.clear_line()
+            self._progress_tool_id = None
+
+    def _handle_tool_update(self, event_data: Any) -> None:
+        tool_id = str(event_data.get("tool_call_id", ""))
+        partial = str(event_data.get("partial_result", ""))
+        if not tool_id or not partial:
+            return
+        if self._progress_tool_id != tool_id:
+            self._clear_progress()
+            self._progress_tool_id = tool_id
+        lines = [l for l in partial.splitlines() if l.strip()]
+        last_line = lines[-1] if lines else ""
+        if len(last_line) > 100:
+            last_line = last_line[:97] + "..."
+        if last_line:
+            self._safe_write(f"\r\033[K\x1b[90m  {last_line}\x1b[0m")
+
     def _flush_tool_group(self) -> None:
         if self.tool_group is None:
             return
+        self._clear_progress()
         calls = int(self.tool_group["calls"])
         errors = list(self.tool_group["errors"])
         intents = list(self.tool_group["intents"])

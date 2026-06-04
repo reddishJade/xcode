@@ -13,10 +13,9 @@ class XcodePublicApiTests(unittest.TestCase):
         self.assertFalse(hasattr(tools, "build_worktree_tools"))
         self.assertTrue(hasattr(tools, "build_file_tools"))
 
-    def test_eval_and_speculation_are_not_reexported_from_core(self) -> None:
+    def test_eval_is_not_reexported_from_core(self) -> None:
         self.assertFalse(hasattr(core, "load_eval_questions"))
         self.assertFalse(hasattr(core, "run_end_to_end_eval"))
-        self.assertFalse(hasattr(agent_runtime, "SpeculationPlanner"))
 
 
 if __name__ == "__main__":

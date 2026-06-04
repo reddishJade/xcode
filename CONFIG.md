@@ -175,7 +175,6 @@
 | `memory` | experimental | 启用压缩摘要写入 `MEMORY.md` 的 consolidation hook |
 | `plugins` | experimental | 扫描 `.local/plugins/*.py` 并注册暴露的工具和 hooks |
 | `daemon` | experimental | 构造 `HeartbeatDaemon` |
-| `speculation` | experimental | 构造 `SpeculationPlanner` |
 | `experimental` | 总开关 | 展开为全部 experimental group |
 
 `bm25` 是 `memory` 的内部检索实现，不单独作为启用入口。

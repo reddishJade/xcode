@@ -41,7 +41,7 @@ src/xcode/main.py
 `EXPERIMENTAL_FEATURE_GROUPS` 当前展开为：
 
 ```text
-worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress, speculation
+worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress
 ```
 
 `experimental` 是总开关。启用它等价于启用全部上述 group。`bm25` 是 `memory` 的内部实现，不是独立 group。
@@ -328,21 +328,6 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 边界：
 
 - `build_app()` 只在启用 `daemon` 或 `experimental` 后构造 daemon。
-
-### `speculation`
-
-文件：`src/xcode/experimental/speculation.py`
-
-能力：
-
-- `FinishKindTracker`
-- `SpeculationPlanner`
-- 根据 tool/status 生成 UI 预热事件
-
-边界：
-
-- 事件本身无副作用。
-- 宿主 UI 是否消费该事件不在此模块内实现。
 
 ---
 

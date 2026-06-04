@@ -67,8 +67,7 @@ from ..observability import (
 )
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
-if TYPE_CHECKING:
-    from xcode.experimental.speculation import SpeculationPlanner
+
 
 __all__ = ["StructuredAgent", "StructuredAgentEvent", "StructuredAgentResult"]
 
@@ -215,7 +214,6 @@ class StructuredAgent:
         hook_manager: HookManager | None = None,
         runtime_context_provider: RuntimeContextProvider | None = None,
         cancellation_token: CancellationToken | None = None,
-        speculation_planner: SpeculationPlanner | None = None,
         fallback_provider: ModelProvider | None = None,
         project_root: Path | None = None,
     ) -> None:
@@ -241,7 +239,6 @@ class StructuredAgent:
         self.hook_manager = hook_manager
         self.runtime_context_provider = runtime_context_provider
         self.cancellation_token = cancellation_token or CancellationToken()
-        self.speculation_planner = speculation_planner
         self._consecutive_errors: int = 0
         self._current_mode: ExecutionMode = "act"
         self._plan_enter_step: int = 0
@@ -343,16 +340,6 @@ class StructuredAgent:
             if translated is not None:
                 for te in translated if isinstance(translated, list) else [translated]:
                     yield te
-                    # 工具执行完成后发射推测事件
-                    if (
-                        isinstance(event, ToolExecutionEndEvent)
-                        and te.type == "tool_result"
-                    ):
-                        status = te.data.status if hasattr(te.data, "status") else "ok"
-                        for spec_event in self._emit_speculation(
-                            event.tool_name, status, translation_state.step
-                        ):
-                            yield spec_event
 
         # 循环结束，从 Agent 获取结果
         result = self._agent.last_result
@@ -687,16 +674,6 @@ class StructuredAgent:
             typed.append(SystemMessage(content=notice))
         typed.append(UserMessage(content=question))
         return typed
-
-    def _emit_speculation(
-        self, tool_name: str | None, status: str, step: int
-    ) -> Generator[StructuredAgentEvent, None, None]:
-        if self.speculation_planner is None:
-            return
-        event = self.speculation_planner.plan(tool_name, status)
-        if event is not None:
-            yield StructuredAgentEvent("speculation", step, event)
-
 
 # ── 事件翻译 ──
 

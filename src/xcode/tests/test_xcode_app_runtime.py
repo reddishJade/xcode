@@ -109,7 +109,6 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         names = {tool.name for tool in app.registry}
         self.assertNotIn("plugin_tool", names)
         self.assertIsNone(_layered_compactor(app).on_compact)
-        self.assertIsNone(app.agent.speculation_planner)
         self.assertIsNone(app.daemon)
         self.assertIsNone(app.mailbox)
         self.assertIsNone(app.progress)
@@ -140,7 +139,6 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertIn("save_task_progress", names)
         self.assertIn("plugin_tool", names)
         self.assertIsNotNone(_layered_compactor(app).on_compact)
-        self.assertIsNotNone(app.agent.speculation_planner)
         self.assertIsNotNone(app.daemon)
         self.assertIsNotNone(app.mailbox)
         self.assertIsNotNone(app.progress)
@@ -161,7 +159,6 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertNotIn("create_worktree_task", names)
         self.assertNotIn("create_task", names)
         self.assertIsNotNone(_layered_compactor(app).on_compact)
-        self.assertIsNone(app.agent.speculation_planner)
         self.assertIsNone(app.daemon)
         self.assertIsNone(app.mailbox)
         self.assertIsNone(app.progress)
@@ -202,25 +199,6 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertIsNone(_layered_compactor(app).on_compact)
         self.assertIsNone(app.mailbox)
         self.assertIsNotNone(app.progress)
-
-    def test_speculation_group_enables_speculation_only(self) -> None:
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core", "speculation")),
-        )
-        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
-            app = build_app(
-                project_root=Path(tmp),
-                runtime_config=runtime_config,
-            )
-
-        names = {tool.name for tool in app.registry}
-        self.assertNotIn("create_worktree_task", names)
-        self.assertNotIn("create_task", names)
-        self.assertIsNone(_layered_compactor(app).on_compact)
-        self.assertIsNotNone(app.agent.speculation_planner)
-        self.assertIsNone(app.daemon)
-        self.assertIsNone(app.mailbox)
-        self.assertIsNone(app.progress)
 
     def test_bash_tool_uses_agent_cancellation_event(self) -> None:
         captured = {}
