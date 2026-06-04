@@ -54,7 +54,7 @@ from .compaction import CompactController, estimate_message_tokens
 from xcode.ai.events import ProviderEvent, ToolCall as ToolUseBlock
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
-from .execution_modes import mode_notice, policy_for_mode
+from .execution_modes import ActPolicy, mode_notice, PlanPolicy, policy_for_mode
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
 from ..observability import (
@@ -242,6 +242,7 @@ class StructuredAgent:
         self.cancellation_token = cancellation_token or CancellationToken()
         self.speculation_planner = speculation_planner
         self._consecutive_errors: int = 0
+        self._current_mode: ExecutionMode = "act"
 
         # 适配 ToolSpec → AgentTool，创建 Agent 实例
         adapted_tools: list[Any] = adapt_tool_specs(
@@ -249,6 +250,7 @@ class StructuredAgent:
             approval_callback=approval_callback,
             permission_policy=self.permission_policy,
         )
+        adapted_tools.extend(self._build_mode_switch_tools())
         self._agent = Agent(adapted_tools)
 
     # ── 公共 API ──
@@ -351,6 +353,56 @@ class StructuredAgent:
         final = _build_structured_result(result, self.config.max_steps)
         yield _final_event(result.steps, final)
 
+    # ── 模式切换 ──
+
+    def _build_mode_switch_tools(self) -> list[Any]:
+        from .tool_adapter import adapt_tool_specs
+
+        plan_tool = ToolSpec(
+            name="enter_plan_mode",
+            description="Switch to Plan Mode: read-only tools only. Call this before making changes to investigate first.",
+            input_hint="empty",
+            handler=lambda _input: self._switch_to_plan(),
+            risk="low",
+        )
+        act_tool = ToolSpec(
+            name="exit_plan_mode",
+            description="Exit Plan Mode: return to full tool access. Call this with a concise summary of your plan.",
+            input_hint="plan_summary",
+            handler=lambda _input: self._switch_to_act(
+                _input.get("plan_summary", "") if isinstance(_input, dict) else str(_input)
+            ),
+            risk="low",
+        )
+        return adapt_tool_specs((plan_tool, act_tool))
+
+    def _switch_to_plan(self) -> str:
+        self._current_mode = "plan"
+        return "Entered Plan Mode. Tools are limited to read-only. Investigate and report a plan."
+
+    def _switch_to_act(self, plan_summary: str | None = None) -> str:
+        self._current_mode = "act"
+        if plan_summary:
+            self.steer(SystemMessage(content=(
+                f"<plan-summary>\n{plan_summary}\n</plan-summary>\n"
+                "The plan above was prepared during Plan Mode. Execute it now."
+            )))
+        self._agent._tools = self._tools_for_mode(self.registry, "act")
+        return "Exited Plan Mode. Full tool access restored."
+
+    def _tools_for_mode(
+        self, registry: tuple[ToolSpec, ...], mode: ExecutionMode
+    ) -> list[Any]:
+        policy = policy_for_mode(mode)
+        filtered = policy.filter_tools(registry)
+        adapted = adapt_tool_specs(
+            filtered,
+            approval_callback=self.approval_callback,
+            permission_policy=self.permission_policy,
+        )
+        adapted.extend(self._build_mode_switch_tools())
+        return adapted
+
     # ── 配置构建 ──
 
     def _build_loop_config(self, mode: ExecutionMode) -> AgentLoopConfig:
@@ -401,7 +453,7 @@ class StructuredAgent:
             tool_calls: list[ToolCallContent],
             tool_results: list[ToolResultMessage],
         ) -> bool:
-            if mode == "plan":
+            if self._current_mode == "plan":
                 return True
             return _tool_results_count_as_progress(
                 [
@@ -421,8 +473,6 @@ class StructuredAgent:
     def _loop_before_tool(
         self, mode: ExecutionMode
     ) -> Callable[[BeforeToolCallContext, Any], BeforeToolCallResult | None]:
-        policy = policy_for_mode(mode)
-
         def before_tool(
             ctx: BeforeToolCallContext, _signal: Any
         ) -> BeforeToolCallResult | None:
@@ -430,13 +480,14 @@ class StructuredAgent:
             args = ctx.args
             action_input = stringify_tool_input(args)
 
-            decision = policy.check_call(
+            effective_policy = policy_for_mode(self._current_mode)
+            decision = effective_policy.check_call(
                 ToolUseBlock(id=tool_call.id, name=tool_call.name, input=args)
             )
             if decision == "deny":
                 return BeforeToolCallResult(
                     block=True,
-                    reason=f"permission denied for tool: {tool_call.name}",
+                    reason=f"tool not allowed in {self._current_mode} mode: {tool_call.name}",
                 )
             if decision == "ask":
                 approval = self._request_tool_approval(tool_call.name, args)
@@ -548,6 +599,7 @@ class StructuredAgent:
     def _initial_messages(
         self, question: str, mode: ExecutionMode = "act"
     ) -> list[AgentMessage]:
+        self._current_mode = mode
         typed: list[AgentMessage] = []
         notice = mode_notice(mode)
         if self.runtime_context_provider is not None:
