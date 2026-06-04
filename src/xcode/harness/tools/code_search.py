@@ -3,11 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Any
 
 from ..skills import ToolInput, ToolSpec, resolve_project_path
 from .path_utils import is_path_blocked, truncate_output, display_path
+import ast
+import traceback
 
 """供编码 Agent 使用的只读代码搜索工具。"""
+
+_EVAL_NS: dict[str, Any] = {}
 
 MAX_GREP_RESULTS = 100
 MAX_GLOB_RESULTS = 200
@@ -38,6 +43,36 @@ def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
         base = _safe_path(root, raw_path)
         limit = int(data.get("limit", MAX_LS_ENTRIES))
         return _ls(root, base, limit)
+
+    def evaluate_python(data: ToolInput) -> str:
+        global _EVAL_NS
+        code = str(data.get("code", "")).strip()
+        if not code:
+            raise ValueError("code is required")
+        try:
+            tree = ast.parse(code, mode="exec")
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    fn = node.func
+                    name = (
+                        fn.attr if isinstance(fn, ast.Attribute) else
+                        fn.id if isinstance(fn, ast.Name) else ""
+                    )
+                    if name in ("exec", "eval", "open", "__import__"):
+                        return f"Error: {name}() is not allowed"
+            compiled = compile(tree, "<programmatic>", "exec")
+            exec(compiled, _EVAL_NS)
+            result = _EVAL_NS.get("result") or _EVAL_NS.get("output", "")
+            if not result:
+                return "ok (no result)"
+            return str(result)[:5000]
+        except Exception as e:
+            return f"Error: {type(e).__name__}: {e}\n{traceback.format_exc()[:500]}"
+
+    def reset_namespace(data: ToolInput) -> str:
+        global _EVAL_NS
+        _EVAL_NS.clear()
+        return "namespace cleared"
 
     return (
         ToolSpec(
@@ -86,6 +121,42 @@ def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
                         "description": "Maximum entries (default: 500)",
                     },
                 },
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="evaluate_python",
+            description="Execute Python code in a persistent namespace. Intermediate results stay in the namespace, not in LLM context. "
+                        "Store the final output in a variable named 'result' or 'output' to return it.",
+            input_hint='JSON: {"code": "result = 2 + 2"}',
+            handler=evaluate_python,
+            risk="low",
+            read_only=True,
+            concurrency_safe=False,
+            execution_mode="sequential",
+            schema={
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Python code to execute. Use 'result' variable for return value.",
+                    }
+                },
+                "required": ["code"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="reset_namespace",
+            description="Reset the persistent Python namespace used by evaluate_python. Call this between unrelated tasks.",
+            input_hint="{}",
+            handler=reset_namespace,
+            risk="low",
+            read_only=True,
+            execution_mode="sequential",
+            schema={
+                "type": "object",
+                "properties": {},
                 "additionalProperties": False,
             },
         ),
