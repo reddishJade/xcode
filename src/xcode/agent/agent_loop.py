@@ -38,6 +38,7 @@ from .types import (
     AgentTool,
     AssistantMessage,
     CancellationSignal,
+    CompactionEvent,
     ContentBlock,
     ShouldStopAfterTurnContext,
     TextContent,
@@ -236,7 +237,16 @@ async def _run_loop(
         # ── 压缩检查 ──
         if config.should_compact and config.compact:
             if config.should_compact(current_context.messages):
+                before = len(current_context.messages)
                 current_context.messages = config.compact(current_context.messages)
+                after = len(current_context.messages)
+                emit(CompactionEvent(
+                    messages_removed=before - after,
+                    messages_after=after,
+                    summary_token_estimate=0,
+                    trigger="token_limit",
+                    archive=None,
+                ))
 
         # ── 内层循环：模型调用 + 重试 + max_tokens ──
         ctx_len_before = len(current_context.messages)

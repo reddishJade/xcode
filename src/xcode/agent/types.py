@@ -229,6 +229,22 @@ class ThinkingUpdateEvent:
     reasoning_content: str = ""
 
 
+@dataclass
+class CompactionArchive:
+    path: str
+    status: Literal["summary", "full"]
+
+
+@dataclass
+class CompactionEvent:
+    type: str = "compaction"
+    messages_removed: int = 0
+    messages_after: int = 0
+    summary_token_estimate: int = 0
+    trigger: str = "token_limit"
+    archive: CompactionArchive | None = None
+
+
 type AgentEvent = (
     AgentStartEvent
     | AgentEndEvent
@@ -241,6 +257,7 @@ type AgentEvent = (
     | ToolExecutionUpdateEvent
     | ToolExecutionEndEvent
     | ThinkingUpdateEvent
+    | CompactionEvent
 )
 
 # ── 监听器 ──
