@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from xcode.ai.events import (
     FinalMessage,
     ProviderEvent,
     ReasoningDelta,
+    StopReason,
     TextDelta,
     ToolCall,
     ToolCallEvent,
@@ -52,8 +53,8 @@ def faux_usage(input_tokens: int = 10, output_tokens: int = 20) -> list[Provider
     return [UsageUpdate(input_tokens=input_tokens, output_tokens=output_tokens)]
 
 
-def faux_final(stop_reason: str = "end_turn") -> list[ProviderEvent]:
-    return [FinalMessage(content="", stop_reason=cast(Any, stop_reason))]  # type: ignore[arg-type]
+def faux_final(stop_reason: StopReason = "end_turn") -> list[ProviderEvent]:
+    return [FinalMessage(content="", stop_reason=stop_reason)]
 
 
 # --- Response queue provider ---

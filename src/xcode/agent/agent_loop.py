@@ -17,7 +17,7 @@ from collections.abc import Callable
 from time import perf_counter
 from typing import Any
 
-from xcode.ai.events import FinalMessage, TextDelta, ReasoningDelta, ToolCallEvent
+from xcode.ai.events import FinalMessage, StopReason, TextDelta, ReasoningDelta, ToolCallEvent
 from xcode.ai.types import ToolDefinition
 from .provider_retry import call_provider_with_retry
 from .types import (
@@ -479,7 +479,7 @@ async def _run_inner_loop(
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
         tool_calls_found: list[ToolCallContent] = []
-        stop_reason = "end_turn"
+        stop_reason: StopReason = "end_turn"
 
         for event in events:
             if isinstance(event, TextDelta):
@@ -505,26 +505,16 @@ async def _run_inner_loop(
                     )
             # FinalMessage 设置 stop_reason
             if isinstance(event, FinalMessage):
-                stop_reason = getattr(event, "stop_reason", "end_turn") or "end_turn"
+                stop_reason = event.stop_reason or "end_turn"
 
         final_text = "".join(text_parts)
         content_blocks: list[ContentBlock] = [TextContent(text=final_text)]
         content_blocks.extend(tool_calls_found)
 
-        valid_stop_reasons = (
-            "end_turn",
-            "max_tokens",
-            "stop_sequence",
-            "error",
-            "aborted",
-        )
-        final_stop_reason = (
-            stop_reason if stop_reason in valid_stop_reasons else "end_turn"
-        )
         message = AssistantMessage(
             content=content_blocks,
             reasoning_content="".join(reasoning_parts) if reasoning_parts else None,
-            stop_reason=final_stop_reason,  # type: ignore[arg-type]
+            stop_reason=stop_reason,
         )
 
         # ── 检查是否为 FinalMessage 的错误 ──

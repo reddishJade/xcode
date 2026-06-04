@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Protocol
 
+from xcode.ai.events import StopReason
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import (
     ImageContent,
@@ -22,7 +23,6 @@ from xcode.ai.types import (
 
 type QueueMode = Literal["all", "one-at-a-time"]
 type ToolExecutionMode = Literal["sequential", "parallel"]
-type StopReason = Literal["end_turn", "max_tokens", "stop_sequence", "error", "aborted"]
 
 # ── 内容块（来自 ai/types.py）──
 
