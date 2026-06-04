@@ -85,6 +85,22 @@ def cmd_resume(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
+def cmd_tree(cmd: str, ctx: CommandContext) -> bool:
+    nodes = ctx.store.get_tree()
+    if not nodes:
+        print("No session tree available (no metadata).")
+        return False
+
+    for node in nodes:
+        indent = "  " * node.depth
+        prefix = "└─ " if node.depth > 0 else ""
+        branch = "🌿 " if node.fork_type else "  "
+        marker = " ← current" if node.is_current else ""
+        label = f"{branch}{node.title}"
+        print(f"{indent}{prefix}{label}{marker}")
+    return False
+
+
 def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
     print_sessions(ctx.store.list_session_infos())
     return False
@@ -256,6 +272,10 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         accepts_args=True,
     ),
     "/sessions": CommandEntry(handler=cmd_sessions, desc="List recent conversations."),
+    "/tree": CommandEntry(
+        handler=cmd_tree,
+        desc="Show session fork tree.",
+    ),
     "/model": CommandEntry(
         handler=cmd_model,
         desc="Show current model info.",

@@ -242,6 +242,58 @@ class SessionStore:
     def current_metadata(self) -> SessionMetadata | None:
         return self._metadata_for_path(self.current_path)
 
+    def get_tree(self) -> list[TreeNode]:
+        """以当前会话为视角，构建会话树：祖先链 + 当前子树。
+
+        返回按深度排序的 TreeNode 列表。
+        """
+        all_meta = {m.id: m for m in self._load_metadata()}
+        current_id = self._session_id(self.current_path)
+
+        # 构建父子索引
+        children: dict[str, list[SessionMetadata]] = {}
+        for m in all_meta.values():
+            pid = m.parent_id
+            if pid:
+                children.setdefault(pid, []).append(m)
+
+        result: list[TreeNode] = []
+
+        # 从根节点开始构建
+        current = all_meta.get(current_id)
+        if current is None:
+            return result
+
+        # 先构建祖先链（root→parent→current）
+        chain: list[SessionMetadata] = [current]
+        while chain[-1].parent_id and chain[-1].parent_id in all_meta:
+            chain.append(all_meta[chain[-1].parent_id])
+        chain.reverse()
+
+        seen: set[str] = set()
+
+        def walk(meta: SessionMetadata, depth: int) -> None:
+            if meta.id in seen:
+                return
+            seen.add(meta.id)
+            is_current = meta.id == current_id
+            result.append(TreeNode(
+                id=meta.id,
+                title=meta.title,
+                fork_type=meta.fork_type,
+                depth=depth,
+                is_current=is_current,
+                is_leaf=meta.id not in children,
+            ))
+            for child in sorted(children.get(meta.id, []), key=lambda m: m.created_at):
+                walk(child, depth + 1)
+
+        for ancestor in chain:
+            walk(ancestor, 0 if ancestor.id == chain[0].id else chain.index(ancestor))
+
+        return result
+
+
     def _session_paths(self) -> list[Path]:
         return sorted(
             self.sessions_dir.glob("session-*.jsonl"),
@@ -391,3 +443,13 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+@dataclass(frozen=True)
+class TreeNode:
+    id: str
+    title: str
+    fork_type: str | None
+    depth: int
+    is_current: bool
+    is_leaf: bool
