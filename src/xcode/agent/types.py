@@ -6,6 +6,7 @@ from typing import Any, Callable, Literal, Protocol
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import (
     ImageContent,
+    StreamOptions,
     TextContent,
     ThinkingContent,
     ThinkingLevel,
@@ -366,6 +367,8 @@ class AgentLoopConfig:
     # 队列
     get_steering_messages: MessageQueueGetter | None = None
     get_follow_up_messages: MessageQueueGetter | None = None
+    steering_mode: QueueMode = "all"
+    follow_up_mode: QueueMode = "all"
 
     # 步骤控制
     max_steps: int = 50
@@ -389,6 +392,9 @@ class AgentLoopConfig:
 
     # 生产力检查（空闲步骤看门狗）
     is_tool_productive: IsToolProductiveHook | None = None
+
+    # 每请求 provider 选项
+    options: StreamOptions | None = None
 
 
 # ── Agent State ──

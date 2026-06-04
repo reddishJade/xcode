@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass, field
-from typing import Any, Union, cast
+from dataclasses import dataclass
+from typing import Any, cast
 
 from xcode.ai.events import (
     FinalMessage,
@@ -14,7 +14,7 @@ from xcode.ai.events import (
     ToolCallEvent,
     UsageUpdate,
 )
-from xcode.ai.types import ToolDefinition
+from xcode.ai.types import StreamOptions, ToolDefinition
 
 """模拟 provider：可脚本化响应队列，用于测试。"""
 
@@ -88,12 +88,18 @@ class FauxProvider:
 
         if response_spec is not None:
             items = list(response_spec)
-            if items and isinstance(items[0], Sequence) and not isinstance(items[0], ProviderEvent):
+            if (
+                items
+                and isinstance(items[0], Sequence)
+                and not isinstance(items[0], ProviderEvent)
+            ):
                 for resp in items:
                     self._queue.append(FauxResponse(events=list(resp)))
             else:
                 self._queue.append(
-                    FauxResponse(events=list(response_spec), delay_seconds=delay_seconds)
+                    FauxResponse(
+                        events=list(response_spec), delay_seconds=delay_seconds
+                    )
                 )
 
     def push(self, events: list[ProviderEvent], delay: float = 0.0) -> None:
@@ -103,7 +109,9 @@ class FauxProvider:
     def push_text(self, text: str) -> None:
         self.push(faux_text(text))
 
-    def push_tool_call(self, name: str, arguments: dict[str, Any] | None = None) -> None:
+    def push_tool_call(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> None:
         self.push(faux_tool_call(name, arguments))
 
     def clear(self) -> None:
@@ -118,6 +126,8 @@ class FauxProvider:
         self,
         messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
         self.call_count += 1
         self._last_messages = messages

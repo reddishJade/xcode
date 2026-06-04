@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Iterable, Iterator
 from typing import Any, cast
 
 from xcode.ai.events import ProviderEvent
-from xcode.ai.types import ToolDefinition
+from xcode.ai.types import StreamOptions, ToolDefinition
 
 from .codec import to_chat_messages, to_chat_tool, to_responses_input, to_responses_tool
 from .openai_compat import OpenAICompatProvider
@@ -106,13 +106,17 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         self,
         messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
-        for event in self._stream_sync(messages, tuple(tools)):
+        for event in self._stream_sync(messages, tuple(tools), **kwargs):
             yield event
 
     def _stream_sync(
-        self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...], **kwargs: Any
+        self,
+        messages: list[dict[str, Any]],
+        tools: tuple[ToolDefinition, ...],
+        **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
         params = self._responses_kwargs(messages, tools, stream=True)
         create = cast(Any, self.client.responses.create)

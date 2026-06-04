@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from .types import (
     AfterToolCallContext,
@@ -23,6 +24,7 @@ from .types import (
     ToolCallContent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
     ToolResultMessage,
 )
 
@@ -70,6 +72,7 @@ async def _execute_sequential(
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
     results: list[ToolResultMessage] = []
+    terminate_flags: list[bool] = []
     for tc in tool_calls:
         if not isinstance(tc, ToolCallContent):
             continue
@@ -78,13 +81,15 @@ async def _execute_sequential(
                 tool_call_id=tc.id, tool_name=tc.name, args=tc.arguments
             )
         )
-        result = await _execute_one(
+        result, terminate = await _execute_one(
             current_context, assistant_message, tc, config, signal, emit
         )
         results.append(result)
+        terminate_flags.append(terminate)
         if _is_cancelled(signal):
             break
-    return ExecutedToolBatch(results=results, terminate=False)
+    all_terminate = len(terminate_flags) > 0 and all(terminate_flags)
+    return ExecutedToolBatch(results=results, terminate=all_terminate)
 
 
 async def _execute_parallel(
@@ -109,10 +114,14 @@ async def _execute_parallel(
         )
 
     raw = await asyncio.gather(*tasks, return_exceptions=True)
-    results: list[ToolResultMessage] = [
-        r for r in raw if isinstance(r, ToolResultMessage)
-    ]
-    return ExecutedToolBatch(results=results, terminate=False)
+    results: list[ToolResultMessage] = []
+    terminate_flags: list[bool] = []
+    for r in raw:
+        if isinstance(r, tuple) and len(r) == 2:
+            results.append(r[0])
+            terminate_flags.append(r[1])
+    all_terminate = len(terminate_flags) > 0 and all(terminate_flags)
+    return ExecutedToolBatch(results=results, terminate=all_terminate)
 
 
 async def _execute_one(
@@ -122,7 +131,8 @@ async def _execute_one(
     config: AgentLoopConfig,
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
-) -> ToolResultMessage:
+) -> tuple[ToolResultMessage, bool]:
+    """Execute a single tool call. Returns (result_message, terminate)."""
     tool = None
     for t in current_context.tools or []:
         if t.name == tool_call.name:
@@ -130,21 +140,27 @@ async def _execute_one(
             break
 
     if tool is None:
-        return ToolResultMessage(
-            tool_call_id=tool_call.id,
-            tool_name=tool_call.name,
-            content=f"unknown tool: {tool_call.name}",
-            is_error=True,
+        return (
+            ToolResultMessage(
+                tool_call_id=tool_call.id,
+                tool_name=tool_call.name,
+                content=f"unknown tool: {tool_call.name}",
+                is_error=True,
+            ),
+            False,
         )
 
     args = tool_call.arguments or {}
 
     if _is_cancelled(signal):
-        return ToolResultMessage(
-            tool_call_id=tool_call.id,
-            tool_name=tool_call.name,
-            content=_cancel_reason(signal),
-            is_error=True,
+        return (
+            ToolResultMessage(
+                tool_call_id=tool_call.id,
+                tool_name=tool_call.name,
+                content=_cancel_reason(signal),
+                is_error=True,
+            ),
+            False,
         )
 
     if config.before_tool_call:
@@ -156,17 +172,34 @@ async def _execute_one(
         )
         before_result = config.before_tool_call(ctx, signal)
         if before_result and before_result.block:
-            return ToolResultMessage(
-                tool_call_id=tool_call.id,
-                tool_name=tool_call.name,
-                content=before_result.reason or "Tool execution was blocked",
-                is_error=True,
+            return (
+                ToolResultMessage(
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_call.name,
+                    content=before_result.reason or "Tool execution was blocked",
+                    is_error=True,
+                ),
+                False,
             )
 
+    def _on_update(partial: AgentToolResult[Any]) -> None:
+        emit(
+            ToolExecutionUpdateEvent(
+                tool_call_id=tool_call.id,
+                tool_name=tool_call.name,
+                args=args,
+                partial_result=partial,
+            )
+        )
+
+    terminate = False
     try:
-        tool_result = await tool.execute(tool_call.id, args, signal)
+        tool_result = await tool.execute(
+            tool_call.id, args, signal, on_update=_on_update
+        )
         is_error = False
         content = tool_result.content
+        terminate = tool_result.terminate
     except Exception as e:
         tool_result = AgentToolResult(content=[TextContent(text=f"Tool error: {e}")])
         content = tool_result.content
@@ -187,6 +220,8 @@ async def _execute_one(
                 content = after_result.content
             if after_result.is_error is not None:
                 is_error = after_result.is_error
+            if after_result.terminate is not None:
+                terminate = after_result.terminate
 
     result_msg = ToolResultMessage(
         tool_call_id=tool_call.id,
@@ -204,7 +239,7 @@ async def _execute_one(
             is_error=is_error,
         )
     )
-    return result_msg
+    return result_msg, terminate
 
 
 def _is_cancelled(signal: CancellationSignal | None) -> bool:

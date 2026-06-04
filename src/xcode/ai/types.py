@@ -73,6 +73,7 @@ class ThinkingConfig:
     - effort: reasoning effort 级别（None 表示使用 provider 默认）
     - clear_thinking: 是否在轮次间清除 thinking 历史
     """
+
     enabled: bool = True
     effort: str | None = None
     clear_thinking: bool = False
@@ -103,6 +104,8 @@ class StreamOptions:
     max_retry_delay_ms: int | None = None
     on_payload: Any | None = None
     on_response: Any | None = None
+    thinking_budgets: ThinkingBudgets | None = None
+    thinking_level: str | None = None
 
 
 # Content block types

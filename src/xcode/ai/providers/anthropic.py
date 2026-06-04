@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from xcode.ai.events import ProviderEvent
+from xcode.ai.types import StreamOptions
 
 NOT_IMPLEMENTED_MSG = (
     "AnthropicProvider is not implemented. "
@@ -27,5 +28,7 @@ class AnthropicProvider:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
         raise RuntimeError(NOT_IMPLEMENTED_MSG)

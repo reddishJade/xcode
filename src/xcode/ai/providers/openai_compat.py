@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any, cast
 
 from xcode.ai.events import ProviderEvent
-from xcode.ai.types import ToolDefinition
+from xcode.ai.types import StreamOptions, ToolDefinition
 
 from .codec import normalize_cross_provider_messages
 from .metrics import ProviderMetricsMixin
@@ -58,14 +58,17 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         self.reasoning_effort = reasoning_effort
         self.runtime = runtime or ProviderRuntime()
         self.transport = transport
+        self._current_options: StreamOptions | None = None
         self._ensure_metrics()
 
     async def stream(
         self,
         messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
+        self._current_options = options
         messages = self._normalize_messages(messages)
         for event in self._stream_sync(messages, tuple(tools), **kwargs):
             yield event
@@ -84,6 +87,18 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         message_count: int,
     ) -> Iterator[ProviderEvent]:
         """调用 chat.completions.create 并通过 _intercept_usage 流式返回事件。"""
+        opts = getattr(self, "_current_options", None)
+        if opts:
+            if opts.api_key:
+                params["api_key"] = opts.api_key
+            extra_headers: dict[str, str] = {}
+            if opts.session_id:
+                extra_headers["x-session-id"] = opts.session_id
+            if opts.headers:
+                extra_headers.update(opts.headers)
+            if extra_headers:
+                params["extra_headers"] = extra_headers
+
         create = cast(Any, self.client.chat.completions.create)
         stream = self.runtime.run(lambda: create(**params))
         self._ensure_metrics()
@@ -116,6 +131,15 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         """
         effective = self.thinking if thinking_override is None else thinking_override
         extra = self._build_thinking_extra_body(thinking_override)
+
+        opts = getattr(self, "_current_options", None)
+        if opts and opts.thinking_budgets and effective:
+            level_name = getattr(opts, "thinking_level", None)
+            if level_name and level_name != "off":
+                budget = getattr(opts.thinking_budgets, level_name, None)
+                if budget and budget > 0:
+                    extra.setdefault("thinking", {})["budget_tokens"] = budget
+
         if extra:
             existing = params.get("extra_body", {})
             existing.update(extra)

@@ -9,7 +9,7 @@ import asyncio
 import random
 from xcode.ai.events import FinalMessage, ProviderEvent
 from xcode.ai.providers.protocol import ModelProvider
-from xcode.ai.types import ToolDefinition
+from xcode.ai.types import StreamOptions, ToolDefinition
 
 
 def _is_transient_error(error: Exception) -> bool:
@@ -37,6 +37,7 @@ async def call_provider_with_retry(
     *,
     max_retries: int = 3,
     backoff_base: float = 0.5,
+    options: StreamOptions | None = None,
 ) -> list[ProviderEvent]:
     """调用 provider，含指数退避重试。
 
@@ -51,6 +52,7 @@ async def call_provider_with_retry(
         tools: 工具定义列表
         max_retries: 最大重试次数
         backoff_base: 基础退避时间（秒）
+        options: 每请求选项（api_key, session_id 等）
 
     返回:
         ProviderEvent 列表
@@ -62,7 +64,10 @@ async def call_provider_with_retry(
     for attempt in range(max_retries + 1):
         try:
             events: list[ProviderEvent] = []
-            async for event in provider.stream(messages, tools):
+            stream_kwargs = {}
+            if options is not None:
+                stream_kwargs["options"] = options
+            async for event in provider.stream(messages, tools, **stream_kwargs):
                 events.append(event)
             return events
         except Exception as e:
@@ -71,15 +76,11 @@ async def call_provider_with_retry(
                 return [FinalMessage(f"Provider error: {e}", "error")]
 
             if attempt >= max_retries:
-                return [
-                    FinalMessage(f"Provider repeatedly unavailable: {e}", "error")
-                ]
+                return [FinalMessage(f"Provider repeatedly unavailable: {e}", "error")]
 
             # 指数退避 + 抖动
-            base_delay = min(backoff_base * (2 ** attempt), 32.0)
+            base_delay = min(backoff_base * (2**attempt), 32.0)
             jitter = random.uniform(0, base_delay * 0.25)
             await asyncio.sleep(base_delay + jitter)
 
-    return [
-        FinalMessage(f"Provider unavailable: {last_error}", "error")
-    ]
+    return [FinalMessage(f"Provider unavailable: {last_error}", "error")]

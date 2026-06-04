@@ -22,6 +22,7 @@ from .types import (
     CancellationSignal,
 )
 
+
 class Agent:
     """纯 agent 运行时薄封装。
 
@@ -121,20 +122,40 @@ class Agent:
 
     # ── 内部 ──
 
-    def _drain_steer(self) -> list[AgentMessage]:
+    def _drain_steer_all(self) -> list[AgentMessage]:
         msgs = list(self._steer_queue)
         self._steer_queue.clear()
         return msgs
 
-    def _drain_followup(self) -> list[AgentMessage]:
+    def _drain_followup_all(self) -> list[AgentMessage]:
         msgs = list(self._followup_queue)
         self._followup_queue.clear()
         return msgs
 
+    def _pop_steer_one(self) -> list[AgentMessage]:
+        if self._steer_queue:
+            return [self._steer_queue.pop(0)]
+        return []
+
+    def _pop_followup_one(self) -> list[AgentMessage]:
+        if self._followup_queue:
+            return [self._followup_queue.pop(0)]
+        return []
+
     def _inject_queues(self, config: AgentLoopConfig) -> AgentLoopConfig:
         """将队列 drain 逻辑注入 config，返回新实例。"""
+        steer_fn = (
+            self._pop_steer_one
+            if config.steering_mode == "one-at-a-time"
+            else self._drain_steer_all
+        )
+        followup_fn = (
+            self._pop_followup_one
+            if config.follow_up_mode == "one-at-a-time"
+            else self._drain_followup_all
+        )
         return dataclasses.replace(
             config,
-            get_steering_messages=self._drain_steer,
-            get_follow_up_messages=self._drain_followup,
+            get_steering_messages=steer_fn,
+            get_follow_up_messages=followup_fn,
         )

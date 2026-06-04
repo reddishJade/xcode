@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Protocol
+from typing import Any, Protocol
 
 from xcode.ai.events import Message, ProviderEvent
-from xcode.ai.types import ToolDefinition
+from xcode.ai.types import StreamOptions, ToolDefinition
 
 
 class ModelProvider(Protocol):
@@ -14,4 +14,6 @@ class ModelProvider(Protocol):
         self,
         messages: list[Message],
         tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]: ...

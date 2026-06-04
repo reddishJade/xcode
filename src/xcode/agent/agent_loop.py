@@ -207,13 +207,12 @@ async def _run_loop(
             return result
 
         # ── 处理 steer 队列 ──
-        while config.get_steering_messages:
+        if config.get_steering_messages:
             steer_msgs = config.get_steering_messages()
-            if not steer_msgs:
-                break
-            for msg in steer_msgs:
-                current_context.messages.append(msg)
-                new_messages.append(msg)
+            if steer_msgs:
+                for msg in steer_msgs:
+                    current_context.messages.append(msg)
+                    new_messages.append(msg)
 
         # ── 发出 turn 事件 ──
         if not first_turn:
@@ -281,7 +280,12 @@ async def _run_loop(
         if stop_reason in ("error", "aborted"):
             emit(_turn_end_event(message, []))
             emit(_agent_end_event(new_messages))
-            return AgentLoopResult(messages=new_messages, steps=step, metrics=metrics, active_provider=active_provider)
+            return AgentLoopResult(
+                messages=new_messages,
+                steps=step,
+                metrics=metrics,
+                active_provider=active_provider,
+            )
 
         # ── 提取工具调用 ──
         tool_calls = [b for b in message.content if isinstance(b, ToolCallContent)]
@@ -329,10 +333,7 @@ async def _run_loop(
             config.watchdog_repeated_tool_limit > 0
             and repeated_tool_count >= config.watchdog_repeated_tool_limit
         ):
-            reason = (
-                f"watchdog stopped repeated tool call: "
-                f"{tool_calls[0].name}"
-            )
+            reason = f"watchdog stopped repeated tool call: {tool_calls[0].name}"
             result = AgentLoopResult(
                 messages=new_messages,
                 steps=step,
@@ -386,7 +387,10 @@ async def _run_loop(
             )
             if config.should_stop_after_turn(ctx):
                 result = AgentLoopResult(
-                    messages=new_messages, steps=step, metrics=metrics, active_provider=active_provider
+                    messages=new_messages,
+                    steps=step,
+                    metrics=metrics,
+                    active_provider=active_provider,
                 )
                 emit(_agent_end_event(new_messages, result))
                 return result
@@ -464,6 +468,7 @@ async def _run_inner_loop(
             tool_definitions,
             max_retries=config.max_step_retries,
             backoff_base=config.retry_backoff_base,
+            options=config.options,
         )
 
         elapsed = round((perf_counter() - started) * 1000, 3)
@@ -506,8 +511,16 @@ async def _run_inner_loop(
         content_blocks: list[ContentBlock] = [TextContent(text=final_text)]
         content_blocks.extend(tool_calls_found)
 
-        valid_stop_reasons = ("end_turn", "max_tokens", "stop_sequence", "error", "aborted")
-        final_stop_reason = stop_reason if stop_reason in valid_stop_reasons else "end_turn"
+        valid_stop_reasons = (
+            "end_turn",
+            "max_tokens",
+            "stop_sequence",
+            "error",
+            "aborted",
+        )
+        final_stop_reason = (
+            stop_reason if stop_reason in valid_stop_reasons else "end_turn"
+        )
         message = AssistantMessage(
             content=content_blocks,
             reasoning_content="".join(reasoning_parts) if reasoning_parts else None,
@@ -522,7 +535,11 @@ async def _run_inner_loop(
                 await asyncio.sleep(delay)
                 continue
             # 重试耗尽
-            if not content_blocks or (len(content_blocks) == 1 and isinstance(content_blocks[0], TextContent) and not content_blocks[0].text):
+            if not content_blocks or (
+                len(content_blocks) == 1
+                and isinstance(content_blocks[0], TextContent)
+                and not content_blocks[0].text
+            ):
                 msg = AssistantMessage(
                     content=[TextContent(text="I encountered an error.")],
                     stop_reason="error",
