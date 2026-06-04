@@ -22,7 +22,32 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
 
             output = tools["read_file"].handler({"path": "a.txt", "limit": 2})
 
-            self.assertEqual(output, "one\ntwo")
+            self.assertIn("one\ntwo", output)
+            self.assertIn('"offset": 3', output)
+
+    def test_read_file_with_offset_and_continuation_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("one\ntwo\nthree\nfour", encoding="utf-8")
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler(
+                {"path": "a.txt", "offset": 2, "limit": 2}
+            )
+
+            self.assertIn("two\nthree", output)
+            self.assertIn('"offset": 4', output)
+            self.assertIn('"limit": 2', output)
+
+    def test_read_file_with_offset_without_limit_reads_to_end(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("one\ntwo\nthree", encoding="utf-8")
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler({"path": "a.txt", "offset": 2})
+
+            self.assertEqual(output, "two\nthree")
 
     def test_read_file_rejects_invalid_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -34,6 +59,19 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
                 tools["read_file"].handler({"path": "a.txt", "limit": "bad"})
             with self.assertRaisesRegex(ValueError, "limit must be non-negative"):
                 tools["read_file"].handler({"path": "a.txt", "limit": -1})
+
+    def test_read_file_rejects_invalid_offset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("one", encoding="utf-8")
+            tools = self._tools(root)
+
+            with self.assertRaisesRegex(ValueError, "offset must be an integer"):
+                tools["read_file"].handler({"path": "a.txt", "offset": "bad"})
+            with self.assertRaisesRegex(ValueError, "offset must be positive"):
+                tools["read_file"].handler({"path": "a.txt", "offset": 0})
+            with self.assertRaisesRegex(ValueError, "beyond end of file"):
+                tools["read_file"].handler({"path": "a.txt", "offset": 2})
 
     def test_rejects_absolute_parent_and_sensitive_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -211,8 +249,10 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tools = self._tools(Path(tmp))
 
+            assert tools["read_file"].schema is not None
             assert tools["write_file"].schema is not None
             assert tools["edit_file"].schema is not None
+            self.assertIn("offset", tools["read_file"].schema["properties"])
             self.assertEqual(
                 tools["write_file"].schema["required"], ["path", "content"]
             )
@@ -236,6 +276,12 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
                 any(
                     "multiple entries in edits" in guideline
                     for guideline in tools["edit_file"].prompt_guidelines
+                )
+            )
+            self.assertTrue(
+                any(
+                    "offset and limit" in guideline
+                    for guideline in tools["read_file"].prompt_guidelines
                 )
             )
 

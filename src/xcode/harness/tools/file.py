@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 from difflib import unified_diff
+import json
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,10 @@ READ_FILE_SCHEMA = {
         "limit": {
             "type": "integer",
             "description": "Optional max number of lines to return.",
+        },
+        "offset": {
+            "type": "integer",
+            "description": "Optional 1-based line number to start reading from.",
         },
     },
     "required": ["path"],
@@ -92,7 +97,7 @@ def build_file_tools(
         ToolSpec(
             name="read_file",
             description="Read a text file inside the project sandbox.",
-            input_hint='JSON: {"path": "src/xcode/main.py", "limit": 80}',
+            input_hint='JSON: {"path": "src/xcode/main.py", "offset": 1, "limit": 80}',
             handler=lambda data: _read_file(root, context_state, data),
             risk="low",
             schema=READ_FILE_SCHEMA,
@@ -100,6 +105,9 @@ def build_file_tools(
             concurrency_safe=True,
             group="core",
             prompt_snippet="Read a text file inside the project sandbox",
+            prompt_guidelines=(
+                "Use read_file offset and limit to continue reading long files.",
+            ),
         ),
         ToolSpec(
             name="write_file",
@@ -180,9 +188,10 @@ def _read_file(
     text, _encoding = _read_text(path)
     if context_state is not None:
         context_state.record_file(path)
+    offset = data.get("offset")
     limit = data.get("limit")
-    if limit is not None:
-        text = _limit_lines(text, limit)
+    if offset is not None or limit is not None:
+        text = _select_lines(text, _display(root, path), offset, limit)
     return _truncate(text)
 
 
@@ -241,15 +250,50 @@ def _edit_file(
     return f"edited file: {_display(root, path)} replacements={edit_count}\n{diff}"
 
 
-def _limit_lines(text: str, limit: Any) -> str:
+def _parse_optional_int(value: Any, name: str) -> int:
     try:
-        limit_value = int(limit)
+        return int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("limit must be an integer") from exc
-    if limit_value < 0:
+        raise ValueError(f"{name} must be an integer") from exc
+
+
+def _select_lines(
+    text: str,
+    display_path: str,
+    offset: Any,
+    limit: Any,
+) -> str:
+    offset_value = 1 if offset is None else _parse_optional_int(offset, "offset")
+    if offset_value < 1:
+        raise ValueError("offset must be positive")
+
+    limit_value = None if limit is None else _parse_optional_int(limit, "limit")
+    if limit_value is not None and limit_value < 0:
         raise ValueError("limit must be non-negative")
+
     lines = text.splitlines()
-    return "\n".join(lines[:limit_value])
+    if not lines:
+        return ""
+    start = offset_value - 1
+    if start >= len(lines):
+        raise ValueError(
+            f"offset {offset_value} is beyond end of file ({len(lines)} lines total)"
+        )
+    end = len(lines) if limit_value is None else min(start + limit_value, len(lines))
+    selected = "\n".join(lines[start:end])
+    if end < len(lines):
+        continuation: dict[str, int | str] = {
+            "path": display_path,
+            "offset": end + 1,
+        }
+        if limit_value is not None:
+            continuation["limit"] = limit_value
+        selected += (
+            f"\n\n[Showing lines {offset_value}-{end} of {len(lines)}. "
+            f"Use read_file with {json.dumps(continuation, ensure_ascii=False)} "
+            "to continue.]"
+        )
+    return selected
 
 
 def read_project_text_file(project_root: Path, raw_path: str) -> str:
