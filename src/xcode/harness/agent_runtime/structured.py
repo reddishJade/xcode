@@ -687,40 +687,32 @@ def _build_structured_result(
     result: AgentLoopResult, max_steps: int
 ) -> StructuredAgentResult:
     """将 AgentLoopResult 转换为 StructuredAgentResult。"""
-    # 提取文本答案（拼接所有 AssistantMessage 中的文本）
     answer_parts: list[str] = []
-    for msg in result.messages:
-        if isinstance(msg, AssistantMessage):
-            extracted = text_from_blocks(
-                [
-                    {"type": "text", "text": b.text}
-                    if isinstance(b, TextContent)
-                    else {}
-                    for b in msg.content
-                ]
-            )
-            if extracted:
-                answer_parts.append(extracted)
-    answer = " ".join(answer_parts)
-
-    # 提取工具调用
     tool_calls: list[ToolUseBlock] = []
+    messages: list[dict[str, Any]] = []
     for msg in result.messages:
-        if isinstance(msg, AssistantMessage):
-            for block in msg.content:
-                if isinstance(block, ToolCallContent):
-                    tool_calls.append(
-                        ToolUseBlock(
-                            id=block.id,
-                            name=block.name,
-                            input=block.arguments or {},
-                        )
+        messages.append(to_dict(msg))
+        if not isinstance(msg, AssistantMessage):
+            continue
+        extracted = text_from_blocks(
+            [
+                {"type": "text", "text": b.text} if isinstance(b, TextContent) else {}
+                for b in msg.content
+            ]
+        )
+        if extracted:
+            answer_parts.append(extracted)
+        for block in msg.content:
+            if isinstance(block, ToolCallContent):
+                tool_calls.append(
+                    ToolUseBlock(
+                        id=block.id,
+                        name=block.name,
+                        input=block.arguments or {},
                     )
+                )
 
-    # 转换消息为 dict
-    messages = [to_dict(m) for m in result.messages]
-
-    # 构建指标
+    answer = " ".join(answer_parts)
     metrics = None
     if result.metrics:
         metrics = {
@@ -731,7 +723,6 @@ def _build_structured_result(
             "tool_latencies_ms": result.metrics.tool_latencies_ms,
         }
 
-    # 当 agent 被看门狗或步骤限制停止时，追加原因
     if result.stopped_by_watchdog and result.watchdog_reason:
         if answer:
             answer = answer + " " + result.watchdog_reason

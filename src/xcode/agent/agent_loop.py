@@ -234,7 +234,9 @@ async def _run_loop(
         _drain_pending_messages(current_context, new_messages, state, emit)
 
         # ── 压缩检查 ──
-        current_context.messages = _maybe_compact_messages(current_context, config)
+        if config.should_compact and config.compact:
+            if config.should_compact(current_context.messages):
+                current_context.messages = config.compact(current_context.messages)
 
         # ── 内层循环：模型调用 + 重试 + max_tokens ──
         ctx_len_before = len(current_context.messages)
@@ -263,7 +265,8 @@ async def _run_loop(
         message, stop_reason, new_provider = inner_result
         state.active_provider = new_provider
 
-        _sync_inner_messages(current_context, new_messages, ctx_len_before)
+        for msg in current_context.messages[ctx_len_before:-1]:
+            new_messages.append(msg)
 
         # ── 更新步骤重试状态 ──
         _update_retry_state(state, stop_reason)
@@ -435,25 +438,6 @@ def _drain_pending_messages(
         current_context.messages.append(msg)
         new_messages.append(msg)
     state.pending_messages = []
-
-
-def _maybe_compact_messages(
-    current_context: AgentContext,
-    config: AgentLoopConfig,
-) -> list[AgentMessage]:
-    if config.should_compact and config.compact:
-        if config.should_compact(current_context.messages):
-            return config.compact(current_context.messages)
-    return current_context.messages
-
-
-def _sync_inner_messages(
-    current_context: AgentContext,
-    new_messages: list[AgentMessage],
-    ctx_len_before: int,
-) -> None:
-    for msg in current_context.messages[ctx_len_before:-1]:
-        new_messages.append(msg)
 
 
 def _update_retry_state(state: _LoopRunState, stop_reason: str) -> None:

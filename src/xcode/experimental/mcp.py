@@ -112,6 +112,28 @@ def build_fetch_tools_tool(
     )
 
 
+def _format_tool_match(server_name: str, tool: dict[str, Any]) -> str:
+    name = tool["name"]
+    desc = tool.get("description", "")
+    schema = tool.get("inputSchema", {})
+    required = schema.get("required", [])
+    props = schema.get("properties", {})
+    param_lines = [
+        f"    - **{p_name}** ({p_info.get('type', 'any')}): "
+        f"{p_info.get('description', '')}"
+        f"{' (required)' if p_name in required else ''}"
+        for p_name, p_info in props.items()
+    ]
+    params_str = (
+        "\n".join(param_lines) if param_lines else "    - No parameters required."
+    )
+    return (
+        f"- **Tool Name**: `mcp__{server_name}__{name}`\n"
+        f"  **Description**: {desc}\n"
+        f"  **Schema / Parameters**:\n{params_str}"
+    )
+
+
 def build_mcp_tool_search(project_root: Path, deferred_servers: set[str]) -> ToolSpec:
     """创建用于搜索和获取延迟加载工具完整参数 Schema 的工具。"""
 
@@ -143,28 +165,8 @@ def build_mcp_tool_search(project_root: Path, deferred_servers: set[str]) -> Too
             ]
             if matched:
                 results.append(f"### Server '{server_name}' matched tools:")
-                for mt in matched:
-                    name = mt["name"]
-                    desc = mt.get("description", "")
-                    schema = mt.get("inputSchema", {})
-                    required = schema.get("required", [])
-                    props = schema.get("properties", {})
-                    param_lines = [
-                        f"    - **{p_name}** ({p_info.get('type', 'any')}): "
-                        f"{p_info.get('description', '')}"
-                        f"{' (required)' if p_name in required else ''}"
-                        for p_name, p_info in props.items()
-                    ]
-                    params_str = (
-                        "\n".join(param_lines)
-                        if param_lines
-                        else "    - No parameters required."
-                    )
-                    results.append(
-                        f"- **Tool Name**: `mcp__{server_name}__{name}`\n"
-                        f"  **Description**: {desc}\n"
-                        f"  **Schema / Parameters**:\n{params_str}"
-                    )
+                for tool in matched:
+                    results.append(_format_tool_match(server_name, tool))
 
         return (
             "\n\n".join(results)

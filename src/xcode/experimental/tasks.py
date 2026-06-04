@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from collections.abc import Iterator
 from typing import Any
@@ -391,7 +392,7 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
             name="create_task",
             description="Create a durable task graph node. Expose title, description, and dependencies/blocked_by.",
             input_hint='{"title": "Implement X", "blocked_by": [1]}',
-            handler=lambda args: _create_task(store, args),
+            handler=partial(_create_task, store),
             risk="low",
             schema=CREATE_TASK_SCHEMA,
             group="tasks",
@@ -400,7 +401,7 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
             name="update_task",
             description="Update task attributes, status (pending/claimed/completed), title, or dependencies.",
             input_hint='{"id": 1, "status": "completed"}',
-            handler=lambda args: _update_task(store, args),
+            handler=partial(_update_task, store),
             risk="low",
             schema=UPDATE_TASK_SCHEMA,
             group="tasks",
@@ -409,7 +410,7 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
             name="list_tasks",
             description="List task graph nodes. Supports 'kanban', 'topological', or 'raw' views.",
             input_hint='{"view": "kanban"}',
-            handler=lambda args: _list_tasks(store, args),
+            handler=partial(_list_tasks, store),
             risk="low",
             schema=LIST_TASKS_SCHEMA,
             read_only=True,
@@ -419,7 +420,7 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
             name="get_task",
             description="Retrieve detailed fields and full payload of a single task by its integer ID.",
             input_hint='{"id": 1}',
-            handler=lambda args: _get_task(store, args),
+            handler=partial(_get_task, store),
             risk="low",
             schema=GET_TASK_SCHEMA,
             read_only=True,
