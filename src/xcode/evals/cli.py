@@ -16,7 +16,7 @@ from xcode.ai.events import (
     ToolCall,
     ToolCallEvent,
 )
-from xcode.ai.types import ToolDefinition
+from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.harness.app import XcodeApp, build_app as build_real_app
 from xcode.harness.config import AgentConfig
@@ -259,6 +259,8 @@ class _StaticProvider(ModelProvider):
         self,
         messages: list[Message],
         tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
         try:
             events = next(self._turns)

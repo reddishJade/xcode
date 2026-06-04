@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 import unittest
 
 from xcode.ai.events import (
@@ -8,6 +9,7 @@ from xcode.ai.events import (
     ToolCallEvent,
     TextDelta,
 )
+from xcode.ai.types import StreamOptions
 from xcode.harness.agent_runtime.structured import (
     StructuredAgent,
     _FallbackSwitchingProvider,
@@ -143,7 +145,7 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         fallback_calls = 0
 
         class OverloadedProvider:
-            async def stream(self, messages, tools):
+            async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
                 nonlocal primary_calls
                 primary_calls += 1
                 if False:
@@ -151,7 +153,7 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
                 raise RuntimeError("529 Service Overloaded")
 
         class FallbackProvider:
-            async def stream(self, messages, tools):
+            async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
                 nonlocal fallback_calls
                 fallback_calls += 1
                 yield TextDelta("fallback done")

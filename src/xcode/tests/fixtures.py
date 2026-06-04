@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any, cast
 from xcode.ai.events import ProviderEvent
 from xcode.ai.providers.protocol import ModelProvider
-from xcode.ai.types import ToolDefinition
+from xcode.ai.types import StreamOptions, ToolDefinition
 
 
 class FakeProvider(ModelProvider):
@@ -30,6 +30,8 @@ class FakeProvider(ModelProvider):
         self,
         messages: list[Any],
         tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
         if callable(self.events):
             res_list = self.events(messages, tools)

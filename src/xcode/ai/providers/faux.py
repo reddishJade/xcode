@@ -92,7 +92,7 @@ class FauxProvider:
             if (
                 items
                 and isinstance(items[0], Sequence)
-                and not isinstance(items[0], ProviderEvent)
+                and not isinstance(items[0], (FinalMessage, ReasoningDelta, TextDelta, ToolCallEvent, UsageUpdate))
             ):
                 for resp in items:
                     self._queue.append(FauxResponse(events=list(resp)))

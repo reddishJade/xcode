@@ -26,7 +26,7 @@ from xcode.ai.events import (
     ToolCall,
     ToolCallEvent,
 )
-from xcode.ai.types import ToolDefinition
+from xcode.ai.types import StreamOptions, ToolDefinition
 
 
 class TextProvider:
@@ -34,7 +34,13 @@ class TextProvider:
         self.messages: list[Message] | None = None
         self.tools: list[ToolDefinition] | None = None
 
-    async def stream(self, messages: list[Message], tools: list[ToolDefinition]):
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
+    ):
         self.messages = messages
         self.tools = tools
         yield TextDelta("ok")
@@ -45,7 +51,13 @@ class ToolProvider:
         self.calls = 0
         self.messages: list[list[Message]] = []
 
-    async def stream(self, messages: list[Message], tools: list[ToolDefinition]):
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
+    ):
         self.calls += 1
         self.messages.append(messages)
         if self.calls == 1:
@@ -151,7 +163,7 @@ class StepLimitProvider:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
         self.calls += 1
         yield ToolCallEvent([ToolCall(f"call-{self.calls}", "noop", {})])
 
@@ -175,7 +187,7 @@ class ErrorProvider:
         self.calls = 0
         self.error = error or RuntimeError("transient error: rate limit")
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
         self.calls += 1
         if self.calls <= self.fail_count:
             raise self.error
@@ -189,7 +201,7 @@ class MaxTokensProvider:
         self.max_tokens_count = max_tokens_count
         self.calls = 0
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
         self.calls += 1
         if self.calls <= self.max_tokens_count:
             yield TextDelta("partial" * 100)
@@ -201,7 +213,7 @@ class MaxTokensProvider:
 class RepeatedToolProvider:
     """始终返回相同的工具调用，用于测试重复工具看门狗。"""
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
         yield ToolCallEvent([ToolCall("same-call", "echo", {"text": "hi"})])
 
 
@@ -323,7 +335,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.call_count = 0
 
-            async def stream(self, messages, tools):
+            async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
                 self.call_count += 1
                 yield ToolCallEvent([ToolCall(f"call-{self.call_count}", "fail", {})])
 
