@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Generator, Iterator, cast
+from typing import Any, AsyncIterator, Generator, Iterator, TYPE_CHECKING, cast
 
 from ...agent.agent import Agent
 from ...agent.messages import convert_to_llm
@@ -53,6 +53,9 @@ from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
+
+if TYPE_CHECKING:
+    from xcode.experimental.speculation import SpeculationPlanner
 
 __all__ = ["StructuredAgent", "StructuredAgentEvent", "StructuredAgentResult"]
 
@@ -193,7 +196,7 @@ class StructuredAgent:
         hook_manager: HookManager | None = None,
         runtime_context_provider: RuntimeContextProvider | None = None,
         cancellation_token: CancellationToken | None = None,
-        speculation_planner: Any = None,
+        speculation_planner: SpeculationPlanner | None = None,
         fallback_provider: ModelProvider | None = None,
         project_root: Path | None = None,
     ) -> None:
