@@ -82,7 +82,7 @@ class TestTaskStoreAndMailbox(unittest.TestCase):
         msg_id1 = mailbox.send_message("agent_a", recipient_id, "good1", {})
 
         # Manually append some corrupt lines
-        mailbox_file = mailbox._mailbox_path(recipient_id)
+        mailbox_file = mailbox.inbox_dir / f"{recipient_id}.jsonl"
         with open(mailbox_file, "a", encoding="utf-8") as f:
             f.write("{\n")  # invalid JSON
             f.write('{"event": "corrupt", "message_id": }\n')  # invalid JSON
