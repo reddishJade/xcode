@@ -8,11 +8,36 @@ from xcode.cli.repl_tools import parse_tool_input
 from xcode.harness.observability import HITLResult
 from xcode.harness.skills import run_tool, run_tool_result
 from xcode.harness.tools import build_file_tools
+from xcode.harness.tools.file import LocalFileOperations
+
+
+class RecordingFileOperations(LocalFileOperations):
+    def __init__(self) -> None:
+        self.reads: list[Path] = []
+        self.writes: list[Path] = []
+        self.mkdirs: list[Path] = []
+
+    def read_bytes(self, path: Path) -> bytes:
+        self.reads.append(path)
+        return super().read_bytes(path)
+
+    def write_bytes(self, path: Path, data: bytes) -> None:
+        self.writes.append(path)
+        super().write_bytes(path, data)
+
+    def mkdir(self, path: Path) -> None:
+        self.mkdirs.append(path)
+        super().mkdir(path)
 
 
 class XcodeSandboxedFileToolsTests(unittest.TestCase):
     def _tools(self, root: Path):
         return {tool.name: tool for tool in build_file_tools(root)}
+
+    def _tools_with_operations(self, root: Path, operations: RecordingFileOperations):
+        return {
+            tool.name: tool for tool in build_file_tools(root, operations=operations)
+        }
 
     def test_read_file_with_limit_and_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -24,6 +49,24 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
 
             self.assertIn("one\ntwo", output)
             self.assertIn('"offset": 3', output)
+
+    def test_file_tools_use_injected_operations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("old", encoding="utf-8")
+            operations = RecordingFileOperations()
+            tools = self._tools_with_operations(root, operations)
+
+            tools["read_file"].handler({"path": "a.txt"})
+            tools["write_file"].handler({"path": "b.txt", "content": "new"})
+            tools["edit_file"].handler(
+                {"path": "a.txt", "old_text": "old", "new_text": "updated"}
+            )
+
+            self.assertIn(root / "a.txt", operations.reads)
+            self.assertIn(root / "b.txt", operations.writes)
+            self.assertIn(root / "a.txt", operations.writes)
+            self.assertIn(root, operations.mkdirs)
 
     def test_read_file_with_offset_and_continuation_hint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

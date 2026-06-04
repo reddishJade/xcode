@@ -4,7 +4,7 @@ from __future__ import annotations
 from difflib import unified_diff
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from ..agent_runtime.contextual import ContextualRetrievalState
 from ..skills import ToolInput, ToolOutput, ToolSpec, resolve_project_path
@@ -18,6 +18,46 @@ from .path_utils import is_path_blocked, truncate_output, display_path
 
 MAX_READ_BYTES = 1_000_000
 MAX_WRITE_BYTES = 1_000_000
+
+
+class FileOperations(Protocol):
+    def exists(self, path: Path) -> bool: ...
+
+    def is_file(self, path: Path) -> bool: ...
+
+    def is_dir(self, path: Path) -> bool: ...
+
+    def size(self, path: Path) -> int: ...
+
+    def read_bytes(self, path: Path) -> bytes: ...
+
+    def write_bytes(self, path: Path, data: bytes) -> None: ...
+
+    def mkdir(self, path: Path) -> None: ...
+
+
+class LocalFileOperations:
+    def exists(self, path: Path) -> bool:
+        return path.exists()
+
+    def is_file(self, path: Path) -> bool:
+        return path.is_file()
+
+    def is_dir(self, path: Path) -> bool:
+        return path.is_dir()
+
+    def size(self, path: Path) -> int:
+        return path.stat().st_size
+
+    def read_bytes(self, path: Path) -> bytes:
+        return path.read_bytes()
+
+    def write_bytes(self, path: Path, data: bytes) -> None:
+        path.write_bytes(data)
+
+    def mkdir(self, path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+
 
 READ_FILE_SCHEMA = {
     "type": "object",
@@ -90,15 +130,17 @@ EDIT_FILE_SCHEMA = {
 def build_file_tools(
     project_root: Path,
     context_state: ContextualRetrievalState | None = None,
+    operations: FileOperations | None = None,
 ) -> tuple[ToolSpec, ...]:
     root = project_root.resolve()
+    ops = operations or LocalFileOperations()
 
     return (
         ToolSpec(
             name="read_file",
             description="Read a text file inside the project sandbox.",
             input_hint='JSON: {"path": "src/xcode/main.py", "offset": 1, "limit": 80}',
-            handler=lambda data: _read_file(root, context_state, data),
+            handler=lambda data: _read_file(root, ops, context_state, data),
             risk="low",
             schema=READ_FILE_SCHEMA,
             read_only=True,
@@ -117,7 +159,7 @@ def build_file_tools(
                 "existing file."
             ),
             input_hint='JSON: {"path": "notes.md", "content": "..."}',
-            handler=lambda data: _write_file(root, context_state, data),
+            handler=lambda data: _write_file(root, ops, context_state, data),
             risk="high",
             schema=WRITE_FILE_SCHEMA,
             group="core",
@@ -141,7 +183,7 @@ def build_file_tools(
                 "content is preserved."
             ),
             input_hint='JSON: {"path": "src/main.py", "edits": [{"old_text": "...", "new_text": "..."}]}',
-            handler=lambda data: _edit_file(root, context_state, data),
+            handler=lambda data: _edit_file(root, ops, context_state, data),
             risk="high",
             schema=EDIT_FILE_SCHEMA,
             group="core",
@@ -173,6 +215,7 @@ def build_file_tools(
 
 def _read_file(
     root: Path,
+    operations: FileOperations,
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
@@ -180,12 +223,12 @@ def _read_file(
     if not path_str:
         raise ValueError("path is required")
     path = _safe_path(root, path_str)
-    if not path.is_file():
+    if not operations.is_file(path):
         raise ValueError(f"not a file: {_display(root, path)}")
-    size = path.stat().st_size
+    size = operations.size(path)
     if size > MAX_READ_BYTES:
         raise ValueError(f"file too large: {size} bytes")
-    text, _encoding = _read_text(path)
+    text, _encoding = _read_text(path, operations)
     if context_state is not None:
         context_state.record_file(path)
     offset = data.get("offset")
@@ -197,6 +240,7 @@ def _read_file(
 
 def _write_file(
     root: Path,
+    operations: FileOperations,
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
@@ -204,14 +248,14 @@ def _write_file(
     if not path_str:
         raise ValueError("path is required")
     path = _safe_path(root, path_str)
-    if path.exists() and path.is_dir():
+    if operations.exists(path) and operations.is_dir(path):
         raise ValueError(f"path is a directory: {_display(root, path)}")
     if "content" not in data:
         raise ValueError("content is required")
     content = str(data.get("content", ""))
     _ensure_write_size(content)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _write_text(path, content, "utf-8")
+    operations.mkdir(path.parent)
+    _write_text(path, content, "utf-8", operations)
     if context_state is not None:
         context_state.record_file(path)
     return f"wrote file: {_display(root, path)}"
@@ -219,6 +263,7 @@ def _write_file(
 
 def _edit_file(
     root: Path,
+    operations: FileOperations,
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
@@ -226,16 +271,16 @@ def _edit_file(
     if not path_str:
         raise ValueError("path is required")
     path = _safe_path(root, path_str)
-    if path.exists() and path.is_dir():
+    if operations.exists(path) and operations.is_dir(path):
         raise ValueError(f"path is a directory: {_display(root, path)}")
-    if not path.is_file():
+    if not operations.is_file(path):
         raise ValueError(f"not a file: {_display(root, path)}")
 
     edits = _prepare_edits(data)
     if not edits:
         raise ValueError("no edits provided")
 
-    content, encoding = _read_text(path)
+    content, encoding = _read_text(path, operations)
     updated, edit_count = _apply_edits(
         content,
         edits,
@@ -243,7 +288,7 @@ def _edit_file(
         replace_all=bool(data.get("replace_all", False)),
     )
     _ensure_write_size(updated)
-    _write_text(path, updated, encoding)
+    _write_text(path, updated, encoding, operations)
     if context_state is not None:
         context_state.record_file(path)
     diff = _diff_preview(_display(root, path), content, updated)
@@ -303,14 +348,15 @@ def _select_lines(
 
 
 def read_project_text_file(project_root: Path, raw_path: str) -> str:
+    operations = LocalFileOperations()
     root = project_root.resolve()
     path = _safe_path(root, raw_path)
-    if not path.is_file():
+    if not operations.is_file(path):
         raise ValueError(f"not a file: {_display(root, path)}")
-    size = path.stat().st_size
+    size = operations.size(path)
     if size > MAX_READ_BYTES:
         raise ValueError(f"file too large: {size} bytes")
-    text, _encoding = _read_text(path)
+    text, _encoding = _read_text(path, operations)
     return _truncate(text)
 
 
@@ -329,8 +375,8 @@ def _truncate(text: str) -> str:
     return truncate_output(text)
 
 
-def _read_text(path: Path) -> tuple[str, str]:
-    data = path.read_bytes()
+def _read_text(path: Path, operations: FileOperations) -> tuple[str, str]:
+    data = operations.read_bytes(path)
     encoding = "utf-8-sig" if data.startswith(b"\xef\xbb\xbf") else "utf-8"
     try:
         return data.decode(encoding), encoding
@@ -339,8 +385,13 @@ def _read_text(path: Path) -> tuple[str, str]:
     raise UnicodeDecodeError("utf-8", data, 0, 1, "file is not valid UTF-8 text")
 
 
-def _write_text(path: Path, text: str, encoding: str) -> None:
-    path.write_bytes(text.encode(encoding))
+def _write_text(
+    path: Path,
+    text: str,
+    encoding: str,
+    operations: FileOperations,
+) -> None:
+    operations.write_bytes(path, text.encode(encoding))
 
 
 def _ensure_write_size(text: str) -> None:
