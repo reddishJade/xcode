@@ -569,8 +569,7 @@ async def _run_inner_loop(
             continue
 
         # ── 正常结束 ──
-        if not tool_calls_found:
-            context.messages.append(message)
+        context.messages.append(message)
         emit(_message_end_event(message))
         step_retries = 0
         consecutive_continuations = 0
