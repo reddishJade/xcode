@@ -14,10 +14,19 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
 
-from xcode.ai.events import FinalMessage, ProviderEvent, StopReason, TextDelta, ReasoningDelta, ToolCallEvent, UsageUpdate
+from xcode.ai.events import (
+    FinalMessage,
+    ProviderEvent,
+    ReasoningDelta,
+    StopReason,
+    TextDelta,
+    ToolCallEvent,
+    UsageUpdate,
+)
 from xcode.ai.types import ToolDefinition
 from .types import (
     AgentContext,
@@ -165,6 +174,18 @@ async def run_agent_loop_continue(
 # ── 内部循环 ──
 
 
+@dataclass
+class _LoopRunState:
+    first_turn: bool = True
+    pending_messages: list[AgentMessage] = field(default_factory=list)
+    last_tool_signature: str | None = None
+    repeated_tool_count: int = 0
+    consecutive_idle_steps: int = 0
+    consecutive_continuations: int = 0
+    step_retries: int = 0
+    active_provider: Any = None
+
+
 async def _run_loop(
     initial_context: AgentContext,
     new_messages: list[AgentMessage],
@@ -179,60 +200,35 @@ async def _run_loop(
     """
     metrics = AgentLoopMetrics()
     current_context = initial_context
-    first_turn = True
-    pending_messages: list[AgentMessage] = []
-
-    # 看门狗状态
-    last_tool_signature: str | None = None
-    repeated_tool_count: int = 0
-    consecutive_idle_steps: int = 0
-    consecutive_continuations: int = 0
-    step_retries: int = 0
-
-    # Provider 状态
-    active_provider = config.provider
+    state = _LoopRunState(active_provider=config.provider)
 
     for step in range(1, config.max_steps + 1):
         metrics.steps = step
 
         # ── 取消检查 ──
         if _is_cancelled(signal):
-            result = AgentLoopResult(
-                messages=new_messages,
-                steps=step,
-                metrics=metrics,
-                active_provider=active_provider,
+            return _finish_loop(
+                new_messages,
+                step,
+                metrics,
+                state.active_provider,
+                emit,
             )
-            emit(_agent_end_event(new_messages, result))
-            return result
 
         # ── 处理 steer 队列 ──
-        if config.get_steering_messages:
-            steer_msgs = config.get_steering_messages()
-            if steer_msgs:
-                for msg in steer_msgs:
-                    current_context.messages.append(msg)
-                    new_messages.append(msg)
+        _append_steering_messages(current_context, new_messages, config)
 
         # ── 发出 turn 事件 ──
-        if not first_turn:
+        if not state.first_turn:
             emit(_turn_start_event())
         else:
-            first_turn = False
+            state.first_turn = False
 
         # ── 处理 pending messages ──
-        if pending_messages:
-            for msg in pending_messages:
-                emit(_message_start_event(msg))
-                emit(_message_end_event(msg))
-                current_context.messages.append(msg)
-                new_messages.append(msg)
-            pending_messages = []
+        _drain_pending_messages(current_context, new_messages, state, emit)
 
         # ── 压缩检查 ──
-        if config.should_compact and config.compact:
-            if config.should_compact(current_context.messages):
-                current_context.messages = config.compact(current_context.messages)
+        current_context.messages = _maybe_compact_messages(current_context, config)
 
         # ── 内层循环：模型调用 + 重试 + max_tokens ──
         ctx_len_before = len(current_context.messages)
@@ -243,35 +239,28 @@ async def _run_loop(
             signal,
             metrics,
             step,
-            active_provider,
-            step_retries,
-            consecutive_continuations,
+            state.active_provider,
+            state.step_retries,
+            state.consecutive_continuations,
         )
 
         if inner_result is None:
             # 内层循环决定提前退出（错误耗尽 or 递减收益）
-            result = AgentLoopResult(
-                messages=new_messages,
-                steps=step,
-                metrics=metrics,
-                active_provider=active_provider,
+            return _finish_loop(
+                new_messages,
+                step,
+                metrics,
+                state.active_provider,
+                emit,
             )
-            emit(_agent_end_event(new_messages, result))
-            return result
 
         message, stop_reason, new_provider = inner_result
-        active_provider = new_provider
+        state.active_provider = new_provider
 
-        # 同步内层循环添加的中间消息（如 max_tokens 续写的 "continue"）
-        for msg in current_context.messages[ctx_len_before:-1]:
-            new_messages.append(msg)
+        _sync_inner_messages(current_context, new_messages, ctx_len_before)
 
         # ── 更新步骤重试状态 ──
-        if stop_reason == "error":
-            step_retries += 1
-        else:
-            step_retries = 0
-            consecutive_continuations = 0
+        _update_retry_state(state, stop_reason)
 
         new_messages.append(message)
         metrics.llm_calls += 1
@@ -284,7 +273,7 @@ async def _run_loop(
                 messages=new_messages,
                 steps=step,
                 metrics=metrics,
-                active_provider=active_provider,
+                active_provider=state.active_provider,
             )
 
         # ── 提取工具调用 ──
@@ -295,81 +284,54 @@ async def _run_loop(
             emit(_turn_end_event(message, []))
 
             # 检查 follow-up 队列
-            if config.get_follow_up_messages:
-                follow_up = config.get_follow_up_messages()
-                if follow_up:
-                    pending_messages = follow_up
-                    continue
-            result = AgentLoopResult(
-                messages=new_messages,
-                steps=step,
-                metrics=metrics,
-                active_provider=active_provider,
+            if _queue_follow_up(state, config):
+                continue
+            return _finish_loop(
+                new_messages,
+                step,
+                metrics,
+                state.active_provider,
+                emit,
             )
-            emit(_agent_end_event(new_messages, result))
-            return result
 
         # ── 工具执行 ──
         executed: ExecutedToolBatch = await execute_tool_calls(
             current_context, message, tool_calls, config, signal, emit
         )
         tool_results = executed.results
-        for tr in tool_results:
-            current_context.messages.append(tr)
-            new_messages.append(tr)
-            metrics.tool_calls += 1
+        _append_tool_results(current_context, new_messages, metrics, tool_results)
 
         emit(_turn_end_event(message, tool_results))
 
         # ── 重复工具看门狗 ──
-        sig = _tool_signature(tool_calls)
-        if sig == last_tool_signature:
-            repeated_tool_count += 1
-        else:
-            repeated_tool_count = 0
-            last_tool_signature = sig
-
-        if (
-            config.watchdog_repeated_tool_limit > 0
-            and repeated_tool_count >= config.watchdog_repeated_tool_limit
-        ):
-            reason = f"watchdog stopped repeated tool call: {tool_calls[0].name}"
-            result = AgentLoopResult(
-                messages=new_messages,
-                steps=step,
+        repeated_watchdog_reason = _update_repeated_tool_watchdog(
+            state, tool_calls, config
+        )
+        if repeated_watchdog_reason:
+            return _finish_loop(
+                new_messages,
+                step,
+                metrics,
+                state.active_provider,
+                emit,
                 stopped_by_watchdog=True,
-                watchdog_reason=reason,
-                metrics=metrics,
-                active_provider=active_provider,
+                watchdog_reason=repeated_watchdog_reason,
             )
-            emit(_agent_end_event(new_messages, result))
-            return result
 
         # ── 空闲步骤看门狗 ──
-        is_productive = config.is_tool_productive or _is_tool_productive_default
-        if is_productive(tool_calls, tool_results):
-            consecutive_idle_steps = 0
-        else:
-            consecutive_idle_steps += 1
-
-        if (
-            config.max_consecutive_idle_steps > 0
-            and consecutive_idle_steps >= config.max_consecutive_idle_steps
-        ):
-            reason = (
-                f"Watchdog triggered: {consecutive_idle_steps} consecutive steps "
-                f"without productive tool calls."
-            )
-            result = AgentLoopResult(
-                messages=new_messages,
-                steps=step,
+        idle_watchdog_reason = _update_idle_tool_watchdog(
+            state, tool_calls, tool_results, config
+        )
+        if idle_watchdog_reason:
+            return _finish_loop(
+                new_messages,
+                step,
+                metrics,
+                state.active_provider,
+                emit,
                 stopped_by_watchdog=True,
-                watchdog_reason=reason,
-                metrics=metrics,
-                active_provider=active_provider,
+                watchdog_reason=idle_watchdog_reason,
             )
-            emit(_agent_end_event(new_messages, result))
-            return result
 
         # ── prepare_next_turn 钩子 ──
         if config.prepare_next_turn:
@@ -386,21 +348,17 @@ async def _run_loop(
                 new_messages=new_messages,
             )
             if config.should_stop_after_turn(ctx):
-                result = AgentLoopResult(
-                    messages=new_messages,
-                    steps=step,
-                    metrics=metrics,
-                    active_provider=active_provider,
+                return _finish_loop(
+                    new_messages,
+                    step,
+                    metrics,
+                    state.active_provider,
+                    emit,
                 )
-                emit(_agent_end_event(new_messages, result))
-                return result
 
         # ── 处理 follow-up 队列 ──
-        if config.get_follow_up_messages:
-            follow_up = config.get_follow_up_messages()
-            if follow_up:
-                pending_messages = follow_up
-                continue
+        if _queue_follow_up(state, config):
+            continue
 
         # 工具已执行但没有 follow-up，继续内层循环（下一轮工具调用）
         if not executed.terminate:
@@ -412,10 +370,157 @@ async def _run_loop(
         steps=config.max_steps,
         stopped_by_limit=True,
         metrics=metrics,
+        active_provider=state.active_provider,
+    )
+    emit(_agent_end_event(new_messages, result))
+    return result
+
+
+def _finish_loop(
+    new_messages: list[AgentMessage],
+    step: int,
+    metrics: AgentLoopMetrics,
+    active_provider: Any,
+    emit: Callable[[AgentEvent], None],
+    *,
+    stopped_by_watchdog: bool = False,
+    watchdog_reason: str | None = None,
+    stopped_by_limit: bool = False,
+) -> AgentLoopResult:
+    result = AgentLoopResult(
+        messages=new_messages,
+        steps=step,
+        stopped_by_watchdog=stopped_by_watchdog,
+        watchdog_reason=watchdog_reason,
+        stopped_by_limit=stopped_by_limit,
+        metrics=metrics,
         active_provider=active_provider,
     )
     emit(_agent_end_event(new_messages, result))
     return result
+
+
+def _append_steering_messages(
+    current_context: AgentContext,
+    new_messages: list[AgentMessage],
+    config: AgentLoopConfig,
+) -> None:
+    if not config.get_steering_messages:
+        return
+    steer_msgs = config.get_steering_messages()
+    if not steer_msgs:
+        return
+    for msg in steer_msgs:
+        current_context.messages.append(msg)
+        new_messages.append(msg)
+
+
+def _drain_pending_messages(
+    current_context: AgentContext,
+    new_messages: list[AgentMessage],
+    state: _LoopRunState,
+    emit: Callable[[AgentEvent], None],
+) -> None:
+    if not state.pending_messages:
+        return
+    for msg in state.pending_messages:
+        emit(_message_start_event(msg))
+        emit(_message_end_event(msg))
+        current_context.messages.append(msg)
+        new_messages.append(msg)
+    state.pending_messages = []
+
+
+def _maybe_compact_messages(
+    current_context: AgentContext,
+    config: AgentLoopConfig,
+) -> list[AgentMessage]:
+    if config.should_compact and config.compact:
+        if config.should_compact(current_context.messages):
+            return config.compact(current_context.messages)
+    return current_context.messages
+
+
+def _sync_inner_messages(
+    current_context: AgentContext,
+    new_messages: list[AgentMessage],
+    ctx_len_before: int,
+) -> None:
+    for msg in current_context.messages[ctx_len_before:-1]:
+        new_messages.append(msg)
+
+
+def _update_retry_state(state: _LoopRunState, stop_reason: str) -> None:
+    if stop_reason == "error":
+        state.step_retries += 1
+        return
+    state.step_retries = 0
+    state.consecutive_continuations = 0
+
+
+def _queue_follow_up(state: _LoopRunState, config: AgentLoopConfig) -> bool:
+    if not config.get_follow_up_messages:
+        return False
+    follow_up = config.get_follow_up_messages()
+    if not follow_up:
+        return False
+    state.pending_messages = follow_up
+    return True
+
+
+def _append_tool_results(
+    current_context: AgentContext,
+    new_messages: list[AgentMessage],
+    metrics: AgentLoopMetrics,
+    tool_results: list[ToolResultMessage],
+) -> None:
+    for tr in tool_results:
+        current_context.messages.append(tr)
+        new_messages.append(tr)
+        metrics.tool_calls += 1
+
+
+def _update_repeated_tool_watchdog(
+    state: _LoopRunState,
+    tool_calls: list[ToolCallContent],
+    config: AgentLoopConfig,
+) -> str | None:
+    sig = _tool_signature(tool_calls)
+    if sig == state.last_tool_signature:
+        state.repeated_tool_count += 1
+    else:
+        state.repeated_tool_count = 0
+        state.last_tool_signature = sig
+
+    if (
+        config.watchdog_repeated_tool_limit > 0
+        and state.repeated_tool_count >= config.watchdog_repeated_tool_limit
+    ):
+        return f"watchdog stopped repeated tool call: {tool_calls[0].name}"
+    return None
+
+
+def _update_idle_tool_watchdog(
+    state: _LoopRunState,
+    tool_calls: list[ToolCallContent],
+    tool_results: list[ToolResultMessage],
+    config: AgentLoopConfig,
+) -> str | None:
+    is_productive = config.is_tool_productive or _is_tool_productive_default
+    if is_productive(tool_calls, tool_results):
+        state.consecutive_idle_steps = 0
+    else:
+        state.consecutive_idle_steps += 1
+
+    if (
+        config.max_consecutive_idle_steps > 0
+        and state.consecutive_idle_steps >= config.max_consecutive_idle_steps
+    ):
+        return (
+            f"Watchdog triggered: {state.consecutive_idle_steps} consecutive steps "
+            f"without productive tool calls."
+        )
+    return None
 
 
 # ── 内层循环 ──
@@ -467,7 +572,9 @@ async def _run_inner_loop(
             kwargs = {}
             if config.options is not None:
                 kwargs["options"] = config.options
-            async for event in provider.stream(llm_messages, tool_definitions, **kwargs):
+            async for event in provider.stream(
+                llm_messages, tool_definitions, **kwargs
+            ):
                 events.append(event)
         except Exception as e:
             events = [FinalMessage(f"Provider error: {e}", "error")]

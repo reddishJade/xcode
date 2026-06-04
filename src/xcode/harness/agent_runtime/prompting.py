@@ -10,6 +10,7 @@ from typing import Any
 
 from .git_preflight import build_git_preflight
 from .contextual import ContextualRetrievalState
+from ...experimental.tasks import TaskStore
 from ...harness.skill_loader import SkillLoader
 from ..skills import ToolSpec, build_tool_prompt
 from ...harness.tools.shell_adapter import ShellSpec
@@ -79,139 +80,10 @@ class SystemPromptBuilder:
 
     def build(self, context: PromptContext) -> str:
         enabled = set(context.modules)
+        stable_prompt = self._build_stable_region(context, enabled)
+        dynamic_prompt = self._build_dynamic_region(context, enabled)
+        volatile_parts = _build_volatile_region(context, enabled)
 
-        # 计算静态区文件（AGENTS.md / CLAUDE.md）的修改时间
-        try:
-            mtimes = tuple(
-                (context.project_root / name).stat().st_mtime
-                for name in ("AGENTS.md", "CLAUDE.md")
-                if (context.project_root / name).is_file()
-            )
-        except Exception:
-            mtimes = ()
-
-        # 1. Stable Region (静态/稳定区)
-        # 稳定区校验键：注册工具名称元组、修改时间元组、启用的静态模块集合
-        stable_enabled = enabled.intersection(
-            {"identity", "tool_discipline", "tools", "search_strategy", "instructions"}
-        )
-        stable_key = (
-            tuple(t.name for t in context.registry),
-            mtimes,
-            frozenset(stable_enabled),
-        )
-
-        if self._stable_cache is not None and self._stable_key == stable_key:
-            stable_prompt = self._stable_cache
-        else:
-            stable_parts: list[str] = []
-            if "identity" in enabled:
-                stable_parts.append(CORE_IDENTITY)
-            if "tool_discipline" in enabled:
-                stable_parts.append(TOOL_DISCIPLINE)
-            if "tools" in enabled:
-                stable_parts.append(
-                    "Available tools:\n" + build_tool_prompt(context.registry)
-                )
-            if "search_strategy" in enabled:
-                stable_parts.append(SEARCH_STRATEGY)
-            if "instructions" in enabled:
-                instructions = _project_instructions(context.project_root)
-                if instructions:
-                    stable_parts.append(instructions)
-
-            stable_prompt = "\n\n".join(stable_parts)
-            self._stable_cache = stable_prompt
-            self._stable_key = stable_key
-
-        # 2. Dynamic Region (动态区)
-        # 动态区校验键：项目根路径、Shell 规范名称、启用的动态模块集合
-        dynamic_enabled = enabled.intersection({"environment", "cwd"})
-        dynamic_key = (
-            context.project_root,
-            context.shell_spec.name if context.shell_spec else None,
-            frozenset(dynamic_enabled),
-        )
-
-        if self._dynamic_cache is not None and self._dynamic_key == dynamic_key:
-            dynamic_prompt = self._dynamic_cache
-        else:
-            dynamic_parts: list[str] = []
-            if "environment" in enabled:
-                dynamic_parts.append(
-                    _environment_info(context.project_root, context.shell_spec)
-                )
-            if "cwd" in enabled:
-                dynamic_parts.append(_cwd_info(context.project_root))
-
-            dynamic_prompt = "\n\n".join(dynamic_parts)
-            self._dynamic_cache = dynamic_prompt
-            self._dynamic_key = dynamic_key
-
-        # 3. Volatile Region (易失区)
-        volatile_parts: list[str] = []
-        if "git_preflight" in enabled:
-            volatile_parts.append(build_git_preflight(context.project_root))
-        if "contextual_retrieval" in enabled and context.contextual_state is not None:
-            rendered = context.contextual_state.render()
-            if rendered.strip():
-                volatile_parts.append(rendered)
-        if "skills" in enabled and context.skill_loader is not None:
-            volatile_parts.append(context.skill_loader.get_catalog())
-        if "notices" in enabled:
-            notices = [context.resumed_notice, context.interrupted_notice]
-            notice_text = "\n".join(notice for notice in notices if notice)
-            if notice_text:
-                volatile_parts.append(
-                    "<session-notices>\n" + notice_text + "\n</session-notices>"
-                )
-
-        # 压缩后活跃元数据后置恢复 (注入位置保证在 volatile 区域，绝不影响 stable/dynamic cache)
-        metadata_parts = []
-
-        # 1. 活跃文件清单 (由 ContextualRetrievalState 维护)
-        # 2. 活跃任务依赖图
-        active_tasks = []
-        try:
-            from ...experimental.tasks import TaskStore
-
-            store = TaskStore(context.project_root)
-            all_tasks = store.list()
-            for task in all_tasks:
-                if task.status in ("pending", "claimed"):
-                    task_info = (
-                        f"- [{task.status.upper()}] Task #{task.id}: {task.title}"
-                    )
-                    fl = task.payload.get("feature_list")
-                    if isinstance(fl, list) and fl:
-                        completed = sum(
-                            1
-                            for item in fl
-                            if isinstance(item, dict)
-                            and item.get("status") == "completed"
-                        )
-                        task_info += f" ({completed}/{len(fl)} subtasks completed)"
-                    blocked_by = task.payload.get("blocked_by")
-                    if blocked_by:
-                        task_info += f" [Blocked by: {blocked_by}]"
-                    active_tasks.append(task_info)
-        except Exception:
-            logging.warning("failed to build active-tasks graph", exc_info=True)
-        if active_tasks:
-            metadata_parts.append(
-                "<active-tasks-graph>\n"
-                + "\n".join(active_tasks)
-                + "\n</active-tasks-graph>"
-            )
-
-        if metadata_parts:
-            volatile_parts.append(
-                "<post-compact-metadata>\n"
-                + "\n\n".join(metadata_parts)
-                + "\n</post-compact-metadata>"
-            )
-
-        # 组合各个区域
         full_parts = []
         if stable_prompt.strip():
             full_parts.append(stable_prompt)
@@ -223,6 +95,131 @@ class SystemPromptBuilder:
             full_parts.append("\n\n".join(volatile_parts))
 
         return "\n\n".join(part for part in full_parts if part.strip())
+
+    def _build_stable_region(self, context: PromptContext, enabled: set[str]) -> str:
+        try:
+            mtimes = tuple(
+                (context.project_root / name).stat().st_mtime
+                for name in ("AGENTS.md", "CLAUDE.md")
+                if (context.project_root / name).is_file()
+            )
+        except Exception:
+            mtimes = ()
+
+        stable_enabled = enabled.intersection(
+            {"identity", "tool_discipline", "tools", "search_strategy", "instructions"}
+        )
+        stable_key = (
+            tuple(t.name for t in context.registry),
+            mtimes,
+            frozenset(stable_enabled),
+        )
+
+        if self._stable_cache is not None and self._stable_key == stable_key:
+            return self._stable_cache
+
+        stable_parts: list[str] = []
+        if "identity" in enabled:
+            stable_parts.append(CORE_IDENTITY)
+        if "tool_discipline" in enabled:
+            stable_parts.append(TOOL_DISCIPLINE)
+        if "tools" in enabled:
+            stable_parts.append(
+                "Available tools:\n" + build_tool_prompt(context.registry)
+            )
+        if "search_strategy" in enabled:
+            stable_parts.append(SEARCH_STRATEGY)
+        if "instructions" in enabled:
+            instructions = _project_instructions(context.project_root)
+            if instructions:
+                stable_parts.append(instructions)
+
+        stable_prompt = "\n\n".join(stable_parts)
+        self._stable_cache = stable_prompt
+        self._stable_key = stable_key
+        return stable_prompt
+
+    def _build_dynamic_region(self, context: PromptContext, enabled: set[str]) -> str:
+        dynamic_enabled = enabled.intersection({"environment", "cwd"})
+        dynamic_key = (
+            context.project_root,
+            context.shell_spec.name if context.shell_spec else None,
+            frozenset(dynamic_enabled),
+        )
+
+        if self._dynamic_cache is not None and self._dynamic_key == dynamic_key:
+            return self._dynamic_cache
+
+        dynamic_parts: list[str] = []
+        if "environment" in enabled:
+            dynamic_parts.append(
+                _environment_info(context.project_root, context.shell_spec)
+            )
+        if "cwd" in enabled:
+            dynamic_parts.append(_cwd_info(context.project_root))
+
+        dynamic_prompt = "\n\n".join(dynamic_parts)
+        self._dynamic_cache = dynamic_prompt
+        self._dynamic_key = dynamic_key
+        return dynamic_prompt
+
+
+def _build_volatile_region(context: PromptContext, enabled: set[str]) -> list[str]:
+    volatile_parts: list[str] = []
+    if "git_preflight" in enabled:
+        volatile_parts.append(build_git_preflight(context.project_root))
+    if "contextual_retrieval" in enabled and context.contextual_state is not None:
+        rendered = context.contextual_state.render()
+        if rendered.strip():
+            volatile_parts.append(rendered)
+    if "skills" in enabled and context.skill_loader is not None:
+        volatile_parts.append(context.skill_loader.get_catalog())
+    if "notices" in enabled:
+        notices = [context.resumed_notice, context.interrupted_notice]
+        notice_text = "\n".join(notice for notice in notices if notice)
+        if notice_text:
+            volatile_parts.append(
+                "<session-notices>\n" + notice_text + "\n</session-notices>"
+            )
+
+    metadata_parts = _build_post_compact_metadata(context.project_root)
+    if metadata_parts:
+        volatile_parts.append(
+            "<post-compact-metadata>\n"
+            + "\n\n".join(metadata_parts)
+            + "\n</post-compact-metadata>"
+        )
+
+    return volatile_parts
+
+
+def _build_post_compact_metadata(project_root: Path) -> list[str]:
+    active_tasks = []
+    try:
+        store = TaskStore(project_root)
+        for task in store.list():
+            if task.status in ("pending", "claimed"):
+                task_info = f"- [{task.status.upper()}] Task #{task.id}: {task.title}"
+                fl = task.payload.get("feature_list")
+                if isinstance(fl, list) and fl:
+                    completed = sum(
+                        1
+                        for item in fl
+                        if isinstance(item, dict) and item.get("status") == "completed"
+                    )
+                    task_info += f" ({completed}/{len(fl)} subtasks completed)"
+                blocked_by = task.payload.get("blocked_by")
+                if blocked_by:
+                    task_info += f" [Blocked by: {blocked_by}]"
+                active_tasks.append(task_info)
+    except Exception:
+        logging.warning("failed to build active-tasks graph", exc_info=True)
+
+    if not active_tasks:
+        return []
+    return [
+        "<active-tasks-graph>\n" + "\n".join(active_tasks) + "\n</active-tasks-graph>"
+    ]
 
 
 def build_runtime_context_provider(

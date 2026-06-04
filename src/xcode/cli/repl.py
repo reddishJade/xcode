@@ -140,115 +140,7 @@ def _run_agent_turn(
     session: PromptLike,
     agent_text: str,
 ) -> None:
-    step_answers: list[str] = []
-    current_step_thoughts: list[str] = []
-    stopped_reason: str | None = None
-    interrupted = False
-    live_console = Console(file=sys.stdout)
-    reasoning_started_at: float | None = None
-    reasoning_text = ""
-    reasoning_preview = LiveReasoningPreview(live_console)
-    answer_stream = LiveMarkdownStream(live_console)
-    streamed_text = False
-    tool_group: dict[str, Any] | None = None
-    tool_call_labels: dict[str, str] = {}
-
-    def safe_write(text: str) -> None:
-        try:
-            sys.stdout.write(text)
-            sys.stdout.flush()
-        except UnicodeEncodeError:
-            safe_text = (
-                text.replace("•", "*")
-                .replace("×", "x")
-                .replace("✘", "x")
-                .replace("⊘", "o")
-            )
-            encoding = sys.stdout.encoding or "utf-8"
-            sys.stdout.write(
-                safe_text.encode(encoding, errors="replace").decode(encoding)
-            )
-            sys.stdout.flush()
-
-    def clear_line() -> None:
-        safe_write("\r\033[K")
-
-    def record_tool_call(event_data: Any) -> None:
-        nonlocal tool_group
-        label = brief_input(event_data.name, event_data.input)
-        intent = tool_intent(event_data.name, event_data.input)
-        tool_call_labels[event_data.id] = label
-        if state.verbose:
-            print_tool_call_rich(label, live_console)
-            return
-        if tool_group is None:
-            tool_group = {
-                "intents": [],
-                "calls": 0,
-                "ok": 0,
-                "errors": [],
-            }
-        tool_group["calls"] += 1
-        if intent not in tool_group["intents"]:
-            tool_group["intents"].append(intent)
-
-    def record_tool_result(event_data: Any) -> None:
-        if state.verbose:
-            print_tool_result_rich(event_data, state.verbose, live_console)
-            return
-        if tool_group is None:
-            return
-        if event_data.status == "ok":
-            tool_group["ok"] += 1
-            return
-        label = tool_call_labels.get(event_data.tool_use_id, event_data.tool_use_id)
-        tool_group["errors"].append((label, event_data))
-
-    def flush_tool_group() -> None:
-        nonlocal tool_group
-        if tool_group is None:
-            return
-        calls = int(tool_group["calls"])
-        errors = list(tool_group["errors"])
-        intents = list(tool_group["intents"])
-        title = summarize_intents(intents)
-        status = "failed" if errors else "done"
-        style = CLI_COLOR_ERROR if errors else CLI_COLOR_SUCCESS
-        live_console.print(Text(f"  • Explore: {title}", style=CLI_COLOR_TOOL))
-        live_console.print(Text(f"    {status}: {calls} tools", style=style))
-        for label, result in errors:
-            summary = single_line_preview(str(result.content), width=120)
-            live_console.print(
-                Text(f"    error: {label}: {summary}", style=CLI_COLOR_ERROR)
-            )
-        tool_group = None
-
-    def render_reasoning_preview() -> None:
-        lines = reasoning_preview_lines(reasoning_text)
-        if lines:
-            reasoning_preview.update(lines)
-
-    def finish_reasoning_preview() -> None:
-        nonlocal reasoning_started_at, reasoning_text
-        if reasoning_started_at is None:
-            return
-        elapsed = time.perf_counter() - reasoning_started_at
-        reasoning_preview.stop()
-        if not should_print_reasoning_summary(reasoning_text, elapsed):
-            reasoning_started_at = None
-            reasoning_text = ""
-            return
-        preview = single_line_preview(reasoning_text)
-        live_console.print(
-            Text(
-                f"  • thinked for {format_elapsed(elapsed)}",
-                style=CLI_COLOR_THINKING,
-            )
-        )
-        if preview:
-            live_console.print(Text(f"    {preview}", style=CLI_COLOR_THINKING))
-        reasoning_started_at = None
-        reasoning_text = ""
+    turn = _ReplTurnRenderer(markdown_renderer, state)
 
     if state.pending_partial is not None:
         _, partial_text = state.pending_partial
@@ -264,67 +156,18 @@ def _run_agent_turn(
     try:
         for event in app.ask_stream(agent_text, mode=state.mode):
             store.append("event", event_to_dict(event))
-            if event.type == "reasoning_delta":
-                flush_tool_group()
-                if reasoning_started_at is None:
-                    reasoning_started_at = time.perf_counter()
-                reasoning_text += str(event.data)
-                render_reasoning_preview()
-                continue
-
-            finish_reasoning_preview()
-
-            if event.type == "text_delta":
-                flush_tool_group()
-                chunk = str(event.data)
-                current_step_thoughts.append(chunk)
-                streamed_text = True
-                answer_stream.update("".join(current_step_thoughts))
-            elif event.type == "assistant":
-                if _assistant_has_tool_calls(event.data):
-                    thoughts = "".join(current_step_thoughts).strip()
-                    if thoughts:
-                        answer_stream.stop()
-                        if step_answers:
-                            print()
-                        step_answers.append(thoughts)
-                    current_step_thoughts = []
-                    streamed_text = False
-            elif event.type == "tool_use":
-                record_tool_call(event.data)
-            elif event.type == "tool_result":
-                record_tool_result(event.data)
-            elif event.type == "final":
-                flush_tool_group()
-                final_answer = "".join(current_step_thoughts).strip()
-                if not final_answer and getattr(event.data, "answer", None):
-                    final_answer = str(event.data.answer).strip()
-                if final_answer:
-                    step_answers.append(final_answer)
-                    if streamed_text:
-                        answer_stream.stop()
-                    elif len(step_answers) > 1:
-                        print()
-                        markdown_renderer.render(final_answer)
-                    else:
-                        markdown_renderer.render(final_answer)
-                    streamed_text = False
-                stopped_reason = final_stop_reason(event.data)
+            turn.handle_event(event)
     except KeyboardInterrupt:
-        interrupted = True
+        turn.interrupted = True
         token = getattr(getattr(app, "agent", None), "cancellation_token", None)
         if token is not None:
             token.cancel("interrupted by user")
-        tool_group = None
-        clear_line()
+        turn.clear_line()
         store.append("event", {"type": "interrupted", "data": "interrupted by user"})
-        has_partial = bool(reasoning_text or current_step_thoughts or step_answers)
+        reasoning_text, partial_answer = turn.partial_state()
+        has_partial = bool(reasoning_text or partial_answer)
         if has_partial:
-            state.pending_partial = (
-                reasoning_text,
-                "".join(current_step_thoughts)
-                or ("".join(step_answers) if step_answers else ""),
-            )
+            state.pending_partial = (reasoning_text, partial_answer)
             print("[interrupted] type your message below to inject into context")
             try:
                 inject_text = session.prompt(
@@ -342,17 +185,198 @@ def _run_agent_turn(
             print("[interrupted] current run cancelled; session is still active.")
         return
     finally:
-        finish_reasoning_preview()
-        answer_stream.stop()
-        if not interrupted:
-            flush_tool_group()
+        turn.close()
 
-    if stopped_reason:
-        print(stopped_reason)
-    if step_answers:
-        answer = "\n\n".join(step_answers)
+    if turn.stopped_reason:
+        print(turn.stopped_reason)
+    if turn.step_answers:
+        answer = "\n\n".join(turn.step_answers)
         store.append("assistant", answer)
         store.update_summary()
+
+
+class _ReplTurnRenderer:
+    def __init__(self, markdown_renderer: MarkdownRenderer, state: ReplState) -> None:
+        self.markdown_renderer = markdown_renderer
+        self.state = state
+        self.step_answers: list[str] = []
+        self.current_step_thoughts: list[str] = []
+        self.stopped_reason: str | None = None
+        self.interrupted = False
+        self.live_console = Console(file=sys.stdout)
+        self.reasoning_started_at: float | None = None
+        self.reasoning_text = ""
+        self.reasoning_preview = LiveReasoningPreview(self.live_console)
+        self.answer_stream = LiveMarkdownStream(self.live_console)
+        self.streamed_text = False
+        self.tool_group: dict[str, Any] | None = None
+        self.tool_call_labels: dict[str, str] = {}
+
+    def handle_event(self, event: Any) -> None:
+        if event.type == "reasoning_delta":
+            self._handle_reasoning_delta(event.data)
+            return
+
+        self._finish_reasoning_preview()
+        if event.type == "text_delta":
+            self._handle_text_delta(event.data)
+        elif event.type == "assistant":
+            self._handle_assistant_event(event.data)
+        elif event.type == "tool_use":
+            self._record_tool_call(event.data)
+        elif event.type == "tool_result":
+            self._record_tool_result(event.data)
+        elif event.type == "final":
+            self._handle_final_event(event.data)
+
+    def partial_state(self) -> tuple[str, str]:
+        partial_answer = "".join(self.current_step_thoughts) or (
+            "".join(self.step_answers) if self.step_answers else ""
+        )
+        return self.reasoning_text, partial_answer
+
+    def close(self) -> None:
+        self._finish_reasoning_preview()
+        self.answer_stream.stop()
+        if not self.interrupted:
+            self._flush_tool_group()
+        else:
+            self.tool_group = None
+
+    def clear_line(self) -> None:
+        self._safe_write("\r\033[K")
+
+    def _handle_reasoning_delta(self, event_data: Any) -> None:
+        self._flush_tool_group()
+        if self.reasoning_started_at is None:
+            self.reasoning_started_at = time.perf_counter()
+        self.reasoning_text += str(event_data)
+        lines = reasoning_preview_lines(self.reasoning_text)
+        if lines:
+            self.reasoning_preview.update(lines)
+
+    def _handle_text_delta(self, event_data: Any) -> None:
+        self._flush_tool_group()
+        self.current_step_thoughts.append(str(event_data))
+        self.streamed_text = True
+        self.answer_stream.update("".join(self.current_step_thoughts))
+
+    def _handle_assistant_event(self, event_data: Any) -> None:
+        if not _assistant_has_tool_calls(event_data):
+            return
+        thoughts = "".join(self.current_step_thoughts).strip()
+        if thoughts:
+            self.answer_stream.stop()
+            if self.step_answers:
+                print()
+            self.step_answers.append(thoughts)
+        self.current_step_thoughts = []
+        self.streamed_text = False
+
+    def _handle_final_event(self, event_data: Any) -> None:
+        self._flush_tool_group()
+        final_answer = "".join(self.current_step_thoughts).strip()
+        if not final_answer and getattr(event_data, "answer", None):
+            final_answer = str(event_data.answer).strip()
+        if final_answer:
+            self.step_answers.append(final_answer)
+            if self.streamed_text:
+                self.answer_stream.stop()
+            elif len(self.step_answers) > 1:
+                print()
+                self.markdown_renderer.render(final_answer)
+            else:
+                self.markdown_renderer.render(final_answer)
+            self.streamed_text = False
+        self.stopped_reason = final_stop_reason(event_data)
+
+    def _record_tool_call(self, event_data: Any) -> None:
+        label = brief_input(event_data.name, event_data.input)
+        intent = tool_intent(event_data.name, event_data.input)
+        self.tool_call_labels[event_data.id] = label
+        if self.state.verbose:
+            print_tool_call_rich(label, self.live_console)
+            return
+        if self.tool_group is None:
+            self.tool_group = {
+                "intents": [],
+                "calls": 0,
+                "ok": 0,
+                "errors": [],
+            }
+        self.tool_group["calls"] += 1
+        if intent not in self.tool_group["intents"]:
+            self.tool_group["intents"].append(intent)
+
+    def _record_tool_result(self, event_data: Any) -> None:
+        if self.state.verbose:
+            print_tool_result_rich(event_data, self.state.verbose, self.live_console)
+            return
+        if self.tool_group is None:
+            return
+        if event_data.status == "ok":
+            self.tool_group["ok"] += 1
+            return
+        label = self.tool_call_labels.get(
+            event_data.tool_use_id, event_data.tool_use_id
+        )
+        self.tool_group["errors"].append((label, event_data))
+
+    def _flush_tool_group(self) -> None:
+        if self.tool_group is None:
+            return
+        calls = int(self.tool_group["calls"])
+        errors = list(self.tool_group["errors"])
+        intents = list(self.tool_group["intents"])
+        title = summarize_intents(intents)
+        status = "failed" if errors else "done"
+        style = CLI_COLOR_ERROR if errors else CLI_COLOR_SUCCESS
+        self.live_console.print(Text(f"  • Explore: {title}", style=CLI_COLOR_TOOL))
+        self.live_console.print(Text(f"    {status}: {calls} tools", style=style))
+        for label, result in errors:
+            summary = single_line_preview(str(result.content), width=120)
+            self.live_console.print(
+                Text(f"    error: {label}: {summary}", style=CLI_COLOR_ERROR)
+            )
+        self.tool_group = None
+
+    def _finish_reasoning_preview(self) -> None:
+        if self.reasoning_started_at is None:
+            return
+        elapsed = time.perf_counter() - self.reasoning_started_at
+        self.reasoning_preview.stop()
+        if not should_print_reasoning_summary(self.reasoning_text, elapsed):
+            self.reasoning_started_at = None
+            self.reasoning_text = ""
+            return
+        preview = single_line_preview(self.reasoning_text)
+        self.live_console.print(
+            Text(
+                f"  • thinked for {format_elapsed(elapsed)}",
+                style=CLI_COLOR_THINKING,
+            )
+        )
+        if preview:
+            self.live_console.print(Text(f"    {preview}", style=CLI_COLOR_THINKING))
+        self.reasoning_started_at = None
+        self.reasoning_text = ""
+
+    def _safe_write(self, text: str) -> None:
+        try:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        except UnicodeEncodeError:
+            safe_text = (
+                text.replace("•", "*")
+                .replace("×", "x")
+                .replace("✘", "x")
+                .replace("⊘", "o")
+            )
+            encoding = sys.stdout.encoding or "utf-8"
+            sys.stdout.write(
+                safe_text.encode(encoding, errors="replace").decode(encoding)
+            )
+            sys.stdout.flush()
 
 
 def _assistant_has_tool_calls(data: Any) -> bool:
