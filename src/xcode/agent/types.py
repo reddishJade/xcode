@@ -264,6 +264,40 @@ type AgentEvent = (
 
 type AgentListener = Callable[[AgentEvent], None]
 
+# ── 任务状态 ──
+
+
+TaskStatus = Literal["pending", "in_progress", "completed", "failed"]
+
+
+@dataclass
+class TaskItem:
+    id: str
+    desc: str
+    status: TaskStatus = "pending"
+
+
+@dataclass
+class TaskGraph:
+    tasks: list[TaskItem] = field(default_factory=list)
+
+    @property
+    def in_progress_count(self) -> int:
+        return sum(1 for t in self.tasks if t.status == "in_progress")
+
+    @property
+    def completed_count(self) -> int:
+        return sum(1 for t in self.tasks if t.status == "completed")
+
+    @property
+    def progress(self) -> str:
+        total = len(self.tasks)
+        if total == 0:
+            return "0/0"
+        done = self.completed_count
+        return f"{done}/{total}"
+
+
 # ── 循环配置 ──
 
 

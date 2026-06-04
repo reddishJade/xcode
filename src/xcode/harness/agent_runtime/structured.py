@@ -23,6 +23,7 @@ from ...agent.types import (
     AgentEvent,
     AgentLoopConfig,
     AgentLoopResult,
+    AgentLoopTurnUpdate,
     AgentMessage,
     AgentStartEvent,
     AssistantMessage,
@@ -243,6 +244,8 @@ class StructuredAgent:
         self.speculation_planner = speculation_planner
         self._consecutive_errors: int = 0
         self._current_mode: ExecutionMode = "act"
+        self._progress_steps_without_update: int = 0
+        self._last_progress_step: int = 0
 
         # 适配 ToolSpec → AgentTool，创建 Agent 实例
         adapted_tools: list[Any] = adapt_tool_specs(
@@ -430,6 +433,7 @@ class StructuredAgent:
             is_tool_productive=self._loop_is_tool_productive(mode),
             before_tool_call=self._loop_before_tool(mode),
             after_tool_call=self._loop_after_tool,
+            prepare_next_turn=self._loop_prepare_next_turn,
         )
 
     # ── 辅助方法 ──
@@ -445,6 +449,18 @@ class StructuredAgent:
         self.compactor(dict_messages)
         # compactor 通过 dict 操作，返回值由 harness 层管理。
         return messages
+
+    def _loop_prepare_next_turn(
+        self,
+    ) -> AgentLoopTurnUpdate | None:
+        self._progress_steps_without_update += 1
+        if self._progress_steps_without_update >= 5:
+            self._progress_steps_without_update = 0
+            self.steer(UserMessage(
+                content="<reminder>You have gone several turns without updating task progress. "
+                        "Use update_task or save_task_progress to record progress before continuing.</reminder>"
+            ))
+        return None
 
     def _loop_is_tool_productive(
         self, mode: ExecutionMode
@@ -517,9 +533,16 @@ class StructuredAgent:
             )
         return None
 
+    PROGRESS_TOOL_NAMES = frozenset({
+        "save_task_progress", "resume_task_progress",
+        "update_task", "create_task",
+    })
+
     def _loop_after_tool(
         self, ctx: AfterToolCallContext, _signal: Any
     ) -> AfterToolCallResult | None:
+        if ctx.tool_call.name in self.PROGRESS_TOOL_NAMES:
+            self._progress_steps_without_update = 0
         action_input = stringify_tool_input(ctx.args)
         result_content_text = _tool_result_text(ctx)
 
