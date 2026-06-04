@@ -17,7 +17,7 @@ from collections.abc import Callable
 from time import perf_counter
 from typing import Any
 
-from xcode.ai.events import TextDelta, ReasoningDelta, ToolCallEvent
+from xcode.ai.events import FinalMessage, TextDelta, ReasoningDelta, ToolCallEvent
 from xcode.ai.types import ToolDefinition
 from .provider_retry import call_provider_with_retry
 from .types import (
@@ -502,8 +502,6 @@ async def _run_inner_loop(
                         )
                     )
             # FinalMessage 设置 stop_reason
-            from xcode.ai.events import FinalMessage
-
             if isinstance(event, FinalMessage):
                 stop_reason = getattr(event, "stop_reason", "end_turn") or "end_turn"
 
