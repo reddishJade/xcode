@@ -133,6 +133,7 @@ class AgentTool[Details](Protocol):
     description: str
     parameters: dict[str, Any]  # JSON Schema
     execution_mode: ToolExecutionMode | None = None
+    examples: list[dict[str, Any]] = []
 
     async def execute(
         self,

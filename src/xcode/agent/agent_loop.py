@@ -769,10 +769,21 @@ def _append_continuation_prompt(
 def _tools_to_definitions(tools: list[AgentTool[Any]] | None) -> list[ToolDefinition]:
     if not tools:
         return []
-    return [
-        ToolDefinition(name=t.name, description=t.description, schema=t.parameters)
-        for t in tools
-    ]
+    result: list[ToolDefinition] = []
+    for t in tools:
+        desc = t.description
+        examples = getattr(t, "examples", [])
+        if examples:
+            example_lines = ["", "Examples:"]
+            for ex in examples:
+                example_lines.append(
+                    f"  - {ex.get('name', '')}: "
+                    f"input={json.dumps(ex.get('input', {}), ensure_ascii=False)}, "
+                    f"output=\"{ex.get('output', '')}\""
+                )
+            desc += "\n".join(example_lines)
+        result.append(ToolDefinition(name=t.name, description=desc, schema=t.parameters))
+    return result
 
 
 def _cancelled_message(signal: CancellationSignal | None) -> AssistantMessage:

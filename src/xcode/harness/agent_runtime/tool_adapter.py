@@ -60,6 +60,10 @@ class ToolSpecAdapter:
         return self._spec.schema or {"type": "object"}
 
     @property
+    def examples(self) -> list[dict[str, Any]]:
+        return list(self._spec.examples)
+
+    @property
     def execution_mode(self) -> ToolExecutionMode | None:
         if self._spec.execution_mode is not None:
             return self._spec.execution_mode

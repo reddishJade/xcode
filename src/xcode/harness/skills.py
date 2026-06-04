@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from typing import Any, Literal
@@ -47,6 +47,7 @@ class ToolSpec:
     group: str = "core"
     execution_mode: ToolExecutionMode | None = None
     counts_as_progress: bool | None = None
+    examples: list[dict[str, Any]] = field(default_factory=list)
 
 
 ToolExecutionStatus = Literal["ok", "denied", "error", "approval_required"]
