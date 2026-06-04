@@ -15,16 +15,14 @@ class ToolValidationError(ValueError):
     """工具参数校验失败时抛出。"""
 
 
-def _type_name(value: object) -> str:
-    mapping: dict[type, str] = {
-        str: "string",
-        int: "integer",
-        float: "number",
-        bool: "boolean",
-        list: "array",
-        dict: "object",
-    }
-    return mapping.get(type(value), type(value).__name__)
+_TYPE_NAMES: dict[type, str] = {
+    str: "string",
+    int: "integer",
+    float: "number",
+    bool: "boolean",
+    list: "array",
+    dict: "object",
+}
 
 
 def _validate_value(
@@ -36,17 +34,17 @@ def _validate_value(
 
     if "type" in schema:
         expected = schema["type"]
-        actual = _type_name(value)
+        actual = _TYPE_NAMES.get(type(value), type(value).__name__)
+
         if expected == "integer" and actual == "number" and isinstance(value, bool):
             errors.append(f"{path}: expected integer, got boolean")
         elif expected == "integer" and actual == "number" and isinstance(value, float):
             if value != int(value):
                 errors.append(f"{path}: expected integer, got float {value}")
+        elif expected == "integer" and actual == "number":
+            pass
         elif expected != actual and not (expected == "number" and actual == "integer"):
-            if expected == "integer" and actual == "number":
-                pass  # allow float that equals int
-            else:
-                errors.append(f"{path}: expected {expected}, got {actual}")
+            errors.append(f"{path}: expected {expected}, got {actual}")
 
     if "enum" in schema and value not in schema["enum"]:
         errors.append(f"{path}: value {value!r} not in {schema['enum']}")
@@ -91,7 +89,7 @@ def validate_tool_call(
     抛出:
         ToolValidationError: 校验失败时
     """
-    tool = _find_tool(tools, name)
+    tool = next((t for t in tools if t.name == name), None)
     if tool is None:
         msg = f"Unknown tool: {name}. Available: {[t.name for t in tools]}"
         raise ToolValidationError(msg)
@@ -104,10 +102,3 @@ def validate_tool_call(
         raise ToolValidationError("; ".join(errors))
 
     return arguments
-
-
-def _find_tool(tools: list[ToolDefinition], name: str) -> ToolDefinition | None:
-    for t in tools:
-        if t.name == name:
-            return t
-    return None

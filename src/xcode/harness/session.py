@@ -277,14 +277,16 @@ class SessionStore:
                 return
             seen.add(meta.id)
             is_current = meta.id == current_id
-            result.append(TreeNode(
-                id=meta.id,
-                title=meta.title,
-                fork_type=meta.fork_type,
-                depth=depth,
-                is_current=is_current,
-                is_leaf=meta.id not in children,
-            ))
+            result.append(
+                TreeNode(
+                    id=meta.id,
+                    title=meta.title,
+                    fork_type=meta.fork_type,
+                    depth=depth,
+                    is_current=is_current,
+                    is_leaf=meta.id not in children,
+                )
+            )
             for child in sorted(children.get(meta.id, []), key=lambda m: m.created_at):
                 walk(child, depth + 1)
 
@@ -292,7 +294,6 @@ class SessionStore:
             walk(ancestor, 0 if ancestor.id == chain[0].id else chain.index(ancestor))
 
         return result
-
 
     def _session_paths(self) -> list[Path]:
         return sorted(
@@ -338,7 +339,9 @@ class SessionStore:
             try:
                 items.append(SessionMetadata(**raw))
             except TypeError:
-                logging.warning("skipping malformed session metadata: %s", raw, exc_info=True)
+                logging.warning(
+                    "skipping malformed session metadata: %s", raw, exc_info=True
+                )
                 continue
         return items
 

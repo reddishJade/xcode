@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .types import Cost, KnownProvider, Model
+from .types import Cost, Model
 
 """内置模型注册表：预定义常见模型的元数据。"""
 
@@ -166,4 +166,6 @@ def resolve_model(provider_name: str, model_id: str) -> Model:
     if provider:
         fallback = next(iter(provider.values()))
         return fallback
-    return Model(id=model_id, name=model_id, api="openai-completions", provider=provider_name)
+    return Model(
+        id=model_id, name=model_id, api="openai-completions", provider=provider_name
+    )

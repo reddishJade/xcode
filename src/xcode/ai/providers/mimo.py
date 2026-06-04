@@ -45,7 +45,10 @@ class MiMoProvider(OpenAICompatProvider):
         )
 
     def _stream_sync(
-        self, messages: list[dict[str, Any]], tools: tuple[ToolDefinition, ...], **kwargs: Any
+        self,
+        messages: list[dict[str, Any]],
+        tools: tuple[ToolDefinition, ...],
+        **kwargs: Any,
     ) -> Iterator[Any]:
         openai_messages = to_chat_messages(messages)
 

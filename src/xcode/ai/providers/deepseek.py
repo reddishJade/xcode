@@ -101,7 +101,9 @@ class DeepSeekProvider(OpenAICompatProvider):
         stream = self.runtime.run(lambda: create(**params))
         self._ensure_metrics()
         self.metrics["sent_messages"] = len(params["messages"])
-        yield from chat_stream_to_events(self._intercept_usage(stream, len(params["messages"])))
+        yield from chat_stream_to_events(
+            self._intercept_usage(stream, len(params["messages"]))
+        )
 
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]
