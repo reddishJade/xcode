@@ -387,6 +387,9 @@ type AfterToolCallHook = Callable[
 type PrepareNextTurnHook = Callable[[], AgentLoopTurnUpdate | None]
 type ShouldStopAfterTurnHook = Callable[[ShouldStopAfterTurnContext], bool]
 type MessageQueueGetter = Callable[[], list[AgentMessage]]
+type ArchiveWriter = Callable[[list[AgentMessage]], str | None]
+"""写入消息存档，返回存档路径或 None。"""
+
 type ShouldCompactHook = Callable[[list[AgentMessage]], bool]
 type CompactHook = Callable[[list[AgentMessage]], list[AgentMessage]]
 type IsToolProductiveHook = Callable[
@@ -462,6 +465,7 @@ class AgentLoopConfig:
     should_compact: ShouldCompactHook | None = None
     compact: CompactHook | None = None
     compact_instructions: CompactInstructions | None = None
+    archive_writer: ArchiveWriter | None = None
 
     # 生产力检查（空闲步骤看门狗）
     is_tool_productive: IsToolProductiveHook | None = None
