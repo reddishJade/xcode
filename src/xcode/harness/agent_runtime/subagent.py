@@ -12,6 +12,7 @@ from typing import Literal
 from ..config import PROFILE_SUBAGENT
 from ..skills import ToolInput, ToolSpec
 from .async_worker import IsolatedAsyncWorker
+from ...agent.types import BranchSummaryMessage
 
 """子 Agent 任务工具。
 
@@ -188,7 +189,11 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
             except Exception as exc:
                 return f"status=failed\n{type(exc).__name__}: {exc}"
         try:
-            return f"status=done\n{runner.result(job_id)}"
+            raw_result = runner.result(job_id)
+            job = runner._jobs.get(job_id)
+            prompt = job.prompt if job else ""
+            summary = build_branch_summary(job_id, prompt, raw_result)
+            return f"status=done\n{build_branch_summary(job_id, prompt, raw_result).summary}"
         except KeyError as exc:
             return str(exc)
 
@@ -226,6 +231,25 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
 def _unknown_profile(model_profile: str, profiles) -> str:
     available = ", ".join(sorted(profiles)) or "(none)"
     return f"unknown model_profile: {model_profile}; available: {available}"
+
+
+def build_branch_summary(
+    job_id: str,
+    prompt: str,
+    result: str,
+) -> BranchSummaryMessage:
+    lines = result.strip().splitlines()
+    summary_lines = [f"Task: {prompt[:80]}"]
+    output_lines = [l for l in lines if l.strip()][:5]
+    if output_lines:
+        summary_lines.append("Results:")
+        summary_lines.extend(f"  {l}" for l in output_lines)
+    if len(lines) > 5:
+        summary_lines.append(f"  (... {len(lines) - 5} more lines)")
+    return BranchSummaryMessage(
+        summary="\n".join(summary_lines),
+        from_id=job_id,
+    )
 
 
 def _task_name(prompt: str) -> str:
