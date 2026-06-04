@@ -244,6 +244,8 @@ class StructuredAgent:
         self.speculation_planner = speculation_planner
         self._consecutive_errors: int = 0
         self._current_mode: ExecutionMode = "act"
+        self._plan_enter_step: int = 0
+        self._max_plan_turns: int = 8
         self._progress_steps_without_update: int = 0
         self._last_progress_step: int = 0
 
@@ -388,7 +390,12 @@ class StructuredAgent:
 
     def _switch_to_plan(self) -> str:
         self._current_mode = "plan"
-        return "Entered Plan Mode. Tools are limited to read-only. Investigate and report a plan."
+        self._plan_enter_step = 0
+        return (
+            "Entered Plan Mode. Tools are limited to read-only. "
+            "Investigate and report a plan. "
+            "Use exit_plan_mode with a concise plan summary to return to full tool access."
+        )
 
     def _switch_to_act(self, plan_summary: str | None = None) -> str:
         self._current_mode = "act"
@@ -467,6 +474,19 @@ class StructuredAgent:
                 content="<reminder>You have gone several turns without updating task progress. "
                         "Use update_task or save_task_progress to record progress before continuing.</reminder>"
             ))
+
+        if self._current_mode == "plan":
+            self._plan_enter_step += 1
+            if self._plan_enter_step >= self._max_plan_turns:
+                self._plan_enter_step = 0
+                self._current_mode = "act"
+                self._agent._tools = self._tools_for_mode(self.registry, "act")
+                self.steer(SystemMessage(content=(
+                    "<plan-timeout>\n"
+                    "Plan Mode timed out after reaching the maximum number "
+                    "of investigation turns. Returning to Act Mode.\n"
+                    "</plan-timeout>"
+                )))
         return None
 
     def _loop_is_tool_productive(
