@@ -43,6 +43,7 @@ class XcodePromptingTests(unittest.TestCase):
             )
             self.assertIn("echo", prompt)
             self.assertIn('Example: {"input": "hello"}', prompt)
+            self.assertIn("prefer edit_file", prompt)
             self.assertIn("<environment>", prompt)
             self.assertIn("<git-preflight>", prompt)
             self.assertIn("<search-strategy>", prompt)

@@ -32,6 +32,9 @@ Code changes, file operations, diagnostics, validation, and command execution
 require tools. The <git-preflight> block is already injected; do not manually
 repeat git status/diff commands unless the user asks or the task specifically
 requires a fresh check.
+When modifying an existing file, prefer edit_file with exact old_text and
+new_text replacements. Use write_file for new files or deliberate full-file
+replacement.
 </tool-discipline>"""
 
 SEARCH_STRATEGY = """<search-strategy>
