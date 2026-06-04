@@ -314,6 +314,32 @@ class AgentLoopTurnUpdate:
     thinking_level: ThinkingLevel = "off"
 
 
+# ── 压缩指令 ──
+
+
+type CompactPriority = Literal[
+    "architecture_decision",
+    "modified_file",
+    "verification_status",
+    "todo",
+    "tool_output",
+]
+
+
+@dataclass
+class CompactInstructions:
+    """压缩保留优先级与不可变标识符保护规则。"""
+    priorities: list[CompactPriority] = field(default_factory=lambda: [
+        "architecture_decision",
+        "modified_file",
+        "verification_status",
+        "todo",
+        "tool_output",
+    ])
+    frozen_identifiers: list[str] = field(default_factory=list)
+    """LLM 可观测摘要时不可变动的标识符列表（UUID, hash, PR编号等）。"""
+
+
 type MessageConverter = Callable[[list[AgentMessage]], list[dict[str, Any]]]
 type ContextTransformer = Callable[
     [list[AgentMessage], CancellationSignal | None], list[AgentMessage]
@@ -401,6 +427,7 @@ class AgentLoopConfig:
     # 压缩钩子
     should_compact: ShouldCompactHook | None = None
     compact: CompactHook | None = None
+    compact_instructions: CompactInstructions | None = None
 
     # 生产力检查（空闲步骤看门狗）
     is_tool_productive: IsToolProductiveHook | None = None

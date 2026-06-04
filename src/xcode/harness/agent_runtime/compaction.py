@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from xcode.agent.types import CompactInstructions
 from ..skills import ToolSpec
 
 """分层上下文压缩工具。"""
@@ -41,8 +42,10 @@ class LayeredCompactor:
         compact_token_threshold: int = 32_000,
         budget_trigger_token_ratio: float = 0.5,
         on_compact: Callable[[str], None] | None = None,
+        compact_instructions: CompactInstructions | None = None,
     ) -> None:
         self.transcript_dir = transcript_dir
+        self.compact_instructions = compact_instructions
         self.keep_recent_tool_results = keep_recent_tool_results
         self.max_tool_result_chars = max_tool_result_chars
         self.max_recent_messages = max_recent_messages
@@ -76,7 +79,9 @@ class LayeredCompactor:
             self.last_transcript_path = save_transcript(micro, self.transcript_dir)
 
         final_messages = summarize_messages(
-            micro, max_recent_messages=self.max_recent_messages
+            micro,
+            max_recent_messages=self.max_recent_messages,
+            compact_instructions=self.compact_instructions,
         )
         if len(final_messages) > 1:
             second_msg = final_messages[1]
@@ -298,20 +303,75 @@ def estimate_text_tokens(text: str) -> int:
 def summarize_messages(
     messages: list[dict[str, Any]],
     max_recent_messages: int = 8,
+    compact_instructions: CompactInstructions | None = None,
 ) -> list[dict[str, Any]]:
     if len(messages) <= max_recent_messages + 1:
         return messages
-    recent_start = max(1, len(messages) - max_recent_messages)
+
+    if compact_instructions and compact_instructions.priorities:
+        preserved_count = _preserved_recent_count(
+            messages, compact_instructions, max_recent_messages
+        )
+        effective_recent = max(max_recent_messages, preserved_count)
+    else:
+        effective_recent = max_recent_messages
+
+    recent_start = max(1, len(messages) - effective_recent)
     older = messages[1:recent_start]
+
+    if not older:
+        return messages
+
     summary_lines = []
     for message in older:
         content = _content_preview(message.get("content"))
         summary_lines.append(f"- {message.get('role')}: {content}")
+
+    summary_content = "[Compressed]\n" + "\n".join(summary_lines)
+
+    if compact_instructions and compact_instructions.frozen_identifiers:
+        summary_content = _protect_identifiers(
+            summary_content, compact_instructions.frozen_identifiers
+        )
+
     summary = {
         "role": "user",
-        "content": "[Compressed]\n" + "\n".join(summary_lines),
+        "content": summary_content,
     }
     return [messages[0], summary, *messages[recent_start:]]
+
+
+def _preserved_recent_count(
+    messages: list[dict[str, Any]],
+    instructions: CompactInstructions,
+    base_count: int,
+) -> int:
+    """根据优先级估算需要额外保留的消息数。"""
+    extra = 0
+    has_top = "architecture_decision" in instructions.priorities
+    has_high = "modified_file" in instructions.priorities
+    if has_top and len(messages) > 20:
+        extra += 2
+    if has_high and len(messages) > 15:
+        extra += 1
+    return extra
+
+
+def _protect_identifiers(
+    summary: str,
+    frozen: list[str],
+) -> str:
+    """标记不可变标识符，防止后续 LLM 摘要修改它们。"""
+    if not frozen:
+        return summary
+    markers = [f"__FROZEN_{i}__" for i in range(len(frozen))]
+    for marker, value in zip(markers, frozen):
+        if value in summary:
+            summary = summary.replace(value, marker)
+    for marker, value in zip(markers, frozen):
+        if marker in summary:
+            summary = summary.replace(marker, f"`{value}`")
+    return summary
 
 
 def save_transcript(messages: list[dict[str, Any]], transcript_dir: Path) -> Path:
