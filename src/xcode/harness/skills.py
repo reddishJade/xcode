@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ..agent.types import ToolExecutionMode
-from .observability import HITLResult, PermissionPolicy, check_tool_permission, redact_text
+from .observability import (
+    HITLResult,
+    PermissionPolicy,
+    check_tool_permission,
+    redact_text,
+)
 
 """工具注册表与 HITL 执行门禁。
 
@@ -52,11 +57,6 @@ STATUS_APPROVAL_REQUIRED: ToolExecutionStatus = "approval_required"
 
 RISK_LOW = "low"
 RISK_HIGH = "high"
-
-STATUS_OK: ToolExecutionStatus = "ok"
-STATUS_DENIED: ToolExecutionStatus = "denied"
-STATUS_ERROR: ToolExecutionStatus = "error"
-STATUS_APPROVAL_REQUIRED: ToolExecutionStatus = "approval_required"
 
 
 @dataclass(frozen=True)
@@ -141,13 +141,15 @@ def run_tool_result(
         high_risk_requires_approval=True,
     )
     if perm_result.blocked:
-        status = STATUS_APPROVAL_REQUIRED if perm_result.decision == "ask" else STATUS_DENIED
-        return ToolExecutionResult(status, perm_result.reason, metadata=perm_result.metadata)
+        status = (
+            STATUS_APPROVAL_REQUIRED if perm_result.decision == "ask" else STATUS_DENIED
+        )
+        return ToolExecutionResult(
+            status, perm_result.reason, metadata=perm_result.metadata
+        )
     try:
         content = redact_text(tool.handler(action_input))
-        return ToolExecutionResult(
-            STATUS_OK, content, metadata=perm_result.metadata
-        )
+        return ToolExecutionResult(STATUS_OK, content, metadata=perm_result.metadata)
     except Exception as exc:
         meta = {"error": str(exc)}
         if perm_result.metadata:
