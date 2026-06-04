@@ -247,9 +247,7 @@ async def _run_loop(
             signal,
             metrics,
             step,
-            state.active_provider,
-            state.step_retries,
-            state.consecutive_continuations,
+            state,
         )
 
         if inner_result is None:
@@ -267,9 +265,6 @@ async def _run_loop(
 
         for msg in current_context.messages[ctx_len_before:-1]:
             new_messages.append(msg)
-
-        # ── 更新步骤重试状态 ──
-        _update_retry_state(state, stop_reason)
 
         new_messages.append(message)
         metrics.llm_calls += 1
@@ -442,14 +437,6 @@ def _drain_pending_messages(
     state.pending_messages = []
 
 
-def _update_retry_state(state: _LoopRunState, stop_reason: str) -> None:
-    if stop_reason == "error":
-        state.step_retries += 1
-        return
-    state.step_retries = 0
-    state.consecutive_continuations = 0
-
-
 def _queue_follow_up(state: _LoopRunState, config: AgentLoopConfig) -> bool:
     if not config.get_follow_up_messages:
         return False
@@ -525,14 +512,15 @@ async def _run_inner_loop(
     signal: CancellationSignal | None,
     metrics: AgentLoopMetrics,
     step: int,
-    provider: Any,
-    step_retries: int,
-    consecutive_continuations: int,
+    state: _LoopRunState,
 ) -> tuple[AssistantMessage, str, Any] | None:
     """内层循环：模型调用 → 错误重试 → max_tokens 续写。
 
+    通过 state 对象共享 step_retries / consecutive_continuations 计数器，
+    无需外循环再手动同步。
     返回 (message, stop_reason, provider)，或 None 表示应提前退出。
     """
+    provider = state.active_provider
     while True:
         if _is_cancelled(signal):
             return _cancelled_message(signal), "aborted", provider
@@ -559,9 +547,9 @@ async def _run_inner_loop(
 
         # ── 检查是否为 FinalMessage 的错误 ──
         if stop_reason == "error":
-            step_retries += 1
+            state.step_retries += 1
             should_retry, fallback_message = await _handle_provider_error(
-                message, step_retries, config, emit
+                message, state.step_retries, config, emit
             )
             if should_retry:
                 continue
@@ -572,8 +560,8 @@ async def _run_inner_loop(
 
         # ── max_tokens 续写 ──
         if _should_continue_max_tokens(stop_reason, config):
-            consecutive_continuations = _update_continuation_count(
-                message, consecutive_continuations, config
+            state.consecutive_continuations = _update_continuation_count(
+                message, state.consecutive_continuations, config
             )
             _append_continuation_prompt(context, message)
             continue
@@ -581,8 +569,8 @@ async def _run_inner_loop(
         # ── 正常结束 ──
         context.messages.append(message)
         emit(_message_end_event(message))
-        step_retries = 0
-        consecutive_continuations = 0
+        state.step_retries = 0
+        state.consecutive_continuations = 0
         return message, stop_reason, provider
 
 
