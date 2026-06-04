@@ -260,16 +260,19 @@ class XcodeReplTests(unittest.TestCase):
 
     def test_run_repl_shell_shortcut_runs_bash_tool(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            app = ShellShortcutApp()
+            app = ShellShortcutApp(output="Name    Length\n----    ------\nfile    42")
             prompt = FakePrompt(["!echo hello", "/exit"])
             renderer = FakeRenderer()
+            output = StringIO()
 
-            with redirect_stdout(StringIO()):
+            with redirect_stdout(output):
                 code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
 
             self.assertEqual(code, 0)
             self.assertEqual(app.commands, ["echo hello"])
-            self.assertEqual(renderer.rendered, ["ran: echo hello"])
+            self.assertEqual(renderer.rendered, [])
+            text_output = output.getvalue()
+            self.assertIn("Name    Length\n----    ------\nfile    42\n", text_output)
             session = next(Path(temp_dir).glob("session-*.jsonl"))
             text = session.read_text(encoding="utf-8")
             self.assertIn("shell_shortcut", text)
@@ -280,13 +283,15 @@ class XcodeReplTests(unittest.TestCase):
             app = ShellShortcutApp()
             prompt = FakePrompt(["!", "/exit"])
             renderer = FakeRenderer()
+            output = StringIO()
 
-            with redirect_stdout(StringIO()):
+            with redirect_stdout(output):
                 code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
 
             self.assertEqual(code, 0)
             self.assertEqual(app.commands, [])
-            self.assertEqual(renderer.rendered, ["usage: !COMMAND"])
+            self.assertEqual(renderer.rendered, [])
+            self.assertIn("usage: !COMMAND\n", output.getvalue())
 
     def test_run_repl_tool_command_preserves_high_risk_approval(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -872,13 +877,14 @@ class ToolApp:
 
 
 class ShellShortcutApp(ToolApp):
-    def __init__(self) -> None:
+    def __init__(self, output: str | None = None) -> None:
         self.commands: list[str] = []
+        self.output = output
 
         def bash(value: dict[str, Any]) -> str:
             command = str(value["command"])
             self.commands.append(command)
-            return f"ran: {command}"
+            return self.output or f"ran: {command}"
 
         super().__init__(
             registry=(

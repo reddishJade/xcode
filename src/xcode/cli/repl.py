@@ -115,7 +115,7 @@ def run_repl(
             output = run_shell_shortcut(text, app)
             store.append("event", {"type": "shell_shortcut", "data": text})
             store.append("event", {"type": "tool_result", "data": output})
-            markdown_renderer.render(output)
+            _print_raw_output(output)
             continue
 
         store.append("user", text)
@@ -361,3 +361,12 @@ def _assistant_has_tool_calls(data: Any) -> bool:
     return any(
         isinstance(block, dict) and block.get("type") == "tool_use" for block in data
     )
+
+
+def _print_raw_output(text: str) -> None:
+    if not text:
+        return
+    sys.stdout.write(text)
+    if not text.endswith("\n"):
+        sys.stdout.write("\n")
+    sys.stdout.flush()
