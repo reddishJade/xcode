@@ -1,24 +1,59 @@
 from __future__ import annotations
 
+import csv
 from html import escape
+import io
 import json
 from pathlib import Path
 from typing import Any
 
 from .schema import EvalReport
 
+_NUMERIC_FIELDS = ("llm_calls", "estimated_prompt_tokens", "model_total_ms", "tool_calls", "tool_errors", "steps")
 
-def write_report_files(report: EvalReport) -> tuple[Path, Path]:
-    """写入机器可读 JSON 和可浏览 HTML 报告。"""
+
+def write_report_files(report: EvalReport) -> tuple[Path, Path, Path]:
     report.output_dir.mkdir(parents=True, exist_ok=True)
     json_path = report.output_dir / "report.json"
     html_path = report.output_dir / "report.html"
+    csv_path = report.output_dir / "report.csv"
     json_path.write_text(
         json.dumps(report_to_dict(report), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     html_path.write_text(report_to_html(report), encoding="utf-8")
-    return json_path, html_path
+    csv_path.write_text(write_csv_report(report), encoding="utf-8")
+    return json_path, html_path, csv_path
+
+
+def write_csv_report(report: EvalReport) -> str:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "task_id", "trial_id", "success",
+        "graders_pass", "graders_total",
+        "tool_calls", "tool_errors",
+        "llm_calls", "tokens", "model_ms",
+    ])
+    for trial in report.trials:
+        g_pass = sum(1 for g in trial.graders if g.passed)
+        g_total = len(trial.graders)
+        writer.writerow([
+            trial.task_id, trial.trial_id, trial.success,
+            g_pass, g_total,
+            trial.metrics.get("tool_calls", ""),
+            trial.metrics.get("tool_errors", ""),
+            trial.metrics.get("llm_calls", ""),
+            trial.metrics.get("estimated_prompt_tokens", ""),
+            trial.metrics.get("model_total_ms", ""),
+        ])
+    writer.writerow([])
+    writer.writerow(["run_id", report.run_id, "success", report.success])
+    for k, v in report.metrics.items():
+        if isinstance(v, dict):
+            continue
+        writer.writerow([k, v])
+    return buf.getvalue()
 
 
 def report_to_dict(report: EvalReport) -> dict[str, Any]:
@@ -57,10 +92,19 @@ def report_to_html(report: EvalReport) -> str:
     total = m.get("trial_count", len(report.trials))
     grader_rate = m.get("grader_pass_rate")
     grader_pct = f"{grader_rate * 100:.1f}%" if grader_rate is not None else "—"
+    pass_at_k = m.get("pass@k", "—")
+    pass_k_rate = m.get("pass@k_rate")
+    pass_k_pct = f"{pass_k_rate * 100:.0f}%" if pass_k_rate is not None else ""
+    pass_pow_k = m.get("pass^k", "—")
+    pass_pow_rate = m.get("pass^k_rate")
+    pass_pow_pct = f"{pass_pow_rate * 100:.0f}%" if pass_pow_rate is not None else ""
     total_llm = m.get("total_llm_calls", 0)
     total_tokens = m.get("total_estimated_tokens", 0)
     total_model_ms = m.get("total_model_ms", 0.0)
+    total_tool_calls = m.get("total_tool_calls", 0)
+    total_tool_errors = m.get("total_tool_errors", 0)
     grader_table = _grader_summary_table(m.get("per_grader_pass_rate", {}))
+    dist_table = _distribution_table_html(m)
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -96,16 +140,21 @@ def report_to_html(report: EvalReport) -> str:
 <body>
   <h1>Xcode Eval Report</h1>
   <div>Run ID: <code>{escape(report.run_id)}</code></div>
-  <div class="summary">
+    <div class="summary">
     <div class="card"><div class="label">Status</div><div class="value {status.lower()}">{status}</div></div>
+    <div class="card"><div class="label">pass@k</div><div class="value">{pass_at_k} {pass_k_pct}</div></div>
+    <div class="card"><div class="label">pass^k</div><div class="value">{pass_pow_k} {pass_pow_pct}</div></div>
     <div class="card"><div class="label">Trials</div><div class="value">{passed}/{total}</div></div>
     <div class="card"><div class="label">Tasks</div><div class="value">{m.get("task_count", 0)}</div></div>
     <div class="card"><div class="label">Grader Pass Rate</div><div class="value">{grader_pct}</div></div>
+    <div class="card"><div class="label">Tool Calls</div><div class="value">{total_tool_calls}</div></div>
+    <div class="card"><div class="label">Tool Errors</div><div class="value">{total_tool_errors}</div></div>
     <div class="card"><div class="label">LLM Calls</div><div class="value">{total_llm}</div></div>
     <div class="card"><div class="label">Est. Tokens</div><div class="value">{total_tokens:,}</div></div>
     <div class="card"><div class="label">Model Latency</div><div class="value">{_fmt_ms(total_model_ms)}</div></div>
-  </div>
-  {grader_table}
+    </div>
+    {grader_table}
+    {dist_table}
   <h2>Trials</h2>
   <table>
     <thead>
@@ -219,3 +268,32 @@ def _file_evidence_html(evidence: list | None) -> str:
         if items:
             parts.append(f"<b>{escape(path)}</b>: " + " ".join(items))
     return "<br>".join(parts) if parts else ""
+
+
+def _distribution_table_html(m: dict[str, Any]) -> str:
+    rows = []
+    for key in _NUMERIC_FIELDS:
+        dist = m.get(f"{key}_distribution")
+        if not dist:
+            continue
+        bar_w = int(dist.get("p50", 0) / max(dist.get("max", 1), 1) * 100)
+        bar_w = min(bar_w, 100)
+        label = key.replace("_", " ")
+        rows.append(
+            f"<tr><td>{escape(label)}</td>"
+            f"<td>{dist['min']}</td>"
+            f"<td>{dist['p50']}</td>"
+            f"<td>{dist['p95']}</td>"
+            f"<td>{dist['p99']}</td>"
+            f"<td>{dist['max']}</td>"
+            f"<td>{dist['mean']}</td>"
+            f'<td><span class="grader-bar grader-bar-pass" style="width:{bar_w}px"></span></td>'
+            f"</tr>"
+        )
+    if not rows:
+        return ""
+    return (
+        "<h2>Distribution (p50/p95/p99)</h2>"
+        "<table><thead><tr><th>Metric</th><th>Min</th><th>p50</th><th>p95</th><th>p99</th><th>Max</th><th>Mean</th><th>p50→max</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )

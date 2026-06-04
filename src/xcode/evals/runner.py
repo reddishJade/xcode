@@ -261,8 +261,10 @@ def _string_tuple(value: object) -> tuple[str, ...]:
     return ()
 
 
+_NUMERIC_FIELDS = ("llm_calls", "estimated_prompt_tokens", "model_total_ms", "tool_calls", "tool_errors", "steps")
+
+
 def _extract_agent_metrics(events: list[StructuredAgentEvent]) -> dict[str, Any]:
-    """从 final event 的 metrics 中提取运行级指标。"""
     for event in events:
         if event.type == "final" and hasattr(event.data, "metrics"):
             agent_m = event.data.metrics
@@ -278,24 +280,33 @@ def _extract_agent_metrics(events: list[StructuredAgentEvent]) -> dict[str, Any]
                     "model_total_ms",
                     "tool_total_ms",
                     "total_observed_ms",
+                    "steps",
                 )
                 if k in agent_m
             }
     return {}
 
 
+def _percentile(sorted_values: Sequence[float], p: float) -> float:
+    if not sorted_values:
+        return 0.0
+    k = (len(sorted_values) - 1) * p / 100.0
+    f = int(k)
+    c = f + 1
+    if c >= len(sorted_values):
+        return sorted_values[-1]
+    return sorted_values[f] + (k - f) * (sorted_values[c] - sorted_values[f])
+
+
 def _build_run_metrics(
     tasks: Sequence[EvalTask], trials: list[TrialResult]
 ) -> dict[str, Any]:
-    """构建 run 级汇总指标：基础计数 + 跨 trial 聚合 + grader 统计。"""
     passed = sum(1 for t in trials if t.success)
     metrics: dict[str, Any] = {
         "task_count": len(tasks),
         "trial_count": len(trials),
         "passed_trials": passed,
     }
-    # pass@k: k 次至少一次正确（探索能力上限）
-    # pass^k: k 次全部正确（上线回归）
     from collections import defaultdict
     task_trials: dict[str, list[bool]] = defaultdict(list)
     for t in trials:
@@ -306,31 +317,57 @@ def _build_run_metrics(
     metrics["trials_per_task"] = k
     metrics["pass@k"] = f"{pass_at_k_count}/{len(task_trials)}"
     metrics["pass^k"] = f"{pass_pow_k_count}/{len(task_trials)}"
-    # 跨 trial 聚合延迟和 token
+    metrics["pass@k_rate"] = round(pass_at_k_count / len(task_trials), 4) if task_trials else 0.0
+    metrics["pass^k_rate"] = round(pass_pow_k_count / len(task_trials), 4) if task_trials else 0.0
     total_llm = 0
     total_tokens = 0
     total_model_ms = 0.0
+    total_tool_calls = 0
+    total_tool_errors = 0
     for t in trials:
         total_llm += t.metrics.get("llm_calls", 0)
         total_tokens += t.metrics.get("estimated_prompt_tokens", 0)
         total_model_ms += t.metrics.get("model_total_ms", 0.0)
+        total_tool_calls += t.metrics.get("tool_calls", 0)
+        total_tool_errors += t.metrics.get("tool_errors", 0)
     if total_llm:
         metrics["total_llm_calls"] = total_llm
     if total_tokens:
         metrics["total_estimated_tokens"] = total_tokens
     if total_model_ms:
         metrics["total_model_ms"] = round(total_model_ms, 1)
-    # grader 统计
+    metrics["total_tool_calls"] = total_tool_calls
+    metrics["total_tool_errors"] = total_tool_errors
+    for field in _NUMERIC_FIELDS:
+        values = [t.metrics.get(field, 0) or 0 for t in trials]
+        if all(v == 0 for v in values):
+            continue
+        sv = sorted(values)
+        metrics[f"{field}_distribution"] = {
+            "min": sv[0],
+            "p50": round(_percentile(sv, 50), 1),
+            "p95": round(_percentile(sv, 95), 1),
+            "p99": round(_percentile(sv, 99), 1),
+            "max": sv[-1],
+            "mean": round(sum(sv) / len(sv), 1),
+        }
     all_graders = [g for t in trials for g in t.graders]
     if all_graders:
         total_g = len(all_graders)
         passed_g = sum(1 for g in all_graders if g.passed)
         metrics["grader_pass_rate"] = round(passed_g / total_g, 4)
-        # 按 grader name 分组统计
         by_name: dict[str, list[bool]] = {}
         for g in all_graders:
             by_name.setdefault(g.name, []).append(g.passed)
         metrics["per_grader_pass_rate"] = {
             name: round(sum(v) / len(v), 4) for name, v in by_name.items()
+        }
+        task_graders: dict[str, list[bool]] = defaultdict(list)
+        for t in trials:
+            for g in t.graders:
+                task_graders[t.task_id].append(g.passed)
+        metrics["per_task_grader_rate"] = {
+            tid: round(sum(v) / len(v), 4)
+            for tid, v in sorted(task_graders.items())
         }
     return metrics

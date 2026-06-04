@@ -17,4 +17,5 @@ docs/claude.md
 docs/llm.md
 docs/rag.md
 packages/
+tmp/
 uv.lock

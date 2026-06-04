@@ -55,27 +55,39 @@ def main(argv: list[str] | None = None) -> int:
     report = runner.run()
     print(f"Eval run: {report.run_id}")
     print(f"Status: {'PASS' if report.success else 'FAIL'}")
-    _print_summary(report)
+    _print_enhanced_summary(report)
     print(f"Report JSON: {report.output_dir / 'report.json'}")
     print(f"Report HTML: {report.output_dir / 'report.html'}")
+    print(f"Report CSV:  {report.output_dir / 'report.csv'}")
     return 0 if report.success else 1
 
 
-def _print_summary(report) -> None:
-    """打印量化摘要：grader 通过率、pass@k/pass^k、LLM 调用、token、延迟。"""
+_NUMERIC_FIELDS = ("llm_calls", "estimated_prompt_tokens", "model_total_ms", "tool_calls", "tool_errors", "steps")
+
+
+def _fmt_ms(ms: float) -> str:
+    if ms < 1000:
+        return f"{ms:.0f}ms"
+    return f"{ms / 1000:.1f}s"
+
+
+def _print_enhanced_summary(report) -> None:
     m = report.metrics
+    _print_task_table(report)
     pass_at_k = m.get("pass@k")
+    pass_k_rate = m.get("pass@k_rate")
     pass_pow_k = m.get("pass^k")
+    pass_pow_rate = m.get("pass^k_rate")
     if pass_at_k and pass_pow_k:
-        print(f"pass@k: {pass_at_k}   pass^k: {pass_pow_k}")
+        rate_str = f" ({pass_k_rate * 100:.0f}%)" if pass_k_rate is not None else ""
+        pow_str = f" ({pass_pow_rate * 100:.0f}%)" if pass_pow_rate is not None else ""
+        print(f"pass@k: {pass_at_k}{rate_str}   pass^k: {pass_pow_k}{pow_str}")
     grader_rate = m.get("grader_pass_rate")
     if grader_rate is not None:
         all_graders = [g for t in report.trials for g in t.graders]
         passed_g = sum(1 for g in all_graders if g.passed)
-        print(
-            f"Graders: {passed_g}/{len(all_graders)} passed ({grader_rate * 100:.1f}%)"
-        )
-    # LLM 和延迟
+        print(f"Graders: {passed_g}/{len(all_graders)} ({grader_rate * 100:.1f}%)")
+        _print_grader_bars(m.get("per_grader_pass_rate", {}))
     parts = []
     total_llm = m.get("total_llm_calls", 0)
     if total_llm:
@@ -88,6 +100,67 @@ def _print_summary(report) -> None:
         parts.append(f"{total_ms / 1000:.1f}s model time")
     if parts:
         print(f"Metrics: {', '.join(parts)}")
+    _print_distribution(m)
+
+
+def _print_task_table(report) -> None:
+    trials = report.trials
+    if not trials:
+        return
+    from collections import OrderedDict
+    task_map: dict[str, list] = OrderedDict()
+    for t in trials:
+        task_map.setdefault(t.task_id, []).append(t)
+    print(f"\nTasks ({len(task_map)} total):")
+    id_w = min(max(max(len(t.task_id) for t in trials) + 2, 12), 30)
+    for task_id, task_trials in task_map.items():
+        best = next((t for t in task_trials if t.success), task_trials[0])
+        g_pass = sum(1 for g in best.graders if g.passed)
+        g_total = len(best.graders)
+        status = "PASS" if best.success else "FAIL"
+        calls = best.metrics.get("tool_calls", "")
+        tokens = best.metrics.get("estimated_prompt_tokens", "")
+        if isinstance(tokens, int):
+            tokens = f"{tokens:,}"
+        lat = best.metrics.get("model_total_ms", 0)
+        lat_str = _fmt_ms(lat) if lat else ""
+        mark = "+" if best.success else "x"
+        print(
+            f"  {mark} {task_id:<{id_w}} {status:>4}  "
+            f"graders {g_pass}/{g_total}  "
+            f"calls {str(calls):>3}  "
+            f"tokens {str(tokens):>7}  "
+            f"{lat_str}"
+        )
+
+
+def _print_grader_bars(per_grader: dict[str, float]) -> None:
+    if not per_grader:
+        return
+    print()
+    width = 20
+    name_w = min(max(len(k) for k in per_grader) + 2, 50)
+    for name, rate in sorted(per_grader.items()):
+        fill = int(rate * width)
+        bar = "#" * fill + "." * (width - fill)
+        print(f"  {name:<{name_w}} [{bar}] {rate * 100:.0f}%")
+
+
+def _print_distribution(m: dict[str, Any]) -> None:
+    rows = []
+    for field in _NUMERIC_FIELDS:
+        dist = m.get(f"{field}_distribution")
+        if not dist:
+            continue
+        rows.append(
+            f"  {field:<22} min={dist['min']}  "
+            f"p50={dist['p50']}  p95={dist['p95']}  "
+            f"p99={dist['p99']}  max={dist['max']}  mean={dist['mean']}"
+        )
+    if rows:
+        print(f"\nDistribution:")
+        for r in rows:
+            print(r)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
