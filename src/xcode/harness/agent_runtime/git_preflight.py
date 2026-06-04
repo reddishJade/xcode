@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 """每轮任务开始前注入的 Git 工作区基线。"""
 
 MAX_SECTION_CHARS = 6_000
+CACHE_TTL = 5.0  # seconds
+
+_cache: dict[str, tuple[float, str]] = {}
 
 
 def build_git_preflight(project_root: Path) -> str:
+    key = str(project_root.resolve())
+    now = time.monotonic()
+    cached = _cache.get(key)
+    if cached and (now - cached[0]) < CACHE_TTL:
+        return cached[1]
     status = _run_git(project_root, "status", "--short")
     if status is None:
         return "<git-preflight>\nstatus: unavailable\n</git-preflight>"
@@ -36,7 +45,9 @@ def build_git_preflight(project_root: Path) -> str:
             "relevant diff; do not overwrite unrelated changes."
         )
     lines.append("</git-preflight>")
-    return "\n".join(lines)
+    result = "\n".join(lines)
+    _cache[key] = (time.monotonic(), result)
+    return result
 
 
 def _run_git(project_root: Path, *args: str) -> str | None:
