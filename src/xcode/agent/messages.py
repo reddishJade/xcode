@@ -108,8 +108,9 @@ def _convert_block(block: ContentBlock) -> dict[str, Any] | None:
                 "arguments": block.arguments or {},
             },
         }
+    # ThinkingContent 通过 AssistantMessage.reasoning_content 单独传递，不在 content 中重复
     if isinstance(block, ThinkingContent):
-        return {"type": "text", "text": block.thinking}
+        return None
     # ImageContent 在 LLM 输出中不直接转换为 text
     return None
 
