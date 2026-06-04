@@ -7,8 +7,8 @@ import sys
 
 from .cli.repl import run_repl
 from .cli.setup_wizard import has_valid_config, run_setup_wizard
-from xcode.harness.config import discover_runtime_config, resolve_config_path
-from xcode.harness.app import build_app
+from .harness.config import discover_runtime_config, resolve_config_path
+from .harness.app import build_app
 
 
 def parse_args() -> argparse.Namespace:
@@ -100,4 +100,4 @@ def _print_stream(events) -> None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

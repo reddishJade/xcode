@@ -10,10 +10,10 @@ agent/Agent.run() 执行。
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Generator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from ...agent.agent import Agent
 from ...agent.messages import convert_to_llm
@@ -55,7 +55,7 @@ from .compaction import CompactController, estimate_message_tokens
 from xcode.ai.events import ProviderEvent, ToolCall as ToolUseBlock
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
-from .execution_modes import ActPolicy, mode_notice, PlanPolicy, policy_for_mode
+from .execution_modes import mode_notice, policy_for_mode
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
 from ..observability import (
@@ -79,7 +79,8 @@ class _FallbackSwitchingProvider:
     """Provider wrapper that switches to fallback after consecutive errors.
 
     Tracks consecutive error count across calls and switches to fallback_provider
-    when the threshold is reached. Used by harness layer for model fallback.
+    when the threshold is reached. After ``error_threshold`` successful calls on
+    the fallback, retries the primary provider.
     """
 
     def __init__(
@@ -87,11 +88,14 @@ class _FallbackSwitchingProvider:
         primary: ModelProvider,
         fallback: ModelProvider,
         error_threshold: int = 3,
+        fallback_success_threshold: int = 3,
     ) -> None:
         self._primary = primary
         self._fallback = fallback
         self._error_threshold = error_threshold
+        self._fallback_success_threshold = fallback_success_threshold
         self._consecutive_errors: int = 0
+        self._fallback_successes: int = 0
         self._using_fallback: bool = False
 
     @property
@@ -132,6 +136,63 @@ class _FallbackSwitchingProvider:
                 and self._fallback is not None
             ):
                 self._using_fallback = True
+                self._fallback_successes = 0
+                async for event in self._stream_with(
+                    self._fallback, messages, tools, options, kwargs
+                ):
+                    yield event
+            else:
+                raise
+
+    @staticmethod
+    async def _stream_with(
+        provider: Any,
+        messages: list[dict[str, Any]],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None,
+        kwargs: dict[str, Any],
+    ) -> AsyncIterator[ProviderEvent]:
+        try:
+            async for event in provider.stream(
+                messages, tools, options=options, **kwargs
+            ):
+                yield event
+        except TypeError:
+            async for event in provider.stream(messages, tools):
+                yield event
+
+
+class _FallbackWithRetryPrimary(_FallbackSwitchingProvider):
+    """Extends _FallbackSwitchingProvider to retry primary after success threshold."""
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ProviderEvent]:
+        provider = self._fallback if self._using_fallback else self._primary
+        try:
+            async for event in self._stream_with(
+                provider, messages, tools, options, kwargs
+            ):
+                if self._using_fallback:
+                    self._fallback_successes += 1
+                    if self._fallback_successes >= self._fallback_success_threshold:
+                        self._using_fallback = False
+                        self._fallback_successes = 0
+                self._consecutive_errors = 0
+                yield event
+        except Exception:
+            self._consecutive_errors += 1
+            if (
+                not self._using_fallback
+                and self._consecutive_errors >= self._error_threshold
+                and self._fallback is not None
+            ):
+                self._using_fallback = True
+                self._fallback_successes = 0
                 async for event in self._stream_with(
                     self._fallback, messages, tools, options, kwargs
                 ):
@@ -219,7 +280,7 @@ class StructuredAgent:
     ) -> None:
         self.provider: ModelProvider = provider
         if fallback_provider is not None:
-            self.provider = _FallbackSwitchingProvider(provider, fallback_provider)
+            self.provider = _FallbackWithRetryPrimary(provider, fallback_provider)
         self._original_provider = provider
         self.project_root = project_root
         self.registry = registry

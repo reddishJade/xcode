@@ -192,7 +192,6 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
             raw_result = runner.result(job_id)
             job = runner._jobs.get(job_id)
             prompt = job.prompt if job else ""
-            summary = build_branch_summary(job_id, prompt, raw_result)
             return f"status=done\n{build_branch_summary(job_id, prompt, raw_result).summary}"
         except KeyError as exc:
             return str(exc)
@@ -240,10 +239,10 @@ def build_branch_summary(
 ) -> BranchSummaryMessage:
     lines = result.strip().splitlines()
     summary_lines = [f"Task: {prompt[:80]}"]
-    output_lines = [l for l in lines if l.strip()][:5]
+    output_lines = [line for line in lines if line.strip()][:5]
     if output_lines:
         summary_lines.append("Results:")
-        summary_lines.extend(f"  {l}" for l in output_lines)
+        summary_lines.extend(f"  {line}" for line in output_lines)
     if len(lines) > 5:
         summary_lines.append(f"  (... {len(lines) - 5} more lines)")
     return BranchSummaryMessage(

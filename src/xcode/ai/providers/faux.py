@@ -15,6 +15,7 @@ from xcode.ai.events import (
     ToolCallEvent,
     UsageUpdate,
 )
+from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
 
 """模拟 provider：可脚本化响应队列，用于测试。"""
@@ -66,11 +67,16 @@ class FauxResponse:
     delay_seconds: float = 0.0
 
 
-class FauxProvider:
+class FauxProvider(ModelProvider):
     """可脚本化的模拟 provider。
 
     支持预设多轮响应队列、tool call、thinking、usage 事件。
     每次 ``stream()`` 消费队列中的一个响应。
+
+    接受：
+    - ProviderEvent 列表（单轮）
+    - ProviderEvent 列表的列表（多轮）
+    - ``(messages, tools) -> list[ProviderEvent]`` 工厂函数
     """
 
     def __init__(
@@ -86,22 +92,26 @@ class FauxProvider:
         self.call_count = 0
         self._last_messages: list[dict[str, Any]] = []
         self._last_tools: list[ToolDefinition] = []
+        self._factory: Any = None
 
         if response_spec is not None:
-            items = list(response_spec)
-            if (
-                items
-                and isinstance(items[0], Sequence)
-                and not isinstance(items[0], (FinalMessage, ReasoningDelta, TextDelta, ToolCallEvent, UsageUpdate))
-            ):
-                for resp in items:
-                    self._queue.append(FauxResponse(events=list(resp)))
+            if callable(response_spec):
+                self._factory = response_spec
             else:
-                self._queue.append(
-                    FauxResponse(
-                        events=list(response_spec), delay_seconds=delay_seconds
+                items = list(response_spec)
+                if (
+                    items
+                    and isinstance(items[0], Sequence)
+                    and not isinstance(items[0], (FinalMessage, ReasoningDelta, TextDelta, ToolCallEvent, UsageUpdate))
+                ):
+                    for resp in items:
+                        self._queue.append(FauxResponse(events=list(resp)))
+                else:
+                    self._queue.append(
+                        FauxResponse(
+                            events=list(response_spec), delay_seconds=delay_seconds
+                        )
                     )
-                )
 
     def push(self, events: list[ProviderEvent], delay: float = 0.0) -> None:
         """向队列尾部添加一个响应。"""
@@ -135,6 +145,10 @@ class FauxProvider:
         self._last_tools = tools
 
         if not self._queue:
+            if self._factory is not None:
+                for event in self._factory(messages, tools):
+                    yield event
+                return
             yield FinalMessage(
                 content="No more faux responses queued.",
                 stop_reason="error",
@@ -146,6 +160,14 @@ class FauxProvider:
             await asyncio.sleep(resp.delay_seconds)
         for event in resp.events:
             yield event
+
+    @property
+    def last_messages(self) -> list[dict[str, Any]]:
+        return self._last_messages
+
+    @property
+    def last_tools(self) -> list[ToolDefinition]:
+        return self._last_tools
 
 
 def register_faux_provider(

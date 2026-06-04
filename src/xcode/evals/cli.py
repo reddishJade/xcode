@@ -158,7 +158,7 @@ def _print_distribution(m: dict[str, Any]) -> None:
             f"p99={dist['p99']}  max={dist['max']}  mean={dist['mean']}"
         )
     if rows:
-        print(f"\nDistribution:")
+        print("\nDistribution:")
         for r in rows:
             print(r)
 

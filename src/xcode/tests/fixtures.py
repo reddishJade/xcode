@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Iterator
-from typing import Any, cast
+from collections.abc import Callable
+from typing import Any
+
 from xcode.ai.events import ProviderEvent
-from xcode.ai.providers.protocol import ModelProvider
-from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.ai.providers.faux import FauxProvider
 
 
-class FakeProvider(ModelProvider):
-    """A strict FakeProvider that only accepts explicit ProviderEvent lists or factories."""
+class FakeProvider(FauxProvider):
+    """Lightweight alias for FauxProvider.
 
-    _iterator: Iterator[list[ProviderEvent]] | None
+    Supports ProviderEvent lists, list-of-lists, or callable factories.
+    Delegates to the consolidated FauxProvider implementation.
+    """
 
     def __init__(
         self,
@@ -18,32 +20,4 @@ class FakeProvider(ModelProvider):
         | list[list[ProviderEvent]]
         | Callable[[list[Any], list[Any]], list[ProviderEvent]],
     ) -> None:
-        self.events = events
-        self._iterator = None
-        if isinstance(events, list):
-            if events and isinstance(events[0], list):
-                self._iterator = iter(cast(list[list[ProviderEvent]], events))
-            else:
-                self._iterator = iter([cast(list[ProviderEvent], events)])
-
-    async def stream(
-        self,
-        messages: list[Any],
-        tools: list[ToolDefinition],
-        options: StreamOptions | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[ProviderEvent]:
-        if callable(self.events):
-            res_list = self.events(messages, tools)
-        elif self._iterator is not None:
-            try:
-                res_list = next(self._iterator)
-            except StopIteration:
-                res_list = []
-        else:
-            raise TypeError(
-                "events must be a list of ProviderEvents or a callable factory"
-            )
-
-        for event in res_list:
-            yield event
+        super().__init__(response_spec=events)

@@ -12,8 +12,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from .types import (
     AfterToolCallContext,
     AgentContext,
@@ -31,6 +29,8 @@ from .types import (
     ToolExecutionUpdateEvent,
     ToolResultMessage,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

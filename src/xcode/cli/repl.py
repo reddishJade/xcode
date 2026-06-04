@@ -339,7 +339,7 @@ class _ReplTurnRenderer:
         if self._progress_tool_id != tool_id:
             self._clear_progress()
             self._progress_tool_id = tool_id
-        lines = [l for l in partial.splitlines() if l.strip()]
+        lines = [line for line in partial.splitlines() if line.strip()]
         last_line = lines[-1] if lines else ""
         if len(last_line) > 100:
             last_line = last_line[:97] + "..."

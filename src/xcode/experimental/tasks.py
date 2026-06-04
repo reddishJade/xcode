@@ -317,7 +317,6 @@ def advance_task(store: TaskStore, task_id: int | str) -> list[TaskRecord]:
     返回所有受影响的任务列表。
     """
     with store._locked():
-        current = store.get(task_id)
         updated = store.update(task_id, status="completed")
         affected = [updated]
 

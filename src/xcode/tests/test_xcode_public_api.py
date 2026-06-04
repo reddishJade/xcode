@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 import xcode as core
-import xcode.harness.agent_runtime as agent_runtime
 import xcode.harness.tools as tools
 
 

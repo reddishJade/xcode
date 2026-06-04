@@ -195,6 +195,8 @@ def _parse_judge_response(
 ) -> tuple[GraderResult, ...]:
     """解析 LLM judge 的结构化输出。
 
+    支持 ``PASS: <编号>: <理由>`` / ``FAIL: <编号>: <理由>`` 和
+    ``PASS|FAIL: <编号>: <理由>`` 两种格式。
     当无任何一行被成功解析时返回空 tuple（调用方据此不纳入 success 判定）。
     """
     results: list[GraderResult] = []
@@ -204,12 +206,22 @@ def _parse_judge_response(
             continue
 
         passed = False
+        rest: str | None = None
+        # 标准格式 PASS: / FAIL:
         if line.startswith("PASS:"):
             passed = True
             rest = line[5:].strip()
         elif line.startswith("FAIL:"):
             rest = line[5:].strip()
+        # 容错：LLM 可能直接从模板粘贴 PASS|FAIL:
+        elif line.startswith("PASS|FAIL:"):
+            rest = line[10:].strip()
+            if rest and rest[0] == "1":
+                passed = True
         else:
+            continue
+
+        if rest is None:
             continue
 
         parts = rest.split(":", 1)

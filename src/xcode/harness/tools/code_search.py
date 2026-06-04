@@ -19,6 +19,28 @@ MAX_GLOB_RESULTS = 200
 MAX_LS_ENTRIES = 500
 _RG_MISSING_HINT_EMITTED = False
 
+_BLOCKED_CALL_NAMES = frozenset({
+    "exec", "eval", "open", "__import__",
+    "getattr", "setattr", "delattr", "vars", "locals", "globals",
+    "compile", "breakpoint", "input",
+})
+
+_SAFE_BUILTINS: dict[str, Any] = {
+    "abs": abs, "all": all, "any": any, "ascii": ascii, "bin": bin,
+    "bool": bool, "bytearray": bytearray, "bytes": bytes,
+    "chr": chr, "complex": complex, "dict": dict, "divmod": divmod,
+    "enumerate": enumerate, "filter": filter, "float": float,
+    "format": format, "frozenset": frozenset, "hash": hash, "hex": hex,
+    "id": id, "int": int, "isinstance": isinstance, "issubclass": issubclass,
+    "iter": iter, "len": len, "list": list, "map": map, "max": max,
+    "min": min, "next": next, "object": object, "oct": oct, "ord": ord,
+    "pow": pow, "print": print, "range": range, "repr": repr,
+    "reversed": reversed, "round": round, "set": set,
+    "slice": slice, "sorted": sorted, "str": str, "sum": sum,
+    "tuple": tuple, "type": type, "zip": zip,
+    "True": True, "False": False, "None": None,
+}
+
 
 def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
     root = project_root.resolve()
@@ -58,10 +80,19 @@ def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
                         fn.attr if isinstance(fn, ast.Attribute) else
                         fn.id if isinstance(fn, ast.Name) else ""
                     )
-                    if name in ("exec", "eval", "open", "__import__"):
+                    if name in _BLOCKED_CALL_NAMES:
                         return f"Error: {name}() is not allowed"
+            safe_globals: dict[str, Any] = {
+                "__builtins__": _SAFE_BUILTINS,
+            }
+            safe_globals.update(_EVAL_NS)
             compiled = compile(tree, "<programmatic>", "exec")
-            exec(compiled, _EVAL_NS)
+            exec(compiled, safe_globals)
+            _EVAL_NS.clear()
+            _EVAL_NS.update(
+                {k: v for k, v in safe_globals.items()
+                 if k not in ("__builtins__",)}
+            )
             result = _EVAL_NS.get("result") or _EVAL_NS.get("output", "")
             if not result:
                 return "ok (no result)"
