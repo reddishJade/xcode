@@ -32,7 +32,7 @@ uv run python -m unittest discover src\xcode\tests
 uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
 uv run python -m unittest src.xcode.tests.test_xcode_mcp_client
 uv run python -m unittest src.xcode.tests.test_xcode_mailbox src.xcode.tests.test_xcode_progress
-uv run python -m unittest src.xcode.tests.test_eval_pipeline src.xcode.tests.test_eval_harness
+uv run python -m unittest src.xcode.tests.test_eval_pipeline
 ```
 
 ---
@@ -104,10 +104,7 @@ uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
 
 ## 6. Agent Eval Pipeline
 
-`src/xcode/evals/` 包含两类 eval：
-
-1. `eval_harness.py`：直接验证 core tools 的 smoke harness。
-2. `EvalRunner`：消费 `XcodeApp.aask_stream()` 的事件流，记录 trace，并输出 `report.json` / `report.html`。
+`src/xcode/evals/` 包含 `EvalRunner`，消费 `XcodeApp.aask_stream()` 的事件流，记录 trace，并输出 `report.json` / `report.html`。
 
 `EvalTask` 支持：
 
@@ -164,6 +161,8 @@ xcode-eval --real --project-root . --tasks .local/eval_tasks.jsonl --output-dir 
 ```text
 examples/eval/coding-tasks.jsonl
 examples/eval/fixtures/tiny-calculator/
+examples/eval/fixtures/buggy-math/
+examples/eval/fixtures/string-utils/
 ```
 
 运行：
@@ -203,7 +202,7 @@ uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
 涉及 eval 文档变更：
 
 ```powershell
-uv run python -m unittest src.xcode.tests.test_eval_pipeline src.xcode.tests.test_eval_harness
+uv run python -m unittest src.xcode.tests.test_eval_pipeline
 ```
 
 ---

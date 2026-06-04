@@ -44,11 +44,13 @@ src/xcode/main.py
   -> src/xcode/cli/repl.py::run_repl() 或单次 --prompt
 ```
 
-`build_app()` 是当前唯一应用装配中心。它负责：
+`build_app()` 是应用装配入口。装配逻辑主要委托给 `assembly.py`，后者负责：
 
 - 读取 runtime config
+- 构造 shared infra（`ContextualRetrievalState`、`CancellationToken`、`CompactController`）
 - 构造 provider bundle
 - 构造 core tools 和 opt-in tools
+- 构造 tool registry
 - 构造 `StructuredAgent`
 - 按配置连接 compactor、audit logger、hooks、subagent runner、experimental 组件
 
@@ -81,7 +83,8 @@ src/xcode/main.py
 
 | 模块 | 职责 |
 | --- | --- |
-| `app.py` | 应用装配、工具组展开、experimental opt-in、provider/agent 连接 |
+| `app.py` | 应用装配入口，委托 `assembly.py` |
+| `assembly.py` | 装配核心：config 解析、shared infra、tool registry、provider bundle、experimental services |
 | `config.py` | runtime config dataclass、配置读取、相对路径解析 |
 | `session.py` | JSONL 会话存储、索引、resume、fork、plan artifact |
 | `skills.py` | `ToolSpec`、工具输入解析、HITL 执行和脱敏入口 |
@@ -97,18 +100,21 @@ src/xcode/main.py
 
 | 模块 | 职责 |
 | --- | --- |
-| `types.py` | LLM 可见的共享接口类型，例如 provider tool schema |
+| `types.py` | LLM 可见的共享接口类型，例如 `ToolDefinition` |
 | `events.py` | provider stream 输出事件协议 |
-| `stream.py` | provider response 到 agent event 的流式适配 |
 | `providers/factory.py` | 根据 profile 构造 provider bundle |
 | `providers/protocol.py` | `ModelProvider` 协议 |
 | `providers/codec.py` | OpenAI-compatible schema 和 delta 编解码 |
+| `providers/openai_compat.py` | OpenAI Chat Completions 兼容基类 |
 | `providers/openai.py` | OpenAI Chat Completions 和 stateful Responses |
-| `providers/deepseek.py` | DeepSeek thinking mode 适配 |
 | `providers/anthropic.py` | Anthropic Messages 适配 |
+| `providers/deepseek.py` | DeepSeek thinking mode 适配 |
+| `providers/chatglm.py` | ChatGLM 适配 |
 | `providers/mimo.py` | MiMo 适配 |
 | `providers/faux.py` | 测试用 provider |
 | `providers/runtime.py` | retry/rate limit 运行期控制 |
+| `providers/metrics.py` | provider metrics 追踪 |
+| `providers/stream_codec.py` | provider stream delta 到 event 的编解码 |
 
 ### `src/xcode/agent/`
 
@@ -118,7 +124,11 @@ src/xcode/main.py
 | --- | --- |
 | `types.py` | Agent 消息、事件、工具运行时协议、loop callback 合约 |
 | `messages.py` | Agent message 到 LLM message 的转换 |
+| `agent.py` | Agent 薄封装，包装 `run_agent_loop` |
 | `agent_loop.py` | 无状态 Agent loop，provider、工具执行、turn hooks 均通过合约注入 |
+| `provider_response.py` | Provider 响应类型 |
+| `provider_retry.py` | Provider retry 逻辑 |
+| `tool_execution.py` | 工具执行逻辑，从 `agent_loop.py` 提取 |
 
 ### `src/xcode/evals/`
 
@@ -131,7 +141,6 @@ src/xcode/main.py
 | `tracing.py` | JSONL trace 记录 |
 | `graders.py` | 确定性 grader |
 | `reporting.py` | JSON/HTML 报告 |
-| `eval_harness.py` | core tools smoke harness |
 | `cli.py` | `xcode-eval` / `python -m xcode.evals.cli` |
 
 ### `src/xcode/experimental/`
@@ -142,10 +151,12 @@ src/xcode/main.py
 | --- | --- | --- |
 | `worktree.py` | `worktree` | Git worktree 任务隔离；工具：`create_worktree_task`、`remove_worktree_task` |
 | `mcp.py` | `mcp` | stdio MCP client、schema cache、动态 MCP tool proxy |
+| `mcp_client.py` | internal | MCP stdio JSON-RPC 客户端，被 `mcp.py` 引用 |
 | `tasks.py` | `tasks` | JSON/filelock 任务存储、依赖排序、Kanban 视图；工具：`create_task`、`update_task`、`list_tasks`、`get_task` |
 | `mailbox.py` | `mailbox` | append-only JSONL mailbox；工具：`send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
 | `progress.py` | `progress` | 长任务 checklist 保存/恢复；工具：`save_task_progress`、`resume_task_progress` |
 | `memory.py` | `memory` | `MEMORY.md` 记忆块校验、BM25 召回、压缩摘要 consolidation |
+| `memory_parsing.py` | internal | 记忆块解析数据类型，被 `memory.py` 引用 |
 | `bm25.py` | internal | `memory` 使用的纯 Python BM25Okapi，不单独作为启用入口 |
 | `plugins.py` | `plugins` | `.local/plugins/*.py` 动态加载，收集 tools/hooks/skills |
 | `daemon.py` | `daemon` | `HeartbeatDaemon`，轮询 mailbox/git/tasks |

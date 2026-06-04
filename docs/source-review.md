@@ -29,13 +29,12 @@ src/xcode/main.py
 
 ## 2. 装配中心
 
-`src/xcode/harness/app.py::build_app()` 是当前应用装配中心。
+`src/xcode/harness/app.py::build_app()` 是应用装配入口。装配委托给 `assembly.py`，后者负责：
 
-它负责：
-
-- 构造 provider bundle。
-- 初始化 `ContextualRetrievalState`、`CancellationToken`、`CompactController`。
+- 解析 config。
+- 初始化 shared infra（`ContextualRetrievalState`、`CancellationToken`、`CompactController`）。
 - 根据 `tools.enabled_groups` 构造可见工具 registry。
+- 构造 provider bundle。
 - 构造 `StructuredAgent`。
 - 按 opt-in group 连接 experimental 组件。
 
@@ -338,7 +337,6 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 `src/xcode/evals/` 包含两条验证线：
 
-- `eval_harness.py`：核心工具 smoke。
 - `EvalRunner`：消费 `XcodeApp.aask_stream()` 事件流，生成 trace、JSON report 和 HTML report。
 
 当前 grader 是确定性规则，覆盖最终事件、答案片段、工具调用约束、工具错误数和文件证据。
@@ -354,7 +352,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 - `tasks` + `progress` 能表达任务和 checklist，但还不是完整可重入长任务编排器。
 - eval 仍以确定性 grader 为主，没有 LLM-as-judge、Pass@k 和外部 benchmark 接入。
 - `intercept_usage` closure 和 `_record_usage`/`_ensure_metrics` 在 4-5 个 provider 中有重复，可抽取到基类或工具函数。
-- Provider 层仍缺少 OpenAI-compatible 基类抽取（~200 行重复横跨 deepseek/chatglm/openai/structured）。
+- Provider 层已完成 OpenAI-compatible 基类 `openai_compat.py` 抽取，`deepseek`、`chatglm`、`mimo` 均已继承自该基类。
 
 ---
 
