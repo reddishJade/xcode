@@ -97,9 +97,8 @@ class ChatGLMProvider(OpenAICompatProvider):
 
         create = cast(Any, self.client.chat.completions.create)
         stream = self.runtime.run(lambda: create(**kwargs))
-        self.metrics["sent_messages"] = len(openai_messages)
         yield from chat_stream_to_events(
-            self._intercept_usage(stream, len(openai_messages))
+            self._intercept_stream(stream, len(openai_messages))
         )
 
     def _chat_kwargs(

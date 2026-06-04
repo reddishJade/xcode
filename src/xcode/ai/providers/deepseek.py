@@ -99,10 +99,8 @@ class DeepSeekProvider(OpenAICompatProvider):
         # DeepSeek has its own _call_chat_api pattern due to extra params
         create = cast(Any, self.client.chat.completions.create)
         stream = self.runtime.run(lambda: create(**params))
-        self._ensure_metrics()
-        self.metrics["sent_messages"] = len(params["messages"])
         yield from chat_stream_to_events(
-            self._intercept_usage(stream, len(params["messages"]))
+            self._intercept_stream(stream, len(params["messages"]))
         )
 
     def _clean_reasoning_content(

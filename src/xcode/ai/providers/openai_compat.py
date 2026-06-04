@@ -101,9 +101,7 @@ class OpenAICompatProvider(ProviderMetricsMixin):
 
         create = cast(Any, self.client.chat.completions.create)
         stream = self.runtime.run(lambda: create(**params))
-        self._ensure_metrics()
-        self.metrics["sent_messages"] = message_count
-        return chat_stream_to_events(self._intercept_usage(stream, message_count))
+        return chat_stream_to_events(self._intercept_stream(stream, message_count))
 
     # --- Unified thinking abstractions ---
 

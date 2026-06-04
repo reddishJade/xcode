@@ -31,6 +31,14 @@ class ProviderMetricsMixin:
         if not hasattr(self, "metrics"):
             self.metrics = self._default_metrics()
 
+    def _intercept_stream(
+        self, stream: Iterable[Any], message_count: int
+    ) -> Iterator[Any]:
+        """确保 metrics 已初始化，设置 sent_messages，拦截 usage 并返回流。"""
+        self._ensure_metrics()
+        self.metrics["sent_messages"] = message_count
+        return self._intercept_usage(stream, message_count)
+
     def _intercept_usage(
         self, chunks: Iterable[Any], message_count: int
     ) -> Iterator[Any]:
