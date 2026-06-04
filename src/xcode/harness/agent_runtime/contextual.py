@@ -40,18 +40,25 @@ class ContextualRetrievalState:
         self.max_results = max_results
         self._files: deque[str] = deque()
         self._file_set: set[str] = set()
+        self._active_file: str | None = None
         self._tool_results: deque[RecentToolResult] = deque(maxlen=max_results)
         self._tool_calls: deque[RecentToolCall] = deque(maxlen=max_tool_calls)
 
     def record_file(self, path: Path | str) -> None:
         text = self._display(path)
-        if not text or text in self._file_set:
+        if not text:
             return
+        if text in self._file_set:
+            self._files.remove(text)
+        else:
+            self._file_set.add(text)
         self._files.append(text)
-        self._file_set.add(text)
+        self._active_file = text
         while len(self._files) > self.max_files:
             removed = self._files.popleft()
             self._file_set.discard(removed)
+            if self._active_file == removed:
+                self._active_file = self._files[-1] if self._files else None
 
     def record_tool_result(self, tool: str, content: str) -> None:
         clean = " ".join(content.strip().split())
@@ -91,7 +98,10 @@ class ContextualRetrievalState:
             "<contextual-retrieval>",
             "This block contains only context already made relevant by the current task.",
             "Use it to orient tool choices; do not treat it as a replacement for exact search or file reads.",
+            "For ambiguous references such as 'this file' or 'it', prefer active_file as the first candidate, then verify before editing.",
         ]
+        if self._active_file:
+            lines.append(f"active_file: {self._active_file}")
         if self._files:
             lines.append("recent_files:")
             lines.extend(f"- {path}" for path in self._files)

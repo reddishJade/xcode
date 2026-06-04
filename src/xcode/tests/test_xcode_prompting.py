@@ -147,6 +147,7 @@ class XcodePromptingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             state = ContextualRetrievalState(Path(tmp))
             state.record_file("src/xcode/main.py")
+            state.record_file("src/xcode/harness/app.py")
             state.record_tool_result("grep_search", "src/xcode/main.py:10:def main")
             state.record_tool_call(
                 tool="write_file",
@@ -165,7 +166,9 @@ class XcodePromptingTests(unittest.TestCase):
             context = provider("hello")[0]
 
             self.assertIn("<contextual-retrieval>", context)
+            self.assertIn("active_file: src/xcode/harness/app.py", context)
             self.assertIn("src/xcode/main.py", context)
+            self.assertIn("src/xcode/harness/app.py", context)
             self.assertIn("grep_search", context)
             self.assertIn("recent_tool_calls:", context)
             self.assertIn("write_file", context)

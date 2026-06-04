@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
+from typing import Any
 import unittest
 from unittest.mock import patch
 
 from xcode.harness.assembly import build_project_scoped_registry
 from xcode.harness.app import XcodeApp, build_app
-from xcode.harness.agent_runtime import StructuredAgent
-from xcode.ai.events import FinalMessage, TextDelta, ToolCall, ToolCallEvent
+from xcode.ai.events import (
+    FinalMessage,
+    Message,
+    ProviderEvent,
+    TextDelta,
+    ToolCall,
+    ToolCallEvent,
+)
 from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.config import (
     AgentConfig,
     DaemonRuntimeConfig,
@@ -275,7 +285,13 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.calls = 0
 
-            async def stream(self, messages, tools):
+            async def stream(
+                self,
+                messages: list[Message],
+                tools: list[ToolDefinition],
+                options: StreamOptions | None = None,
+                **kwargs: Any,
+            ) -> AsyncIterator[ProviderEvent]:
                 from xcode.ai.events import ToolCall, ToolCallEvent
 
                 self.calls += 1
@@ -312,6 +328,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         self.assertIn("recent_tool_results:", rendered)
         self.assertIn("- read_file:", rendered)
+        self.assertIn("active_file: a.txt", rendered)
 
     def test_subagent_inherits_only_enabled_core_tools(self) -> None:
         seen_child_tools: list[list[str]] = []
@@ -421,7 +438,13 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         seen_reads: list[str] = []
 
         class ReadingProvider(ModelProvider):
-            async def stream(self, messages, tools):
+            async def stream(
+                self,
+                messages: list[Message],
+                tools: list[ToolDefinition],
+                options: StreamOptions | None = None,
+                **kwargs: Any,
+            ) -> AsyncIterator[ProviderEvent]:
                 if messages and isinstance(messages[-1].get("content"), list):
                     result_block = messages[-1]["content"][0]
                     seen_reads.append(str(result_block.get("content", "")))
@@ -495,7 +518,13 @@ class MockProvider(ModelProvider):
     def __init__(self, seen_child_tools: list[list[str]]):
         self.seen_child_tools = seen_child_tools
 
-    async def stream(self, messages, tools):
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ProviderEvent]:
         self.seen_child_tools.append([tool.name for tool in tools])
         yield TextDelta("child done")
         yield FinalMessage("", "end_turn")
