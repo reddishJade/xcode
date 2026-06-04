@@ -6,6 +6,7 @@ import unittest
 
 from xcode.cli.repl_tools import parse_tool_input
 from xcode.harness.tools import build_bash_tool
+from xcode.harness.tools.bash import OutputAccumulator
 from xcode.harness.skills import run_tool
 
 
@@ -83,6 +84,26 @@ class XcodeBashToolTests(unittest.TestCase):
             assert tool.schema is not None
             self.assertEqual(tool.schema["required"], ["command"])
             self.assertIn("timeout", tool.schema["properties"])
+
+    def test_bash_accumulator_preserves_full_output_file(self) -> None:
+        acc = OutputAccumulator(max_bytes=80, max_lines=2)
+        acc.append(b"one\n")
+        acc.append(b"two\n")
+        acc.append(b"three\n")
+
+        output = acc.snapshot()
+        marker = "Full output: "
+        self.assertIn(marker, output)
+        full_path = output.split(marker, 1)[1].rstrip("]")
+        acc.close()
+
+        try:
+            self.assertEqual(
+                Path(full_path).read_text(encoding="utf-8"),
+                "one\ntwo\nthree\n",
+            )
+        finally:
+            Path(full_path).unlink(missing_ok=True)
 
     def test_bash_static_risk_is_low(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
