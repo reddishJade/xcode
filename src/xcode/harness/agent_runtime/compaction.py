@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from xcode.agent.types import CompactInstructions
@@ -43,9 +43,11 @@ class LayeredCompactor:
         budget_trigger_token_ratio: float = 0.5,
         on_compact: Callable[[str], None] | None = None,
         compact_instructions: CompactInstructions | None = None,
+        summarize_fn: SummarizeFn | None = None,
     ) -> None:
         self.transcript_dir = transcript_dir
         self.compact_instructions = compact_instructions
+        self.summarize_fn = summarize_fn
         self.keep_recent_tool_results = keep_recent_tool_results
         self.max_tool_result_chars = max_tool_result_chars
         self.max_recent_messages = max_recent_messages
@@ -82,6 +84,7 @@ class LayeredCompactor:
             micro,
             max_recent_messages=self.max_recent_messages,
             compact_instructions=self.compact_instructions,
+            summarize_fn=self.summarize_fn,
         )
         if len(final_messages) > 1:
             second_msg = final_messages[1]
@@ -300,10 +303,30 @@ def estimate_text_tokens(text: str) -> int:
     return len(encoding.encode(text))
 
 
+type SummarizeFn = Callable[[list[dict[str, Any]]], str | Awaitable[str]]
+"""可选的 LLM 摘要函数。接收旧消息列表，返回摘要文本。"""
+
+
+SUMMARIZE_SYSTEM_PROMPT = (
+    "Summarize the following conversation turns into a concise summary. "
+    "Preserve architecture decisions, file changes, and TODO items. "
+    "Output only the summary, no preamble."
+)
+
+
+def build_summarize_prompt(older: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """构建 LLM 摘要的消息列表。与 claude.md 描述的 fork → Summarize 模式对应。"""
+    return [
+        {"role": "user", "content": SUMMARIZE_SYSTEM_PROMPT},
+        *older,
+    ]
+
+
 def summarize_messages(
     messages: list[dict[str, Any]],
     max_recent_messages: int = 8,
     compact_instructions: CompactInstructions | None = None,
+    summarize_fn: SummarizeFn | None = None,
 ) -> list[dict[str, Any]]:
     if len(messages) <= max_recent_messages + 1:
         return messages
@@ -322,12 +345,20 @@ def summarize_messages(
     if not older:
         return messages
 
-    summary_lines = []
-    for message in older:
-        content = _content_preview(message.get("content"))
-        summary_lines.append(f"- {message.get('role')}: {content}")
-
-    summary_content = "[Compressed]\n" + "\n".join(summary_lines)
+    if summarize_fn:
+        raw = summarize_fn(older)
+        if isinstance(raw, Awaitable):
+            import asyncio
+            raw = asyncio.get_event_loop().run_until_complete(raw)
+        summary_content = str(raw).strip()
+        if not summary_content.startswith("[Compressed]"):
+            summary_content = "[Compressed]\n" + summary_content
+    else:
+        summary_lines = []
+        for message in older:
+            content = _content_preview(message.get("content"))
+            summary_lines.append(f"- {message.get('role')}: {content}")
+        summary_content = "[Compressed]\n" + "\n".join(summary_lines)
 
     if compact_instructions and compact_instructions.frozen_identifiers:
         summary_content = _protect_identifiers(
