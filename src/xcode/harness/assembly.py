@@ -369,10 +369,14 @@ def build_agent(
     if hook_manager is None and plugins_hooks:
         hook_manager = HookManager()
 
-    if plugins_hooks and hook_manager is not None:
-        for event, callbacks in plugins_hooks.items():
-            for cb in callbacks:
-                hook_manager.register(cast("HookEvent", event), cb)
+    if hook_manager is not None:
+        hook_manager.register("before_agent_start", lambda r: None)
+        hook_manager.register("before_provider_request", lambda r: None)
+
+        if plugins_hooks:
+            for event, callbacks in plugins_hooks.items():
+                for cb in callbacks:
+                    hook_manager.register(cast("HookEvent", event), cb)
 
     return StructuredAgent(
         provider=llm,

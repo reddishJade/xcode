@@ -317,6 +317,13 @@ class StructuredAgent:
         # 构建 AgentLoopConfig（含 harness 钩子）
         loop_config = self._build_loop_config(effective_mode)
 
+        # 发射 before_agent_start 钩子
+        self._emit_hook(
+            HookRecord("before_agent_start", metadata={
+                "question": question, "mode": effective_mode,
+            })
+        )
+
         # 实时流式：消费 Agent.run_stream()，边跑边翻译边 yield
         translation_state = _StreamTranslationState()
 
