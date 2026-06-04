@@ -125,9 +125,6 @@ class XcodeApp:
         for closer in self._closers:
             closer()
 
-    async def close_async(self) -> None:
-        self.close()
-
 
 def build_app(
     project_root: Path,
