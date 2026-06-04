@@ -36,6 +36,7 @@ from .repl_tools import (
     final_stop_reason,
     print_tool_call_rich,
     print_tool_result_rich,
+    run_shell_shortcut,
     summarize_intents,
     tool_intent,
 )
@@ -109,6 +110,12 @@ def run_repl(
             ):
                 print_saved_conversation(store)
                 return 0
+            continue
+        if text.startswith("!"):
+            output = run_shell_shortcut(text, app)
+            store.append("event", {"type": "shell_shortcut", "data": text})
+            store.append("event", {"type": "tool_result", "data": output})
+            markdown_renderer.render(output)
             continue
 
         store.append("user", text)

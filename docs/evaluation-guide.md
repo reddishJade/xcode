@@ -74,6 +74,7 @@ uv run python -m compileall src
 - `/sessions`：列出会话。
 - `/resume <id>`：恢复会话。
 - `/tool NAME INPUT`：直接调用当前 registry 中的工具。
+- `!COMMAND`：通过已注册的 `bash` 工具直接运行 shell 命令。
 - `@relative/path`：注入文件引用。
 
 恢复最近会话：

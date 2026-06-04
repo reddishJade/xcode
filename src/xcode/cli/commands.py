@@ -70,6 +70,7 @@ def generate_help_text(registry: dict[str, CommandEntry]) -> str:
     lines.extend(
         [
             "",
+            "Prefix a line with ! to run it through the registered bash tool.",
             "Press Shift+Enter for a newline. If your terminal does not send Shift+Enter,",
             "use Esc Enter as the fallback accepted by prompt_toolkit.",
             "Use Tab to complete slash commands, /tool names, and @file references.",

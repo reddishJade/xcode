@@ -87,6 +87,13 @@ def run_tool_command(command: str, app: Any) -> str:
     return result.content
 
 
+def run_shell_shortcut(command: str, app: Any) -> str:
+    shell_command = command[1:].strip()
+    if not shell_command:
+        return "usage: !COMMAND"
+    return run_tool_command(f"/tool bash {shell_command}", app)
+
+
 def parse_tool_input(tool: ToolSpec, raw_input: str) -> ToolInput:
     """解析 `/tool` 命令的人类输入；核心工具协议只接收 dict。"""
     text = raw_input.strip()

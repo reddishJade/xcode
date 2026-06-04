@@ -258,6 +258,36 @@ class XcodeReplTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(renderer.rendered, ["hello"])
 
+    def test_run_repl_shell_shortcut_runs_bash_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = ShellShortcutApp()
+            prompt = FakePrompt(["!echo hello", "/exit"])
+            renderer = FakeRenderer()
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(app.commands, ["echo hello"])
+            self.assertEqual(renderer.rendered, ["ran: echo hello"])
+            session = next(Path(temp_dir).glob("session-*.jsonl"))
+            text = session.read_text(encoding="utf-8")
+            self.assertIn("shell_shortcut", text)
+            self.assertNotIn('"type": "user"', text)
+
+    def test_run_repl_shell_shortcut_rejects_empty_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = ShellShortcutApp()
+            prompt = FakePrompt(["!", "/exit"])
+            renderer = FakeRenderer()
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(app.commands, [])
+            self.assertEqual(renderer.rendered, ["usage: !COMMAND"])
+
     def test_run_repl_tool_command_preserves_high_risk_approval(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = ToolApp(
@@ -838,6 +868,32 @@ class ToolApp:
                 steps=1,
                 tool_calls=[],
             ),
+        )
+
+
+class ShellShortcutApp(ToolApp):
+    def __init__(self) -> None:
+        self.commands: list[str] = []
+
+        def bash(value: dict[str, Any]) -> str:
+            command = str(value["command"])
+            self.commands.append(command)
+            return f"ran: {command}"
+
+        super().__init__(
+            registry=(
+                ToolSpec(
+                    "bash",
+                    "Run shell.",
+                    "command",
+                    bash,
+                    schema={
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                        "required": ["command"],
+                    },
+                ),
+            )
         )
 
 
