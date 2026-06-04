@@ -47,6 +47,7 @@ from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
 from xcode.ai.events import ProviderEvent, ToolCall as ToolUseBlock
 from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.types import StreamOptions
 from .execution_modes import mode_notice, policy_for_mode
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
@@ -86,10 +87,14 @@ class _FallbackSwitchingProvider:
         self,
         messages: list[dict[str, Any]],
         tools: list[Any],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
         provider = self._fallback if self._using_fallback else self._primary
         try:
-            async for event in provider.stream(messages, tools):
+            async for event in provider.stream(
+                messages, tools, options=options, **kwargs
+            ):
                 self._consecutive_errors = 0
                 yield event
         except Exception:
@@ -100,7 +105,9 @@ class _FallbackSwitchingProvider:
                 and self._fallback is not None
             ):
                 self._using_fallback = True
-                async for event in self._fallback.stream(messages, tools):
+                async for event in self._fallback.stream(
+                    messages, tools, options=options, **kwargs
+                ):
                     yield event
             else:
                 raise
@@ -363,9 +370,7 @@ class StructuredAgent:
             # pre_tool 钩子
             if self.hook_manager is not None:
                 self.hook_manager.emit(
-                    HookRecord(
-                        "pre_tool", tool=tc.name, input=action_input
-                    )
+                    HookRecord("pre_tool", tool=tc.name, input=action_input)
                 )
             return None
 
@@ -513,7 +518,7 @@ def _translate_event(
                     step = step_counter[0]
                     prev = _text_seen.get(step, "") if _text_seen is not None else ""
                     full = block.text
-                    delta = full[len(prev):]
+                    delta = full[len(prev) :]
                     if not delta:
                         return None
                     if _text_seen is not None:
