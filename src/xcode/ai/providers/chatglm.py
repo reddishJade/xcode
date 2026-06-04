@@ -62,11 +62,6 @@ class ChatGLMProvider(ProviderMetricsMixin):
         self.metrics["total_tokens"] = 0
         self.metrics["cache_hit_ratio"] = 0.0
 
-    def _default_metrics(self) -> dict[str, object]:
-        base = super()._default_metrics()
-        base["transport"] = "chatglm_chat"
-        return base
-
     async def stream(
         self,
         messages: list[dict[str, Any]],

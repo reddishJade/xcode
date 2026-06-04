@@ -49,11 +49,6 @@ class DeepSeekProvider(ProviderMetricsMixin):
         self.metrics["prompt_cache_hit_tokens"] = 0
         self.metrics["prompt_cache_miss_tokens"] = 0
 
-    def _default_metrics(self) -> dict[str, object]:
-        base = super()._default_metrics()
-        base["transport"] = "deepseek_chat"
-        return base
-
     async def stream(
         self,
         messages: list[dict[str, Any]],

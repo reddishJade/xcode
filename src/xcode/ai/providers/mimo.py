@@ -50,11 +50,6 @@ class MiMoProvider(ProviderMetricsMixin):
         self.transport = "mimo_chat"
         self._ensure_metrics()
 
-    def _default_metrics(self) -> dict[str, object]:
-        base = super()._default_metrics()
-        base["transport"] = "mimo_chat"
-        return base
-
     async def stream(
         self,
         messages: list[dict[str, Any]],

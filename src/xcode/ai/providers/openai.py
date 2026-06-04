@@ -49,11 +49,6 @@ class OpenAIChatProvider(ProviderMetricsMixin):
         self._ensure_metrics()
         self.metrics["previous_response_id"] = None
 
-    def _default_metrics(self) -> dict[str, object]:
-        base = super()._default_metrics()
-        base["transport"] = "openai_chat"
-        return base
-
     async def stream(
         self,
         messages: list[dict[str, Any]],
@@ -125,11 +120,6 @@ class OpenAIResponsesProvider(ProviderMetricsMixin):
         self._pending_sent_message_index: int = 0
         self._ensure_metrics()
         self.metrics["previous_response_id"] = None
-
-    def _default_metrics(self) -> dict[str, object]:
-        base = super()._default_metrics()
-        base["transport"] = "openai_responses"
-        return base
 
     async def stream(
         self,
