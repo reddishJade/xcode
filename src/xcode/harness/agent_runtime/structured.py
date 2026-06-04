@@ -48,7 +48,7 @@ from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
 from xcode.ai.events import ProviderEvent, ToolCall as ToolUseBlock
 from xcode.ai.providers.protocol import ModelProvider
-from xcode.ai.types import StreamOptions
+from xcode.ai.types import StreamOptions, ToolDefinition
 from .execution_modes import mode_notice, policy_for_mode
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
@@ -102,7 +102,7 @@ class _FallbackSwitchingProvider:
     async def stream(
         self,
         messages: list[dict[str, Any]],
-        tools: list[Any],
+        tools: list[ToolDefinition],
         options: StreamOptions | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
@@ -132,7 +132,7 @@ class _FallbackSwitchingProvider:
     async def _stream_with(
         provider: Any,
         messages: list[dict[str, Any]],
-        tools: list[Any],
+        tools: list[ToolDefinition],
         options: StreamOptions | None,
         kwargs: dict[str, Any],
     ) -> AsyncIterator[ProviderEvent]:

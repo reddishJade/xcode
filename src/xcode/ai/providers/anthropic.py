@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from xcode.ai.events import ProviderEvent
-from xcode.ai.types import StreamOptions
+from xcode.ai.types import StreamOptions, ToolDefinition
 
 NOT_IMPLEMENTED_MSG = (
     "AnthropicProvider is not implemented. "
@@ -27,7 +27,7 @@ class AnthropicProvider:
     async def stream(
         self,
         messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
+        tools: list[ToolDefinition],
         options: StreamOptions | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
