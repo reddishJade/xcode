@@ -255,13 +255,7 @@ def _make_handler(
 
 def build_mcp_tools(project_root: Path) -> tuple[ToolSpec, ...]:
     """根据配置文件加载和构建所有 MCP 工具，支持 defer_loading 延迟加载。"""
-    local_config = project_root / ".local" / "mcp_config.json"
-    root_config = project_root / "mcp_config.json"
-    config_path = (
-        local_config
-        if local_config.exists()
-        else (root_config if root_config.exists() else None)
-    )
+    config_path = _mcp_config_path(project_root)
     if config_path is None:
         return ()
 
@@ -285,81 +279,25 @@ def build_mcp_tools(project_root: Path) -> tuple[ToolSpec, ...]:
         if is_deferred:
             deferred_servers.add(server_name)
 
-        config_hash = compute_config_hash(server_config)
-        cached_entry = cache_data.get("servers", {}).get(server_name, {})
-        tools_list = None
-        if cached_entry.get("config_hash") == config_hash:
-            tools_list = cached_entry.get("tools")
-
-        if tools_list is None:
-            if is_deferred:
-                tools_list = []
-                tools_to_register.append(
-                    build_fetch_tools_tool(project_root, server_name, server_config)
-                )
-            else:
-                try:
-                    command = [server_config["command"]] + server_config.get("args", [])
-                    client = _mcp_mod.McpClient(command, server_config.get("env"))
-                    client.start()
-                    tools_list = client.list_tools()
-                    client.stop()
-                    for tool in tools_list:
-                        tool["risk"] = resolve_mcp_tool_risk(
-                            server_config, tool["name"]
-                        )
-                    cache_data.setdefault("servers", {})[server_name] = {
-                        "config_hash": config_hash,
-                        "tools": tools_list,
-                    }
-                    _save_cache(cache_path, cache_data)
-                except Exception as e:
-                    print(f"Error querying tools from MCP server '{server_name}': {e}")
-                    tools_list = cached_entry.get("tools") or []
-
+        tools_list = _tools_for_server(
+            project_root,
+            cache_path,
+            cache_data,
+            server_name,
+            server_config,
+            is_deferred,
+            tools_to_register,
+        )
         lazy_ref = _mcp_mod.LazyClientRef(server_name, server_config)
-
         for tool in tools_list:
-            name = tool["name"]
-            desc = tool.get("description", "")
-            input_schema = tool.get("inputSchema", {})
-
-            props = input_schema.get("properties", {})
-            required = input_schema.get("required", [])
-            hints = [
-                f"{p_name}: {p_info.get('type', 'any')}{' (required)' if p_name in required else ''}"
-                for p_name, p_info in props.items()
-            ]
-            input_hint = ", ".join(hints) if hints else "no arguments"
-
-            risk = resolve_mcp_tool_risk(server_config, name)
-
-            # 描述与 Schema
-            if is_deferred:
-                tool_schema = {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": True,
-                }
-                tool_description = f"[Deferred] {desc} Parameters unknown until searched. Call mcp_tool_search first to retrieve the required schema before invoking this tool. [mcp: {server_name}]"
-            else:
-                tool_schema = input_schema
-                tool_description = (
-                    f"{desc} [mcp: {server_name}]" if desc else f"[mcp: {server_name}]"
-                )
-
             tools_to_register.append(
-                ToolSpec(
-                    name=f"mcp__{server_name}__{name}",
-                    description=tool_description,
-                    input_hint=input_hint,
-                    handler=_make_handler(
-                        lazy_ref, name, is_deferred, server_name, cache_path
-                    ),
-                    risk=risk,
-                    schema=tool_schema,
-                    read_only=(risk == "low"),
-                    group="mcp",
+                _build_registered_mcp_tool(
+                    server_name,
+                    server_config,
+                    tool,
+                    lazy_ref,
+                    is_deferred,
+                    cache_path,
                 )
             )
 
@@ -367,3 +305,125 @@ def build_mcp_tools(project_root: Path) -> tuple[ToolSpec, ...]:
         tools_to_register.append(build_mcp_tool_search(project_root, deferred_servers))
 
     return tuple(tools_to_register)
+
+
+def _mcp_config_path(project_root: Path) -> Path | None:
+    local_config = project_root / ".local" / "mcp_config.json"
+    root_config = project_root / "mcp_config.json"
+    if local_config.exists():
+        return local_config
+    if root_config.exists():
+        return root_config
+    return None
+
+
+def _tools_for_server(
+    project_root: Path,
+    cache_path: Path,
+    cache_data: dict[str, Any],
+    server_name: str,
+    server_config: dict[str, Any],
+    is_deferred: bool,
+    tools_to_register: list[ToolSpec],
+) -> list[dict[str, Any]]:
+    config_hash = compute_config_hash(server_config)
+    cached_entry = cache_data.get("servers", {}).get(server_name, {})
+    if cached_entry.get("config_hash") == config_hash:
+        cached_tools = cached_entry.get("tools")
+        if isinstance(cached_tools, list):
+            return cached_tools
+
+    if is_deferred:
+        tools_to_register.append(
+            build_fetch_tools_tool(project_root, server_name, server_config)
+        )
+        return []
+
+    return _query_server_tools(
+        cache_path,
+        cache_data,
+        server_name,
+        server_config,
+        config_hash,
+        cached_entry,
+    )
+
+
+def _query_server_tools(
+    cache_path: Path,
+    cache_data: dict[str, Any],
+    server_name: str,
+    server_config: dict[str, Any],
+    config_hash: str,
+    cached_entry: dict[str, Any],
+) -> list[dict[str, Any]]:
+    try:
+        command = [server_config["command"]] + server_config.get("args", [])
+        client = _mcp_mod.McpClient(command, server_config.get("env"))
+        client.start()
+        tools_list = client.list_tools()
+        client.stop()
+        for tool in tools_list:
+            tool["risk"] = resolve_mcp_tool_risk(server_config, tool["name"])
+        cache_data.setdefault("servers", {})[server_name] = {
+            "config_hash": config_hash,
+            "tools": tools_list,
+        }
+        _save_cache(cache_path, cache_data)
+        return tools_list
+    except Exception as e:
+        print(f"Error querying tools from MCP server '{server_name}': {e}")
+        cached_tools = cached_entry.get("tools")
+        return cached_tools if isinstance(cached_tools, list) else []
+
+
+def _build_registered_mcp_tool(
+    server_name: str,
+    server_config: dict[str, Any],
+    tool: dict[str, Any],
+    lazy_ref: _mcp_mod.LazyClientRef,
+    is_deferred: bool,
+    cache_path: Path,
+) -> ToolSpec:
+    name = tool["name"]
+    risk = resolve_mcp_tool_risk(server_config, name)
+    tool_schema, tool_description = _mcp_tool_schema_and_description(
+        server_name, tool, is_deferred
+    )
+    return ToolSpec(
+        name=f"mcp__{server_name}__{name}",
+        description=tool_description,
+        input_hint=_mcp_tool_input_hint(tool.get("inputSchema", {})),
+        handler=_make_handler(lazy_ref, name, is_deferred, server_name, cache_path),
+        risk=risk,
+        schema=tool_schema,
+        read_only=(risk == "low"),
+        group="mcp",
+    )
+
+
+def _mcp_tool_schema_and_description(
+    server_name: str,
+    tool: dict[str, Any],
+    is_deferred: bool,
+) -> tuple[dict[str, Any], str]:
+    desc = tool.get("description", "")
+    if is_deferred:
+        return (
+            {"type": "object", "properties": {}, "additionalProperties": True},
+            f"[Deferred] {desc} Parameters unknown until searched. Call mcp_tool_search first to retrieve the required schema before invoking this tool. [mcp: {server_name}]",
+        )
+    return (
+        tool.get("inputSchema", {}),
+        f"{desc} [mcp: {server_name}]" if desc else f"[mcp: {server_name}]",
+    )
+
+
+def _mcp_tool_input_hint(input_schema: dict[str, Any]) -> str:
+    props = input_schema.get("properties", {})
+    required = input_schema.get("required", [])
+    hints = [
+        f"{p_name}: {p_info.get('type', 'any')}{' (required)' if p_name in required else ''}"
+        for p_name, p_info in props.items()
+    ]
+    return ", ".join(hints) if hints else "no arguments"
