@@ -245,7 +245,7 @@ type AgentEvent = (
 
 # ── 监听器 ──
 
-type AgentListener = Callable[[AgentEvent, Any], None]
+type AgentListener = Callable[[AgentEvent], None]
 
 # ── 循环配置 ──
 
@@ -295,11 +295,6 @@ class AgentLoopTurnUpdate:
     context: AgentContext | None = None
     model: Any = None
     thinking_level: ThinkingLevel = "off"
-
-
-@dataclass
-class AgentEventSink(Protocol):
-    async def __call__(self, event: AgentEvent) -> None: ...
 
 
 type MessageConverter = Callable[[list[AgentMessage]], list[dict[str, Any]]]
@@ -396,16 +391,4 @@ class AgentLoopConfig:
     options: StreamOptions | None = None
 
 
-# ── Agent State ──
 
-
-class AgentState(Protocol):
-    system_prompt: str
-    model: Any
-    thinking_level: ThinkingLevel
-    messages: list[AgentMessage]
-    tools: list[AgentTool[Any]]
-    is_streaming: bool
-    streaming_message: AgentMessage | None
-    pending_tool_calls: set[str]
-    error_message: str | None
