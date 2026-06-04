@@ -246,6 +246,7 @@ class StructuredAgent:
         self._current_mode: ExecutionMode = "act"
         self._plan_enter_step: int = 0
         self._max_plan_turns: int = 8
+        self._plan_pending_confirmation: bool = False
         self._progress_steps_without_update: int = 0
         self._last_progress_step: int = 0
 
@@ -269,6 +270,10 @@ class StructuredAgent:
     def request_compaction(self) -> None:
         if self._compact_controller is not None:
             self._compact_controller.request()
+
+    def confirm_plan(self) -> None:
+        """确认 plan，允许执行 write 工具。"""
+        self._plan_pending_confirmation = False
 
     def run(
         self, question: str, mode: ExecutionMode | None = None
@@ -397,15 +402,25 @@ class StructuredAgent:
             "Use exit_plan_mode with a concise plan summary to return to full tool access."
         )
 
+    def _plan_confirmation_required(self, ctx: BeforeToolCallContext) -> bool:
+        if not self._plan_pending_confirmation:
+            return False
+        policy = policy_for_mode("plan")
+        decision = policy.check_call(
+            ToolUseBlock(id=ctx.tool_call.id, name=ctx.tool_call.name, input=ctx.args)
+        )
+        return decision != "allow"
+
     def _switch_to_act(self, plan_summary: str | None = None) -> str:
         self._current_mode = "act"
+        self._plan_pending_confirmation = True
         if plan_summary:
             self.steer(SystemMessage(content=(
                 f"<plan-summary>\n{plan_summary}\n</plan-summary>\n"
-                "The plan above was prepared during Plan Mode. Execute it now."
+                "A plan has been prepared. Confirm with the user before executing write tools."
             )))
         self._agent._tools = self._tools_for_mode(self.registry, "act")
-        return "Exited Plan Mode. Full tool access restored."
+        return "Plan ready. Present it to the user for confirmation."
 
     def _tools_for_mode(
         self, registry: tuple[ToolSpec, ...], mode: ExecutionMode
@@ -522,6 +537,16 @@ class StructuredAgent:
             tool_call = ctx.tool_call
             args = ctx.args
             action_input = stringify_tool_input(args)
+
+            if self._plan_pending_confirmation and self._plan_confirmation_required(ctx):
+                self._plan_pending_confirmation = False
+                return BeforeToolCallResult(
+                    block=True,
+                    reason=(
+                        f"tool {tool_call.name} requires plan confirmation. "
+                        "Present the plan to the user for approval before executing write tools."
+                    ),
+                )
 
             effective_policy = policy_for_mode(self._current_mode)
             decision = effective_policy.check_call(
