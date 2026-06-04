@@ -82,6 +82,9 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 "grep_search",
                 "ls",
                 "bash",
+                "search_tools",
+                "evaluate_python",
+                "reset_namespace",
             },
         )
 
