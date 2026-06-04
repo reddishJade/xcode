@@ -1,34 +1,152 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
+import asyncio
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Union, cast
 
-from xcode.ai.events import FinalMessage, ProviderEvent, TextDelta
+from xcode.ai.events import (
+    FinalMessage,
+    ProviderEvent,
+    ReasoningDelta,
+    TextDelta,
+    ToolCall,
+    ToolCallEvent,
+    UsageUpdate,
+)
+from xcode.ai.types import ToolDefinition
 
-"""模拟 provider：无真实 API 调用，用于测试。"""
+"""模拟 provider：可脚本化响应队列，用于测试。"""
+
+
+# --- Faux response builders ---
+
+
+def faux_text(text: str) -> list[ProviderEvent]:
+    """构建纯文本响应的事件列表。"""
+    return [
+        TextDelta(chunk=text),
+        FinalMessage(content=text, stop_reason="end_turn"),
+    ]
+
+
+def faux_thinking(text: str) -> list[ProviderEvent]:
+    """构建 thinking 文本的事件列表。"""
+    return [ReasoningDelta(chunk=text)]
+
+
+def faux_tool_call(
+    name: str,
+    arguments: dict[str, Any] | None = None,
+    tool_id: str | None = None,
+) -> list[ProviderEvent]:
+    """构建单次工具调用的事件列表。"""
+    tid = tool_id or f"faux_{name}"
+    return [
+        ToolCallEvent(calls=[ToolCall(id=tid, name=name, input=arguments or {})]),
+        FinalMessage(content="", stop_reason="tool_use"),
+    ]
+
+
+def faux_usage(input_tokens: int = 10, output_tokens: int = 20) -> list[ProviderEvent]:
+    return [UsageUpdate(input_tokens=input_tokens, output_tokens=output_tokens)]
+
+
+def faux_final(stop_reason: str = "end_turn") -> list[ProviderEvent]:
+    return [FinalMessage(content="", stop_reason=cast(Any, stop_reason))]  # type: ignore[arg-type]
+
+
+# --- Response queue provider ---
+
+
+@dataclass
+class FauxResponse:
+    events: list[ProviderEvent]
+    delay_seconds: float = 0.0
 
 
 class FauxProvider:
-    """模拟 provider，返回固定的 mock 响应。"""
+    """可脚本化的模拟 provider。
+
+    支持预设多轮响应队列、tool call、thinking、usage 事件。
+    每次 ``stream()`` 消费队列中的一个响应。
+    """
 
     def __init__(
         self,
-        response_text: str = "Mock response",
+        response_spec: Any = None,
+        *,
+        model: str = "faux-model",
         delay_seconds: float = 0.0,
     ) -> None:
-        self.response_text = response_text
-        self.delay_seconds = delay_seconds
-        self.model = "mock-model"
+        self.model = model
+        self._delay = delay_seconds
+        self._queue: list[FauxResponse] = []
+        self.call_count = 0
+        self._last_messages: list[dict[str, Any]] = []
+        self._last_tools: list[ToolDefinition] = []
+
+        if response_spec is not None:
+            items = list(response_spec)
+            if items and isinstance(items[0], Sequence) and not isinstance(items[0], ProviderEvent):
+                for resp in items:
+                    self._queue.append(FauxResponse(events=list(resp)))
+            else:
+                self._queue.append(
+                    FauxResponse(events=list(response_spec), delay_seconds=delay_seconds)
+                )
+
+    def push(self, events: list[ProviderEvent], delay: float = 0.0) -> None:
+        """向队列尾部添加一个响应。"""
+        self._queue.append(FauxResponse(events=events, delay_seconds=delay))
+
+    def push_text(self, text: str) -> None:
+        self.push(faux_text(text))
+
+    def push_tool_call(self, name: str, arguments: dict[str, Any] | None = None) -> None:
+        self.push(faux_tool_call(name, arguments))
+
+    def clear(self) -> None:
+        self._queue.clear()
+        self.call_count = 0
+
+    @property
+    def pending_count(self) -> int:
+        return len(self._queue)
 
     async def stream(
         self,
         messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
+        tools: list[ToolDefinition],
     ) -> AsyncIterator[ProviderEvent]:
-        import asyncio
+        self.call_count += 1
+        self._last_messages = messages
+        self._last_tools = tools
 
-        if self.delay_seconds > 0:
-            await asyncio.sleep(self.delay_seconds)
+        if not self._queue:
+            yield FinalMessage(
+                content="No more faux responses queued.",
+                stop_reason="error",
+            )
+            return
 
-        yield TextDelta(self.response_text)
-        yield FinalMessage(self.response_text, "end_turn")
+        resp = self._queue.pop(0)
+        if resp.delay_seconds > 0:
+            await asyncio.sleep(resp.delay_seconds)
+        for event in resp.events:
+            yield event
+
+
+def register_faux_provider(
+    responses: list[list[ProviderEvent]] | None = None,
+    *,
+    model: str = "faux-model",
+    model_id: str = "faux",
+    delay_seconds: float = 0.0,
+) -> FauxProvider:
+    """快捷创建 FauxProvider。"""
+    return FauxProvider(
+        response_spec=responses,
+        model=model,
+        delay_seconds=delay_seconds,
+    )

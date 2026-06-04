@@ -56,12 +56,6 @@ class MiMoProvider(OpenAICompatProvider):
             "stream": True,
         }
 
-        extra_body: dict[str, Any] = {}
-        if not self.thinking:
-            extra_body["thinking"] = {"type": "disabled"}
-        else:
-            extra_body["thinking"] = {"type": "enabled"}
-        if extra_body:
-            params["extra_body"] = extra_body
+        self._build_thinking_params(params)
 
         yield from self._call_chat_api(params, len(openai_messages))

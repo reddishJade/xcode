@@ -124,16 +124,10 @@ class ChatGLMProvider(OpenAICompatProvider):
         if stream and self.tool_stream and _supports_tool_stream(self.model):
             kwargs["tool_stream"] = True
 
-        extra_body: dict[str, Any] = {}
-        if not effective_thinking:
-            extra_body["thinking"] = {"type": "disabled"}
-        else:
-            extra_body["thinking"] = {
-                "type": "enabled",
-                "clear_thinking": self.clear_thinking,
-            }
-        if extra_body:
-            kwargs["extra_body"] = extra_body
+        self._build_thinking_params(kwargs, effective_thinking)
+        extra_body = cast(dict[str, Any], kwargs.setdefault("extra_body", {}))
+        thinking_body = cast(dict[str, Any], extra_body.setdefault("thinking", {}))
+        thinking_body["clear_thinking"] = self.clear_thinking
         return kwargs
 
     def _clean_reasoning_content(

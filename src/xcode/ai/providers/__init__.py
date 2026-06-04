@@ -4,7 +4,7 @@ from .anthropic import AnthropicProvider
 from .chatglm import ChatGLMProvider
 from .deepseek import DeepSeekProvider
 from .factory import ProviderBundle, ProviderSettings, build_provider_bundle
-from .faux import FauxProvider
+from .faux import FauxProvider, FauxResponse, faux_final, faux_text, faux_thinking, faux_tool_call, faux_usage, register_faux_provider
 from .mimo import MiMoProvider
 from .openai import OpenAIChatProvider, OpenAIResponsesProvider
 
@@ -22,6 +22,7 @@ __all__ = [
     "ChatGLMProvider",
     "DeepSeekProvider",
     "FauxProvider",
+    "FauxResponse",
     "MiMoProvider",
     "OpenAIChatProvider",
     "OpenAIResponsesProvider",
@@ -29,4 +30,10 @@ __all__ = [
     "ProviderSettings",
     "PROVIDER_REGISTRY",
     "build_provider_bundle",
+    "faux_final",
+    "faux_text",
+    "faux_thinking",
+    "faux_tool_call",
+    "faux_usage",
+    "register_faux_provider",
 ]

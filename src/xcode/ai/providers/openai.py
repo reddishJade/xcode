@@ -66,8 +66,7 @@ class OpenAIChatProvider(OpenAICompatProvider):
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        if self.reasoning_effort:
-            params["reasoning_effort"] = self.reasoning_effort
+        self._build_thinking_params(params)
 
         yield from self._call_chat_api(params, len(chat_messages))
 

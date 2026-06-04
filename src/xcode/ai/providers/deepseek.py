@@ -90,15 +90,7 @@ class DeepSeekProvider(OpenAICompatProvider):
         if max_tokens:
             params["max_tokens"] = max_tokens
 
-        extra_body = {}
-        if not self.thinking:
-            extra_body["thinking"] = {"type": "disabled"}
-        elif self.reasoning_effort:
-            extra_body["thinking"] = {"type": "enabled"}
-        if extra_body:
-            params["extra_body"] = extra_body
-        if self.thinking and self.reasoning_effort:
-            params["reasoning_effort"] = self.reasoning_effort
+        self._build_thinking_params(params)
 
         for k, v in kwargs.items():
             if k not in params:
