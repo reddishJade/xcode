@@ -18,6 +18,69 @@ from .path_utils import is_path_blocked, truncate_output, display_path
 MAX_READ_BYTES = 1_000_000
 MAX_WRITE_BYTES = 1_000_000
 
+READ_FILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {
+            "type": "string",
+            "description": "Project-relative text file path.",
+        },
+        "limit": {
+            "type": "integer",
+            "description": "Optional max number of lines to return.",
+        },
+    },
+    "required": ["path"],
+    "additionalProperties": False,
+}
+
+WRITE_FILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {
+            "type": "string",
+            "description": "Project-relative file path to write.",
+        },
+        "content": {
+            "type": "string",
+            "description": "Full UTF-8 file content.",
+        },
+    },
+    "required": ["path", "content"],
+    "additionalProperties": False,
+}
+
+EDIT_FILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {
+            "type": "string",
+            "description": "Project-relative file path to edit.",
+        },
+        "edits": {
+            "type": "array",
+            "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "old_text": {
+                        "type": "string",
+                        "description": "Exact text to find. Must match exactly one occurrence.",
+                    },
+                    "new_text": {
+                        "type": "string",
+                        "description": "Replacement text.",
+                    },
+                },
+                "required": ["old_text", "new_text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["path"],
+    "additionalProperties": False,
+}
+
 
 def build_file_tools(
     project_root: Path,
@@ -25,98 +88,14 @@ def build_file_tools(
 ) -> tuple[ToolSpec, ...]:
     root = project_root.resolve()
 
-    def read_file(data: ToolInput) -> str:
-        path_str = str(data.get("path", "")).strip()
-        if not path_str:
-            raise ValueError("path is required")
-        path = _safe_path(root, path_str)
-        if not path.is_file():
-            raise ValueError(f"not a file: {_display(root, path)}")
-        size = path.stat().st_size
-        if size > MAX_READ_BYTES:
-            raise ValueError(f"file too large: {size} bytes")
-        text, _encoding = _read_text(path)
-        if context_state is not None:
-            context_state.record_file(path)
-        limit = data.get("limit")
-        if limit is not None:
-            try:
-                limit_value = int(limit)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("limit must be an integer") from exc
-            if limit_value < 0:
-                raise ValueError("limit must be non-negative")
-            lines = text.splitlines()
-            text = "\n".join(lines[:limit_value])
-        return _truncate(text)
-
-    def write_file(data: ToolInput) -> str:
-        path_str = str(data.get("path", "")).strip()
-        if not path_str:
-            raise ValueError("path is required")
-        path = _safe_path(root, path_str)
-        if path.exists() and path.is_dir():
-            raise ValueError(f"path is a directory: {_display(root, path)}")
-        if "content" not in data:
-            raise ValueError("content is required")
-        content = str(data.get("content", ""))
-        _ensure_write_size(content)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _write_text(path, content, "utf-8")
-        if context_state is not None:
-            context_state.record_file(path)
-        return f"wrote file: {_display(root, path)}"
-
-    def edit_file(data: ToolInput) -> str:
-        path_str = str(data.get("path", "")).strip()
-        if not path_str:
-            raise ValueError("path is required")
-        path = _safe_path(root, path_str)
-        if path.exists() and path.is_dir():
-            raise ValueError(f"path is a directory: {_display(root, path)}")
-        if not path.is_file():
-            raise ValueError(f"not a file: {_display(root, path)}")
-
-        edits = _prepare_edits(data)
-        if not edits:
-            raise ValueError("no edits provided")
-
-        content, encoding = _read_text(path)
-        updated, edit_count = _apply_edits(
-            content,
-            edits,
-            _display(root, path),
-            replace_all=bool(data.get("replace_all", False)),
-        )
-        _ensure_write_size(updated)
-        _write_text(path, updated, encoding)
-        if context_state is not None:
-            context_state.record_file(path)
-        diff = _diff_preview(_display(root, path), content, updated)
-        return f"edited file: {_display(root, path)} replacements={edit_count}\n{diff}"
-
     return (
         ToolSpec(
             name="read_file",
             description="Read a text file inside the project sandbox.",
             input_hint='JSON: {"path": "src/xcode/main.py", "limit": 80}',
-            handler=read_file,
+            handler=lambda data: _read_file(root, context_state, data),
             risk="low",
-            schema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Project-relative text file path.",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Optional max number of lines to return.",
-                    },
-                },
-                "required": ["path"],
-                "additionalProperties": False,
-            },
+            schema=READ_FILE_SCHEMA,
             read_only=True,
             concurrency_safe=True,
             group="core",
@@ -125,23 +104,9 @@ def build_file_tools(
             name="write_file",
             description="Write a text file inside the project sandbox.",
             input_hint='JSON: {"path": "notes.md", "content": "..."}',
-            handler=write_file,
+            handler=lambda data: _write_file(root, context_state, data),
             risk="high",
-            schema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Project-relative file path to write.",
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Full UTF-8 file content.",
-                    },
-                },
-                "required": ["path", "content"],
-                "additionalProperties": False,
-            },
+            schema=WRITE_FILE_SCHEMA,
             group="core",
             counts_as_progress=True,
         ),
@@ -149,42 +114,102 @@ def build_file_tools(
             name="edit_file",
             description="Edit a text file with one or more search-and-replace edits. Each edit's old_text is matched against the original file content (not incrementally). Use this tool for targeted replacements.",
             input_hint='JSON: {"path": "src/main.py", "edits": [{"old_text": "...", "new_text": "..."}]}',
-            handler=edit_file,
+            handler=lambda data: _edit_file(root, context_state, data),
             risk="high",
-            schema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Project-relative file path to edit.",
-                    },
-                    "edits": {
-                        "type": "array",
-                        "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "old_text": {
-                                    "type": "string",
-                                    "description": "Exact text to find. Must match exactly one occurrence.",
-                                },
-                                "new_text": {
-                                    "type": "string",
-                                    "description": "Replacement text.",
-                                },
-                            },
-                            "required": ["old_text", "new_text"],
-                            "additionalProperties": False,
-                        },
-                    },
-                },
-                "required": ["path"],
-                "additionalProperties": False,
-            },
+            schema=EDIT_FILE_SCHEMA,
             group="core",
             counts_as_progress=True,
         ),
     )
+
+
+def _read_file(
+    root: Path,
+    context_state: ContextualRetrievalState | None,
+    data: ToolInput,
+) -> str:
+    path_str = str(data.get("path", "")).strip()
+    if not path_str:
+        raise ValueError("path is required")
+    path = _safe_path(root, path_str)
+    if not path.is_file():
+        raise ValueError(f"not a file: {_display(root, path)}")
+    size = path.stat().st_size
+    if size > MAX_READ_BYTES:
+        raise ValueError(f"file too large: {size} bytes")
+    text, _encoding = _read_text(path)
+    if context_state is not None:
+        context_state.record_file(path)
+    limit = data.get("limit")
+    if limit is not None:
+        text = _limit_lines(text, limit)
+    return _truncate(text)
+
+
+def _write_file(
+    root: Path,
+    context_state: ContextualRetrievalState | None,
+    data: ToolInput,
+) -> str:
+    path_str = str(data.get("path", "")).strip()
+    if not path_str:
+        raise ValueError("path is required")
+    path = _safe_path(root, path_str)
+    if path.exists() and path.is_dir():
+        raise ValueError(f"path is a directory: {_display(root, path)}")
+    if "content" not in data:
+        raise ValueError("content is required")
+    content = str(data.get("content", ""))
+    _ensure_write_size(content)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_text(path, content, "utf-8")
+    if context_state is not None:
+        context_state.record_file(path)
+    return f"wrote file: {_display(root, path)}"
+
+
+def _edit_file(
+    root: Path,
+    context_state: ContextualRetrievalState | None,
+    data: ToolInput,
+) -> str:
+    path_str = str(data.get("path", "")).strip()
+    if not path_str:
+        raise ValueError("path is required")
+    path = _safe_path(root, path_str)
+    if path.exists() and path.is_dir():
+        raise ValueError(f"path is a directory: {_display(root, path)}")
+    if not path.is_file():
+        raise ValueError(f"not a file: {_display(root, path)}")
+
+    edits = _prepare_edits(data)
+    if not edits:
+        raise ValueError("no edits provided")
+
+    content, encoding = _read_text(path)
+    updated, edit_count = _apply_edits(
+        content,
+        edits,
+        _display(root, path),
+        replace_all=bool(data.get("replace_all", False)),
+    )
+    _ensure_write_size(updated)
+    _write_text(path, updated, encoding)
+    if context_state is not None:
+        context_state.record_file(path)
+    diff = _diff_preview(_display(root, path), content, updated)
+    return f"edited file: {_display(root, path)} replacements={edit_count}\n{diff}"
+
+
+def _limit_lines(text: str, limit: Any) -> str:
+    try:
+        limit_value = int(limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("limit must be an integer") from exc
+    if limit_value < 0:
+        raise ValueError("limit must be non-negative")
+    lines = text.splitlines()
+    return "\n".join(lines[:limit_value])
 
 
 def read_project_text_file(project_root: Path, raw_path: str) -> str:
