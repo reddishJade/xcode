@@ -98,7 +98,7 @@ class XcodeContextRestorationTests(unittest.TestCase):
             )
 
             class FakeLoader:
-                def get_catalog(self) -> str:
+                def get_catalog(self, question: str | None = None) -> str:
                     return (
                         "<skill-catalog>\n"
                         '<skill name="compile_skill" path="skills/compile/SKILL.md" risk="low">\n'
