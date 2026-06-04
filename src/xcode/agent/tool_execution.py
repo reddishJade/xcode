@@ -7,9 +7,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from .types import (
     AfterToolCallContext,
@@ -136,11 +139,33 @@ async def _execute_parallel(
         if isinstance(raw_result, tuple) and len(raw_result) == 2:
             results.append(raw_result[0])
             terminate_flags.append(raw_result[1])
+        elif isinstance(raw_result, BaseException):
+            logger.exception(
+                "Tool execution raised unexpected exception", exc_info=raw_result
+            )
     all_terminate = len(terminate_flags) > 0 and all(terminate_flags)
     return ExecutedToolBatch(results=results, terminate=all_terminate)
 
 
 async def _execute_one(
+    current_context: AgentContext,
+    assistant_message: AssistantMessage,
+    tool_call: ToolCallContent,
+    config: AgentLoopConfig,
+    signal: CancellationSignal | None,
+    emit: Callable[[AgentEvent], None],
+) -> tuple[ToolResultMessage, bool]:
+    """Execute a single tool call. Returns (result_message, terminate)."""
+    try:
+        return await _execute_one_impl(
+            current_context, assistant_message, tool_call, config, signal, emit
+        )
+    except BaseException:
+        logger.exception("Unexpected error executing tool %s", tool_call.name)
+        return _error_result(tool_call, "unexpected tool execution error")
+
+
+async def _execute_one_impl(
     current_context: AgentContext,
     assistant_message: AssistantMessage,
     tool_call: ToolCallContent,
