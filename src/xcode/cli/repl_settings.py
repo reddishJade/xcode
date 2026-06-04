@@ -98,9 +98,9 @@ def handle_model_command(command: str, app: object) -> None:
         print(f"Warning: unrecognized option '{parts[2]}' ignored.")
     if len(parts) >= 4 and parts[2] == "--thinking":
         level = parts[3].lower()
-        if level not in ("off", "minimal", "low", "medium", "high", "xhigh"):
+        if level not in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
             print(
-                f"Invalid thinking level: {level}. Use off/minimal/low/medium/high/xhigh."
+                f"Invalid thinking level: {level}. Use off/minimal/low/medium/high/xhigh/max."
             )
             return
         if level == "off":
@@ -134,8 +134,8 @@ def handle_effort_command(command: str, app: object) -> None:
         return
 
     level = parts[1].lower()
-    if level not in ("off", "minimal", "low", "medium", "high", "xhigh"):
-        print("Invalid effort level. Use: off/minimal/low/medium/high/xhigh")
+    if level not in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
+        print("Invalid effort level. Use: off/minimal/low/medium/high/xhigh/max")
         return
 
     if not _is_model_control_app(app):
