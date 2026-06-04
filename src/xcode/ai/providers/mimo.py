@@ -49,7 +49,7 @@ class MiMoProvider(OpenAICompatProvider):
     ) -> Iterator[Any]:
         openai_messages = to_chat_messages(messages)
 
-        kwargs: dict[str, object] = {
+        params: dict[str, object] = {
             "model": self.model,
             "messages": openai_messages,
             "tools": [to_chat_tool(t.name, t.description, t.schema) for t in tools],
@@ -62,6 +62,6 @@ class MiMoProvider(OpenAICompatProvider):
         else:
             extra_body["thinking"] = {"type": "enabled"}
         if extra_body:
-            kwargs["extra_body"] = extra_body
+            params["extra_body"] = extra_body
 
-        yield from self._call_chat_api(kwargs, len(openai_messages))
+        yield from self._call_chat_api(params, len(openai_messages))

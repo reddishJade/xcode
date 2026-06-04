@@ -4,6 +4,8 @@ import copy
 from collections.abc import Iterator
 from typing import Any, cast
 
+from xcode.ai.types import ToolDefinition
+
 from .codec import to_chat_messages, to_chat_tool
 from .openai_compat import OpenAICompatProvider
 from .stream_codec import chat_stream_to_events
@@ -48,7 +50,7 @@ class DeepSeekProvider(OpenAICompatProvider):
     def _stream_sync(
         self,
         messages: list[dict[str, Any]],
-        tools: tuple[dict[str, Any], ...],
+        tools: tuple[ToolDefinition, ...],
         response_format: dict[str, Any] | None = None,
         max_tokens: int | None = None,
         **kwargs: Any,

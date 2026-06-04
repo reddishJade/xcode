@@ -378,7 +378,7 @@ class StructuredAgent:
             result_content_text = ""
             if ctx.result and ctx.result.content:
                 result_content_text = "".join(
-                    c.text for c in ctx.result.content if hasattr(c, "text")
+                    c.text for c in ctx.result.content if isinstance(c, TextContent)
                 )
 
             if ctx.is_error:
