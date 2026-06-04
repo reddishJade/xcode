@@ -69,6 +69,29 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
         self.assertNotEqual(first_prompt, second_prompt)
         self.assertIn("tool_new", second_prompt)
 
+    def test_stable_cache_invalidates_when_tool_prompt_surface_changes(self) -> None:
+        """测试同名工具的 prompt 可见内容变化时，静态缓存正确失效。"""
+        registry_1 = (ToolSpec("tool_a", "desc a", "hint a", lambda x: "a"),)
+        registry_2 = (
+            ToolSpec(
+                "tool_a",
+                "desc changed",
+                "hint a",
+                lambda x: "a",
+                examples=[{"input": "new"}],
+            ),
+        )
+
+        context_1 = PromptContext(self.root, registry_1, "test")
+        context_2 = PromptContext(self.root, registry_2, "test")
+
+        first_prompt = self.builder.build(context_1)
+        second_prompt = self.builder.build(context_2)
+
+        self.assertNotEqual(first_prompt, second_prompt)
+        self.assertIn("desc changed", second_prompt)
+        self.assertIn('Example: {"input": "new"}', second_prompt)
+
     def test_stable_cache_invalidates_when_instructions_change(self) -> None:
         """测试当 AGENTS.md 或 CLAUDE.md 等配置文件修改时间变化时，静态缓存正确失效。"""
         agents_file = self.root / "AGENTS.md"

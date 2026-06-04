@@ -91,9 +91,13 @@ def build_tool_prompt(registry: tuple[ToolSpec, ...]) -> str:
                 f"   Description: {tool.description}",
                 f"   Action Input: {tool.input_hint}",
                 f"   Risk: {tool.risk}",
-                "",
             ]
         )
+        for example in tool.examples:
+            lines.append(
+                "   Example: " + json.dumps(example, ensure_ascii=False, sort_keys=True)
+            )
+        lines.append("")
     return "\n".join(lines).rstrip()
 
 

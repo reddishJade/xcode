@@ -110,7 +110,16 @@ class SystemPromptBuilder:
             {"identity", "tool_discipline", "tools", "search_strategy", "instructions"}
         )
         stable_key = (
-            tuple(t.name for t in context.registry),
+            tuple(
+                (
+                    t.name,
+                    t.description,
+                    t.input_hint,
+                    t.risk,
+                    tuple(tuple(sorted(example.items())) for example in t.examples),
+                )
+                for t in context.registry
+            ),
             mtimes,
             frozenset(stable_enabled),
         )

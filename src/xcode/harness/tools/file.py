@@ -102,23 +102,48 @@ def build_file_tools(
         ),
         ToolSpec(
             name="write_file",
-            description="Write a text file inside the project sandbox.",
+            description=(
+                "Create a new text file or intentionally replace an entire file inside "
+                "the project sandbox. Prefer edit_file for targeted changes to an "
+                "existing file."
+            ),
             input_hint='JSON: {"path": "notes.md", "content": "..."}',
             handler=lambda data: _write_file(root, context_state, data),
             risk="high",
             schema=WRITE_FILE_SCHEMA,
             group="core",
             counts_as_progress=True,
+            examples=[
+                {
+                    "path": "notes.md",
+                    "content": "# Notes\n\nNew file content.\n",
+                }
+            ],
         ),
         ToolSpec(
             name="edit_file",
-            description="Edit a text file with one or more search-and-replace edits. Each edit's old_text is matched against the original file content (not incrementally). Use this tool for targeted replacements.",
+            description=(
+                "Modify an existing text file with one or more targeted replacements. "
+                "Use this tool when changing existing code or docs so unrelated "
+                "content is preserved."
+            ),
             input_hint='JSON: {"path": "src/main.py", "edits": [{"old_text": "...", "new_text": "..."}]}',
             handler=lambda data: _edit_file(root, context_state, data),
             risk="high",
             schema=EDIT_FILE_SCHEMA,
             group="core",
             counts_as_progress=True,
+            examples=[
+                {
+                    "path": "src/main.py",
+                    "edits": [
+                        {
+                            "old_text": "return old_value\n",
+                            "new_text": "return new_value\n",
+                        }
+                    ],
+                }
+            ],
         ),
     )
 

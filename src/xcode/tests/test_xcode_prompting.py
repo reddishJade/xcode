@@ -26,7 +26,13 @@ class XcodePromptingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("Use tests.", encoding="utf-8")
-            tool = ToolSpec("echo", "Echo input.", "text", _echo_handler)
+            tool = ToolSpec(
+                "echo",
+                "Echo input.",
+                "text",
+                _echo_handler,
+                examples=[{"input": "hello"}],
+            )
 
             prompt = SystemPromptBuilder().build(
                 PromptContext(project_root=root, registry=(tool,), question="hello")
@@ -36,6 +42,7 @@ class XcodePromptingTests(unittest.TestCase):
                 prompt.index("You are Xcode"), prompt.index("Available tools")
             )
             self.assertIn("echo", prompt)
+            self.assertIn('Example: {"input": "hello"}', prompt)
             self.assertIn("<environment>", prompt)
             self.assertIn("<git-preflight>", prompt)
             self.assertIn("<search-strategy>", prompt)
