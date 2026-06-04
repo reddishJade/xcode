@@ -338,6 +338,7 @@ class AgentLoopResult:
     steps: int = 0
     stopped_by_limit: bool = False
     stopped_by_watchdog: bool = False
+    stopped_by_error: bool = False
     watchdog_reason: str | None = None
     metrics: AgentLoopMetrics | None = None
     active_provider: ModelProvider | None = None

@@ -253,13 +253,13 @@ async def _run_loop(
         )
 
         if inner_result is None:
-            # 内层循环决定提前退出（错误耗尽 or 递减收益）
             return _finish_loop(
                 new_messages,
                 step,
                 metrics,
                 state.active_provider,
                 emit,
+                stopped_by_error=True,
             )
 
         message, stop_reason, new_provider = inner_result
@@ -395,6 +395,7 @@ def _finish_loop(
     stopped_by_watchdog: bool = False,
     watchdog_reason: str | None = None,
     stopped_by_limit: bool = False,
+    stopped_by_error: bool = False,
 ) -> AgentLoopResult:
     result = AgentLoopResult(
         messages=new_messages,
@@ -402,6 +403,7 @@ def _finish_loop(
         stopped_by_watchdog=stopped_by_watchdog,
         watchdog_reason=watchdog_reason,
         stopped_by_limit=stopped_by_limit,
+        stopped_by_error=stopped_by_error,
         metrics=metrics,
         active_provider=active_provider,
     )
