@@ -230,7 +230,7 @@ class ToolExecutionEndEvent:
     type: str = "tool_execution_end"
     tool_call_id: str = ""
     tool_name: str = ""
-    result: Any = None
+    result: ToolResultMessage | None = None
     is_error: bool = False
 
 
