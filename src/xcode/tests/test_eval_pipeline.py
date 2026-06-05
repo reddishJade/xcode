@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.ai.events import (
@@ -193,6 +194,34 @@ class EvalPipelineTests(unittest.TestCase):
             self.assertIn("validation", trial.metrics)
             grader_names = {grader.name for grader in trial.graders}
             self.assertIn("validation_command:1", grader_names)
+
+    def test_eval_runner_records_model_patch_from_git_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "project"
+            root.mkdir()
+            (root / "math_utils.py").write_text(
+                "def add(left, right):\n    return left + right\n",
+                encoding="utf-8",
+            )
+            task = EvalTask(
+                id="code-change",
+                prompt="add subtract",
+                expected_answer_contains=("done",),
+            )
+            runner = EvalRunner(
+                tasks=(task,),
+                app_factory=lambda _task, _trial: _editing_app(root),
+                output_dir=Path(tmp) / "run",
+            )
+
+            with patch("xcode.evals.runner.subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stdout = "diff --git a/math_utils.py b/math_utils.py\n"
+                report = runner.run()
+
+            trial = report.trials[0]
+            self.assertIn("model_patch", trial.metrics)
+            self.assertIn("math_utils.py", trial.metrics["model_patch"])
 
     def test_trial_project_root_copies_fixture_to_sandbox(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

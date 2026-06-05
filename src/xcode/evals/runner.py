@@ -6,6 +6,7 @@ from datetime import datetime, UTC
 from pathlib import Path
 import hashlib
 import math
+import subprocess
 import uuid
 from typing import Any
 
@@ -121,6 +122,9 @@ class EvalRunner:
             metrics.update(agent_metrics)
         if after_evidence:
             metrics["file_evidence"] = after_evidence
+        model_patch = _collect_model_patch(project_root)
+        if model_patch:
+            metrics["model_patch"] = model_patch
         if validation_results:
             metrics["validation"] = validation_results_to_dict(validation_results)
         return TrialResult(
@@ -270,6 +274,26 @@ def _string_tuple(value: object) -> tuple[str, ...]:
     if isinstance(value, list | tuple):
         return tuple(str(item) for item in value)
     return ()
+
+
+def _collect_model_patch(project_root: Path | None) -> str:
+    """采集 Git 工作区补丁，供外部 benchmark harness 消费。"""
+    if project_root is None:
+        return ""
+    try:
+        completed = subprocess.run(
+            ["git", "diff", "--binary"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout
 
 
 _NUMERIC_FIELDS = ("llm_calls", "estimated_prompt_tokens", "model_total_ms", "tool_calls", "tool_errors", "steps")
