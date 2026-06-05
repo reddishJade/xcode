@@ -121,11 +121,13 @@ src/xcode/main.py
 
 | 文件 | 职责 |
 | --- | --- |
-| `types.py` | Agent 消息、事件、工具运行时协议、loop callback 合约 |
-| `messages.py` | Agent message 到 LLM message 的转换 |
-| `agent.py` | Agent 薄封装，包装 `run_agent_loop` |
+| `protocols.py` | `AgentTool`、`CancellationSignal` 协议；`ContentBlock`、`ToolExecutionMode` 等基础类型 |
+| `messages.py` | 消息类型（`SystemMessage`、`AssistantMessage` 等）、`AgentMessage` union、LLM 格式转换 |
+| `events.py` | Agent 事件类型（`TurnStartEvent`、`MessageUpdateEvent`、`ToolExecutionEndEvent` 等）和 `AgentEvent` union |
+| `config.py` | `AgentLoopConfig`、`AgentLoopResult`、hook 上下文类型、压缩指令、指标 |
+| `agent.py` | `Agent` 薄封装，包装 `run_agent_loop` 并管理 steer/followup 队列 |
 | `agent_loop.py` | 无状态 Agent loop，provider、工具执行、turn hooks 均通过合约注入 |
-| `tool_execution.py` | 工具执行逻辑，从 `agent_loop.py` 提取 |
+| `tool_execution.py` | 工具执行逻辑（串行/并行调度、before/after hook），从 `agent_loop.py` 提取 |
 
 ### `src/xcode/evals/`
 
