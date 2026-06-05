@@ -81,10 +81,20 @@ class OutputAccumulator:
         self._truncated = True
         self._trim_tail()
 
+    @staticmethod
+    def _ensure_utf8_boundary(data: bytes) -> bytes:
+        """确保字节切片不会断裂多字节 UTF-8 字符开头。"""
+        if not data:
+            return data
+        i = 0
+        while i < len(data) and (data[i] & 0xC0) == 0x80:
+            i += 1
+        return data[i:] if i > 0 else data
+
     def _trim_tail(self) -> None:
         text = b"".join(self._chunks)
         if len(text) > self._max_bytes:
-            text = text[-self._max_bytes :]
+            text = self._ensure_utf8_boundary(text[-self._max_bytes :])
             first_newline = text.find(b"\n")
             if first_newline > 0:
                 text = text[first_newline + 1 :]
