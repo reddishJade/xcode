@@ -12,7 +12,7 @@ from typing import Literal
 from ..config import PROFILE_SUBAGENT
 from ..skills import ToolInput, ToolSpec
 from .async_worker import IsolatedAsyncWorker
-from ...agent.types import BranchSummaryMessage
+from ...agent.messages import BranchSummaryMessage
 
 """子 Agent 任务工具。
 

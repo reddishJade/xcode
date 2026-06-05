@@ -11,14 +11,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ...agent.types import (
+from ...agent.protocols import (
     AgentTool,
     AgentToolResult,
     CancellationSignal,
-    TextContent,
     ToolExecutionMode,
     ToolUpdateCallback,
 )
+from xcode.ai.types import TextContent
 from ..skills import ToolSpec, stringify_tool_input
 from ..observability import (
     PermissionCheckResult,

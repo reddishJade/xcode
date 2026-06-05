@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
-from typing import Any, cast
+from typing import cast
 
 from xcode.agent.tool_execution import partition_tool_calls_for_execution
-from xcode.agent.types import AgentContext, AgentTool, ToolCallContent
+from xcode.agent.config import AgentContext
+from xcode.agent.protocols import AgentTool
+from xcode.ai.types import ToolCallContent
 from xcode.harness.agent_runtime.tool_adapter import adapt_tool_specs
 from xcode.harness.skills import ToolSpec
 

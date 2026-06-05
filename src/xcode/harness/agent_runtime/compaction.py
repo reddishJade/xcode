@@ -9,7 +9,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from xcode.agent.types import CompactInstructions
+from xcode.agent.config import CompactInstructions
 from ..skills import ToolSpec
 
 """分层上下文压缩工具。"""

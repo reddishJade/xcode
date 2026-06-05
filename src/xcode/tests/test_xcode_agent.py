@@ -5,18 +5,10 @@ import unittest
 
 from xcode.agent.agent_loop import run_agent_loop
 from xcode.agent.messages import convert_to_llm
-from xcode.agent.types import (
-    AgentContext,
-    AgentEvent,
-    AgentLoopConfig,
-    AgentLoopResult,
-    AgentToolResult,
-    AssistantMessage,
-    TextContent,
-    ToolExecutionMode,
-    ToolResultMessage,
-    UserMessage,
-)
+from xcode.agent.config import AgentContext, AgentLoopConfig, AgentLoopResult
+from xcode.agent.events import AgentEvent
+from xcode.agent.messages import AssistantMessage, ToolResultMessage, UserMessage
+from xcode.agent.protocols import AgentToolResult, ToolExecutionMode
 from xcode.ai.events import (
     FinalMessage,
     Message,
@@ -24,7 +16,7 @@ from xcode.ai.events import (
     ToolCall,
     ToolCallEvent,
 )
-from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.ai.types import StreamOptions, TextContent, ToolDefinition
 
 
 class TextProvider:

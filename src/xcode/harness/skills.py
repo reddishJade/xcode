@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from ..agent.types import ToolExecutionMode
+from ..agent.protocols import ToolExecutionMode
 from .observability import (
     HITLResult,
     PermissionPolicy,

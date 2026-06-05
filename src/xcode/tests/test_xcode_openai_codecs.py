@@ -5,13 +5,13 @@ from collections.abc import Sequence
 from typing import cast
 
 from xcode.agent.messages import convert_to_llm
-from xcode.agent.types import (
+from xcode.agent.messages import (
     AssistantMessage,
     BranchSummaryMessage,
     CompactionSummaryMessage,
-    ToolCallContent,
     ToolResultMessage,
 )
+from xcode.ai.types import ToolCallContent
 from xcode.ai.events import ReasoningDelta, TextDelta, ToolCallEvent
 from xcode.ai.providers.codec import to_chat_messages, to_chat_tool
 from xcode.ai.providers.stream_codec import chat_stream_to_events

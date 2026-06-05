@@ -17,34 +17,37 @@ from typing import Any
 
 from ...agent.agent import Agent
 from ...agent.messages import convert_to_llm
-from ...agent.types import (
+from ...agent.config import (
     AfterToolCallContext,
     AfterToolCallResult,
-    AgentEvent,
     AgentLoopConfig,
     AgentLoopResult,
     AgentLoopTurnUpdate,
-    AgentMessage,
-    AgentStartEvent,
-    AssistantMessage,
     BeforeToolCallContext,
     BeforeToolCallResult,
+)
+from ...agent.events import (
+    AgentEvent,
+    AgentStartEvent,
     CompactionEvent,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
-    SystemMessage,
-    TextContent,
-    ToolCallContent,
+    ThinkingUpdateEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
-    ThinkingUpdateEvent,
-    ToolResultMessage,
     TurnEndEvent,
     TurnStartEvent,
+)
+from ...agent.messages import (
+    AgentMessage,
+    AssistantMessage,
+    SystemMessage,
+    ToolResultMessage,
     UserMessage,
 )
+from xcode.ai.types import TextContent, ToolCallContent
 from .agent_helpers import (
     run_coro_sync,
     aiter_to_sync_iter,

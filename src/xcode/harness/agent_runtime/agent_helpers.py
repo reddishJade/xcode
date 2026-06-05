@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 from ...agent.messages import convert_to_llm
-from ...agent.types import AgentMessage
+from ...agent.messages import AgentMessage
 from .cancellation import CancellationToken
 from .compaction import (
     budget_large_tool_outputs,

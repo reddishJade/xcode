@@ -27,34 +27,29 @@ from xcode.ai.events import (
     ToolCallEvent,
     UsageUpdate,
 )
-from xcode.ai.types import ToolDefinition
-from .types import (
+from xcode.ai.types import ToolDefinition, TextContent, ToolCallContent
+from .config import (
     AgentContext,
-    AgentEvent,
     AgentLoopConfig,
     AgentLoopMetrics,
     AgentLoopResult,
-    AgentMessage,
-    AgentTool,
-    AssistantMessage,
-    CancellationSignal,
+    ShouldStopAfterTurnContext,
+)
+from .events import (
+    AgentEndEvent,
+    AgentEvent,
+    AgentStartEvent,
     CompactionArchive,
     CompactionEvent,
-    ContentBlock,
-    ShouldStopAfterTurnContext,
-    TextContent,
-    ToolCallContent,
-    ToolResultMessage,
-    UserMessage,
-    AgentStartEvent,
-    AgentEndEvent,
-    TurnStartEvent,
-    TurnEndEvent,
+    MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
-    MessageEndEvent,
     ThinkingUpdateEvent,
+    TurnEndEvent,
+    TurnStartEvent,
 )
+from .messages import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
+from .protocols import AgentTool, CancellationSignal, ContentBlock
 from .tool_execution import (
     ExecutedToolBatch,
     execute_tool_calls,
