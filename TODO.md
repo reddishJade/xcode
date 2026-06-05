@@ -1,106 +1,77 @@
 # Xcode TODO
 
-本文记录下一阶段设计和实现的方向。TODO 中仅保留未完成的计划，按优先级排序。
+按优先级排序，仅保留未完成计划。
 
-## 当前边界
+## 边界
 
-- 默认路径继续保持：REPL/CLI -> StructuredAgent -> core tools -> permission/risk/audit -> final answer。
-- 默认工具组继续保持 `tools.enabled_groups=["core"]`。
-- 新能力必须先证明真实使用场景，默认以 opt-in group 或 `experimental.*` 进入。
-- 不做默认启用的 MCP 全量工具注入（防 MCP 接口挤爆 Prompt Cache）。
-- 不做不可观测的自动 swarm（多 Agent 必须受控于邮箱总线与物理沙箱）。
-- 不做绕过权限系统的外部工具直连。
-- 不做面向企业平台的 RBAC、Grafana、Phoenix、RAGAS 等集成。
+- 默认路径：REPL/CLI → StructuredAgent → core tools → permission/risk/audit
+- 默认工具组：`tools.enabled_groups=["core"]`
+- 新能力以 opt-in group 或 `experimental.*` 进入
+- 不做默认 MCP 全量注入，不做不可观测 swarms，不做绕过权限的外部工具直连，不做企业级 RBAC/Grafana/Phoenix/RAGAS
 
 ---
 
 ## 待实现
 
----
+### P1 评估基础设施
 
-### 1. Session 并发安全（借鉴 Pi-mono Phase 锁）
+评估系统"骨架完整、肌肉不足"。当前仅 7 个自定义合成任务，需接入外部标准 benchmark 并激活已有 LLM-as-judge 能力。
 
-- **当前**：`SessionStore` 无任何并发保护，多 CLI/daemon 同时操作同一 session 会产生竞态。
-- **做法**：引入轻量 `session.lock()` 上下文管理器（`filelock`），在 `fork_into`、`compact_current_session`、`rewind_turns` 等写操作前获取锁。不引入 pi-mono 完整 phase 状态机，只解决实际的 session 竞态。
+- **外部 coding benchmark 接入**（source-review §10）：至少接入 HumanEval（代码补全）+ SWE-bench Lite（任务级修复），与当前 fixture-based eval 架构天然匹配。同时将 Pass@k 从朴素 `any(pass in k)` 改为无偏估计量 `1 - C(n-c,k)/C(n,k)`。
+- **内置 LLM-as-judge 任务启用**（source-review §10）：`src/xcode/evals/graders.py` 中 `llm_judge` 接口完整，但内置 `tasks.py` 套件均未设置 `llm_judge_criteria`。为内置套件补充 LLM 评判标准，使其在每次评测中自动触发。
 
-### 2. 分支摘要自动压缩
+### P2 Session 并发安全
 
-- **当前**：有 `BranchSummaryMessage` 类型和 session fork，但无自动压缩非活跃分支的机制。分支上下文只会在被显式引用时加入，不会自动摘要后替换原始消息来释放 token。
-- **做法**：在 `LayeredCompactor` 中增加分支摘要层。当上下文紧张时（超过 token 阈值），定位不活跃分支，调用 LLM 生成摘要，以 `BranchSummaryMessage` 替换原始分支内容。
+`SessionStore` 引入轻量 `filelock` 上下文管理器保护写操作（fork、compact、rewind）。
 
-### 3. Turn Snapshot 隔离
+### P3 分支摘要自动压缩
 
-- **当前**：turn 执行中修改 model/config/skills 可能影响进行中的 turn，产生不一致行为。
-- **做法**：`StructuredAgent.execute_turn()` 在 turn 开始时冻结当前 config/tools/skills 快照，turn 内使用快照而非全局引用。pi-mono 称此为 "Turn Snapshot"。
+`LayeredCompactor` 增加分支摘要层：上下文紧张时调用 LLM 压缩非活跃分支，以 `BranchSummaryMessage` 替换原始内容。需要 P2 的 session 安全写入作为前置。
 
----
+### P4 Turn Snapshot 隔离
 
-### 有场景再动（依赖实际需求驱动）
+`StructuredAgent.execute_turn()` 在 turn 开始时冻结 config/tools/skills 快照，turn 内使用快照而非全局引用。
 
-#### 0. 队列模式（REPL 异步化前置）
+### P5 会话持久化协议
 
-- **当前能力**：引导中断模式已实现。Ctrl+C 中断 LLM 回复后保存 partial response 并允许注入新消息。
-- **缺口**：用户不能在 LLM 回复时直接打字输入（sync `for event in _ask_stream(...)` 阻塞了主线程）。队列模式需要输入事件和流事件双路复用，当前 sync REPL 架构不支持。
-- **触发条件**：REPL 主体改为 asyncio 双路架构后再实现。队列模式本身逻辑简单——`agent.follow_up()` 已就绪，只差让 REPL 在流式期间接受输入。
+存储协议（JSONL vs SQLite）、恢复边界、分支联动设计。
 
-#### 1. Tasks + Progress 编排能力增强
+### P6 分支导航
 
-- **当前能力**：`tasks` 提供依赖排序和 Kanban 视图，`progress` 提供 checklist 保存/恢复。能表达任务图和进度。
-- **缺口**：可重入长任务中断恢复（除最基础 `resume_task_progress`）、任务超时/重试、子任务自动分发。
-- **触发条件**：有用户需要跨 session 长任务编排或嵌套子任务时再实现。保持轻量，不引入外部编排引擎。
+依赖 P5。分支 fork/摘要/切换，需要会话状态树存储。
 
-#### 2. Daemon 生命周期管理完善
+### P7 类型化事件流（含 P9 订阅事件）
 
-- **当前能力**：`HeartbeatDaemon` 由 `build_app()` 构造，但启动/停止需调用方在 `main.py` 中手动调用。
-- **缺口**：缺少健康检查、自动重启、生命周期回调注册机制。
-- **触发条件**：daemon 在真实场景中长期运行暴露出稳定性问题时再优化。
+定义统一 `HarnessEvent` union，提供强类型 `subscribe()`。保留 `HookManager` 做内部桥接。
 
-#### 3. 模型模式解析（`model:thinking_level` 三段式）
+### P7 Tasks+Progress 编排
 
-- **当前**：CLI 模型切换只支持 `--thinking` flag，不能将 thinking level 编码到模型名中。无 fuzzy match，无用户自定义模型注册表。
-- **做法**：在 `repl_settings.py` 中增加 `sonnet:high`、`anthropic/claude-sonnet-4-5` 模式解析，分离 provider / model ID / thinking level 三段。
-- **触发条件**：用户反馈当前模型切换方式不方便时再做。
+从"有场景再动"升级。现有 `tasks` + `progress` 实验组支持轻量任务图和 checklist，但缺少可重入长任务的完整编排能力：中断恢复、超时/重试、子任务分发。实现后使长任务在真实场景中可靠运行。无硬性前置依赖。
 
-#### 4. 类型化事件流
+### P8 类型化事件流（含 P9 订阅事件）
 
-- **当前**：`HookManager` 用字符串回调名分派事件，类型约束弱，扩展者需知道回调名。
-- **做法**：定义统一 `HarnessEvent` union 类型（`MessageStart | ToolCall | QueueUpdate | ResourcesUpdate`），提供 `subscribe()` 强类型订阅。保留 `HookManager` 做内部桥接。
-- **触发条件**：TUI/Web UI 需要消费 harness 事件流时再做。
+定义统一 `HarnessEvent` union，提供强类型 `subscribe()`。保留 `HookManager` 做内部桥接。
 
-#### 5. ExecutionEnv 抽象（跨平台 FS/Shell）
+### P9 Daemon 生命周期
 
-- **当前**：tool 实现直接调用 `subprocess` / `pathlib`，非本地场景（web sandbox）难复用。
-- **做法**：定义 `ExecutionEnv` protocol（`read_file`/`write_file`/`exec_shell`），实际 tool 通过它操作。默认实现调 `subprocess`，web sandbox 可注入 mock。
-- **触发条件**：有 web sandbox 或远程执行场景需求时再动。
+从"有场景再动"升级。现有 `daemon` 实验组支持 `HeartbeatDaemon` 周期性检查，但缺少健康检查、自动重启和回调注册。完善后使后台守护过程可观测、可恢复。
 
----
+### P10 维护契约补齐（source-review §10）
 
-### 当前不做（无使用场景证明）
+当前 `tool_catalog.py` 已覆盖所有产出 `ToolSpec` 的模块（包括 mailbox/progress/mcp），但缺少"新增 `build_*_tools()` 须同步注册 builder 条目"的显式维护契约。在 `tool_catalog.py` docstring 中注明此规则。
 
-#### 3. MCP SSE / WebSocket 传输协议支持
+### P11 Provider 代码清理（source-review §10）
 
-- **现状**：stdio MCP 已正常工作，项目内所有 MCP server 都是本地进程。
-- **不做原因**：远程 MCP Server 的使用场景在项目内未出现。SSE 和 WS 传输层会显著增加客户端复杂度（重连、认证、消息分帧），在有真实需求前不值得投入。
-- **标记**：`wontfix` 直到有用户请求跨主机 MCP。
+`src/xcode/ai/providers/metrics.py` 的 `ProviderMetricsMixin` 已完成三个模式的提取，子类覆写 `_record_usage` 属合理多态。仅 `OpenAIResponsesProvider.intercept_events`（`openai.py:126-141`）因 Responses API 事件模型差异存在一个同构闭包，可提取为 mixin 中的 `_intercept_responses_stream` 方法。
 
-#### 4. OAuth 2.0 (PKCE) 认证与系统 Keyring 凭据存储
+### P12 模型模式解析
 
-- **现状**：API key 管理通过环境变量和 `.env` 文件，满足当前所有 provider 配置需求。
-- **不做原因**：OAuth 管线 + OS keychain 集成是企业级安全增强，项目当前无企业部署场景。凭据管理的复杂度远高于收益。
-- **标记**：`wontfix` 直到出现多用户共享主机的部署需求。
+从"有场景再动"升级。`model:thinking_level` 三段式解析（provider / model ID / thinking level）。独立、范围小、可实现为纯函数，适合作为低优先级 quick win。
 
-#### 5. SpeculationPlanner 消费端实现
+### P13 队列模式
 
-- **现状**：`SpeculationPlanner` 已能生成 UI 预热事件，但无宿主 UI 消费。属于有生产者无消费者。
-- **不做原因**：消费端属于宿主 UI 的职责范围，不在 agent harness 内实现。如果将来 xcode 附带自己的 web UI，届时再对接。
-- **标记**：`external`（依赖外部项目）。
+从"有场景再动"升级。REPL 主循环改为 asyncio 双路架构后支持流式期间输入。UX 改善显著但前置重构较大，放在低优先级等待 REPL 架构自然演进。
 
-#### 6. Session 索引大数量性能优化
+### P14 ExecutionEnv 抽象
 
-- **现状**：`.local/session_index.json` 在数百条级别工作正常，未验证数千条场景。
-- **不做原因**：预优化。等真实用户反馈索引加载变慢时再切换为按需加载或分片存储。
-
-#### 7. 配置迁移测试
-
-- **现状**：无正式测试覆盖 `xcode.config.json` 结构变更时的迁移逻辑。
-- **不做原因**：预优化。当前配置结构稳定，等下次 breaking change 时同步补充迁移测试。
+从"有场景再动"升级。`ExecutionEnv` protocol，默认调 subprocess，web sandbox 可注入 mock。纯架构改善，无直接用户影响，放在最后。

@@ -19,3 +19,4 @@ docs/rag.md
 packages/
 tmp/
 uv.lock
+xcode.config.json

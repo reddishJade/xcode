@@ -45,8 +45,6 @@ The staged set must contain only files for the current task.
 
 ## Commit Message Format
 
-Use the commit format from @AGENTS.md. Commit messages must be written in English.
-
 ```text
 [type]: [one-line short title describing major feature in lowercase and imperative]
 
@@ -58,6 +56,8 @@ Key changes:
 - [Brief grouped change]
 ```
 
+Commit messages must be written in English.
+
 ---
 
 ## Commit Command
@@ -66,12 +66,6 @@ Use normal commit after exact staging. Follow the format described in [Commit Me
 
 ```powershell
 git commit -m "type: title" -m "body"
-```
-
-If using `git commit --only`, place all `-m` flags before the pathspec:
-
-```powershell
-git commit --only -m "type: title" -m "body" -- path\to\file
 ```
 
 > **PowerShell note**: When using `@'...'@` single-quoted here-strings, the `@` delimiters are not passed to the command. However, `@"..."@` double-quoted here-strings expand `$` variables and backtick escapes. Prefer `@'...'@` for multi-line commit messages to avoid accidental variable expansion.
@@ -99,7 +93,7 @@ Never force push.
 If rebasing causes conflicts:
 
 - Resolve only files you modified for the current task.
-- If conflicts appear in files you did not modify, abort and ask the user.
+- If conflicts appear in files you did not modify, abort with `git rebase --abort` and ask the user.
 - Do not use broad checkout/reset commands to resolve conflicts.
 
 ---
@@ -113,4 +107,4 @@ git status --short
 git show --stat --oneline --no-renames HEAD
 ```
 
-Unrelated local changes should remain uncommitted.
+Unrelated local changes should remain uncommitted. If `git status` still shows staged files unrelated to the current task, do not proceed — report to the user.

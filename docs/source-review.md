@@ -350,19 +350,24 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 - `EvalRunner`：消费 `XcodeApp.aask_stream()` 事件流，生成 trace、JSON report 和 HTML report。
 
-当前 grader 是确定性规则，覆盖最终事件、答案片段、工具调用约束、工具错误数和文件证据。
+Grader 分三类：
+- **确定性 grader**：runtime_error、final_event、answer_contains、expected_tool、disallowed_tool、max_tool_errors。
+- **文件证据 grader**：file_exists、file_contains、file_not_contains、file_changed。
+- **LLM-as-judge**：`run_llm_judge()` 接口完整，通过描述性标准评判 Agent 输出。当前内置任务未设置 `llm_judge_criteria`，需自定义 JSONL 启用。
+
+`pass@k` 和 `pass^k` 指标通过朴素 `any(pass in k trials)` 计算，非学术版无偏估计量。
 
 ---
 
 ## 10. 已知约束
 
-- `cli/tool_catalog.py` 扫描部分工具 builder，未覆盖 mailbox/progress/mcp 等 opt-in 工具。
+- `cli/tool_catalog.py` 已覆盖所有产出 `ToolSpec` 的模块（含 mailbox/progress/mcp），但缺少"新增 `build_*_tools()` 须同步注册 builder 条目"的显式维护契约。
 - `memory` 缺少 consolidation 质量门、冲突合并和长期遗忘策略。
 - `plugins` 使用动态加载，通过显式 opt-in 控制。
 - `daemon` 由 `build_app()` 构造，生命周期启动由调用方控制。
 - `tasks` + `progress` 支持任务和 checklist，不提供完整可重入长任务编排能力。
-- eval 使用确定性 grader，未接入 LLM-as-judge、Pass@k 和外部 benchmark。
-- `intercept_usage` closure 和 `_record_usage`/`_ensure_metrics` 在多个 provider 中有重复实现。
+- eval 缺少外部 benchmark 接入（HumanEval/SWE-bench 等）。LLM-as-judge 和 Pass@k 接口已实现但精度不足：LLM-as-judge 内置 task 未启用；Pass@k 使用朴素 `any(pass in k)` 而非无偏估计量。
+- `intercept_usage`/`_record_usage`/`_ensure_metrics` 已提取为 `ProviderMetricsMixin`（`ai/providers/metrics.py`），子类覆写 `_record_usage` 属合理多态。仅 `OpenAIResponsesProvider` 因 Responses API 事件模型差异有一个同构闭包 `intercept_events`（`openai.py:126-141`）可清理。
 
 ---
 
