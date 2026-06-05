@@ -81,7 +81,7 @@ class EchoTool:
         params: dict[str, Any],
         signal: Any | None = None,
         on_update=None,
-    ) -> AgentToolResult[None]:
+    ) -> AgentToolResult:
         self.seen_signal = signal
         return AgentToolResult(content=[TextContent(text=str(params["text"]))])
 

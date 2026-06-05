@@ -58,7 +58,7 @@ class AgentToolExecutionTests(unittest.TestCase):
                 ),
             )
         )
-        context = AgentContext(tools=cast(list[AgentTool[Any]], tools))
+        context = AgentContext(tools=cast(list[AgentTool], tools))
         tool_calls = [
             ToolCallContent(id="c1", name="read"),
             ToolCallContent(id="c2", name="read"),
