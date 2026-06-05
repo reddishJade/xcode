@@ -469,9 +469,13 @@ def _find_files_fd(
                 "--max-results",
                 str(max_results),
             ]
-            if pattern.startswith("**/") or pattern.startswith("/"):
+            adjusted = pattern
+            if "/" in pattern and not adjusted.startswith("**/") and not adjusted.startswith("/"):
+                adjusted = f"**/{pattern}"
                 args.append("--full-path")
-            args.extend(["--", pattern, str(base)])
+            elif adjusted.startswith("**/") or adjusted.startswith("/"):
+                args.append("--full-path")
+            args.extend(["--", adjusted, str(base)])
             completed = subprocess.run(
                 args,
                 cwd=root,
