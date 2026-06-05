@@ -15,6 +15,7 @@ from .edit_diff import (
     restore_line_endings,
     strip_bom,
 )
+from .file_mutation_queue import with_file_mutation
 from .path_utils import is_path_blocked, truncate_output, display_path
 
 """受沙箱约束的本地文件工具。
@@ -261,6 +262,18 @@ def _write_file(
         raise ValueError("content is required")
     content = str(data.get("content", ""))
     _ensure_write_size(content)
+    return with_file_mutation(
+        path, lambda: _write_file_impl(root, path, content, operations, context_state)
+    )
+
+
+def _write_file_impl(
+    root: Path,
+    path: Path,
+    content: str,
+    operations: FileOperations,
+    context_state: ContextualRetrievalState | None,
+) -> str:
     operations.mkdir(path.parent)
     _write_text(path, content, "utf-8", operations)
     if context_state is not None:
@@ -287,6 +300,20 @@ def _edit_file(
     if not edits:
         raise ValueError("no edits provided")
 
+    return with_file_mutation(
+        path,
+        lambda: _edit_file_impl(root, path, edits, data, operations, context_state),
+    )
+
+
+def _edit_file_impl(
+    root: Path,
+    path: Path,
+    edits: list[dict[str, str]],
+    data: ToolInput,
+    operations: FileOperations,
+    context_state: ContextualRetrievalState | None,
+) -> str:
     content, encoding = _read_text(path, operations)
     bom, clean_content = strip_bom(content)
     ending = detect_line_ending(clean_content)
