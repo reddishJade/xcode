@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
 
+from ..skills import resolve_project_path
 from .truncate import truncate_tail
 
 BLOCKED_PARTS = {".git", ".venv", "__pycache__"}
@@ -32,6 +34,33 @@ def is_path_blocked(root: Path, path: Path) -> bool:
         and relative.parts[1] == ".local"
         and relative.parts[2] == "chroma_db"
     )
+
+
+def resolve_read_path(root: Path, raw_path: str) -> Path:
+    """解析路径并尝试 macOS 特有文件名变体 fallback。"""
+    resolved = resolve_project_path(root, raw_path)
+    if resolved.exists():
+        return resolved
+
+    nfd = unicodedata.normalize("NFD", str(resolved))
+    if nfd != str(resolved):
+        nfd_path = Path(nfd)
+        if nfd_path.exists():
+            return nfd_path
+
+    curly = str(resolved).replace("'", "\u2019")
+    if curly != str(resolved):
+        curly_path = Path(curly)
+        if curly_path.exists():
+            return curly_path
+
+    nfd_curly = unicodedata.normalize("NFD", curly)
+    if nfd_curly != str(resolved):
+        nfd_curly_path = Path(nfd_curly)
+        if nfd_curly_path.exists():
+            return nfd_curly_path
+
+    return resolved
 
 
 def truncate_output(
