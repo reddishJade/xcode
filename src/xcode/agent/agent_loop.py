@@ -38,6 +38,7 @@ from .config import (
 from .events import (
     AgentEndEvent,
     AgentEvent,
+    AgentStartEvent,
     CompactionArchive,
     CompactionEvent,
     MessageEndEvent,
@@ -58,6 +59,10 @@ from .tool_execution import (
 
 
 # ── 事件辅助构造 ──
+
+
+def _agent_start_event() -> AgentStartEvent:
+    return AgentStartEvent()
 
 
 def _agent_end_event(
@@ -131,6 +136,7 @@ async def run_agent_loop(
         messages=list(context.messages) + list(prompts),
         tools=list(context.tools) if context.tools else [],
     )
+    emit(_agent_start_event())
     emit(_turn_start_event())
     for prompt in prompts:
         emit(_message_start_event(prompt))
