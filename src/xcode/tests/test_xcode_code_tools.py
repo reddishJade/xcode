@@ -73,7 +73,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
             code_search._RG_MISSING_HINT_EMITTED = False
 
             with patch(
-                "xcode.coding_agent.tools.code_search.shutil.which", return_value=None
+                "xcode.coding_agent.tools.code_search.ensure_tool", return_value=None
             ):
                 first = tools["grep_search"].handler({"pattern": "needle"})
                 second = tools["grep_search"].handler({"pattern": "needle"})
