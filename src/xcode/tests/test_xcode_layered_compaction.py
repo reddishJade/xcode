@@ -11,6 +11,7 @@ from xcode.harness.agent_runtime.compaction import (
     build_compact_tool,
     estimate_message_tokens,
     micro_compact_tool_results,
+    summarize_inactive_branches,
 )
 from xcode.harness.config import AgentConfig
 from xcode.harness.agent_runtime import StructuredAgent
@@ -59,6 +60,60 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             self.assertTrue(list(Path(tmp).glob("transcript_*.jsonl")))
             self.assertIn("[Compressed]", compacted[1]["content"])
             self.assertEqual(compacted[-1]["content"], "old 5")
+
+    def test_summarize_inactive_branches_replaces_branch_run(self) -> None:
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "root"},
+            {
+                "role": "user",
+                "content": "inactive one",
+                "metadata": {"branch_id": "branch-a"},
+            },
+            {
+                "role": "assistant",
+                "content": "inactive two",
+                "metadata": {"branch_id": "branch-a"},
+            },
+            {
+                "role": "user",
+                "content": "active",
+                "metadata": {"branch_id": "branch-b", "active_branch": True},
+            },
+        ]
+
+        compacted = summarize_inactive_branches(
+            messages,
+            active_branch_id="branch-b",
+            compact_token_threshold=1,
+            budget_trigger_token_ratio=0,
+            summarize_fn=lambda branch_messages: "branch-a summary",
+        )
+
+        self.assertEqual(len(compacted), 3)
+        summary = compacted[1]
+        self.assertEqual(summary["metadata"]["type"], "branch_summary")
+        self.assertEqual(summary["metadata"]["branch_id"], "branch-a")
+        self.assertIn("branch-a summary", summary["content"][0]["text"])
+        self.assertEqual(compacted[2]["content"], "active")
+
+    def test_summarize_inactive_branches_waits_for_token_pressure(self) -> None:
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "root"},
+            {
+                "role": "user",
+                "content": "inactive",
+                "metadata": {"branch_id": "branch-a"},
+            },
+        ]
+
+        compacted = summarize_inactive_branches(
+            messages,
+            compact_token_threshold=100_000,
+            budget_trigger_token_ratio=1,
+            summarize_fn=lambda _branch_messages: "unused",
+        )
+
+        self.assertEqual(compacted, messages)
 
     def test_manual_compact_tool_triggers_structured_agent_compaction(self) -> None:
         controller = CompactController()
