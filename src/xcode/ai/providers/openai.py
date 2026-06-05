@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any, cast
 
 from xcode.ai.events import ProviderEvent
@@ -121,26 +121,26 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         params = self._responses_kwargs(messages, tools, stream=True)
         create = cast(Any, self.client.responses.create)
         stream = self.runtime.run(lambda: create(**params))
-        self.metrics["sent_messages"] = len(params["input"])
+        message_count = len(params["input"])
+        yield from responses_stream_to_events(
+            cast(
+                Any,
+                self._intercept_responses_stream(
+                    stream,
+                    message_count,
+                    on_response_completed=self._record_completed_response,
+                ),
+            )
+        )
 
-        def intercept_events(events: Iterable[object]) -> Iterator[object]:
-            for raw_event in events:
-                if str(getattr(raw_event, "type", "")).endswith(".completed"):
-                    response = getattr(raw_event, "response", None)
-                    if response is not None:
-                        response_id = getattr(response, "id", None)
-                        if response_id:
-                            self.previous_response_id = str(response_id)
-                            self.metrics["previous_response_id"] = (
-                                self.previous_response_id
-                            )
-                            self._last_sent_message_index = (
-                                self._pending_sent_message_index
-                            )
-                        self._record_usage(response, len(params["input"]))
-                yield raw_event
-
-        yield from responses_stream_to_events(cast(Any, intercept_events(stream)))
+    def _record_completed_response(self, response: object) -> None:
+        """记录 Responses API 的 stateful 游标。"""
+        response_id = getattr(response, "id", None)
+        if not response_id:
+            return
+        self.previous_response_id = str(response_id)
+        self.metrics["previous_response_id"] = self.previous_response_id
+        self._last_sent_message_index = self._pending_sent_message_index
 
     def _responses_kwargs(
         self,
