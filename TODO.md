@@ -13,10 +13,6 @@
 
 ## 待实现
 
-### P2 Session 并发安全
-
-`SessionStore` 引入轻量 `filelock` 上下文管理器保护写操作（fork、compact、rewind）。
-
 ### P3 分支摘要自动压缩
 
 `LayeredCompactor` 增加分支摘要层：上下文紧张时调用 LLM 压缩非活跃分支，以 `BranchSummaryMessage` 替换原始内容。需要 P2 的 session 安全写入作为前置。
@@ -78,3 +74,8 @@
 - 已接入本地 HumanEval 与 SWE-bench Lite JSON/JSONL benchmark loader。
 - 已将 Pass@k 改为无偏估计量 `1 - C(n-c,k)/C(n,k)`。
 - 已为内置 eval suites 补充 `llm_judge_criteria`，触发现有 LLM-as-judge 路径。
+
+### P2 Session 并发安全
+
+- 已为 `SessionStore` 写操作增加 `filelock` 保护。
+- 已覆盖 append、fork、clean fork、rewind、compact 与 metadata 写入路径。
