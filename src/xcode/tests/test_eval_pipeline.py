@@ -335,6 +335,65 @@ class EvalPipelineTests(unittest.TestCase):
             self.assertIn("Fix the failing parser.", tasks[0].prompt)
             self.assertEqual(tasks[0].metadata["benchmark"]["repo"], "owner/repo")
 
+    def test_load_evalplus_humaneval_creates_validated_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "humaneval_plus.jsonl"
+            path.write_text(
+                json.dumps(
+                    {
+                        "task_id": "HumanEval/0",
+                        "prompt": "def add(a, b):\n    pass",
+                        "entry_point": "add",
+                        "test": "def check(candidate):\n    assert candidate(1, 2) == 3",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            tasks = load_benchmark(
+                "evalplus-humaneval",
+                path,
+                fixture_root=root / "fixtures",
+            )
+
+            self.assertEqual(len(tasks), 1)
+            task = tasks[0]
+            fixture = Path(str(task.metadata["fixture_dir"]))
+            self.assertTrue((fixture / "solution.py").exists())
+            self.assertTrue((fixture / "tests" / "test_solution.py").exists())
+            self.assertIn("validation", task.metadata)
+            self.assertEqual(task.metadata["benchmark"]["entry_point"], "add")
+
+    def test_load_evalplus_mbpp_infers_entry_point(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "mbpp_plus.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "task_id": 1,
+                            "prompt": "Write a function add_one.",
+                            "test_list": ["assert add_one(1) == 2"],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            tasks = load_benchmark(
+                "evalplus-mbpp",
+                path,
+                fixture_root=root / "fixtures",
+            )
+
+            self.assertEqual(len(tasks), 1)
+            task = tasks[0]
+            self.assertEqual(task.metadata["benchmark"]["entry_point"], "add_one")
+            self.assertIn("validation", task.metadata)
+
     def test_coding_fixture_suite_is_sandboxed_and_validated(self) -> None:
         tasks = SUITES["coding-fixture"]
 

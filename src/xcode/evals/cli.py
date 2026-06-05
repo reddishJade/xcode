@@ -33,6 +33,7 @@ from .tasks import SUITE_DESCRIPTIONS, SUITES
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    output_dir = args.output_dir or Path.cwd() / ".local" / "eval_runs"
     if args.list_suites:
         _print_suite_list()
         return 0
@@ -54,7 +55,11 @@ def main(argv: list[str] | None = None) -> int:
             print("--benchmark-path is required when --benchmark is set")
             return 1
         try:
-            tasks = load_benchmark(args.benchmark, args.benchmark_path)
+            tasks = load_benchmark(
+                args.benchmark,
+                args.benchmark_path,
+                fixture_root=output_dir / "benchmark_fixtures",
+            )
         except ValueError as exc:
             print(str(exc))
             return 1
@@ -62,7 +67,6 @@ def main(argv: list[str] | None = None) -> int:
         tasks = _load_tasks(args.tasks)
     else:
         tasks = SUITES.get("smoke", ())
-    output_dir = args.output_dir or Path.cwd() / ".local" / "eval_runs"
     runner = EvalRunner(
         tasks=tasks,
         app_factory=_real_app_factory(
@@ -242,7 +246,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--benchmark",
-        choices=("humaneval", "swebench-lite"),
+        choices=("humaneval", "swebench-lite", "evalplus-humaneval", "evalplus-mbpp"),
         help="Load tasks from a local benchmark JSON or JSONL file.",
     )
     parser.add_argument(
