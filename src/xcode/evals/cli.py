@@ -23,6 +23,7 @@ from xcode.harness.config import discover_runtime_config
 from xcode.harness.skills import ToolSpec
 from xcode.harness.observability import HITLResult
 
+from .adapters import BENCHMARK_ADAPTERS
 from .benchmarks import load_benchmark
 from .runner import EvalRunner
 from .sandbox import trial_project_root
@@ -34,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     if args.list_suites:
         _print_suite_list()
+        return 0
+    if args.list_benchmarks:
+        _print_benchmark_list()
         return 0
     if args.show_suite:
         return _print_suite_detail(args.show_suite)
@@ -200,6 +204,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Show tasks in a built-in eval suite and exit.",
     )
     parser.add_argument(
+        "--list-benchmarks",
+        action="store_true",
+        help="List external benchmark adapter targets and exit.",
+    )
+    parser.add_argument(
         "--tasks",
         type=Path,
         help="JSON or JSONL EvalTask file. If omitted, runs smoke suite.",
@@ -273,6 +282,17 @@ def _print_suite_detail(name: str) -> int:
         if commands:
             print(f"    validation_commands: {len(commands)}")
     return 0
+
+
+def _print_benchmark_list() -> None:
+    print("External benchmark adapter targets:")
+    for name in sorted(BENCHMARK_ADAPTERS):
+        spec = BENCHMARK_ADAPTERS[name]
+        print(f"  {spec.name:<18} {spec.display_name}")
+        print(f"    purpose: {spec.purpose}")
+        print(f"    harness: {spec.harness}")
+        print(f"    xcode_role: {spec.xcode_role}")
+        print(f"    upstream: {spec.upstream_url}")
 
 
 def _load_tasks(path: Path) -> tuple[EvalTask, ...]:

@@ -25,6 +25,7 @@ from xcode.evals.cli import main as eval_main
 from xcode.evals.cli import _trial_project_root
 from xcode.evals.cli import _task_from_dict
 from xcode.evals import EvalRunner, EvalTask
+from xcode.evals.adapters import BENCHMARK_ADAPTERS
 from xcode.evals.runner import _build_run_metrics
 from xcode.evals.sandbox import UnsafeEvalTaskError
 from xcode.evals.tasks import SUITES
@@ -340,6 +341,23 @@ class EvalPipelineTests(unittest.TestCase):
         text = output.getvalue()
         self.assertIn("tiny-calculator-subtract", text)
         self.assertIn("validation_commands", text)
+
+    def test_eval_cli_lists_external_benchmarks(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = eval_main(["--list-benchmarks"])
+
+        self.assertEqual(exit_code, 0)
+        text = output.getvalue()
+        self.assertIn("swebench-lite", text)
+        self.assertIn("terminal-bench", text)
+
+    def test_external_benchmark_registry_names_core_targets(self) -> None:
+        self.assertIn("swebench-lite", BENCHMARK_ADAPTERS)
+        self.assertIn("swebench-verified", BENCHMARK_ADAPTERS)
+        self.assertIn("terminal-bench", BENCHMARK_ADAPTERS)
+        self.assertIn("aider-polyglot", BENCHMARK_ADAPTERS)
 
     def test_pass_at_k_uses_unbiased_estimator(self) -> None:
         trials = (
