@@ -8,11 +8,9 @@ from .prompting import (
     SystemPromptBuilder,
     build_runtime_context_provider,
 )
-from .structured import (
-    StructuredAgent,
-    StructuredAgentEvent,
-    StructuredAgentResult,
-)
+from .structured import StructuredAgent
+from .event_translation import StructuredAgentEvent
+from .result import StructuredAgentResult
 from .subagent import ManagedSubagentRunner, build_managed_subagent_tools
 
 __all__ = [

@@ -1,17 +1,12 @@
-"""结构化工具调用执行框架。
+"""StructuredAgent — harness 层对 agent/Agent 的适配。
 
-本模块把模型响应看作 content blocks：text、tool_use、tool_result，并在
-事件流中暴露模型输出、工具调用、工具结果和最终答案。
-
-StructuredAgent 是 harness 层对 agent/Agent 的适配：将 Xcode 特定的
-ToolSpec、权限、审计、压缩等配置映射为 AgentLoopConfig，委托给
-agent/Agent.run() 执行。
+将 Xcode 特定的 ToolSpec、权限、审计、压缩等配置映射为 AgentLoopConfig，
+委托给 agent/Agent.run() 执行。
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -21,25 +16,11 @@ from ...agent.config import (
     AfterToolCallContext,
     AfterToolCallResult,
     AgentLoopConfig,
-    AgentLoopResult,
     AgentLoopTurnUpdate,
     BeforeToolCallContext,
     BeforeToolCallResult,
 )
-from ...agent.events import (
-    AgentEvent,
-    AgentStartEvent,
-    CompactionEvent,
-    MessageEndEvent,
-    MessageStartEvent,
-    MessageUpdateEvent,
-    ThinkingUpdateEvent,
-    ToolExecutionEndEvent,
-    ToolExecutionStartEvent,
-    ToolExecutionUpdateEvent,
-    TurnEndEvent,
-    TurnStartEvent,
-)
+from ...agent.events import ToolExecutionEndEvent, ToolExecutionStartEvent
 from ...agent.messages import (
     AgentMessage,
     AssistantMessage,
@@ -47,19 +28,24 @@ from ...agent.messages import (
     ToolResultMessage,
     UserMessage,
 )
+from xcode.ai.events import ToolCall as ToolUseBlock
+from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import TextContent, ToolCallContent
 from .agent_helpers import (
     run_coro_sync,
     aiter_to_sync_iter,
-    text_from_blocks,
     to_dict,
 )
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
-from xcode.ai.events import ProviderEvent, ToolCall as ToolUseBlock
-from xcode.ai.providers.protocol import ModelProvider
-from xcode.ai.types import StreamOptions, ToolDefinition
+from .event_translation import (
+    _StreamTranslationState,
+    _translate_event,
+    StructuredAgentEvent,
+)
 from .execution_modes import mode_notice, policy_for_mode
+from .fallback import _FallbackSwitchingProvider, _FallbackWithRetryPrimary
+from .result import _build_structured_result, _final_event, _tool_result_text, StructuredAgentResult
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
 from ..observability import (
@@ -72,187 +58,10 @@ from ..observability import (
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 
-__all__ = ["StructuredAgent", "StructuredAgentEvent", "StructuredAgentResult"]
+__all__ = ["StructuredAgent"]
 
 StructuredCompactor = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
 RuntimeContextProvider = Callable[[str], list[str]]
-
-
-class _FallbackSwitchingProvider:
-    """Provider wrapper that switches to fallback after consecutive errors.
-
-    Tracks consecutive error count across calls and switches to fallback_provider
-    when the threshold is reached. After ``error_threshold`` successful calls on
-    the fallback, retries the primary provider.
-    """
-
-    def __init__(
-        self,
-        primary: ModelProvider,
-        fallback: ModelProvider,
-        error_threshold: int = 3,
-        fallback_success_threshold: int = 3,
-    ) -> None:
-        self._primary = primary
-        self._fallback = fallback
-        self._error_threshold = error_threshold
-        self._fallback_success_threshold = fallback_success_threshold
-        self._consecutive_errors: int = 0
-        self._fallback_successes: int = 0
-        self._using_fallback: bool = False
-
-    @property
-    def active_provider(self) -> ModelProvider:
-        return self._fallback if self._using_fallback else self._primary
-
-    @property
-    def model(self) -> str:
-        return getattr(self.active_provider, "model", "unknown")
-
-    @property
-    def thinking(self) -> bool:
-        return getattr(self.active_provider, "thinking", True)
-
-    @property
-    def reasoning_effort(self) -> str | None:
-        return getattr(self.active_provider, "reasoning_effort", None)
-
-    async def stream(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[ToolDefinition],
-        options: StreamOptions | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[ProviderEvent]:
-        provider = self._fallback if self._using_fallback else self._primary
-        try:
-            async for event in self._stream_with(
-                provider, messages, tools, options, kwargs
-            ):
-                self._consecutive_errors = 0
-                yield event
-        except Exception:
-            self._consecutive_errors += 1
-            if (
-                not self._using_fallback
-                and self._consecutive_errors >= self._error_threshold
-                and self._fallback is not None
-            ):
-                self._using_fallback = True
-                self._fallback_successes = 0
-                async for event in self._stream_with(
-                    self._fallback, messages, tools, options, kwargs
-                ):
-                    yield event
-            else:
-                raise
-
-    @staticmethod
-    async def _stream_with(
-        provider: Any,
-        messages: list[dict[str, Any]],
-        tools: list[ToolDefinition],
-        options: StreamOptions | None,
-        kwargs: dict[str, Any],
-    ) -> AsyncIterator[ProviderEvent]:
-        try:
-            async for event in provider.stream(
-                messages, tools, options=options, **kwargs
-            ):
-                yield event
-        except TypeError:
-            async for event in provider.stream(messages, tools):
-                yield event
-
-
-class _FallbackWithRetryPrimary(_FallbackSwitchingProvider):
-    """Extends _FallbackSwitchingProvider to retry primary after success threshold."""
-
-    async def stream(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[ToolDefinition],
-        options: StreamOptions | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[ProviderEvent]:
-        provider = self._fallback if self._using_fallback else self._primary
-        try:
-            async for event in self._stream_with(
-                provider, messages, tools, options, kwargs
-            ):
-                if self._using_fallback:
-                    self._fallback_successes += 1
-                    if self._fallback_successes >= self._fallback_success_threshold:
-                        self._using_fallback = False
-                        self._fallback_successes = 0
-                self._consecutive_errors = 0
-                yield event
-        except Exception:
-            self._consecutive_errors += 1
-            if (
-                not self._using_fallback
-                and self._consecutive_errors >= self._error_threshold
-                and self._fallback is not None
-            ):
-                self._using_fallback = True
-                self._fallback_successes = 0
-                async for event in self._stream_with(
-                    self._fallback, messages, tools, options, kwargs
-                ):
-                    yield event
-            else:
-                raise
-
-    @staticmethod
-    async def _stream_with(
-        provider: Any,
-        messages: list[dict[str, Any]],
-        tools: list[ToolDefinition],
-        options: StreamOptions | None,
-        kwargs: dict[str, Any],
-    ) -> AsyncIterator[ProviderEvent]:
-        try:
-            async for event in provider.stream(
-                messages, tools, options=options, **kwargs
-            ):
-                yield event
-        except TypeError:
-            async for event in provider.stream(messages, tools):
-                yield event
-
-
-@dataclass(frozen=True)
-class ToolResultBlock:
-    tool_use_id: str
-    content: str
-    status: str = "ok"
-    type: str = "tool_result"
-
-
-@dataclass(frozen=True)
-class StructuredAgentResult:
-    answer: str
-    messages: list[dict[str, Any]]
-    steps: int
-    tool_calls: list[ToolUseBlock]
-    stopped_by_limit: bool = False
-    metrics: dict[str, Any] | None = None
-    stopped_by_watchdog: bool = False
-    watchdog_reason: str | None = None
-    needs_follow_up: bool = False
-
-
-@dataclass(frozen=True)
-class StructuredAgentEvent:
-    type: str
-    step: int
-    data: Any
-
-
-@dataclass
-class _StreamTranslationState:
-    step: int = 0
-    text_seen: dict[int, str] = field(default_factory=dict)
 
 
 class StructuredAgent:
@@ -762,190 +571,6 @@ class StructuredAgent:
         return typed
 
 
-# ── 事件翻译 ──
-
-
-def _translate_event(
-    event: AgentEvent,
-    state: _StreamTranslationState,
-) -> StructuredAgentEvent | list[StructuredAgentEvent] | None:
-    """将 AgentEvent 翻译为 StructuredAgentEvent。"""
-
-    if isinstance(event, AgentStartEvent):
-        return None
-
-    if isinstance(event, TurnStartEvent):
-        state.step += 1
-        return None
-
-    if isinstance(event, MessageUpdateEvent):
-        msg = event.message
-        if isinstance(msg, AssistantMessage) and msg.content:
-            for block in msg.content:
-                if isinstance(block, TextContent) and block.text:
-                    step = state.step
-                    prev = state.text_seen.get(step, "")
-                    full = block.text
-                    delta = full[len(prev) :]
-                    if not delta:
-                        return None
-                    state.text_seen[step] = full
-                    return StructuredAgentEvent("text_delta", step, delta)
-        return None
-
-    if isinstance(event, MessageStartEvent):
-        return StructuredAgentEvent("message_start", state.step, event.message)
-
-    if isinstance(event, TurnEndEvent):
-        return StructuredAgentEvent(
-            "turn_end",
-            state.step,
-            {
-                "tool_results": [
-                    {"tool_call_id": r.tool_call_id, "content": str(r.content)}
-                    for r in event.tool_results
-                ]
-            },
-        )
-
-    if isinstance(event, ThinkingUpdateEvent):
-        return StructuredAgentEvent(
-            "reasoning_delta", state.step, event.reasoning_content
-        )
-
-    if isinstance(event, MessageEndEvent):
-        msg = event.message
-        if isinstance(msg, AssistantMessage) and msg.content:
-            blocks = _assistant_to_raw_blocks(msg)
-            if blocks:
-                return StructuredAgentEvent("assistant", state.step, blocks)
-        return None
-
-    if isinstance(event, ToolExecutionStartEvent):
-        tool_use = ToolUseBlock(
-            id=event.tool_call_id,
-            name=event.tool_name,
-            input=event.args or {},
-        )
-        return StructuredAgentEvent("tool_use", state.step, tool_use)
-
-    if isinstance(event, ToolExecutionUpdateEvent):
-        return StructuredAgentEvent(
-            "tool_update",
-            state.step,
-            {
-                "tool_call_id": event.tool_call_id,
-                "tool_name": event.tool_name,
-                "partial_result": str(event.partial_result)
-                if event.partial_result
-                else "",
-            },
-        )
-
-    if isinstance(event, ToolExecutionEndEvent):
-        return StructuredAgentEvent(
-            "tool_result",
-            state.step,
-            ToolResultBlock(
-                tool_use_id=event.tool_call_id,
-                content=str(event.result.content) if event.result else "",
-                status="error" if event.is_error else "ok",
-            ),
-        )
-
-    if isinstance(event, CompactionEvent):
-        return StructuredAgentEvent(
-            "compaction",
-            state.step,
-            {
-                "messages_removed": event.messages_removed,
-                "messages_after": event.messages_after,
-                "summary_token_estimate": event.summary_token_estimate,
-                "trigger": event.trigger,
-            },
-        )
-
-    return None
-
-
-def _assistant_to_raw_blocks(msg: AssistantMessage) -> list[dict[str, Any]]:
-    """将 AssistantMessage 转换为 raw block 列表。"""
-    blocks: list[dict[str, Any]] = []
-    for block in msg.content:
-        if isinstance(block, TextContent):
-            blocks.append({"type": "text", "text": block.text})
-        elif isinstance(block, ToolCallContent):
-            blocks.append(
-                {
-                    "type": "tool_use",
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.arguments or {},
-                }
-            )
-    return blocks
-
-
-def _build_structured_result(
-    result: AgentLoopResult, max_steps: int
-) -> StructuredAgentResult:
-    """将 AgentLoopResult 转换为 StructuredAgentResult。"""
-    answer_parts: list[str] = []
-    tool_calls: list[ToolUseBlock] = []
-    messages: list[dict[str, Any]] = []
-    for msg in result.messages:
-        messages.append(to_dict(msg))
-        if not isinstance(msg, AssistantMessage):
-            continue
-        extracted = text_from_blocks(
-            [
-                {"type": "text", "text": b.text} if isinstance(b, TextContent) else {}
-                for b in msg.content
-            ]
-        )
-        if extracted:
-            answer_parts.append(extracted)
-        for block in msg.content:
-            if isinstance(block, ToolCallContent):
-                tool_calls.append(
-                    ToolUseBlock(
-                        id=block.id,
-                        name=block.name,
-                        input=block.arguments or {},
-                    )
-                )
-
-    answer = " ".join(answer_parts)
-    metrics = None
-    if result.metrics:
-        metrics = {
-            "llm_calls": result.metrics.llm_calls,
-            "tool_calls": result.metrics.tool_calls,
-            "estimated_prompt_tokens": 0,
-            "model_latencies_ms": result.metrics.model_latencies_ms,
-            "tool_latencies_ms": result.metrics.tool_latencies_ms,
-        }
-
-    if result.stopped_by_watchdog and result.watchdog_reason:
-        if answer:
-            answer = answer + " " + result.watchdog_reason
-        else:
-            answer = result.watchdog_reason
-    elif result.stopped_by_limit and not answer:
-        answer = "step limit reached"
-
-    return StructuredAgentResult(
-        answer=answer,
-        messages=messages,
-        steps=result.steps,
-        tool_calls=tool_calls,
-        stopped_by_limit=result.stopped_by_limit,
-        metrics=metrics,
-        stopped_by_watchdog=result.stopped_by_watchdog,
-        watchdog_reason=result.watchdog_reason,
-    )
-
-
 # ── 模块级辅助 ──
 
 
@@ -985,13 +610,3 @@ def _tool_results_count_as_progress(
         if spec and spec.read_only:
             return True
     return False
-
-
-def _tool_result_text(ctx: AfterToolCallContext) -> str:
-    if not ctx.result or not ctx.result.content:
-        return ""
-    return "".join(c.text for c in ctx.result.content if isinstance(c, TextContent))
-
-
-def _final_event(step: int, result: StructuredAgentResult) -> StructuredAgentEvent:
-    return StructuredAgentEvent("final", step, result)
