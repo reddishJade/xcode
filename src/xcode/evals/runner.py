@@ -5,6 +5,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime, UTC
 from pathlib import Path
 import hashlib
+import math
 import uuid
 from typing import Any
 
@@ -312,12 +313,20 @@ def _build_run_metrics(
     for t in trials:
         task_trials[t.task_id].append(t.success)
     k = max(len(v) for v in task_trials.values()) if task_trials else 1
+    pass_at_k_rates = [
+        _unbiased_pass_at_k(len(values), sum(1 for passed in values if passed), k)
+        for values in task_trials.values()
+    ]
     pass_at_k_count = sum(1 for v in task_trials.values() if any(v))
     pass_pow_k_count = sum(1 for v in task_trials.values() if all(v))
     metrics["trials_per_task"] = k
     metrics["pass@k"] = f"{pass_at_k_count}/{len(task_trials)}"
     metrics["pass^k"] = f"{pass_pow_k_count}/{len(task_trials)}"
-    metrics["pass@k_rate"] = round(pass_at_k_count / len(task_trials), 4) if task_trials else 0.0
+    metrics["pass@k_rate"] = (
+        round(sum(pass_at_k_rates) / len(pass_at_k_rates), 4)
+        if pass_at_k_rates
+        else 0.0
+    )
     metrics["pass^k_rate"] = round(pass_pow_k_count / len(task_trials), 4) if task_trials else 0.0
     total_llm = 0
     total_tokens = 0
@@ -371,3 +380,16 @@ def _build_run_metrics(
             for tid, v in sorted(task_graders.items())
         }
     return metrics
+
+
+def _unbiased_pass_at_k(sample_count: int, correct_count: int, k: int) -> float:
+    """使用 HumanEval 无偏估计量计算 pass@k。"""
+    if sample_count <= 0 or correct_count <= 0:
+        return 0.0
+    if k <= 0:
+        return 0.0
+    if sample_count - correct_count < k:
+        return 1.0
+    return 1.0 - math.comb(sample_count - correct_count, k) / math.comb(
+        sample_count, k
+    )
