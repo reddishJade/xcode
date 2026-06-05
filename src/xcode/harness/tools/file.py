@@ -16,7 +16,12 @@ from .edit_diff import (
     strip_bom,
 )
 from .file_mutation_queue import with_file_mutation
-from .path_utils import is_path_blocked, truncate_output, display_path
+from .path_utils import (
+    is_path_blocked,
+    resolve_read_path,
+    truncate_output,
+    display_path,
+)
 
 """受沙箱约束的本地文件工具。
 
@@ -230,7 +235,9 @@ def _read_file(
     path_str = str(data.get("path", "")).strip()
     if not path_str:
         raise ValueError("path is required")
-    path = _safe_path(root, path_str)
+    path = resolve_read_path(root, path_str)
+    if is_path_blocked(root, path):
+        raise ValueError(f"path is blocked: {_display(root, path)}")
     if not operations.is_file(path):
         raise ValueError(f"not a file: {_display(root, path)}")
     size = operations.size(path)
