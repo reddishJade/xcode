@@ -383,22 +383,12 @@ class XcodeAppRuntimeTests(unittest.TestCase):
     def test_scoped_child_registry_uses_override_for_bash(self) -> None:
         seen_cwds: list[Path] = []
 
-        class FakePipe:
-            def __iter__(self):
-                return iter(())
+        class TrackingEnv:
+            def run(self, argv, cwd, timeout=30, cancel_event=None):
+                seen_cwds.append(Path(cwd))
+                from xcode.harness.execution_env import ExecutionResult
 
-            def close(self) -> None:
-                pass
-
-        class FakePopen:
-            def __init__(self, *args, **kwargs):
-                seen_cwds.append(Path(kwargs["cwd"]))
-                self.stdout = FakePipe()
-                self.stderr = FakePipe()
-                self.returncode = 0
-
-            def poll(self):
-                return 0
+                return ExecutionResult(stdout="")
 
         with tempfile.TemporaryDirectory() as tmp:
             worktree = Path(tmp) / "wt"
@@ -410,10 +400,10 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                     enabled={"core", "subagent", "worktree"},
                     contextual_state=None,
                     shell_spec=detect_shell(),
+                    env=TrackingEnv(),
                 )
             }
-            with patch("xcode.coding_agent.tools.bash.subprocess.Popen", FakePopen):
-                tools["bash"].handler({"command": "pwd"})
+            tools["bash"].handler({"command": "pwd"})
 
         self.assertEqual(seen_cwds, [worktree.resolve()])
 

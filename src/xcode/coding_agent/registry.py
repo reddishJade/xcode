@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from xcode.harness.execution_env import ExecutionEnv
 from xcode.harness.skills import BASE_REGISTRY, ToolSpec
 from xcode.coding_agent.tools import build_bash_tool, build_code_tools, build_file_tools
 
@@ -25,11 +26,17 @@ def build_project_scoped_registry(
     contextual_state: ContextualRetrievalState | None,
     shell_spec: ShellSpec,
     cancel_event: threading.Event | None = None,
+    env: ExecutionEnv | None = None,
 ) -> tuple[ToolSpec, ...]:
     registry = BASE_REGISTRY
     registry += build_file_tools(project_root, context_state=contextual_state)
     registry += build_code_tools(project_root)
     registry += (
-        build_bash_tool(project_root, shell_spec=shell_spec, cancel_event=cancel_event),
+        build_bash_tool(
+            project_root,
+            shell_spec=shell_spec,
+            cancel_event=cancel_event,
+            env=env,
+        ),
     )
     return tuple(t for t in registry if t.group in enabled)

@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import logging
-import os
-import signal
-import subprocess
-import sys
 import threading
-import time
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
+from xcode.harness.execution_env import ExecutionEnv, SubprocessExecutionEnv
 from xcode.harness.skills import ToolInput, ToolSpec
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
@@ -18,64 +14,17 @@ logger = logging.getLogger("xcode.coding_agent.tools.bash")
 
 DEFAULT_TIMEOUT_SECONDS = 30
 MAX_TIMEOUT_SECONDS = 120
-POLL_INTERVAL = 0.1
-TERMINATE_GRACE_SECONDS = 3
-
-
-def _kill_process(proc: subprocess.Popen) -> None:
-    if proc.poll() is not None:
-        return
-    try:
-        if sys.platform != "win32":
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        else:
-            proc.terminate()
-        proc.wait(timeout=TERMINATE_GRACE_SECONDS)
-    except ProcessLookupError:
-        pass
-    except subprocess.TimeoutExpired:
-        if sys.platform != "win32":
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        else:
-            _taskkill(proc)
-        proc.wait()
-
-
-def _taskkill(proc: subprocess.Popen) -> None:
-    subprocess.run(
-        ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-        capture_output=True,
-        timeout=5,
-    )
-
-
-def _close_pipes(proc: subprocess.Popen) -> None:
-    for pipe in (proc.stdout, proc.stderr):
-        if pipe is not None:
-            try:
-                pipe.close()
-            except Exception:
-                logger.debug("failed to close process pipe", exc_info=True)
-
-
-class BashOperations(Protocol):
-    def exec_command(
-        self,
-        argv: list[str],
-        cwd: Path,
-        timeout: int,
-        cancel_event: threading.Event | None,
-    ) -> str: ...
 
 
 def build_bash_tool(
     project_root: Path,
     cancel_event: threading.Event | None = None,
     shell_spec: ShellSpec | None = None,
-    bash_ops: BashOperations | None = None,
+    env: ExecutionEnv | None = None,
 ) -> ToolSpec:
     root = project_root.resolve()
     spec = shell_spec or detect_shell()
+    env = env or SubprocessExecutionEnv()
 
     def bash(data: ToolInput) -> str:
         command = str(data.get("command") or data.get("input") or "").strip()
@@ -84,65 +33,21 @@ def build_bash_tool(
         timeout = _parse_timeout(data.get("timeout", DEFAULT_TIMEOUT_SECONDS))
 
         argv = build_shell_argv(spec, command)
-        popen_kwargs: dict[str, Any] = {}
-        if sys.platform != "win32":
-            popen_kwargs["start_new_session"] = True
-        proc = subprocess.Popen(
-            argv,
-            shell=False,
-            cwd=root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            **popen_kwargs,
-        )
+        result = env.run(argv, cwd=root, timeout=timeout, cancel_event=cancel_event)
+
         acc = OutputAccumulator()
-        cancelled = False
-        timed_out = False
-
-        def _drain(pipe):
-            try:
-                for raw in pipe:
-                    acc.append(raw)
-            except Exception:
-                logger.debug("error draining process output", exc_info=True)
-
-        out_thread = threading.Thread(target=_drain, args=(proc.stdout,), daemon=True)
-        err_thread = threading.Thread(target=_drain, args=(proc.stderr,), daemon=True)
-        out_thread.start()
-        err_thread.start()
-
-        try:
-            deadline = time.monotonic() + timeout
-            while proc.poll() is None:
-                if time.monotonic() >= deadline:
-                    _kill_process(proc)
-                    timed_out = True
-                    break
-                if cancel_event is not None and cancel_event.is_set():
-                    _kill_process(proc)
-                    cancelled = True
-                    break
-                time.sleep(POLL_INTERVAL)
-            out_thread.join(timeout=2)
-            err_thread.join(timeout=2)
-        except Exception:
-            _kill_process(proc)
-            raise
-        finally:
-            _close_pipes(proc)
-
+        for raw in [result.stdout.encode(), result.stderr.encode()]:
+            if raw:
+                acc.append(raw)
         output = acc.snapshot()
         acc.close()
 
-        prefixed = False
-        if timed_out:
+        if result.timed_out:
             output += f"\nCommand timed out after {timeout}s"
-            prefixed = True
-        if cancelled:
+        elif result.cancelled:
             output += "\nCommand cancelled"
-            prefixed = True
-        if not prefixed and proc.returncode not in (0, None):
-            output = f"exit code: {proc.returncode}\n{output}"
+        elif result.returncode not in (0, None):
+            output = f"exit code: {result.returncode}\n{output}"
         return output
 
     return ToolSpec(
