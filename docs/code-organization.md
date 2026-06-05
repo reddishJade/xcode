@@ -164,7 +164,7 @@ src/xcode/main.py
 | `graders.py` | 确定性 grader |
 | `reporting.py` | JSON/HTML 报告 |
 | `cli.py` | `xcode-eval` / `python -m xcode.evals.cli` |
-| `adapters/` | 外部 benchmark adapter registry |
+| `adapters/` | 外部 benchmark adapter registry 与 SWE-bench predictions helper |
 
 ### `src/xcode/experimental/`
 

@@ -198,6 +198,7 @@ uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
 | `total_model_ms` | 模型总延迟 |
 | `total_tool_calls` | 工具调用总数 |
 | `total_tool_errors` | 工具错误总数 |
+| `model_patch` | Git 工作区补丁，供外部 benchmark harness 消费 |
 | `*_distribution` | 各数值指标在 trials 间的分布（min/p50/p95/p99/max/mean） |
 
 ### 离线 Pipeline Eval
@@ -233,6 +234,8 @@ uv run python -m xcode.evals.cli --list-benchmarks
 - `aider-polyglot`
 
 adapter registry 描述 Xcode 与外部 harness 的职责边界。外部 harness 负责数据集、任务环境和评分；Xcode 负责在任务工作区内生成候选修改或执行终端任务。
+
+SWE-bench adapter helper 位于 `src/xcode/evals/adapters/swebench.py`。它把 `EvalReport` 和 benchmark tasks 转换为 predictions JSONL 记录，字段包含 `instance_id`、`model_name_or_path` 和 `model_patch`。
 
 ### 开发调试 JSONL
 

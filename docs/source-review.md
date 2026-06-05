@@ -369,7 +369,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 - `pipeline`：离线 provider 驱动 eval runner、trace、grader 和 report 回归。
 - `tool-policy`：离线 provider 验证工具选择和禁止写入约束。
 - `coding-fixture`：真实 provider 在 fixture sandbox 中执行小型编码任务，并运行 validation command。
-- `adapters/`：登记 SWE-bench Lite、SWE-bench Verified、Terminal-Bench 和 Aider Polyglot 外部 harness 目标。
+- `adapters/`：登记 SWE-bench Lite、SWE-bench Verified、Terminal-Bench 和 Aider Polyglot 外部 harness 目标，并提供 SWE-bench predictions JSONL helper。
 
 `EvalRunner` 消费 `XcodeApp.aask_stream()` 事件流，生成 trace、JSON report、HTML report 和 CSV report。
 
@@ -383,6 +383,8 @@ Grader 分四类：
 
 内置 HumanEval 与 SWE-bench Lite JSON/JSONL benchmark loader：`src/xcode/evals/benchmarks.py`。通过 `--tasks` 参数加载自定义 JSONL，与内置套件共用 `EvalRunner` 和 grader 体系。
 
+Git 工作区补丁记录在 trial metrics 的 `model_patch` 字段中。SWE-bench adapter helper 使用该字段生成 predictions JSONL。
+
 ---
 
 ## 10. 已知约束
@@ -393,7 +395,7 @@ Grader 分四类：
 - `daemon` 由 `build_app()` 构造，生命周期启动由调用方控制。
 - `tasks` + `progress` 支持任务和 checklist，不提供完整可重入长任务编排能力。
 - eval 的 LLM-as-judge 内置 task 未启用；已接入 HumanEval/SWE-bench loader，Pass@k 已采用无偏估计量。
-- 外部 benchmark adapter registry 覆盖 SWE-bench Lite、SWE-bench Verified、Terminal-Bench 和 Aider Polyglot。执行器接入点位于 `src/xcode/evals/adapters/`。
+- 外部 benchmark adapter registry 覆盖 SWE-bench Lite、SWE-bench Verified、Terminal-Bench 和 Aider Polyglot。执行器接入点位于 `src/xcode/evals/adapters/`，SWE-bench predictions helper 位于 `src/xcode/evals/adapters/swebench.py`。
 - `intercept_usage`/`_record_usage`/`_ensure_metrics` 已提取为 `ProviderMetricsMixin`（`ai/providers/metrics.py`），子类覆写 `_record_usage` 属合理多态。仅 `OpenAIResponsesProvider` 因 Responses API 事件模型差异有一个同构闭包 `intercept_events`（`openai.py:126-141`）可清理。
 
 ---
