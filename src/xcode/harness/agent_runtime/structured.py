@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +64,19 @@ __all__ = ["StructuredAgent"]
 
 StructuredCompactor = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
 RuntimeContextProvider = Callable[[str], list[str]]
+
+
+@dataclass(frozen=True)
+class TurnSnapshot:
+    """单个 turn 使用的运行期快照。"""
+
+    config: AgentConfig
+    registry: tuple[ToolSpec, ...]
+    tool_map: dict[str, ToolSpec]
+    approval_callback: ApprovalCallback | None
+    permission_policy: PermissionPolicy | None
+    provider: ModelProvider
+    runtime_context_provider: RuntimeContextProvider | None
 
 
 class StructuredAgent:
@@ -175,24 +190,25 @@ class StructuredAgent:
     async def arun_stream(
         self, question: str, mode: ExecutionMode | None = None
     ) -> AsyncIterator[StructuredAgentEvent]:
-        effective_mode = mode or self.config.execution_mode
+        snapshot = self._turn_snapshot()
+        effective_mode = mode or snapshot.config.execution_mode
         policy = policy_for_mode(effective_mode)
-        active_registry = policy.filter_tools(self.registry)
+        active_registry = policy.filter_tools(snapshot.registry)
         self.cancellation_token.reset()
 
         # 构建初始消息
-        initial_messages = self._initial_messages(question, effective_mode)
+        initial_messages = self._initial_messages(question, effective_mode, snapshot)
 
         # 重新适配工具（执行模式可能过滤了工具集）
         adapted_tools: list[Any] = adapt_tool_specs(
             active_registry,
-            approval_callback=self.approval_callback,
-            permission_policy=self.permission_policy,
+            approval_callback=snapshot.approval_callback,
+            permission_policy=snapshot.permission_policy,
         )
         self._agent = Agent(adapted_tools)
 
         # 构建 AgentLoopConfig（含 harness 钩子）
-        loop_config = self._build_loop_config(effective_mode)
+        loop_config = self._build_loop_config(effective_mode, snapshot)
 
         # 发射 before_agent_start 钩子
         self._emit_hook(
@@ -231,7 +247,7 @@ class StructuredAgent:
                 self._original_provider = wrapper._primary
 
         # 构建最终结果
-        final = _build_structured_result(result, self.config.max_steps)
+        final = _build_structured_result(result, snapshot.config.max_steps)
         yield _final_event(result.steps, final)
 
     # ── 模式切换 ──
@@ -307,38 +323,47 @@ class StructuredAgent:
 
     # ── 配置构建 ──
 
-    def _build_loop_config(self, mode: ExecutionMode) -> AgentLoopConfig:
+    def _build_loop_config(
+        self, mode: ExecutionMode, snapshot: TurnSnapshot
+    ) -> AgentLoopConfig:
         """将 harness 配置映射为 AgentLoopConfig。
 
         队列 drain（get_steering_messages / get_follow_up_messages）
         由 Agent 层注入，此处不设置。
         """
-        should_compact = self._loop_should_compact if self.compactor else None
+        should_compact = (
+            self._loop_should_compact(snapshot) if self.compactor else None
+        )
         compact = self._loop_compact if self.compactor else None
 
         return AgentLoopConfig(
-            provider=self.provider,
+            provider=snapshot.provider,
             convert_to_llm=convert_to_llm,
-            max_steps=self.config.max_steps,
+            max_steps=snapshot.config.max_steps,
             max_step_retries=3,
             retry_backoff_base=0.5,
             max_tokens_continuation=True,
             max_consecutive_continuations=3,
             min_continuation_tokens=500,
-            watchdog_repeated_tool_limit=self.config.watchdog_repeated_tool_limit,
+            watchdog_repeated_tool_limit=snapshot.config.watchdog_repeated_tool_limit,
             max_consecutive_idle_steps=4,
             should_compact=should_compact,
             compact=compact,
-            is_tool_productive=self._loop_is_tool_productive(mode),
-            before_tool_call=self._loop_before_tool(mode),
-            after_tool_call=self._loop_after_tool,
-            prepare_next_turn=self._loop_prepare_next_turn,
+            is_tool_productive=self._loop_is_tool_productive(mode, snapshot),
+            before_tool_call=self._loop_before_tool(mode, snapshot),
+            after_tool_call=self._loop_after_tool(snapshot),
+            prepare_next_turn=self._loop_prepare_next_turn(snapshot),
         )
 
     # ── 辅助方法 ──
 
-    def _loop_should_compact(self, messages: list[AgentMessage]) -> bool:
-        return self._should_compact([to_dict(m) for m in messages])
+    def _loop_should_compact(
+        self, snapshot: TurnSnapshot
+    ) -> Callable[[list[AgentMessage]], bool]:
+        def should_compact(messages: list[AgentMessage]) -> bool:
+            return self._should_compact([to_dict(m) for m in messages], snapshot)
+
+        return should_compact
 
     def _loop_compact(self, messages: list[AgentMessage]) -> list[AgentMessage]:
         self._emit_hook(HookRecord("on_compact", metadata={"messages": len(messages)}))
@@ -350,38 +375,43 @@ class StructuredAgent:
         return messages
 
     def _loop_prepare_next_turn(
-        self,
-    ) -> AgentLoopTurnUpdate | None:
-        self._progress_steps_without_update += 1
-        if self._progress_steps_without_update >= 5:
-            self._progress_steps_without_update = 0
-            self.steer(
-                UserMessage(
-                    content="<reminder>You have gone several turns without updating task progress. "
-                    "Use update_task or save_task_progress to record progress before continuing.</reminder>"
-                )
-            )
-
-        if self._current_mode == "plan":
-            self._plan_enter_step += 1
-            if self._plan_enter_step >= self._max_plan_turns:
-                self._plan_enter_step = 0
-                self._current_mode = "act"
-                self._agent._tools = self._tools_for_mode(self.registry, "act")
+        self, snapshot: TurnSnapshot
+    ) -> Callable[[], AgentLoopTurnUpdate | None]:
+        def prepare_next_turn() -> AgentLoopTurnUpdate | None:
+            self._progress_steps_without_update += 1
+            if self._progress_steps_without_update >= 5:
+                self._progress_steps_without_update = 0
                 self.steer(
-                    SystemMessage(
-                        content=(
-                            "<plan-timeout>\n"
-                            "Plan Mode timed out after reaching the maximum number "
-                            "of investigation turns. Returning to Act Mode.\n"
-                            "</plan-timeout>"
-                        )
+                    UserMessage(
+                        content="<reminder>You have gone several turns without updating task progress. "
+                        "Use update_task or save_task_progress to record progress before continuing.</reminder>"
                     )
                 )
-        return None
+
+            if self._current_mode == "plan":
+                self._plan_enter_step += 1
+                if self._plan_enter_step >= self._max_plan_turns:
+                    self._plan_enter_step = 0
+                    self._current_mode = "act"
+                    self._agent._tools = self._tools_for_mode(
+                        snapshot.registry, "act"
+                    )
+                    self.steer(
+                        SystemMessage(
+                            content=(
+                                "<plan-timeout>\n"
+                                "Plan Mode timed out after reaching the maximum number "
+                                "of investigation turns. Returning to Act Mode.\n"
+                                "</plan-timeout>"
+                            )
+                        )
+                    )
+            return None
+
+        return prepare_next_turn
 
     def _loop_is_tool_productive(
-        self, mode: ExecutionMode
+        self, mode: ExecutionMode, snapshot: TurnSnapshot
     ) -> Callable[[list[ToolCallContent], list[ToolResultMessage]], bool]:
         def is_tool_productive(
             tool_calls: list[ToolCallContent],
@@ -399,13 +429,13 @@ class StructuredAgent:
                     for tool_call in tool_calls
                 ],
                 tool_results,
-                self.tool_map,
+                snapshot.tool_map,
             )
 
         return is_tool_productive
 
     def _loop_before_tool(
-        self, mode: ExecutionMode
+        self, mode: ExecutionMode, snapshot: TurnSnapshot
     ) -> Callable[[BeforeToolCallContext, Any], BeforeToolCallResult | None]:
         def before_tool(
             ctx: BeforeToolCallContext, _signal: Any
@@ -436,7 +466,7 @@ class StructuredAgent:
                     reason=f"tool not allowed in {self._current_mode} mode: {tool_call.name}",
                 )
             if decision == "ask":
-                approval = self._request_tool_approval(tool_call.name, args)
+                approval = self._request_tool_approval(tool_call.name, args, snapshot)
                 if approval is not None:
                     return approval
 
@@ -448,14 +478,17 @@ class StructuredAgent:
         return before_tool
 
     def _request_tool_approval(
-        self, tool_name: str, args: dict[str, Any]
+        self, tool_name: str, args: dict[str, Any], snapshot: TurnSnapshot
     ) -> BeforeToolCallResult | None:
-        if self.approval_callback is None or self.tool_map.get(tool_name) is None:
+        if (
+            snapshot.approval_callback is None
+            or snapshot.tool_map.get(tool_name) is None
+        ):
             return BeforeToolCallResult(
                 block=True,
                 reason=f"tool requires approval: {tool_name}",
             )
-        hitl = self.approval_callback(self.tool_map[tool_name], args)
+        hitl = snapshot.approval_callback(snapshot.tool_map[tool_name], args)
         if hitl.decision == "deny":
             return BeforeToolCallResult(
                 block=True,
@@ -473,16 +506,21 @@ class StructuredAgent:
     )
 
     def _loop_after_tool(
-        self, ctx: AfterToolCallContext, _signal: Any
-    ) -> AfterToolCallResult | None:
-        if ctx.tool_call.name in self.PROGRESS_TOOL_NAMES:
-            self._progress_steps_without_update = 0
-        action_input = stringify_tool_input(ctx.args)
-        result_content_text = _tool_result_text(ctx)
+        self, snapshot: TurnSnapshot
+    ) -> Callable[[AfterToolCallContext, Any], AfterToolCallResult | None]:
+        def after_tool(
+            ctx: AfterToolCallContext, _signal: Any
+        ) -> AfterToolCallResult | None:
+            if ctx.tool_call.name in self.PROGRESS_TOOL_NAMES:
+                self._progress_steps_without_update = 0
+            action_input = stringify_tool_input(ctx.args)
+            result_content_text = _tool_result_text(ctx)
 
-        self._emit_tool_hook(ctx, action_input, result_content_text)
-        self._emit_audit_record(ctx, action_input, result_content_text)
-        return None
+            self._emit_tool_hook(ctx, action_input, result_content_text)
+            self._emit_audit_record(ctx, action_input, result_content_text, snapshot)
+            return None
+
+        return after_tool
 
     def _emit_tool_hook(
         self,
@@ -515,6 +553,7 @@ class StructuredAgent:
         ctx: AfterToolCallContext,
         action_input: str,
         result_content_text: str,
+        snapshot: TurnSnapshot,
     ) -> None:
         if self.audit_logger is None:
             return
@@ -523,7 +562,7 @@ class StructuredAgent:
             AuditRecord(
                 session_id=self.session_id,
                 tool=tool_call.name,
-                static_risk=self.tool_map.get(
+                static_risk=snapshot.tool_map.get(
                     tool_call.name, ToolSpec("", "", "", lambda _: "")
                 ).risk
                 or "low",
@@ -540,27 +579,33 @@ class StructuredAgent:
         if self.hook_manager is not None:
             self.hook_manager.emit(record)
 
-    def _should_compact(self, messages: list[dict[str, Any]]) -> bool:
+    def _should_compact(
+        self, messages: list[dict[str, Any]], snapshot: TurnSnapshot
+    ) -> bool:
         if self.compactor is None:
             return False
         if self.manual_compact_requested and self.manual_compact_requested():
             return True
         return (
-            self.config.compact_threshold > 0
-            and len(messages) > self.config.compact_threshold
+            snapshot.config.compact_threshold > 0
+            and len(messages) > snapshot.config.compact_threshold
         ) or (
-            self.config.compact_token_threshold > 0
-            and estimate_message_tokens(messages) > self.config.compact_token_threshold
+            snapshot.config.compact_token_threshold > 0
+            and estimate_message_tokens(messages)
+            > snapshot.config.compact_token_threshold
         )
 
     def _initial_messages(
-        self, question: str, mode: ExecutionMode = "act"
+        self,
+        question: str,
+        mode: ExecutionMode,
+        snapshot: TurnSnapshot,
     ) -> list[AgentMessage]:
         self._current_mode = mode
         typed: list[AgentMessage] = []
         notice = mode_notice(mode)
-        if self.runtime_context_provider is not None:
-            parts = self.runtime_context_provider(question)
+        if snapshot.runtime_context_provider is not None:
+            parts = snapshot.runtime_context_provider(question)
             if notice:
                 parts.append(notice)
             if parts:
@@ -569,6 +614,19 @@ class StructuredAgent:
             typed.append(SystemMessage(content=notice))
         typed.append(UserMessage(content=question))
         return typed
+
+    def _turn_snapshot(self) -> TurnSnapshot:
+        """冻结当前 turn 依赖的配置和工具引用。"""
+        registry = tuple(self.registry)
+        return TurnSnapshot(
+            config=deepcopy(self.config),
+            registry=registry,
+            tool_map={tool.name: tool for tool in registry},
+            approval_callback=self.approval_callback,
+            permission_policy=self.permission_policy,
+            provider=self.provider,
+            runtime_context_provider=self.runtime_context_provider,
+        )
 
 
 # ── 模块级辅助 ──
