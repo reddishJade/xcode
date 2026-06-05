@@ -337,10 +337,28 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 - `HeartbeatDaemon`
 - 周期检查 mailbox、git dirty status、background tasks
 - 把事件写入 mailbox
+- `DaemonHealth` 健康快照：记录任务失败计数、错误事件
+- `register_callback()` 事件回调注册
+- `ensure_healthy()` 自愈重启
 
 边界：
 
 - `build_app()` 在启用 `daemon` 或 `experimental` 后构造 daemon。
+
+### `execution_env`
+
+文件：`src/xcode/harness/execution_env.py`
+
+能力：
+
+- `ExecutionEnv` protocol：`run(argv, cwd, timeout, cancel_event) → ExecutionResult`
+- `SubprocessExecutionEnv`：子进程管理（Popen、线程 drain、进程树清理）
+- `SandboxExecutionEnv`：测试用 mock，记录调用、支持预设返回
+
+边界：
+
+- `ExecutionResult` 包含 stdout/stderr/returncode/timed_out/cancelled
+- 通过 `registry.py`/`assembly.py` 透传至 `bash` 工具
 
 ---
 
@@ -355,7 +373,9 @@ Grader 分三类：
 - **文件证据 grader**：file_exists、file_contains、file_not_contains、file_changed。
 - **LLM-as-judge**：`run_llm_judge()` 接口完整，通过描述性标准评判 Agent 输出。当前内置任务未设置 `llm_judge_criteria`，需自定义 JSONL 启用。
 
-`pass@k` 和 `pass^k` 指标通过朴素 `any(pass in k trials)` 计算，非学术版无偏估计量。
+`pass@k` 和 `pass^k` 指标通过无偏估计量 `1 - C(n-c,k)/C(n,k)` 计算。
+
+内置 HumanEval 与 SWE-bench Lite JSON/JSONL benchmark loader：`src/xcode/evals/benchmarks.py`。通过 `--tasks` 参数加载自定义 JSONL，与内置套件共用 `EvalRunner` 和 grader 体系。
 
 ---
 
@@ -366,7 +386,7 @@ Grader 分三类：
 - `plugins` 使用动态加载，通过显式 opt-in 控制。
 - `daemon` 由 `build_app()` 构造，生命周期启动由调用方控制。
 - `tasks` + `progress` 支持任务和 checklist，不提供完整可重入长任务编排能力。
-- eval 缺少外部 benchmark 接入（HumanEval/SWE-bench 等）。LLM-as-judge 和 Pass@k 接口已实现但精度不足：LLM-as-judge 内置 task 未启用；Pass@k 使用朴素 `any(pass in k)` 而非无偏估计量。
+- eval 的 LLM-as-judge 内置 task 未启用；已接入 HumanEval/SWE-bench loader，Pass@k 已采用无偏估计量。
 - `intercept_usage`/`_record_usage`/`_ensure_metrics` 已提取为 `ProviderMetricsMixin`（`ai/providers/metrics.py`），子类覆写 `_record_usage` 属合理多态。仅 `OpenAIResponsesProvider` 因 Responses API 事件模型差异有一个同构闭包 `intercept_events`（`openai.py:126-141`）可清理。
 
 ---

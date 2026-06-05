@@ -116,6 +116,7 @@ src/xcode/main.py
 | `config.py` | runtime config dataclass、配置读取、相对路径解析 |
 | `session.py` | JSONL 会话存储、索引、resume、fork、plan artifact |
 | `skills.py` | `ToolSpec`、工具输入解析、HITL 执行和脱敏入口 |
+| `execution_env.py` | `ExecutionEnv` protocol、`SubprocessExecutionEnv`（本地子进程）、`SandboxExecutionEnv`（测试 mock） |
 | `skill_loader.py` | `SKILL.md` catalog 扫描和 `load_skill` 工具 |
 | `agent_runtime/` | `StructuredAgent`（harness 对 agent loop 的适配器）、subagent、prompt、compaction、cancellation |
 | `observability/` | audit、permission policy、hook manager |
@@ -178,7 +179,7 @@ src/xcode/main.py
 | `memory_parsing.py` | internal | 记忆块解析数据类型，被 `memory.py` 引用 |
 | `bm25.py` | internal | `memory` 使用的纯 Python BM25Okapi，随 `memory` group 启用 |
 | `plugins.py` | `plugins` | `.local/plugins/*.py` 动态加载，收集 tools/hooks/skills |
-| `daemon.py` | `daemon` | `HeartbeatDaemon`，轮询 mailbox/git/tasks |
+| `daemon.py` | `daemon` | `HeartbeatDaemon`，轮询 mailbox/git/tasks；`DaemonHealth` 健康快照、`ensure_healthy()` 自愈重启 |
 
 ---
 

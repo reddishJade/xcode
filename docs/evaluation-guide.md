@@ -73,6 +73,9 @@ uv run python -m compileall src
 - `/compact`：请求下一轮前压缩上下文。
 - `/sessions`：列出会话。
 - `/resume <id>`：恢复会话。
+- `/branch list|tree|<id|title>`：会话分支导航与切换。
+- `/queue on|off`：切换队列模式，流式 turn 期间可读 queued follow-up。
+- `/model [profile/]name[:thinking]`：切换模型，支持 profile/name:thinking 语法。
 - `/tool NAME INPUT`：直接调用当前 registry 中的工具。
 - `!COMMAND`：通过已注册的 `bash` 工具直接运行 shell 命令。
 - `@relative/path`：注入文件引用。
@@ -117,6 +120,8 @@ uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
 - `llm_judge_criteria`：LLM-as-judge 评判标准
 - `metadata.evidence.files`：文件证据（`exists` / `contains` / `not_contains` / `changed`）
 
+内置 HumanEval 与 SWE-bench Lite JSON/JSONL benchmark loader：`src/xcode/evals/benchmarks.py`。通过 `--tasks` 参数加载自定义 JSONL，与内置套件共用 `EvalRunner` 和 grader 体系。
+
 ### 快速参考
 
 | 命令 | 用途 |
@@ -126,6 +131,7 @@ uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
 | `uv run python -m xcode.evals.cli --suite all --trials 3` | 全套 3 轮，测量 pass@k/pass^k |
 | `uv run python -m xcode.evals.cli --real --suite coding --trials 3` | 真实 provider 的编码评测 |
 | `uv run python -m xcode.evals.cli --real --suite tool` | 真实 provider 的工具调用 |
+| `uv run python -m xcode.evals.cli --real --suite all --trials 3` | 真实 provider 全量 3 轮 |
 
 ### 可用套件
 
@@ -173,7 +179,7 @@ uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
 
 | 指标 | 说明 |
 |------|------|
-| `pass@k` | N/M + 百分比：k 轮中至少一次正确（探索能力上限） |
+| `pass@k` | N/M + 百分比：k 轮中至少一次正确（探索能力上限）。使用无偏估计量 `1 - C(n-c,k)/C(n,k)` |
 | `pass^k` | N/M + 百分比：k 轮全部正确（回归稳定性） |
 | `grader_pass_rate` | 所有 grader 的通过率 |
 | `per_grader_pass_rate` | 每个 grader 维度（runtime_error、file_exists 等）的通过率 |
