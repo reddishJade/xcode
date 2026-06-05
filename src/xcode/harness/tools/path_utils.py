@@ -1,16 +1,16 @@
-"""文件路径安全约束和输出截断共享工具。"""
-
 from __future__ import annotations
 
 from pathlib import Path
 
+from .truncate import truncate_tail
+
 BLOCKED_PARTS = {".git", ".venv", "__pycache__"}
 
-MAX_RETURN_CHARS = 50_000
+DEFAULT_MAX_LINES = 2000
+DEFAULT_MAX_BYTES = 50 * 1024
 
 
 def is_path_blocked(root: Path, path: Path) -> bool:
-    """判断 path 是否在受保护目录内或逃逸出 root。"""
     try:
         relative = path.resolve().relative_to(root)
     except ValueError:
@@ -34,16 +34,12 @@ def is_path_blocked(root: Path, path: Path) -> bool:
     )
 
 
-def truncate_output(text: str, max_chars: int = MAX_RETURN_CHARS) -> str:
-    """截断过长文本，保留首尾并在中间标注被截断的字符数。"""
-    if len(text) <= max_chars:
-        return text
-    keep = (max_chars - 80) // 2
-    return (
-        text[:keep]
-        + f"\n\n[... truncated {len(text) - keep * 2} chars ...]\n\n"
-        + text[-keep:]
-    )
+def truncate_output(
+    text: str,
+    max_lines: int = DEFAULT_MAX_LINES,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+) -> str:
+    return truncate_tail(text, max_lines=max_lines, max_bytes=max_bytes)
 
 
 def display_path(root: Path, path: Path) -> str:
