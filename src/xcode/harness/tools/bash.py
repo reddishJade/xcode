@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from ..skills import ToolInput, ToolSpec
 from .output_accumulator import OutputAccumulator
@@ -27,27 +27,18 @@ def _kill_process(proc: subprocess.Popen) -> None:
         return
     try:
         if sys.platform != "win32":
-            _kill_process_group(proc, signal.SIGTERM)
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         else:
             proc.terminate()
         proc.wait(timeout=TERMINATE_GRACE_SECONDS)
+    except ProcessLookupError:
+        pass
     except subprocess.TimeoutExpired:
         if sys.platform != "win32":
-            _kill_process_group(proc, signal.SIGKILL)
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         else:
             _taskkill(proc)
         proc.wait()
-
-
-def _kill_process_group(proc: subprocess.Popen, sig: int) -> None:
-    try:
-        killpg = getattr(os, "killpg")
-        getpgid = getattr(os, "getpgid")
-        killpg(getpgid(proc.pid), sig)
-    except ProcessLookupError:
-        pass
-    except OSError:
-        proc.kill()
 
 
 def _taskkill(proc: subprocess.Popen) -> None:
@@ -67,10 +58,21 @@ def _close_pipes(proc: subprocess.Popen) -> None:
                 logger.debug("failed to close process pipe", exc_info=True)
 
 
+class BashOperations(Protocol):
+    def exec_command(
+        self,
+        argv: list[str],
+        cwd: Path,
+        timeout: int,
+        cancel_event: threading.Event | None,
+    ) -> str: ...
+
+
 def build_bash_tool(
     project_root: Path,
     cancel_event: threading.Event | None = None,
     shell_spec: ShellSpec | None = None,
+    bash_ops: BashOperations | None = None,
 ) -> ToolSpec:
     root = project_root.resolve()
     spec = shell_spec or detect_shell()

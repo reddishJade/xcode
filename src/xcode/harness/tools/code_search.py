@@ -1,16 +1,50 @@
 from __future__ import annotations
 
-from pathlib import Path
+import ast
 import shutil
 import subprocess
-from typing import Any
+import traceback
+from pathlib import Path
+from typing import Any, Protocol
 
 from ..skills import ToolInput, ToolSpec, resolve_project_path
 from .path_utils import is_path_blocked, truncate_output, display_path
-import ast
-import traceback
 
 """供编码 Agent 使用的只读代码搜索工具。"""
+
+
+class GrepOperations(Protocol):
+    def is_directory(self, path: Path) -> bool: ...
+
+    def read_file(self, path: Path) -> str: ...
+
+
+class LsOperations(Protocol):
+    def exists(self, path: Path) -> bool: ...
+
+    def is_directory(self, path: Path) -> bool: ...
+
+    def list_dir(self, path: Path) -> list[Path]: ...
+
+
+class LocalGrepOperations:
+    def is_directory(self, path: Path) -> bool:
+        return path.is_dir()
+
+    def read_file(self, path: Path) -> str:
+        return path.read_text(encoding="utf-8", errors="ignore")
+
+
+class LocalLsOperations:
+    def exists(self, path: Path) -> bool:
+        return path.exists()
+
+    def is_directory(self, path: Path) -> bool:
+        return path.is_dir()
+
+    def list_dir(self, path: Path) -> list[Path]:
+        return list(path.iterdir())
+
 
 _EVAL_NS: dict[str, Any] = {}
 
@@ -19,31 +53,86 @@ MAX_GLOB_RESULTS = 200
 MAX_LS_ENTRIES = 500
 _RG_MISSING_HINT_EMITTED = False
 
-_BLOCKED_CALL_NAMES = frozenset({
-    "exec", "eval", "open", "__import__",
-    "getattr", "setattr", "delattr", "vars", "locals", "globals",
-    "compile", "breakpoint", "input",
-})
+_BLOCKED_CALL_NAMES = frozenset(
+    {
+        "exec",
+        "eval",
+        "open",
+        "__import__",
+        "getattr",
+        "setattr",
+        "delattr",
+        "vars",
+        "locals",
+        "globals",
+        "compile",
+        "breakpoint",
+        "input",
+    }
+)
 
 _SAFE_BUILTINS: dict[str, Any] = {
-    "abs": abs, "all": all, "any": any, "ascii": ascii, "bin": bin,
-    "bool": bool, "bytearray": bytearray, "bytes": bytes,
-    "chr": chr, "complex": complex, "dict": dict, "divmod": divmod,
-    "enumerate": enumerate, "filter": filter, "float": float,
-    "format": format, "frozenset": frozenset, "hash": hash, "hex": hex,
-    "id": id, "int": int, "isinstance": isinstance, "issubclass": issubclass,
-    "iter": iter, "len": len, "list": list, "map": map, "max": max,
-    "min": min, "next": next, "object": object, "oct": oct, "ord": ord,
-    "pow": pow, "print": print, "range": range, "repr": repr,
-    "reversed": reversed, "round": round, "set": set,
-    "slice": slice, "sorted": sorted, "str": str, "sum": sum,
-    "tuple": tuple, "type": type, "zip": zip,
-    "True": True, "False": False, "None": None,
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "ascii": ascii,
+    "bin": bin,
+    "bool": bool,
+    "bytearray": bytearray,
+    "bytes": bytes,
+    "chr": chr,
+    "complex": complex,
+    "dict": dict,
+    "divmod": divmod,
+    "enumerate": enumerate,
+    "filter": filter,
+    "float": float,
+    "format": format,
+    "frozenset": frozenset,
+    "hash": hash,
+    "hex": hex,
+    "id": id,
+    "int": int,
+    "isinstance": isinstance,
+    "issubclass": issubclass,
+    "iter": iter,
+    "len": len,
+    "list": list,
+    "map": map,
+    "max": max,
+    "min": min,
+    "next": next,
+    "object": object,
+    "oct": oct,
+    "ord": ord,
+    "pow": pow,
+    "print": print,
+    "range": range,
+    "repr": repr,
+    "reversed": reversed,
+    "round": round,
+    "set": set,
+    "slice": slice,
+    "sorted": sorted,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+    "type": type,
+    "zip": zip,
+    "True": True,
+    "False": False,
+    "None": None,
 }
 
 
-def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
+def build_code_tools(
+    project_root: Path,
+    grep_ops: GrepOperations | None = None,
+    ls_ops: LsOperations | None = None,
+) -> tuple[ToolSpec, ...]:
     root = project_root.resolve()
+    local_grep = grep_ops or LocalGrepOperations()
+    local_ls = ls_ops or LocalLsOperations()
 
     def grep_search(data: ToolInput) -> str:
         pattern = str(data.get("pattern", "")).strip()
@@ -52,7 +141,9 @@ def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
         base = _safe_path(root, str(data.get("path", ".")))
         glob = data.get("glob")
         max_results = int(data.get("max_results", MAX_GREP_RESULTS))
-        return _grep(root, base, pattern, str(glob) if glob else None, max_results)
+        return _grep(
+            root, base, pattern, str(glob) if glob else None, max_results, local_grep
+        )
 
     def glob_files(data: ToolInput) -> str:
         pattern = str(data.get("pattern", "*")).strip() or "*"
@@ -64,7 +155,7 @@ def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
         raw_path = str(data.get("path", ".")).strip()
         base = _safe_path(root, raw_path)
         limit = int(data.get("limit", MAX_LS_ENTRIES))
-        return _ls(root, base, limit)
+        return _ls(root, base, limit, local_ls)
 
     def evaluate_python(data: ToolInput) -> str:
         global _EVAL_NS
@@ -77,8 +168,11 @@ def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
                 if isinstance(node, ast.Call):
                     fn = node.func
                     name = (
-                        fn.attr if isinstance(fn, ast.Attribute) else
-                        fn.id if isinstance(fn, ast.Name) else ""
+                        fn.attr
+                        if isinstance(fn, ast.Attribute)
+                        else fn.id
+                        if isinstance(fn, ast.Name)
+                        else ""
                     )
                     if name in _BLOCKED_CALL_NAMES:
                         return f"Error: {name}() is not allowed"
@@ -90,8 +184,7 @@ def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
             exec(compiled, safe_globals)
             _EVAL_NS.clear()
             _EVAL_NS.update(
-                {k: v for k, v in safe_globals.items()
-                 if k not in ("__builtins__",)}
+                {k: v for k, v in safe_globals.items() if k not in ("__builtins__",)}
             )
             result = _EVAL_NS.get("result") or _EVAL_NS.get("output", "")
             if not result:
@@ -158,7 +251,7 @@ def build_code_tools(project_root: Path) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="evaluate_python",
             description="Execute Python code in a persistent namespace. Intermediate results stay in the namespace, not in LLM context. "
-                        "Store the final output in a variable named 'result' or 'output' to return it.",
+            "Store the final output in a variable named 'result' or 'output' to return it.",
             input_hint='JSON: {"code": "result = 2 + 2"}',
             handler=evaluate_python,
             risk="low",
@@ -200,6 +293,7 @@ def _grep(
     pattern: str,
     glob: str | None,
     max_results: int,
+    grep_ops: GrepOperations,
 ) -> str:
     global _RG_MISSING_HINT_EMITTED
     rg = shutil.which("rg")
@@ -226,7 +320,7 @@ def _grep(
     if not _RG_MISSING_HINT_EMITTED:
         _RG_MISSING_HINT_EMITTED = True
         hint = "[ripgrep not found; install rg for faster search. Falling back to Python grep.]\n"
-    return hint + _grep_fallback(root, base, pattern, glob, max_results)
+    return hint + _grep_fallback(root, base, pattern, glob, max_results, grep_ops)
 
 
 def _glob_files(root: Path, base: Path, pattern: str, max_results: int) -> str:
@@ -243,13 +337,18 @@ def _glob_files(root: Path, base: Path, pattern: str, max_results: int) -> str:
     return "\n".join(matches) + suffix
 
 
-def _ls(root: Path, base: Path, limit: int) -> str:
-    if not base.exists():
+def _ls(
+    root: Path,
+    base: Path,
+    limit: int,
+    ls_ops: LsOperations,
+) -> str:
+    if not ls_ops.exists(base):
         raise FileNotFoundError(f"Path not found: {_display(root, base)}")
-    if not base.is_dir():
+    if not ls_ops.is_directory(base):
         raise NotADirectoryError(f"Not a directory: {_display(root, base)}")
     try:
-        entries = sorted(base.iterdir(), key=lambda p: p.name.lower())
+        entries = sorted(ls_ops.list_dir(base), key=lambda p: p.name.lower())
     except PermissionError as exc:
         raise PermissionError(f"Permission denied: {_display(root, base)}") from exc
 
@@ -278,15 +377,16 @@ def _grep_fallback(
     pattern: str,
     glob: str | None,
     max_results: int,
+    grep_ops: GrepOperations,
 ) -> str:
-    files = sorted(base.rglob(glob or "*")) if base.is_dir() else [base]
+    files = sorted(base.rglob(glob or "*")) if grep_ops.is_directory(base) else [base]
     matches: list[str] = []
     for path in files:
         if len(matches) >= max_results:
             break
         if not path.is_file() or _is_blocked(root, path):
             continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        text = grep_ops.read_file(path)
         for line_no, line in enumerate(text.splitlines(), 1):
             if pattern in line:
                 matches.append(f"{_display(root, path)}:{line_no}:{line}")
