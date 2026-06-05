@@ -423,21 +423,26 @@ def _grep(
             errors="replace",
         )
         assert proc.stdout is not None
+        assert proc.stderr is not None
         lines: list[str] = []
         lines_truncated = 0
-        while True:
-            raw_line = proc.stdout.readline()
-            if not raw_line:
-                break
-            line = raw_line.rstrip("\n").rstrip("\r")
-            truncated, was_truncated = truncate_line(line)
-            if was_truncated:
-                lines_truncated += 1
-            lines.append(truncated)
-            if len(lines) >= max_results:
-                proc.kill()
-                break
-        proc.wait(timeout=5)
+        try:
+            while True:
+                raw_line = proc.stdout.readline()
+                if not raw_line:
+                    break
+                line = raw_line.rstrip("\n").rstrip("\r")
+                truncated, was_truncated = truncate_line(line)
+                if was_truncated:
+                    lines_truncated += 1
+                lines.append(truncated)
+                if len(lines) >= max_results:
+                    proc.kill()
+                    break
+            proc.wait(timeout=5)
+        finally:
+            proc.stdout.close()
+            proc.stderr.close()
         if not lines:
             return "No matches found."
         result = "\n".join(lines)
