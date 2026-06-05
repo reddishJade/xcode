@@ -301,11 +301,34 @@ def _read_image(
     path: Path, display_path: str, mime: str, operations: FileOperations
 ) -> str:
     import base64
+    from io import BytesIO
+
+    from PIL import Image
 
     data = operations.read_bytes(path)
+    img = Image.open(BytesIO(data))
+    orig_w, orig_h = img.width, img.height
+    max_dim = 2000
+    if orig_w > max_dim or orig_h > max_dim:
+        ratio = min(max_dim / orig_w, max_dim / orig_h)
+        new_size = (int(orig_w * ratio), int(orig_h * ratio))
+        resized = img.resize(new_size, Image.Resampling.LANCZOS)
+        buf = BytesIO()
+        save_format = img.format or "PNG"
+        resized.save(buf, format=save_format)
+        new_w, new_h = resized.width, resized.height
+        data = buf.getvalue()
+        mime = _IMAGE_MIME_BY_EXTENSION.get(f".{save_format.lower()}", mime)
+    else:
+        new_w, new_h = orig_w, orig_h
     b64 = base64.b64encode(data).decode("ascii")
+    hint = (
+        f" (resized from {orig_w}x{orig_h} to {new_w}x{new_h})"
+        if orig_w > max_dim or orig_h > max_dim
+        else ""
+    )
     return ToolOutput(
-        f"Read image file [{mime}]\nImage data is available in metadata.",
+        f"Read image file [{mime}]{hint}\nImage data is available in metadata.",
         metadata={"image": {"mime": mime, "data": b64}},
     )
 
