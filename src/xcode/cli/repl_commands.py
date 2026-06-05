@@ -303,7 +303,7 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/model": CommandEntry(
         handler=cmd_model,
         desc="Show current model info.",
-        args_desc="<name> [--thinking <level>]",
+        args_desc="[profile/]name[:thinking] [--thinking <level>]",
         accepts_args=True,
     ),
     "/effort": CommandEntry(

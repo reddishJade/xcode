@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol, TypeGuard
 
+from xcode.ai.model_modes import parse_model_mode
 from xcode.harness.observability import (
     PersistentPermissionStore,
     SessionPermissionPolicy,
@@ -90,9 +91,22 @@ def handle_model_command(command: str, app: object) -> None:
             print("Model info not available.")
         return
 
-    model_name = parts[1]
+    try:
+        parsed = parse_model_mode(parts[1])
+    except ValueError as exc:
+        print(str(exc))
+        return
+    model_name = parsed.model
+    profile = parsed.provider or "main"
     thinking: bool | None = None
     reasoning_effort: str | None = None
+    if parsed.thinking_level is not None:
+        if parsed.thinking_level == "off":
+            thinking = False
+            reasoning_effort = None
+        else:
+            thinking = True
+            reasoning_effort = parsed.thinking_level
 
     if len(parts) >= 4 and parts[2] != "--thinking":
         print(f"Warning: unrecognized option '{parts[2]}' ignored.")
@@ -117,6 +131,7 @@ def handle_model_command(command: str, app: object) -> None:
     try:
         new_model = app.set_model(
             model=model_name,
+            profile=profile,
             thinking=thinking,
             reasoning_effort=reasoning_effort,
         )
