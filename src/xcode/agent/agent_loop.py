@@ -744,7 +744,7 @@ def _append_continuation_prompt(
 # ── 辅助函数 ──
 
 
-def _tools_to_definitions(tools: list[AgentTool[Any]] | None) -> list[ToolDefinition]:
+def _tools_to_definitions(tools: list[AgentTool] | None) -> list[ToolDefinition]:
     if not tools:
         return []
     result: list[ToolDefinition] = []

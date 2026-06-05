@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 from collections.abc import AsyncIterator, Callable
-from typing import Any
 
 from .agent_loop import run_agent_loop
 from .types import (
@@ -33,7 +32,7 @@ class Agent:
 
     def __init__(
         self,
-        tools: list[AgentTool[Any]],
+        tools: list[AgentTool],
     ) -> None:
         self._tools = tools
         self._steer_queue: list[AgentMessage] = []

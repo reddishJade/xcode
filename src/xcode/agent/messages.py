@@ -1,22 +1,82 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
-from .types import (
-    AgentMessage,
-    AssistantMessage,
-    BranchSummaryMessage,
-    CompactionSummaryMessage,
-    ContentBlock,
-    SystemMessage,
-    TextContent,
-    ThinkingContent,
-    ToolCallContent,
-    ToolResultMessage,
-    UserMessage,
+from xcode.ai.events import StopReason
+from xcode.ai.types import ImageContent, TextContent, ThinkingContent, ToolCallContent
+
+from .protocols import ContentBlock
+
+"""Agent 消息类型与消息转换。"""
+
+# ── 消息类型 ──
+
+
+@dataclass
+class SystemMessage:
+    role: str = "system"
+    content: str = ""
+    timestamp: int = 0
+
+
+@dataclass
+class UserMessage:
+    role: str = "user"
+    content: str | list[TextContent | ImageContent] = ""
+    timestamp: int = 0
+
+
+@dataclass
+class AssistantMessage:
+    role: str = "assistant"
+    content: list[ContentBlock] = field(default_factory=list)
+    reasoning_content: str | None = None
+    stop_reason: StopReason = "end_turn"
+    error_message: str | None = None
+    model: str = ""
+    provider: str = ""
+    timestamp: int = 0
+    usage: dict[str, int] | None = None
+
+
+@dataclass
+class ToolResultMessage:
+    role: str = "tool_result"
+    tool_call_id: str = ""
+    tool_name: str = ""
+    content: str | list[TextContent | ImageContent] = ""
+    is_error: bool = False
+    timestamp: int = 0
+
+
+@dataclass
+class CompactionSummaryMessage:
+    role: str = "compaction_summary"
+    summary: str = ""
+    tokens_before: int = 0
+    timestamp: int = 0
+
+
+@dataclass
+class BranchSummaryMessage:
+    role: str = "branch_summary"
+    summary: str = ""
+    from_id: str = ""
+    timestamp: int = 0
+
+
+type AgentMessage = (
+    SystemMessage
+    | UserMessage
+    | AssistantMessage
+    | ToolResultMessage
+    | CompactionSummaryMessage
+    | BranchSummaryMessage
 )
 
-"""消息转换层。将内部消息角色转为 provider 可接收的消息格式。"""
+
+# ── 消息转换（LLM 格式）──
 
 COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
 COMPACTION_SUMMARY_SUFFIX = "\n</summary>"
@@ -25,7 +85,6 @@ BRANCH_SUMMARY_SUFFIX = "\n</summary>"
 
 
 def convert_to_llm(messages: list[AgentMessage]) -> list[dict[str, Any]]:
-    """将 AgentMessage list 转换成 LLM 兼容的 dict message list。"""
     result: list[dict[str, Any]] = []
     for m in messages:
         converted = _convert_one(m)
@@ -89,7 +148,6 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
 
 
 def _convert_block(block: ContentBlock) -> dict[str, Any] | None:
-    """将单个 ContentBlock 转为 dict（text/tool_call/thinking）。"""
     if isinstance(block, TextContent):
         return {"type": "text", "text": block.text}
     if isinstance(block, ToolCallContent):
@@ -101,10 +159,8 @@ def _convert_block(block: ContentBlock) -> dict[str, Any] | None:
                 "arguments": block.arguments or {},
             },
         }
-    # ThinkingContent 通过 AssistantMessage.reasoning_content 单独传递，不在 content 中重复
     if isinstance(block, ThinkingContent):
         return None
-    # ImageContent 在 LLM 输出中不直接转换为 text
     return None
 
 

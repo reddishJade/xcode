@@ -190,7 +190,7 @@ async def _execute_one_impl(
     if before_block is not None:
         return before_block
 
-    def _on_update(partial: AgentToolResult[Any]) -> None:
+    def _on_update(partial: AgentToolResult) -> None:
         emit(
             ToolExecutionUpdateEvent(
                 tool_call_id=tool_call.id,
@@ -274,8 +274,8 @@ async def _run_tool_handler(
     tool_call: ToolCallContent,
     args: dict[str, Any],
     signal: CancellationSignal | None,
-    on_update: Callable[[AgentToolResult[Any]], None],
-) -> tuple[AgentToolResult[Any], list[TextContent | ImageContent], bool, bool]:
+    on_update: Callable[[AgentToolResult], None],
+) -> tuple[AgentToolResult, list[TextContent | ImageContent], bool, bool]:
     try:
         tool_result = await tool.execute(
             tool_call.id, args, signal, on_update=on_update
@@ -291,7 +291,7 @@ def _run_after_tool_hook(
     assistant_message: AssistantMessage,
     tool_call: ToolCallContent,
     args: dict[str, Any],
-    tool_result: AgentToolResult[Any],
+    tool_result: AgentToolResult,
     is_error: bool,
     terminate: bool,
     content: list[TextContent | ImageContent],

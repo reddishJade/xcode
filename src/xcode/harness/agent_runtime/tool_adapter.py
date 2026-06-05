@@ -84,7 +84,7 @@ class ToolSpecAdapter:
         params: dict[str, Any],
         signal: CancellationSignal | None = None,
         on_update: ToolUpdateCallback | None = None,
-    ) -> AgentToolResult[None]:
+    ) -> AgentToolResult:
         action_input = stringify_tool_input(params)
         result: PermissionCheckResult = check_tool_permission(
             self._spec.name,
@@ -118,7 +118,7 @@ def adapt_tool_specs(
     ]
 
 
-def create_tool_spec_from_agent_tool(tool: AgentTool[Any]) -> ToolSpec:
+def create_tool_spec_from_agent_tool(tool: AgentTool) -> ToolSpec:
     """将 AgentTool 反向适配为 ToolSpec。
 
     在测试或第三方集成中，调用方提供了 AgentTool 实例而 harness

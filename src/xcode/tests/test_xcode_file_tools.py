@@ -157,7 +157,7 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             path.write_text("x\nx\n", encoding="utf-8")
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "multiple occurrences"):
+            with self.assertRaisesRegex(ValueError, "Found 2 occurrences"):
                 tools["edit_file"].handler(
                     {"path": "a.txt", "old_text": "x", "new_text": "y"}
                 )
@@ -349,7 +349,7 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             tools = self._tools(root)
 
             path.write_text("modified externally", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "Could not find edits\\[0\\]"):
+            with self.assertRaisesRegex(ValueError, "Could not find the exact text"):
                 tools["edit_file"].handler(
                     {
                         "path": "a.txt",
