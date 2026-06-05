@@ -272,12 +272,22 @@ SUITES: dict[str, tuple[EvalTask, ...]] = {
     "pipeline": pipeline(),
     "tool-policy": tool_policy(),
     "coding-fixture": coding_fixture(),
-    # 兼容旧命令；coding 现在指向安全的 fixture suite，不再修改当前仓库。
-    "coding": coding_fixture(),
     "smoke": smoke(),
     "tool": tool_use(),
     "context": context(),
     "multi": multi_turn(),
     "plan": plan_tasks(),
     "all": all_suites(),
+}
+
+SUITE_DESCRIPTIONS: dict[str, str] = {
+    "pipeline": "离线 eval pipeline 回归，验证事件流、grader 和 report。",
+    "tool-policy": "离线工具策略回归，验证预期工具和禁止写入约束。",
+    "coding-fixture": "真实 provider 小型编码回归，默认复制 fixture 到 sandbox。",
+    "smoke": "基础烟雾任务。",
+    "tool": "基础工具调用任务。",
+    "context": "上下文读取回归。",
+    "multi": "多步工具链回归。",
+    "plan": "规划和实现任务；真实运行需显式允许项目变异。",
+    "all": "默认离线回归集合，覆盖 pipeline、tool-policy、context 和 multi。",
 }

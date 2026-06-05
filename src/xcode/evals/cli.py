@@ -27,11 +27,16 @@ from .benchmarks import load_benchmark
 from .runner import EvalRunner
 from .sandbox import trial_project_root
 from .schema import EvalTask
-from .tasks import SUITES
+from .tasks import SUITE_DESCRIPTIONS, SUITES
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.list_suites:
+        _print_suite_list()
+        return 0
+    if args.show_suite:
+        return _print_suite_detail(args.show_suite)
     tasks: tuple[EvalTask, ...]
     if args.suite:
         t = SUITES.get(args.suite)
@@ -185,6 +190,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help=f"Run a named task suite: {', '.join(sorted(SUITES))}",
     )
     parser.add_argument(
+        "--list-suites",
+        action="store_true",
+        help="List built-in eval suites and exit.",
+    )
+    parser.add_argument(
+        "--show-suite",
+        type=str,
+        help="Show tasks in a built-in eval suite and exit.",
+    )
+    parser.add_argument(
         "--tasks",
         type=Path,
         help="JSON or JSONL EvalTask file. If omitted, runs smoke suite.",
@@ -225,6 +240,39 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--trials", type=int, default=1, help="Trials per task.")
     return parser.parse_args(argv)
+
+
+def _print_suite_list() -> None:
+    print("Built-in eval suites:")
+    for name in sorted(SUITES):
+        tasks = SUITES[name]
+        description = SUITE_DESCRIPTIONS.get(name, "")
+        has_fixture = any("fixture_dir" in task.metadata for task in tasks)
+        real_hint = "real/sandbox" if has_fixture else "offline"
+        print(f"  {name:<16} {len(tasks):>2} tasks  {real_hint:<12} {description}")
+
+
+def _print_suite_detail(name: str) -> int:
+    tasks = SUITES.get(name)
+    if tasks is None:
+        available = ", ".join(sorted(SUITES))
+        print(f"Unknown suite: {name}. Available: {available}")
+        return 1
+    description = SUITE_DESCRIPTIONS.get(name, "")
+    print(f"Suite: {name}")
+    if description:
+        print(f"Description: {description}")
+    print(f"Tasks ({len(tasks)}):")
+    for task in tasks:
+        fixture = task.metadata.get("fixture_dir")
+        validation = task.metadata.get("validation", {})
+        commands = validation.get("commands", ()) if isinstance(validation, dict) else ()
+        print(f"  - {task.id}")
+        if fixture:
+            print(f"    fixture: {fixture}")
+        if commands:
+            print(f"    validation_commands: {len(commands)}")
+    return 0
 
 
 def _load_tasks(path: Path) -> tuple[EvalTask, ...]:

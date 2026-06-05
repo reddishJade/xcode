@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import redirect_stdout
+import io
 import json
 from pathlib import Path
 import sys
@@ -19,6 +21,7 @@ from xcode.harness.app import XcodeApp
 from xcode.harness.config import AgentConfig
 from xcode.harness.skills import ToolSpec
 from xcode.evals.benchmarks import load_benchmark
+from xcode.evals.cli import main as eval_main
 from xcode.evals.cli import _trial_project_root
 from xcode.evals.cli import _task_from_dict
 from xcode.evals import EvalRunner, EvalTask
@@ -308,9 +311,6 @@ class EvalPipelineTests(unittest.TestCase):
             self.assertIn("validation", task.metadata)
             self.assertTrue(task.metadata["validation"]["commands"])
 
-    def test_coding_suite_aliases_safe_fixture_tasks(self) -> None:
-        self.assertEqual(SUITES["coding"], SUITES["coding-fixture"])
-
     def test_all_suite_excludes_real_coding_fixtures(self) -> None:
         all_tasks = SUITES["all"]
 
@@ -318,6 +318,28 @@ class EvalPipelineTests(unittest.TestCase):
         for task in all_tasks:
             self.assertNotIn("fixture_dir", task.metadata)
             self.assertNotIn("validation", task.metadata)
+
+    def test_eval_cli_lists_builtin_suites(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = eval_main(["--list-suites"])
+
+        self.assertEqual(exit_code, 0)
+        text = output.getvalue()
+        self.assertIn("coding-fixture", text)
+        self.assertIn("tool-policy", text)
+
+    def test_eval_cli_shows_suite_tasks(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = eval_main(["--show-suite", "coding-fixture"])
+
+        self.assertEqual(exit_code, 0)
+        text = output.getvalue()
+        self.assertIn("tiny-calculator-subtract", text)
+        self.assertIn("validation_commands", text)
 
     def test_pass_at_k_uses_unbiased_estimator(self) -> None:
         trials = (
