@@ -22,6 +22,7 @@ from xcode.evals.cli import _trial_project_root
 from xcode.evals.cli import _task_from_dict
 from xcode.evals import EvalRunner, EvalTask
 from xcode.evals.runner import _build_run_metrics
+from xcode.evals.sandbox import UnsafeEvalTaskError
 from xcode.tests.fixtures import FakeProvider
 from xcode.evals.schema import TrialResult
 
@@ -173,6 +174,33 @@ class EvalPipelineTests(unittest.TestCase):
                 (root / "app.py").read_text(encoding="utf-8"), "VALUE = 1\n"
             )
             self.assertIn("fixture-task-1", str(root))
+
+    def test_trial_project_root_rejects_unisolated_real_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task = EvalTask(id="unsafe-task", prompt="edit current repo")
+
+            with self.assertRaises(UnsafeEvalTaskError):
+                _trial_project_root(
+                    task,
+                    0,
+                    base_root=Path(tmp),
+                    output_dir=Path(tmp) / "runs",
+                )
+
+    def test_trial_project_root_allows_explicit_project_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            task = EvalTask(id="unsafe-task", prompt="edit current repo")
+
+            root = _trial_project_root(
+                task,
+                0,
+                base_root=base,
+                output_dir=base / "runs",
+                allow_project_mutation=True,
+            )
+
+            self.assertEqual(root, base.resolve())
 
     def test_task_from_dict_normalizes_llm_judge_criteria(self) -> None:
         task = _task_from_dict(

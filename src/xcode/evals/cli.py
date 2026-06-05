@@ -4,7 +4,6 @@ import argparse
 from collections.abc import AsyncIterator, Callable
 import json
 from pathlib import Path
-import shutil
 from typing import Any
 
 from xcode.harness.agent_runtime import StructuredAgent
@@ -26,6 +25,7 @@ from xcode.harness.observability import HITLResult
 
 from .benchmarks import load_benchmark
 from .runner import EvalRunner
+from .sandbox import trial_project_root
 from .schema import EvalTask
 from .tasks import SUITES
 
@@ -56,7 +56,11 @@ def main(argv: list[str] | None = None) -> int:
     output_dir = args.output_dir or Path.cwd() / ".local" / "eval_runs"
     runner = EvalRunner(
         tasks=tasks,
-        app_factory=_real_app_factory(args.project_root, output_dir)
+        app_factory=_real_app_factory(
+            args.project_root,
+            output_dir,
+            allow_project_mutation=args.allow_project_mutation,
+        )
         if args.real
         else _offline_app_factory,
         output_dir=output_dir,
@@ -211,6 +215,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         type=Path,
         help="Directory for trace files, report.json, and report.html.",
     )
+    parser.add_argument(
+        "--allow-project-mutation",
+        action="store_true",
+        help=(
+            "Allow --real eval tasks without fixture_dir to modify --project-root. "
+            "By default real eval writes must run in sandboxes."
+        ),
+    )
     parser.add_argument("--trials", type=int, default=1, help="Trials per task.")
     return parser.parse_args(argv)
 
@@ -263,6 +275,8 @@ def _offline_smoke_tasks() -> tuple[EvalTask, ...]:
 def _real_app_factory(
     project_root: Path,
     output_dir: Path,
+    *,
+    allow_project_mutation: bool = False,
 ) -> Callable[[EvalTask, int], XcodeApp]:
     base_root = project_root.resolve()
     runtime_config = discover_runtime_config(base_root)
@@ -279,6 +293,7 @@ def _real_app_factory(
             trial_index,
             base_root=base_root,
             output_dir=output_dir,
+            allow_project_mutation=allow_project_mutation,
         )
         app = build_real_app(
             project_root=effective_root,
@@ -302,20 +317,15 @@ def _trial_project_root(
     trial_index: int,
     base_root: Path,
     output_dir: Path,
+    allow_project_mutation: bool = False,
 ) -> Path:
-    fixture_dir = task.metadata.get("fixture_dir")
-    if not fixture_dir:
-        return base_root
-    fixture_path = Path(str(fixture_dir))
-    if not fixture_path.is_absolute():
-        fixture_path = base_root / fixture_path
-    if not fixture_path.is_dir():
-        raise ValueError(f"fixture_dir is not a directory: {fixture_path}")
-    sandbox = output_dir / "sandboxes" / f"{task.id}-{trial_index + 1}"
-    if sandbox.exists():
-        shutil.rmtree(sandbox)
-    shutil.copytree(fixture_path, sandbox)
-    return sandbox.resolve()
+    return trial_project_root(
+        task,
+        trial_index,
+        base_root=base_root,
+        output_dir=output_dir,
+        allow_project_mutation=allow_project_mutation,
+    )
 
 
 def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:

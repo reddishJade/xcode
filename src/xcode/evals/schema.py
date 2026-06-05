@@ -23,6 +23,10 @@ class EvalTask:
     # LLM-as-judge 评判标准：每条是一个描述性句子，如 "代码编译通过" 或 "方案考虑了边界情况"
     llm_judge_criteria: tuple[str, ...] = ()
 
+    def requires_project_mutation(self) -> bool:
+        """判断任务是否需要直接使用调用方项目根目录。"""
+        return "fixture_dir" not in self.metadata
+
 
 @dataclass(frozen=True)
 class GraderResult:
