@@ -308,6 +308,17 @@ class EvalPipelineTests(unittest.TestCase):
             self.assertIn("validation", task.metadata)
             self.assertTrue(task.metadata["validation"]["commands"])
 
+    def test_coding_suite_aliases_safe_fixture_tasks(self) -> None:
+        self.assertEqual(SUITES["coding"], SUITES["coding-fixture"])
+
+    def test_all_suite_excludes_real_coding_fixtures(self) -> None:
+        all_tasks = SUITES["all"]
+
+        self.assertGreaterEqual(len(all_tasks), 1)
+        for task in all_tasks:
+            self.assertNotIn("fixture_dir", task.metadata)
+            self.assertNotIn("validation", task.metadata)
+
     def test_pass_at_k_uses_unbiased_estimator(self) -> None:
         trials = (
             _trial("task-a", True),

@@ -14,90 +14,6 @@ from .schema import EvalTask
 """
 
 
-def coding() -> tuple[EvalTask, ...]:
-    """编码能力：读代码、写代码、改代码，最终由文件证据和编译验证。"""
-    return (
-        EvalTask(
-            id="write-python-function",
-            prompt=(
-                "Create a file called fix_bug.py in the project root. "
-                "It should contain a function is_palindrome(s) that returns True "
-                "if string s is a palindrome (case-insensitive, ignoring spaces and punctuation), "
-                "False otherwise. Use a two-pointer approach."
-            ),
-            expected_tool_calls=("write_file",),
-            tags=("coding", "write"),
-            llm_judge_criteria=(
-                "代码定义了 is_palindrome(s) 函数。",
-                "实现忽略大小写、空格和标点。",
-                "实现使用双指针思路判断回文。",
-            ),
-            metadata={
-                "evidence": {
-                    "files": [
-                        {
-                            "path": "fix_bug.py",
-                            "exists": True,
-                            "contains": ("is_palindrome", "def "),
-                        },
-                    ],
-                },
-            },
-        ),
-        EvalTask(
-            id="edit-function-logic",
-            prompt=(
-                "Read src/xcode/evals/runner.py, find the function _build_run_metrics. "
-                "Add a new metric key 'total_steps' that sums trial.metrics['steps'] across all trials. "
-                "Make this as a targeted edit to the existing file."
-            ),
-            expected_tool_calls=("read_file", "edit_file"),
-            tags=("coding", "edit"),
-            llm_judge_criteria=(
-                "修改集中在 _build_run_metrics 相关逻辑。",
-                "新增 total_steps 指标按所有 trial 的 steps 求和。",
-                "没有移除现有 metrics 行为。",
-            ),
-            metadata={
-                "evidence": {
-                    "files": [
-                        {
-                            "path": "src/xcode/evals/runner.py",
-                            "contains": ("total_steps",),
-                        },
-                    ],
-                },
-            },
-        ),
-        EvalTask(
-            id="find-and-fix-bug",
-            prompt=(
-                "Read src/xcode/evals/graders.py and find a bug: "
-                "the function _parse_judge_response splits on 'PASS:' and 'FAIL:' but "
-                "the output format in JUDGE_PROMPT_TEMPLATE uses 'PASS|FAIL: <number>: <reason>'. "
-                "Fix the parsing to handle the 'PASS|FAIL:' prefix correctly."
-            ),
-            expected_tool_calls=("read_file", "edit_file"),
-            tags=("coding", "debug"),
-            llm_judge_criteria=(
-                "解析逻辑能处理 PASS|FAIL 模板输出。",
-                "解析失败时仍保持明确的 grader 结果语义。",
-                "修改没有破坏 PASS 和 FAIL 标准格式。",
-            ),
-            metadata={
-                "evidence": {
-                    "files": [
-                        {
-                            "path": "src/xcode/evals/graders.py",
-                            "not_contains": ('line.startswith("PASS:")',),
-                        },
-                    ],
-                },
-            },
-        ),
-    )
-
-
 def coding_fixture() -> tuple[EvalTask, ...]:
     """真实 provider 小型编码回归：复制 fixture 到 sandbox 后运行验证命令。"""
     validation = {
@@ -268,6 +184,11 @@ def smoke() -> tuple[EvalTask, ...]:
     )
 
 
+def pipeline() -> tuple[EvalTask, ...]:
+    """内部 pipeline 回归：只验证 eval 基础事件流和报告链路。"""
+    return smoke()
+
+
 def tool_use() -> tuple[EvalTask, ...]:
     """工具调用能力：预期工具名、禁止工具名。"""
     return (
@@ -293,6 +214,11 @@ def tool_use() -> tuple[EvalTask, ...]:
             llm_judge_criteria=("Agent 没有执行写入或编辑文件的行为。",),
         ),
     )
+
+
+def tool_policy() -> tuple[EvalTask, ...]:
+    """工具策略回归：验证工具选择和禁止写入约束。"""
+    return tool_use()
 
 
 def context() -> tuple[EvalTask, ...]:
@@ -335,22 +261,23 @@ def multi_turn() -> tuple[EvalTask, ...]:
 
 def all_suites() -> tuple[EvalTask, ...]:
     result: list[EvalTask] = []
-    result.extend(smoke())
-    result.extend(tool_use())
+    result.extend(pipeline())
+    result.extend(tool_policy())
     result.extend(context())
     result.extend(multi_turn())
-    result.extend(coding())
-    result.extend(plan_tasks())
     return tuple(result)
 
 
 SUITES: dict[str, tuple[EvalTask, ...]] = {
+    "pipeline": pipeline(),
+    "tool-policy": tool_policy(),
+    "coding-fixture": coding_fixture(),
+    # 兼容旧命令；coding 现在指向安全的 fixture suite，不再修改当前仓库。
+    "coding": coding_fixture(),
     "smoke": smoke(),
     "tool": tool_use(),
     "context": context(),
     "multi": multi_turn(),
-    "coding-fixture": coding_fixture(),
-    "coding": coding(),
     "plan": plan_tasks(),
     "all": all_suites(),
 }
