@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
@@ -150,6 +151,41 @@ class EvalPipelineTests(unittest.TestCase):
                 "file_contains:math_utils.py:def subtract",
                 grader_names,
             )
+
+    def test_eval_runner_grades_validation_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "project"
+            root.mkdir()
+            task = EvalTask(
+                id="validation-task",
+                prompt="run validation",
+                expected_answer_contains=("done",),
+                metadata={
+                    "validation": {
+                        "commands": [
+                            [
+                                sys.executable,
+                                "-c",
+                                "from pathlib import Path; assert Path('ok.txt').read_text() == 'ok'",
+                            ]
+                        ],
+                        "timeout_seconds": 5,
+                    }
+                },
+            )
+            runner = EvalRunner(
+                tasks=(task,),
+                app_factory=lambda _task, _trial: _validation_app(root),
+                output_dir=Path(tmp) / "run",
+            )
+
+            report = runner.run()
+
+            self.assertTrue(report.success)
+            trial = report.trials[0]
+            self.assertIn("validation", trial.metrics)
+            grader_names = {grader.name for grader in trial.graders}
+            self.assertIn("validation_command:1", grader_names)
 
     def test_trial_project_root_copies_fixture_to_sandbox(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -326,6 +362,30 @@ def _editing_app(project_root: Path) -> XcodeApp:
     responses: list[list[ProviderEvent]] = [
         [
             ToolCallEvent([ToolCall("edit", "edit_file", {"path": "math_utils.py"})]),
+            FinalMessage("", "end_turn"),
+        ],
+        [TextDelta("done"), FinalMessage("", "end_turn")],
+    ]
+    return XcodeApp(
+        agent=StructuredAgent(
+            provider=FakeProvider(responses),
+            registry=(tool,),
+            config=AgentConfig(max_steps=2),
+            project_root=project_root,
+        ),
+        registry=(tool,),
+    )
+
+
+def _validation_app(project_root: Path) -> XcodeApp:
+    def write_ok(_value: dict) -> str:
+        (project_root / "ok.txt").write_text("ok", encoding="utf-8")
+        return "created"
+
+    tool = ToolSpec("write_file", "Write validation file.", "text", write_ok)
+    responses: list[list[ProviderEvent]] = [
+        [
+            ToolCallEvent([ToolCall("write", "write_file", {"path": "ok.txt"})]),
             FinalMessage("", "end_turn"),
         ],
         [TextDelta("done"), FinalMessage("", "end_turn")],

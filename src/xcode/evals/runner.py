@@ -16,6 +16,7 @@ from .graders import grade_events, run_llm_judge
 from .reporting import write_report_files
 from .schema import EvalReport, EvalTask, GraderResult, TrialResult
 from .tracing import TraceRecorder
+from .validation import run_validation, validation_results_to_dict
 
 AppFactory = Callable[[EvalTask, int], XcodeApp]
 
@@ -84,7 +85,12 @@ class EvalRunner:
 
         after_evidence = _collect_file_evidence(task, project_root)
         evidence_graders = _grade_file_evidence(task, before_evidence, after_evidence)
-        graders = grade_events(task, events, answer, runtime_error) + evidence_graders
+        validation_graders, validation_results = run_validation(task, project_root)
+        graders = (
+            grade_events(task, events, answer, runtime_error)
+            + evidence_graders
+            + validation_graders
+        )
 
         # LLM-as-judge：当 task.llm_judge_criteria 非空时执行
         if task.llm_judge_criteria:
@@ -113,6 +119,8 @@ class EvalRunner:
             metrics.update(agent_metrics)
         if after_evidence:
             metrics["file_evidence"] = after_evidence
+        if validation_results:
+            metrics["validation"] = validation_results_to_dict(validation_results)
         return TrialResult(
             task_id=task.id,
             trial_id=trial_id,
