@@ -7,130 +7,19 @@ import subprocess
 import sys
 import threading
 import time
-import tempfile
 from pathlib import Path
 from typing import Any
 
 from ..skills import ToolInput, ToolSpec
+from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 
 logger = logging.getLogger("xcode.harness.tools.bash")
 
-MAX_OUTPUT_BYTES = 50_000
-MAX_OUTPUT_LINES = 2_000
 DEFAULT_TIMEOUT_SECONDS = 30
 MAX_TIMEOUT_SECONDS = 120
 POLL_INTERVAL = 0.1
 TERMINATE_GRACE_SECONDS = 3
-
-
-class OutputAccumulator:
-    """管理 bash 输出，支持尾部截断和全量持久化到临时文件。"""
-
-    def __init__(
-        self, max_bytes: int = MAX_OUTPUT_BYTES, max_lines: int = MAX_OUTPUT_LINES
-    ):
-        self._max_bytes = max_bytes
-        self._max_lines = max_lines
-        self._chunks: list[bytes] = []
-        self._total_lines = 0
-        self._total_bytes = 0
-        self._truncated = False
-        self._full_path: str | None = None
-        self._file: Any = None
-
-    def append(self, chunk: bytes) -> None:
-        """摄入原始字节块。"""
-        self._chunks.append(chunk)
-        self._total_bytes += len(chunk)
-        self._total_lines += chunk.count(b"\n")
-        if self._file is not None:
-            self._file.write(chunk)
-            self._trim_tail()
-            return
-        if self._total_lines > self._max_lines or self._total_bytes > self._max_bytes:
-            self._persist_full()
-
-    def _persist_full(self) -> None:
-        """将完整输出写入临时文件并释放内存缓冲。"""
-        if self._file is None:
-            self._file = tempfile.NamedTemporaryFile(
-                delete=False, suffix=".log", prefix="xcode-bash-"
-            )
-            self._full_path = self._file.name
-            for chunk in self._chunks:
-                self._file.write(chunk)
-            self._file.flush()
-        self._truncated = True
-        self._trim_tail()
-
-    def _trim_tail(self) -> None:
-        text = b"".join(self._chunks)
-        if len(text) > self._max_bytes:
-            text = text[-self._max_bytes :]
-            first_newline = text.find(b"\n")
-            if first_newline > 0:
-                text = text[first_newline + 1 :]
-        lines = text.splitlines(keepends=True)
-        if len(lines) > self._max_lines:
-            text = b"".join(lines[-self._max_lines :])
-        self._chunks = [text] if text else []
-
-    def snapshot(self) -> str:
-        """返回截断后的尾部文本，带截断标记。"""
-        if self._chunks:
-            text = b"".join(self._chunks).decode("utf-8", errors="replace")
-        else:
-            text = ""
-
-        if not text and not self._truncated:
-            return "(no output)"
-
-        lines = text.splitlines()
-        total_lines = self._total_lines
-
-        # 尾部截断：保留最后 max_lines 行，最后 max_bytes 字节
-        truncated_by: str | None = None
-        output_lines = len(lines)
-        if output_lines > self._max_lines:
-            lines = lines[-self._max_lines :]
-            truncated_by = "lines"
-            output_lines = len(lines)
-
-        output = "\n".join(lines)
-        output_bytes = len(output.encode("utf-8"))
-        if output_bytes > self._max_bytes:
-            # 尾部字节截断
-            encoded = output.encode("utf-8")
-            output = encoded[-self._max_bytes :].decode("utf-8", errors="replace")
-            # 找到第一个换行开始位置
-            first_newline = output.find("\n")
-            if first_newline > 0:
-                output = output[first_newline + 1 :]
-            truncated_by = "bytes"
-
-        if self._full_path and (
-            self._truncated or truncated_by or total_lines > output_lines
-        ):
-            footer = (
-                f"\n[Showing {output_lines} of {total_lines} lines"
-                f" ({self._max_bytes // 1024}KB limit)."
-                f" Full output: {self._full_path}]"
-            )
-            return output + footer
-
-        return output
-
-    def close(self) -> None:
-        """关闭完整输出文件，保留路径供调用方继续读取。"""
-        if self._file is not None:
-            try:
-                self._file.flush()
-                self._file.close()
-            except Exception:
-                logger.debug(
-                    "failed to close temp file %s", self._full_path, exc_info=True
-                )
 
 
 def _kill_process(proc: subprocess.Popen) -> None:
