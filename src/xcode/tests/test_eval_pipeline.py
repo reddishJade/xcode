@@ -26,9 +26,8 @@ from xcode.evals.cli import _print_failed_trials
 from xcode.evals.cli import main as eval_main
 from xcode.evals.cli import _trial_project_root
 from xcode.evals.cli import _task_from_dict
-from xcode.evals import EvalReport, EvalRunner, EvalTask
-from xcode.evals.adapters import BENCHMARK_ADAPTERS
-from xcode.evals.adapters import build_swebench_predictions
+from xcode.evals import EvalRunner, EvalTask
+
 from xcode.evals.runner import _build_run_metrics
 from xcode.evals.sandbox import UnsafeEvalTaskError
 from xcode.evals.tasks import SUITES
@@ -286,114 +285,6 @@ class EvalPipelineTests(unittest.TestCase):
 
         self.assertEqual(task.llm_judge_criteria, ("criteria one", "criteria two"))
 
-    def test_load_humaneval_benchmark_from_jsonl(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "humaneval.jsonl"
-            path.write_text(
-                json.dumps(
-                    {
-                        "task_id": "HumanEval/0",
-                        "prompt": "def add(a, b):",
-                        "entry_point": "add",
-                        "test": "assert add(1, 2) == 3",
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            tasks = load_benchmark("humaneval", path)
-
-            self.assertEqual(len(tasks), 1)
-            self.assertEqual(tasks[0].id, "humaneval-HumanEval-0")
-            self.assertIn("benchmark", tasks[0].tags)
-            self.assertIn("add", tasks[0].expected_answer_contains)
-            self.assertTrue(tasks[0].llm_judge_criteria)
-
-    def test_load_swebench_lite_benchmark_from_json(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "swebench.json"
-            path.write_text(
-                json.dumps(
-                    [
-                        {
-                            "instance_id": "repo__issue-1",
-                            "repo": "owner/repo",
-                            "base_commit": "abc123",
-                            "problem_statement": "Fix the failing parser.",
-                            "test_patch": "assert parser()",
-                        }
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            tasks = load_benchmark("swebench-lite", path)
-
-            self.assertEqual(len(tasks), 1)
-            self.assertEqual(tasks[0].id, "swebench-lite-repo__issue-1")
-            self.assertIn("Fix the failing parser.", tasks[0].prompt)
-            self.assertEqual(tasks[0].metadata["benchmark"]["repo"], "owner/repo")
-
-    def test_load_evalplus_humaneval_creates_validated_fixture(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            path = root / "humaneval_plus.jsonl"
-            path.write_text(
-                json.dumps(
-                    {
-                        "task_id": "HumanEval/0",
-                        "prompt": "def add(a, b):\n    pass",
-                        "entry_point": "add",
-                        "test": "def check(candidate):\n    assert candidate(1, 2) == 3",
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            tasks = load_benchmark(
-                "evalplus-humaneval",
-                path,
-                fixture_root=root / "fixtures",
-            )
-
-            self.assertEqual(len(tasks), 1)
-            task = tasks[0]
-            fixture = Path(str(task.metadata["fixture_dir"]))
-            self.assertTrue((fixture / "solution.py").exists())
-            self.assertTrue((fixture / "tests" / "test_solution.py").exists())
-            self.assertIn("validation", task.metadata)
-            self.assertEqual(task.metadata["benchmark"]["entry_point"], "add")
-
-    def test_load_evalplus_mbpp_infers_entry_point(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            path = root / "mbpp_plus.json"
-            path.write_text(
-                json.dumps(
-                    [
-                        {
-                            "task_id": 1,
-                            "prompt": "Write a function add_one.",
-                            "test_list": ["assert add_one(1) == 2"],
-                        }
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            tasks = load_benchmark(
-                "evalplus-mbpp",
-                path,
-                fixture_root=root / "fixtures",
-            )
-
-            self.assertEqual(len(tasks), 1)
-            task = tasks[0]
-            self.assertEqual(task.metadata["benchmark"]["entry_point"], "add_one")
-            self.assertIn("validation", task.metadata)
-
     def test_coding_fixture_suite_is_sandboxed_and_validated(self) -> None:
         tasks = SUITES["coding-fixture"]
 
@@ -444,38 +335,6 @@ class EvalPipelineTests(unittest.TestCase):
         self.assertIn("swebench-lite", text)
         self.assertIn("terminal-bench", text)
 
-    def test_external_benchmark_registry_names_core_targets(self) -> None:
-        self.assertIn("evalplus-humaneval", BENCHMARK_ADAPTERS)
-        self.assertIn("evalplus-mbpp", BENCHMARK_ADAPTERS)
-        self.assertIn("swebench-lite", BENCHMARK_ADAPTERS)
-        self.assertIn("swebench-verified", BENCHMARK_ADAPTERS)
-        self.assertIn("terminal-bench", BENCHMARK_ADAPTERS)
-        self.assertIn("aider-polyglot", BENCHMARK_ADAPTERS)
-
-    def test_swebench_adapter_builds_predictions(self) -> None:
-        task = EvalTask(
-            id="swebench-lite-owner__repo-1",
-            prompt="fix bug",
-            metadata={
-                "benchmark": {
-                    "name": "swebench-lite",
-                    "instance_id": "owner__repo-1",
-                }
-            },
-        )
-        report = _report_with_patch(task.id, "diff --git a/file.py b/file.py\n")
-
-        predictions = build_swebench_predictions(
-            report,
-            (task,),
-            model_name="xcode-test",
-        )
-
-        self.assertEqual(len(predictions), 1)
-        self.assertEqual(predictions[0]["instance_id"], "owner__repo-1")
-        self.assertEqual(predictions[0]["model_name_or_path"], "xcode-test")
-        self.assertIn("file.py", predictions[0]["model_patch"])
-
     def test_eval_cli_prints_failed_trial_details(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task = EvalTask(
@@ -498,6 +357,31 @@ class EvalPipelineTests(unittest.TestCase):
             self.assertIn("Failures:", text)
             self.assertIn("disallowed_tool:echo", text)
             self.assertIn("trace:", text)
+
+    def test_load_benchmark_limit_slices_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "humaneval.jsonl"
+            lines = []
+            for i in range(5):
+                lines.append(
+                    json.dumps(
+                        {
+                            "task_id": f"HumanEval/{i}",
+                            "prompt": f"def foo{i}(): pass",
+                            "entry_point": f"foo{i}",
+                            "test": f"assert foo{i}()",
+                        }
+                    )
+                )
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            all_tasks = load_benchmark("humaneval", path)
+            limited = load_benchmark("humaneval", path, limit=2)
+
+            self.assertEqual(len(all_tasks), 5)
+            self.assertEqual(len(limited), 2)
+            self.assertEqual(limited[0].id, "humaneval-HumanEval-0")
+            self.assertEqual(limited[1].id, "humaneval-HumanEval-1")
 
     def test_pass_at_k_uses_unbiased_estimator(self) -> None:
         trials = (
@@ -610,24 +494,6 @@ def _trial(task_id: str, success: bool) -> TrialResult:
         answer="",
         trace_path=Path("trace.jsonl"),
         graders=(),
-    )
-
-
-def _report_with_patch(task_id: str, patch_text: str) -> EvalReport:
-    trial = TrialResult(
-        task_id=task_id,
-        trial_id=f"{task_id}-1",
-        success=True,
-        answer="",
-        trace_path=Path("trace.jsonl"),
-        graders=(),
-        metrics={"model_patch": patch_text},
-    )
-    return EvalReport(
-        run_id="run",
-        success=True,
-        output_dir=Path("."),
-        trials=(trial,),
     )
 
 

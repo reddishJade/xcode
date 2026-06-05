@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
 import re
 import sys
+from urllib.parse import urlparse
+from urllib.request import urlopen
 from typing import Any, Literal
 
 from .schema import EvalTask
@@ -18,19 +21,24 @@ BenchmarkName = Literal[
 
 def load_benchmark(
     name: str,
-    path: Path,
+    path: Path | str,
     fixture_root: Path | None = None,
+    limit: int | None = None,
 ) -> tuple[EvalTask, ...]:
-    """从本地 benchmark 数据文件加载 eval 任务。"""
+    """从本地或 URL benchmark 数据文件加载 eval 任务，limit 限制最大返回任务数。"""
     if name == "humaneval":
-        return load_humaneval(path)
-    if name == "swebench-lite":
-        return load_swebench_lite(path)
-    if name == "evalplus-humaneval":
-        return load_evalplus_humaneval(path, fixture_root=fixture_root)
-    if name == "evalplus-mbpp":
-        return load_evalplus_mbpp(path, fixture_root=fixture_root)
-    raise ValueError(f"unsupported benchmark: {name}")
+        tasks = load_humaneval(Path(path))
+    elif name == "swebench-lite":
+        tasks = load_swebench_lite(Path(path))
+    elif name == "evalplus-humaneval":
+        tasks = load_evalplus_humaneval(path, fixture_root=fixture_root)
+    elif name == "evalplus-mbpp":
+        tasks = load_evalplus_mbpp(path, fixture_root=fixture_root)
+    else:
+        raise ValueError(f"unsupported benchmark: {name}")
+    if limit is not None and len(tasks) > limit:
+        tasks = tasks[:limit]
+    return tasks
 
 
 def load_humaneval(path: Path) -> tuple[EvalTask, ...]:
@@ -109,7 +117,7 @@ def load_swebench_lite(path: Path) -> tuple[EvalTask, ...]:
 
 
 def load_evalplus_humaneval(
-    path: Path,
+    path: Path | str,
     fixture_root: Path | None = None,
 ) -> tuple[EvalTask, ...]:
     """加载 HumanEval+ 风格数据为 sandbox 编码任务。"""
@@ -119,8 +127,39 @@ def load_evalplus_humaneval(
         task_id = str(item.get("task_id") or item.get("id") or "").strip()
         prompt = str(item.get("prompt") or "").strip()
         entry_point = str(item.get("entry_point") or "").strip()
+        canonical_solution = str(item.get("canonical_solution") or "").strip()
+        base_inputs = _benchmark_inputs(item, "base_input")
+        plus_inputs = _benchmark_inputs(item, "plus_input")
         tests = _benchmark_tests(item)
-        if not task_id or not prompt or not entry_point or not tests:
+        has_evalplus_inputs = bool(base_inputs or plus_inputs)
+        if not task_id or not prompt or not entry_point:
+            continue
+        if has_evalplus_inputs and canonical_solution:
+            fixture_dir = _write_evalplus_fixture(
+                root=root,
+                benchmark_name="evalplus-humaneval",
+                raw_id=task_id,
+                prompt=prompt,
+                entry_point=entry_point,
+                canonical_solution=canonical_solution,
+                tests=tests,
+                base_inputs=base_inputs,
+                plus_inputs=plus_inputs,
+            )
+            tasks.append(
+                _evalplus_task(
+                    benchmark_name="evalplus-humaneval",
+                    raw_id=task_id,
+                    prompt=prompt,
+                    entry_point=entry_point,
+                    fixture_dir=fixture_dir,
+                    tests=tests,
+                    base_inputs=base_inputs,
+                    plus_inputs=plus_inputs,
+                )
+            )
+            continue
+        if not tests:
             continue
         fixture_dir = _write_evalplus_fixture(
             root=root,
@@ -128,7 +167,10 @@ def load_evalplus_humaneval(
             raw_id=task_id,
             prompt=prompt,
             entry_point=entry_point,
+            canonical_solution="",
             tests=tests,
+            base_inputs=(),
+            plus_inputs=(),
         )
         tasks.append(
             _evalplus_task(
@@ -138,13 +180,15 @@ def load_evalplus_humaneval(
                 entry_point=entry_point,
                 fixture_dir=fixture_dir,
                 tests=tests,
+                base_inputs=(),
+                plus_inputs=(),
             )
         )
     return tuple(tasks)
 
 
 def load_evalplus_mbpp(
-    path: Path,
+    path: Path | str,
     fixture_root: Path | None = None,
 ) -> tuple[EvalTask, ...]:
     """加载 MBPP+ 风格数据为 sandbox 编码任务。"""
@@ -153,11 +197,42 @@ def load_evalplus_mbpp(
     for item in _load_items(path):
         task_id = str(item.get("task_id") or item.get("id") or "").strip()
         prompt = str(item.get("prompt") or item.get("text") or "").strip()
-        tests = _benchmark_tests(item)
         entry_point = str(item.get("entry_point") or "").strip()
+        canonical_solution = str(item.get("canonical_solution") or "").strip()
+        base_inputs = _benchmark_inputs(item, "base_input")
+        plus_inputs = _benchmark_inputs(item, "plus_input")
+        tests = _benchmark_tests(item)
         if not entry_point:
             entry_point = _infer_entry_point(tests)
-        if not task_id or not prompt or not entry_point or not tests:
+        has_evalplus_inputs = bool(base_inputs or plus_inputs)
+        if not task_id or not prompt or not entry_point:
+            continue
+        if has_evalplus_inputs and canonical_solution:
+            fixture_dir = _write_evalplus_fixture(
+                root=root,
+                benchmark_name="evalplus-mbpp",
+                raw_id=task_id,
+                prompt=prompt,
+                entry_point=entry_point,
+                canonical_solution=canonical_solution,
+                tests=tests,
+                base_inputs=base_inputs,
+                plus_inputs=plus_inputs,
+            )
+            tasks.append(
+                _evalplus_task(
+                    benchmark_name="evalplus-mbpp",
+                    raw_id=task_id,
+                    prompt=prompt,
+                    entry_point=entry_point,
+                    fixture_dir=fixture_dir,
+                    tests=tests,
+                    base_inputs=base_inputs,
+                    plus_inputs=plus_inputs,
+                )
+            )
+            continue
+        if not tests:
             continue
         fixture_dir = _write_evalplus_fixture(
             root=root,
@@ -165,7 +240,10 @@ def load_evalplus_mbpp(
             raw_id=task_id,
             prompt=prompt,
             entry_point=entry_point,
+            canonical_solution="",
             tests=tests,
+            base_inputs=(),
+            plus_inputs=(),
         )
         tasks.append(
             _evalplus_task(
@@ -175,16 +253,18 @@ def load_evalplus_mbpp(
                 entry_point=entry_point,
                 fixture_dir=fixture_dir,
                 tests=tests,
+                base_inputs=(),
+                plus_inputs=(),
             )
         )
     return tuple(tasks)
 
 
-def _load_items(path: Path) -> tuple[dict[str, Any], ...]:
-    text = path.read_text(encoding="utf-8").strip()
+def _load_items(path: Path | str) -> tuple[dict[str, Any], ...]:
+    text = _read_source_text(path).strip()
     if not text:
         return ()
-    if path.suffix.lower() == ".jsonl":
+    if _is_jsonl_source(path):
         raw_items = [json.loads(line) for line in text.splitlines() if line.strip()]
     else:
         raw = json.loads(text)
@@ -192,12 +272,37 @@ def _load_items(path: Path) -> tuple[dict[str, Any], ...]:
     return tuple(item for item in raw_items if isinstance(item, dict))
 
 
+def _read_source_text(path: Path | str) -> str:
+    if _is_url_source(path):
+        with urlopen(str(path)) as response:
+            data = response.read()
+        return _decode_source_bytes(data, str(path))
+    data = Path(path).read_bytes()
+    return _decode_source_bytes(data, str(path))
+
+
+def _decode_source_bytes(data: bytes, source_name: str) -> str:
+    if source_name.lower().endswith(".gz"):
+        data = gzip.decompress(data)
+    return data.decode("utf-8")
+
+
+def _is_url_source(path: Path | str) -> bool:
+    return urlparse(str(path)).scheme in {"http", "https"}
+
+
+def _is_jsonl_source(path: Path | str) -> bool:
+    source = str(path).lower()
+    return source.endswith(".jsonl") or source.endswith(".jsonl.gz")
+
+
 def _benchmark_fixture_root(
-    path: Path,
+    path: Path | str,
     fixture_root: Path | None,
     benchmark_name: str,
 ) -> Path:
-    root = fixture_root or path.parent / ".xcode_eval_fixtures"
+    source_path = Path(path)
+    root = fixture_root or source_path.parent / ".xcode_eval_fixtures"
     return root / benchmark_name
 
 
@@ -212,6 +317,24 @@ def _benchmark_tests(item: dict[str, Any]) -> str:
     return ""
 
 
+def _benchmark_inputs(
+    item: dict[str, Any],
+    field_name: str,
+) -> tuple[tuple[Any, ...], ...]:
+    """读取 EvalPlus 输入列表并规范化为元组序列。"""
+    raw_inputs = item.get(field_name)
+    if not isinstance(raw_inputs, list):
+        return ()
+    cases: list[tuple[Any, ...]] = []
+    for raw_case in raw_inputs:
+        if isinstance(raw_case, list):
+            cases.append(tuple(raw_case))
+            continue
+        if isinstance(raw_case, tuple):
+            cases.append(raw_case)
+    return tuple(cases)
+
+
 def _write_evalplus_fixture(
     *,
     root: Path,
@@ -220,6 +343,9 @@ def _write_evalplus_fixture(
     prompt: str,
     entry_point: str,
     tests: str,
+    canonical_solution: str = "",
+    base_inputs: tuple[tuple[Any, ...], ...] = (),
+    plus_inputs: tuple[tuple[Any, ...], ...] = (),
 ) -> Path:
     fixture_dir = root / _normalize_task_id(benchmark_name, raw_id)
     tests_dir = fixture_dir / "tests"
@@ -229,8 +355,21 @@ def _write_evalplus_fixture(
         encoding="utf-8",
     )
     (tests_dir / "__init__.py").write_text("", encoding="utf-8")
+    if canonical_solution and (base_inputs or plus_inputs):
+        (fixture_dir / "reference.py").write_text(
+            _reference_template(prompt, canonical_solution),
+            encoding="utf-8",
+        )
+        test_source = _evalplus_test_file(
+            entry_point,
+            tests,
+            base_inputs,
+            plus_inputs,
+        )
+    else:
+        test_source = _legacy_evalplus_test_file(entry_point, tests)
     (tests_dir / "test_solution.py").write_text(
-        _evalplus_test_file(entry_point, tests),
+        test_source,
         encoding="utf-8",
     )
     return fixture_dir.resolve()
@@ -240,7 +379,21 @@ def _solution_template(prompt: str) -> str:
     return f'"""{prompt}"""\n\n# 在下方实现要求的函数。\n'
 
 
-def _evalplus_test_file(entry_point: str, tests: str) -> str:
+def _reference_template(prompt: str, canonical_solution: str) -> str:
+    """生成公开 benchmark 的参考实现文件。"""
+    return "\n".join(
+        [
+            '"""公开 benchmark 参考解。"""',
+            "",
+            prompt.rstrip(),
+            "",
+            canonical_solution.rstrip(),
+            "",
+        ]
+    )
+
+
+def _legacy_evalplus_test_file(entry_point: str, tests: str) -> str:
     return "\n".join(
         [
             "from __future__ import annotations",
@@ -266,6 +419,54 @@ def _evalplus_test_file(entry_point: str, tests: str) -> str:
     )
 
 
+def _evalplus_test_file(
+    entry_point: str,
+    tests: str,
+    base_inputs: tuple[tuple[Any, ...], ...],
+    plus_inputs: tuple[tuple[Any, ...], ...],
+) -> str:
+    """生成 EvalPlus 测试文件。"""
+    base_inputs_literal = json.dumps(base_inputs, ensure_ascii=False)
+    plus_inputs_literal = json.dumps(plus_inputs, ensure_ascii=False)
+    lines = [
+        "from __future__ import annotations",
+        "",
+        "import json",
+        "import unittest",
+        "",
+        "import reference",
+        "from solution import *",
+        "",
+        f"BASE_INPUTS = json.loads({base_inputs_literal!r})",
+        f"PLUS_INPUTS = json.loads({plus_inputs_literal!r})",
+        "",
+        f"ENTRY_POINT = {entry_point!r}",
+        "",
+    ]
+    if tests:
+        lines.extend([tests, ""])
+    lines.extend(
+        [
+            "class EvalPlusTests(unittest.TestCase):",
+            "    def test_benchmark(self) -> None:",
+            "        candidate = globals()[ENTRY_POINT]",
+            "        reference_fn = getattr(reference, ENTRY_POINT)",
+            "        for args in BASE_INPUTS:",
+            "            with self.subTest(args=args):",
+            "                self.assertEqual(reference_fn(*args), candidate(*args))",
+            "        for args in PLUS_INPUTS:",
+            "            with self.subTest(args=args):",
+            "                self.assertEqual(reference_fn(*args), candidate(*args))",
+            "",
+            "",
+            "if __name__ == '__main__':",
+            "    unittest.main()",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _infer_entry_point(tests: str) -> str:
     match = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", tests)
     return match.group(1) if match else ""
@@ -279,6 +480,8 @@ def _evalplus_task(
     entry_point: str,
     fixture_dir: Path,
     tests: str,
+    base_inputs: tuple[tuple[Any, ...], ...],
+    plus_inputs: tuple[tuple[Any, ...], ...],
 ) -> EvalTask:
     task_id = _normalize_task_id(benchmark_name, raw_id)
     return EvalTask(
@@ -307,6 +510,8 @@ def _evalplus_task(
                 "task_id": raw_id,
                 "entry_point": entry_point,
                 "test": tests,
+                "base_input_count": len(base_inputs),
+                "plus_input_count": len(plus_inputs),
             },
         },
     )

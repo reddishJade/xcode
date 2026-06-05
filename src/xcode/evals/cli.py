@@ -59,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.benchmark,
                 args.benchmark_path,
                 fixture_root=output_dir / "benchmark_fixtures",
+                limit=args.limit,
             )
         except ValueError as exc:
             print(str(exc))
@@ -90,7 +91,14 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if report.success else 1
 
 
-_NUMERIC_FIELDS = ("llm_calls", "estimated_prompt_tokens", "model_total_ms", "tool_calls", "tool_errors", "steps")
+_NUMERIC_FIELDS = (
+    "llm_calls",
+    "estimated_prompt_tokens",
+    "model_total_ms",
+    "tool_calls",
+    "tool_errors",
+    "steps",
+)
 
 
 def _fmt_ms(ms: float) -> str:
@@ -136,6 +144,7 @@ def _print_task_table(report) -> None:
     if not trials:
         return
     from collections import OrderedDict
+
     task_map: dict[str, list] = OrderedDict()
     for t in trials:
         task_map.setdefault(t.task_id, []).append(t)
@@ -251,8 +260,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--benchmark-path",
-        type=Path,
-        help="Local JSON or JSONL file for --benchmark.",
+        type=str,
+        help="Local path or URL for --benchmark.",
     )
     parser.add_argument(
         "--real",
@@ -279,6 +288,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--trials", type=int, default=1, help="Trials per task.")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Max tasks to run from the benchmark (e.g. --limit 1 for a quick smoke).",
+    )
     return parser.parse_args(argv)
 
 
@@ -306,7 +321,9 @@ def _print_suite_detail(name: str) -> int:
     for task in tasks:
         fixture = task.metadata.get("fixture_dir")
         validation = task.metadata.get("validation", {})
-        commands = validation.get("commands", ()) if isinstance(validation, dict) else ()
+        commands = (
+            validation.get("commands", ()) if isinstance(validation, dict) else ()
+        )
         print(f"  - {task.id}")
         if fixture:
             print(f"    fixture: {fixture}")
