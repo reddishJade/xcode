@@ -239,6 +239,7 @@ uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3
 
 ```powershell
 uv run python -m xcode.evals.cli --list-benchmarks
+uv run python -m xcode.evals.cli --real --benchmark evalplus-humaneval --benchmark-path examples/eval/benchmarks/evalplus-humaneval-sample.jsonl --trials 1
 ```
 
 更多说明见 [docs/evaluation-guide.md](docs/evaluation-guide.md)。

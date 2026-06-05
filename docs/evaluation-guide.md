@@ -135,6 +135,7 @@ uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
 | `uv run python -m xcode.evals.cli --suite all --trials 3` | 默认离线回归集合，测量 pass@k/pass^k |
 | `uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3` | 真实 provider 的 sandbox coding fixture 评测 |
 | `uv run python -m xcode.evals.cli --list-benchmarks` | 列出外部 benchmark adapter 目标 |
+| `uv run python -m xcode.evals.cli --real --benchmark evalplus-humaneval --benchmark-path examples/eval/benchmarks/evalplus-humaneval-sample.jsonl` | 轻量 EvalPlus HumanEval 样例评测 |
 
 ### 可用套件
 
@@ -228,12 +229,20 @@ uv run python -m xcode.evals.cli --list-benchmarks
 
 当前 adapter registry 覆盖：
 
+- `evalplus-humaneval`
+- `evalplus-mbpp`
 - `swebench-lite`
 - `swebench-verified`
 - `terminal-bench`
 - `aider-polyglot`
 
 adapter registry 描述 Xcode 与外部 harness 的职责边界。外部 harness 负责数据集、任务环境和评分；Xcode 负责在任务工作区内生成候选修改或执行终端任务。
+
+EvalPlus loader 会从本地 JSON/JSONL 数据生成 sandbox fixture。每个任务包含 `solution.py`、`tests/test_solution.py` 和 validation command。仓库提供一个 HumanEval 风格样例：
+
+```powershell
+uv run python -m xcode.evals.cli --real --benchmark evalplus-humaneval --benchmark-path examples/eval/benchmarks/evalplus-humaneval-sample.jsonl --trials 1
+```
 
 SWE-bench adapter helper 位于 `src/xcode/evals/adapters/swebench.py`。它把 `EvalReport` 和 benchmark tasks 转换为 predictions JSONL 记录，字段包含 `instance_id`、`model_name_or_path` 和 `model_patch`。
 
