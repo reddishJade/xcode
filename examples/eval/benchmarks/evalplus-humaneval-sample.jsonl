@@ -1,0 +1,1 @@
+{"task_id":"HumanEvalSample/0","prompt":"def add(a, b):\n    \"\"\"Return the sum of a and b.\"\"\"\n    pass","entry_point":"add","test":"def check(candidate):\n    assert candidate(1, 2) == 3\n    assert candidate(-1, 1) == 0\n    assert candidate(0, 0) == 0"}
