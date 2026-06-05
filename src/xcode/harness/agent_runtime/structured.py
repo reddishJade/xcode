@@ -29,6 +29,7 @@ from ...agent.types import (
     AssistantMessage,
     BeforeToolCallContext,
     BeforeToolCallResult,
+    CompactionEvent,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
@@ -66,7 +67,6 @@ from ..observability import (
     redact_text,
 )
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
-
 
 
 __all__ = ["StructuredAgent", "StructuredAgentEvent", "StructuredAgentResult"]
@@ -384,9 +384,13 @@ class StructuredAgent:
 
         # 发射 before_agent_start 钩子
         self._emit_hook(
-            HookRecord("before_agent_start", metadata={
-                "question": question, "mode": effective_mode,
-            })
+            HookRecord(
+                "before_agent_start",
+                metadata={
+                    "question": question,
+                    "mode": effective_mode,
+                },
+            )
         )
 
         # 实时流式：消费 Agent.run_stream()，边跑边翻译边 yield
@@ -435,7 +439,9 @@ class StructuredAgent:
             description="Exit Plan Mode: return to full tool access. Call this with a concise summary of your plan.",
             input_hint="plan_summary",
             handler=lambda _input: self._switch_to_act(
-                _input.get("plan_summary", "") if isinstance(_input, dict) else str(_input)
+                _input.get("plan_summary", "")
+                if isinstance(_input, dict)
+                else str(_input)
             ),
             risk="low",
         )
@@ -463,10 +469,14 @@ class StructuredAgent:
         self._current_mode = "act"
         self._plan_pending_confirmation = True
         if plan_summary:
-            self.steer(SystemMessage(content=(
-                f"<plan-summary>\n{plan_summary}\n</plan-summary>\n"
-                "A plan has been prepared. Confirm with the user before executing write tools."
-            )))
+            self.steer(
+                SystemMessage(
+                    content=(
+                        f"<plan-summary>\n{plan_summary}\n</plan-summary>\n"
+                        "A plan has been prepared. Confirm with the user before executing write tools."
+                    )
+                )
+            )
         self._agent._tools = self._tools_for_mode(self.registry, "act")
         return "Plan ready. Present it to the user for confirmation."
 
@@ -533,10 +543,12 @@ class StructuredAgent:
         self._progress_steps_without_update += 1
         if self._progress_steps_without_update >= 5:
             self._progress_steps_without_update = 0
-            self.steer(UserMessage(
-                content="<reminder>You have gone several turns without updating task progress. "
-                        "Use update_task or save_task_progress to record progress before continuing.</reminder>"
-            ))
+            self.steer(
+                UserMessage(
+                    content="<reminder>You have gone several turns without updating task progress. "
+                    "Use update_task or save_task_progress to record progress before continuing.</reminder>"
+                )
+            )
 
         if self._current_mode == "plan":
             self._plan_enter_step += 1
@@ -544,12 +556,16 @@ class StructuredAgent:
                 self._plan_enter_step = 0
                 self._current_mode = "act"
                 self._agent._tools = self._tools_for_mode(self.registry, "act")
-                self.steer(SystemMessage(content=(
-                    "<plan-timeout>\n"
-                    "Plan Mode timed out after reaching the maximum number "
-                    "of investigation turns. Returning to Act Mode.\n"
-                    "</plan-timeout>"
-                )))
+                self.steer(
+                    SystemMessage(
+                        content=(
+                            "<plan-timeout>\n"
+                            "Plan Mode timed out after reaching the maximum number "
+                            "of investigation turns. Returning to Act Mode.\n"
+                            "</plan-timeout>"
+                        )
+                    )
+                )
         return None
 
     def _loop_is_tool_productive(
@@ -586,7 +602,9 @@ class StructuredAgent:
             args = ctx.args
             action_input = stringify_tool_input(args)
 
-            if self._plan_pending_confirmation and self._plan_confirmation_required(ctx):
+            if self._plan_pending_confirmation and self._plan_confirmation_required(
+                ctx
+            ):
                 self._plan_pending_confirmation = False
                 return BeforeToolCallResult(
                     block=True,
@@ -633,10 +651,14 @@ class StructuredAgent:
             )
         return None
 
-    PROGRESS_TOOL_NAMES = frozenset({
-        "save_task_progress", "resume_task_progress",
-        "update_task", "create_task",
-    })
+    PROGRESS_TOOL_NAMES = frozenset(
+        {
+            "save_task_progress",
+            "resume_task_progress",
+            "update_task",
+            "create_task",
+        }
+    )
 
     def _loop_after_tool(
         self, ctx: AfterToolCallContext, _signal: Any
@@ -736,6 +758,7 @@ class StructuredAgent:
         typed.append(UserMessage(content=question))
         return typed
 
+
 # ── 事件翻译 ──
 
 
@@ -825,6 +848,18 @@ def _translate_event(
                 content=str(event.result.content) if event.result else "",
                 status="error" if event.is_error else "ok",
             ),
+        )
+
+    if isinstance(event, CompactionEvent):
+        return StructuredAgentEvent(
+            "compaction",
+            state.step,
+            {
+                "messages_removed": event.messages_removed,
+                "messages_after": event.messages_after,
+                "summary_token_estimate": event.summary_token_estimate,
+                "trigger": event.trigger,
+            },
         )
 
     return None
