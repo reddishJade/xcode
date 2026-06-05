@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from xcode.harness.observability import HookManager
+from xcode.harness.observability import HookManager, HookRecord
+from xcode.harness.observability import PreToolEvent, PostToolEvent
 from xcode.harness.skills import ToolSpec
 from xcode.harness.agent_runtime import StructuredAgent
 
@@ -18,6 +19,26 @@ from xcode.ai.events import (
 
 
 class XcodeHookTests(unittest.TestCase):
+    def test_typed_subscribers_receive_harness_events(self) -> None:
+        seen: list[tuple[str, str]] = []
+        hooks = HookManager()
+
+        def record_pre(event) -> None:
+            self.assertIsInstance(event, PreToolEvent)
+            seen.append((event.type, event.tool))
+
+        def record_post(event) -> None:
+            self.assertIsInstance(event, PostToolEvent)
+            seen.append((event.type, event.output))
+
+        hooks.subscribe("pre_tool", record_pre)
+        hooks.subscribe("post_tool", record_post)
+
+        hooks.emit(HookRecord("pre_tool", tool="echo", input="hi"))
+        hooks.emit(HookRecord("post_tool", tool="echo", output="done"))
+
+        self.assertEqual(seen, [("pre_tool", "echo"), ("post_tool", "done")])
+
     def test_hooks_fire_around_tool_execution(self) -> None:
         seen = []
         hooks = HookManager()
