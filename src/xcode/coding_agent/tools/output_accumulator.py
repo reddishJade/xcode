@@ -2,11 +2,21 @@ from __future__ import annotations
 
 import logging
 import tempfile
+from dataclasses import dataclass
 from typing import Any
 
 from .truncate import DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncate_tail
 
 logger = logging.getLogger("xcode.coding_agent.tools.output_accumulator")
+
+
+@dataclass
+class SnapshotResult:
+    content: str
+    total_lines: int
+    total_bytes: int
+    truncated: bool
+    full_output_path: str | None
 
 
 class OutputAccumulator:
@@ -25,6 +35,7 @@ class OutputAccumulator:
         self._truncated = False
         self._full_path: str | None = None
         self._file: Any = None
+        self._current_line_bytes = 0
 
     @property
     def full_path(self) -> str | None:
@@ -38,10 +49,19 @@ class OutputAccumulator:
     def total_bytes(self) -> int:
         return self._total_bytes
 
+    def get_last_line_bytes(self) -> int:
+        return self._current_line_bytes
+
     def append(self, chunk: bytes) -> None:
         self._chunks.append(chunk)
         self._total_bytes += len(chunk)
-        self._total_lines += chunk.count(b"\n")
+        newlines = chunk.count(b"\n")
+        self._total_lines += newlines
+        if newlines == 0:
+            self._current_line_bytes += len(chunk)
+        else:
+            last_newline = chunk.rfind(b"\n")
+            self._current_line_bytes = len(chunk) - last_newline - 1
         if self._file is not None:
             self._file.write(chunk)
             self._trim_tail()
@@ -73,14 +93,29 @@ class OutputAccumulator:
             text = b"".join(lines[-self._max_lines :])
         self._chunks = [text] if text else []
 
-    def snapshot(self) -> str:
+    def snapshot(self, persist_if_truncated: bool = False) -> str:
+        result = self.snapshot_detailed(persist_if_truncated=persist_if_truncated)
+        return result.content
+
+    def snapshot_detailed(self, persist_if_truncated: bool = False) -> SnapshotResult:
         if self._chunks:
             text = b"".join(self._chunks).decode("utf-8", errors="replace")
         else:
             text = ""
 
-        if not text and not self._truncated:
-            return "(no output)"
+        has_content = bool(text) or self._truncated
+
+        if not has_content:
+            return SnapshotResult(
+                content="(no output)",
+                total_lines=0,
+                total_bytes=0,
+                truncated=False,
+                full_output_path=self._full_path,
+            )
+
+        if persist_if_truncated and self._truncated and self._file is None:
+            self._persist_full()
 
         tr = truncate_tail(text, max_lines=self._max_lines, max_bytes=self._max_bytes)
 
@@ -93,9 +128,21 @@ class OutputAccumulator:
                 f" ({self._max_bytes // 1024}KB limit)."
                 f" Full output: {self._full_path}]"
             )
-            return tr.content + footer
+            return SnapshotResult(
+                content=tr.content + footer,
+                total_lines=self._total_lines,
+                total_bytes=self._total_bytes,
+                truncated=True,
+                full_output_path=self._full_path,
+            )
 
-        return tr.content
+        return SnapshotResult(
+            content=tr.content,
+            total_lines=self._total_lines,
+            total_bytes=self._total_bytes,
+            truncated=self._truncated,
+            full_output_path=self._full_path,
+        )
 
     def close(self) -> None:
         if self._file is not None:
