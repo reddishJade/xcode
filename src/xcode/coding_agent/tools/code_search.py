@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import re
 import subprocess
+import threading
 import traceback
 from pathlib import Path
 from typing import Any, Protocol
@@ -146,11 +147,16 @@ def build_code_tools(
     grep_ops: GrepOperations | None = None,
     ls_ops: LsOperations | None = None,
     find_ops: FindOperations | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[ToolSpec, ...]:
     root = project_root.resolve()
     local_grep = grep_ops or LocalGrepOperations()
     local_ls = ls_ops or LocalLsOperations()
     local_find = find_ops or LocalFindOperations()
+
+    def _cancel_check() -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ValueError("Tool cancelled")
 
     def grep_search(data: ToolInput) -> str:
         pattern = str(data.get("pattern", "")).strip()
@@ -162,6 +168,7 @@ def build_code_tools(
         ignore_case = bool(data.get("ignore_case", False))
         literal = bool(data.get("literal", False))
         context = int(data.get("context", 0))
+        _cancel_check()
         return _grep(
             root,
             base,
@@ -172,15 +179,18 @@ def build_code_tools(
             ignore_case=ignore_case,
             literal=literal,
             context=context,
+            cancel_event=cancel_event,
         )
 
     def glob_files(data: ToolInput) -> str:
+        _cancel_check()
         pattern = str(data.get("pattern", "*")).strip() or "*"
         base = _safe_path(root, str(data.get("path", ".")))
         max_results = int(data.get("max_results", MAX_GLOB_RESULTS))
         return _glob_files(root, base, pattern, max_results)
 
     def find_files(data: ToolInput) -> str:
+        _cancel_check()
         pattern = str(data.get("pattern", "")).strip()
         if not pattern:
             raise ValueError("pattern is required")
@@ -189,12 +199,14 @@ def build_code_tools(
         return _find_files_fd(root, base, pattern, max_results, local_find)
 
     def ls_files(data: ToolInput) -> str:
+        _cancel_check()
         raw_path = str(data.get("path", ".")).strip()
         base = _safe_path(root, raw_path)
         limit = int(data.get("limit", MAX_LS_ENTRIES))
         return _ls(root, base, limit, local_ls)
 
     def evaluate_python(data: ToolInput) -> str:
+        _cancel_check()
         global _EVAL_NS
         code = str(data.get("code", "")).strip()
         if not code:
@@ -398,6 +410,7 @@ def _grep(
     ignore_case: bool = False,
     literal: bool = False,
     context: int = 0,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     global _RG_MISSING_HINT_EMITTED
     rg = ensure_tool("rg", silent=True)
@@ -428,6 +441,9 @@ def _grep(
         lines_truncated = 0
         try:
             while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    proc.kill()
+                    raise ValueError("Tool cancelled")
                 raw_line = proc.stdout.readline()
                 if not raw_line:
                     break

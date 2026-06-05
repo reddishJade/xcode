@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from difflib import unified_diff
 import json
+import threading
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -145,16 +146,24 @@ def build_file_tools(
     project_root: Path,
     context_state: ContextualRetrievalState | None = None,
     operations: FileOperations | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[ToolSpec, ...]:
     root = project_root.resolve()
     ops = operations or LocalFileOperations()
+
+    def _handler(fn, data):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ValueError("Tool cancelled")
+        return fn(data)
 
     return (
         ToolSpec(
             name="read_file",
             description="Read a text file inside the project sandbox.",
             input_hint='JSON: {"path": "src/xcode/main.py", "offset": 1, "limit": 80}',
-            handler=lambda data: _read_file(root, ops, context_state, data),
+            handler=lambda data: _handler(
+                lambda d: _read_file(root, ops, context_state, d), data
+            ),
             risk="low",
             schema=READ_FILE_SCHEMA,
             read_only=True,
@@ -173,7 +182,9 @@ def build_file_tools(
                 "existing file."
             ),
             input_hint='JSON: {"path": "notes.md", "content": "..."}',
-            handler=lambda data: _write_file(root, ops, context_state, data),
+            handler=lambda data: _handler(
+                lambda d: _write_file(root, ops, context_state, d), data
+            ),
             risk="high",
             schema=WRITE_FILE_SCHEMA,
             group="core",
@@ -197,7 +208,9 @@ def build_file_tools(
                 "content is preserved."
             ),
             input_hint='JSON: {"path": "src/main.py", "edits": [{"old_text": "...", "new_text": "..."}]}',
-            handler=lambda data: _edit_file(root, ops, context_state, data),
+            handler=lambda data: _handler(
+                lambda d: _edit_file(root, ops, context_state, d), data
+            ),
             risk="high",
             schema=EDIT_FILE_SCHEMA,
             group="core",

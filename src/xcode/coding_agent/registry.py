@@ -29,8 +29,10 @@ def build_project_scoped_registry(
     env: ExecutionEnv | None = None,
 ) -> tuple[ToolSpec, ...]:
     registry = BASE_REGISTRY
-    registry += build_file_tools(project_root, context_state=contextual_state)
-    registry += build_code_tools(project_root)
+    registry += build_file_tools(
+        project_root, context_state=contextual_state, cancel_event=cancel_event
+    )
+    registry += build_code_tools(project_root, cancel_event=cancel_event)
     registry += (
         build_bash_tool(
             project_root,
