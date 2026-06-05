@@ -101,6 +101,24 @@ def cmd_tree(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
+def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
+    parts = cmd.split(maxsplit=1)
+    if len(parts) == 1 or parts[1].strip() in {"list", "tree"}:
+        return cmd_tree("/tree", ctx)
+
+    target = parts[1].strip()
+    try:
+        view = ctx.store.switch_branch(target)
+    except ValueError as exc:
+        print(str(exc))
+        return False
+    if ctx.session_policy is not None:
+        ctx.session_policy.clear()
+    print(resumed_message(view))
+    print_loaded_history(ctx.store)
+    return False
+
+
 def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
     print_sessions(ctx.store.list_session_infos())
     return False
@@ -275,6 +293,12 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/tree": CommandEntry(
         handler=cmd_tree,
         desc="Show session fork tree.",
+    ),
+    "/branch": CommandEntry(
+        handler=cmd_branch,
+        desc="List or switch session branches.",
+        args_desc="list|tree|<id|title>",
+        accepts_args=True,
     ),
     "/model": CommandEntry(
         handler=cmd_model,

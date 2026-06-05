@@ -711,6 +711,51 @@ class XcodeReplForkTests(unittest.TestCase):
             assert meta is not None
             self.assertIsNone(meta.fork_type)
 
+    def test_switch_branch_resumes_branch_by_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "parent")
+            parent = store.current_metadata()
+            assert parent is not None
+            store.fork_into("explore")
+            branch = store.current_metadata()
+            assert branch is not None
+            store.resume(parent.id)
+
+            view = store.switch_branch(branch.id)
+
+            self.assertEqual(view.id, branch.id)
+            self.assertEqual(store.current_metadata(), branch)
+
+    def test_branch_command_switches_and_prints_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "parent")
+            parent = store.current_metadata()
+            assert parent is not None
+            store.fork_into("verify")
+            branch = store.current_metadata()
+            assert branch is not None
+            store.append("assistant", "branch answer")
+            store.resume(parent.id)
+            prompt = FakePrompt([])
+            renderer = FakeRenderer()
+            state = ReplState()
+
+            with redirect_stdout(StringIO()) as output:
+                handled = handle_command(
+                    f"/branch {branch.id}",
+                    store,
+                    FakeApp(),
+                    renderer,
+                    state,
+                    prompt,
+                )
+
+            self.assertFalse(handled)
+            self.assertIn("Resumed conversation:", output.getvalue())
+            self.assertEqual(store.current_metadata(), branch)
+
     def test_run_repl_compact_command(self) -> None:
         class FakeAgent:
             def __init__(self) -> None:

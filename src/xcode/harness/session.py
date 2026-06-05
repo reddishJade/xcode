@@ -160,6 +160,11 @@ class SessionStore:
             raise ValueError(f"session does not exist: {path}")
         self.current_path = path
 
+    def switch_branch(self, target: str) -> SessionMetadataView:
+        """切换到会话树中的指定分支。"""
+        self.resume(target)
+        return self._view_for_path(self.current_path, self.current_metadata())
+
     def resume_latest(self) -> Path | None:
         sessions = [item.path for item in self.list_session_infos(limit=1)]
         if not sessions:
