@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from xcode.harness.skills import ToolInput, ToolSpec, resolve_project_path
 from .path_utils import is_path_blocked, truncate_output, display_path
 from .tools_manager import ensure_tool
+from .truncate import GREP_MAX_LINE_LENGTH, truncate_line, truncate_tail
 
 """供编码 Agent 使用的只读代码搜索工具。"""
 
@@ -413,20 +414,36 @@ def _grep(
         if glob:
             command.extend(["-g", glob])
         command.append(str(base))
-        completed = subprocess.run(
+        proc = subprocess.Popen(
             command,
             cwd=root,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             errors="replace",
-            timeout=10,
-            check=False,
         )
-        output = completed.stdout.strip()
-        if not output:
+        assert proc.stdout is not None
+        lines: list[str] = []
+        lines_truncated = 0
+        while True:
+            raw_line = proc.stdout.readline()
+            if not raw_line:
+                break
+            line = raw_line.rstrip("\n").rstrip("\r")
+            truncated, was_truncated = truncate_line(line)
+            if was_truncated:
+                lines_truncated += 1
+            lines.append(truncated)
+            if len(lines) >= max_results:
+                proc.kill()
+                break
+        proc.wait(timeout=5)
+        if not lines:
             return "No matches found."
-        lines = output.splitlines()[:max_results]
-        return _truncate("\n".join(lines))
+        result = "\n".join(lines)
+        if lines_truncated > 0:
+            result += f"\n[Truncated {lines_truncated} long lines to {GREP_MAX_LINE_LENGTH} chars]"
+        return _truncate(result)
 
     hint = ""
     if not _RG_MISSING_HINT_EMITTED:
@@ -609,8 +626,10 @@ def _grep_fallback(
             end = min(len(all_lines), line_no + context) if context > 0 else line_no
             for ctx_line_no in range(start, end):
                 prefix = ">" if ctx_line_no + 1 == line_no else "-"
+                raw = all_lines[ctx_line_no]
+                truncated_raw, _ = truncate_line(raw)
                 matches.append(
-                    f"{_display(root, path)}:{ctx_line_no + 1}:{prefix} {all_lines[ctx_line_no]}"
+                    f"{_display(root, path)}:{ctx_line_no + 1}:{prefix} {truncated_raw}"
                 )
     return _truncate("\n".join(matches)) if matches else "No matches found."
 
