@@ -60,6 +60,18 @@ def resolve_read_path(root: Path, raw_path: str) -> Path:
         if nfd_curly_path.exists():
             return nfd_curly_path
 
+    narrow_space = str(resolved).replace("\u202f", " ")
+    if narrow_space != str(resolved):
+        narrow_path = Path(narrow_space)
+        if narrow_path.exists():
+            return narrow_path
+
+        nfd_narrow = unicodedata.normalize("NFD", narrow_space)
+        if nfd_narrow != str(resolved):
+            nfd_narrow_path = Path(nfd_narrow)
+            if nfd_narrow_path.exists():
+                return nfd_narrow_path
+
     return resolved
 
 
