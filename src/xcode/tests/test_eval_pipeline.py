@@ -17,9 +17,13 @@ from xcode.ai.events import (
 from xcode.harness.app import XcodeApp
 from xcode.harness.config import AgentConfig
 from xcode.harness.skills import ToolSpec
+from xcode.evals.benchmarks import load_benchmark
 from xcode.evals.cli import _trial_project_root
+from xcode.evals.cli import _task_from_dict
 from xcode.evals import EvalRunner, EvalTask
+from xcode.evals.runner import _build_run_metrics
 from xcode.tests.fixtures import FakeProvider
+from xcode.evals.schema import TrialResult
 
 
 class EvalPipelineTests(unittest.TestCase):
@@ -170,6 +174,84 @@ class EvalPipelineTests(unittest.TestCase):
             )
             self.assertIn("fixture-task-1", str(root))
 
+    def test_task_from_dict_normalizes_llm_judge_criteria(self) -> None:
+        task = _task_from_dict(
+            {
+                "id": "judge-task",
+                "prompt": "answer",
+                "llm_judge_criteria": ["criteria one", "criteria two"],
+            }
+        )
+
+        self.assertEqual(task.llm_judge_criteria, ("criteria one", "criteria two"))
+
+    def test_load_humaneval_benchmark_from_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "humaneval.jsonl"
+            path.write_text(
+                json.dumps(
+                    {
+                        "task_id": "HumanEval/0",
+                        "prompt": "def add(a, b):",
+                        "entry_point": "add",
+                        "test": "assert add(1, 2) == 3",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            tasks = load_benchmark("humaneval", path)
+
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0].id, "humaneval-HumanEval-0")
+            self.assertIn("benchmark", tasks[0].tags)
+            self.assertIn("add", tasks[0].expected_answer_contains)
+            self.assertTrue(tasks[0].llm_judge_criteria)
+
+    def test_load_swebench_lite_benchmark_from_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "swebench.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "instance_id": "repo__issue-1",
+                            "repo": "owner/repo",
+                            "base_commit": "abc123",
+                            "problem_statement": "Fix the failing parser.",
+                            "test_patch": "assert parser()",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            tasks = load_benchmark("swebench-lite", path)
+
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0].id, "swebench-lite-repo__issue-1")
+            self.assertIn("Fix the failing parser.", tasks[0].prompt)
+            self.assertEqual(tasks[0].metadata["benchmark"]["repo"], "owner/repo")
+
+    def test_pass_at_k_uses_unbiased_estimator(self) -> None:
+        trials = (
+            _trial("task-a", True),
+            _trial("task-a", False),
+            _trial("task-a", False),
+            _trial("task-b", False),
+            _trial("task-b", False),
+            _trial("task-b", False),
+        )
+
+        metrics = _build_run_metrics(
+            (EvalTask(id="task-a", prompt="a"), EvalTask(id="task-b", prompt="b")),
+            list(trials),
+        )
+
+        self.assertEqual(metrics["pass@k"], "1/2")
+        self.assertEqual(metrics["pass@k_rate"], 0.5)
+
 
 def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
     responses: list[list[ProviderEvent]] = [
@@ -228,6 +310,17 @@ def _editing_app(project_root: Path) -> XcodeApp:
             project_root=project_root,
         ),
         registry=(tool,),
+    )
+
+
+def _trial(task_id: str, success: bool) -> TrialResult:
+    return TrialResult(
+        task_id=task_id,
+        trial_id=f"{task_id}-1",
+        success=success,
+        answer="",
+        trace_path=Path("trace.jsonl"),
+        graders=(),
     )
 
 

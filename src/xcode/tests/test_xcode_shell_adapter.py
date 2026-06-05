@@ -129,26 +129,20 @@ class XcodeShellAdapterTests(unittest.TestCase):
             output = run_tool(registry, "bash", {"command": "echo hello"})
             self.assertIn("hello", output)
 
-    @mock.patch("xcode.coding_agent.tools.bash.subprocess.Popen")
-    def test_bash_tool_passes_shell_false_and_argv(
-        self, mock_popen: mock.MagicMock
-    ) -> None:
-        """验证显式 shell_spec 时 Popen 使用 shell=False 和正确的 argv。"""
-        mock_proc = mock.MagicMock()
-        mock_proc.poll.return_value = 0
-        mock_proc.stdout.readline.return_value = b""
-        mock_proc.stderr.readline.return_value = b""
-        mock_popen.return_value = mock_proc
+    def test_bash_tool_passes_shell_false_and_argv(self) -> None:
+        """验证显式 shell_spec 时 argv 和 cwd 正确传递。"""
+        from xcode.harness.execution_env import SandboxExecutionEnv
 
+        env = SandboxExecutionEnv()
         spec = _KNOWN_SHELLS["bash"]
         with tempfile.TemporaryDirectory() as tmp:
-            tool = build_bash_tool(Path(tmp), shell_spec=spec)
+            tool = build_bash_tool(Path(tmp), shell_spec=spec, env=env)
             tool.handler({"command": "echo mock_shell", "timeout": 5})
 
-        mock_popen.assert_called_once()
-        _args, _kwargs = mock_popen.call_args
-        self.assertIs(_kwargs.get("shell"), False, "Popen must use shell=False")
+        self.assertEqual(len(env.calls), 1)
+        argv, cwd, timeout = env.calls[0]
+        # 使用 argv 而非 command string，即 shell=False
         self.assertEqual(
-            _args[0],
+            argv,
             ["bash", "--noprofile", "--norc", "-c", "echo mock_shell"],
         )

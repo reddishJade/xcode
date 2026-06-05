@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from xcode.harness.execution_env import ExecutionEnv
+
 from xcode.harness.config import (
     AgentConfig,
     PROFILE_MAIN,
@@ -185,6 +187,7 @@ def build_search_tools_tool(
     registry: tuple[ToolSpec, ...],
 ) -> ToolSpec:
     """按关键字搜索所有已注册工具。"""
+
     def search_tools(data: ToolInput) -> str:
         query = str(data.get("query", "")).strip().lower()
         if not query:
@@ -201,7 +204,9 @@ def build_search_tools_tool(
                 )
         if not results:
             return f"No tools matching '{query}'."
-        return f"Found {len(results)} tool(s) matching '{query}':\n" + "\n\n".join(results[:5])
+        return f"Found {len(results)} tool(s) matching '{query}':\n" + "\n\n".join(
+            results[:5]
+        )
 
     return ToolSpec(
         name="search_tools",
@@ -234,6 +239,7 @@ def build_tool_registry(
     contextual_state: ContextualRetrievalState | None = None,
     compact_controller: CompactController | None = None,
     cancel_event: threading.Event | None = None,
+    env: ExecutionEnv | None = None,
 ) -> tuple[
     tuple[ToolSpec, ...], SkillLoader | None, ShellSpec, tuple[Callable[[], None], ...]
 ]:
@@ -248,6 +254,7 @@ def build_tool_registry(
         contextual_state=contextual_state,
         shell_spec=shell_spec,
         cancel_event=cancel_event,
+        env=env,
     )
     if "worktree" in enabled:
         from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
@@ -292,6 +299,7 @@ def build_tool_registry(
                     contextual_state=contextual_state,
                     shell_spec=shell_spec,
                     cancel_event=cancel_event,
+                    env=env,
                 )
             result = await StructuredAgent(
                 provider=child_llms[model_profile],

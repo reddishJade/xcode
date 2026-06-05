@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
@@ -80,9 +81,47 @@ class XcodeReplTests(unittest.TestCase):
                 )
             )
             item = index["sessions"][0]
+            self.assertEqual(index["version"], 1)
+            self.assertEqual(index["storage"], "jsonl-v1")
+            self.assertEqual(
+                index["recovery_boundary"],
+                "current_transcript_and_session_tree",
+            )
             self.assertEqual(item["title"], "Refactor session storage and resume flow")
             self.assertIn("Answer preview", item["summary"])
             self.assertFalse(Path(item["transcript_path"]).is_absolute())
+
+    def test_session_store_loads_legacy_index_without_protocol_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sessions = Path(temp_dir) / ".local" / "sessions"
+            sessions.mkdir(parents=True)
+            transcript = sessions / "session-legacy.jsonl"
+            transcript.write_text("", encoding="utf-8")
+            index_path = Path(temp_dir) / ".local" / "session_index.json"
+            index_path.write_text(
+                json.dumps(
+                    {
+                        "sessions": [
+                            {
+                                "id": "legacy",
+                                "title": "Legacy",
+                                "summary": "Old index",
+                                "project_path": temp_dir,
+                                "transcript_path": "sessions/session-legacy.jsonl",
+                                "created_at": "2026-01-01T00:00:00+00:00",
+                                "updated_at": "2026-01-01T00:00:00+00:00",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = SessionStore(sessions, project_root=Path(temp_dir))
+
+            views = store.list_session_infos()
+
+            self.assertEqual(views[0].title, "Legacy")
+            self.assertEqual(store.protocol_info().storage, "jsonl-v1")
 
     def test_run_repl_persists_user_and_answer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -347,6 +386,17 @@ class XcodeReplTests(unittest.TestCase):
             self.assertIn("<hidden tools", renderer.rendered[0])
             self.assertIn("submit_subagent", renderer.rendered[0])
 
+    def test_run_repl_queue_mode_enqueues_followup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = QueueModeApp()
+            prompt = FakePrompt(["/queue on", "hello", "queued followup", "", "/exit"])
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(app.agent.followups, ["queued followup"])
+
     def test_brief_input_shows_bash_command_and_file_paths(self) -> None:
         self.assertEqual(
             brief_input("bash", {"command": "Remove-Item tmp\\hello.c"}),
@@ -422,7 +472,7 @@ class XcodeReplTests(unittest.TestCase):
 
         items = completer.complete("/q")
 
-        self.assertEqual(items, [])
+        self.assertEqual([item.text for item in items], ["/queue"])
 
     def test_handle_command_keeps_quit_alias(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -673,6 +723,51 @@ class XcodeReplForkTests(unittest.TestCase):
             assert meta is not None
             self.assertIsNone(meta.fork_type)
 
+    def test_switch_branch_resumes_branch_by_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "parent")
+            parent = store.current_metadata()
+            assert parent is not None
+            store.fork_into("explore")
+            branch = store.current_metadata()
+            assert branch is not None
+            store.resume(parent.id)
+
+            view = store.switch_branch(branch.id)
+
+            self.assertEqual(view.id, branch.id)
+            self.assertEqual(store.current_metadata(), branch)
+
+    def test_branch_command_switches_and_prints_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "parent")
+            parent = store.current_metadata()
+            assert parent is not None
+            store.fork_into("verify")
+            branch = store.current_metadata()
+            assert branch is not None
+            store.append("assistant", "branch answer")
+            store.resume(parent.id)
+            prompt = FakePrompt([])
+            renderer = FakeRenderer()
+            state = ReplState()
+
+            with redirect_stdout(StringIO()) as output:
+                handled = handle_command(
+                    f"/branch {branch.id}",
+                    store,
+                    FakeApp(),
+                    renderer,
+                    state,
+                    prompt,
+                )
+
+            self.assertFalse(handled)
+            self.assertIn("Resumed conversation:", output.getvalue())
+            self.assertEqual(store.current_metadata(), branch)
+
     def test_run_repl_compact_command(self) -> None:
         class FakeAgent:
             def __init__(self) -> None:
@@ -767,6 +862,33 @@ class FakeApp:
             1,
             StructuredAgentResult(
                 answer=f"{text}!",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class QueueModeAgent:
+    def __init__(self) -> None:
+        self.followups: list[str] = []
+
+    def follow_up(self, message) -> None:
+        self.followups.append(str(message.content))
+
+
+class QueueModeApp:
+    def __init__(self) -> None:
+        self.agent = QueueModeAgent()
+
+    def ask_stream(self, text: str, mode: str | None = None):
+        yield StructuredAgentEvent("text_delta", 1, text)
+        time.sleep(0.05)
+        yield StructuredAgentEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer=text,
                 messages=[],
                 steps=1,
                 tool_calls=[],

@@ -9,6 +9,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from xcode.agent.messages import BRANCH_SUMMARY_PREFIX, BRANCH_SUMMARY_SUFFIX
 from xcode.agent.config import CompactInstructions
 from ..skills import ToolSpec
 
@@ -44,10 +45,12 @@ class LayeredCompactor:
         on_compact: Callable[[str], None] | None = None,
         compact_instructions: CompactInstructions | None = None,
         summarize_fn: SummarizeFn | None = None,
+        active_branch_id: str | None = None,
     ) -> None:
         self.transcript_dir = transcript_dir
         self.compact_instructions = compact_instructions
         self.summarize_fn = summarize_fn
+        self.active_branch_id = active_branch_id
         self.keep_recent_tool_results = keep_recent_tool_results
         self.max_tool_result_chars = max_tool_result_chars
         self.max_recent_messages = max_recent_messages
@@ -77,11 +80,20 @@ class LayeredCompactor:
             max_content_chars=self.max_tool_result_chars,
             preserve_tool_result_ids=preserved_tool_results,
         )
+        branch_compacted = summarize_inactive_branches(
+            micro,
+            active_branch_id=self.active_branch_id,
+            compact_token_threshold=self.compact_token_threshold,
+            budget_trigger_token_ratio=self.budget_trigger_token_ratio,
+            summarize_fn=self.summarize_fn,
+        )
         if self.transcript_dir is not None:
-            self.last_transcript_path = save_transcript(micro, self.transcript_dir)
+            self.last_transcript_path = save_transcript(
+                branch_compacted, self.transcript_dir
+            )
 
         final_messages = summarize_messages(
-            micro,
+            branch_compacted,
             max_recent_messages=self.max_recent_messages,
             compact_instructions=self.compact_instructions,
             summarize_fn=self.summarize_fn,
@@ -370,6 +382,117 @@ def summarize_messages(
         "content": summary_content,
     }
     return [messages[0], summary, *messages[recent_start:]]
+
+
+def summarize_inactive_branches(
+    messages: list[dict[str, Any]],
+    active_branch_id: str | None = None,
+    compact_token_threshold: int = 32_000,
+    budget_trigger_token_ratio: float = 0.5,
+    summarize_fn: SummarizeFn | None = None,
+) -> list[dict[str, Any]]:
+    """在上下文紧张时用分支摘要替换非活跃分支消息。"""
+    if not _branch_summary_should_run(
+        messages, compact_token_threshold, budget_trigger_token_ratio
+    ):
+        return messages
+
+    result: list[dict[str, Any]] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        branch_id = _inactive_branch_id(message, active_branch_id)
+        if branch_id is None:
+            result.append(message)
+            index += 1
+            continue
+
+        branch_messages = [message]
+        index += 1
+        while index < len(messages):
+            next_message = messages[index]
+            if _inactive_branch_id(next_message, active_branch_id) != branch_id:
+                break
+            branch_messages.append(next_message)
+            index += 1
+        result.append(
+            build_branch_summary_message(
+                branch_id,
+                branch_messages,
+                summarize_fn=summarize_fn,
+            )
+        )
+    return result
+
+
+def build_branch_summary_message(
+    branch_id: str,
+    messages: list[dict[str, Any]],
+    summarize_fn: SummarizeFn | None = None,
+) -> dict[str, Any]:
+    """构建 LLM 可见的分支摘要消息。"""
+    summary = _summarize_branch_messages(messages, summarize_fn)
+    content = BRANCH_SUMMARY_PREFIX + summary + BRANCH_SUMMARY_SUFFIX
+    return {
+        "role": "user",
+        "content": [{"type": "text", "text": content}],
+        "metadata": {
+            "type": "branch_summary",
+            "branch_id": branch_id,
+            "source_message_count": len(messages),
+        },
+    }
+
+
+def _branch_summary_should_run(
+    messages: list[dict[str, Any]],
+    compact_token_threshold: int,
+    budget_trigger_token_ratio: float,
+) -> bool:
+    if compact_token_threshold <= 0:
+        return False
+    trigger_threshold = compact_token_threshold * budget_trigger_token_ratio
+    return estimate_message_tokens(messages) > trigger_threshold
+
+
+def _inactive_branch_id(
+    message: dict[str, Any],
+    active_branch_id: str | None,
+) -> str | None:
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    if metadata.get("type") == "branch_summary":
+        return None
+    branch_id = str(metadata.get("branch_id") or "").strip()
+    if not branch_id:
+        return None
+    if bool(metadata.get("active_branch", False)):
+        return None
+    if active_branch_id is not None and branch_id == active_branch_id:
+        return None
+    return branch_id
+
+
+def _summarize_branch_messages(
+    messages: list[dict[str, Any]],
+    summarize_fn: SummarizeFn | None,
+) -> str:
+    if summarize_fn is not None:
+        raw = summarize_fn(messages)
+        if isinstance(raw, Awaitable):
+            import asyncio
+
+            raw = asyncio.get_event_loop().run_until_complete(raw)
+        summary = context_collapse_clean(str(raw).strip())
+        if summary:
+            return summary
+
+    summary_lines = []
+    for message in messages:
+        content = _content_preview(message.get("content"))
+        summary_lines.append(f"- {message.get('role')}: {content}")
+    return "\n".join(summary_lines)
 
 
 def _preserved_recent_count(

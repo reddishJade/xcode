@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import logging
 import threading
 import time
@@ -11,6 +12,17 @@ from .mailbox import AgentMailbox
 from .tasks import TaskStore
 
 logger = logging.getLogger("xcode.experimental.daemon")
+
+
+@dataclass(frozen=True)
+class DaemonHealth:
+    """守护进程健康状态快照。"""
+
+    running: bool
+    restart_count: int
+    last_heartbeat_at: float
+    last_error: str = ""
+    task_failures: dict[str, int] = field(default_factory=dict)
 
 
 class HeartbeatDaemon:
@@ -32,6 +44,11 @@ class HeartbeatDaemon:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._tasks: dict[str, Callable[[], list[dict[str, Any]] | None]] = {}
+        self._callbacks: dict[str, list[Callable[[dict[str, Any]], None]]] = {}
+        self._restart_count = 0
+        self._last_heartbeat_at = 0.0
+        self._last_error = ""
+        self._task_failures: dict[str, int] = {}
         self.mailbox = AgentMailbox(project_root)
         self.task_store = TaskStore(project_root)
 
@@ -45,6 +62,15 @@ class HeartbeatDaemon:
     ) -> None:
         """注册定时轮询任务。"""
         self._tasks[name] = func
+
+    def register_callback(
+        self,
+        event_type: str,
+        callback: Callable[[dict[str, Any]], None],
+    ) -> None:
+        """注册守护事件回调。"""
+        clean_type = event_type.strip() or "*"
+        self._callbacks.setdefault(clean_type, []).append(callback)
 
     def start(self) -> None:
         """启动后台心跳线程。"""
@@ -64,24 +90,30 @@ class HeartbeatDaemon:
         self._thread = None
         logger.info("HeartbeatDaemon stopped")
 
+    def health_check(self) -> DaemonHealth:
+        """返回当前守护进程健康状态。"""
+        running = self._thread is not None and self._thread.is_alive()
+        return DaemonHealth(
+            running=running,
+            restart_count=self._restart_count,
+            last_heartbeat_at=self._last_heartbeat_at,
+            last_error=self._last_error,
+            task_failures=dict(self._task_failures),
+        )
+
+    def ensure_healthy(self) -> DaemonHealth:
+        """如果后台线程异常退出，则自动重启。"""
+        health = self.health_check()
+        if health.running or self._stop_event.is_set():
+            return health
+        self._restart_count += 1
+        self.start()
+        return self.health_check()
+
     def _run_loop(self) -> None:
         """心跳轮询主循环。"""
         while not self._stop_event.is_set():
-            for name, func in list(self._tasks.items()):
-                if self._stop_event.is_set():
-                    break
-                try:
-                    events = func()
-                    if events:
-                        for evt in events:
-                            self.mailbox.send_message(
-                                sender_id="heartbeat_daemon",
-                                recipient_id=self.agent_id,
-                                type_name=evt.get("type", "system_alert"),
-                                payload=evt.get("payload", {}),
-                            )
-                except Exception as e:
-                    logger.error("Error running task %s: %s", name, e)
+            self._run_loop_once()
 
             # 以小刻度休眠，以便快速响应 stop 信号
             sleep_step = 0.5
@@ -89,6 +121,53 @@ class HeartbeatDaemon:
             while elapsed < self.interval_seconds and not self._stop_event.is_set():
                 time.sleep(sleep_step)
                 elapsed += sleep_step
+
+    def _run_loop_once(self) -> None:
+        """执行一轮心跳任务。"""
+        self._last_heartbeat_at = time.time()
+        for name, func in list(self._tasks.items()):
+            if self._stop_event.is_set():
+                break
+            try:
+                events = func()
+                if events:
+                    for evt in events:
+                        self._publish_event(evt)
+            except Exception as e:
+                self._last_error = f"{name}: {e}"
+                self._task_failures[name] = self._task_failures.get(name, 0) + 1
+                logger.error("Error running task %s: %s", name, e)
+                self._publish_event(
+                    {
+                        "type": "daemon_task_error",
+                        "payload": {
+                            "task": name,
+                            "error": str(e),
+                            "failure_count": self._task_failures[name],
+                        },
+                    }
+                )
+
+    def _publish_event(self, event: dict[str, Any]) -> None:
+        """发送守护事件到 mailbox 并通知回调。"""
+        event_type = str(event.get("type", "system_alert"))
+        payload = event.get("payload", {})
+        if not isinstance(payload, dict):
+            payload = {"value": payload}
+        normalized = {"type": event_type, "payload": payload}
+        self.mailbox.send_message(
+            sender_id="heartbeat_daemon",
+            recipient_id=self.agent_id,
+            type_name=event_type,
+            payload=payload,
+        )
+        for callback in self._callbacks.get(event_type, []) + self._callbacks.get(
+            "*", []
+        ):
+            try:
+                callback(normalized)
+            except Exception:
+                logger.debug("daemon callback failed", exc_info=True)
 
     def check_mailbox(self) -> list[dict[str, Any]] | None:
         """检查未读邮件，如果有未读消息则产生通知事件。"""

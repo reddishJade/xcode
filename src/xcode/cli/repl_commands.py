@@ -101,6 +101,24 @@ def cmd_tree(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
+def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
+    parts = cmd.split(maxsplit=1)
+    if len(parts) == 1 or parts[1].strip() in {"list", "tree"}:
+        return cmd_tree("/tree", ctx)
+
+    target = parts[1].strip()
+    try:
+        view = ctx.store.switch_branch(target)
+    except ValueError as exc:
+        print(str(exc))
+        return False
+    if ctx.session_policy is not None:
+        ctx.session_policy.clear()
+    print(resumed_message(view))
+    print_loaded_history(ctx.store)
+    return False
+
+
 def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
     print_sessions(ctx.store.list_session_infos())
     return False
@@ -217,6 +235,21 @@ def cmd_verbose(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
+def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
+    parts = cmd.split(maxsplit=1)
+    if len(parts) == 1:
+        state = "on" if ctx.state.queue_mode else "off"
+        print(f"Queue mode: {state}")
+        return False
+    value = parts[1].strip().lower()
+    if value not in {"on", "off"}:
+        print("Usage: /queue on|off")
+        return False
+    ctx.state.queue_mode = value == "on"
+    print(f"Queue mode {'enabled' if ctx.state.queue_mode else 'disabled'}.")
+    return False
+
+
 def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     agent = getattr(ctx.app, "agent", None)
     if agent is not None and hasattr(agent, "request_compaction"):
@@ -276,10 +309,16 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         handler=cmd_tree,
         desc="Show session fork tree.",
     ),
+    "/branch": CommandEntry(
+        handler=cmd_branch,
+        desc="List or switch session branches.",
+        args_desc="list|tree|<id|title>",
+        accepts_args=True,
+    ),
     "/model": CommandEntry(
         handler=cmd_model,
         desc="Show current model info.",
-        args_desc="<name> [--thinking <level>]",
+        args_desc="[profile/]name[:thinking] [--thinking <level>]",
         accepts_args=True,
     ),
     "/effort": CommandEntry(
@@ -310,6 +349,12 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/verbose": CommandEntry(
         handler=cmd_verbose,
         desc="Show or hide tool call ids and result details.",
+        args_desc="on|off",
+        accepts_args=True,
+    ),
+    "/queue": CommandEntry(
+        handler=cmd_queue,
+        desc="Enable queued input while an agent turn is streaming.",
         args_desc="on|off",
         accepts_args=True,
     ),

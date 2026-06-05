@@ -24,6 +24,7 @@ from xcode.harness.config import discover_runtime_config
 from xcode.harness.skills import ToolSpec
 from xcode.harness.observability import HITLResult
 
+from .benchmarks import load_benchmark
 from .runner import EvalRunner
 from .schema import EvalTask
 from .tasks import SUITES
@@ -39,6 +40,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Unknown suite: {args.suite}. Available: {available}")
             return 1
         tasks = t
+    elif args.benchmark:
+        if args.benchmark_path is None:
+            print("--benchmark-path is required when --benchmark is set")
+            return 1
+        try:
+            tasks = load_benchmark(args.benchmark, args.benchmark_path)
+        except ValueError as exc:
+            print(str(exc))
+            return 1
     elif args.tasks:
         tasks = _load_tasks(args.tasks)
     else:
@@ -176,6 +186,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="JSON or JSONL EvalTask file. If omitted, runs smoke suite.",
     )
     parser.add_argument(
+        "--benchmark",
+        choices=("humaneval", "swebench-lite"),
+        help="Load tasks from a local benchmark JSON or JSONL file.",
+    )
+    parser.add_argument(
+        "--benchmark-path",
+        type=Path,
+        help="Local JSON or JSONL file for --benchmark.",
+    )
+    parser.add_argument(
         "--real",
         action="store_true",
         help="Run tasks against build_real_app() instead of the offline fake provider.",
@@ -213,6 +233,7 @@ def _task_from_dict(item: dict[str, Any]) -> EvalTask:
         "expected_tool_calls",
         "disallowed_tool_calls",
         "tags",
+        "llm_judge_criteria",
     )
     normalized = dict(item)
     for key in tuple_keys:

@@ -28,6 +28,7 @@ class ReplState:
     exit_pending: float = 0.0
     pending_partial: tuple[str, str] | None = None
     pending_inject: str | None = None
+    queue_mode: bool = False
 
 
 @dataclass

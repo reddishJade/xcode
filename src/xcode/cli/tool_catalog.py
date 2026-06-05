@@ -2,6 +2,8 @@
 
 每次调用 `build_tool_catalog()` 都会在临时上下文中扫描所有注册的构建函数，
 返回 `{group: set_of_tool_names}`。新增工具或修改 group 后无需手动更新任何列表。
+新增 `build_*_tools()` 入口时必须同步加入 `_builders()`，确保目录和实际 registry
+保持一致。
 
 导入此模块本身没有副作用；build_tool_catalog() 调用各构建函数时使用
 自动清理的临时目录作为 project_root，构造阶段不会执行网络请求。
