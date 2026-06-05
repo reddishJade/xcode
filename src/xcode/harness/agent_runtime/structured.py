@@ -28,7 +28,6 @@ from ...agent.config import (
 )
 from ...agent.events import (
     AgentEvent,
-    AgentStartEvent,
     CompactionEvent,
     MessageEndEvent,
     MessageStartEvent,
@@ -770,9 +769,6 @@ def _translate_event(
     state: _StreamTranslationState,
 ) -> StructuredAgentEvent | list[StructuredAgentEvent] | None:
     """将 AgentEvent 翻译为 StructuredAgentEvent。"""
-
-    if isinstance(event, AgentStartEvent):
-        return None
 
     if isinstance(event, TurnStartEvent):
         state.step += 1

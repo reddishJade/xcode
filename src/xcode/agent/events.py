@@ -9,11 +9,6 @@ from .messages import AgentMessage, ToolResultMessage
 
 
 @dataclass
-class AgentStartEvent:
-    type: str = "agent_start"
-
-
-@dataclass
 class AgentEndEvent:
     type: str = "agent_end"
     messages: list[AgentMessage] = field(default_factory=list)
@@ -98,8 +93,7 @@ class CompactionEvent:
 
 
 type AgentEvent = (
-    AgentStartEvent
-    | AgentEndEvent
+    AgentEndEvent
     | TurnStartEvent
     | TurnEndEvent
     | MessageStartEvent
