@@ -60,6 +60,45 @@ class TestHeartbeatDaemon(unittest.TestCase):
         self.assertEqual(messages[0]["type"], "custom_alert")
         self.assertEqual(messages[0]["payload"]["info"], "test_data")
 
+    def test_callbacks_receive_published_events(self) -> None:
+        """测试守护事件回调注册。"""
+        seen: list[dict] = []
+        self.daemon.register_callback("custom_alert", seen.append)
+
+        self.daemon._publish_event(
+            {"type": "custom_alert", "payload": {"info": "callback"}}
+        )
+
+        self.assertEqual(
+            seen,
+            [{"type": "custom_alert", "payload": {"info": "callback"}}],
+        )
+
+    def test_task_failure_updates_health_and_emits_error(self) -> None:
+        """测试任务失败会更新健康状态并发出错误事件。"""
+        seen: list[dict] = []
+        self.daemon.register_callback("daemon_task_error", seen.append)
+
+        def fail() -> None:
+            raise ValueError("bad task")
+
+        self.daemon.register_task("bad", fail)
+        self.daemon._run_loop_once()
+
+        health = self.daemon.health_check()
+        self.assertIn("bad task", health.last_error)
+        self.assertEqual(health.task_failures["bad"], 1)
+        self.assertEqual(seen[0]["type"], "daemon_task_error")
+
+    def test_ensure_healthy_restarts_dead_thread(self) -> None:
+        """测试后台线程异常退出后的显式自愈重启。"""
+        self.daemon._stop_event.clear()
+
+        health = self.daemon.ensure_healthy()
+
+        self.assertTrue(health.running)
+        self.assertEqual(health.restart_count, 1)
+
     def test_check_git_status_task(self) -> None:
         """测试脏工作区检查定时任务。"""
         with patch("subprocess.run") as mock_run:
