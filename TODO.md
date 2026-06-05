@@ -13,13 +13,6 @@
 
 ## 待实现
 
-### P1 评估基础设施
-
-评估系统"骨架完整、肌肉不足"。当前仅 7 个自定义合成任务，需接入外部标准 benchmark 并激活已有 LLM-as-judge 能力。
-
-- **外部 coding benchmark 接入**（source-review §10）：至少接入 HumanEval（代码补全）+ SWE-bench Lite（任务级修复），与当前 fixture-based eval 架构天然匹配。同时将 Pass@k 从朴素 `any(pass in k)` 改为无偏估计量 `1 - C(n-c,k)/C(n,k)`。
-- **内置 LLM-as-judge 任务启用**（source-review §10）：`src/xcode/evals/graders.py` 中 `llm_judge` 接口完整，但内置 `tasks.py` 套件均未设置 `llm_judge_criteria`。为内置套件补充 LLM 评判标准，使其在每次评测中自动触发。
-
 ### P2 Session 并发安全
 
 `SessionStore` 引入轻量 `filelock` 上下文管理器保护写操作（fork、compact、rewind）。
@@ -75,3 +68,13 @@
 ### P14 ExecutionEnv 抽象
 
 从"有场景再动"升级。`ExecutionEnv` protocol，默认调 subprocess，web sandbox 可注入 mock。纯架构改善，无直接用户影响，放在最后。
+
+---
+
+## 已完成
+
+### P1 评估基础设施
+
+- 已接入本地 HumanEval 与 SWE-bench Lite JSON/JSONL benchmark loader。
+- 已将 Pass@k 改为无偏估计量 `1 - C(n-c,k)/C(n,k)`。
+- 已为内置 eval suites 补充 `llm_judge_criteria`，触发现有 LLM-as-judge 路径。
