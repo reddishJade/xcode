@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
@@ -385,6 +386,17 @@ class XcodeReplTests(unittest.TestCase):
             self.assertIn("<hidden tools", renderer.rendered[0])
             self.assertIn("submit_subagent", renderer.rendered[0])
 
+    def test_run_repl_queue_mode_enqueues_followup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = QueueModeApp()
+            prompt = FakePrompt(["/queue on", "hello", "queued followup", "", "/exit"])
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(app.agent.followups, ["queued followup"])
+
     def test_brief_input_shows_bash_command_and_file_paths(self) -> None:
         self.assertEqual(
             brief_input("bash", {"command": "Remove-Item tmp\\hello.c"}),
@@ -460,7 +472,7 @@ class XcodeReplTests(unittest.TestCase):
 
         items = completer.complete("/q")
 
-        self.assertEqual(items, [])
+        self.assertEqual([item.text for item in items], ["/queue"])
 
     def test_handle_command_keeps_quit_alias(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -850,6 +862,33 @@ class FakeApp:
             1,
             StructuredAgentResult(
                 answer=f"{text}!",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class QueueModeAgent:
+    def __init__(self) -> None:
+        self.followups: list[str] = []
+
+    def follow_up(self, message) -> None:
+        self.followups.append(str(message.content))
+
+
+class QueueModeApp:
+    def __init__(self) -> None:
+        self.agent = QueueModeAgent()
+
+    def ask_stream(self, text: str, mode: str | None = None):
+        yield StructuredAgentEvent("text_delta", 1, text)
+        time.sleep(0.05)
+        yield StructuredAgentEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer=text,
                 messages=[],
                 steps=1,
                 tool_calls=[],
