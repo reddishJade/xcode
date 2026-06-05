@@ -443,7 +443,15 @@ def _grep(
         result = "\n".join(lines)
         if lines_truncated > 0:
             result += f"\n[Truncated {lines_truncated} long lines to {GREP_MAX_LINE_LENGTH} chars]"
-        return _truncate(result)
+        tr = truncate_tail(result)
+        if tr.truncated:
+            result = tr.content
+            result += (
+                f"\n[Showing {tr.output_lines} of {tr.total_lines} lines "
+                f"({tr.max_bytes // 1024}KB limit). "
+                f"Use 'max_results=N*2' for more, or refine pattern.]"
+            )
+        return result
 
     hint = ""
     if not _RG_MISSING_HINT_EMITTED:
@@ -519,9 +527,16 @@ def _find_files_fd(
                 if not relativized:
                     return "No files found."
                 result = "\n".join(relativized)
-                truncated = len(relativized) >= max_results
-                if truncated:
-                    result += f"\n... {len(lines) - max_results} more results omitted"
+                total_hits = len(lines)
+                truncated_by_count = len(relativized) >= max_results
+                tr = truncate_tail(result)
+                if tr.truncated:
+                    result = tr.content
+                if truncated_by_count or tr.truncated:
+                    result += (
+                        f"\n[Found {total_hits} results, showing {tr.output_lines if tr.truncated else len(relativized)}. "
+                        f"Use 'max_results=N*2' for more, or refine pattern.]"
+                    )
                 return result
         except subprocess.TimeoutExpired:
             pass
