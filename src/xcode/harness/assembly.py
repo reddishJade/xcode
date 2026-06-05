@@ -36,11 +36,9 @@ from xcode.harness.observability import JsonlAuditLogger, HookManager
 from xcode.harness.observability.hooks import HookEvent
 from xcode.harness.skills import ToolInput, ToolSpec
 from xcode.harness.skill_loader import SkillLoader, build_skill_loader_tool
-from xcode.harness.tools import (
+from xcode.coding_agent import (
     ShellSpec,
-    build_bash_tool,
-    build_code_tools,
-    build_file_tools,
+    build_project_scoped_registry,
 )
 from xcode.ai.providers.factory import (
     ModelProfileProto,
@@ -239,7 +237,7 @@ def build_tool_registry(
 ) -> tuple[
     tuple[ToolSpec, ...], SkillLoader | None, ShellSpec, tuple[Callable[[], None], ...]
 ]:
-    from xcode.harness.tools.shell_adapter import detect_shell
+    from xcode.coding_agent.tools import detect_shell
 
     enabled = effective_enabled_groups(runtime_config.tools.enabled_groups)
     closers: list[Callable[[], None]] = []
@@ -315,24 +313,6 @@ def build_tool_registry(
         if "subagent" in enabled:
             registry += build_managed_subagent_tools(managed_runner)
     return registry, skill_loader, shell_spec, tuple(closers)
-
-
-def build_project_scoped_registry(
-    project_root: Path,
-    enabled: set[str],
-    contextual_state: ContextualRetrievalState | None,
-    shell_spec: ShellSpec,
-    cancel_event: threading.Event | None = None,
-) -> tuple[ToolSpec, ...]:
-    from xcode.harness.skills import BASE_REGISTRY
-
-    registry = BASE_REGISTRY
-    registry += build_file_tools(project_root, context_state=contextual_state)
-    registry += build_code_tools(project_root)
-    registry += (
-        build_bash_tool(project_root, shell_spec=shell_spec, cancel_event=cancel_event),
-    )
-    return tuple(t for t in registry if t.group in enabled)
 
 
 def llm_profiles_dict(

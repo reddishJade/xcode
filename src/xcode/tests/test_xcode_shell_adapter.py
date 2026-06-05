@@ -6,14 +6,14 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from xcode.harness.tools.shell_adapter import (
+from xcode.coding_agent.tools.shell_adapter import (
     SHELL_NAMES,
     ShellSpec,
     build_shell_argv,
     detect_shell,
+    _KNOWN_SHELLS,
 )
-from xcode.harness.tools.shell_adapter import _KNOWN_SHELLS
-from xcode.harness.tools import build_bash_tool
+from xcode.coding_agent.tools import build_bash_tool
 from xcode.harness.skills import run_tool
 
 
@@ -129,7 +129,7 @@ class XcodeShellAdapterTests(unittest.TestCase):
             output = run_tool(registry, "bash", {"command": "echo hello"})
             self.assertIn("hello", output)
 
-    @mock.patch("xcode.harness.tools.bash.subprocess.Popen")
+    @mock.patch("xcode.coding_agent.tools.bash.subprocess.Popen")
     def test_bash_tool_passes_shell_false_and_argv(
         self, mock_popen: mock.MagicMock
     ) -> None:

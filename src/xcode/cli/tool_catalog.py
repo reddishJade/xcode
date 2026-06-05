@@ -15,7 +15,7 @@ import tempfile
 from typing import Any
 
 from xcode.harness.skills import ToolSpec
-from xcode.harness.tools import (
+from xcode.coding_agent.tools import (
     build_bash_tool,
     build_code_tools,
     build_file_tools,

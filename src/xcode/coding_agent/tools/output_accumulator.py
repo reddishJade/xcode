@@ -6,7 +6,7 @@ from typing import Any
 
 from .truncate import DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncate_tail
 
-logger = logging.getLogger("xcode.harness.tools.output_accumulator")
+logger = logging.getLogger("xcode.coding_agent.tools.output_accumulator")
 
 
 class OutputAccumulator:

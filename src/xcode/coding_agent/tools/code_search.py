@@ -7,7 +7,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Protocol
 
-from ..skills import ToolInput, ToolSpec, resolve_project_path
+from xcode.harness.skills import ToolInput, ToolSpec, resolve_project_path
 from .path_utils import is_path_blocked, truncate_output, display_path
 
 """供编码 Agent 使用的只读代码搜索工具。"""

@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 import xcode as core
-import xcode.harness.tools as tools
+import xcode.coding_agent.tools as tools
 
 
 class XcodePublicApiTests(unittest.TestCase):

@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from ..agent_runtime.contextual import ContextualRetrievalState
-from ..skills import ToolInput, ToolOutput, ToolSpec, resolve_project_path
+from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
+from xcode.harness.skills import ToolInput, ToolOutput, ToolSpec, resolve_project_path
 from .edit_diff import (
     apply_edits_fuzzy,
     detect_line_ending,

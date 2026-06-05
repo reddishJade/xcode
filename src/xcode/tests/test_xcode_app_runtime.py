@@ -30,7 +30,7 @@ from xcode.harness.config import (
     XcodeRuntimeConfig,
 )
 from xcode.harness.agent_runtime.compaction import LayeredCompactor
-from xcode.harness.tools.shell_adapter import detect_shell
+from xcode.coding_agent.tools.shell_adapter import detect_shell
 from xcode.harness.skills import ToolSpec
 
 
@@ -209,7 +209,8 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             with patch(
-                "xcode.harness.assembly.build_bash_tool", side_effect=fake_bash_tool
+                "xcode.coding_agent.registry.build_bash_tool",
+                side_effect=fake_bash_tool,
             ):
                 app = build_app(
                     project_root=Path(tmp),
@@ -410,7 +411,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                     shell_spec=detect_shell(),
                 )
             }
-            with patch("xcode.harness.tools.bash.subprocess.Popen", FakePopen):
+            with patch("xcode.coding_agent.tools.bash.subprocess.Popen", FakePopen):
                 tools["bash"].handler({"command": "pwd"})
 
         self.assertEqual(seen_cwds, [worktree.resolve()])

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 
-from xcode.harness.tools.file import read_project_text_file
+from xcode.coding_agent.tools.file import read_project_text_file
 
 """REPL 输入中的显式 @file 引用解析。"""
 

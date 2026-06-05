@@ -5,8 +5,8 @@ from unittest.mock import patch
 import tempfile
 import unittest
 
-import xcode.harness.tools.code_search as code_search
-from xcode.harness.tools import build_code_tools
+import xcode.coding_agent.tools.code_search as code_search
+from xcode.coding_agent.tools import build_code_tools
 
 
 class XcodeCodeToolsTests(unittest.TestCase):
@@ -73,7 +73,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
             code_search._RG_MISSING_HINT_EMITTED = False
 
             with patch(
-                "xcode.harness.tools.code_search.shutil.which", return_value=None
+                "xcode.coding_agent.tools.code_search.shutil.which", return_value=None
             ):
                 first = tools["grep_search"].handler({"pattern": "needle"})
                 second = tools["grep_search"].handler({"pattern": "needle"})

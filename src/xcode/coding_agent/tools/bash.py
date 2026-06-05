@@ -10,11 +10,11 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
-from ..skills import ToolInput, ToolSpec
+from xcode.harness.skills import ToolInput, ToolSpec
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 
-logger = logging.getLogger("xcode.harness.tools.bash")
+logger = logging.getLogger("xcode.coding_agent.tools.bash")
 
 DEFAULT_TIMEOUT_SECONDS = 30
 MAX_TIMEOUT_SECONDS = 120

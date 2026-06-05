@@ -4,6 +4,22 @@
 
 ---
 
+## 分层概览
+
+Xcode 按四层模型组织，依赖方向从左到右：
+
+```text
+cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
+                                    └────────────────────→ ai/ (layer skip)
+```
+
+| 层 | 目录 | 职责 |
+|---|------|------|
+| Provider | `ai/` | 统一多 provider LLM API |
+| Loop Core | `agent/` | 通用 agent 循环合约，中性消息/事件类型 |
+| Runtime Infra | `harness/` | 应用装配、config、session、安全、观测、ToolSpec 协议 |
+| Coding Product | `coding_agent/` | coding 产品工具（file/search/bash/edit）及产品层逻辑 |
+
 ## 顶层结构
 
 ```text
@@ -19,6 +35,7 @@
 └── src/xcode/
     ├── main.py
     ├── cli/
+    ├── coding_agent/
     ├── harness/
     ├── ai/
     ├── evals/
@@ -44,58 +61,17 @@ src/xcode/main.py
   -> src/xcode/cli/repl.py::run_repl() 或单次 --prompt
 ```
 
-`build_app()` 是应用装配入口。装配逻辑主要委托给 `assembly.py`，后者负责：
-
-- 读取 runtime config
-- 构造 shared infra（`ContextualRetrievalState`、`CancellationToken`、`CompactController`）
-- 构造 provider bundle
-- 构造 core tools 和 opt-in tools
-- 构造 tool registry
-- 构造 `StructuredAgent`
-- 按配置连接 compactor、audit logger、hooks、subagent runner、experimental 组件
+`build_app()` 是应用装配入口。装配逻辑委托给 `assembly.py`，后者通过 `coding_agent/registry.py` 构造工具注册表：
 
 ---
 
 ## 主要目录职责
 
-### `src/xcode/cli/`
-
-交互层，负责终端体验和会话命令。
-
-| 文件 | 职责 |
-| --- | --- |
-| `repl.py` | REPL 主循环和事件流展示编排 |
-| `repl_commands.py` | slash command 注册表和命令处理 |
-| `repl_hitl.py` | REPL 人工授权提示 |
-| `repl_rendering.py` | 终端渲染、prompt session、推理预览 |
-| `repl_sessions.py` | REPL 会话恢复和历史展示 |
-| `repl_settings.py` | 模型、thinking、effort、权限命令处理 |
-| `repl_tools.py` | `/tool` 输入解析、`!COMMAND` shell 快捷入口、工具意图摘要、事件序列化 |
-| `completion.py` | 命令、工具名、`@file` 和 `!COMMAND` 路径补全 |
-| `file_refs.py` | `@relative/path` 解析和文件内容注入 |
-| `markdown.py` | 终端 markdown/diff 渲染 |
-| `tool_catalog.py` | 构造 REPL 可见工具目录 |
-| `setup_wizard.py` | 配置向导 |
-
-### `src/xcode/harness/`
-
-核心运行层，负责 Agent 生命周期、工具协议、安全和观测。
-
-| 模块 | 职责 |
-| --- | --- |
-| `app.py` | 应用装配入口，委托 `assembly.py` |
-| `assembly.py` | 装配核心：config 解析、shared infra、tool registry、provider bundle、experimental services |
-| `config.py` | runtime config dataclass、配置读取、相对路径解析 |
-| `session.py` | JSONL 会话存储、索引、resume、fork、plan artifact |
-| `skills.py` | `ToolSpec`、工具输入解析、HITL 执行和脱敏入口 |
-| `skill_loader.py` | `SKILL.md` catalog 扫描和 `load_skill` 工具 |
-| `agent_runtime/` | `StructuredAgent`、工具执行结果、subagent、prompt、compaction、cancellation |
-| `tools/` | core file/search/bash tools |
-| `observability/` | audit、permission policy、hook manager |
+各层按依赖方向排序：Provider → Loop Core → Runtime Infra → Coding Product → UI。
 
 ### `src/xcode/ai/`
 
-模型传输和 provider 适配层。
+**Provider 层**：统一多 provider LLM API，提供 OpenAI、Anthropic、Google 等模型接入。
 
 | 模块 | 职责 |
 | --- | --- |
@@ -117,7 +93,7 @@ src/xcode/main.py
 
 ### `src/xcode/agent/`
 
-纯 Agent core 层，负责中性消息类型、消息转换和可注入的 Agent 循环合约。该层可以依赖 `ai/` provider 协议，但不依赖 `harness/`、`cli/` 或 Xcode 运行时配置。
+**Loop Core 层**：通用 agent 循环合约。定义中性消息类型、事件协议和可注入的 agent 循环。依赖 `ai/` provider 协议。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -128,6 +104,50 @@ src/xcode/main.py
 | `agent.py` | `Agent` 薄封装，包装 `run_agent_loop` 并管理 steer/followup 队列 |
 | `agent_loop.py` | 无状态 Agent loop，provider、工具执行、turn hooks 均通过合约注入 |
 | `tool_execution.py` | 工具执行逻辑（串行/并行调度、before/after hook），从 `agent_loop.py` 提取 |
+
+### `src/xcode/harness/`
+
+**Runtime Infra 层**：跨产品应用基础设施。负责配置解析、会话管理、安全策略、观测和 agent 适配器。
+
+| 模块 | 职责 |
+| --- | --- |
+| `app.py` | 应用装配入口，委托 `assembly.py` |
+| `assembly.py` | 装配核心：config 解析、shared infra、provider bundle、experimental services |
+| `config.py` | runtime config dataclass、配置读取、相对路径解析 |
+| `session.py` | JSONL 会话存储、索引、resume、fork、plan artifact |
+| `skills.py` | `ToolSpec`、工具输入解析、HITL 执行和脱敏入口 |
+| `skill_loader.py` | `SKILL.md` catalog 扫描和 `load_skill` 工具 |
+| `agent_runtime/` | `StructuredAgent`（harness 对 agent loop 的适配器）、subagent、prompt、compaction、cancellation |
+| `observability/` | audit、permission policy、hook manager |
+
+### `src/xcode/coding_agent/`
+
+**Coding Product 层**：coding 产品工具（file/search/bash/edit）和产品级 registry 构造。
+
+| 模块 | 职责 |
+| --- | --- |
+| `tools/` | coding 内置工具实现（`read_file`、`write_file`、`edit_file`、`bash`、`grep`、`glob`、`ls`） |
+| `registry.py` | coding 产品工具注册表构造 |
+| `__init__.py` | 对外门面，re-export 工具 builder（`build_file_tools`、`build_code_tools`、`build_bash_tool`） |
+
+### `src/xcode/cli/`
+
+**UI 层**：终端入口和交互体验。负责 REPL、命令、渲染和会话命令。通过 `harness/` 和 `coding_agent/` 访问下层能力。
+
+| 文件 | 职责 |
+| --- | --- |
+| `repl.py` | REPL 主循环和事件流展示编排 |
+| `repl_commands.py` | slash command 注册表和命令处理 |
+| `repl_hitl.py` | REPL 人工授权提示 |
+| `repl_rendering.py` | 终端渲染、prompt session、推理预览 |
+| `repl_sessions.py` | REPL 会话恢复和历史展示 |
+| `repl_settings.py` | 模型、thinking、effort、权限命令处理 |
+| `repl_tools.py` | `/tool` 输入解析、`!COMMAND` shell 快捷入口、工具意图摘要、事件序列化 |
+| `completion.py` | 命令、工具名、`@file` 和 `!COMMAND` 路径补全 |
+| `file_refs.py` | `@relative/path` 解析和文件内容注入 |
+| `markdown.py` | 终端 markdown/diff 渲染 |
+| `tool_catalog.py` | 构造 REPL 可见工具目录 |
+| `setup_wizard.py` | 配置向导 |
 
 ### `src/xcode/evals/`
 
@@ -156,7 +176,7 @@ src/xcode/main.py
 | `progress.py` | `progress` | 长任务 checklist 保存/恢复；工具：`save_task_progress`、`resume_task_progress` |
 | `memory.py` | `memory` | `MEMORY.md` 记忆块校验、BM25 召回、压缩摘要 consolidation |
 | `memory_parsing.py` | internal | 记忆块解析数据类型，被 `memory.py` 引用 |
-| `bm25.py` | internal | `memory` 使用的纯 Python BM25Okapi，不单独作为启用入口 |
+| `bm25.py` | internal | `memory` 使用的纯 Python BM25Okapi，随 `memory` group 启用 |
 | `plugins.py` | `plugins` | `.local/plugins/*.py` 动态加载，收集 tools/hooks/skills |
 | `daemon.py` | `daemon` | `HeartbeatDaemon`，轮询 mailbox/git/tasks |
 
@@ -164,7 +184,7 @@ src/xcode/main.py
 
 ## 工具组与默认可见工具
 
-默认 `enabled_groups=("core",)`，可见工具为：
+工具实现归 `coding_agent/` 层所有。默认 `enabled_groups=("core",)`，可见工具为：
 
 - `read_file`
 - `write_file`
@@ -210,7 +230,7 @@ experimental group：
 
 ## 测试目录
 
-`src/xcode/tests/` 覆盖核心装配、provider、runtime、tools、observability、REPL、evals 和 experimental 组件。常用命令：
+`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和 experimental 组件。常用命令：
 
 ```powershell
 uv run python -m unittest discover src\xcode\tests

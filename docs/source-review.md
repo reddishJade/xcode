@@ -1,15 +1,26 @@
 # Xcode 源码级审查报告
 
-本文基于当前独立 checkout 的 `src/xcode/` 源码整理。目标不是宣传能力，而是记录当前实现边界、默认路径和实验性功能的真实接入方式。
+本文基于当前独立 checkout 的 `src/xcode/` 源码整理，记录当前实现边界、默认路径和实验性功能的真实接入方式。
 
 ---
 
 ## 1. 系统定位
 
-Xcode 是一个轻量级 Python coding agent harness。核心设计是：
+Xcode 是一个轻量级 Python coding agent。架构按四层模型组织：
+
+- `ai/` — **Provider 层**：统一多 provider LLM API。
+- `agent/` — **Loop Core 层**：通用 agent 循环合约和中性消息/事件类型。
+- `harness/` — **Runtime Infra 层**：应用装配、config、session、安全、观测，以及 `StructuredAgent`（对 agent loop 的适配器）。
+- `coding_agent/` — **Coding Product 层**：coding 产品工具（file/search/bash/edit）和产品级 registry 构造。
+
+```text
+cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
+```
+
+核心设计是：
 
 - 模型负责推理和工具选择。
-- Harness 负责工具协议、安全边界、上下文装配、会话状态、审计和验证。
+- 各层职责分离，每层只关注自己的契约边界。
 - 默认路径保持小而稳定，只暴露 `core` 工具组。
 - 实验性能力必须通过 `tools.enabled_groups` 显式启用。
 
@@ -18,10 +29,12 @@ Xcode 是一个轻量级 Python coding agent harness。核心设计是：
 ```text
 src/xcode/main.py
   -> discover_runtime_config()
-  -> build_app()
-  -> StructuredAgent
-  -> provider stream
-  -> tool execution
+  -> build_app()            [ harness/app.py ]
+  -> assembly.py            [ harness/assembly.py, routing tools via coding_agent/ ]
+  -> StructuredAgent        [ harness/agent_runtime/structured.py ]
+  -> Agent loop             [ agent/agent_loop.py ]
+  -> provider stream        [ ai/providers/ ]
+  -> tool execution         [ agent/tool_execution.py → coding_agent/tools/ ]
   -> final answer / REPL transcript
 ```
 
@@ -33,10 +46,12 @@ src/xcode/main.py
 
 - 解析 config。
 - 初始化 shared infra（`ContextualRetrievalState`、`CancellationToken`、`CompactController`）。
-- 根据 `tools.enabled_groups` 构造可见工具 registry。
+- 通过 `coding_agent/registry.py` 构造 coding 产品工具 registry。
 - 构造 provider bundle。
 - 构造 `StructuredAgent`。
 - 按 opt-in group 连接 experimental 组件。
+
+装配依赖方向：`assembly.py` → `coding_agent/registry.py` → `coding_agent/tools/`
 
 `EXPERIMENTAL_FEATURE_GROUPS` 当前展开为：
 
@@ -67,7 +82,7 @@ worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress
 
 ### Git Preflight
 
-`git_preflight.py` 在 prompt 中注入当前 Git 状态、最近 commit 和 dirty diff stat。它只提供环境上下文，不自动 stage、commit 或回滚文件。
+`git_preflight.py` 在 prompt 中注入当前 Git 状态、最近 commit 和 dirty diff stat，提供环境上下文。
 
 ### Contextual Retrieval
 
@@ -79,7 +94,7 @@ worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress
 
 ### Core tools
 
-默认 `core` 工具组提供：
+默认 `core` 工具组提供（实现归 `coding_agent/tools/` 层所有）：
 
 - `read_file`
 - `write_file`
@@ -93,7 +108,7 @@ worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress
 
 `bash` 通过 `ShellAdapter` 选择宿主 shell，并使用 `Popen` 生命周期控制、超时和 cancellation token。命令风险由 `CommandRiskEvaluator` 判定。
 
-REPL 中的 `!COMMAND` 是 `bash` 工具的快捷入口，输出按原始终端文本展示；它不绕过工具适配器的权限判定和脱敏路径。
+REPL 中的 `!COMMAND` 是 `bash` 工具的快捷入口，输出按原始终端文本展示。
 
 ### Tool execution
 
@@ -216,7 +231,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 - 只在启用 `mcp` 或 `experimental` 后读取 MCP 配置。
 - MCP 工具风险必须通过 server `overrides` 显式声明；未声明工具默认 high risk。
-- 只支持当前实现里的 stdio 传输；SSE/WebSocket 仍属于后续方向。
+- 只支持当前实现里的 stdio 传输。
 
 ### `tasks`
 
@@ -232,7 +247,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 边界：
 
-- 这是轻量任务图，不是完整长任务编排系统。
+- 轻量任务图，适合依赖排序和 Kanban 视图。
 
 ### `worktree`
 
@@ -262,7 +277,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 边界：
 
-- 当前是本地文件邮箱，不含跨机器 transport。
+- 当前是本地文件邮箱。
 
 ### `progress`
 
@@ -277,8 +292,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 边界：
 
-- 依赖 `TaskStore` 作为真值源。
-- 不会自动决定任务计划，只保存调用方传入的 checklist。
+- 依赖 `TaskStore` 作为真值源，保存调用方传入的 checklist。
 
 ### `memory`
 
@@ -296,9 +310,8 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 边界：
 
-- 默认不启用。
-- 不自动注入主 prompt。
-- `bm25` 是内部算法实现，不单独启用。
+- 默认关闭，通过 `tools.enabled_groups` 启用。
+- `bm25` 是 `memory` 的内部算法实现，随 `memory` group 启用。
 
 ### `plugins`
 
@@ -327,7 +340,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 边界：
 
-- `build_app()` 只在启用 `daemon` 或 `experimental` 后构造 daemon。
+- `build_app()` 在启用 `daemon` 或 `experimental` 后构造 daemon。
 
 ---
 
@@ -341,16 +354,15 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 ---
 
-## 10. Current Gaps
+## 10. 已知约束
 
-- `cli/tool_catalog.py` 仍只扫描部分工具 builder，若 REPL 目录要展示 mailbox/progress/mcp 等所有 opt-in 工具，需要继续同步。
-- `memory` 仍缺少 consolidation 质量门、冲突合并和长期遗忘策略。
-- `plugins` 使用动态加载，应继续保持显式 opt-in，并补更细的安全策略。
-- `daemon` 当前由 app 构造，但生命周期启动仍需要调用方控制。
-- `tasks` + `progress` 能表达任务和 checklist，但还不是完整可重入长任务编排器。
-- eval 仍以确定性 grader 为主，没有 LLM-as-judge、Pass@k 和外部 benchmark 接入。
-- `intercept_usage` closure 和 `_record_usage`/`_ensure_metrics` 在 4-5 个 provider 中有重复，可抽取到基类或工具函数。
-- Provider 层已完成 OpenAI-compatible 基类 `openai_compat.py` 抽取，`deepseek`、`chatglm`、`mimo` 均已继承自该基类。
+- `cli/tool_catalog.py` 扫描部分工具 builder，未覆盖 mailbox/progress/mcp 等 opt-in 工具。
+- `memory` 缺少 consolidation 质量门、冲突合并和长期遗忘策略。
+- `plugins` 使用动态加载，通过显式 opt-in 控制。
+- `daemon` 由 `build_app()` 构造，生命周期启动由调用方控制。
+- `tasks` + `progress` 支持任务和 checklist，不提供完整可重入长任务编排能力。
+- eval 使用确定性 grader，未接入 LLM-as-judge、Pass@k 和外部 benchmark。
+- `intercept_usage` closure 和 `_record_usage`/`_ensure_metrics` 在多个 provider 中有重复实现。
 
 ---
 

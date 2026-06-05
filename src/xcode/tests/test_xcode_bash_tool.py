@@ -5,8 +5,8 @@ import tempfile
 import unittest
 
 from xcode.cli.repl_tools import parse_tool_input
-from xcode.harness.tools import build_bash_tool
-from xcode.harness.tools.bash import OutputAccumulator
+from xcode.coding_agent.tools import build_bash_tool
+from xcode.coding_agent.tools.bash import OutputAccumulator
 from xcode.harness.skills import run_tool
 
 

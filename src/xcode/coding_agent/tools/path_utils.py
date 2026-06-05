@@ -3,7 +3,7 @@ from __future__ import annotations
 import unicodedata
 from pathlib import Path
 
-from ..skills import resolve_project_path
+from xcode.harness.skills import resolve_project_path
 from .truncate import truncate_tail
 
 BLOCKED_PARTS = {".git", ".venv", "__pycache__"}

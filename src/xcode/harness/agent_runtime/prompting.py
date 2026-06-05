@@ -12,8 +12,8 @@ from .git_preflight import build_git_preflight
 from .contextual import ContextualRetrievalState
 from ...experimental.tasks import TaskStore
 from ...harness.skill_loader import SkillLoader
-from ..skills import ToolSpec, build_tool_guidelines, build_tool_prompt
-from ...harness.tools.shell_adapter import ShellSpec
+from xcode.harness.skills import ToolSpec, build_tool_guidelines, build_tool_prompt
+from xcode.coding_agent.tools import ShellSpec
 
 
 CORE_IDENTITY = (
