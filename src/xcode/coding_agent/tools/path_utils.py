@@ -68,7 +68,7 @@ def truncate_output(
     max_lines: int = DEFAULT_MAX_LINES,
     max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> str:
-    return truncate_tail(text, max_lines=max_lines, max_bytes=max_bytes)
+    return truncate_tail(text, max_lines=max_lines, max_bytes=max_bytes).content
 
 
 def display_path(root: Path, path: Path) -> str:

@@ -79,6 +79,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 "write_file",
                 "edit_file",
                 "glob_files",
+                "find_files",
                 "grep_search",
                 "ls",
                 "bash",

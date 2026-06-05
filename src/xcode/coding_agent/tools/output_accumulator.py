@@ -82,20 +82,20 @@ class OutputAccumulator:
         if not text and not self._truncated:
             return "(no output)"
 
-        result = truncate_tail(
-            text, max_lines=self._max_lines, max_bytes=self._max_bytes
-        )
-        output_lines = result.count("\n") + 1 if result else 0
+        tr = truncate_tail(text, max_lines=self._max_lines, max_bytes=self._max_bytes)
 
-        if self._full_path and (self._truncated or self._total_lines > output_lines):
+        full_path_hint = self._full_path and (
+            self._truncated or self._total_lines > tr.output_lines
+        )
+        if full_path_hint:
             footer = (
-                f"\n[Showing {output_lines} of {self._total_lines} lines"
+                f"\n[Showing {tr.output_lines} of {self._total_lines} lines"
                 f" ({self._max_bytes // 1024}KB limit)."
                 f" Full output: {self._full_path}]"
             )
-            return result + footer
+            return tr.content + footer
 
-        return result
+        return tr.content
 
     def close(self) -> None:
         if self._file is not None:

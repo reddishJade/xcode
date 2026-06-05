@@ -1,8 +1,25 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 DEFAULT_MAX_LINES = 2000
 DEFAULT_MAX_BYTES = 50 * 1024
 GREP_MAX_LINE_LENGTH = 500
+
+
+@dataclass
+class TruncationResult:
+    content: str
+    truncated: bool
+    truncated_by: str | None
+    total_lines: int
+    total_bytes: int
+    output_lines: int
+    output_bytes: int
+    last_line_partial: bool
+    first_line_exceeds_limit: bool
+    max_lines: int
+    max_bytes: int
 
 
 def format_size(bytes_: int) -> str:
@@ -26,61 +43,158 @@ def truncate_head(
     content: str,
     max_lines: int = DEFAULT_MAX_LINES,
     max_bytes: int = DEFAULT_MAX_BYTES,
-) -> str:
+) -> TruncationResult:
     total_bytes = len(content.encode("utf-8"))
     lines = _split_lines(content)
     total_lines = len(lines)
 
     if total_lines <= max_lines and total_bytes <= max_bytes:
-        return content
+        return TruncationResult(
+            content=content,
+            truncated=False,
+            truncated_by=None,
+            total_lines=total_lines,
+            total_bytes=total_bytes,
+            output_lines=total_lines,
+            output_bytes=total_bytes,
+            last_line_partial=False,
+            first_line_exceeds_limit=False,
+            max_lines=max_lines,
+            max_bytes=max_bytes,
+        )
 
     if not lines:
-        return ""
+        return TruncationResult(
+            content="",
+            truncated=False,
+            truncated_by=None,
+            total_lines=0,
+            total_bytes=0,
+            output_lines=0,
+            output_bytes=0,
+            last_line_partial=False,
+            first_line_exceeds_limit=False,
+            max_lines=max_lines,
+            max_bytes=max_bytes,
+        )
 
     first_line_bytes = len(lines[0].encode("utf-8"))
     if first_line_bytes > max_bytes:
-        return ""
+        return TruncationResult(
+            content="",
+            truncated=True,
+            truncated_by="bytes",
+            total_lines=total_lines,
+            total_bytes=total_bytes,
+            output_lines=0,
+            output_bytes=0,
+            last_line_partial=False,
+            first_line_exceeds_limit=True,
+            max_lines=max_lines,
+            max_bytes=max_bytes,
+        )
 
     output: list[str] = []
     output_bytes = 0
+    truncated_by: str | None = None
     for line in lines:
         if len(output) >= max_lines:
+            truncated_by = "lines"
             break
         line_bytes = len(line.encode("utf-8")) + (1 if output else 0)
         if output_bytes + line_bytes > max_bytes:
+            truncated_by = "bytes"
             break
         output.append(line)
         output_bytes += line_bytes
 
+    if truncated_by is None:
+        truncated_by = "lines" if len(output) < total_lines else None
     result = "\n".join(output)
-    return result
+    result_bytes = len(result.encode("utf-8"))
+    result_lines = len(output)
+    return TruncationResult(
+        content=result,
+        truncated=truncated_by is not None,
+        truncated_by=truncated_by,
+        total_lines=total_lines,
+        total_bytes=total_bytes,
+        output_lines=result_lines,
+        output_bytes=result_bytes,
+        last_line_partial=False,
+        first_line_exceeds_limit=False,
+        max_lines=max_lines,
+        max_bytes=max_bytes,
+    )
 
 
 def truncate_tail(
     content: str,
     max_lines: int = DEFAULT_MAX_LINES,
     max_bytes: int = DEFAULT_MAX_BYTES,
-) -> str:
+) -> TruncationResult:
     total_bytes = len(content.encode("utf-8"))
     lines = _split_lines(content)
     total_lines = len(lines)
 
     if total_lines <= max_lines and total_bytes <= max_bytes:
-        return content
+        return TruncationResult(
+            content=content,
+            truncated=False,
+            truncated_by=None,
+            total_lines=total_lines,
+            total_bytes=total_bytes,
+            output_lines=total_lines,
+            output_bytes=total_bytes,
+            last_line_partial=False,
+            first_line_exceeds_limit=False,
+            max_lines=max_lines,
+            max_bytes=max_bytes,
+        )
 
     output: list[str] = []
     output_bytes = 0
+    last_line_partial = False
+    truncated_by: str | None = None
     for line in reversed(lines):
         if len(output) >= max_lines:
+            truncated_by = "lines"
             break
         line_bytes = len(line.encode("utf-8")) + (1 if output else 0)
         if output_bytes + line_bytes > max_bytes:
+            if len(output) == 0:
+                buf = line.encode("utf-8")
+                if len(buf) > max_bytes:
+                    start = len(buf) - max_bytes
+                    while start < len(buf) and (buf[start] & 0xC0) == 0x80:
+                        start += 1
+                    truncated_line = buf[start:].decode("utf-8")
+                    output.insert(0, truncated_line)
+                    output_bytes = len(output[0].encode("utf-8"))
+                    last_line_partial = True
+            truncated_by = "bytes"
             break
-        output.append(line)
+        output.insert(0, line)
         output_bytes += line_bytes
 
-    output.reverse()
-    return "\n".join(output)
+    if truncated_by is None:
+        truncated_by = "lines" if len(output) < total_lines else None
+    result = "\n".join(output)
+    result_bytes = len(result.encode("utf-8"))
+    result_lines = len(output)
+    return TruncationResult(
+        content=result,
+        truncated=truncated_by is not None,
+        truncated_by=truncated_by,
+        total_lines=total_lines,
+        total_bytes=total_bytes,
+        output_lines=result_lines,
+        output_bytes=result_bytes,
+        last_line_partial=last_line_partial,
+        first_line_exceeds_limit=False,
+        max_lines=max_lines,
+        max_bytes=max_bytes,
+    )
 
 
 def truncate_line(line: str, max_chars: int = GREP_MAX_LINE_LENGTH) -> tuple[str, bool]:

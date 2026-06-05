@@ -22,6 +22,7 @@ from .path_utils import (
     truncate_output,
     display_path,
 )
+from .truncate import truncate_head, format_size
 
 """受沙箱约束的本地文件工具。
 
@@ -246,11 +247,81 @@ def _read_file(
     text, _encoding = _read_text(path, operations)
     if context_state is not None:
         context_state.record_file(path)
+
+    display = _display(root, path)
     offset = data.get("offset")
     limit = data.get("limit")
+
     if offset is not None or limit is not None:
-        text = _select_lines(text, _display(root, path), offset, limit)
-    return _truncate(text)
+        return _read_with_offset_limit(text, display, offset, limit)
+
+    return _read_full(text, display)
+
+
+def _read_full(text: str, display_path: str) -> str:
+    tr = truncate_head(text)
+    if not tr.truncated:
+        return tr.content
+
+    if tr.first_line_exceeds_limit:
+        return (
+            f"[Line 1 is {format_size(tr.total_bytes)}, exceeds "
+            f"{format_size(tr.max_bytes)} limit. "
+            f"Use bash to read this file.]"
+        )
+
+    end_line = tr.output_lines
+    continuation = json.dumps({"path": display_path, "offset": end_line + 1})
+    reason = (
+        "lines" if tr.truncated_by == "lines" else format_size(tr.max_bytes) + " limit"
+    )
+    return (
+        f"{tr.content}\n\n"
+        f"[Showing lines 1-{end_line} of {tr.total_lines} "
+        f"({reason}). "
+        f"Use read_file with {continuation} to continue.]"
+    )
+
+
+def _read_with_offset_limit(
+    text: str,
+    display_path: str,
+    offset: Any,
+    limit: Any,
+) -> str:
+    offset_value = 1 if offset is None else _parse_optional_int(offset, "offset")
+    if offset_value < 1:
+        raise ValueError("offset must be positive")
+
+    limit_value = None if limit is None else _parse_optional_int(limit, "limit")
+    if limit_value is not None and limit_value < 0:
+        raise ValueError("limit must be non-negative")
+
+    lines = text.splitlines()
+    if not lines:
+        return ""
+    start = offset_value - 1
+    if start >= len(lines):
+        raise ValueError(
+            f"offset {offset_value} is beyond end of file ({len(lines)} lines total)"
+        )
+    end = len(lines) if limit_value is None else min(start + limit_value, len(lines))
+    selected = "\n".join(lines[start:end])
+    selected_truncated = _truncate(selected)
+
+    if end < len(lines):
+        continuation: dict[str, int | str] = {
+            "path": display_path,
+            "offset": end + 1,
+        }
+        if limit_value is not None:
+            continuation["limit"] = limit_value
+        selected_truncated += (
+            f"\n\n[Showing lines {offset_value}-{end} of {len(lines)}. "
+            f"Use read_file with {json.dumps(continuation, ensure_ascii=False)} "
+            "to continue.]"
+        )
+    return selected_truncated
 
 
 def _write_file(
@@ -294,6 +365,7 @@ def _edit_file(
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
+    data = _prepare_edit_arguments(data)
     path_str = str(data.get("path", "")).strip()
     if not path_str:
         raise ValueError("path is required")
@@ -352,50 +424,36 @@ def _edit_file_impl(
     )
 
 
+def _prepare_edit_arguments(data: dict[str, Any]) -> dict[str, Any]:
+    """对 edit_file 输入做防御性预处理，对齐 Pi-mono 的 prepareArguments。"""
+    result = dict(data)
+
+    raw_edits = result.get("edits")
+    if isinstance(raw_edits, str):
+        try:
+            parsed = json.loads(raw_edits)
+            if isinstance(parsed, list):
+                result["edits"] = parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    old_text = result.get("old_text")
+    new_text = result.get("new_text")
+    if old_text is not None and new_text is not None:
+        edits = list(result.get("edits") or [])
+        edits.append({"old_text": str(old_text), "new_text": str(new_text)})
+        result["edits"] = edits
+        result.pop("old_text", None)
+        result.pop("new_text", None)
+
+    return result
+
+
 def _parse_optional_int(value: Any, name: str) -> int:
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be an integer") from exc
-
-
-def _select_lines(
-    text: str,
-    display_path: str,
-    offset: Any,
-    limit: Any,
-) -> str:
-    offset_value = 1 if offset is None else _parse_optional_int(offset, "offset")
-    if offset_value < 1:
-        raise ValueError("offset must be positive")
-
-    limit_value = None if limit is None else _parse_optional_int(limit, "limit")
-    if limit_value is not None and limit_value < 0:
-        raise ValueError("limit must be non-negative")
-
-    lines = text.splitlines()
-    if not lines:
-        return ""
-    start = offset_value - 1
-    if start >= len(lines):
-        raise ValueError(
-            f"offset {offset_value} is beyond end of file ({len(lines)} lines total)"
-        )
-    end = len(lines) if limit_value is None else min(start + limit_value, len(lines))
-    selected = "\n".join(lines[start:end])
-    if end < len(lines):
-        continuation: dict[str, int | str] = {
-            "path": display_path,
-            "offset": end + 1,
-        }
-        if limit_value is not None:
-            continuation["limit"] = limit_value
-        selected += (
-            f"\n\n[Showing lines {offset_value}-{end} of {len(lines)}. "
-            f"Use read_file with {json.dumps(continuation, ensure_ascii=False)} "
-            "to continue.]"
-        )
-    return selected
 
 
 def read_project_text_file(project_root: Path, raw_path: str) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import shutil
 import subprocess
 import traceback
@@ -27,6 +28,12 @@ class LsOperations(Protocol):
     def list_dir(self, path: Path) -> list[Path]: ...
 
 
+class FindOperations(Protocol):
+    def exists(self, path: Path) -> bool: ...
+
+    def is_directory(self, path: Path) -> bool: ...
+
+
 class LocalGrepOperations:
     def is_directory(self, path: Path) -> bool:
         return path.is_dir()
@@ -44,6 +51,14 @@ class LocalLsOperations:
 
     def list_dir(self, path: Path) -> list[Path]:
         return list(path.iterdir())
+
+
+class LocalFindOperations:
+    def exists(self, path: Path) -> bool:
+        return path.exists()
+
+    def is_directory(self, path: Path) -> bool:
+        return path.is_dir()
 
 
 _EVAL_NS: dict[str, Any] = {}
@@ -129,10 +144,12 @@ def build_code_tools(
     project_root: Path,
     grep_ops: GrepOperations | None = None,
     ls_ops: LsOperations | None = None,
+    find_ops: FindOperations | None = None,
 ) -> tuple[ToolSpec, ...]:
     root = project_root.resolve()
     local_grep = grep_ops or LocalGrepOperations()
     local_ls = ls_ops or LocalLsOperations()
+    local_find = find_ops or LocalFindOperations()
 
     def grep_search(data: ToolInput) -> str:
         pattern = str(data.get("pattern", "")).strip()
@@ -141,8 +158,19 @@ def build_code_tools(
         base = _safe_path(root, str(data.get("path", ".")))
         glob = data.get("glob")
         max_results = int(data.get("max_results", MAX_GREP_RESULTS))
+        ignore_case = bool(data.get("ignore_case", False))
+        literal = bool(data.get("literal", False))
+        context = int(data.get("context", 0))
         return _grep(
-            root, base, pattern, str(glob) if glob else None, max_results, local_grep
+            root,
+            base,
+            pattern,
+            str(glob) if glob else None,
+            max_results,
+            local_grep,
+            ignore_case=ignore_case,
+            literal=literal,
+            context=context,
         )
 
     def glob_files(data: ToolInput) -> str:
@@ -150,6 +178,14 @@ def build_code_tools(
         base = _safe_path(root, str(data.get("path", ".")))
         max_results = int(data.get("max_results", MAX_GLOB_RESULTS))
         return _glob_files(root, base, pattern, max_results)
+
+    def find_files(data: ToolInput) -> str:
+        pattern = str(data.get("pattern", "")).strip()
+        if not pattern:
+            raise ValueError("pattern is required")
+        base = _safe_path(root, str(data.get("path", ".")))
+        max_results = int(data.get("max_results", MAX_GLOB_RESULTS))
+        return _find_files_fd(root, base, pattern, max_results, local_find)
 
     def ls_files(data: ToolInput) -> str:
         raw_path = str(data.get("path", ".")).strip()
@@ -217,13 +253,76 @@ def build_code_tools(
             },
         ),
         ToolSpec(
+            name="find_files",
+            description="Find files by glob pattern using fd (fast) with Python glob fallback. Respects .gitignore.",
+            input_hint='JSON: {"path": ".", "pattern": "*.py", "max_results": 100}',
+            handler=find_files,
+            risk="low",
+            read_only=True,
+            concurrency_safe=True,
+            schema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory to search in (default: current directory)",
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "Glob pattern to match, e.g. '*.ts' or 'src/**/*.py'",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Max results (default: 200)",
+                    },
+                },
+                "required": ["pattern"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
             name="grep_search",
-            description="Search exact project text. Uses ripgrep when available, then falls back to Python grep.",
+            description="Search file contents for a pattern. Uses ripgrep when available, then falls back to Python grep.",
             input_hint='JSON: {"pattern": "ToolSpec", "path": "src/xcode", "glob": "*.py"}',
             handler=grep_search,
             risk="low",
             read_only=True,
             concurrency_safe=True,
+            schema={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Search pattern (regex or literal string)",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Directory or file to search",
+                    },
+                    "glob": {
+                        "type": "string",
+                        "description": "File glob filter, e.g. '*.py' or '**/*.spec.ts'",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Max matches (default: 100)",
+                    },
+                    "ignore_case": {
+                        "type": "boolean",
+                        "description": "Case-insensitive search (default: false)",
+                    },
+                    "literal": {
+                        "type": "boolean",
+                        "description": "Treat pattern as literal string instead of regex (default: false)",
+                    },
+                    "context": {
+                        "type": "integer",
+                        "description": "Lines of context before and after each match (default: 0)",
+                    },
+                },
+                "required": ["pattern"],
+                "additionalProperties": False,
+            },
         ),
         ToolSpec(
             name="ls",
@@ -294,11 +393,23 @@ def _grep(
     glob: str | None,
     max_results: int,
     grep_ops: GrepOperations,
+    *,
+    ignore_case: bool = False,
+    literal: bool = False,
+    context: int = 0,
 ) -> str:
     global _RG_MISSING_HINT_EMITTED
     rg = shutil.which("rg")
     if rg:
-        command = [rg, "--line-number", "--no-heading", "--color", "never", pattern]
+        command = [rg, "--line-number", "--no-heading", "--color", "never"]
+        if ignore_case:
+            command.append("--ignore-case")
+        if literal:
+            command.append("--fixed-strings")
+        if context > 0:
+            command.extend(["--context", str(context)])
+        command.append("--")
+        command.append(pattern)
         if glob:
             command.extend(["-g", glob])
         command.append(str(base))
@@ -316,11 +427,85 @@ def _grep(
             return "No matches found."
         lines = output.splitlines()[:max_results]
         return _truncate("\n".join(lines))
+
     hint = ""
     if not _RG_MISSING_HINT_EMITTED:
         _RG_MISSING_HINT_EMITTED = True
         hint = "[ripgrep not found; install rg for faster search. Falling back to Python grep.]\n"
-    return hint + _grep_fallback(root, base, pattern, glob, max_results, grep_ops)
+    return hint + _grep_fallback(
+        root,
+        base,
+        pattern,
+        glob,
+        max_results,
+        grep_ops,
+        ignore_case=ignore_case,
+        literal=literal,
+        context=context,
+    )
+
+
+def _find_files_fd(
+    root: Path,
+    base: Path,
+    pattern: str,
+    max_results: int,
+    find_ops: FindOperations,
+) -> str:
+    if not find_ops.exists(base):
+        raise FileNotFoundError(f"Path not found: {_display(root, base)}")
+    if not find_ops.is_directory(base):
+        raise NotADirectoryError(f"Not a directory: {_display(root, base)}")
+
+    fd = shutil.which("fd")
+    if fd:
+        try:
+            args = [
+                fd,
+                "--glob",
+                "--color=never",
+                "--hidden",
+                "--no-require-git",
+                "--max-results",
+                str(max_results),
+            ]
+            if pattern.startswith("**/") or pattern.startswith("/"):
+                args.append("--full-path")
+            args.extend(["--", pattern, str(base)])
+            completed = subprocess.run(
+                args,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=30,
+                check=False,
+            )
+            if completed.returncode == 0 or completed.stdout.strip():
+                lines = completed.stdout.strip().splitlines()
+                relativized: list[str] = []
+                for line in lines:
+                    raw = line.strip()
+                    if not raw:
+                        continue
+                    p = Path(raw)
+                    try:
+                        rel = p.resolve().relative_to(root)
+                        suffix = "/" if p.is_dir() else ""
+                        relativized.append(rel.as_posix() + suffix)
+                    except ValueError:
+                        relativized.append(str(p))
+                if not relativized:
+                    return "No files found."
+                result = "\n".join(relativized)
+                truncated = len(relativized) >= max_results
+                if truncated:
+                    result += f"\n... {len(lines) - max_results} more results omitted"
+                return result
+        except subprocess.TimeoutExpired:
+            pass
+
+    return _glob_files(root, base, pattern, max_results)
 
 
 def _glob_files(root: Path, base: Path, pattern: str, max_results: int) -> str:
@@ -378,8 +563,21 @@ def _grep_fallback(
     glob: str | None,
     max_results: int,
     grep_ops: GrepOperations,
+    *,
+    ignore_case: bool = False,
+    literal: bool = False,
+    context: int = 0,
 ) -> str:
     files = sorted(base.rglob(glob or "*")) if grep_ops.is_directory(base) else [base]
+
+    re_pattern: re.Pattern[str] | None = None
+    if not literal:
+        try:
+            flags = re.IGNORECASE if ignore_case else 0
+            re_pattern = re.compile(pattern, flags)
+        except re.error as e:
+            return f"Invalid regex pattern: {e}"
+
     matches: list[str] = []
     for path in files:
         if len(matches) >= max_results:
@@ -387,11 +585,29 @@ def _grep_fallback(
         if not path.is_file() or _is_blocked(root, path):
             continue
         text = grep_ops.read_file(path)
-        for line_no, line in enumerate(text.splitlines(), 1):
-            if pattern in line:
-                matches.append(f"{_display(root, path)}:{line_no}:{line}")
+        all_lines = text.splitlines()
+        match_indices: list[int] = []
+        for line_no, line in enumerate(all_lines, 1):
+            if literal:
+                search_line = line.casefold() if ignore_case else line
+                search_pattern = pattern.casefold() if ignore_case else pattern
+                matched = search_pattern in search_line
+            else:
+                matched = bool(re_pattern.search(line)) if re_pattern else False
+            if matched:
+                match_indices.append(line_no)
                 if len(matches) >= max_results:
                     break
+        for line_no in match_indices:
+            if len(matches) >= max_results:
+                break
+            start = max(0, line_no - 1 - context) if context > 0 else line_no - 1
+            end = min(len(all_lines), line_no + context) if context > 0 else line_no
+            for ctx_line_no in range(start, end):
+                prefix = ">" if ctx_line_no + 1 == line_no else "-"
+                matches.append(
+                    f"{_display(root, path)}:{ctx_line_no + 1}:{prefix} {all_lines[ctx_line_no]}"
+                )
     return _truncate("\n".join(matches)) if matches else "No matches found."
 
 
