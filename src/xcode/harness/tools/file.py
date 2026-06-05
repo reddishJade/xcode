@@ -8,12 +8,19 @@ from typing import Any, Protocol
 
 from ..agent_runtime.contextual import ContextualRetrievalState
 from ..skills import ToolInput, ToolOutput, ToolSpec, resolve_project_path
+from .edit_diff import (
+    apply_edits_fuzzy,
+    detect_line_ending,
+    normalize_to_lf,
+    restore_line_endings,
+    strip_bom,
+)
 from .path_utils import is_path_blocked, truncate_output, display_path
 
 """受沙箱约束的本地文件工具。
 
 文件工具负责读写项目内文本文件，并在工具层集中处理路径解析、敏感目录
-拒绝、输出截断和基于 old_text 精确匹配的文件编辑。
+拒绝、输出截断和基于 old_text 的文件编辑（含模糊匹配）。
 """
 
 MAX_READ_BYTES = 1_000_000
@@ -281,22 +288,32 @@ def _edit_file(
         raise ValueError("no edits provided")
 
     content, encoding = _read_text(path, operations)
-    updated, edit_count = _apply_edits(
-        content,
-        edits,
-        _display(root, path),
-        replace_all=bool(data.get("replace_all", False)),
-    )
-    _ensure_write_size(updated)
-    _write_text(path, updated, encoding, operations)
+    bom, clean_content = strip_bom(content)
+    ending = detect_line_ending(clean_content)
+    normalized = normalize_to_lf(clean_content)
+
+    replace_all = bool(data.get("replace_all", False))
+    if replace_all and len(edits) == 1:
+        count = normalized.count(edits[0]["old_text"])
+        if count == 0:
+            raise ValueError("old_text not found")
+        updated = normalized.replace(edits[0]["old_text"], edits[0]["new_text"])
+        edit_count = count
+    else:
+        updated, edit_count = apply_edits_fuzzy(normalized, edits, _display(root, path))
+
+    restored = restore_line_endings(updated, ending)
+    final = bom + restored
+    _ensure_write_size(final)
+    _write_text(path, final, encoding, operations)
     if context_state is not None:
         context_state.record_file(path)
-    diff = _diff_preview(_display(root, path), content, updated)
+    diff = _diff_preview(_display(root, path), content, final)
     return ToolOutput(
         f"edited file: {_display(root, path)} replacements={edit_count}\n{diff}",
         metadata={
             "patch": diff,
-            "first_changed_line": _first_changed_line(content, updated),
+            "first_changed_line": _first_changed_line(content, final),
         },
     )
 
@@ -365,10 +382,6 @@ def _safe_path(root: Path, raw_path: str) -> Path:
     if is_path_blocked(root, path):
         raise ValueError(f"path is blocked: {display_path(root, path)}")
     return path
-
-
-def _is_blocked(root: Path, path: Path) -> bool:
-    return is_path_blocked(root, path)
 
 
 def _truncate(text: str) -> str:
@@ -449,71 +462,3 @@ def _prepare_edits(data: dict[str, Any]) -> list[dict[str, str]]:
         edits.append({"old_text": old_text, "new_text": str(data.get("new_text", ""))})
 
     return edits
-
-
-def _apply_edits(
-    content: str,
-    edits: list[dict[str, str]],
-    display_path: str,
-    replace_all: bool = False,
-) -> tuple[str, int]:
-    """对原始内容应用编辑。所有编辑基于原始内容匹配，逆序替换。
-
-    返回 (更新后内容, 替换次数) 或抛出 ValueError。
-    """
-    if replace_all and len(edits) == 1:
-        edit = edits[0]
-        count = content.count(edit["old_text"])
-        if count == 0:
-            raise ValueError("old_text not found")
-        updated = content.replace(edit["old_text"], edit["new_text"])
-        return updated, count
-
-    matches: list[dict[str, Any]] = []
-    for i, edit in enumerate(edits):
-        old = edit["old_text"]
-        if not old:
-            raise ValueError(f"edits[{i}].old_text must not be empty in {display_path}")
-
-        idx = content.find(old)
-        if idx == -1:
-            raise ValueError(
-                f"Could not find edits[{i}] in {display_path}. "
-                "The old text must match exactly."
-            )
-        idx2 = content.find(old, idx + 1)
-        if idx2 != -1:
-            raise ValueError(
-                f"Found multiple occurrences of edits[{i}] in {display_path}. "
-                "Each old_text must be unique. Use more context to disambiguate."
-            )
-        matches.append(
-            {
-                "index": i,
-                "start": idx,
-                "end": idx + len(old),
-                "old": old,
-                "new": edit["new_text"],
-            }
-        )
-
-    # 检测重叠
-    matches.sort(key=lambda m: m["start"])
-    for a, b in zip(matches, matches[1:]):
-        if a["end"] > b["start"]:
-            raise ValueError(
-                f"edits[{a['index']}] and edits[{b['index']}] overlap in {display_path}. "
-                "Merge them into one edit or target disjoint regions."
-            )
-
-    # 逆序替换
-    new_content = content
-    for m in reversed(matches):
-        new_content = new_content[: m["start"]] + m["new"] + new_content[m["end"] :]
-
-    if new_content == content:
-        raise ValueError(
-            f"No changes made to {display_path}. The replacements produced identical content."
-        )
-
-    return new_content, len(matches)
