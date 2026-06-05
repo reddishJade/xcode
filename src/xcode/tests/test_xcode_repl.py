@@ -80,9 +80,47 @@ class XcodeReplTests(unittest.TestCase):
                 )
             )
             item = index["sessions"][0]
+            self.assertEqual(index["version"], 1)
+            self.assertEqual(index["storage"], "jsonl-v1")
+            self.assertEqual(
+                index["recovery_boundary"],
+                "current_transcript_and_session_tree",
+            )
             self.assertEqual(item["title"], "Refactor session storage and resume flow")
             self.assertIn("Answer preview", item["summary"])
             self.assertFalse(Path(item["transcript_path"]).is_absolute())
+
+    def test_session_store_loads_legacy_index_without_protocol_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sessions = Path(temp_dir) / ".local" / "sessions"
+            sessions.mkdir(parents=True)
+            transcript = sessions / "session-legacy.jsonl"
+            transcript.write_text("", encoding="utf-8")
+            index_path = Path(temp_dir) / ".local" / "session_index.json"
+            index_path.write_text(
+                json.dumps(
+                    {
+                        "sessions": [
+                            {
+                                "id": "legacy",
+                                "title": "Legacy",
+                                "summary": "Old index",
+                                "project_path": temp_dir,
+                                "transcript_path": "sessions/session-legacy.jsonl",
+                                "created_at": "2026-01-01T00:00:00+00:00",
+                                "updated_at": "2026-01-01T00:00:00+00:00",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = SessionStore(sessions, project_root=Path(temp_dir))
+
+            views = store.list_session_infos()
+
+            self.assertEqual(views[0].title, "Legacy")
+            self.assertEqual(store.protocol_info().storage, "jsonl-v1")
 
     def test_run_repl_persists_user_and_answer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

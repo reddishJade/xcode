@@ -14,6 +14,9 @@ import filelock
 SUMMARY_USER_CHARS = 120
 SUMMARY_ASSISTANT_CHARS = 180
 SUMMARY_TITLE_CHARS = 160
+SESSION_INDEX_VERSION = 1
+SESSION_STORAGE_PROTOCOL = "jsonl-v1"
+SESSION_RECOVERY_BOUNDARY = "current_transcript_and_session_tree"
 
 
 FORK_TYPES = frozenset(["explore", "verify", "isolate"])
@@ -37,6 +40,15 @@ class SessionMetadata:
     updated_at: str
     parent_id: str | None = None
     fork_type: str | None = None
+
+
+@dataclass(frozen=True)
+class SessionProtocolInfo:
+    """会话持久化协议描述。"""
+
+    version: int
+    storage: str
+    recovery_boundary: str
 
 
 class SessionStore:
@@ -261,6 +273,14 @@ class SessionStore:
     def current_metadata(self) -> SessionMetadata | None:
         return self._metadata_for_path(self.current_path)
 
+    def protocol_info(self) -> SessionProtocolInfo:
+        """返回当前会话索引使用的持久化协议。"""
+        return SessionProtocolInfo(
+            version=SESSION_INDEX_VERSION,
+            storage=SESSION_STORAGE_PROTOCOL,
+            recovery_boundary=SESSION_RECOVERY_BOUNDARY,
+        )
+
     def get_tree(self) -> list[TreeNode]:
         """以当前会话为视角，构建会话树：祖先链 + 当前子树。
 
@@ -367,7 +387,13 @@ class SessionStore:
     def _write_metadata(self, items: list[SessionMetadata]) -> None:
         with self._lock:
             self.index_path.parent.mkdir(parents=True, exist_ok=True)
-            payload = {"sessions": [asdict(item) for item in items]}
+            protocol = self.protocol_info()
+            payload = {
+                "version": protocol.version,
+                "storage": protocol.storage,
+                "recovery_boundary": protocol.recovery_boundary,
+                "sessions": [asdict(item) for item in items],
+            }
             self.index_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
