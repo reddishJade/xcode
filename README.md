@@ -157,7 +157,7 @@ uv run python -m unittest discover src\xcode\tests
 - `daemon`：构造 `HeartbeatDaemon`
 - `experimental`：展开为全部 experimental feature groups
 
-`skills` 不是默认能力；`skills.auto_trigger=true` 只有在 `skills` group 启用后才有意义。
+`skills` 由 `skills` group 启用；`skills.auto_trigger=true` 随该 group 生效。
 
 ---
 
@@ -224,13 +224,21 @@ uv run python -m compileall src
 离线 eval：
 
 ```powershell
-uv run python -m xcode.evals.cli --output-dir .local/eval_runs/offline-smoke
+uv run python -m xcode.evals.cli --list-suites
+uv run python -m xcode.evals.cli --suite pipeline
+uv run python -m xcode.evals.cli --suite tool-policy
 ```
 
-真实 Agent eval：
+真实 provider coding fixture eval：
 
 ```powershell
-uv run python -m xcode.evals.cli --real --project-root . --tasks examples/eval/coding-tasks.jsonl --output-dir .local/eval_runs/tiny-coding
+uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3
+```
+
+外部 benchmark adapter 目标：
+
+```powershell
+uv run python -m xcode.evals.cli --list-benchmarks
 ```
 
 更多说明见 [docs/evaluation-guide.md](docs/evaluation-guide.md)。
