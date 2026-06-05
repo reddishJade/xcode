@@ -9,6 +9,8 @@ from pathlib import Path
 import shutil
 from typing import Any
 
+import filelock
+
 SUMMARY_USER_CHARS = 120
 SUMMARY_ASSISTANT_CHARS = 180
 SUMMARY_TITLE_CHARS = 160
@@ -38,7 +40,12 @@ class SessionMetadata:
 
 
 class SessionStore:
-    def __init__(self, sessions_dir: Path, project_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        sessions_dir: Path,
+        project_root: Path | None = None,
+        lock_timeout_seconds: float = 10.0,
+    ) -> None:
         self.sessions_dir = sessions_dir
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.project_root = (project_root or sessions_dir).resolve()
@@ -48,48 +55,55 @@ class SessionStore:
             else self.sessions_dir
         )
         self.index_path = index_dir / "session_index.json"
+        self._lock = filelock.FileLock(
+            str(index_dir / "session_store.lock"),
+            timeout=lock_timeout_seconds,
+        )
         self.current_path = self._new_path()
         self.artifacts_dir = self.project_root / ".local" / "session_artifacts"
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     def append(self, record_type: str, content: Any) -> None:
-        record = SessionRecord(
-            type=record_type,
-            content=content,
-            created_at=datetime.now(UTC).isoformat(timespec="seconds"),
-        )
-        with self.current_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
-        if record_type == "user":
-            self.ensure_metadata(str(content))
+        with self._lock:
+            record = SessionRecord(
+                type=record_type,
+                content=content,
+                created_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            )
+            with self.current_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+            if record_type == "user":
+                self.ensure_metadata(str(content))
 
     def clear(self) -> None:
-        self.current_path = self._new_path()
+        with self._lock:
+            self.current_path = self._new_path()
 
     def fork_into(self, fork_type: str | None = None) -> SessionMetadata:
         if fork_type is not None and fork_type not in FORK_TYPES:
             raise ValueError(
                 f"fork_type must be one of {FORK_TYPES}, got {fork_type!r}"
             )
-        parent = self.ensure_metadata()
-        fork_path = self._new_path()
-        if self.current_path.exists():
-            shutil.copy2(self.current_path, fork_path)
-        now = datetime.now(UTC).isoformat(timespec="seconds")
-        meta = SessionMetadata(
-            id=self._session_id(fork_path),
-            title=f"Fork of {parent.title}",
-            summary=parent.summary,
-            project_path=parent.project_path,
-            transcript_path=self._relative_transcript_path(fork_path),
-            created_at=now,
-            updated_at=now,
-            parent_id=parent.id,
-            fork_type=fork_type,
-        )
-        self._upsert_metadata(meta)
-        self.current_path = fork_path
-        return meta
+        with self._lock:
+            parent = self.ensure_metadata()
+            fork_path = self._new_path()
+            if self.current_path.exists():
+                shutil.copy2(self.current_path, fork_path)
+            now = datetime.now(UTC).isoformat(timespec="seconds")
+            meta = SessionMetadata(
+                id=self._session_id(fork_path),
+                title=f"Fork of {parent.title}",
+                summary=parent.summary,
+                project_path=parent.project_path,
+                transcript_path=self._relative_transcript_path(fork_path),
+                created_at=now,
+                updated_at=now,
+                parent_id=parent.id,
+                fork_type=fork_type,
+            )
+            self._upsert_metadata(meta)
+            self.current_path = fork_path
+            return meta
 
     def fork_clean_into(
         self, fork_type: str | None = None, title: str | None = None
@@ -98,23 +112,24 @@ class SessionStore:
             raise ValueError(
                 f"fork_type must be one of {FORK_TYPES}, got {fork_type!r}"
             )
-        parent = self.ensure_metadata()
-        fork_path = self._new_path()
-        now = datetime.now(UTC).isoformat(timespec="seconds")
-        meta = SessionMetadata(
-            id=self._session_id(fork_path),
-            title=title or f"Clean Fork of {parent.title}",
-            summary="Conversation started (clean fork).",
-            project_path=parent.project_path,
-            transcript_path=self._relative_transcript_path(fork_path),
-            created_at=now,
-            updated_at=now,
-            parent_id=parent.id,
-            fork_type=fork_type,
-        )
-        self._upsert_metadata(meta)
-        self.current_path = fork_path
-        return meta
+        with self._lock:
+            parent = self.ensure_metadata()
+            fork_path = self._new_path()
+            now = datetime.now(UTC).isoformat(timespec="seconds")
+            meta = SessionMetadata(
+                id=self._session_id(fork_path),
+                title=title or f"Clean Fork of {parent.title}",
+                summary="Conversation started (clean fork).",
+                project_path=parent.project_path,
+                transcript_path=self._relative_transcript_path(fork_path),
+                created_at=now,
+                updated_at=now,
+                parent_id=parent.id,
+                fork_type=fork_type,
+            )
+            self._upsert_metadata(meta)
+            self.current_path = fork_path
+            return meta
 
     def load_records(self, path: Path | None = None) -> list[SessionRecord]:
         target = path or self.current_path
@@ -141,47 +156,51 @@ class SessionStore:
         return self.current_path
 
     def rewind_turns(self, turns: int = 1) -> int:
-        records = self.load_records()
-        if turns <= 0 or not records:
-            return 0
-        user_indices = [
-            index for index, record in enumerate(records) if record.type == "user"
-        ]
-        if not user_indices:
-            return 0
-        keep_until = user_indices[max(0, len(user_indices) - turns)]
-        kept = records[:keep_until]
-        with self.current_path.open("w", encoding="utf-8") as handle:
-            for record in kept:
-                handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
-        return len(records) - len(kept)
+        with self._lock:
+            records = self.load_records()
+            if turns <= 0 or not records:
+                return 0
+            user_indices = [
+                index for index, record in enumerate(records) if record.type == "user"
+            ]
+            if not user_indices:
+                return 0
+            keep_until = user_indices[max(0, len(user_indices) - turns)]
+            kept = records[:keep_until]
+            with self.current_path.open("w", encoding="utf-8") as handle:
+                for record in kept:
+                    handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+            return len(records) - len(kept)
 
     def compact_current_session(self, max_tool_result_chars: int = 200) -> int:
         """压缩当前会话事件日志，截断过长的工具执行结果内容。"""
-        records = self.load_records()
-        if not records:
-            return 0
-        compacted_count = 0
-        new_records = []
-        for record in records:
-            if record.type == "event" and isinstance(record.content, dict):
-                if record.content.get("type") == "tool_result":
-                    data = record.content.get("data")
-                    if isinstance(data, dict) and "content" in data:
-                        content_str = str(data["content"])
-                        if len(content_str) > max_tool_result_chars:
-                            original_len = len(content_str)
-                            data["content"] = (
-                                "[Previous tool_result compacted; "
-                                f"{original_len} chars removed]"
-                            )
-                            compacted_count += 1
-            new_records.append(record)
-        if compacted_count > 0:
-            with self.current_path.open("w", encoding="utf-8") as handle:
-                for record in new_records:
-                    handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
-        return compacted_count
+        with self._lock:
+            records = self.load_records()
+            if not records:
+                return 0
+            compacted_count = 0
+            new_records = []
+            for record in records:
+                if record.type == "event" and isinstance(record.content, dict):
+                    if record.content.get("type") == "tool_result":
+                        data = record.content.get("data")
+                        if isinstance(data, dict) and "content" in data:
+                            content_str = str(data["content"])
+                            if len(content_str) > max_tool_result_chars:
+                                original_len = len(content_str)
+                                data["content"] = (
+                                    "[Previous tool_result compacted; "
+                                    f"{original_len} chars removed]"
+                                )
+                                compacted_count += 1
+                new_records.append(record)
+            if compacted_count > 0:
+                with self.current_path.open("w", encoding="utf-8") as handle:
+                    for record in new_records:
+                        handle.write(
+                            json.dumps(asdict(record), ensure_ascii=False) + "\n"
+                        )
+            return compacted_count
 
     def list_sessions(self, limit: int = 10) -> list[Path]:
         return [item.path for item in self.list_session_infos(limit=limit)]
@@ -346,12 +365,13 @@ class SessionStore:
         return items
 
     def _write_metadata(self, items: list[SessionMetadata]) -> None:
-        self.index_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"sessions": [asdict(item) for item in items]}
-        self.index_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        with self._lock:
+            self.index_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"sessions": [asdict(item) for item in items]}
+            self.index_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
 
     def _upsert_metadata(self, metadata: SessionMetadata) -> None:
         items = [item for item in self._load_metadata() if item.id != metadata.id]
