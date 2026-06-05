@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import re
-import shutil
 import subprocess
 import traceback
 from pathlib import Path
@@ -10,6 +9,7 @@ from typing import Any, Protocol
 
 from xcode.harness.skills import ToolInput, ToolSpec, resolve_project_path
 from .path_utils import is_path_blocked, truncate_output, display_path
+from .tools_manager import ensure_tool
 
 """供编码 Agent 使用的只读代码搜索工具。"""
 
@@ -399,7 +399,7 @@ def _grep(
     context: int = 0,
 ) -> str:
     global _RG_MISSING_HINT_EMITTED
-    rg = shutil.which("rg")
+    rg = ensure_tool("rg", silent=True)
     if rg:
         command = [rg, "--line-number", "--no-heading", "--color", "never"]
         if ignore_case:
@@ -457,7 +457,7 @@ def _find_files_fd(
     if not find_ops.is_directory(base):
         raise NotADirectoryError(f"Not a directory: {_display(root, base)}")
 
-    fd = shutil.which("fd")
+    fd = ensure_tool("fd", silent=True)
     if fd:
         try:
             args = [
