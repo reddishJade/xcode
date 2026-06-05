@@ -495,7 +495,11 @@ def _find_files_fd(
                 str(max_results),
             ]
             adjusted = pattern
-            if "/" in pattern and not adjusted.startswith("**/") and not adjusted.startswith("/"):
+            if (
+                "/" in pattern
+                and not adjusted.startswith("**/")
+                and not adjusted.startswith("/")
+            ):
                 adjusted = f"**/{pattern}"
                 args.append("--full-path")
             elif adjusted.startswith("**/") or adjusted.startswith("/"):

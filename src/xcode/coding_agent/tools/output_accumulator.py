@@ -36,6 +36,7 @@ class OutputAccumulator:
         self._full_path: str | None = None
         self._file: Any = None
         self._current_line_bytes = 0
+        self._finished = False
 
     @property
     def full_path(self) -> str | None:
@@ -53,6 +54,8 @@ class OutputAccumulator:
         return self._current_line_bytes
 
     def append(self, chunk: bytes) -> None:
+        if self._finished:
+            raise RuntimeError("cannot append after close")
         self._chunks.append(chunk)
         self._total_bytes += len(chunk)
         newlines = chunk.count(b"\n")
@@ -155,6 +158,7 @@ class OutputAccumulator:
         )
 
     def close(self) -> None:
+        self._finished = True
         if self._file is not None:
             try:
                 self._file.flush()
