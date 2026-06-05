@@ -59,7 +59,7 @@ src/xcode/main.py
 worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress
 ```
 
-`experimental` 是总开关。启用它等价于启用全部上述 group。`bm25` 是 `memory` 的内部实现，不是独立 group。
+`experimental` 是总开关。启用它等价于启用全部上述 group。`bm25` 归属 `memory` 内部实现。
 
 ---
 
@@ -364,16 +364,22 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 ## 9. Evals
 
-`src/xcode/evals/` 包含两条验证线：
+`src/xcode/evals/` 包含四条验证线：
 
-- `EvalRunner`：消费 `XcodeApp.aask_stream()` 事件流，生成 trace、JSON report 和 HTML report。
+- `pipeline`：离线 provider 驱动 eval runner、trace、grader 和 report 回归。
+- `tool-policy`：离线 provider 验证工具选择和禁止写入约束。
+- `coding-fixture`：真实 provider 在 fixture sandbox 中执行小型编码任务，并运行 validation command。
+- `adapters/`：登记 SWE-bench Lite、SWE-bench Verified、Terminal-Bench 和 Aider Polyglot 外部 harness 目标。
 
-Grader 分三类：
+`EvalRunner` 消费 `XcodeApp.aask_stream()` 事件流，生成 trace、JSON report、HTML report 和 CSV report。
+
+Grader 分四类：
 - **确定性 grader**：runtime_error、final_event、answer_contains、expected_tool、disallowed_tool、max_tool_errors。
 - **文件证据 grader**：file_exists、file_contains、file_not_contains、file_changed。
-- **LLM-as-judge**：`run_llm_judge()` 接口完整，通过描述性标准评判 Agent 输出。当前内置任务未设置 `llm_judge_criteria`，需自定义 JSONL 启用。
+- **Validation command grader**：执行 `metadata.validation.commands`，按退出码生成 `validation_command:<n>`。
+- **LLM-as-judge**：`run_llm_judge()` 通过描述性标准评判 Agent 输出。
 
-`pass@k` 和 `pass^k` 指标通过无偏估计量 `1 - C(n-c,k)/C(n,k)` 计算。
+`pass@k` 输出任务成功计数，并用无偏估计量计算 rate；`pass^k` 输出全部 trial 成功的任务计数和 rate。
 
 内置 HumanEval 与 SWE-bench Lite JSON/JSONL benchmark loader：`src/xcode/evals/benchmarks.py`。通过 `--tasks` 参数加载自定义 JSONL，与内置套件共用 `EvalRunner` 和 grader 体系。
 
@@ -387,6 +393,7 @@ Grader 分三类：
 - `daemon` 由 `build_app()` 构造，生命周期启动由调用方控制。
 - `tasks` + `progress` 支持任务和 checklist，不提供完整可重入长任务编排能力。
 - eval 的 LLM-as-judge 内置 task 未启用；已接入 HumanEval/SWE-bench loader，Pass@k 已采用无偏估计量。
+- 外部 benchmark adapter registry 覆盖 SWE-bench Lite、SWE-bench Verified、Terminal-Bench 和 Aider Polyglot。执行器接入点位于 `src/xcode/evals/adapters/`。
 - `intercept_usage`/`_record_usage`/`_ensure_metrics` 已提取为 `ProviderMetricsMixin`（`ai/providers/metrics.py`），子类覆写 `_record_usage` 属合理多态。仅 `OpenAIResponsesProvider` 因 Responses API 事件模型差异有一个同构闭包 `intercept_events`（`openai.py:126-141`）可清理。
 
 ---
