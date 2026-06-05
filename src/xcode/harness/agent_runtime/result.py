@@ -61,9 +61,11 @@ def _build_structured_result(
         metrics = {
             "llm_calls": result.metrics.llm_calls,
             "tool_calls": result.metrics.tool_calls,
-            "estimated_prompt_tokens": 0,
+            "estimated_prompt_tokens": result.metrics.input_tokens,
+            "estimated_completion_tokens": result.metrics.output_tokens,
             "model_latencies_ms": result.metrics.model_latencies_ms,
             "tool_latencies_ms": result.metrics.tool_latencies_ms,
+            "steps": result.metrics.steps,
         }
 
     if result.stopped_by_watchdog and result.watchdog_reason:
