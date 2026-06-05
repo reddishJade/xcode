@@ -445,6 +445,8 @@ class EvalPipelineTests(unittest.TestCase):
         self.assertIn("terminal-bench", text)
 
     def test_external_benchmark_registry_names_core_targets(self) -> None:
+        self.assertIn("evalplus-humaneval", BENCHMARK_ADAPTERS)
+        self.assertIn("evalplus-mbpp", BENCHMARK_ADAPTERS)
         self.assertIn("swebench-lite", BENCHMARK_ADAPTERS)
         self.assertIn("swebench-verified", BENCHMARK_ADAPTERS)
         self.assertIn("terminal-bench", BENCHMARK_ADAPTERS)

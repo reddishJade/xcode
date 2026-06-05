@@ -16,6 +16,22 @@ class BenchmarkAdapterSpec:
 
 
 BENCHMARK_ADAPTERS: dict[str, BenchmarkAdapterSpec] = {
+    "evalplus-humaneval": BenchmarkAdapterSpec(
+        name="evalplus-humaneval",
+        display_name="EvalPlus HumanEval+",
+        purpose="Python 单函数生成能力评测。",
+        harness="EvalPlus 风格 unittest fixture",
+        xcode_role="在 sandbox 中编辑 solution.py，validation command 运行测试。",
+        upstream_url="https://evalplus.github.io/",
+    ),
+    "evalplus-mbpp": BenchmarkAdapterSpec(
+        name="evalplus-mbpp",
+        display_name="EvalPlus MBPP+",
+        purpose="Python 入门编程任务评测。",
+        harness="EvalPlus 风格 unittest fixture",
+        xcode_role="在 sandbox 中编辑 solution.py，validation command 运行测试。",
+        upstream_url="https://evalplus.github.io/",
+    ),
     "swebench-lite": BenchmarkAdapterSpec(
         name="swebench-lite",
         display_name="SWE-bench Lite",
