@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -68,11 +69,18 @@ class BashOperations(Protocol):
     ) -> str: ...
 
 
+SpawnHook = Callable[[str, Path], tuple[str, Path]]
+"""Hook to adjust command and cwd before execution. Receives (command, cwd), returns (command, cwd)."""
+
+
 def build_bash_tool(
     project_root: Path,
     cancel_event: threading.Event | None = None,
     shell_spec: ShellSpec | None = None,
     bash_ops: BashOperations | None = None,
+    command_prefix: str | None = None,
+    spawn_hook: SpawnHook | None = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> ToolSpec:
     root = project_root.resolve()
     spec = shell_spec or detect_shell()
@@ -81,6 +89,12 @@ def build_bash_tool(
         command = str(data.get("command") or data.get("input") or "").strip()
         if not command:
             raise ValueError("command is required")
+        if command_prefix:
+            command = f"{command_prefix}\n{command}"
+        if spawn_hook:
+            command, cwd = spawn_hook(command, root)
+        else:
+            cwd = root
         timeout = _parse_timeout(data.get("timeout", DEFAULT_TIMEOUT_SECONDS))
 
         argv = build_shell_argv(spec, command)
@@ -90,7 +104,7 @@ def build_bash_tool(
         proc = subprocess.Popen(
             argv,
             shell=False,
-            cwd=root,
+            cwd=cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             **popen_kwargs,
@@ -110,11 +124,16 @@ def build_bash_tool(
         err_thread = threading.Thread(target=_drain, args=(proc.stderr,), daemon=True)
         out_thread.start()
         err_thread.start()
+        last_progress = 0.0
 
         try:
             deadline = time.monotonic() + timeout
             while proc.poll() is None:
-                if time.monotonic() >= deadline:
+                now = time.monotonic()
+                if on_progress and now - last_progress >= 0.5:
+                    on_progress(acc.snapshot())
+                    last_progress = now
+                if now >= deadline:
                     _kill_process(proc)
                     timed_out = True
                     break
