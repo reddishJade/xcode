@@ -227,8 +227,7 @@ def build_file_tools(
     )
 
 
-_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp"})
-_IMAGE_MIME = {
+_IMAGE_MIME_BY_EXTENSION: dict[str, str] = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
@@ -236,10 +235,30 @@ _IMAGE_MIME = {
     ".webp": "image/webp",
 }
 
+_IMAGE_MAGIC: list[tuple[bytes, str]] = [
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+]
 
-def _detect_image(path: Path) -> str | None:
+
+def _detect_image(path: Path, operations: FileOperations) -> str | None:
     ext = path.suffix.lower()
-    return _IMAGE_MIME.get(ext)
+    mime = _IMAGE_MIME_BY_EXTENSION.get(ext)
+    if mime:
+        return mime
+    try:
+        header = operations.read_bytes(path)[:16]
+    except Exception:
+        return None
+    for magic, mime in _IMAGE_MAGIC:
+        if header.startswith(magic):
+            return mime
+    if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 def _read_file(
@@ -261,7 +280,7 @@ def _read_file(
         raise ValueError(f"file too large: {size} bytes")
 
     display = _display(root, path)
-    mime = _detect_image(path)
+    mime = _detect_image(path, operations)
 
     if mime:
         return _read_image(path, display, mime, operations)
