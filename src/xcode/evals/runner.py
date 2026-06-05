@@ -7,6 +7,7 @@ from pathlib import Path
 import hashlib
 import math
 import subprocess
+import sys
 import uuid
 from typing import Any
 
@@ -47,10 +48,26 @@ class EvalRunner:
 
     async def arun(self) -> EvalReport:
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        total_trials = len(self.tasks) * self.trials_per_task
         trials: list[TrialResult] = []
         for task in self.tasks:
             for trial_index in range(self.trials_per_task):
-                trials.append(await self._run_trial(task, trial_index))
+                trial_no = len(trials) + 1
+                print(
+                    f"\r[{trial_no}/{total_trials}] {task.id} "
+                    f"trial {trial_index + 1}/{self.trials_per_task} ...",
+                    end="",
+                    file=sys.stderr,
+                )
+                sys.stderr.flush()
+                result = await self._run_trial(task, trial_index)
+                trials.append(result)
+                status = "PASS" if result.success else "FAIL"
+                print(
+                    f"\r[{trial_no}/{total_trials}] {task.id} "
+                    f"trial {trial_index + 1}/{self.trials_per_task} {status}",
+                    file=sys.stderr,
+                )
         success = all(trial.success for trial in trials)
         metrics = _build_run_metrics(self.tasks, trials)
         report = EvalReport(
