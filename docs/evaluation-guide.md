@@ -1,112 +1,10 @@
-# Xcode 评估与验证指南
+# Xcode Eval 指南
 
-本指南记录当前 checkout 的测试、编译和 eval 工作流。所有命令默认从仓库根目录运行。
-
----
-
-## 1. 单元测试
-
-完整测试：
-
-```powershell
-uv run python -m unittest discover src\xcode\tests
-```
-
-测试覆盖范围：
-
-- runtime config loading
-- app assembly and tool group gating
-- `StructuredAgent` loop
-- provider codecs and stream adapters
-- file/search/bash tools
-- permission policy and audit redaction
-- REPL/session behavior
-- compaction and read-version restoration
-- subagent runner
-- experimental modules
-- eval pipeline
-
-针对性测试示例：
-
-```powershell
-uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
-uv run python -m unittest src.xcode.tests.test_xcode_mcp_client
-uv run python -m unittest src.xcode.tests.test_xcode_mailbox src.xcode.tests.test_xcode_progress
-uv run python -m unittest src.xcode.tests.test_eval_pipeline
-```
+所有命令默认从仓库根目录运行。
 
 ---
 
-## 2. 格式、Lint 和类型检查
-
-修改 Python 文件后，按 `docs/code-standards.md` 的 Python 验证命令对修改文件运行。
-
-修改多个文件时把文件列表显式传入命令。不要默认扩大到全仓库，除非任务需要。
-
----
-
-## 3. 编译检查
-
-检查包内 Python 文件语法和导入形状：
-
-```powershell
-uv run python -m compileall src
-```
-
----
-
-## 4. REPL 验证
-
-启动 REPL：
-
-```powershell
-.\.venv\Scripts\python.exe -m xcode.main
-```
-
-常用交互验证：
-
-- `/help`：查看 REPL 命令。
-- `/plan`：切换只读规划模式。
-- `/review`：切换审查模式，写入和 bash 仍走审批边界。
-- `/act`：切换执行模式。
-- `/act --clear`：保存 plan artifact，并进入干净会话。
-- `/compact`：请求下一轮前压缩上下文。
-- `/sessions`：列出会话。
-- `/resume <id>`：恢复会话。
-- `/branch list|tree|<id|title>`：会话分支导航与切换。
-- `/queue on|off`：切换队列模式，流式 turn 期间可读 queued follow-up。
-- `/model [profile/]name[:thinking]`：切换模型，支持 profile/name:thinking 语法。
-- `/tool NAME INPUT`：直接调用当前 registry 中的工具。
-- `!COMMAND`：通过已注册的 `bash` 工具直接运行 shell 命令。
-- `@relative/path`：注入文件引用。
-
-恢复最近会话：
-
-```powershell
-.\.venv\Scripts\python.exe -m xcode.main --resume
-```
-
----
-
-## 5. Tool Group 验证
-
-默认工具组只应暴露 core tools。相关测试：
-
-```powershell
-uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
-```
-
-该测试覆盖：
-
-- 默认不构造 optional/experimental groups。
-- 单独启用 group 时只加入对应工具。
-- `experimental` 总开关会展开所有 experimental group。
-- `mailbox` 和 `progress` group 会注册 Agent 可调用工具。
-- subagent 只继承已启用工具。
-
----
-
-## 6. Agent Eval Pipeline
+## Agent Eval Pipeline
 
 `src/xcode/evals/` 包含 `EvalRunner`，消费 `XcodeApp.aask_stream()` 的事件流，记录 trace，并输出 `report.json` / `report.html` / `report.csv`。
 
@@ -135,7 +33,7 @@ uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
 | `uv run python -m xcode.evals.cli --suite all --trials 3` | 默认离线回归集合，测量 pass@k/pass^k |
 | `uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3` | 真实 provider 的 sandbox coding fixture 评测 |
 | `uv run python -m xcode.evals.cli --list-benchmarks` | 列出外部 benchmark adapter 目标 |
-| `uv run python -m xcode.evals.cli --real --benchmark evalplus-humaneval --benchmark-path https://github.com/evalplus/humanevalplus_release/releases/download/v0.1.10/HumanEvalPlus-Mini.jsonl.gz` | 轻量 EvalPlus HumanEval 评测 |
+| `uv run python -m xcode.evals.cli --real --benchmark evalplus-humaneval --benchmark-path https://github.com/evalplus/humanevalplus_release/releases/download/v0.1.10/HumanEvalPlus-Mini.jsonl.gz --limit 1` | 公开 benchmark 小子集快速评测 |
 
 ### 可用套件
 
@@ -159,7 +57,10 @@ uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
 | `--list-suites` | 列出内置 suite |
 | `--show-suite <name>` | 查看 suite 任务 |
 | `--list-benchmarks` | 列出外部 benchmark adapter 目标 |
-| `--tasks <path>` | 运行开发调试 JSON/JSONL 任务（与 `--suite` 互斥） |
+| `--tasks <path>` | 运行 JSON/JSONL 任务文件（与 `--suite` 互斥） |
+| `--benchmark <name>` | 从公开或本地 benchmark 数据加载任务 |
+| `--benchmark-path <path-or-url>` | benchmark 数据路径或 URL |
+| `--limit N` | 限制加载的最大任务数 |
 | `--real` | 使用真实 provider（否则用离线静态 provider） |
 | `--trials N` | 每任务 N 轮（默认 1），用于 pass@k/pass^k 测量 |
 | `--project-root <path>` | 项目根目录（默认当前目录） |
@@ -261,39 +162,3 @@ uv run python -m xcode.evals.cli --tasks path/to/tasks.jsonl
 ```
 
 真实 provider task 需要 `metadata.fixture_dir`，或显式使用 `--allow-project-mutation`。`report.json` 中的 `metrics.file_evidence` 会记录目标文件是否存在、hash 是否变化、指定文本是否出现。`report.csv` 可用于直接导入电子表格分析。
-
----
-
-## 7. 文档变更验证
-
-只改文档时，至少运行：
-
-```powershell
-git diff --check -- README.md CONFIG.md docs\code-organization.md docs\source-review.md docs\evaluation-guide.md
-```
-
-如果文档涉及命令、模块路径或工具组，应同时运行相关 targeted tests。例如工具组文档变更：
-
-```powershell
-uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
-```
-
-涉及 eval 文档变更：
-
-```powershell
-uv run python -m unittest src.xcode.tests.test_eval_pipeline
-```
-
----
-
-## 8. 推荐提交前检查
-
-针对代码和文档混合变更：
-
-```powershell
-# Run the Python validation commands from docs/code-standards.md on modified Python files.
-uv run python -m unittest <targeted-test-modules>
-git diff --check -- <modified-files>
-```
-
-只提交任务相关文件，保留其他会话或用户已有改动。
