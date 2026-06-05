@@ -80,7 +80,7 @@ src/xcode/main.py
 | `providers/factory.py` | 根据 profile 构造 provider bundle |
 | `providers/protocol.py` | `ModelProvider` 协议 |
 | `providers/codec.py` | OpenAI-compatible schema 和 delta 编解码 |
-| `providers/openai_compat.py` | OpenAI Chat Completions 兼容基类 |
+| `providers/openai_compat.py` | OpenAI Chat Completions 适配基类 |
 | `providers/openai.py` | OpenAI Chat Completions 和 stateful Responses |
 | `providers/anthropic.py` | Anthropic Messages 适配 |
 | `providers/deepseek.py` | DeepSeek thinking mode 适配 |
@@ -158,10 +158,13 @@ src/xcode/main.py
 | --- | --- |
 | `schema.py` | `EvalTask` 和配置 schema |
 | `runner.py` | 事件流 eval runner |
+| `sandbox.py` | 真实 provider eval 的 sandbox 项目根选择 |
+| `validation.py` | validation command grader |
 | `tracing.py` | JSONL trace 记录 |
 | `graders.py` | 确定性 grader |
 | `reporting.py` | JSON/HTML 报告 |
 | `cli.py` | `xcode-eval` / `python -m xcode.evals.cli` |
+| `adapters/` | 外部 benchmark adapter registry |
 
 ### `src/xcode/experimental/`
 
