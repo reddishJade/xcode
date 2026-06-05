@@ -227,6 +227,21 @@ def build_file_tools(
     )
 
 
+_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp"})
+_IMAGE_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+
+def _detect_image(path: Path) -> str | None:
+    ext = path.suffix.lower()
+    return _IMAGE_MIME.get(ext)
+
+
 def _read_file(
     root: Path,
     operations: FileOperations,
@@ -244,11 +259,16 @@ def _read_file(
     size = operations.size(path)
     if size > MAX_READ_BYTES:
         raise ValueError(f"file too large: {size} bytes")
-    text, _encoding = _read_text(path, operations)
-    if context_state is not None:
-        context_state.record_file(path)
 
     display = _display(root, path)
+    mime = _detect_image(path)
+
+    if mime:
+        return _read_image(path, display, mime, operations)
+
+    if context_state is not None:
+        context_state.record_file(path)
+    text, _encoding = _read_text(path, operations)
     offset = data.get("offset")
     limit = data.get("limit")
 
@@ -256,6 +276,19 @@ def _read_file(
         return _read_with_offset_limit(text, display, offset, limit)
 
     return _read_full(text, display)
+
+
+def _read_image(
+    path: Path, display_path: str, mime: str, operations: FileOperations
+) -> str:
+    import base64
+
+    data = operations.read_bytes(path)
+    b64 = base64.b64encode(data).decode("ascii")
+    return ToolOutput(
+        f"Read image file [{mime}]\nImage data is available in metadata.",
+        metadata={"image": {"mime": mime, "data": b64}},
+    )
 
 
 def _read_full(text: str, display_path: str) -> str:
@@ -267,7 +300,7 @@ def _read_full(text: str, display_path: str) -> str:
         return (
             f"[Line 1 is {format_size(tr.total_bytes)}, exceeds "
             f"{format_size(tr.max_bytes)} limit. "
-            f"Use bash to read this file.]"
+            f"Use bash: sed -n '1p' {json.dumps(display_path)} | head -c {tr.max_bytes}]"
         )
 
     end_line = tr.output_lines
