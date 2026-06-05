@@ -24,6 +24,7 @@ from xcode.evals.cli import _task_from_dict
 from xcode.evals import EvalRunner, EvalTask
 from xcode.evals.runner import _build_run_metrics
 from xcode.evals.sandbox import UnsafeEvalTaskError
+from xcode.evals.tasks import SUITES
 from xcode.tests.fixtures import FakeProvider
 from xcode.evals.schema import TrialResult
 
@@ -297,6 +298,15 @@ class EvalPipelineTests(unittest.TestCase):
             self.assertEqual(tasks[0].id, "swebench-lite-repo__issue-1")
             self.assertIn("Fix the failing parser.", tasks[0].prompt)
             self.assertEqual(tasks[0].metadata["benchmark"]["repo"], "owner/repo")
+
+    def test_coding_fixture_suite_is_sandboxed_and_validated(self) -> None:
+        tasks = SUITES["coding-fixture"]
+
+        self.assertGreaterEqual(len(tasks), 1)
+        for task in tasks:
+            self.assertIn("fixture_dir", task.metadata)
+            self.assertIn("validation", task.metadata)
+            self.assertTrue(task.metadata["validation"]["commands"])
 
     def test_pass_at_k_uses_unbiased_estimator(self) -> None:
         trials = (

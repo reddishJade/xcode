@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from .schema import EvalTask
 
 """预定义的 eval task 套件。每套侧重一个能力维度。
@@ -88,6 +90,129 @@ def coding() -> tuple[EvalTask, ...]:
                         {
                             "path": "src/xcode/evals/graders.py",
                             "not_contains": ('line.startswith("PASS:")',),
+                        },
+                    ],
+                },
+            },
+        ),
+    )
+
+
+def coding_fixture() -> tuple[EvalTask, ...]:
+    """真实 provider 小型编码回归：复制 fixture 到 sandbox 后运行验证命令。"""
+    validation = {
+        "commands": ((sys.executable, "-m", "unittest", "discover", "tests"),),
+        "timeout_seconds": 60,
+    }
+    return (
+        EvalTask(
+            id="tiny-calculator-subtract",
+            prompt=(
+                "Update the tiny calculator project so it supports subtract(left, right). "
+                "Keep the existing add behavior, add a focused unittest for subtract, "
+                "run the unit validation, and finish with a concise summary of the changed "
+                "file and validation result."
+            ),
+            expected_answer_contains=("subtract",),
+            expected_tool_calls=("read_file", "bash"),
+            tags=("coding", "sandbox", "real-agent", "add-function"),
+            metadata={
+                "fixture_dir": "examples/eval/fixtures/tiny-calculator",
+                "validation": validation,
+                "evidence": {
+                    "files": [
+                        {
+                            "path": "calculator.py",
+                            "changed": True,
+                            "contains": ("def subtract", "return left - right"),
+                        },
+                        {
+                            "path": "tests/test_calculator.py",
+                            "changed": True,
+                            "contains": ("test_subtract", "subtract("),
+                        },
+                    ],
+                },
+            },
+        ),
+        EvalTask(
+            id="fix-divide-by-zero",
+            prompt=(
+                "The math_utils.py module has a bug: divide(a, 0) returns 0 instead "
+                "of raising ZeroDivisionError. Fix the divide function so it raises "
+                "ZeroDivisionError when b is 0. Run the test suite to verify all tests pass."
+            ),
+            expected_answer_contains=("divide",),
+            expected_tool_calls=("read_file", "bash"),
+            tags=("coding", "sandbox", "real-agent", "bugfix"),
+            metadata={
+                "fixture_dir": "examples/eval/fixtures/buggy-math",
+                "validation": validation,
+                "evidence": {
+                    "files": [
+                        {
+                            "path": "math_utils.py",
+                            "changed": True,
+                            "not_contains": ("return 0",),
+                        },
+                    ],
+                },
+            },
+        ),
+        EvalTask(
+            id="add-capitalize-words",
+            prompt=(
+                "Add a capitalize_words(s) function to string_utils.py that capitalizes "
+                "the first letter of each word in a string. For example, "
+                "capitalize_words('hello world') should return 'Hello World'. "
+                "Add a unittest for it in the test file, then run the tests to verify."
+            ),
+            expected_answer_contains=("capitalize_words",),
+            expected_tool_calls=("read_file", "bash"),
+            tags=("coding", "sandbox", "real-agent", "add-function"),
+            metadata={
+                "fixture_dir": "examples/eval/fixtures/string-utils",
+                "validation": validation,
+                "evidence": {
+                    "files": [
+                        {
+                            "path": "string_utils.py",
+                            "changed": True,
+                            "contains": ("def capitalize_words",),
+                        },
+                        {
+                            "path": "tests/test_string_utils.py",
+                            "changed": True,
+                            "contains": ("capitalize_words", "Hello World"),
+                        },
+                    ],
+                },
+            },
+        ),
+        EvalTask(
+            id="add-multiply",
+            prompt=(
+                "Extend the tiny calculator to support multiply(left, right). Keep the "
+                "existing add behavior. Add a focused unittest for multiply, run the unit "
+                "validation, and finish with a concise summary."
+            ),
+            expected_answer_contains=("multiply",),
+            expected_tool_calls=("read_file", "bash"),
+            tags=("coding", "sandbox", "real-agent", "add-function"),
+            metadata={
+                "fixture_dir": "examples/eval/fixtures/tiny-calculator",
+                "validation": validation,
+                "evidence": {
+                    "files": [
+                        {
+                            "path": "calculator.py",
+                            "changed": True,
+                            "contains": ("def multiply", "return left * right"),
+                        },
+                        {
+                            "path": "tests/test_calculator.py",
+                            "changed": True,
+                            "contains": ("test_multiply", "multiply("),
                         },
                     ],
                 },
@@ -224,6 +349,7 @@ SUITES: dict[str, tuple[EvalTask, ...]] = {
     "tool": tool_use(),
     "context": context(),
     "multi": multi_turn(),
+    "coding-fixture": coding_fixture(),
     "coding": coding(),
     "plan": plan_tasks(),
     "all": all_suites(),
