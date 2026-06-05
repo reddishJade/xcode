@@ -47,7 +47,9 @@ class SubprocessExecutionEnv:
         cancel_event: threading.Event | None = None,
     ) -> ExecutionResult:
         popen_kwargs: dict[str, Any] = {}
-        if sys.platform != "win32":
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        else:
             popen_kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             argv,
