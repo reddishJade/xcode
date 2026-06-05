@@ -8,7 +8,6 @@ from .types import (
     BranchSummaryMessage,
     CompactionSummaryMessage,
     ContentBlock,
-    CustomMessage,
     SystemMessage,
     TextContent,
     ThinkingContent,
@@ -61,12 +60,6 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
                 }
             ],
         }
-
-    if isinstance(m, CustomMessage):
-        content: Any = m.content
-        if isinstance(m.content, str):
-            content = [{"type": "text", "text": m.content}]
-        return {"role": "user", "content": content}
 
     if isinstance(m, BranchSummaryMessage):
         return {

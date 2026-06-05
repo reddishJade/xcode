@@ -70,16 +70,6 @@ class ToolResultMessage:
 
 
 @dataclass
-class CustomMessage:
-    role: str = "custom"
-    custom_type: str = ""
-    content: str | list[TextContent | ImageContent] = ""
-    display: bool = True
-    details: Any = None
-    timestamp: int = 0
-
-
-@dataclass
 class CompactionSummaryMessage:
     role: str = "compaction_summary"
     summary: str = ""
@@ -100,7 +90,6 @@ type AgentMessage = (
     | UserMessage
     | AssistantMessage
     | ToolResultMessage
-    | CustomMessage
     | CompactionSummaryMessage
     | BranchSummaryMessage
 )
