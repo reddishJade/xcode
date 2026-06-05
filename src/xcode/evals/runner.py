@@ -113,6 +113,8 @@ class EvalRunner:
             "tool_calls": tool_call_count,
             "tool_errors": tool_error_count,
         }
+        if project_root is not None:
+            metrics["project_root"] = str(project_root)
         # 从 final event 提取运行级指标
         agent_metrics = _extract_agent_metrics(events)
         if agent_metrics:

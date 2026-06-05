@@ -21,6 +21,7 @@ from xcode.harness.app import XcodeApp
 from xcode.harness.config import AgentConfig
 from xcode.harness.skills import ToolSpec
 from xcode.evals.benchmarks import load_benchmark
+from xcode.evals.cli import _print_failed_trials
 from xcode.evals.cli import main as eval_main
 from xcode.evals.cli import _trial_project_root
 from xcode.evals.cli import _task_from_dict
@@ -150,6 +151,7 @@ class EvalPipelineTests(unittest.TestCase):
             self.assertTrue(report.success)
             trial = report.trials[0]
             self.assertIn("file_evidence", trial.metrics)
+            self.assertEqual(trial.metrics["project_root"], str(root))
             grader_names = {grader.name for grader in trial.graders}
             self.assertIn("file_changed:math_utils.py", grader_names)
             self.assertIn(
@@ -358,6 +360,29 @@ class EvalPipelineTests(unittest.TestCase):
         self.assertIn("swebench-verified", BENCHMARK_ADAPTERS)
         self.assertIn("terminal-bench", BENCHMARK_ADAPTERS)
         self.assertIn("aider-polyglot", BENCHMARK_ADAPTERS)
+
+    def test_eval_cli_prints_failed_trial_details(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task = EvalTask(
+                id="no-echo",
+                prompt="do not run echo",
+                disallowed_tool_calls=("echo",),
+            )
+            runner = EvalRunner(
+                tasks=(task,),
+                app_factory=_tool_app,
+                output_dir=Path(tmp),
+            )
+            report = runner.run()
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                _print_failed_trials(report)
+
+            text = output.getvalue()
+            self.assertIn("Failures:", text)
+            self.assertIn("disallowed_tool:echo", text)
+            self.assertIn("trace:", text)
 
     def test_pass_at_k_uses_unbiased_estimator(self) -> None:
         trials = (

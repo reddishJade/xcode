@@ -27,7 +27,7 @@ from .adapters import BENCHMARK_ADAPTERS
 from .benchmarks import load_benchmark
 from .runner import EvalRunner
 from .sandbox import trial_project_root
-from .schema import EvalTask
+from .schema import EvalReport, EvalTask
 from .tasks import SUITE_DESCRIPTIONS, SUITES
 
 
@@ -79,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Eval run: {report.run_id}")
     print(f"Status: {'PASS' if report.success else 'FAIL'}")
     _print_enhanced_summary(report)
+    _print_failed_trials(report)
     print(f"Report JSON: {report.output_dir / 'report.json'}")
     print(f"Report HTML: {report.output_dir / 'report.html'}")
     print(f"Report CSV:  {report.output_dir / 'report.csv'}")
@@ -184,6 +185,32 @@ def _print_distribution(m: dict[str, Any]) -> None:
         print("\nDistribution:")
         for r in rows:
             print(r)
+
+
+def _print_failed_trials(report: EvalReport) -> None:
+    failed_trials = [trial for trial in report.trials if not trial.success]
+    if not failed_trials:
+        return
+    print("\nFailures:")
+    for trial in failed_trials:
+        print(f"  - {trial.trial_id}")
+        project_root = trial.metrics.get("project_root")
+        if project_root:
+            print(f"    project_root: {project_root}")
+        print(f"    trace: {trial.trace_path}")
+        for grader in trial.graders:
+            if grader.passed:
+                continue
+            detail = f": {grader.details}" if grader.details else ""
+            print(f"    grader: {grader.name}{detail}")
+        validation = trial.metrics.get("validation", ())
+        if isinstance(validation, list):
+            for item in validation:
+                if not isinstance(item, dict):
+                    continue
+                command = item.get("command", "")
+                returncode = item.get("returncode", "")
+                print(f"    validation: exit={returncode} command={command}")
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
