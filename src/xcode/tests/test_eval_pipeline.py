@@ -26,8 +26,9 @@ from xcode.evals.cli import _print_failed_trials
 from xcode.evals.cli import main as eval_main
 from xcode.evals.cli import _trial_project_root
 from xcode.evals.cli import _task_from_dict
-from xcode.evals import EvalRunner, EvalTask
+from xcode.evals import EvalReport, EvalRunner, EvalTask
 from xcode.evals.adapters import BENCHMARK_ADAPTERS
+from xcode.evals.adapters import build_swebench_predictions
 from xcode.evals.runner import _build_run_metrics
 from xcode.evals.sandbox import UnsafeEvalTaskError
 from xcode.evals.tasks import SUITES
@@ -390,6 +391,30 @@ class EvalPipelineTests(unittest.TestCase):
         self.assertIn("terminal-bench", BENCHMARK_ADAPTERS)
         self.assertIn("aider-polyglot", BENCHMARK_ADAPTERS)
 
+    def test_swebench_adapter_builds_predictions(self) -> None:
+        task = EvalTask(
+            id="swebench-lite-owner__repo-1",
+            prompt="fix bug",
+            metadata={
+                "benchmark": {
+                    "name": "swebench-lite",
+                    "instance_id": "owner__repo-1",
+                }
+            },
+        )
+        report = _report_with_patch(task.id, "diff --git a/file.py b/file.py\n")
+
+        predictions = build_swebench_predictions(
+            report,
+            (task,),
+            model_name="xcode-test",
+        )
+
+        self.assertEqual(len(predictions), 1)
+        self.assertEqual(predictions[0]["instance_id"], "owner__repo-1")
+        self.assertEqual(predictions[0]["model_name_or_path"], "xcode-test")
+        self.assertIn("file.py", predictions[0]["model_patch"])
+
     def test_eval_cli_prints_failed_trial_details(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task = EvalTask(
@@ -524,6 +549,24 @@ def _trial(task_id: str, success: bool) -> TrialResult:
         answer="",
         trace_path=Path("trace.jsonl"),
         graders=(),
+    )
+
+
+def _report_with_patch(task_id: str, patch_text: str) -> EvalReport:
+    trial = TrialResult(
+        task_id=task_id,
+        trial_id=f"{task_id}-1",
+        success=True,
+        answer="",
+        trace_path=Path("trace.jsonl"),
+        graders=(),
+        metrics={"model_patch": patch_text},
+    )
+    return EvalReport(
+        run_id="run",
+        success=True,
+        output_dir=Path("."),
+        trials=(trial,),
     )
 
 
