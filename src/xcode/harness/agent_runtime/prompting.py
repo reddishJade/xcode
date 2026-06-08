@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from collections.abc import Callable
@@ -80,6 +81,15 @@ class PromptContext:
     modules: tuple[str, ...] = DEFAULT_PROMPT_MODULES
 
 
+@dataclass(frozen=True)
+class ProjectInstruction:
+    """项目指令文件的缓存键和渲染内容。"""
+
+    name: str
+    content_hash: str
+    prompt_text: str
+
+
 class SystemPromptBuilder:
     """根据稳定模块、动态模块和易失模块构造每轮 system prompt，最大化 Prompt Cache 命中率。"""
 
@@ -109,16 +119,12 @@ class SystemPromptBuilder:
         return "\n\n".join(part for part in full_parts if part.strip())
 
     def _build_stable_region(self, context: PromptContext, enabled: set[str]) -> str:
-        try:
-            mtimes = tuple(
-                (context.project_root / name).stat().st_mtime
-                for name in ("AGENTS.md", "CLAUDE.md")
-                if (context.project_root / name).is_file()
-            )
-        except Exception:
-            mtimes = ()
-
         stable_enabled = enabled.intersection(STABLE_PROMPT_MODULE_ORDER)
+        instruction_sources = (
+            _project_instruction_sources(context.project_root)
+            if "instructions" in stable_enabled
+            else ()
+        )
         stable_key = (
             tuple(
                 (
@@ -131,7 +137,7 @@ class SystemPromptBuilder:
                 )
                 for t in context.registry
             ),
-            mtimes,
+            tuple((source.name, source.content_hash) for source in instruction_sources),
             frozenset(stable_enabled),
         )
 
@@ -146,7 +152,7 @@ class SystemPromptBuilder:
                 case "identity":
                     stable_parts.append(CORE_IDENTITY)
                 case "instructions":
-                    instructions = _project_instructions(context.project_root)
+                    instructions = _render_project_instructions(instruction_sources)
                     if instructions:
                         stable_parts.append(instructions)
                 case "tool_discipline":
@@ -334,12 +340,29 @@ def _cwd_info(project_root: Path) -> str:
     return "<cwd-info>\n" + "\n".join(names) + "\n</cwd-info>"
 
 
-def _project_instructions(project_root: Path) -> str:
-    parts = []
+def _project_instruction_sources(project_root: Path) -> tuple[ProjectInstruction, ...]:
+    """读取项目指令文件，并为 prompt 可见内容生成内容哈希。"""
+    sources = []
     for name in ("AGENTS.md", "CLAUDE.md"):
         path = project_root / name
         if path.is_file():
             text = path.read_text(encoding="utf-8", errors="replace").strip()
             if text:
-                parts.append(f"<{name}>\n{text[:MAX_INSTRUCTION_CHARS]}\n</{name}>")
+                prompt_text = text[:MAX_INSTRUCTION_CHARS]
+                content_hash = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
+                sources.append(
+                    ProjectInstruction(
+                        name=name,
+                        content_hash=content_hash,
+                        prompt_text=prompt_text,
+                    )
+                )
+    return tuple(sources)
+
+
+def _render_project_instructions(sources: tuple[ProjectInstruction, ...]) -> str:
+    """渲染项目指令文件内容。"""
+    parts = []
+    for source in sources:
+        parts.append(f"<{source.name}>\n{source.prompt_text}\n</{source.name}>")
     return "\n\n".join(parts)
