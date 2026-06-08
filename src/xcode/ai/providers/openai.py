@@ -113,6 +113,8 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         options: StreamOptions | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
+        self._current_options = options
+        messages = self._normalize_messages(messages)
         for event in self._stream_sync(messages, tuple(tools), **kwargs):
             yield event
 
@@ -123,7 +125,9 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
         params = self._responses_kwargs(messages, tools, stream=True)
-        create = cast(Any, self.client.responses.create)
+        self._apply_responses_options(params)
+        client = self._responses_client()
+        create = cast(Any, client.responses.create)
         stream = self.runtime.run(lambda: create(**params))
         message_count = len(params["input"])
         yield from responses_stream_to_events(
@@ -193,6 +197,35 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         if self.prompt_cache_key:
             kwargs["prompt_cache_key"] = self.prompt_cache_key
         return kwargs
+
+    def _apply_responses_options(self, params: dict[str, object]) -> None:
+        """将通用 StreamOptions 映射到 Responses API 请求参数。"""
+        opts = getattr(self, "_current_options", None)
+        if opts is None:
+            return
+
+        extra_headers: dict[str, str] = {}
+        if opts.session_id:
+            extra_headers["x-session-id"] = opts.session_id
+        if opts.headers:
+            extra_headers.update(opts.headers)
+        if extra_headers:
+            params["extra_headers"] = extra_headers
+        if opts.metadata and "metadata" not in params:
+            params["metadata"] = opts.metadata
+        if opts.temperature is not None:
+            params["temperature"] = opts.temperature
+        if opts.max_tokens is not None:
+            params["max_output_tokens"] = opts.max_tokens
+        if opts.timeout_ms is not None:
+            params["timeout"] = opts.timeout_ms / 1000
+
+    def _responses_client(self) -> Any:
+        """按请求级 API key 返回 Responses 客户端。"""
+        opts = getattr(self, "_current_options", None)
+        if opts is None or not opts.api_key:
+            return self.client
+        return self.client.with_options(api_key=opts.api_key)
 
     def _record_usage(self, response, sent_messages: int) -> None:
         self.metrics["sent_messages"] = sent_messages
