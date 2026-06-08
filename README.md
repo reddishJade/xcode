@@ -98,7 +98,7 @@ uv run python -m unittest discover src\xcode\tests
   "provider": {
     "model_profiles": {
       "main": {
-        "transport": "chat_completions",
+        "transport": "deepseek_chat",
         "chat_model": "deepseek-v4-flash",
         "base_url": "https://api.deepseek.com",
         "api_key": ""

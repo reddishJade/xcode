@@ -91,6 +91,21 @@ def _resolve_api_key(
     env_files: tuple[Path, ...],
     transport: str = "",
 ) -> str:
+    """按回退优先级解析 API key。
+
+    回退顺序设计原因：
+    1. profile 显式配置优先（显式覆盖）
+    2. profile_name 专属环境变量（{PROFILE}_API_KEY）
+    3. provider 官方环境变量（各家官方 SDK 约定）
+    4. OPENAI_API_KEY（OpenAI-compatible 兼容层通用约定）
+    5. API_KEY（通用回退）
+
+    provider 官方环境变量映射表基于各家 SDK 文档：
+    - Anthropic: ANTHROPIC_API_KEY
+    - ChatGLM: CHATGLM_API_KEY / ZHIPUAI_API_KEY / BIGMODEL_API_KEY（历史兼容）
+    - DeepSeek: DEEPSEEK_API_KEY
+    - MiMo: MIMO_API_KEY
+    """
     if configured:
         return configured
     provider_candidates = {
@@ -121,6 +136,16 @@ def _build_llm_profiles(
     settings: ProviderSettings,
     runtime: ProviderRuntime,
 ) -> dict[str, ModelProvider]:
+    """构造所有 model profile 的 provider 实例。
+
+    确保四个标准 profile 存在的原因：
+    - main: 主循环默认模型，所有场景都需要
+    - subagent: 子任务代理模型，未配置时继承 main（成本控制）
+    - judge: 评审/验证模型，未配置时继承 main（质量保证）
+    - refiner: 精化/重写模型，未配置时继承 main（输出优化）
+
+    用户只需配置 main，其余三个按需覆盖。
+    """
     profile_settings = dict(settings.model_profiles)
     profile_settings.setdefault("main", ModelProfileConfig())
     profile_settings.setdefault("subagent", profile_settings["main"])
@@ -138,7 +163,7 @@ def _build_llm_profile(
     env_files: tuple[Path, ...],
     runtime: ProviderRuntime,
 ) -> ModelProvider:
-    transport = _canonical_transport(profile.transport)
+    transport = profile.transport
     api_key = _resolve_api_key(profile.api_key, profile_name, env_files, transport)
     from . import PROVIDER_REGISTRY
 
@@ -151,6 +176,10 @@ def _build_llm_profile(
         "api_key": api_key,
         "model": profile.chat_model,
     }
+    # Anthropic Messages API 特殊处理原因：
+    # 1. 官方 SDK 无 base_url 参数（非 OpenAI-compatible）
+    # 2. 无 thinking/reasoning_effort 等扩展参数
+    # 3. 重试和限流由 ProviderRuntime 统一处理，不在 provider 构造时注入
     if transport == "anthropic_messages":
         return provider_cls(**kwargs)
 
@@ -168,12 +197,3 @@ def _build_llm_profile(
         kwargs["tool_stream"] = profile.tool_stream
         kwargs["response_format"] = profile.response_format
     return provider_cls(**kwargs)
-
-
-def _canonical_transport(transport: str) -> str:
-    aliases = {
-        "chat_completions": "openai_chat",
-        "responses_stateful": "openai_responses",
-        "chatglm": "chatglm_chat",
-    }
-    return aliases.get(transport, transport)

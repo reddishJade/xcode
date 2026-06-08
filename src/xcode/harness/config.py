@@ -9,7 +9,6 @@ ProviderTransport = Literal[
     "openai_chat",
     "openai_responses",
     "anthropic_messages",
-    "chatglm",
     "chatglm_chat",
     "deepseek_chat",
     "mimo_chat",
@@ -192,6 +191,20 @@ def _optional_path(value: object) -> Path | None:
 
 
 def _load_model_profiles(provider: dict) -> dict[str, ModelProfileRuntimeConfig]:
+    """从配置文件加载 model profiles，支持字符串简写和完整配置。
+
+    字符串简写设计原因：
+    用户只需配置 {"subagent": "deepseek-v4-flash"} 即可快速切换模型，
+    其余参数（transport/base_url/api_key）自动继承 main profile。
+    这避免了为每个 profile 重复完整配置的冗余。
+
+    三个固定 profile 的设计原因：
+    - main: 主循环默认模型
+    - subagent: 子任务模型（成本优化，未配置时继承 main）
+    - fallback: 降级模型（可用性保障，未配置时继承 main）
+
+    这三个 profile 是运行时约定，确保代码可以安全引用它们而不需要每次检查存在性。
+    """
     profiles = {PROFILE_MAIN: ModelProfileRuntimeConfig()}
     raw_profiles = provider.get("model_profiles", {})
     if not isinstance(raw_profiles, dict):
@@ -211,8 +224,9 @@ def _load_model_profiles(provider: dict) -> dict[str, ModelProfileRuntimeConfig]
         if not isinstance(raw, dict):
             continue
         profiles[profile_name] = ModelProfileRuntimeConfig(
-            transport=_normalize_transport(
-                raw.get("transport", profiles[PROFILE_MAIN].transport)
+            transport=cast(
+                ProviderTransport,
+                raw.get("transport", profiles[PROFILE_MAIN].transport),
             ),
             chat_model=raw.get("chat_model", profiles[PROFILE_MAIN].chat_model),
             base_url=raw.get("base_url", profiles[PROFILE_MAIN].base_url),
@@ -235,16 +249,6 @@ def _load_model_profiles(provider: dict) -> dict[str, ModelProfileRuntimeConfig]
     profiles.setdefault(PROFILE_SUBAGENT, main)
     profiles.setdefault(PROFILE_FALLBACK, main)
     return profiles
-
-
-def _normalize_transport(value: object) -> ProviderTransport:
-    aliases = {
-        "chat_completions": "openai_chat",
-        "responses_stateful": "openai_responses",
-        "chatglm": "chatglm_chat",
-    }
-    raw = str(value)
-    return cast(ProviderTransport, aliases.get(raw, raw))
 
 
 def _optional_dict(value: object) -> dict[str, Any] | None:

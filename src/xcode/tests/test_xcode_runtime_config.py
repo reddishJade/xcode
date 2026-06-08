@@ -91,7 +91,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             path = Path(tmp) / "xcode.config.json"
             path.write_text(
                 '{"provider":{"model_profiles":{"main":{'
-                '"transport":"chatglm",'
+                '"transport":"chatglm_chat",'
                 '"chat_model":"glm-4.7",'
                 '"base_url":"https://open.bigmodel.cn/api/paas/v4/",'
                 '"thinking":false,'

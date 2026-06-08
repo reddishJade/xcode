@@ -2,7 +2,7 @@
 
 `xcode.config.json` 位于项目根目录。`python -m xcode.main` 和 `build_app(project_root=...)` 会自动读取它；命令行 `--config` 只用于显式指定其他配置文件。相对路径均按 `--project-root` 解析。
 
-没有 `xcode.config.json` 时，运行时只启用 `core` 工具组。
+**没有 `xcode.config.json` 时的设计原因**：运行时只启用 `core` 工具组（read_file/write_file/bash 等基础能力），这是零配置可用的最小安全集合。实验性功能（MCP/subagent/worktree 等）必须显式 opt-in，避免意外引入复杂依赖和权限风险。
 
 ```powershell
 .\.venv\Scripts\python.exe -m xcode.main
@@ -18,7 +18,7 @@
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `transport` | string | `"chat_completions"` | 模型传输协议。支持 `chat_completions`、`responses_stateful`、`deepseek_chat`、`mimo_chat`、`chatglm`、`anthropic_messages`。 |
+| `transport` | string | `"openai_chat"` | 模型传输协议。支持 `openai_chat`、`openai_responses`、`deepseek_chat`、`mimo_chat`、`chatglm_chat`、`anthropic_messages`。 |
 | `chat_model` | string | `"deepseek-v4-flash"` | 聊天模型名。 |
 | `base_url` | string | `""` | OpenAI-compatible API 地址。DeepSeek 和 ChatGLM 有默认值，MiMo 需要显式配置。 |
 | `api_key` | string | `""` | 显式 API key；留空时按 profile 环境变量和通用环境变量查找。 |
@@ -37,10 +37,10 @@
 #### DeepSeek 专用说明
 
 - **Thinking Mode**：默认开启，通过 `extra_body={"thinking": {"type": "enabled"}}` 控制
-- **reasoning_effort**：默认 `"high"`，复杂 agent 请求自动设为 `"max"`
+- **reasoning_effort**：默认 `"high"`，原因是 agent 场景需要多步推理和工具选择，`"high"` 是质量和成本的平衡点。复杂 agent 请求（多工具并行、嵌套推理）自动设为 `"max"`，牺牲成本换取正确性。
 - **reasoning_content 处理**：
-  - 无工具调用时：历史 reasoning_content 自动清除
-  - 有工具调用时：保留当前轮次 reasoning_content，确保 API 调用成功
+  - 无工具调用时：历史 reasoning_content 自动清除（节省上下文）
+  - 有工具调用时：保留当前轮次 reasoning_content，确保 API 调用成功（DeepSeek API 要求）
 
 #### MiMo 专用说明
 
@@ -88,7 +88,7 @@
   "provider": {
     "model_profiles": {
       "main": {
-        "transport": "chatglm",
+        "transport": "chatglm_chat",
         "chat_model": "glm-4.7",
         "api_key": "YOUR_ZHIPU_API_KEY"
       }
@@ -192,6 +192,8 @@
 
 ## MCP
 
+**MCP 配置独立的设计原因**：MCP server 配置包含启动命令、环境变量和工具覆盖，属于外部集成而非核心 agent 配置。独立文件支持本地覆盖（`.local/mcp_config.json` 优先级高于项目根 `mcp_config.json`），避免团队共享配置与个人环境冲突。
+
 MCP server 不写入 `xcode.config.json` 的 `tools` 段，而是放在 `.local/mcp_config.json` 或项目根 `mcp_config.json`：
 
 ```json
@@ -252,7 +254,7 @@ MCP server 不写入 `xcode.config.json` 的 `tools` 段，而是放在 `.local/
   "provider": {
     "model_profiles": {
       "main": {
-        "transport": "chat_completions",
+        "transport": "deepseek_chat",
         "chat_model": "deepseek-v4-flash",
         "base_url": "https://api.deepseek.com",
         "api_key": ""

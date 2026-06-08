@@ -150,7 +150,7 @@ def build_app(
 
 | 类型别名 | 值 |
 |---|---|
-| `ProviderTransport` | `Literal["openai_chat", "openai_responses", "anthropic_messages", "chatglm", "chatglm_chat", "deepseek_chat", "mimo_chat"]` |
+| `ProviderTransport` | `Literal["openai_chat", "openai_responses", "anthropic_messages", "chatglm_chat", "deepseek_chat", "mimo_chat"]` |
 | `ExecutionMode` | `Literal["plan", "review", "act"]` |
 
 | DataClass | 关键字段 | 说明 |

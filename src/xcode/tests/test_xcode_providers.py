@@ -104,7 +104,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
                         env_files=(env_file,),
                         model_profiles={
                             "main": ModelProfileRuntimeConfig(
-                                transport="chatglm",
+                                transport="chatglm_chat",
                                 chat_model="glm-4.7",
                                 base_url="",
                                 reasoning_effort=None,
