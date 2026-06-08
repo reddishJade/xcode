@@ -243,6 +243,7 @@ def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     converted: list[dict[str, Any]] = []
     for message in messages:
         role = str(message.get("role", "user"))
+        responses_role = "developer" if role == "system" else role
         content = message.get("content")
 
         if role == "tool" and "tool_call_id" in message:
@@ -279,7 +280,9 @@ def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         if isinstance(content, list):
-            converted.extend(_content_blocks_to_responses_input(role, content))
+            converted.extend(
+                _content_blocks_to_responses_input(responses_role, content)
+            )
         else:
             text = str(content) if content is not None else ""
             if role == "assistant":
@@ -294,7 +297,7 @@ def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 converted.append(
                     {
                         "type": "message",
-                        "role": role,
+                        "role": responses_role,
                         "content": [{"type": "input_text", "text": text}],
                     }
                 )

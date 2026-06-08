@@ -339,6 +339,18 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
         )
         self.assertEqual(content[2], {"type": "input_file", "file_id": "file_123"})
 
+    def test_responses_input_maps_system_role_to_developer(self) -> None:
+        """Responses input 将系统指令映射为 developer 角色。"""
+        converted = to_responses_input(
+            [
+                {"role": "system", "content": "Follow project instructions."},
+                {"role": "user", "content": "hello"},
+            ]
+        )
+
+        self.assertEqual(converted[0]["role"], "developer")
+        self.assertEqual(converted[1]["role"], "user")
+
 
 @dataclass(frozen=True)
 class MockProfile:
