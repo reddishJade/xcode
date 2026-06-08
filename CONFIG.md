@@ -452,10 +452,47 @@ fingerprint = tool_catalog_fingerprint(tools)
 2. **压缩动态历史**：长会话通过 compaction 保留目标、约束、决策、工具结果和未解决事项
 3. **控制工具输出**：只在请求边界压缩超长 tool_result，磁盘日志保留完整历史
 4. **渐进发现工具**：当工具过多时，用 search/describe/call 模式避免每轮携带所有工具定义
+5. **Token-aware 压缩触发**：优先使用 provider 返回的真实 `prompt_tokens` 判断压缩时机
+6. **智能重复抑制**：文件变更后清除只读工具历史，避免"编辑后复读"误判
+
+#### Token-Aware 压缩触发
+
+`src/xcode/agent/compaction.py` 提供基于真实 token 的压缩判断：
+
+- `should_compact_token_aware()`: 优先使用 `last_prompt_tokens`（provider 返回），回退到本地估算
+- `get_model_soft_threshold()`: 各模型的软阈值（上下文窗口的 ~50-80%）
+- `extract_prompt_tokens_from_usage()`: 从 usage 字典提取 `prompt_tokens`
+
+**优先级**：真实 token > 消息数阈值 > 估算 token 阈值
+
+**设计原因**：provider 的 `prompt_tokens` 比本地 4 字符/token 估算更准确，避免接近上下文窗口才触发压缩。
+
+#### 重复工具调用抑制增强
+
+`src/xcode/agent/watchdog.py` 提供文件变更感知的重复检测：
+
+- `RepeatDetector`: 带状态的重复检测器
+- `is_file_mutation_tool()`: 识别文件变更工具（write_file、edit_file、bash）
+- `is_file_read_tool()`: 识别只读工具（read_file、grep_search、glob_files）
+- **智能清除**：文件变更后自动清除只读调用历史，避免误判
+
+**使用示例**：
+
+```python
+detector = RepeatDetector(limit=3)
+is_repeated, reason = detector.check_and_update(tool_calls)
+if is_repeated:
+    # 触发重复限制，reason 包含详细信息
+    pass
+```
 
 #### 验证方式
 
-- **单元测试**：`src/xcode/tests/test_cache_optimization.py`
+- **单元测试**：
+  - `src/xcode/tests/test_cache_optimization.py` - 缓存统计和工具稳定化
+  - `src/xcode/tests/test_history_hygiene.py` - 历史修复和 hygiene
+  - `src/xcode/tests/test_compaction.py` - Token-aware 压缩触发
+  - `src/xcode/tests/test_watchdog.py` - 重复工具调用抑制
 - **Metrics API**：读取 `provider.metrics` 字典查看实时缓存统计
 - **真实验证**：通过多轮对话观察缓存命中率稳定性
 
