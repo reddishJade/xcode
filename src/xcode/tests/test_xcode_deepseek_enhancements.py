@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from typing import Any, cast
 
@@ -14,6 +15,7 @@ from xcode.ai.events import (
     UsageUpdate,
     ToolCallEvent,
 )
+from xcode.ai.types import StreamOptions
 from xcode.harness.skills import ToolSpec
 
 
@@ -134,6 +136,79 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
         ready_call = cast(ToolCallEvent, events[-1])
         self.assertEqual(ready_call.calls[0].name, "echo")
         self.assertEqual(ready_call.calls[0].input, {"text": "hi"})
+
+    def test_stream_options_injection_via_public_entry(self) -> None:
+        """验证 StreamOptions 通过 provider.stream() 注入到请求。"""
+        async def run_test():
+            captured_params: dict[str, Any] = {}
+
+            def capture_create(**kwargs):
+                captured_params.update(kwargs)
+                return iter([FakeStreamChunk(content="ok")])
+
+            client = FakeOpenAIClient(stream_chunks=[])
+            client.chat.completions.create = capture_create
+            provider = DeepSeekProvider(
+                api_key="ds-key",
+                base_url="https://api.deepseek.com",
+                model="deepseek-chat",
+                client=client,
+            )
+
+            options = StreamOptions(
+                headers={"X-Custom": "test-header"},
+                session_id="test-session-123",
+                api_key="override-key",
+            )
+            events = [
+                ev
+                async for ev in provider.stream(
+                    [{"role": "user", "content": "Hi"}], [], options=options
+                )
+            ]
+
+            self.assertEqual(captured_params.get("api_key"), "override-key")
+            extra_headers = captured_params.get("extra_headers", {})
+            self.assertEqual(extra_headers.get("X-Custom"), "test-header")
+            self.assertEqual(extra_headers.get("x-session-id"), "test-session-123")
+            self.assertTrue(len(events) > 0)
+
+        asyncio.run(run_test())
+
+    def test_response_format_passed_to_request(self) -> None:
+        """验证 response_format 传递到实际请求参数。"""
+        captured_params: dict[str, Any] = {}
+
+        def capture_create(**kwargs):
+            captured_params.update(kwargs)
+            return iter([FakeStreamChunk(content="ok")])
+
+        client = FakeOpenAIClient(stream_chunks=[])
+        client.chat.completions.create = capture_create
+        provider = DeepSeekProvider(
+            api_key="ds-key",
+            base_url="https://api.deepseek.com",
+            model="deepseek-chat",
+            client=client,
+        )
+
+        events = list(
+            provider._stream_sync(
+                [{"role": "user", "content": "Hi"}],
+                (),
+                response_format={"type": "json_object"},
+            )
+        )
+
+        self.assertEqual(
+            captured_params.get("response_format"), {"type": "json_object"}
+        )
+        # 验证 JSON mode 防御逻辑注入了 'json' 关键字
+        messages = captured_params.get("messages", [])
+        self.assertTrue(len(messages) > 0)
+        content = messages[0].get("content", "")
+        self.assertIn("json", content.lower())
+        self.assertTrue(len(events) > 0)
 
 
 class FakeOpenAIClient:

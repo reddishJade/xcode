@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Iterator
-from typing import Any, cast
+from typing import Any
 
 from xcode.ai.types import ToolDefinition
 
 from .codec import to_chat_messages, to_chat_tool
 from .openai_compat import OpenAICompatProvider
-from .stream_codec import chat_stream_to_events
 
 """DeepSeek provider（兼容 OpenAI Chat API，带 reasoning_content 支持）。"""
 
@@ -31,6 +30,7 @@ class DeepSeekProvider(OpenAICompatProvider):
         runtime=None,
         client=None,
         strict_tools: bool = False,
+        response_format: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             api_key,
@@ -44,6 +44,7 @@ class DeepSeekProvider(OpenAICompatProvider):
             import_error_msg="Missing dependency: openai.",
         )
         self.strict_tools = strict_tools
+        self.response_format = response_format
         self.metrics["prompt_cache_hit_tokens"] = 0
         self.metrics["prompt_cache_miss_tokens"] = 0
 
@@ -64,7 +65,9 @@ class DeepSeekProvider(OpenAICompatProvider):
         cleaned_messages = self._clean_reasoning_content(messages)
         api_messages = to_chat_messages(cleaned_messages)
 
-        if response_format and response_format.get("type") == "json_object":
+        # 优先使用运行时传递的 response_format，回退到构造时配置
+        effective_format = response_format or self.response_format
+        if effective_format and effective_format.get("type") == "json_object":
             api_messages = self._ensure_json_word(api_messages)
 
         strict_tools = kwargs.pop("strict_tools", getattr(self, "strict_tools", False))
@@ -85,8 +88,8 @@ class DeepSeekProvider(OpenAICompatProvider):
             "stream_options": {"include_usage": True},
         }
 
-        if response_format:
-            params["response_format"] = response_format
+        if effective_format:
+            params["response_format"] = effective_format
         if max_tokens:
             params["max_tokens"] = max_tokens
 
@@ -96,12 +99,7 @@ class DeepSeekProvider(OpenAICompatProvider):
             if k not in params:
                 params[k] = v
 
-        # DeepSeek has its own _call_chat_api pattern due to extra params
-        create = cast(Any, self.client.chat.completions.create)
-        stream = self.runtime.run(lambda: create(**params))
-        yield from chat_stream_to_events(
-            self._intercept_stream(stream, len(params["messages"]))
-        )
+        yield from self._call_chat_api(params, len(api_messages))
 
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]

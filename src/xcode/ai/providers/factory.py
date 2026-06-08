@@ -196,4 +196,6 @@ def _build_llm_profile(
         kwargs["clear_thinking"] = profile.clear_thinking
         kwargs["tool_stream"] = profile.tool_stream
         kwargs["response_format"] = profile.response_format
+    if transport == "deepseek_chat":
+        kwargs["response_format"] = profile.response_format
     return provider_cls(**kwargs)
