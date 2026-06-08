@@ -15,6 +15,7 @@ from .repl_sessions import (
     resume_interactively,
     resume_latest,
     resumed_message,
+    sync_agent_history,
 )
 from .repl_settings import (
     handle_effort_command,
@@ -39,6 +40,7 @@ def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
     ctx.store.clear()
     if ctx.session_policy is not None:
         ctx.session_policy.clear()
+    sync_agent_history(ctx.app, ctx.store)
     print("New session started.")
     return False
 
@@ -52,6 +54,7 @@ def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
     meta = ctx.store.fork_into(fork_type)
     if ctx.session_policy is not None:
         ctx.session_policy.clear()
+    sync_agent_history(ctx.app, ctx.store)
     label = f" ({fork_type})" if fork_type else ""
     print(f'Forked: "{meta.title}"{label}')
     return False
@@ -61,6 +64,7 @@ def cmd_rewind(cmd: str, ctx: CommandContext) -> bool:
     parts = cmd.split()
     turns = int(parts[1]) if len(parts) > 1 else 1
     removed = ctx.store.rewind_turns(turns)
+    sync_agent_history(ctx.app, ctx.store)
     print(f"Rewound {removed} transcript records.")
     return False
 
@@ -74,14 +78,17 @@ def cmd_resume(cmd: str, ctx: CommandContext) -> bool:
             if view:
                 print(resumed_message(view))
                 print_loaded_history(ctx.store)
+                sync_agent_history(ctx.app, ctx.store)
             else:
                 print("No conversations found.")
             return False
         ctx.store.resume(target)
         print(resumed_message(current_view(ctx.store)))
         print_loaded_history(ctx.store)
+        sync_agent_history(ctx.app, ctx.store)
         return False
     resume_interactively(ctx.store, ctx.prompt_session)
+    sync_agent_history(ctx.app, ctx.store)
     return False
 
 
@@ -114,6 +121,7 @@ def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
         return False
     if ctx.session_policy is not None:
         ctx.session_policy.clear()
+    sync_agent_history(ctx.app, ctx.store)
     print(resumed_message(view))
     print_loaded_history(ctx.store)
     return False
@@ -204,6 +212,7 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
         )
         if ctx.session_policy is not None:
             ctx.session_policy.clear()
+        sync_agent_history(ctx.app, ctx.store)
 
         ctx.state.approved_plan = str(last_assistant_content)
         ctx.state.mode = "act"

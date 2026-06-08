@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -8,7 +9,15 @@ from rich.text import Text
 
 from .commands import PromptLike
 from .repl_rendering import CLI_COLOR_ASSISTANT, CLI_COLOR_INFO, CLI_COLOR_USER
-from xcode.harness.session import SessionMetadataView, SessionStore
+from xcode.agent.protocols import ContentBlock
+from xcode.agent.messages import (
+    AgentMessage,
+    AssistantMessage,
+    ToolResultMessage,
+    UserMessage,
+)
+from xcode.agent.types import TextContent, ToolCallContent
+from xcode.harness.session import SessionMetadataView, SessionRecord, SessionStore
 
 
 def resume_interactively(store: SessionStore, prompt_session: PromptLike) -> None:
@@ -36,6 +45,145 @@ def resume_latest(store: SessionStore) -> SessionMetadataView | None:
         return None
     store.resume(sessions[0].id)
     return sessions[0]
+
+
+def sync_agent_history(app: Any, store: SessionStore) -> None:
+    """把当前 transcript 的文本历史同步到支持该接口的 agent。"""
+    agent = getattr(app, "agent", None)
+    load_history = getattr(agent, "load_history", None)
+    if not callable(load_history):
+        return
+    load_history(records_to_agent_messages(store.load_records()))
+
+
+def records_to_agent_messages(records: list[SessionRecord]) -> list[AgentMessage]:
+    """把 transcript 记录转换为模型可见的简化会话历史。"""
+    messages: list[AgentMessage] = []
+    pending_tool_calls: list[ToolCallContent] = []
+    seen_tool_call_ids: set[str] = set()
+    for record in records:
+        if record.type == "user":
+            messages.append(UserMessage(content=str(record.content)))
+            continue
+        if record.type == "assistant":
+            text = str(record.content).strip()
+            if text:
+                messages.append(AssistantMessage(content=[TextContent(text=text)]))
+            continue
+        if record.type != "event" or not isinstance(record.content, dict):
+            continue
+        event_type = str(record.content.get("type", ""))
+        event_data = record.content.get("data")
+        if event_type == "assistant":
+            _append_tool_assistant_event(
+                messages,
+                event_data,
+                pending_tool_calls,
+                seen_tool_call_ids,
+            )
+            continue
+        if event_type == "tool_use":
+            _queue_tool_use_event(event_data, pending_tool_calls, seen_tool_call_ids)
+            continue
+        if event_type == "tool_result":
+            _append_tool_result_event(messages, event_data, pending_tool_calls)
+    return messages
+
+
+def _append_tool_assistant_event(
+    messages: list[AgentMessage],
+    event_data: object,
+    pending_tool_calls: list[ToolCallContent],
+    seen_tool_call_ids: set[str],
+) -> None:
+    """恢复包含工具调用的 assistant 事件。"""
+    if not isinstance(event_data, list):
+        return
+    content: list[ContentBlock] = []
+    tool_call_ids: set[str] = set()
+    for block in event_data:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            text = str(block.get("text", "")).strip()
+            if text:
+                content.append(TextContent(text=text))
+            continue
+        tool_call = _tool_call_from_block(block)
+        if tool_call is None:
+            continue
+        content.append(tool_call)
+        tool_call_ids.add(tool_call.id)
+    if not tool_call_ids:
+        return
+    messages.append(AssistantMessage(content=content))
+    seen_tool_call_ids.update(tool_call_ids)
+    pending_tool_calls[:] = [
+        call for call in pending_tool_calls if call.id not in tool_call_ids
+    ]
+
+
+def _queue_tool_use_event(
+    event_data: object,
+    pending_tool_calls: list[ToolCallContent],
+    seen_tool_call_ids: set[str],
+) -> None:
+    """在缺少 assistant 事件时缓存单独的 tool_use 事件。"""
+    if not isinstance(event_data, dict):
+        return
+    tool_call = _tool_call_from_event_data(event_data)
+    if tool_call is None or tool_call.id in seen_tool_call_ids:
+        return
+    pending_tool_calls.append(tool_call)
+    seen_tool_call_ids.add(tool_call.id)
+
+
+def _append_tool_result_event(
+    messages: list[AgentMessage],
+    event_data: object,
+    pending_tool_calls: list[ToolCallContent],
+) -> None:
+    """恢复工具结果，并在需要时先补齐待恢复的工具调用。"""
+    if pending_tool_calls:
+        messages.append(AssistantMessage(content=list(pending_tool_calls)))
+        pending_tool_calls.clear()
+    if not isinstance(event_data, dict):
+        return
+    tool_use_id = str(event_data.get("tool_use_id", "")).strip()
+    if not tool_use_id:
+        return
+    status = str(event_data.get("status", "ok"))
+    messages.append(
+        ToolResultMessage(
+            tool_call_id=tool_use_id,
+            content=str(event_data.get("content", "")),
+            is_error=status not in {"ok", "interrupted"},
+        )
+    )
+
+
+def _tool_call_from_block(block: dict[str, Any]) -> ToolCallContent | None:
+    """从 assistant raw block 解析工具调用。"""
+    if block.get("type") != "tool_use":
+        return None
+    tool_call_id = str(block.get("id", "")).strip()
+    name = str(block.get("name", "")).strip()
+    if not tool_call_id or not name:
+        return None
+    raw_input = block.get("input", {})
+    arguments = raw_input if isinstance(raw_input, dict) else {}
+    return ToolCallContent(id=tool_call_id, name=name, arguments=arguments)
+
+
+def _tool_call_from_event_data(event_data: dict[str, Any]) -> ToolCallContent | None:
+    """从 tool_use event data 解析工具调用。"""
+    tool_call_id = str(event_data.get("id", "")).strip()
+    name = str(event_data.get("name", "")).strip()
+    if not tool_call_id or not name:
+        return None
+    raw_input = event_data.get("input", {})
+    arguments = raw_input if isinstance(raw_input, dict) else {}
+    return ToolCallContent(id=tool_call_id, name=name, arguments=arguments)
 
 
 def select_session(

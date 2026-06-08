@@ -30,7 +30,11 @@ from .repl_rendering import (
     should_print_reasoning_summary,
     single_line_preview,
 )
-from .repl_sessions import print_saved_conversation, resume_interactively
+from .repl_sessions import (
+    print_saved_conversation,
+    resume_interactively,
+    sync_agent_history,
+)
 from .repl_tools import (
     brief_input,
     event_to_dict,
@@ -73,6 +77,7 @@ def run_repl(
     print_startup_banner(app, root)
     if resume_latest:
         resume_interactively(store, session)
+        sync_agent_history(app, store)
 
     while True:
         if state.pending_inject is not None:

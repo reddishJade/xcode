@@ -460,6 +460,99 @@ class XcodeReplTests(unittest.TestCase):
             self.assertIn("1. first conversation", text)
             self.assertIn("Resumed conversation: first conversation", text)
 
+    def test_resume_command_loads_agent_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "AGENTS.md的字节数是多少？")
+            store.append("assistant", "AGENTS.md is 10000 bytes.")
+            session_id = store.current_path.stem.removeprefix("session-")
+            store.clear()
+            app = HistoryLoadingApp()
+            renderer = FakeRenderer()
+
+            with redirect_stdout(StringIO()):
+                handled = handle_command(
+                    f"/resume {session_id}",
+                    store,
+                    app,
+                    renderer,
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+            self.assertFalse(handled)
+            self.assertEqual(
+                [message.role for message in app.agent.loaded],
+                ["user", "assistant"],
+            )
+            self.assertIn("AGENTS.md", str(app.agent.loaded[0].content))
+            self.assertIn("10000 bytes", str(app.agent.loaded[1].content))
+
+    def test_resume_command_loads_tool_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "检查文件大小")
+            store.append(
+                "event",
+                {
+                    "type": "assistant",
+                    "data": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_1",
+                            "name": "bash",
+                            "input": {"command": "wc -c AGENTS.md"},
+                        }
+                    ],
+                },
+            )
+            store.append(
+                "event",
+                {
+                    "type": "tool_use",
+                    "data": {
+                        "id": "call_1",
+                        "name": "bash",
+                        "input": {"command": "wc -c AGENTS.md"},
+                    },
+                },
+            )
+            store.append(
+                "event",
+                {
+                    "type": "tool_result",
+                    "data": {
+                        "tool_use_id": "call_1",
+                        "content": "10000 AGENTS.md",
+                        "status": "ok",
+                    },
+                },
+            )
+            session_id = store.current_path.stem.removeprefix("session-")
+            store.clear()
+            app = HistoryLoadingApp()
+
+            with redirect_stdout(StringIO()):
+                handle_command(
+                    f"/resume {session_id}",
+                    store,
+                    app,
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+            self.assertEqual(
+                [message.role for message in app.agent.loaded],
+                ["user", "assistant", "tool_result"],
+            )
+            tool_call = app.agent.loaded[1].content[0]
+            self.assertEqual(tool_call.id, "call_1")
+            self.assertEqual(tool_call.name, "bash")
+            self.assertEqual(tool_call.arguments["command"], "wc -c AGENTS.md")
+            self.assertEqual(app.agent.loaded[2].tool_call_id, "call_1")
+            self.assertIn("10000", str(app.agent.loaded[2].content))
+
     def test_repl_completer_suggests_slash_commands(self) -> None:
         completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
@@ -867,6 +960,24 @@ class FakeApp:
                 tool_calls=[],
             ),
         )
+
+
+class HistoryLoadingAgent:
+    """记录 REPL 恢复时同步进来的会话历史。"""
+
+    def __init__(self) -> None:
+        self.loaded: list[Any] = []
+
+    def load_history(self, messages: list[Any]) -> None:
+        """保存测试传入的历史消息。"""
+        self.loaded = messages
+
+
+class HistoryLoadingApp:
+    """暴露带 load_history 接口的测试 agent。"""
+
+    def __init__(self) -> None:
+        self.agent = HistoryLoadingAgent()
 
 
 class QueueModeAgent:

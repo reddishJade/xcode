@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from collections.abc import Iterator
-from typing import cast
+from typing import Any, cast
 from xcode.harness.config import AgentConfig
 from xcode.ai.events import (
     FinalMessage,
@@ -65,6 +65,43 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         self.assertEqual(result.tool_calls, [])
         assert result.metrics is not None
         self.assertEqual(result.metrics["llm_calls"], 1)
+
+    def test_follow_up_turn_receives_previous_messages(self) -> None:
+        """短追问应看到上一轮 user 和 assistant 消息。"""
+        responses: Iterator[list[ProviderEvent]] = iter(
+            [
+                [
+                    TextDelta("AGENTS.md is 10000 bytes."),
+                    FinalMessage("", "end_turn"),
+                ],
+                [TextDelta("是，正好 10000 字节。"), FinalMessage("", "end_turn")],
+            ]
+        )
+        seen_messages: list[list[dict[str, Any]]] = []
+
+        def factory(
+            messages: list[dict[str, Any]],
+            _tools: list[Any],
+        ) -> list[ProviderEvent]:
+            seen_messages.append(messages)
+            return next(responses)
+
+        agent = StructuredAgent(provider=FakeProvider(factory), registry=())
+
+        list(agent.run_stream("AGENTS.md的字节数是多少？"))
+        second_events = list(agent.run_stream("正好是10000？"))
+
+        self.assertEqual(
+            [message["role"] for message in seen_messages[1]],
+            ["user", "assistant", "user"],
+        )
+        self.assertIn("AGENTS.md的字节数", str(seen_messages[1][0]["content"]))
+        self.assertIn("10000 bytes", str(seen_messages[1][1]["content"]))
+        self.assertIn("正好是10000", str(seen_messages[1][2]["content"]))
+        self.assertEqual(
+            [event.type for event in second_events],
+            ["message_start", "text_delta", "assistant", "turn_end", "final"],
+        )
 
     def test_provider_events_drive_main_loop(self) -> None:
         events: list[ProviderEvent] = [TextDelta("done"), FinalMessage("", "end_turn")]

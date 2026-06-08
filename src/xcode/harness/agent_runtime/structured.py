@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -22,17 +22,15 @@ from ...agent.config import (
     BeforeToolCallContext,
     BeforeToolCallResult,
 )
-from ...agent.events import ToolExecutionEndEvent, ToolExecutionStartEvent
 from ...agent.messages import (
     AgentMessage,
-    AssistantMessage,
     SystemMessage,
     ToolResultMessage,
     UserMessage,
 )
 from xcode.ai.events import ToolCall as ToolUseBlock
 from xcode.ai.providers.protocol import ModelProvider
-from xcode.agent.types import TextContent, ToolCallContent
+from xcode.agent.types import ToolCallContent
 from .agent_helpers import (
     run_coro_sync,
     aiter_to_sync_iter,
@@ -47,7 +45,12 @@ from .event_translation import (
 )
 from .execution_modes import mode_notice, policy_for_mode
 from .fallback import _FallbackSwitchingProvider, _FallbackWithRetryPrimary
-from .result import _build_structured_result, _final_event, _tool_result_text, StructuredAgentResult
+from .result import (
+    _build_structured_result,
+    _final_event,
+    _tool_result_text,
+    StructuredAgentResult,
+)
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
 from ..observability import (
@@ -130,10 +133,15 @@ class StructuredAgent:
         self._consecutive_errors: int = 0
         self._current_mode: ExecutionMode = "act"
         self._plan_enter_step: int = 0
-        self._max_plan_turns: int = 8  # plan mode 最大探索深度：平衡探索全面性与防止过度推理
+        self._max_plan_turns: int = (
+            8  # plan mode 最大探索深度：平衡探索全面性与防止过度推理
+        )
         self._plan_pending_confirmation: bool = False
         self._progress_steps_without_update: int = 0
         self._last_progress_step: int = 0
+
+        # 会话历史管理：存储用户消息、助手消息和工具调用
+        self._conversation_history: list[AgentMessage] = []
 
         # 适配 ToolSpec → AgentTool，创建 Agent 实例
         adapted_tools: list[Any] = adapt_tool_specs(
@@ -159,6 +167,18 @@ class StructuredAgent:
     def confirm_plan(self) -> None:
         """确认 plan，允许执行 write 工具。"""
         self._plan_pending_confirmation = False
+
+    def clear_history(self) -> None:
+        """清空会话历史。对应 /clear 命令。"""
+        self._conversation_history.clear()
+
+    def load_history(self, messages: list[AgentMessage]) -> None:
+        """用外部会话记录替换当前会话历史。"""
+        self._conversation_history = deepcopy(messages)
+
+    def history_messages(self) -> list[AgentMessage]:
+        """返回当前会话历史副本。"""
+        return deepcopy(self._conversation_history)
 
     def run(
         self, question: str, mode: ExecutionMode | None = None
@@ -196,8 +216,12 @@ class StructuredAgent:
         active_registry = policy.filter_tools(snapshot.registry)
         self.cancellation_token.reset()
 
-        # 构建初始消息
-        initial_messages = self._initial_messages(question, effective_mode, snapshot)
+        # 构建 provider 上下文和本轮新增消息。
+        context_messages = self._turn_context_messages(
+            question, effective_mode, snapshot
+        )
+        history_messages = context_messages + self.history_messages()
+        turn_messages: list[AgentMessage] = [UserMessage(content=question)]
 
         # 重新适配工具（执行模式可能过滤了工具集）
         adapted_tools: list[Any] = adapt_tool_specs(
@@ -225,9 +249,10 @@ class StructuredAgent:
         translation_state = _StreamTranslationState()
 
         async for event in self._agent.run_stream(
-            initial_messages,
+            turn_messages,
             loop_config,
             signal=self.cancellation_token,
+            history=history_messages,
         ):
             translated = _translate_event(event, translation_state)
             if translated is not None:
@@ -246,8 +271,16 @@ class StructuredAgent:
             else:
                 self._original_provider = wrapper._primary
 
+        # 保存本轮对话到历史
+        self._save_turn_to_history(result.messages)
+
         # 构建最终结果
-        final = _build_structured_result(result, snapshot.config.max_steps)
+        visible_result = (
+            replace(result, messages=context_messages + result.messages)
+            if context_messages
+            else result
+        )
+        final = _build_structured_result(visible_result, snapshot.config.max_steps)
         yield _final_event(result.steps, final)
 
     # ── 模式切换 ──
@@ -331,9 +364,7 @@ class StructuredAgent:
         队列 drain（get_steering_messages / get_follow_up_messages）
         由 Agent 层注入，此处不设置。
         """
-        should_compact = (
-            self._loop_should_compact(snapshot) if self.compactor else None
-        )
+        should_compact = self._loop_should_compact(snapshot) if self.compactor else None
         compact = self._loop_compact if self.compactor else None
 
         return AgentLoopConfig(
@@ -393,9 +424,7 @@ class StructuredAgent:
                 if self._plan_enter_step >= self._max_plan_turns:
                     self._plan_enter_step = 0
                     self._current_mode = "act"
-                    self._agent._tools = self._tools_for_mode(
-                        snapshot.registry, "act"
-                    )
+                    self._agent._tools = self._tools_for_mode(snapshot.registry, "act")
                     self.steer(
                         SystemMessage(
                             content=(
@@ -595,7 +624,7 @@ class StructuredAgent:
             > snapshot.config.compact_token_threshold
         )
 
-    def _initial_messages(
+    def _turn_context_messages(
         self,
         question: str,
         mode: ExecutionMode,
@@ -612,8 +641,15 @@ class StructuredAgent:
                 typed.append(SystemMessage(content="\n\n".join(p for p in parts if p)))
         elif notice:
             typed.append(SystemMessage(content=notice))
-        typed.append(UserMessage(content=question))
+
         return typed
+
+    def _save_turn_to_history(self, messages: list[AgentMessage]) -> None:
+        """保存本轮对话到历史。
+
+        包括：用户消息、助手消息、工具调用和工具结果。
+        """
+        self._conversation_history.extend(deepcopy(messages))
 
     def _turn_snapshot(self) -> TurnSnapshot:
         """冻结当前 turn 依赖的配置和工具引用。"""

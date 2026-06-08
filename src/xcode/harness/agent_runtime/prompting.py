@@ -22,13 +22,18 @@ CORE_IDENTITY = (
 )
 
 # Prompt 构造限制
-MAX_CWD_ENTRIES = 12            # 终端显示行数限制：ls 输出约 12 行
-MAX_INSTRUCTION_CHARS = 4000    # 项目指令限制：避免 system prompt 过大影响 Prompt Cache 效率
+MAX_CWD_ENTRIES = 12  # 终端显示行数限制：ls 输出约 12 行
+MAX_INSTRUCTION_CHARS = (
+    4000  # 项目指令限制：避免 system prompt 过大影响 Prompt Cache 效率
+)
 
 TOOL_DISCIPLINE = """<tool-discipline>
 Tools must serve the current response. If no external facts or workspace evidence
 are needed — simple greetings, capability questions, conceptual explanations,
 general knowledge — answer directly without any tool calls.
+Conversation history is authoritative. Treat short follow-up questions as
+references to the immediately preceding turns unless the user clearly changes
+topic.
 Code changes, file operations, diagnostics, validation, and command execution
 require tools. The <git-preflight> block is already injected; do not manually
 repeat git status/diff commands unless the user asks or the task specifically

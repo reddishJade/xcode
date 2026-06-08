@@ -67,13 +67,17 @@ class Agent:
         *,
         signal: CancellationSignal | None = None,
         emit: Callable[[AgentEvent], None] | None = None,
+        history: list[AgentMessage] | None = None,
     ) -> AgentLoopResult:
         """执行 agent 循环，返回结果。
 
         config 每次调用传入，不缓存。队列 drain 逻辑自动注入。
         """
         effective = self._inject_queues(config)
-        context = AgentContext(tools=list(self._tools))
+        context = AgentContext(
+            messages=list(history or []),
+            tools=list(self._tools),
+        )
         sink = emit or (lambda _e: None)
         result = await run_agent_loop(messages, context, effective, sink, signal)
         self._last_result = result
@@ -85,6 +89,7 @@ class Agent:
         config: AgentLoopConfig,
         *,
         signal: CancellationSignal | None = None,
+        history: list[AgentMessage] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """执行 agent 循环，以异步迭代器实时产出事件。
 
@@ -92,7 +97,10 @@ class Agent:
         消费方可边跑边 yield。run_agent_loop 抛出的异常会传播给消费方。
         """
         effective = self._inject_queues(config)
-        context = AgentContext(tools=list(self._tools))
+        context = AgentContext(
+            messages=list(history or []),
+            tools=list(self._tools),
+        )
         queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
         error_slot: BaseException | None = None
 
