@@ -458,6 +458,48 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
         )
         self.assertEqual(content[2], {"type": "input_file", "file_id": "file_123"})
 
+    def test_responses_input_supports_shell_call_output_blocks(self) -> None:
+        """Responses input 支持官方 shell_call_output 项。"""
+        converted = to_responses_input(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "shell_call_output",
+                            "call_id": "call_1",
+                            "max_output_length": 4096,
+                            "output": [
+                                {
+                                    "stdout": "Python 3.11\n",
+                                    "stderr": "",
+                                    "outcome": {"type": "exit", "exit_code": 0},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        )
+
+        self.assertEqual(
+            converted,
+            [
+                {
+                    "type": "shell_call_output",
+                    "call_id": "call_1",
+                    "max_output_length": 4096,
+                    "output": [
+                        {
+                            "stdout": "Python 3.11\n",
+                            "stderr": "",
+                            "outcome": {"type": "exit", "exit_code": 0},
+                        }
+                    ],
+                }
+            ],
+        )
+
     def test_responses_input_maps_system_role_to_developer(self) -> None:
         """Responses input 将系统指令映射为 developer 角色。"""
         converted = to_responses_input(

@@ -402,6 +402,8 @@ def _content_blocks_to_responses_input(
                     "output": str(_part_value(part, "content", "")),
                 }
             )
+        elif part_type == "shell_call_output":
+            converted.append(_responses_shell_call_output_part(part))
         elif part_type == "tool_use":
             function_calls.append(
                 {
@@ -470,3 +472,16 @@ def _responses_file_part(part: object) -> dict[str, Any]:
         "type": "input_file",
         "file_id": _part_value(part, "file_id", ""),
     }
+
+
+def _responses_shell_call_output_part(part: object) -> dict[str, Any]:
+    """构造 Responses shell_call_output 输入项。"""
+    result: dict[str, Any] = {
+        "type": "shell_call_output",
+        "call_id": str(_part_value(part, "call_id", "")),
+        "output": _part_value(part, "output", []),
+    }
+    max_output_length = _part_value(part, "max_output_length", None)
+    if max_output_length is not None:
+        result["max_output_length"] = max_output_length
+    return result
