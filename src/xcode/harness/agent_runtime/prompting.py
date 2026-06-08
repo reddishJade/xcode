@@ -12,6 +12,7 @@ from .git_preflight import build_git_preflight
 from .contextual import ContextualRetrievalState
 from ...experimental.tasks import TaskStore
 from ...harness.skill_loader import SkillLoader
+from xcode.harness.config import DEFAULT_PROMPT_MODULES
 from xcode.harness.skills import ToolSpec, build_tool_guidelines, build_tool_prompt
 from xcode.coding_agent.tools import ShellSpec
 
@@ -49,6 +50,20 @@ yourself, make the smallest targeted change, and verify the changed behavior.
 </search-strategy>"""
 
 SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "<system-prompt-dynamic-boundary />"
+STABLE_PROMPT_MODULE_ORDER: tuple[str, ...] = (
+    "identity",
+    "instructions",
+    "tool_discipline",
+    "tools",
+    "search_strategy",
+)
+DYNAMIC_PROMPT_MODULE_ORDER: tuple[str, ...] = ("environment", "cwd")
+VOLATILE_PROMPT_MODULE_ORDER: tuple[str, ...] = (
+    "git_preflight",
+    "contextual_retrieval",
+    "skills",
+    "notices",
+)
 
 
 @dataclass(frozen=True)
@@ -61,19 +76,7 @@ class PromptContext:
     interrupted_notice: str | None = None
     contextual_state: ContextualRetrievalState | None = None
     shell_spec: ShellSpec | None = None
-    modules: tuple[str, ...] = (
-        "identity",
-        "tool_discipline",
-        "tools",
-        "environment",
-        "git_preflight",
-        "search_strategy",
-        "contextual_retrieval",
-        "cwd",
-        "instructions",
-        "skills",
-        "notices",
-    )
+    modules: tuple[str, ...] = DEFAULT_PROMPT_MODULES
 
 
 class SystemPromptBuilder:
@@ -114,9 +117,7 @@ class SystemPromptBuilder:
         except Exception:
             mtimes = ()
 
-        stable_enabled = enabled.intersection(
-            {"identity", "tool_discipline", "tools", "search_strategy", "instructions"}
-        )
+        stable_enabled = enabled.intersection(STABLE_PROMPT_MODULE_ORDER)
         stable_key = (
             tuple(
                 (
@@ -137,18 +138,22 @@ class SystemPromptBuilder:
             return self._stable_cache
 
         stable_parts: list[str] = []
-        if "identity" in enabled:
-            stable_parts.append(CORE_IDENTITY)
-        if "tool_discipline" in enabled:
-            stable_parts.append(TOOL_DISCIPLINE)
-        if "tools" in enabled:
-            stable_parts.append(_tool_prompt_section(context.registry))
-        if "search_strategy" in enabled:
-            stable_parts.append(SEARCH_STRATEGY)
-        if "instructions" in enabled:
-            instructions = _project_instructions(context.project_root)
-            if instructions:
-                stable_parts.append(instructions)
+        for module in STABLE_PROMPT_MODULE_ORDER:
+            if module not in enabled:
+                continue
+            match module:
+                case "identity":
+                    stable_parts.append(CORE_IDENTITY)
+                case "instructions":
+                    instructions = _project_instructions(context.project_root)
+                    if instructions:
+                        stable_parts.append(instructions)
+                case "tool_discipline":
+                    stable_parts.append(TOOL_DISCIPLINE)
+                case "tools":
+                    stable_parts.append(_tool_prompt_section(context.registry))
+                case "search_strategy":
+                    stable_parts.append(SEARCH_STRATEGY)
 
         stable_prompt = "\n\n".join(stable_parts)
         self._stable_cache = stable_prompt
@@ -156,7 +161,7 @@ class SystemPromptBuilder:
         return stable_prompt
 
     def _build_dynamic_region(self, context: PromptContext, enabled: set[str]) -> str:
-        dynamic_enabled = enabled.intersection({"environment", "cwd"})
+        dynamic_enabled = enabled.intersection(DYNAMIC_PROMPT_MODULE_ORDER)
         dynamic_key = (
             context.project_root,
             context.shell_spec.name if context.shell_spec else None,
@@ -167,12 +172,16 @@ class SystemPromptBuilder:
             return self._dynamic_cache
 
         dynamic_parts: list[str] = []
-        if "environment" in enabled:
-            dynamic_parts.append(
-                _environment_info(context.project_root, context.shell_spec)
-            )
-        if "cwd" in enabled:
-            dynamic_parts.append(_cwd_info(context.project_root))
+        for module in DYNAMIC_PROMPT_MODULE_ORDER:
+            if module not in enabled:
+                continue
+            match module:
+                case "environment":
+                    dynamic_parts.append(
+                        _environment_info(context.project_root, context.shell_spec)
+                    )
+                case "cwd":
+                    dynamic_parts.append(_cwd_info(context.project_root))
 
         dynamic_prompt = "\n\n".join(dynamic_parts)
         self._dynamic_cache = dynamic_prompt
@@ -190,23 +199,30 @@ def _tool_prompt_section(registry: tuple[ToolSpec, ...]) -> str:
 
 def _build_volatile_region(context: PromptContext, enabled: set[str]) -> list[str]:
     volatile_parts: list[str] = []
-    if "git_preflight" in enabled:
-        volatile_parts.append(build_git_preflight(context.project_root))
-    if "contextual_retrieval" in enabled and context.contextual_state is not None:
-        rendered = context.contextual_state.render()
-        if rendered.strip():
-            volatile_parts.append(rendered)
-    if "skills" in enabled and context.skill_loader is not None:
-        volatile_parts.append(
-            context.skill_loader.get_catalog(question=context.question)
-        )
-    if "notices" in enabled:
-        notices = [context.resumed_notice, context.interrupted_notice]
-        notice_text = "\n".join(notice for notice in notices if notice)
-        if notice_text:
-            volatile_parts.append(
-                "<session-notices>\n" + notice_text + "\n</session-notices>"
-            )
+    for module in VOLATILE_PROMPT_MODULE_ORDER:
+        if module not in enabled:
+            continue
+        match module:
+            case "git_preflight":
+                volatile_parts.append(build_git_preflight(context.project_root))
+            case "contextual_retrieval":
+                if context.contextual_state is None:
+                    continue
+                rendered = context.contextual_state.render()
+                if rendered.strip():
+                    volatile_parts.append(rendered)
+            case "skills":
+                if context.skill_loader is not None:
+                    volatile_parts.append(
+                        context.skill_loader.get_catalog(question=context.question)
+                    )
+            case "notices":
+                notices = [context.resumed_notice, context.interrupted_notice]
+                notice_text = "\n".join(notice for notice in notices if notice)
+                if notice_text:
+                    volatile_parts.append(
+                        "<session-notices>\n" + notice_text + "\n</session-notices>"
+                    )
 
     metadata_parts = _build_post_compact_metadata(context.project_root)
     if metadata_parts:

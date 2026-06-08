@@ -8,6 +8,7 @@ from unittest.mock import patch
 from typing import Any
 
 from xcode.harness.config import (
+    DEFAULT_PROMPT_MODULES,
     discover_runtime_config,
     load_runtime_config,
     resolve_config_path,
@@ -34,6 +35,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
         )
         self.assertTrue(config.skills.auto_trigger)
         self.assertEqual(config.agent.max_steps, 20)
+        self.assertEqual(config.prompt.modules, DEFAULT_PROMPT_MODULES)
         self.assertIsNone(config.paths.sessions_dir)
         self.assertFalse(config.daemon.enabled)
         self.assertEqual(config.daemon.interval_seconds, 30)

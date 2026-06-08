@@ -39,8 +39,16 @@ class XcodePromptingTests(unittest.TestCase):
                 PromptContext(project_root=root, registry=(tool,), question="hello")
             )
 
+            boundary_index = prompt.index(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+            self.assertLess(prompt.index("You are Xcode"), prompt.index("<AGENTS.md>"))
             self.assertLess(
-                prompt.index("You are Xcode"), prompt.index("Available tools")
+                prompt.index("<AGENTS.md>"), prompt.index("<tool-discipline>")
+            )
+            self.assertLess(
+                prompt.index("<tool-discipline>"), prompt.index("Available tools")
+            )
+            self.assertLess(
+                prompt.index("Available tools"), prompt.index("<search-strategy>")
             )
             self.assertIn("echo", prompt)
             self.assertIn("- echo: Echo text", prompt)
@@ -54,11 +62,13 @@ class XcodePromptingTests(unittest.TestCase):
             self.assertIn("Use tests.", prompt)
             self.assertLess(
                 prompt.index("<search-strategy>"),
-                prompt.index(SYSTEM_PROMPT_DYNAMIC_BOUNDARY),
+                boundary_index,
             )
+            self.assertLess(boundary_index, prompt.index("<environment>"))
+            self.assertLess(prompt.index("<environment>"), prompt.index("<cwd-info>"))
             self.assertLess(
-                prompt.index(SYSTEM_PROMPT_DYNAMIC_BOUNDARY),
-                prompt.index("<environment>"),
+                prompt.index("<cwd-info>"),
+                prompt.index("<git-preflight>", boundary_index),
             )
 
     def test_volatile_context_changes_do_not_rewrite_stable_prefix(self) -> None:

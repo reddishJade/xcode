@@ -20,6 +20,19 @@ ApprovalPolicy = Literal["always", "high_risk_only", "never"]
 PROFILE_MAIN = "main"
 PROFILE_SUBAGENT = "subagent"
 PROFILE_FALLBACK = "fallback"
+DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
+    "identity",
+    "instructions",
+    "tool_discipline",
+    "tools",
+    "search_strategy",
+    "environment",
+    "cwd",
+    "git_preflight",
+    "contextual_retrieval",
+    "skills",
+    "notices",
+)
 
 
 @dataclass(frozen=True)
@@ -140,16 +153,7 @@ class SkillsRuntimeConfig:
 
 @dataclass(frozen=True)
 class PromptRuntimeConfig:
-    modules: tuple[str, ...] = (
-        "identity",
-        "tool_discipline",
-        "tools",
-        "environment",
-        "git_preflight",
-        "cwd",
-        "instructions",
-        "notices",
-    )
+    modules: tuple[str, ...] = DEFAULT_PROMPT_MODULES
 
 
 @dataclass(frozen=True)
@@ -223,7 +227,9 @@ def _load_global_config() -> XcodeRuntimeConfig:
     return load_runtime_config(global_config_path)
 
 
-def _merge_configs(base: XcodeRuntimeConfig, override: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
+def _merge_configs(
+    base: XcodeRuntimeConfig, override: XcodeRuntimeConfig
+) -> XcodeRuntimeConfig:
     """合并两个配置，override 非默认字段覆盖 base。
 
     实现字段级深度合并，保持 dataclass 不可变性。
@@ -237,25 +243,25 @@ def _merge_configs(base: XcodeRuntimeConfig, override: XcodeRuntimeConfig) -> Xc
     # 逐字段合并
     merged_fields = {}
 
-    for field in fields(XcodeRuntimeConfig):
-        base_value = getattr(base, field.name)
-        override_value = getattr(override, field.name)
+    for config_field in fields(XcodeRuntimeConfig):
+        base_value = getattr(base, config_field.name)
+        override_value = getattr(override, config_field.name)
 
         # 获取默认值
-        if field.default is not MISSING:
-            default_value = field.default
-        elif field.default_factory is not MISSING:
-            default_value = field.default_factory()  # type: ignore
+        if config_field.default is not MISSING:
+            default_value = config_field.default
+        elif config_field.default_factory is not MISSING:
+            default_value = config_field.default_factory()
         else:
             # 无默认值的字段，override 优先
-            merged_fields[field.name] = override_value
+            merged_fields[config_field.name] = override_value
             continue
 
         # 如果 override 是默认值，使用 base
         if override_value == default_value:
-            merged_fields[field.name] = base_value
+            merged_fields[config_field.name] = base_value
         else:
-            merged_fields[field.name] = override_value
+            merged_fields[config_field.name] = override_value
 
     return replace(base, **merged_fields)
 
@@ -298,6 +304,7 @@ def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
 def dataclass_replace(obj: Any, **changes: Any) -> Any:
     """替换 dataclass 字段值，保持不可变性。"""
     from dataclasses import replace
+
     return replace(obj, **changes)
 
 
@@ -353,7 +360,9 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
         ),
         request_hygiene=RequestHygieneConfig(
             enabled=bool(request_hygiene.get("enabled", True)),
-            max_tool_result_bytes=int(request_hygiene.get("max_tool_result_bytes", 8000)),
+            max_tool_result_bytes=int(
+                request_hygiene.get("max_tool_result_bytes", 8000)
+            ),
             max_tool_arg_length=int(request_hygiene.get("max_tool_arg_length", 1000)),
             keep_head_lines=int(request_hygiene.get("keep_head_lines", 50)),
             keep_tail_lines=int(request_hygiene.get("keep_tail_lines", 50)),
