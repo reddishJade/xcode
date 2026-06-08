@@ -150,7 +150,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         self._last_sent_message_index: int = 0
         self._pending_sent_message_index: int = 0
         self._pending_store_response: bool = True
-        self._stateless_reasoning_items: list[dict[str, Any]] = []
+        self._stateless_persisted_items: list[dict[str, Any]] = []
         self.response_format = response_format
         self.metrics["previous_response_id"] = None
 
@@ -195,7 +195,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
 
     def _record_completed_response(self, response: object) -> None:
         """记录 Responses API 的 stateful 游标。"""
-        self._stateless_reasoning_items = _reasoning_output_items(response)
+        self._stateless_persisted_items = _persistable_output_items(response)
         if not self._pending_store_response:
             self.previous_response_id = None
             self.metrics["previous_response_id"] = None
@@ -221,8 +221,8 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             raw_input_messages = messages[self._last_sent_message_index :]
 
         converted = to_responses_input(raw_input_messages)
-        if self.previous_response_id is None and self._stateless_reasoning_items:
-            converted = [*self._stateless_reasoning_items, *converted]
+        if self.previous_response_id is None and self._stateless_persisted_items:
+            converted = [*self._stateless_persisted_items, *converted]
 
         if self.previous_response_id is not None:
             converted = [
@@ -389,8 +389,8 @@ def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:
         )
 
 
-def _reasoning_output_items(response: object) -> list[dict[str, Any]]:
-    """从 Responses 输出中提取可回灌的 reasoning item。"""
+def _persistable_output_items(response: object) -> list[dict[str, Any]]:
+    """从 Responses 输出中提取可回灌的 item（reasoning / function_call）。"""
     output = getattr(response, "output", None)
     if not isinstance(output, list):
         return []
@@ -398,7 +398,7 @@ def _reasoning_output_items(response: object) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for item in output:
         serialized = _serialize_response_output_item(item)
-        if serialized.get("type") == "reasoning":
+        if serialized.get("type") in ("reasoning", "function_call"):
             items.append(serialized)
     return items
 
@@ -414,7 +414,7 @@ def _serialize_response_output_item(item: object) -> dict[str, Any]:
             return dumped
 
     result: dict[str, Any] = {"type": str(getattr(item, "type", ""))}
-    for field_name in ("id", "summary", "encrypted_content", "content"):
+    for field_name in ("id", "summary", "encrypted_content", "content", "call_id", "name", "arguments"):
         value = getattr(item, field_name, None)
         if value is not None:
             result[field_name] = value
