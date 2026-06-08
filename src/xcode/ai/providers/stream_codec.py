@@ -121,20 +121,29 @@ def parse_tool_arguments(raw_arguments: str) -> dict[str, Any]:
         return {"input": raw_arguments}
 
 
-def tool_call_from_response_item(item: _ResponseOutputItem) -> dict[str, Any]:
+def tool_call_from_response_item(item: object) -> dict[str, Any]:
+    """将 Responses function_call item 转换为通用工具调用字典。"""
     return {
-        "id": str(item.call_id or item.id or ""),
-        "name": str(item.name or ""),
-        "input": parse_tool_arguments(str(item.arguments or "{}")),
+        "id": str(
+            _response_item_value(item, "call_id", None)
+            or _response_item_value(item, "id", "")
+        ),
+        "name": str(_response_item_value(item, "name", "")),
+        "input": parse_tool_arguments(
+            str(_response_item_value(item, "arguments", "{}") or "{}")
+        ),
     }
 
 
-def shell_call_from_response_item(item: _ResponseOutputItem) -> ToolCall:
+def shell_call_from_response_item(item: object) -> ToolCall:
     """将 Responses shell_call item 转换为内部工具调用。"""
     return ToolCall(
-        id=str(item.call_id or item.id or ""),
+        id=str(
+            _response_item_value(item, "call_id", None)
+            or _response_item_value(item, "id", "")
+        ),
         name="shell",
-        input=_shell_action_input(item.action),
+        input=_shell_action_input(_response_item_value(item, "action", None)),
     )
 
 
@@ -265,14 +274,9 @@ def responses_stream_to_events(
                 raw_status = getattr(response, "status", None)
                 response_status = str(raw_status) if raw_status else None
                 usage = getattr(response, "usage", None)
-                if usage:
-                    input_tokens = getattr(usage, "input_tokens", 0) or getattr(
-                        usage, "prompt_tokens", 0
-                    )
-                    output_tokens = getattr(usage, "output_tokens", 0) or getattr(
-                        usage, "completion_tokens", 0
-                    )
-                    yield UsageUpdate(int(input_tokens), int(output_tokens))
+                usage_update = _usage_update_from_response_usage(usage)
+                if usage_update is not None:
+                    yield usage_update
 
     if pending_calls or pending_shell_calls:
         ready_by_index = {
@@ -295,6 +299,84 @@ def responses_stream_to_events(
                 yield FinalMessage(final_text, "error")
         else:
             yield FinalMessage(final_text, "end_turn")
+
+
+def responses_response_to_events(
+    response: _Response,
+) -> Iterator[ToolCallEvent | UsageUpdate | FinalMessage]:
+    """将非流式 Responses 响应转换为统一事件。"""
+    usage_update = _usage_update_from_response_usage(getattr(response, "usage", None))
+    if usage_update is not None:
+        yield usage_update
+
+    calls = _tool_calls_from_response_output(getattr(response, "output", None))
+    if calls:
+        yield ToolCallEvent(calls)
+        return
+
+    status = _response_status(response)
+    if status in {"queued", "in_progress"}:
+        return
+
+    final_text = str(getattr(response, "output_text", "") or "")
+    if status == "incomplete":
+        yield FinalMessage(final_text, "max_tokens")
+    elif status and status != "completed":
+        yield FinalMessage(final_text, "error")
+    else:
+        yield FinalMessage(final_text, "end_turn")
+
+
+def _usage_update_from_response_usage(usage: Any | None) -> UsageUpdate | None:
+    """从 Responses usage 字段构造统一用量事件。"""
+    if not usage:
+        return None
+    input_tokens = getattr(usage, "input_tokens", 0) or getattr(
+        usage, "prompt_tokens", 0
+    )
+    output_tokens = getattr(usage, "output_tokens", 0) or getattr(
+        usage, "completion_tokens", 0
+    )
+    return UsageUpdate(int(input_tokens), int(output_tokens))
+
+
+def _tool_calls_from_response_output(output: object) -> list[ToolCall]:
+    """从非流式 Responses output 中提取工具调用。"""
+    if not isinstance(output, list):
+        return []
+
+    calls: list[ToolCall] = []
+    for item in output:
+        item_type = str(_response_item_value(item, "type", ""))
+        if item_type == "function_call":
+            calls.append(
+                ToolCall(
+                    id=str(
+                        _response_item_value(item, "call_id", None)
+                        or _response_item_value(item, "id", "")
+                    ),
+                    name=str(_response_item_value(item, "name", "")),
+                    input=parse_tool_arguments(
+                        str(_response_item_value(item, "arguments", "{}") or "{}")
+                    ),
+                )
+            )
+        elif item_type == "shell_call":
+            calls.append(shell_call_from_response_item(item))
+    return calls
+
+
+def _response_item_value(item: object, key: str, default: Any = None) -> Any:
+    """从 SDK item 对象或 dict 中读取字段。"""
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def _response_status(response: _Response) -> str | None:
+    """读取 Responses 响应状态。"""
+    raw_status = getattr(response, "status", None)
+    return str(raw_status) if raw_status else None
 
 
 def _is_reasoning_delta_event(event_type: str) -> bool:

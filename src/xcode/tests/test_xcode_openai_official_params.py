@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from xcode.agent.messages import UserMessage, convert_to_llm
 from xcode.agent.types import FileContent, ImageContent, TextContent
-from xcode.ai.events import ReasoningDelta, ToolCallEvent
+from xcode.ai.events import FinalMessage, ReasoningDelta, TextDelta, ToolCallEvent
 from xcode.ai.providers.codec import to_responses_input, to_responses_tool
 from xcode.ai.providers.factory import _build_llm_profile
 from xcode.ai.providers.openai import OpenAIChatProvider, OpenAIResponsesProvider
@@ -286,6 +286,151 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
             self.assertEqual(kwargs["tools"][0]["name"], "lookup")
             self.assertNotIn("stream", kwargs)
             self.assertNotIn("max_output_tokens", kwargs)
+
+        asyncio.run(run_test())
+
+    def test_responses_provider_retrieves_completed_background_response(self) -> None:
+        """Responses retrieve 轮询完成响应并转为最终消息。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient(
+                retrieve_responses=[
+                    FakeResponsesResponse(
+                        response_id="resp_bg",
+                        output_text="done",
+                        status="completed",
+                    )
+                ]
+            )
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                client=client,
+            )
+            options = StreamOptions(
+                headers={"x-extra": "value"},
+                session_id="session-1",
+                timeout_ms=2500,
+            )
+
+            events = [
+                event
+                async for event in provider.retrieve_response(
+                    "resp_bg",
+                    include=["reasoning.encrypted_content"],
+                    options=options,
+                )
+            ]
+
+            kwargs = client.responses.retrieve_kwargs
+            self.assertEqual(client.responses.retrieve_response_id, "resp_bg")
+            self.assertIs(kwargs["stream"], False)
+            self.assertEqual(kwargs["include"], ["reasoning.encrypted_content"])
+            self.assertEqual(kwargs["extra_headers"]["x-session-id"], "session-1")
+            self.assertEqual(kwargs["extra_headers"]["x-extra"], "value")
+            self.assertEqual(kwargs["timeout"], 2.5)
+            self.assertIsInstance(events[-1], FinalMessage)
+            final = cast(FinalMessage, events[-1])
+            self.assertEqual(final.content, "done")
+            self.assertEqual(final.stop_reason, "end_turn")
+            self.assertEqual(provider.previous_response_id, "resp_bg")
+            self.assertEqual(provider.metrics["background_response_id"], "resp_bg")
+            self.assertEqual(
+                provider.metrics["background_response_status"], "completed"
+            )
+
+        asyncio.run(run_test())
+
+    def test_responses_provider_polls_pending_background_response(self) -> None:
+        """Responses retrieve 轮询未完成响应时只记录状态。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient(
+                retrieve_responses=[
+                    FakeResponsesResponse(
+                        response_id="resp_bg",
+                        output_text="",
+                        status="in_progress",
+                    )
+                ]
+            )
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                client=client,
+            )
+
+            events = [
+                event
+                async for event in provider.retrieve_response(
+                    "resp_bg",
+                    options=StreamOptions(include=["file_search_call.results"]),
+                )
+            ]
+
+            self.assertEqual(events, [])
+            self.assertIs(client.responses.retrieve_kwargs["stream"], False)
+            self.assertEqual(
+                client.responses.retrieve_kwargs["include"],
+                ["file_search_call.results"],
+            )
+            self.assertIsNone(provider.previous_response_id)
+            self.assertEqual(
+                provider.metrics["background_response_status"], "in_progress"
+            )
+
+        asyncio.run(run_test())
+
+    def test_responses_provider_resumes_background_response_stream(self) -> None:
+        """Responses retrieve 可从指定事件序号恢复流式读取。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient(
+                retrieve_outputs=[
+                    [
+                        FakeResponsesStreamEvent(
+                            "response.output_text.delta",
+                            delta="done",
+                        ),
+                        FakeResponsesStreamEvent(
+                            "response.completed",
+                            response=FakeResponsesResponse(
+                                response_id="resp_bg",
+                                output_text="done",
+                                status="completed",
+                            ),
+                        ),
+                    ]
+                ]
+            )
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                client=client,
+            )
+
+            events = [
+                event
+                async for event in provider.retrieve_response(
+                    "resp_bg",
+                    stream=True,
+                    starting_after=12,
+                    include_obfuscation=False,
+                )
+            ]
+
+            kwargs = client.responses.retrieve_kwargs
+            self.assertIs(kwargs["stream"], True)
+            self.assertEqual(kwargs["starting_after"], 12)
+            self.assertIs(kwargs["include_obfuscation"], False)
+            self.assertIsInstance(events[0], TextDelta)
+            text = cast(TextDelta, events[0])
+            self.assertEqual(text.chunk, "done")
+            self.assertIsInstance(events[-1], FinalMessage)
+            self.assertEqual(provider.previous_response_id, "resp_bg")
 
         asyncio.run(run_test())
 
@@ -685,9 +830,16 @@ class FakeOpenAIClient:
         self,
         response_outputs: list[list[Any]] | None = None,
         input_token_count: int = 0,
+        retrieve_responses: list[Any] | None = None,
+        retrieve_outputs: list[list[Any]] | None = None,
     ) -> None:
         self.chat = FakeChat()
-        self.responses = FakeResponses(response_outputs or [], input_token_count)
+        self.responses = FakeResponses(
+            response_outputs or [],
+            input_token_count,
+            retrieve_responses or [],
+            retrieve_outputs or [],
+        )
         self.override_api_key: str | None = None
 
     def with_options(self, *, api_key: str) -> FakeOpenAIClient:
@@ -718,11 +870,22 @@ class FakeCompletions:
 class FakeResponses:
     """记录 Responses create 调用参数。"""
 
-    def __init__(self, outputs: list[list[Any]], input_token_count: int) -> None:
+    def __init__(
+        self,
+        outputs: list[list[Any]],
+        input_token_count: int,
+        retrieve_responses: list[Any],
+        retrieve_outputs: list[list[Any]],
+    ) -> None:
         self.kwargs: dict[str, Any] = {}
         self.calls: list[dict[str, Any]] = []
         self.outputs = outputs
         self.input_tokens = FakeInputTokens(input_token_count)
+        self.retrieve_response_id: str | None = None
+        self.retrieve_kwargs: dict[str, Any] = {}
+        self.retrieve_calls: list[dict[str, Any]] = []
+        self.retrieve_responses = retrieve_responses
+        self.retrieve_outputs = retrieve_outputs
 
     def create(self, **kwargs: Any) -> Any:
         """返回空流并保存请求。"""
@@ -731,6 +894,19 @@ class FakeResponses:
         if self.outputs:
             return iter(self.outputs.pop(0))
         return iter([])
+
+    def retrieve(self, response_id: str, **kwargs: Any) -> Any:
+        """返回后台响应或恢复流并保存请求。"""
+        self.retrieve_response_id = response_id
+        self.retrieve_kwargs = kwargs
+        self.retrieve_calls.append({"response_id": response_id, **kwargs})
+        if kwargs.get("stream"):
+            if self.retrieve_outputs:
+                return iter(self.retrieve_outputs.pop(0))
+            return iter([])
+        if self.retrieve_responses:
+            return self.retrieve_responses.pop(0)
+        return FakeResponsesResponse(response_id=response_id)
 
 
 class FakeInputTokens:
@@ -809,11 +985,15 @@ class FakeResponsesResponse:
         self,
         response_id: str,
         output: list[dict[str, Any]] | None = None,
+        output_text: str = "",
+        status: str = "completed",
+        usage: Any | None = None,
     ) -> None:
         self.id = response_id
-        self.output_text = ""
+        self.output_text = output_text
         self.output = output or []
-        self.usage = None
+        self.status = status
+        self.usage = usage
 
 
 if __name__ == "__main__":

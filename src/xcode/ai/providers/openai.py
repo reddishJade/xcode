@@ -14,7 +14,7 @@ from xcode.ai.types import (
 
 from .codec import to_chat_messages, to_chat_tool, to_responses_input, to_responses_tool
 from .openai_compat import OpenAICompatProvider
-from .stream_codec import responses_stream_to_events
+from .stream_codec import responses_response_to_events, responses_stream_to_events
 from .runtime import ProviderRuntime
 
 _RESPONSES_OPTION_FIELDS = (
@@ -182,6 +182,64 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         for event in self._stream_sync(messages, tuple(tools), **kwargs):
             yield event
 
+    async def retrieve_response(
+        self,
+        response_id: str,
+        *,
+        stream: bool = False,
+        include: list[str] | None = None,
+        starting_after: int | None = None,
+        include_obfuscation: bool | None = None,
+        options: StreamOptions | None = None,
+    ) -> AsyncIterator[ProviderEvent]:
+        """获取后台 Responses 响应，支持轮询或从指定序号恢复流。"""
+        self._current_options = options
+        for event in self._retrieve_response_sync(
+            response_id,
+            stream=stream,
+            include=include,
+            starting_after=starting_after,
+            include_obfuscation=include_obfuscation,
+        ):
+            yield event
+
+    def _retrieve_response_sync(
+        self,
+        response_id: str,
+        *,
+        stream: bool,
+        include: list[str] | None,
+        starting_after: int | None,
+        include_obfuscation: bool | None,
+    ) -> Iterator[ProviderEvent]:
+        """调用 Responses retrieve 并转换为统一事件。"""
+        params = _responses_retrieve_kwargs(
+            getattr(self, "_current_options", None),
+            stream=stream,
+            include=include,
+            starting_after=starting_after,
+            include_obfuscation=include_obfuscation,
+        )
+        client = self._responses_client()
+        retrieve = cast(Any, client.responses.retrieve)
+        response_or_stream = self.runtime.run(lambda: retrieve(response_id, **params))
+
+        if stream:
+            yield from responses_stream_to_events(
+                cast(
+                    Any,
+                    self._intercept_responses_stream(
+                        cast(Any, response_or_stream),
+                        0,
+                        on_response_completed=self._record_completed_response,
+                    ),
+                )
+            )
+            return
+
+        self._record_retrieved_response(response_or_stream)
+        yield from responses_response_to_events(cast(Any, response_or_stream))
+
     def _stream_sync(
         self,
         messages: list[dict[str, Any]],
@@ -225,6 +283,22 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         self.previous_response_id = str(response_id)
         self.metrics["previous_response_id"] = self.previous_response_id
         self._last_sent_message_index = self._pending_sent_message_index
+
+    def _record_retrieved_response(self, response: object) -> None:
+        """记录后台 retrieve 返回的状态和可续接响应。"""
+        self._ensure_metrics()
+        self.metrics["sent_messages"] = 0
+        response_id = getattr(response, "id", None)
+        if response_id:
+            self.metrics["background_response_id"] = str(response_id)
+
+        raw_status = getattr(response, "status", None)
+        status = str(raw_status) if raw_status else None
+        if status:
+            self.metrics["background_response_status"] = status
+        if status in (None, "completed"):
+            self._record_completed_response(response)
+        self._record_usage(response, 0)
 
     def _responses_kwargs(
         self,
@@ -460,6 +534,40 @@ def _responses_compaction_context_management(
             "compact_threshold": compact_threshold,
         }
     ]
+
+
+def _responses_retrieve_kwargs(
+    opts: StreamOptions | None,
+    *,
+    stream: bool,
+    include: list[str] | None,
+    starting_after: int | None,
+    include_obfuscation: bool | None,
+) -> dict[str, object]:
+    """构造 Responses retrieve 请求参数。"""
+    result: dict[str, object] = {"stream": stream}
+    effective_include = include
+    if effective_include is None and opts is not None:
+        effective_include = opts.include
+    if effective_include is not None:
+        result["include"] = effective_include
+    if starting_after is not None:
+        result["starting_after"] = starting_after
+    if include_obfuscation is not None:
+        result["include_obfuscation"] = include_obfuscation
+    if opts is None:
+        return result
+
+    extra_headers: dict[str, str] = {}
+    if opts.session_id:
+        extra_headers["x-session-id"] = opts.session_id
+    if opts.headers:
+        extra_headers.update(opts.headers)
+    if extra_headers:
+        result["extra_headers"] = extra_headers
+    if opts.timeout_ms is not None:
+        result["timeout"] = opts.timeout_ms / 1000
+    return result
 
 
 def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:
