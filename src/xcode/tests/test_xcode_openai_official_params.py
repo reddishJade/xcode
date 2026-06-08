@@ -213,6 +213,62 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_responses_provider_maps_cache_retention(self) -> None:
+        """Responses 将通用缓存保留策略映射到官方 prompt cache 参数。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient()
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                client=client,
+            )
+
+            _events = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "hi"}],
+                    [],
+                    options=StreamOptions(cache_retention="long"),
+                )
+            ]
+
+            self.assertEqual(client.responses.kwargs["prompt_cache_retention"], "24h")
+
+        asyncio.run(run_test())
+
+    def test_responses_provider_prefers_prompt_cache_retention(self) -> None:
+        """显式官方 prompt cache 参数优先于通用缓存保留策略。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient()
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                client=client,
+            )
+
+            _events = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "hi"}],
+                    [],
+                    options=StreamOptions(
+                        cache_retention="long",
+                        prompt_cache_retention="in_memory",
+                    ),
+                )
+            ]
+
+            self.assertEqual(
+                client.responses.kwargs["prompt_cache_retention"],
+                "in_memory",
+            )
+
+        asyncio.run(run_test())
+
     def test_responses_store_false_round_trips_encrypted_reasoning(self) -> None:
         """store=false 时回灌 encrypted reasoning item。"""
 

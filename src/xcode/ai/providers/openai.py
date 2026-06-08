@@ -4,7 +4,12 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any, cast
 
 from xcode.ai.events import ProviderEvent
-from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.ai.types import (
+    CacheRetention,
+    PromptCacheRetention,
+    StreamOptions,
+    ToolDefinition,
+)
 
 from .codec import to_chat_messages, to_chat_tool, to_responses_input, to_responses_tool
 from .openai_compat import OpenAICompatProvider
@@ -31,6 +36,14 @@ _RESPONSES_OPTION_FIELDS = (
     "truncation",
     "user",
 )
+
+_CACHE_RETENTION_TO_PROMPT_CACHE_RETENTION: dict[
+    CacheRetention,
+    PromptCacheRetention,
+] = {
+    "short": "in_memory",
+    "long": "24h",
+}
 
 
 class OpenAIChatProvider(OpenAICompatProvider):
@@ -220,7 +233,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         kwargs: dict[str, object] = {
             "model": self.model,
             "input": converted,
-"tools": [
+            "tools": [
                 to_responses_tool(
                     t.name,
                     t.description,
@@ -269,6 +282,11 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             value = getattr(opts, field_name)
             if value is not None:
                 params[field_name] = value
+        # cache_retention 映射到 prompt_cache_retention，显式设置优先
+        if "prompt_cache_retention" not in params:
+            retention = _map_cache_retention(opts.cache_retention)
+            if retention is not None:
+                params["prompt_cache_retention"] = retention
         if opts.verbosity is not None:
             existing_text = params.get("text")
             text_config = (
@@ -298,9 +316,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             return
         raw_include = params.get("include")
         include = (
-            list(cast(list[str], raw_include))
-            if isinstance(raw_include, list)
-            else []
+            list(cast(list[str], raw_include)) if isinstance(raw_include, list) else []
         )
         if "reasoning.encrypted_content" not in include:
             include.append("reasoning.encrypted_content")
@@ -321,6 +337,19 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             getattr(output_details, "reasoning_tokens", 0) if output_details else 0
         )
         self.metrics["reasoning_tokens"] = reasoning or 0
+
+
+def _map_cache_retention(
+    cache_retention: CacheRetention,
+) -> PromptCacheRetention | None:
+    """将高层 CacheRetention 语义映射到 OpenAI prompt_cache_retention 参数值。
+
+    映射规则：
+    - "none" → None（不发送 prompt_cache_retention，使用 API 默认行为）
+    - "short" → "in_memory"
+    - "long" → "24h"
+    """
+    return _CACHE_RETENTION_TO_PROMPT_CACHE_RETENTION.get(cache_retention)
 
 
 def _responses_text_config(response_format: dict[str, Any]) -> dict[str, object]:
