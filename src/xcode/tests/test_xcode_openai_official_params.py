@@ -150,6 +150,65 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
         assert isinstance(provider, OpenAIResponsesProvider)
         self.assertEqual(provider.response_format, {"type": "json_object"})
 
+    def test_responses_provider_applies_extended_response_options(self) -> None:
+        """Responses 透传官方请求级控制参数。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient()
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                response_format={"type": "json_object"},
+                client=client,
+            )
+            options = StreamOptions(
+                background=True,
+                include=["reasoning.encrypted_content"],
+                instructions="Answer briefly.",
+                max_tool_calls=2,
+                parallel_tool_calls=False,
+                prompt_cache_retention="24h",
+                safety_identifier="user-1",
+                service_tier="flex",
+                store=False,
+                tool_choice="auto",
+                top_logprobs=3,
+                top_p=0.8,
+                truncation="auto",
+                user="end-user",
+                verbosity="low",
+                response_extra_params={"custom_beta": "value", "store": True},
+            )
+
+            _events = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "hi"}], [], options=options
+                )
+            ]
+
+            kwargs = client.responses.kwargs
+            self.assertIs(kwargs["background"], True)
+            self.assertEqual(kwargs["include"], ["reasoning.encrypted_content"])
+            self.assertEqual(kwargs["instructions"], "Answer briefly.")
+            self.assertEqual(kwargs["max_tool_calls"], 2)
+            self.assertIs(kwargs["parallel_tool_calls"], False)
+            self.assertEqual(kwargs["prompt_cache_retention"], "24h")
+            self.assertEqual(kwargs["safety_identifier"], "user-1")
+            self.assertEqual(kwargs["service_tier"], "flex")
+            self.assertIs(kwargs["store"], False)
+            self.assertEqual(kwargs["tool_choice"], "auto")
+            self.assertEqual(kwargs["top_logprobs"], 3)
+            self.assertEqual(kwargs["top_p"], 0.8)
+            self.assertEqual(kwargs["truncation"], "auto")
+            self.assertEqual(kwargs["user"], "end-user")
+            self.assertEqual(kwargs["text"]["format"], {"type": "json_object"})
+            self.assertEqual(kwargs["text"]["verbosity"], "low")
+            self.assertEqual(kwargs["custom_beta"], "value")
+
+        asyncio.run(run_test())
+
 
 @dataclass(frozen=True)
 class MockProfile:

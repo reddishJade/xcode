@@ -32,6 +32,10 @@ type ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 ModelThinkingLevel = ThinkingLevel | str
 Transport = Literal["sse", "websocket", "auto"]
 CacheRetention = Literal["none", "short", "long"]
+PromptCacheRetention = Literal["in_memory", "24h"]
+ServiceTier = Literal["auto", "default", "flex", "scale", "priority"]
+TextVerbosity = Literal["low", "medium", "high"]
+Truncation = Literal["auto", "disabled"]
 
 
 @dataclass(frozen=True)
@@ -87,6 +91,8 @@ class ThinkingBudgets:
 
 @dataclass(frozen=True)
 class StreamOptions:
+    """单次 provider 请求的可选覆盖参数。"""
+
     temperature: float | None = None
     max_tokens: int | None = None
     signal: Any | None = None
@@ -104,6 +110,26 @@ class StreamOptions:
     on_response: Any | None = None
     thinking_budgets: ThinkingBudgets | None = None
     thinking_level: str | None = None
+    background: bool | None = None
+    context_management: list[dict[str, Any]] | None = None
+    conversation: dict[str, Any] | str | None = None
+    include: list[str] | None = None
+    instructions: str | None = None
+    max_tool_calls: int | None = None
+    moderation: dict[str, Any] | None = None
+    parallel_tool_calls: bool | None = None
+    prompt: dict[str, Any] | None = None
+    prompt_cache_retention: PromptCacheRetention | None = None
+    safety_identifier: str | None = None
+    service_tier: ServiceTier | None = None
+    store: bool | None = None
+    tool_choice: str | dict[str, Any] | None = None
+    top_logprobs: int | None = None
+    top_p: float | None = None
+    truncation: Truncation | None = None
+    user: str | None = None
+    verbosity: TextVerbosity | None = None
+    response_extra_params: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,27 @@ from .openai_compat import OpenAICompatProvider
 from .stream_codec import responses_stream_to_events
 from .runtime import ProviderRuntime
 
+_RESPONSES_OPTION_FIELDS = (
+    "background",
+    "context_management",
+    "conversation",
+    "include",
+    "instructions",
+    "max_tool_calls",
+    "moderation",
+    "parallel_tool_calls",
+    "prompt",
+    "prompt_cache_retention",
+    "safety_identifier",
+    "service_tier",
+    "store",
+    "tool_choice",
+    "top_logprobs",
+    "top_p",
+    "truncation",
+    "user",
+)
+
 
 class OpenAIChatProvider(OpenAICompatProvider):
     """OpenAI Chat Completions provider（兼容所有 OpenAI API 兼容服务）。
@@ -231,6 +252,23 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             params["max_output_tokens"] = opts.max_tokens
         if opts.timeout_ms is not None:
             params["timeout"] = opts.timeout_ms / 1000
+        for field_name in _RESPONSES_OPTION_FIELDS:
+            value = getattr(opts, field_name)
+            if value is not None:
+                params[field_name] = value
+        if opts.verbosity is not None:
+            existing_text = params.get("text")
+            text_config = (
+                dict(cast(dict[str, object], existing_text))
+                if isinstance(existing_text, dict)
+                else {}
+            )
+            text_config["verbosity"] = opts.verbosity
+            params["text"] = text_config
+        if opts.response_extra_params:
+            for key, value in opts.response_extra_params.items():
+                if value is not None and key not in params:
+                    params[key] = value
 
     def _responses_client(self) -> Any:
         """按请求级 API key 返回 Responses 客户端。"""
