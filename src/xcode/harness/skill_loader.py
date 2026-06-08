@@ -55,11 +55,13 @@ def route_skills(
 
         if matched_use:
             score = len(matched_use) / max(len(skill.use_when), 1)
-            results.append(SkillMatch(
-                name=name,
-                score=score,
-                matched_use_when=tuple(matched_use),
-            ))
+            results.append(
+                SkillMatch(
+                    name=name,
+                    score=score,
+                    matched_use_when=tuple(matched_use),
+                )
+            )
 
     results.sort(key=lambda m: m.score, reverse=True)
     return results
@@ -137,6 +139,17 @@ class SkillLoader:
         text = skill.path.read_text(encoding="utf-8")
         _meta, body = _parse_frontmatter(text)
         return f'<skill name="{skill.name}">\n{body.strip()}\n</skill>'
+
+    def to_local_shell_skills(self) -> list[dict[str, str]]:
+        """导出 OpenAI local shell environment.skills 元数据。"""
+        return [
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "path": skill.path.parent.as_posix(),
+            }
+            for skill in sorted(self.skills.values(), key=lambda item: item.name)
+        ]
 
     def _scan(self) -> dict[str, SkillMetadata]:
         if not self.skills_dir.exists():

@@ -103,6 +103,28 @@ class XcodeSkillLoaderTests(unittest.TestCase):
             self.assertEqual(skill.path, skill_path)
             self.assertFalse(hasattr(skill, "body"))
 
+    def test_loader_exports_local_shell_skill_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / "skills" / "csv"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: csv-insights\ndescription: Summarize CSV files.\n---\n\nBody.",
+                encoding="utf-8",
+            )
+
+            skills = SkillLoader(Path(tmp) / "skills").to_local_shell_skills()
+
+            self.assertEqual(
+                skills,
+                [
+                    {
+                        "name": "csv-insights",
+                        "description": "Summarize CSV files.",
+                        "path": skill_dir.as_posix(),
+                    }
+                ],
+            )
+
     def test_unknown_skill_reports_error(self) -> None:
         loader = SkillLoader(Path("missing"))
         tool = build_skill_loader_tool(loader)
