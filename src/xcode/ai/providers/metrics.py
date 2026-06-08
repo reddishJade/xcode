@@ -23,6 +23,7 @@ class ProviderMetricsMixin:
             "transport": getattr(self, "transport", "unknown"),
             "sent_messages": 0,
             "cached_tokens": 0,
+            "cache_hit_rate": 0.0,
             "reasoning_tokens": 0,
         }
 
@@ -70,21 +71,19 @@ class ProviderMetricsMixin:
     def _record_usage(self, response: Any, sent_messages: int) -> None:
         """记录 usage 指标。
 
-        基础实现处理 OpenAI Chat Completions 标准字段：
-        prompt_tokens_details.cached_tokens 和
-        completion_tokens_details.reasoning_tokens。
-
-        DeepSeek 和 ChatGLM 覆写此方法以处理 provider 专属字段。
+        基础实现使用统一的缓存提取逻辑处理 OpenAI 标准字段。
+        DeepSeek、ChatGLM、MiMo 覆写此方法以处理 provider 专属字段。
         """
+        from xcode.ai.cache import extract_cache_usage
+
         self._ensure_metrics()
         self.metrics["sent_messages"] = sent_messages
         usage = getattr(response, "usage", None)
         if usage:
-            prompt_details = getattr(usage, "prompt_tokens_details", None)
-            cached = (
-                getattr(prompt_details, "cached_tokens", 0) if prompt_details else 0
-            )
-            self.metrics["cached_tokens"] = cached or 0
+            # 使用统一的缓存提取逻辑
+            cache_usage = extract_cache_usage(response)
+            self.metrics["cached_tokens"] = cache_usage.hit_tokens
+            self.metrics["cache_hit_rate"] = cache_usage.hit_rate
 
             completion_details = getattr(usage, "completion_tokens_details", None)
             reasoning = (

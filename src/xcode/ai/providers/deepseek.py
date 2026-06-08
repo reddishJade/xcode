@@ -194,21 +194,18 @@ class DeepSeekProvider(OpenAICompatProvider):
         return messages
 
     def _record_usage(self, response, sent_messages: int) -> None:
+        """记录 DeepSeek usage，优先使用原生缓存字段。"""
+        from xcode.ai.cache import extract_cache_usage
+
         self.metrics["sent_messages"] = sent_messages
         usage = getattr(response, "usage", None)
         if usage:
-            hit = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
-            miss = getattr(usage, "prompt_cache_miss_tokens", 0) or 0
-            if not hit:
-                details = getattr(usage, "prompt_tokens_details", None)
-                if details:
-                    hit = getattr(details, "cached_tokens", 0) or 0
-                    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-                    if not miss and prompt_tokens:
-                        miss = prompt_tokens - hit
-            self.metrics["prompt_cache_hit_tokens"] = hit
-            self.metrics["prompt_cache_miss_tokens"] = miss
-            self.metrics["cached_tokens"] = hit
+            # 使用统一的缓存提取逻辑
+            cache_usage = extract_cache_usage(response)
+            self.metrics["prompt_cache_hit_tokens"] = cache_usage.hit_tokens
+            self.metrics["prompt_cache_miss_tokens"] = cache_usage.miss_tokens
+            self.metrics["cached_tokens"] = cache_usage.hit_tokens
+            self.metrics["cache_hit_rate"] = cache_usage.hit_rate
 
             completion_details = getattr(usage, "completion_tokens_details", None)
             reasoning = (

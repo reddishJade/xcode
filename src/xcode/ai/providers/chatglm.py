@@ -66,7 +66,7 @@ class ChatGLMProvider(OpenAICompatProvider):
         *,
         response_format: dict[str, Any] | None = None,
         thinking: bool | None = None,
-        **kwargs: Any,
+        **_kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
         self._current_options = options
         for event in self._stream_sync(
@@ -83,7 +83,7 @@ class ChatGLMProvider(OpenAICompatProvider):
         tools: tuple[ToolDefinition, ...],
         response_format: dict[str, Any] | None = None,
         thinking: bool | None = None,
-        **kwargs: Any,
+        **_kwargs: Any,
     ) -> Iterator[ProviderEvent]:
         params = self._chat_kwargs(
             messages,
@@ -143,6 +143,9 @@ class ChatGLMProvider(OpenAICompatProvider):
         return cleaned
 
     def _record_usage(self, response, sent_messages: int) -> None:
+        """记录 ChatGLM usage，使用兼容字段提取缓存统计。"""
+        from xcode.ai.cache import extract_cache_usage
+
         self.metrics["sent_messages"] = sent_messages
         usage = getattr(response, "usage", None)
         if usage:
@@ -157,12 +160,14 @@ class ChatGLMProvider(OpenAICompatProvider):
             self.metrics["completion_tokens"] = completion_tokens
             self.metrics["total_tokens"] = total_tokens or 0
 
-            details = getattr(usage, "prompt_tokens_details", None)
-            cached = getattr(details, "cached_tokens", 0) if details else 0
-            self.metrics["cached_tokens"] = cached or 0
-            self.metrics["cache_hit_ratio"] = (
-                round((cached or 0) / prompt_tokens, 4) if prompt_tokens else 0.0
-            )
+            # 使用统一的缓存提取逻辑
+            cache_usage = extract_cache_usage(response)
+            self.metrics["cached_tokens"] = cache_usage.hit_tokens
+            self.metrics["cache_hit_rate"] = cache_usage.hit_rate
+            # ChatGLM 使用兼容字段，hit/miss 分解不是官方字段
+            if cache_usage.hit_tokens > 0:
+                self.metrics["cache_hit_tokens"] = cache_usage.hit_tokens
+                self.metrics["cache_miss_tokens"] = cache_usage.miss_tokens
 
             completion_details = getattr(usage, "completion_tokens_details", None)
             reasoning = (

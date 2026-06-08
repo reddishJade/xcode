@@ -41,13 +41,21 @@
 - **reasoning_content 处理**：
   - 无工具调用时：历史 reasoning_content 自动清除（节省上下文）
   - 有工具调用时：保留当前轮次 reasoning_content，确保 API 调用成功（DeepSeek API 要求）
+- **缓存统计**：
+  - 优先字段：`prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`（原生）
+  - 回退字段：`prompt_tokens_details.cached_tokens`（兼容）
+  - 命中率公式：`hit / (hit + miss)`，而非 `hit / prompt_tokens`
+  - metrics 字段：`prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、`cached_tokens`、`cache_hit_rate`
 
 #### MiMo 专用说明
 
 - **Thinking Mode**：mimo-v2.5-pro/mimo-v2.5 默认开启，mimo-v2-flash 默认关闭
 - **reasoning_effort**：不支持（MiMo 无此参数）
 - **reasoning_content 处理**：建议保留所有历史 reasoning_content 以获得最佳表现
-- **缓存统计**：记录 `cached_tokens` 和 `reasoning_tokens`
+- **缓存统计**：
+  - 使用兼容字段：`prompt_tokens_details.cached_tokens`
+  - 命中率公式：`hit / (hit + miss)`
+  - metrics 字段：`cached_tokens`、`cache_hit_rate`、`cache_hit_tokens`（可选）、`cache_miss_tokens`（可选）
 - **默认 base_url**：`https://api.xiaomimimo.com/v1`（小米官方 API）
 
 #### ChatGLM 专用字段
@@ -59,7 +67,11 @@
 | `response_format` | object/null | `null` | 结构化输出格式，常用 `{"type":"json_object"}`。 |
 
 - **轮级思考**：ChatGLM provider 支持单次调用覆盖 `thinking`，不改变 profile 默认值。
-- **上下文缓存**：ChatGLM 官方接口按请求内容自动命中缓存；xcode 记录 `cached_tokens`、`cache_hit_ratio`、`prompt_tokens` 等 usage 指标。
+- **上下文缓存**：ChatGLM 官方接口按请求内容自动命中缓存；xcode 记录 `cached_tokens`、`cache_hit_rate`、`prompt_tokens` 等 usage 指标。
+- **缓存统计**：
+  - 使用兼容字段：`prompt_tokens_details.cached_tokens`
+  - 命中率公式：`hit / (hit + miss)`
+  - metrics 字段：`cached_tokens`、`cache_hit_rate`、`cache_hit_tokens`（可选）、`cache_miss_tokens`（可选）
 
 示例（DeepSeek）：
 
@@ -310,3 +322,94 @@ MCP server 不写入 `xcode.config.json` 的 `tools` 段，而是放在 `.local/
   }
 }
 ```
+
+---
+
+## 缓存优化
+
+Xcode 的缓存优化遵循统一的统计口径和工具稳定化原则，确保跨 provider 一致性。
+
+### 统计口径
+
+#### 优先级规则
+
+1. **原生字段优先**（DeepSeek）：`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
+2. **兼容字段回退**（OpenAI/ChatGLM/MiMo）：`prompt_tokens_details.cached_tokens`
+3. **命中率公式**：`hit / (hit + miss)`，而非 `hit / prompt_tokens`
+
+**设计原因**：DeepSeek 原生 `miss` 口径不保证等于 `prompt_tokens - hit`。使用 `hit / prompt_tokens` 作为分母可能导致统计失真。
+
+#### 实现位置
+
+- `src/xcode/ai/cache.py` - 统一缓存提取逻辑 `extract_cache_usage()`
+- `src/xcode/ai/providers/deepseek.py` - DeepSeek 原生字段优先
+- `src/xcode/ai/providers/chatglm.py` - 兼容字段回退
+- `src/xcode/ai/providers/mimo.py` - 兼容字段回退
+
+#### Metrics 字段
+
+所有 provider 的 `metrics` 字典包含以下缓存相关字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `cached_tokens` | int | 缓存命中 token 数（所有 provider） |
+| `cache_hit_rate` | float | 缓存命中率 0.0-1.0（所有 provider） |
+| `prompt_cache_hit_tokens` | int | 原生命中字段（仅 DeepSeek） |
+| `prompt_cache_miss_tokens` | int | 原生未命中字段（仅 DeepSeek） |
+| `cache_hit_tokens` | int | 可选，当使用兼容字段时分解的命中数（ChatGLM/MiMo） |
+| `cache_miss_tokens` | int | 可选，当使用兼容字段时分解的未命中数（ChatGLM/MiMo） |
+
+### 工具稳定化
+
+#### 规范化策略
+
+1. **工具列表排序**：按 `tool.name` 字母顺序排序
+2. **Schema 键排序**：递归排序所有字典键（`json.dumps(obj, sort_keys=True)`）
+3. **指纹生成**：SHA256 hash 前 16 字符
+
+**设计原因**：确保同一组工具在不同调用间字节稳定，避免工具注册顺序或 schema 键序抖动导致缓存前缀漂移。
+
+#### 实现位置
+
+- `src/xcode/ai/cache.py`:
+  - `canonical_tool_schema()` - 单个工具规范化
+  - `canonical_tools()` - 工具列表排序
+  - `tool_catalog_fingerprint()` - 指纹生成
+
+#### 使用示例
+
+```python
+from xcode.ai.cache import canonical_tools, tool_catalog_fingerprint
+from xcode.ai.types import ToolDefinition
+
+tools = [
+    ToolDefinition(name="tool_b", description="B", schema={"z": 1, "a": 2}),
+    ToolDefinition(name="tool_a", description="A", schema={"type": "object"}),
+]
+
+# 规范化并排序
+canonical = canonical_tools(tools)
+# 结果：[tool_a, tool_b]，schema 键排序为 {"a": 2, "z": 1}
+
+# 生成指纹
+fingerprint = tool_catalog_fingerprint(tools)
+# 结果：16 字符 SHA256 hex，顺序无关
+```
+
+### Token ROI 原则
+
+缓存优化的目标不是"让缓存数字变高"，而是**提高每个 token 的 ROI**。用户付出的上下文预算应尽量转化为有效推理、代码修改和可执行结论。
+
+#### 优化策略组合
+
+1. **稳定可缓存前缀**：系统提示词、工具 schema、few-shot 进入 immutable prefix
+2. **压缩动态历史**：长会话通过 compaction 保留目标、约束、决策、工具结果和未解决事项
+3. **控制工具输出**：只在请求边界压缩超长 tool_result，磁盘日志保留完整历史
+4. **渐进发现工具**：当工具过多时，用 search/describe/call 模式避免每轮携带所有工具定义
+
+#### 验证方式
+
+- **单元测试**：`src/xcode/tests/test_cache_optimization.py`
+- **Metrics API**：读取 `provider.metrics` 字典查看实时缓存统计
+- **真实验证**：通过多轮对话观察缓存命中率稳定性
+
