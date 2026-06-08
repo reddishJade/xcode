@@ -185,7 +185,7 @@ def responses_stream_to_events(
             if text:
                 accumulated_text += str(text)
                 yield TextDelta(str(text))
-        elif event_type == "response.reasoning_summary_text.delta":
+        elif _is_reasoning_delta_event(event_type):
             text = event.delta
             if text:
                 yield ReasoningDelta(str(text))
@@ -236,3 +236,15 @@ def responses_stream_to_events(
     elif completed:
         final_text = response_text or accumulated_text
         yield FinalMessage(final_text, "end_turn")
+
+
+def _is_reasoning_delta_event(event_type: str) -> bool:
+    """判断 Responses 事件是否是 reasoning 文本增量。"""
+    return (
+        event_type == "response.reasoning_summary_text.delta"
+        or event_type == "response.reasoning_text.delta"
+        or (
+            event_type.startswith("response.reasoning")
+            and event_type.endswith(".delta")
+        )
+    )

@@ -132,6 +132,8 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         self.previous_response_id: str | None = None
         self._last_sent_message_index: int = 0
         self._pending_sent_message_index: int = 0
+        self._pending_store_response: bool = True
+        self._stateless_reasoning_items: list[dict[str, Any]] = []
         self.response_format = response_format
         self.metrics["previous_response_id"] = None
 
@@ -176,6 +178,13 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
 
     def _record_completed_response(self, response: object) -> None:
         """记录 Responses API 的 stateful 游标。"""
+        self._stateless_reasoning_items = _reasoning_output_items(response)
+        if not self._pending_store_response:
+            self.previous_response_id = None
+            self.metrics["previous_response_id"] = None
+            self._last_sent_message_index = self._pending_sent_message_index
+            return
+
         response_id = getattr(response, "id", None)
         if not response_id:
             return
@@ -195,6 +204,8 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             raw_input_messages = messages[self._last_sent_message_index :]
 
         converted = to_responses_input(raw_input_messages)
+        if self.previous_response_id is None and self._stateless_reasoning_items:
+            converted = [*self._stateless_reasoning_items, *converted]
 
         if self.previous_response_id is not None:
             converted = [
@@ -269,6 +280,8 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             for key, value in opts.response_extra_params.items():
                 if value is not None and key not in params:
                     params[key] = value
+        self._ensure_stateless_reasoning_options(params)
+        self._pending_store_response = params.get("store") is not False
 
     def _responses_client(self) -> Any:
         """按请求级 API key 返回 Responses 客户端。"""
@@ -276,6 +289,20 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         if opts is None or not opts.api_key:
             return self.client
         return self.client.with_options(api_key=opts.api_key)
+
+    def _ensure_stateless_reasoning_options(self, params: dict[str, object]) -> None:
+        """store=false 时请求 encrypted reasoning 以便后续回灌。"""
+        if params.get("store") is not False or not self.thinking:
+            return
+        raw_include = params.get("include")
+        include = (
+            list(cast(list[str], raw_include))
+            if isinstance(raw_include, list)
+            else []
+        )
+        if "reasoning.encrypted_content" not in include:
+            include.append("reasoning.encrypted_content")
+        params["include"] = include
 
     def _record_usage(self, response, sent_messages: int) -> None:
         self.metrics["sent_messages"] = sent_messages
@@ -306,3 +333,35 @@ def _responses_text_config(response_format: dict[str, Any]) -> dict[str, object]
     flattened = dict(json_schema)
     flattened["type"] = "json_schema"
     return {"format": flattened}
+
+
+def _reasoning_output_items(response: object) -> list[dict[str, Any]]:
+    """从 Responses 输出中提取可回灌的 reasoning item。"""
+    output = getattr(response, "output", None)
+    if not isinstance(output, list):
+        return []
+
+    items: list[dict[str, Any]] = []
+    for item in output:
+        serialized = _serialize_response_output_item(item)
+        if serialized.get("type") == "reasoning":
+            items.append(serialized)
+    return items
+
+
+def _serialize_response_output_item(item: object) -> dict[str, Any]:
+    """将 SDK 输出对象转换为 input 可复用的 dict。"""
+    if isinstance(item, dict):
+        return dict(item)
+    model_dump = getattr(item, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(exclude_none=True)
+        if isinstance(dumped, dict):
+            return dumped
+
+    result: dict[str, Any] = {"type": str(getattr(item, "type", ""))}
+    for field_name in ("id", "summary", "encrypted_content", "content"):
+        value = getattr(item, field_name, None)
+        if value is not None:
+            result[field_name] = value
+    return result

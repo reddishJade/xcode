@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import unittest
-from typing import Any
+from typing import Any, cast
 
+from xcode.ai.events import ReasoningDelta
 from xcode.ai.providers.factory import _build_llm_profile
 from xcode.ai.providers.openai import OpenAIChatProvider, OpenAIResponsesProvider
 from xcode.ai.providers.runtime import ProviderRuntime
+from xcode.ai.providers.stream_codec import responses_stream_to_events
 from xcode.ai.types import StreamOptions
 
 
@@ -209,6 +211,78 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_responses_store_false_round_trips_encrypted_reasoning(self) -> None:
+        """store=false 时回灌 encrypted reasoning item。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient(
+                response_outputs=[
+                    [
+                        FakeResponsesStreamEvent(
+                            "response.completed",
+                            response=FakeResponsesResponse(
+                                response_id="r1",
+                                output=[
+                                    {
+                                        "type": "reasoning",
+                                        "encrypted_content": "ciphertext",
+                                    }
+                                ],
+                            ),
+                        )
+                    ],
+                    [],
+                ]
+            )
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                thinking=True,
+                client=client,
+            )
+            options = StreamOptions(store=False)
+
+            _first = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "first"}], [], options=options
+                )
+            ]
+            _second = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "second"}], [], options=options
+                )
+            ]
+
+            first_call, second_call = client.responses.calls
+            self.assertEqual(first_call["include"], ["reasoning.encrypted_content"])
+            self.assertNotIn("previous_response_id", second_call)
+            self.assertEqual(second_call["input"][0]["type"], "reasoning")
+            self.assertEqual(second_call["input"][0]["encrypted_content"], "ciphertext")
+
+        asyncio.run(run_test())
+
+    def test_responses_stream_accepts_reasoning_text_delta(self) -> None:
+        """Responses reasoning 文本增量事件会转为 ReasoningDelta。"""
+        events = list(
+            responses_stream_to_events(
+                cast(
+                    Any,
+                    [
+                        FakeResponsesStreamEvent(
+                            "response.reasoning_text.delta", delta="why"
+                        )
+                    ],
+                )
+            )
+        )
+
+        self.assertIsInstance(events[0], ReasoningDelta)
+        assert isinstance(events[0], ReasoningDelta)
+        self.assertEqual(events[0].chunk, "why")
+
 
 @dataclass(frozen=True)
 class MockProfile:
@@ -234,9 +308,9 @@ class MockProfile:
 class FakeOpenAIClient:
     """记录 Chat Completions 请求参数的测试客户端。"""
 
-    def __init__(self) -> None:
+    def __init__(self, response_outputs: list[list[Any]] | None = None) -> None:
         self.chat = FakeChat()
-        self.responses = FakeResponses()
+        self.responses = FakeResponses(response_outputs or [])
         self.override_api_key: str | None = None
 
     def with_options(self, *, api_key: str) -> FakeOpenAIClient:
@@ -267,13 +341,46 @@ class FakeCompletions:
 class FakeResponses:
     """记录 Responses create 调用参数。"""
 
-    def __init__(self) -> None:
+    def __init__(self, outputs: list[list[Any]]) -> None:
         self.kwargs: dict[str, Any] = {}
+        self.calls: list[dict[str, Any]] = []
+        self.outputs = outputs
 
     def create(self, **kwargs: Any) -> Any:
         """返回空流并保存请求。"""
         self.kwargs = kwargs
+        self.calls.append(kwargs)
+        if self.outputs:
+            return iter(self.outputs.pop(0))
         return iter([])
+
+
+class FakeResponsesStreamEvent:
+    """模拟 Responses 流式事件。"""
+
+    def __init__(
+        self,
+        event_type: str,
+        response: FakeResponsesResponse | None = None,
+        delta: str | None = None,
+    ) -> None:
+        self.type = event_type
+        self.response = response
+        self.delta = delta
+
+
+class FakeResponsesResponse:
+    """模拟 Responses 完成响应。"""
+
+    def __init__(
+        self,
+        response_id: str,
+        output: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.id = response_id
+        self.output_text = ""
+        self.output = output or []
+        self.usage = None
 
 
 if __name__ == "__main__":
