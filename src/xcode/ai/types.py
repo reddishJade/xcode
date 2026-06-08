@@ -29,6 +29,7 @@ KnownProvider = Literal[
 Provider = KnownProvider | str
 
 type ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
+type ReasoningSummary = Literal["auto", "concise", "detailed"]
 ModelThinkingLevel = ThinkingLevel | str
 Transport = Literal["sse", "websocket", "auto"]
 CacheRetention = Literal["none", "short", "long"]
@@ -103,6 +104,7 @@ class StreamOptions:
     cache_retention: CacheRetention = "short"
     session_id: str | None = None
     reasoning: str | None = None
+    reasoning_summary: ReasoningSummary | None = None
     headers: dict[str, str] | None = None
     metadata: dict[str, Any] | None = None
     timeout_ms: int | None = None

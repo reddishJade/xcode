@@ -250,10 +250,16 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             "stream": stream,
         }
 
+        reasoning: dict[str, object] = {}
         if self.reasoning_effort:
-            kwargs["reasoning"] = {"effort": self.reasoning_effort}
+            reasoning["effort"] = self.reasoning_effort
         elif not self.thinking:
-            kwargs["reasoning"] = {"effort": "none"}
+            reasoning["effort"] = "none"
+        opts = getattr(self, "_current_options", None)
+        if opts and opts.reasoning_summary:
+            reasoning["summary"] = opts.reasoning_summary
+        if reasoning:
+            kwargs["reasoning"] = reasoning
 
         if self.previous_response_id is not None:
             kwargs["previous_response_id"] = self.previous_response_id
