@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Iterator
 from typing import Any, cast
 
@@ -36,6 +37,8 @@ _RESPONSES_OPTION_FIELDS = (
     "truncation",
     "user",
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 _CACHE_RETENTION_TO_PROMPT_CACHE_RETENTION: dict[
     CacheRetention,
@@ -86,6 +89,7 @@ class OpenAIChatProvider(OpenAICompatProvider):
         **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
         chat_messages = to_chat_messages(messages)
+        _warn_chat_builtin_tools(tools)
         params: dict[str, object] = {
             "model": self.model,
             "messages": chat_messages,
@@ -364,6 +368,19 @@ def _responses_text_config(response_format: dict[str, Any]) -> dict[str, object]
     flattened = dict(json_schema)
     flattened["type"] = "json_schema"
     return {"format": flattened}
+
+
+def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:
+    """提示 Chat Completions 不支持 Responses 内建工具。"""
+    for tool in tools:
+        if tool.builtin is None:
+            continue
+        _LOGGER.warning(
+            "OpenAI Chat Completions does not support builtin tool %r "
+            "with type=%r; use the Responses API for builtin tools",
+            tool.name,
+            tool.builtin.get("type"),
+        )
 
 
 def _reasoning_output_items(response: object) -> list[dict[str, Any]]:

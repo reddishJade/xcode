@@ -112,6 +112,30 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
             {"type": "json_object"},
         )
 
+    def test_chat_provider_warns_for_builtin_tools(self) -> None:
+        """Chat Completions 遇到 Responses 内建工具时记录 warning。"""
+        client = FakeOpenAIClient()
+        provider = OpenAIChatProvider(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-5.4",
+            client=client,
+        )
+        tool = ToolDefinition(
+            name="shell",
+            description="Run shell commands.",
+            schema={},
+            builtin={"type": "shell", "environment": {"type": "local"}},
+        )
+
+        with self.assertLogs("xcode.ai.providers.openai", level="WARNING") as logs:
+            list(provider._stream_sync([{"role": "user", "content": "hi"}], (tool,)))
+
+        self.assertIn(
+            "OpenAI Chat Completions does not support builtin tool",
+            logs.output[0],
+        )
+
     def test_responses_provider_maps_response_format_to_text_config(self) -> None:
         """Responses 使用 text.format 承载结构化输出配置。"""
         client = FakeOpenAIClient()
