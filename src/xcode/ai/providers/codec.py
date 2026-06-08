@@ -100,8 +100,13 @@ def to_chat_tool(
 
 
 def to_responses_tool(
-    name: str, description: str, schema: dict | None
+    name: str,
+    description: str,
+    schema: dict | None,
+    builtin: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if builtin is not None:
+        return dict(builtin)
     resolved = schema or {
         "type": "object",
         "properties": {
@@ -342,51 +347,86 @@ def _content_blocks_to_responses_input(
     """将内容块转换为 Responses API 格式。"""
     converted: list[dict[str, Any]] = []
     function_calls = []
-    text_parts = []
+    message_content: list[dict[str, Any]] = []
 
     for part in content:
-        if not isinstance(part, dict):
-            text_parts.append(str(part))
+        if not isinstance(part, dict) and not hasattr(part, "type"):
+            message_content.append(_responses_text_part(role, str(part)))
             continue
-        part_type = part.get("type")
+        part_type = str(_part_value(part, "type", ""))
         if part_type == "tool_result":
             converted.append(
                 {
                     "type": "function_call_output",
-                    "call_id": str(part.get("tool_use_id", "")),
-                    "output": str(part.get("content", "")),
+                    "call_id": str(_part_value(part, "tool_use_id", "")),
+                    "output": str(_part_value(part, "content", "")),
                 }
             )
         elif part_type == "tool_use":
             function_calls.append(
                 {
                     "type": "function_call",
-                    "call_id": str(part.get("id", "")),
-                    "name": str(part.get("name", "")),
-                    "arguments": orjson.dumps(part.get("input", {})).decode(),
+                    "call_id": str(_part_value(part, "id", "")),
+                    "name": str(_part_value(part, "name", "")),
+                    "arguments": orjson.dumps(_part_value(part, "input", {})).decode(),
                 }
             )
         elif part_type == "text":
-            text_parts.append(str(part.get("text", "")))
+            text = str(_part_value(part, "text", ""))
+            message_content.append(_responses_text_part(role, text))
+        elif part_type in {"image", "image_url", "input_image"}:
+            message_content.append(_responses_image_part(part))
+        elif part_type in {"file", "input_file"}:
+            message_content.append(_responses_file_part(part))
 
-    if text_parts:
-        text = "".join(text_parts)
-        if role == "assistant":
-            converted.append(
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": text}],
-                }
-            )
-        else:
-            converted.append(
-                {
-                    "type": "message",
-                    "role": role,
-                    "content": [{"type": "input_text", "text": text}],
-                }
-            )
+    if message_content:
+        converted.append(
+            {
+                "type": "message",
+                "role": role,
+                "content": message_content,
+            }
+        )
 
     converted.extend(function_calls)
     return converted
+
+
+def _part_value(part: object, key: str, default: Any = None) -> Any:
+    """从 dict 或内容块对象读取字段。"""
+    if isinstance(part, dict):
+        return part.get(key, default)
+    return getattr(part, key, default)
+
+
+def _responses_text_part(role: str, text: str) -> dict[str, Any]:
+    """构造 Responses 文本内容块。"""
+    if role == "assistant":
+        return {"type": "output_text", "text": text}
+    return {"type": "input_text", "text": text}
+
+
+def _responses_image_part(part: object) -> dict[str, Any]:
+    """构造 Responses 图像输入块。"""
+    source = _part_value(part, "source", None)
+    if isinstance(source, dict):
+        result = {"type": "input_image", **source}
+    else:
+        result = {
+            "type": "input_image",
+            "image_url": _part_value(part, "image_url", ""),
+        }
+    if "url" in result and "image_url" not in result:
+        result["image_url"] = result.pop("url")
+    return result
+
+
+def _responses_file_part(part: object) -> dict[str, Any]:
+    """构造 Responses 文件输入块。"""
+    source = _part_value(part, "source", None)
+    if isinstance(source, dict):
+        return {"type": "input_file", **source}
+    return {
+        "type": "input_file",
+        "file_id": _part_value(part, "file_id", ""),
+    }

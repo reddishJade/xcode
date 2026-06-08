@@ -5,12 +5,14 @@ from dataclasses import dataclass
 import unittest
 from typing import Any, cast
 
+from xcode.agent.types import ImageContent
 from xcode.ai.events import ReasoningDelta
+from xcode.ai.providers.codec import to_responses_input, to_responses_tool
 from xcode.ai.providers.factory import _build_llm_profile
 from xcode.ai.providers.openai import OpenAIChatProvider, OpenAIResponsesProvider
 from xcode.ai.providers.runtime import ProviderRuntime
 from xcode.ai.providers.stream_codec import responses_stream_to_events
-from xcode.ai.types import StreamOptions
+from xcode.ai.types import StreamOptions, ToolDefinition
 
 
 class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
@@ -282,6 +284,50 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
         self.assertIsInstance(events[0], ReasoningDelta)
         assert isinstance(events[0], ReasoningDelta)
         self.assertEqual(events[0].chunk, "why")
+
+    def test_responses_builtin_tool_is_passed_through(self) -> None:
+        """Responses 内建工具定义不包成 function tool。"""
+        tool = ToolDefinition(
+            name="web_search",
+            description="Search the web.",
+            schema={},
+            builtin={"type": "web_search_preview"},
+        )
+
+        encoded = to_responses_tool(
+            tool.name,
+            tool.description,
+            tool.schema,
+            tool.builtin,
+        )
+
+        self.assertEqual(encoded, {"type": "web_search_preview"})
+
+    def test_responses_input_supports_image_and_file_blocks(self) -> None:
+        """Responses input 支持图像和文件内容块。"""
+        converted = to_responses_input(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "inspect"},
+                        ImageContent(source={"url": "https://example.test/a.png"}),
+                        {
+                            "type": "input_file",
+                            "source": {"file_id": "file_123"},
+                        },
+                    ],
+                }
+            ]
+        )
+
+        content = converted[0]["content"]
+        self.assertEqual(content[0], {"type": "input_text", "text": "inspect"})
+        self.assertEqual(
+            content[1],
+            {"type": "input_image", "image_url": "https://example.test/a.png"},
+        )
+        self.assertEqual(content[2], {"type": "input_file", "file_id": "file_123"})
 
 
 @dataclass(frozen=True)

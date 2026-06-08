@@ -139,6 +139,7 @@ class ToolDefinition:
     name: str
     description: str
     schema: dict[str, Any]
+    builtin: dict[str, Any] | None = None
 
 
 # --- Context serialization ---

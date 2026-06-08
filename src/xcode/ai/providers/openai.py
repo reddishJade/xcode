@@ -225,6 +225,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
                     t.name,
                     t.description,
                     t.schema,
+                    t.builtin,
                 )
                 for t in tools
             ],
