@@ -95,6 +95,10 @@ class _Response(Protocol):
     def output(self) -> list[_ResponseOutputItem] | None: ...
     @property
     def id(self) -> str | None: ...
+    @property
+    def status(self) -> str | None: ...
+    @property
+    def incomplete_details(self) -> Any | None: ...
 
 
 class _ResponseStreamEvent(Protocol):
@@ -215,6 +219,7 @@ def responses_stream_to_events(
     accumulated_text = ""
     completed = False
     response_text = ""
+    response_status: str | None = None
 
     for event in stream:
         event_type = event.type
@@ -257,6 +262,8 @@ def responses_stream_to_events(
             response = getattr(event, "response", None)
             if response is not None:
                 response_text = str(getattr(response, "output_text", "") or "")
+                raw_status = getattr(response, "status", None)
+                response_status = str(raw_status) if raw_status else None
                 usage = getattr(response, "usage", None)
                 if usage:
                     input_tokens = getattr(usage, "input_tokens", 0) or getattr(
@@ -281,7 +288,13 @@ def responses_stream_to_events(
         yield ToolCallEvent(ready)
     elif completed:
         final_text = response_text or accumulated_text
-        yield FinalMessage(final_text, "end_turn")
+        if response_status and response_status != "completed":
+            if response_status == "incomplete":
+                yield FinalMessage(final_text, "max_tokens")
+            else:
+                yield FinalMessage(final_text, "error")
+        else:
+            yield FinalMessage(final_text, "end_turn")
 
 
 def _is_reasoning_delta_event(event_type: str) -> bool:
