@@ -2,6 +2,11 @@
 
 从 agent_loop.py 提取的工具调用执行逻辑：串行/并行调度、
 单工具执行、before/after 钩子。
+
+**提取的设计原因**：
+- 关注点分离：agent_loop.py 专注于轮次管理，tool_execution.py 专注于工具调度
+- 测试隔离：工具执行逻辑可以独立测试，不依赖完整 agent 循环
+- 复用性：其他执行模式（如 plan mode）可以复用工具执行逻辑
 """
 
 from __future__ import annotations
@@ -12,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from xcode.ai.types import ImageContent, TextContent, ToolCallContent
+from xcode.agent.types import ImageContent, TextContent, ToolCallContent
 from .config import AfterToolCallContext, AgentContext, AgentLoopConfig, BeforeToolCallContext
 from .events import AgentEvent, ToolExecutionEndEvent, ToolExecutionStartEvent, ToolExecutionUpdateEvent
 from .messages import AssistantMessage, ToolResultMessage
@@ -35,7 +40,17 @@ async def execute_tool_calls(
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
-    """根据 execution_mode 调度串行或并行工具执行。"""
+    """根据 execution_mode 调度串行或并行工具执行。
+
+    串行/并行调度设计原因：
+    - 默认并行：充分利用并发提升效率（如多文件读取、并行搜索）
+    - 强制串行：某些工具有副作用依赖（如先写文件再读取）或需要顺序保证
+    - 批次隔离：同一批次内的工具可以并行，不同批次按顺序执行
+
+    分批策略（partition_tool_calls_for_execution）：
+    按工具的 execution_mode 元数据分组，sequential 工具单独成批，
+    其余工具尽可能合并到同一批次并行执行。
+    """
     if config.tool_execution == "sequential":
         return await _execute_sequential(
             current_context, assistant_message, tool_calls, config, signal, emit
@@ -375,6 +390,13 @@ def _tool_execution_mode(
     current_context: AgentContext,
     tool_call: ToolCallContent,
 ) -> str:
+    """返回工具的执行模式（parallel 或 sequential）。
+
+    默认 sequential 的设计原因：
+    - 保守策略：避免副作用工具并发执行导致状态不一致
+    - 例如：先 write_file 再 read_file，若并行则 read 可能读到旧内容
+    - 工具可通过 metadata 显式声明 execution_mode="parallel" 允许并发
+    """
     for tool in current_context.tools or []:
         if tool.name == tool_call.name:
             return tool.execution_mode or "sequential"

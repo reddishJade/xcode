@@ -106,6 +106,20 @@ class DeepSeekProvider(OpenAICompatProvider):
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
+        """清理 reasoning_content 以符合 DeepSeek API 要求。
+
+        DeepSeek API 的 reasoning_content 处理规则：
+        1. 非工具循环（最后一条不是 tool 消息）：
+           - 清除所有历史 reasoning_content
+           - 原因：避免累积大量思考内容导致上下文膨胀
+
+        2. 工具循环（最后一条是 tool 消息）：
+           - 保留当前轮次（最后一个 user 之后）的 reasoning_content
+           - 清除之前轮次的 reasoning_content
+           - 原因：DeepSeek API 要求工具调用时保留当前轮次思考，否则 API 报错
+
+        这是 DeepSeek 特有的 API 约束，其他 provider 不需要此逻辑。
+        """
         if not messages:
             return messages
 
@@ -113,14 +127,17 @@ class DeepSeekProvider(OpenAICompatProvider):
         in_tool_loop = cleaned[-1].get("role") == "tool"
 
         if not in_tool_loop:
+            # 非工具循环：清除所有 reasoning_content
             for msg in cleaned:
                 msg.pop("reasoning_content", None)
         else:
+            # 工具循环：保留当前轮次，清除历史
             last_user_idx = -1
             for i in range(len(cleaned) - 1, -1, -1):
                 if cleaned[i].get("role") == "user":
                     last_user_idx = i
                     break
+            # 清除最后一个 user 之前的所有 reasoning_content
             for i in range(last_user_idx):
                 if cleaned[i].get("role") == "assistant":
                     cleaned[i].pop("reasoning_content", None)
@@ -128,6 +145,17 @@ class DeepSeekProvider(OpenAICompatProvider):
         return cleaned
 
     def _ensure_json_word(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """确保消息中包含 'json' 关键字，否则注入提示。
+
+        设计原因：
+        DeepSeek API 在 response_format={"type": "json_object"} 时要求
+        prompt 中必须包含 'json' 关键字，否则 API 返回 400 错误。
+        这是 DeepSeek 特有的约束（OpenAI API 没有此要求）。
+
+        注入策略：
+        1. 优先追加到 system 消息
+        2. 若无 system 消息，追加到第一条消息
+        """
         has_json_word = False
         for msg in messages:
             content = msg.get("content")

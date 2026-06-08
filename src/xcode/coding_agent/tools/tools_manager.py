@@ -32,8 +32,9 @@ def _get_bin_dir() -> Path:
 
 
 _OFFLINE_ENV_VAR = "XCODE_OFFLINE"
-_NETWORK_TIMEOUT = 10
-_DOWNLOAD_TIMEOUT = 120
+# 网络超时配置（平衡用户体验与网络稳定性）
+_NETWORK_TIMEOUT = 10      # API 请求超时：防止网络卡顿
+_DOWNLOAD_TIMEOUT = 120    # 二进制下载超时：适配慢速网络
 
 
 def _fd_asset(version: str, os_name: str, arch: str) -> str | None:

@@ -37,11 +37,21 @@ class Agent:
     # ── 队列 API ──
 
     def steer(self, msg: AgentMessage) -> None:
-        """向 steer 队列注入消息（下一轮循环开始前消费）。"""
+        """向 steer 队列注入消息（下一轮循环开始前消费）。
+
+        设计原因：
+        steer 用于循环内中断和调整方向，消息在下一步开始前插入。
+        这允许外部代码在工具执行后、模型调用前干预（如注入上下文）。
+        """
         self._steer_queue.append(msg)
 
     def follow_up(self, msg: AgentMessage) -> None:
-        """向 followup 队列注入消息（当前循环结束后追加）。"""
+        """向 followup 队列注入消息（当前循环结束后追加）。
+
+        设计原因：
+        followup 用于循环后续任务，消息在当前循环自然结束后追加。
+        这允许外部代码安排下一轮工作（如多阶段任务编排）。
+        """
         self._followup_queue.append(msg)
 
     @property

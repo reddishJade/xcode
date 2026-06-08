@@ -13,8 +13,9 @@ from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 
 logger = logging.getLogger("xcode.coding_agent.tools.bash")
 
-DEFAULT_TIMEOUT_SECONDS = 30
-MAX_TIMEOUT_SECONDS = 120
+# 命令执行超时配置
+DEFAULT_TIMEOUT_SECONDS = 30   # 默认超时：适配常规命令（ls/git/npm 等）
+MAX_TIMEOUT_SECONDS = 120      # 最大超时：防止长时间挂起阻塞 Agent 循环
 
 
 SpawnHook = Callable[[str, Path], tuple[str, Path]]

@@ -31,9 +31,10 @@ class ContextualRetrievalState:
     def __init__(
         self,
         project_root: Path,
-        max_files: int = 8,
-        max_results: int = 6,
-        max_tool_calls: int = 8,
+        # 上下文预算限制（基于 system prompt token 预算设计）
+        max_files: int = 8,          # 约占 200 token 预算
+        max_results: int = 6,        # 约占 150 token 预算
+        max_tool_calls: int = 8,     # 约占 200 token 预算
     ) -> None:
         self.project_root = project_root.resolve()
         self.max_files = max_files
@@ -45,6 +46,7 @@ class ContextualRetrievalState:
         self._tool_calls: deque[RecentToolCall] = deque(maxlen=max_tool_calls)
 
     def record_file(self, path: Path | str) -> None:
+        """记录文件为当前上下文相关，去重并维护 LRU 队列。"""
         text = self._display(path)
         if not text:
             return
@@ -61,6 +63,7 @@ class ContextualRetrievalState:
                 self._active_file = self._files[-1] if self._files else None
 
     def record_tool_result(self, tool: str, content: str) -> None:
+        """记录工具结果摘要，用于下一轮 system prompt。"""
         clean = " ".join(content.strip().split())
         if not clean:
             return
@@ -78,6 +81,7 @@ class ContextualRetrievalState:
         approval_scope: str | None = None,
         target_path: str | None = None,
     ) -> None:
+        """记录工具调用历史，包含状态、风险级别和审批范围。"""
         clean_input = " ".join(input_brief.strip().split())
         if len(clean_input) > 160:
             clean_input = clean_input[:157] + "..."
@@ -94,6 +98,7 @@ class ContextualRetrievalState:
         )
 
     def render(self) -> str:
+        """渲染为 system prompt 的 contextual-retrieval 块。"""
         lines = [
             "<contextual-retrieval>",
             "This block contains only context already made relevant by the current task.",

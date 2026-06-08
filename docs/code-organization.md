@@ -6,6 +6,12 @@
 
 ## 分层概览
 
+**四层模型的设计原因**：
+- **职责分离**：每层只关注自己的契约边界，降低耦合
+- **可替换性**：Provider 层可换模型，Product 层可换产品形态（从 coding 换到其他领域）
+- **测试隔离**：Loop Core 可独立测试，不依赖具体 provider 或产品工具
+- **演进稳定**：修改 UI 层不影响 agent 循环核心逻辑
+
 Xcode 按四层模型组织，依赖方向从左到右：
 
 ```text
@@ -188,6 +194,11 @@ src/xcode/main.py
 
 ## 工具组与默认可见工具
 
+**Core 是默认启用的设计原因**：
+- 零配置可用：用户无需编写配置文件即可开始使用基础 coding 能力
+- 最小安全集合：file/search/bash 是本地只读或可审计的操作，风险可控
+- 渐进增强：用户根据需要逐步启用 skills/subagent/experimental 功能
+
 工具实现归 `coding_agent/` 层所有。默认 `enabled_groups=("core",)`，可见工具为：
 
 - `read_file`
@@ -202,6 +213,12 @@ src/xcode/main.py
 
 - `skills`：`load_skill`
 - `subagent`：`submit_subagent`、`check_subagent`、`cancel_subagent`
+
+**Experimental 必须 opt-in 的设计原因**：
+- **稳定性边界**：experimental 功能未经生产验证，可能引入破坏性变更
+- **依赖隔离**：避免默认加载重型依赖（如 MCP stdio 管理、BM25 索引）
+- **权限最小化**：worktree/tasks/mailbox 等涉及文件系统副作用，需要用户显式授权
+- **成本可控**：daemon/memory 等持久化功能会增加存储和计算开销
 
 experimental group：
 

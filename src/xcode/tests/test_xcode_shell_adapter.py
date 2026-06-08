@@ -131,9 +131,9 @@ class XcodeShellAdapterTests(unittest.TestCase):
 
     def test_bash_tool_passes_shell_false_and_argv(self) -> None:
         """验证显式 shell_spec 时 argv 和 cwd 正确传递。"""
-        from xcode.harness.execution_env import SandboxExecutionEnv
+        from xcode.harness.execution_env import MockExecutionEnv
 
-        env = SandboxExecutionEnv()
+        env = MockExecutionEnv()
         spec = _KNOWN_SHELLS["bash"]
         with tempfile.TemporaryDirectory() as tmp:
             tool = build_bash_tool(Path(tmp), shell_spec=spec, env=env)

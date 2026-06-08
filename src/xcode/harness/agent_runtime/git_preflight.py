@@ -6,8 +6,9 @@ from pathlib import Path
 
 """每轮任务开始前注入的 Git 工作区基线。"""
 
-MAX_SECTION_CHARS = 6_000
-CACHE_TTL = 5.0  # seconds
+# Git 输出限制和缓存配置
+MAX_SECTION_CHARS = 6_000  # Git 输出截断：避免大 diff 撑爆 system prompt
+CACHE_TTL = 5.0            # 缓存有效期（秒）：减少频繁 git 调用开销
 
 _cache: dict[str, tuple[float, str]] = {}
 

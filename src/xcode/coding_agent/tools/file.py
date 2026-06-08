@@ -31,8 +31,9 @@ from .truncate import truncate_head, format_size
 拒绝、输出截断和基于 old_text 的文件编辑（含模糊匹配）。
 """
 
-MAX_READ_BYTES = 1_000_000
-MAX_WRITE_BYTES = 1_000_000
+# 文件读写限制（防止内存耗尽和输出截断）
+MAX_READ_BYTES = 1_000_000   # 单文件读取限制：1MB
+MAX_WRITE_BYTES = 1_000_000  # 单文件写入限制：1MB
 
 
 class FileOperations(Protocol):
@@ -321,8 +322,10 @@ def _read_image(
     data = operations.read_bytes(path)
     img = Image.open(BytesIO(data))
     orig_w, orig_h = img.width, img.height
+    # 图片尺寸限制（Anthropic API 要求）
     max_dim = 2000
     if orig_w > max_dim or orig_h > max_dim:
+        # 限制最大边为 2000px 以符合 Anthropic API 图片尺寸要求
         ratio = min(max_dim / orig_w, max_dim / orig_h)
         new_size = (int(orig_w * ratio), int(orig_h * ratio))
         resized = img.resize(new_size, Image.Resampling.LANCZOS)
@@ -513,7 +516,16 @@ def _edit_file_impl(
 
 
 def _prepare_edit_arguments(data: dict[str, Any]) -> dict[str, Any]:
-    """对 edit_file 输入做防御性预处理，对齐 Pi-mono 的 prepareArguments。"""
+    """对 edit_file 输入做防御性预处理，对齐 Pi-mono 的 prepareArguments。
+
+    防御性设计原因：
+    LLM 可能生成不规范的 JSON 结构，此函数归一化输入以提高容错性：
+    - 字符串化数组 → 解析为真实数组
+    - 扁平化字段 → 提取嵌套结构
+    - 缺失必需字段 → 补充默认值
+
+    避免因 LLM 输出格式偏差导致工具调用失败。
+    """
     result = dict(data)
 
     raw_edits = result.get("edits")

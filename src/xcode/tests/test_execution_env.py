@@ -7,7 +7,7 @@ import unittest
 
 from xcode.harness.execution_env import (
     ExecutionResult,
-    SandboxExecutionEnv,
+    MockExecutionEnv,
     SubprocessExecutionEnv,
 )
 from xcode.coding_agent.tools import build_bash_tool
@@ -58,9 +58,9 @@ class TestSubprocessExecutionEnv(unittest.TestCase):
             timer.cancel()
 
 
-class TestSandboxExecutionEnv(unittest.TestCase):
+class TestMockExecutionEnv(unittest.TestCase):
     def test_records_calls(self) -> None:
-        env = SandboxExecutionEnv()
+        env = MockExecutionEnv()
         env.enqueue(ExecutionResult(stdout="mocked"))
         result = env.run(["echo", "hi"], cwd=Path("/tmp"), timeout=5)
         self.assertEqual(result.stdout, "mocked")
@@ -68,13 +68,13 @@ class TestSandboxExecutionEnv(unittest.TestCase):
         self.assertEqual(env.calls[0][0], ["echo", "hi"])
 
     def test_default_result_when_no_enqueued(self) -> None:
-        env = SandboxExecutionEnv()
+        env = MockExecutionEnv()
         result = env.run(["echo", "hi"], cwd=Path("/"))
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.returncode, 0)
 
     def test_multiple_calls_consume_in_order(self) -> None:
-        env = SandboxExecutionEnv()
+        env = MockExecutionEnv()
         env.enqueue(ExecutionResult(stdout="first"))
         env.enqueue(ExecutionResult(stdout="second"))
         r1 = env.run(["cmd1"], cwd=Path("/"))
@@ -83,9 +83,9 @@ class TestSandboxExecutionEnv(unittest.TestCase):
         self.assertEqual(r2.stdout, "second")
 
 
-class TestBashWithSandboxEnv(unittest.TestCase):
+class TestBashWithMockEnv(unittest.TestCase):
     def test_bash_uses_injected_env(self) -> None:
-        env = SandboxExecutionEnv()
+        env = MockExecutionEnv()
         env.enqueue(ExecutionResult(stdout="hello from sandbox"))
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -94,7 +94,7 @@ class TestBashWithSandboxEnv(unittest.TestCase):
             self.assertIn("hello from sandbox", output)
 
     def test_bash_timeout_from_injected_env(self) -> None:
-        env = SandboxExecutionEnv()
+        env = MockExecutionEnv()
         env.enqueue(
             ExecutionResult(stdout="", stderr="", returncode=-1, timed_out=True)
         )
@@ -105,7 +105,7 @@ class TestBashWithSandboxEnv(unittest.TestCase):
             self.assertIn("timed out", output)
 
     def test_bash_cancelled_from_injected_env(self) -> None:
-        env = SandboxExecutionEnv()
+        env = MockExecutionEnv()
         env.enqueue(
             ExecutionResult(stdout="", stderr="", returncode=-1, cancelled=True)
         )
@@ -116,7 +116,7 @@ class TestBashWithSandboxEnv(unittest.TestCase):
             self.assertIn("cancelled", output)
 
     def test_bash_exit_code_from_injected_env(self) -> None:
-        env = SandboxExecutionEnv()
+        env = MockExecutionEnv()
         env.enqueue(ExecutionResult(stdout="", stderr="", returncode=42))
 
         with tempfile.TemporaryDirectory() as tmp:

@@ -32,7 +32,7 @@ from ...agent.messages import (
 )
 from xcode.ai.events import ToolCall as ToolUseBlock
 from xcode.ai.providers.protocol import ModelProvider
-from xcode.ai.types import TextContent, ToolCallContent
+from xcode.agent.types import TextContent, ToolCallContent
 from .agent_helpers import (
     run_coro_sync,
     aiter_to_sync_iter,
@@ -130,7 +130,7 @@ class StructuredAgent:
         self._consecutive_errors: int = 0
         self._current_mode: ExecutionMode = "act"
         self._plan_enter_step: int = 0
-        self._max_plan_turns: int = 8
+        self._max_plan_turns: int = 8  # plan mode 最大探索深度：平衡探索全面性与防止过度推理
         self._plan_pending_confirmation: bool = False
         self._progress_steps_without_update: int = 0
         self._last_progress_step: int = 0

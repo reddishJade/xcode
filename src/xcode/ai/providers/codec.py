@@ -29,6 +29,15 @@ class _ChatToolCall(Protocol):
 
 
 def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
+    """将 JSON Schema 转换为 OpenAI strict mode 兼容格式。
+
+    OpenAI strict mode 约束：
+    - object 类型必须声明所有字段为 required
+    - 不允许 additionalProperties（必须显式禁止）
+    - 不支持约束字段（minLength/maxLength/minItems/maxItems）
+
+    这些限制确保模型生成的 JSON 严格匹配 schema，避免幻觉字段。
+    """
     s = copy.deepcopy(schema)
 
     def process(node: Any) -> Any:
@@ -42,6 +51,7 @@ def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
                 node["required"] = list(properties.keys())
                 node["additionalProperties"] = False
 
+        # 移除 OpenAI strict mode 不支持的约束字段
         node.pop("minLength", None)
         node.pop("maxLength", None)
         node.pop("minItems", None)

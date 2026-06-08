@@ -69,6 +69,16 @@ class Model[TApi: Api]:
 
 @dataclass
 class ThinkingBudgets:
+    """Extended thinking token 预算配置。
+
+    用于支持 extended thinking 的模型（如 o1/o3/DeepSeek R1），
+    控制各思考级别的最大 token 数。字段含义：
+    - minimal: 最简思考（快速响应）
+    - low: 低强度思考
+    - medium: 中等强度思考
+    - high: 高强度思考（深度推理）
+    """
+
     minimal: int = 0
     low: int = 0
     medium: int = 0
@@ -94,42 +104,6 @@ class StreamOptions:
     on_response: Any | None = None
     thinking_budgets: ThinkingBudgets | None = None
     thinking_level: str | None = None
-
-
-# Content block types
-@dataclass(frozen=True)
-class TextContent:
-    type: str = "text"
-    text: str = ""
-
-
-@dataclass(frozen=True)
-class ImageContent:
-    type: str = "image"
-    source: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class ToolCallContent:
-    type: str = "tool_call"
-    id: str = ""
-    name: str = ""
-    arguments: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class ThinkingContent:
-    type: str = "thinking"
-    thinking: str = ""
-    signature: str | None = None
-
-
-@dataclass(frozen=True)
-class ToolResultContent:
-    type: str = "tool_result"
-    tool_use_id: str = ""
-    content: str = ""
-    status: str = "ok"
 
 
 @dataclass(frozen=True)

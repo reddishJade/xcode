@@ -17,12 +17,18 @@ Xcode 是一个轻量级 Python coding agent。架构按四层模型组织：
 cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 ```
 
-核心设计是：
+**核心设计原则**：
 
 - 模型负责推理和工具选择。
 - 各层职责分离，每层只关注自己的契约边界。
 - 默认路径保持小而稳定，只暴露 `core` 工具组。
 - 实验性能力必须通过 `tools.enabled_groups` 显式启用。
+
+**为什么职责分离如此重要**：
+- 修改 UI 渲染不会影响 agent 循环核心逻辑
+- 更换 LLM provider 不需要改动工具执行代码
+- 从 coding 产品切换到其他领域（如数据分析、DevOps）只需替换 Product 层
+- Loop Core 可以独立测试，不依赖具体 provider 实现
 
 运行路径：
 

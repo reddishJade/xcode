@@ -11,9 +11,12 @@ from typing import Any
 
 import filelock
 
-SUMMARY_USER_CHARS = 120
-SUMMARY_ASSISTANT_CHARS = 180
-SUMMARY_TITLE_CHARS = 160
+# 会话摘要字符限制（终端显示和可读性优化）
+SUMMARY_USER_CHARS = 120         # 用户消息摘要：约一行终端显示
+SUMMARY_ASSISTANT_CHARS = 180    # 助手消息摘要：约一行半终端显示
+SUMMARY_TITLE_CHARS = 160        # 会话标题：适配文件浏览器列宽度
+
+# 会话存储协议版本
 SESSION_INDEX_VERSION = 1
 SESSION_STORAGE_PROTOCOL = "jsonl-v1"
 SESSION_RECOVERY_BOUNDARY = "current_transcript_and_session_tree"
@@ -468,6 +471,7 @@ class SessionMetadataView:
 
 
 def _make_title(text: str | None) -> str:
+    """从首条消息生成会话标题，最长 72 字符。"""
     cleaned = _collapse_text(text or "")
     if not cleaned:
         return "Untitled conversation"
@@ -475,6 +479,7 @@ def _make_title(text: str | None) -> str:
 
 
 def _make_initial_summary(text: str | None) -> str:
+    """从首条消息生成初始摘要。"""
     cleaned = _collapse_text(text or "")
     if not cleaned:
         return "Conversation started."
@@ -482,6 +487,7 @@ def _make_initial_summary(text: str | None) -> str:
 
 
 def _make_conversation_summary(user: str, assistant: str | None) -> str:
+    """从首条用户消息和助手响应生成会话摘要。"""
     user_text = _truncate(_collapse_text(user), SUMMARY_USER_CHARS)
     if not assistant:
         return f"First request: {user_text}"
@@ -490,6 +496,7 @@ def _make_conversation_summary(user: str, assistant: str | None) -> str:
 
 
 def _collapse_text(text: str) -> str:
+    """折叠空白字符：连续空白替换为单个空格，删除首尾空白。"""
     return " ".join(str(text).split())
 
 

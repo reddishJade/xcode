@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from xcode.ai.events import StopReason
-from xcode.ai.types import ImageContent, TextContent, ThinkingContent, ToolCallContent
+from xcode.agent.types import ImageContent, TextContent, ThinkingContent, ToolCallContent
 
 from .protocols import ContentBlock
 

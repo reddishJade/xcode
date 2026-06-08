@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from xcode.ai.providers.protocol import ModelProvider
-from xcode.ai.types import StreamOptions, ThinkingLevel, ToolCallContent
+from xcode.ai.types import StreamOptions, ThinkingLevel
+from xcode.agent.types import ToolCallContent
 
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage
 from .protocols import (

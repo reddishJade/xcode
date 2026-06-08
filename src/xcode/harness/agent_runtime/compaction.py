@@ -211,6 +211,7 @@ def latest_read_file_tool_result_ids(messages: list[dict[str, Any]]) -> set[str]
 
 
 def _read_file_tool_paths(messages: list[dict[str, Any]]) -> dict[str, str]:
+    """提取所有 read_file 工具调用的 tool_use_id → 文件路径映射。"""
     tool_use_id_to_path: dict[str, str] = {}
     for message in messages:
         if message.get("role") != "assistant":

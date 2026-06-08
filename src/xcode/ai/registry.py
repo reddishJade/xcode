@@ -159,6 +159,15 @@ def get_model(provider_name: str, model_id: str) -> Model | None:
 
 
 def resolve_model(provider_name: str, model_id: str) -> Model:
+    """解析模型定义，支持三层回退策略。
+
+    回退逻辑：
+    1. 尝试从注册表查找 provider_name + model_id 的精确匹配
+    2. 若未找到，但 provider 存在，返回该 provider 的第一个注册模型（默认模型）
+    3. 若 provider 也不存在，构造最小化 Model 对象（使用 openai-completions 作为兜底 API）
+
+    设计原因：确保未知模型不会导致运行时错误，允许用户使用未预注册的模型。
+    """
     model = get_model(provider_name, model_id)
     if model is not None:
         return model

@@ -179,4 +179,12 @@ class ChatGLMProvider(OpenAICompatProvider):
 
 
 def _supports_tool_stream(model: str) -> bool:
+    """判断模型是否支持 tool_stream。
+
+    tool_stream 支持版本（来源：ChatGLM API 文档）：
+    - glm-4.6: 支持
+    - glm-4.7: 支持
+    - 更早版本: 不支持
+    - 未来版本: 需要查阅官方文档确认
+    """
     return model.startswith("glm-4.6") or model.startswith("glm-4.7")

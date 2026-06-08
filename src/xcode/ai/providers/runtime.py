@@ -55,6 +55,13 @@ def is_transient_provider_error(exc: BaseException) -> bool:
         return True
 
     msg = str(exc).lower()
+    # 临时性错误关键词（基于 HTTP 标准和经验值）
+    # - timeout: 网络超时或服务端处理超时
+    # - connection reset/refused: 网络连接问题
+    # - 429: Too Many Requests（速率限制）
+    # - 500/502/503: 服务端临时故障
+    # - 529: Cloudflare 限流（非标准状态码，部分 CDN 使用）
+    # - temporary: 服务端明确标识的临时错误
     transient_keywords = [
         "timeout",
         "connection reset",

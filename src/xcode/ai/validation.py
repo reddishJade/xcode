@@ -36,13 +36,18 @@ def _validate_value(
         expected = schema["type"]
         actual = _TYPE_NAMES.get(type(value), type(value).__name__)
 
+        # Python 类型兼容性特殊处理：
+        # 1. bool 是 int 的子类，但 JSON Schema 中 boolean ≠ integer
         if expected == "integer" and actual == "number" and isinstance(value, bool):
             errors.append(f"{path}: expected integer, got boolean")
+        # 2. 允许整数值的 float 通过 integer 校验（LLM 常输出 1.0）
         elif expected == "integer" and actual == "number" and isinstance(value, float):
             if value != int(value):
                 errors.append(f"{path}: expected integer, got float {value}")
+        # 3. float 通过 integer 校验（已处理非整数情况）
         elif expected == "integer" and actual == "number":
             pass
+        # 4. number 类型接受 integer（JSON Schema 标准）
         elif expected != actual and not (expected == "number" and actual == "integer"):
             errors.append(f"{path}: expected {expected}, got {actual}")
 

@@ -21,8 +21,9 @@ CORE_IDENTITY = (
     "Use tools deliberately, respect the project sandbox, and keep answers grounded in observed results."
 )
 
-MAX_CWD_ENTRIES = 12
-MAX_INSTRUCTION_CHARS = 4000
+# Prompt 构造限制
+MAX_CWD_ENTRIES = 12            # 终端显示行数限制：ls 输出约 12 行
+MAX_INSTRUCTION_CHARS = 4000    # 项目指令限制：避免 system prompt 过大影响 Prompt Cache 效率
 
 TOOL_DISCIPLINE = """<tool-discipline>
 Tools must serve the current response. If no external facts or workspace evidence

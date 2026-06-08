@@ -1,6 +1,12 @@
 """Agent 核心循环。
 
 Xcode 的类型化 Agent 循环。模块本身不持有运行状态。
+
+**循环设计原因**：
+- 外层循环（步骤限制 + follow-up 队列）：防止无限递归，支持多轮对话延续
+- 内层循环（compact → 模型调用 → 错误重试 → max_tokens 续写）：应对上下文溢出和部分生成
+- 可注入设计：所有外部依赖（provider、工具、hooks）通过参数注入，便于测试和替换
+
 流程：
   外层循环：步骤限制 + follow-up 队列驱动
   内层循环：compact → 模型调用 → 错误重试 → max_tokens 续写
@@ -27,7 +33,8 @@ from xcode.ai.events import (
     ToolCallEvent,
     UsageUpdate,
 )
-from xcode.ai.types import ToolDefinition, TextContent, ToolCallContent
+from xcode.ai.types import ToolDefinition
+from xcode.agent.types import TextContent, ToolCallContent
 from .config import (
     AgentContext,
     AgentLoopConfig,
@@ -99,7 +106,13 @@ def _message_update_event(message: AgentMessage) -> MessageUpdateEvent:
 
 
 def _tool_signature(calls: list[ToolCallContent]) -> str:
-    """生成工具调用签名，用于检测重复调用。"""
+    """生成工具调用签名，用于检测重复调用。
+
+    签名生成规则：
+    - 排序工具调用：忽略调用顺序，只关注工具集合
+    - 分隔符 "|"：避免与 JSON 中的常见字符冲突
+    - 参数归一化：sort_keys 确保参数顺序不影响签名
+    """
     parts = []
     for c in calls:
         args_str = json.dumps(c.arguments or {}, sort_keys=True, default=str)
@@ -454,6 +467,12 @@ def _update_repeated_tool_watchdog(
     tool_calls: list[ToolCallContent],
     config: AgentLoopConfig,
 ) -> str | None:
+    """检测工具调用是否重复，防止无限循环。
+
+    比较工具签名而非工具名的原因：
+    - 工具名相同但参数不同视为有效重试（如搜索不同关键词）
+    - 签名完全相同（包括参数）才视为无效重复
+    """
     sig = _tool_signature(tool_calls)
     if sig == state.last_tool_signature:
         state.repeated_tool_count += 1
@@ -714,11 +733,18 @@ def _update_continuation_count(
     consecutive_continuations: int,
     config: AgentLoopConfig,
 ) -> int:
-    inc = _estimate_text_tokens(
+    """检测模型是否陷入低产出续写循环。
+
+    续写机制设计：
+    - 模型输出因 max_tokens 截断时自动续写
+    - 若续写内容少于阈值（默认 500 tokens），计入低产出计数
+    - 连续多次低产出（默认 3 次）则终止，防止无限循环
+    """
+    estimated_tokens = _estimate_text_tokens(
         json.dumps(message.content, ensure_ascii=False, default=str)
     )
     updated = (
-        consecutive_continuations + 1 if inc < config.min_continuation_tokens else 0
+        consecutive_continuations + 1 if estimated_tokens < config.min_continuation_tokens else 0
     )
     if updated >= config.max_consecutive_continuations:
         raise RuntimeError(
@@ -770,5 +796,11 @@ def _cancelled_message(signal: CancellationSignal | None) -> AssistantMessage:
 
 
 def _estimate_text_tokens(text: str) -> int:
-    """粗略估算文本 token 数（约 4 字符/token）。"""
+    """粗略估算文本 token 数。
+
+    使用 4 字符/token 作为保守估计：
+    - 英文约 4 字符/token
+    - 中文约 2 字符/token
+    - 此处取保守值以避免低估 token 消耗
+    """
     return max(1, len(text) // 4)

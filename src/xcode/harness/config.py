@@ -173,6 +173,7 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
 
 
 def resolve_config_path(project_root: Path, path: Path | None) -> Path | None:
+    """解析配置路径，相对路径转为基于项目根的绝对路径。"""
     if path is None:
         return None
     if path.is_absolute():
@@ -181,6 +182,7 @@ def resolve_config_path(project_root: Path, path: Path | None) -> Path | None:
 
 
 def _optional_path(value: object) -> Path | None:
+    """将配置值转为 Path 对象，空值返回 None。"""
     if value in (None, ""):
         return None
     return Path(str(value))

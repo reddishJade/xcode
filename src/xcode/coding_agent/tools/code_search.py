@@ -65,26 +65,36 @@ class LocalFindOperations:
 
 _EVAL_NS: dict[str, Any] = {}
 
-MAX_GREP_RESULTS = 100
-MAX_GLOB_RESULTS = 200
-MAX_LS_ENTRIES = 500
+# 输出限制：平衡 LLM 上下文窗口利用率与响应速度
+MAX_GREP_RESULTS = 100    # grep 最多返回 100 行匹配
+MAX_GLOB_RESULTS = 200    # glob 最多返回 200 个文件
+MAX_LS_ENTRIES = 500      # ls 最多列出 500 个条目
 _RG_MISSING_HINT_EMITTED = False
 
 _BLOCKED_CALL_NAMES = frozenset(
     {
+        # 代码执行（防止任意代码执行）
         "exec",
         "eval",
+        "compile",
+
+        # I/O 操作（防止文件系统访问）
         "open",
+        "input",
+
+        # 动态导入（防止加载未审查的模块）
         "__import__",
+
+        # 动态属性操作（防止访问私有属性和绕过限制）
         "getattr",
         "setattr",
         "delattr",
         "vars",
         "locals",
         "globals",
-        "compile",
+
+        # 调试工具（防止交互式中断）
         "breakpoint",
-        "input",
     }
 )
 
@@ -229,8 +239,8 @@ def build_code_tools(
                 "__builtins__": _SAFE_BUILTINS,
             }
             safe_globals.update(_EVAL_NS)
-            compiled = compile(tree, "<programmatic>", "exec")
-            exec(compiled, safe_globals)
+            code_object = compile(tree, "<programmatic>", "exec")
+            exec(code_object, safe_globals)
             _EVAL_NS.clear()
             _EVAL_NS.update(
                 {k: v for k, v in safe_globals.items() if k not in ("__builtins__",)}
