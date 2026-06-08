@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-THINKING_LEVELS = frozenset(("off", "minimal", "low", "medium", "high", "xhigh", "max"))
+THINKING_LEVELS = frozenset(("off", "minimal", "low", "medium", "high", "xhigh"))
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,9 @@ def parse_model_mode(value: str) -> ModelMode:
         thinking_level = level.strip().lower()
         if thinking_level not in THINKING_LEVELS:
             allowed = "/".join(sorted(THINKING_LEVELS))
-            raise ValueError(f"invalid thinking level: {thinking_level}. Use {allowed}.")
+            raise ValueError(
+                f"invalid thinking level: {thinking_level}. Use {allowed}."
+            )
 
     model = model.strip()
     if not model:

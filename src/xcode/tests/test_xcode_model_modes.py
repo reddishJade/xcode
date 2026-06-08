@@ -17,11 +17,11 @@ class XcodeModelModeTests(unittest.TestCase):
         self.assertIsNone(parsed.thinking_level)
 
     def test_parse_model_mode_provider_and_thinking(self) -> None:
-        parsed = parse_model_mode("judge/gpt-5:max")
+        parsed = parse_model_mode("judge/gpt-5:xhigh")
 
         self.assertEqual(parsed.provider, "judge")
         self.assertEqual(parsed.model, "gpt-5")
-        self.assertEqual(parsed.thinking_level, "max")
+        self.assertEqual(parsed.thinking_level, "xhigh")
 
     def test_parse_model_mode_rejects_unknown_thinking_level(self) -> None:
         with self.assertRaises(ValueError):
