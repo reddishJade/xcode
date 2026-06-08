@@ -5,7 +5,13 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-"""工具执行的 allow/deny/ask 权限策略与 HITL 授权模型。"""
+"""工具执行的 allow/deny/ask 权限策略与 HITL 授权模型。
+
+三层权限架构：
+Layer 1: permission_mode (strict/normal/permissive) - 用户入口
+Layer 2: sandbox_mode, approval_policy, network_access, writable_roots, restricted_dirs
+Layer 3: deny_tools, ask_tools, allow_tools (deny > ask > allow)
+"""
 
 
 PermissionDecision = Literal["allow", "deny", "ask"]
@@ -152,7 +158,11 @@ class PersistentPermissionStore:
 
 
 class SettingsSandboxPermissionPolicy:
-    """基于 settings.json 配置的安全沙箱权限审查策略。"""
+    """基于 settings.json 配置的三层权限策略。
+
+    Layer 3 优先级：deny_tools > ask_tools > allow_tools
+    Layer 2 边界：sandbox_mode, restricted_dirs, writable_roots
+    """
 
     def __init__(self, settings_path: Path) -> None:
         self.settings_path = settings_path
@@ -167,22 +177,37 @@ class SettingsSandboxPermissionPolicy:
             return {}
 
     def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
-        allowed_tools = self.settings.get("allowedTools")
-        denied_tools = self.settings.get("deniedTools")
+        security = self.settings.get("security", {})
 
-        # 1. 校验黑名单工具
-        if isinstance(denied_tools, list) and tool_name in denied_tools:
+        # Layer 3: 工具规则 (deny > ask > allow)
+        deny_tools = security.get("deny_tools", [])
+        ask_tools = security.get("ask_tools", [])
+        allow_tools = security.get("allow_tools", [])
+
+        if isinstance(deny_tools, list) and tool_name in deny_tools:
             return "deny"
 
-        # 2. 校验受限目录边界
-        restricted_dirs = self.settings.get("restrictedDirs")
+        if isinstance(ask_tools, list) and tool_name in ask_tools:
+            return "ask"
+
+        if isinstance(allow_tools, list) and tool_name in allow_tools:
+            return "allow"
+
+        # Layer 2: 受限目录边界
+        restricted_dirs = security.get("restricted_dirs", [])
         if isinstance(restricted_dirs, list) and restricted_dirs:
             input_lower = action_input.lower()
             for r_dir in restricted_dirs:
                 if str(r_dir).lower() in input_lower:
                     return "deny"
 
-        # 3. 校验白名单工具
+        # 兼容旧配置格式 (deniedTools/allowedTools)
+        denied_tools = self.settings.get("deniedTools")
+        allowed_tools = self.settings.get("allowedTools")
+
+        if isinstance(denied_tools, list) and tool_name in denied_tools:
+            return "deny"
+
         if isinstance(allowed_tools, list):
             if tool_name in allowed_tools:
                 return "allow"
@@ -277,17 +302,25 @@ def check_tool_permission(
 ) -> PermissionCheckResult:
     """统一权限决策入口。
 
-    合并 PermissionPolicy.decide()、risk_evaluator 以及 high-risk 默认规则：
+    决策优先级（从高到低）：
     1. PermissionPolicy 返回 "deny" → 阻断
     2. PermissionPolicy 返回 "ask" → 需要 approval
-    3. risk_evaluator 返回 "deny" → 阻断
-    4. risk_evaluator 返回 "ask" → 需要 approval
-    5. high_risk_requires_approval=True 且 tool.risk=="high" → 需要 approval
-    6. 否则放行
+    3. PermissionPolicy 返回 "allow" → 放行
+    4. risk_evaluator 返回 "deny" → 阻断
+    5. risk_evaluator 返回 "ask" → 需要 approval
+    6. risk_evaluator 返回 "allow" → 放行
+    7. high_risk_requires_approval=True 且 tool.risk=="high" → 需要 approval
+    8. 否则放行
+
+    三层权限架构：
+    - Layer 3 (工具规则): deny_tools > ask_tools > allow_tools
+    - Layer 2 (底层安全): sandbox_mode, restricted_dirs
+    - Layer 1 (permission_mode): 由 PermissionPolicy 实现的简化入口
 
     当需要 approval 但无 approval_callback 时返回 decision="ask"。
     当 approval_callback 授权通过时 metadata 包含 user_decision 和 approval_scope。
     """
+    # Layer 3 + Layer 2: PermissionPolicy 决策（包含 deny > ask > allow 优先级）
     if permission_policy is not None:
         policy_decision = permission_policy.decide(tool_name, action_input)
         if policy_decision == "deny":
@@ -301,6 +334,7 @@ def check_tool_permission(
         if policy_decision == "allow":
             return PermissionCheckResult(blocked=False, decision="allow")
 
+    # 运行时 risk_evaluator 动态决策
     if tool_spec is not None and tool_spec.risk_evaluator:
         risk_decision = tool_spec.risk_evaluator(tool_input or {})
         if risk_decision == "deny":
@@ -314,6 +348,7 @@ def check_tool_permission(
         if risk_decision == "allow":
             return PermissionCheckResult(blocked=False, decision="allow")
 
+    # 静态高风险工具默认需审批
     if (
         high_risk_requires_approval
         and tool_spec is not None

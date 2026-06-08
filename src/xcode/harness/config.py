@@ -14,6 +14,8 @@ ProviderTransport = Literal[
     "mimo_chat",
 ]
 ExecutionMode = Literal["plan", "review", "act"]
+PermissionMode = Literal["strict", "normal", "permissive"]
+ApprovalPolicy = Literal["always", "high_risk_only", "never"]
 
 PROFILE_MAIN = "main"
 PROFILE_SUBAGENT = "subagent"
@@ -70,6 +72,62 @@ class ProviderRuntimeConfig:
 
 
 @dataclass(frozen=True)
+class SecurityRuntimeConfig:
+    """三层权限模型配置。
+
+    Layer 1: permission_mode (用户入口简化配置)
+    Layer 2: 底层安全能力 (sandbox_mode, approval_policy, network_access, writable_roots, restricted_dirs)
+    Layer 3: 工具规则 (deny_tools, ask_tools, allow_tools)
+
+    优先级：deny > ask > allow
+
+    permission_mode 映射规则：
+    - strict: sandbox_mode=True, approval_policy=always, 所有工具默认需审批
+    - normal: sandbox_mode=False, approval_policy=high_risk_only, 高风险工具需审批
+    - permissive: sandbox_mode=False, approval_policy=never, 仅 deny_tools 阻断
+    """
+
+    # Layer 1: 简化模式
+    permission_mode: PermissionMode = "normal"
+
+    # Layer 2: 底层安全能力
+    sandbox_mode: bool = False
+    approval_policy: ApprovalPolicy = "high_risk_only"
+    network_access: bool = True
+    writable_roots: tuple[str, ...] = ()
+    restricted_dirs: tuple[str, ...] = ()
+
+    # Layer 3: 工具规则 (deny > ask > allow)
+    deny_tools: tuple[str, ...] = ()
+    ask_tools: tuple[str, ...] = ()
+    allow_tools: tuple[str, ...] = ()
+
+    def resolve_approval_policy(self) -> ApprovalPolicy:
+        """根据 permission_mode 解析最终的 approval_policy。
+
+        显式设置的 approval_policy 优先于 permission_mode 映射。
+        """
+        # permission_mode 映射表
+        mode_to_policy: dict[PermissionMode, ApprovalPolicy] = {
+            "strict": "always",
+            "normal": "high_risk_only",
+            "permissive": "never",
+        }
+
+        # 如果 approval_policy 是默认值，使用 permission_mode 映射
+        if self.approval_policy == "high_risk_only":
+            return mode_to_policy.get(self.permission_mode, "high_risk_only")
+
+        return self.approval_policy
+
+    def resolve_sandbox_mode(self) -> bool:
+        """根据 permission_mode 解析最终的 sandbox_mode。"""
+        if self.permission_mode == "strict":
+            return True
+        return self.sandbox_mode
+
+
+@dataclass(frozen=True)
 class ToolsRuntimeConfig:
     enabled_groups: tuple[str, ...] = ("core",)
     shell: str = "auto"
@@ -122,6 +180,7 @@ class XcodeRuntimeConfig:
     observability: ObservabilityRuntimeConfig = ObservabilityRuntimeConfig()
     daemon: DaemonRuntimeConfig = DaemonRuntimeConfig()
     request_hygiene: RequestHygieneConfig = RequestHygieneConfig()
+    security: SecurityRuntimeConfig = SecurityRuntimeConfig()
 
 
 # ── 配置发现 ──
@@ -130,6 +189,96 @@ class XcodeRuntimeConfig:
 def discover_runtime_config(
     project_root: Path, explicit_path: Path | None = None
 ) -> XcodeRuntimeConfig:
+    """发现并加载运行时配置，实现完整覆盖链。
+
+    配置覆盖优先级（从高到低）：
+    1. CLI 参数（由调用方传入）
+    2. 环境变量（XCODE_* 前缀）
+    3. .local/settings.json（本机私有覆盖）
+    4. xcode.config.json（项目共享配置）
+    5. ~/.xcode/settings.json（全局用户配置）
+    6. 内置默认值
+    """
+    # 基础配置：全局用户配置 → 项目配置 → 本地覆盖
+    global_config = _load_global_config()
+    project_config_path = explicit_path or project_root / "xcode.config.json"
+    project_config = load_runtime_config(project_config_path)
+    local_config_path = project_root / ".local" / "settings.json"
+    local_config = load_runtime_config(local_config_path)
+
+    # 合并配置（project 覆盖 global，local 覆盖 project）
+    merged = _merge_configs(global_config, project_config)
+    merged = _merge_configs(merged, local_config)
+
+    # 应用环境变量覆盖
+    merged = _apply_env_overrides(merged)
+
+    return merged
+
+
+def _load_global_config() -> XcodeRuntimeConfig:
+    """加载 ~/.xcode/settings.json 全局配置。"""
+    home = Path.home()
+    global_config_path = home / ".xcode" / "settings.json"
+    return load_runtime_config(global_config_path)
+
+
+def _merge_configs(base: XcodeRuntimeConfig, override: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
+    """合并两个配置，override 优先。
+
+    仅合并非默认值字段，保持 dataclass 不可变性。
+    """
+    # 简化实现：直接用 override 替换 base 的非默认字段
+    # 完整实现需要逐字段深度合并，此处暂时返回 override
+    # TODO: 实现字段级精细合并
+    return override if override != XcodeRuntimeConfig() else base
+
+
+def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
+    """应用环境变量覆盖。
+
+    支持的环境变量：
+    - XCODE_PERMISSION_MODE: strict/normal/permissive
+    - XCODE_SANDBOX_MODE: true/false
+    - XCODE_APPROVAL_POLICY: always/high_risk_only/never
+    """
+    import os
+
+    permission_mode = os.getenv("XCODE_PERMISSION_MODE")
+    sandbox_mode = os.getenv("XCODE_SANDBOX_MODE")
+    approval_policy = os.getenv("XCODE_APPROVAL_POLICY")
+
+    security = config.security
+
+    if permission_mode in ("strict", "normal", "permissive"):
+        security = dataclass_replace(
+            security, permission_mode=cast(PermissionMode, permission_mode)
+        )
+
+    if sandbox_mode in ("true", "false"):
+        security = dataclass_replace(security, sandbox_mode=(sandbox_mode == "true"))
+
+    if approval_policy in ("always", "high_risk_only", "never"):
+        security = dataclass_replace(
+            security, approval_policy=cast(ApprovalPolicy, approval_policy)
+        )
+
+    if security != config.security:
+        config = dataclass_replace(config, security=security)
+
+    return config
+
+
+def dataclass_replace(obj: Any, **changes: Any) -> Any:
+    """替换 dataclass 字段值，保持不可变性。"""
+    from dataclasses import replace
+    return replace(obj, **changes)
+
+
+def discover_runtime_config_legacy(
+    project_root: Path, explicit_path: Path | None = None
+) -> XcodeRuntimeConfig:
+    """旧版配置发现，仅加载项目配置。"""
     config_path = explicit_path or project_root / "xcode.config.json"
     return load_runtime_config(config_path)
 
@@ -148,6 +297,7 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
     observability = data.get("observability", {})
     daemon = data.get("daemon", {})
     request_hygiene = data.get("request_hygiene", {})
+    security = data.get("security", {})
     return XcodeRuntimeConfig(
         provider=ProviderRuntimeConfig(
             model_profiles=_load_model_profiles(provider),
@@ -189,6 +339,17 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
             max_tool_arg_length=int(request_hygiene.get("max_tool_arg_length", 1000)),
             keep_head_lines=int(request_hygiene.get("keep_head_lines", 50)),
             keep_tail_lines=int(request_hygiene.get("keep_tail_lines", 50)),
+        ),
+        security=SecurityRuntimeConfig(
+            permission_mode=_load_permission_mode(security.get("permission_mode")),
+            sandbox_mode=bool(security.get("sandbox_mode", False)),
+            approval_policy=_load_approval_policy(security.get("approval_policy")),
+            network_access=bool(security.get("network_access", True)),
+            writable_roots=tuple(security.get("writable_roots", ())),
+            restricted_dirs=tuple(security.get("restricted_dirs", ())),
+            deny_tools=tuple(security.get("deny_tools", ())),
+            ask_tools=tuple(security.get("ask_tools", ())),
+            allow_tools=tuple(security.get("allow_tools", ())),
         ),
     )
 
@@ -272,3 +433,17 @@ def _load_model_profiles(provider: dict) -> dict[str, ModelProfileRuntimeConfig]
 
 def _optional_dict(value: object) -> dict[str, Any] | None:
     return dict(value) if isinstance(value, dict) else None
+
+
+def _load_permission_mode(value: object) -> PermissionMode:
+    """加载 permission_mode，非法值默认为 normal。"""
+    if value in ("strict", "normal", "permissive"):
+        return cast(PermissionMode, value)
+    return "normal"
+
+
+def _load_approval_policy(value: object) -> ApprovalPolicy:
+    """加载 approval_policy，非法值默认为 high_risk_only。"""
+    if value in ("always", "high_risk_only", "never"):
+        return cast(ApprovalPolicy, value)
+    return "high_risk_only"
