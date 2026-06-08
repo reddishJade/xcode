@@ -17,7 +17,7 @@ from xcode.ai.events import (
     ToolCallEvent,
 )
 from xcode.ai.types import StreamOptions, ToolDefinition
-from xcode.agent.types import TextContent, ThinkingContent
+from xcode.agent.types import TextContent, ThinkingContent, ToolCallContent
 
 
 class TextProvider:
@@ -166,6 +166,26 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(converted[0]["content"], "answer")
         self.assertEqual(converted[0]["reasoning_content"], "think")
+
+    def test_tool_call_arguments_convert_to_json_string(self) -> None:
+        """工具调用参数在 provider 边界转为 JSON 字符串。"""
+        converted = convert_to_llm(
+            [
+                AssistantMessage(
+                    content=[
+                        ToolCallContent(
+                            id="call-1",
+                            name="echo",
+                            arguments={"text": "hello"},
+                        )
+                    ]
+                )
+            ]
+        )
+
+        arguments = converted[0]["tool_calls"][0]["function"]["arguments"]
+        self.assertIsInstance(arguments, str)
+        self.assertEqual(arguments, '{"text":"hello"}')
 
 
 # ── 新增功能测试 ──

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import orjson
+
 from xcode.ai.events import StopReason
 from xcode.agent.types import (
     ImageContent,
@@ -167,7 +169,7 @@ def _convert_block(block: ContentBlock) -> dict[str, Any] | None:
             "type": "function",
             "function": {
                 "name": block.name,
-                "arguments": block.arguments or {},
+                "arguments": orjson.dumps(block.arguments or {}).decode(),
             },
         }
     if isinstance(block, ThinkingContent):
