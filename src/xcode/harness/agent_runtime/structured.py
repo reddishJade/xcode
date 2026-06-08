@@ -55,6 +55,7 @@ from .result import (
     RunState,
     StructuredAgentResult,
 )
+from .session import AgentSession, InMemoryAgentSession
 from .tool_adapter import adapt_tool_specs
 from ..config import AgentConfig, ExecutionMode
 from ..observability import (
@@ -111,6 +112,7 @@ class StructuredAgent:
         cancellation_token: CancellationToken | None = None,
         fallback_provider: ModelProvider | None = None,
         project_root: Path | None = None,
+        session: AgentSession | None = None,
     ) -> None:
         self.provider: ModelProvider = provider
         if fallback_provider is not None:
@@ -144,8 +146,7 @@ class StructuredAgent:
         self._progress_steps_without_update: int = 0
         self._last_progress_step: int = 0
 
-        # 会话历史管理：存储用户消息、助手消息和工具调用
-        self._conversation_history: list[AgentMessage] = []
+        self._session = session or InMemoryAgentSession()
 
         # 适配 ToolSpec → AgentTool，创建 Agent 实例
         adapted_tools: list[Any] = adapt_tool_specs(
@@ -174,21 +175,21 @@ class StructuredAgent:
 
     def clear_history(self) -> None:
         """清空会话历史。对应 /clear 命令。"""
-        self._conversation_history.clear()
+        self._session.clear()
 
     def load_history(self, messages: list[AgentMessage]) -> None:
         """用外部会话记录替换当前会话历史。"""
-        self._conversation_history = deepcopy(messages)
+        self._session.load(messages)
 
     def load_run_state(self, run_state: RunState) -> None:
         """用可序列化运行状态恢复当前会话。"""
-        self._conversation_history = _messages_from_run_state(run_state)
+        self._session.load(_messages_from_run_state(run_state))
         if run_state.current_mode in {"act", "plan", "review"}:
             self._current_mode = cast(ExecutionMode, run_state.current_mode)
 
     def history_messages(self) -> list[AgentMessage]:
         """返回当前会话历史副本。"""
-        return deepcopy(self._conversation_history)
+        return self._session.messages()
 
     def run(
         self, question: str, mode: ExecutionMode | None = None
@@ -663,7 +664,7 @@ class StructuredAgent:
 
         包括：用户消息、助手消息、工具调用和工具结果。
         """
-        self._conversation_history.extend(deepcopy(messages))
+        self._session.append(messages)
 
     def _turn_snapshot(self) -> TurnSnapshot:
         """冻结当前 turn 依赖的配置和工具引用。"""
