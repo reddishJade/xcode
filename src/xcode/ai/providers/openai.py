@@ -63,9 +63,16 @@ class OpenAIChatProvider(OpenAICompatProvider):
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        self._build_thinking_params(params)
+        self._build_openai_reasoning_params(params)
 
         yield from self._call_chat_api(params, len(chat_messages))
+
+    def _build_openai_reasoning_params(self, params: dict[str, object]) -> None:
+        """写入官方 OpenAI Chat Completions reasoning 参数。"""
+        if self.reasoning_effort:
+            params["reasoning_effort"] = self.reasoning_effort
+        elif not self.thinking:
+            params["reasoning_effort"] = "none"
 
 
 class OpenAIResponsesProvider(OpenAICompatProvider):
