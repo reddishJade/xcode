@@ -40,6 +40,7 @@ class XcodePromptingTests(unittest.TestCase):
             )
 
             boundary_index = prompt.index(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+            self.assertTrue(prompt.startswith("# Identity\n\nYou are Xcode"))
             self.assertLess(prompt.index("You are Xcode"), prompt.index("<AGENTS.md>"))
             self.assertLess(
                 prompt.index("<AGENTS.md>"), prompt.index("<tool-discipline>")
