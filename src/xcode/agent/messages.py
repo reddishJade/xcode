@@ -39,6 +39,7 @@ class AssistantMessage:
     role: str = "assistant"
     content: list[ContentBlock] = field(default_factory=list)
     reasoning_content: str | None = None
+    phase: str | None = None
     stop_reason: StopReason = "end_turn"
     error_message: str | None = None
     model: str = ""

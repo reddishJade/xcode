@@ -259,13 +259,14 @@ def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if role == "assistant" and "tool_calls" in message:
             text_content = str(content) if content else None
             if text_content:
-                converted.append(
-                    {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": text_content}],
-                    }
-                )
+                msg: dict[str, Any] = {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text_content}],
+                }
+                if message.get("phase"):
+                    msg["phase"] = message["phase"]
+                converted.append(msg)
             for call in message["tool_calls"]:
                 if isinstance(call, dict):
                     func = call.get("function", {})
@@ -286,13 +287,14 @@ def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             text = str(content) if content is not None else ""
             if role == "assistant":
-                converted.append(
-                    {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": text}],
-                    }
-                )
+                msg: dict[str, Any] = {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text}],
+                }
+                if message.get("phase"):
+                    msg["phase"] = message["phase"]
+                converted.append(msg)
             else:
                 converted.append(
                     {
