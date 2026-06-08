@@ -57,6 +57,7 @@ from .events import (
 )
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
 from .protocols import AgentTool, CancellationSignal, ContentBlock
+from .compaction import estimate_tokens_simple
 from .tool_execution import (
     ExecutedToolBatch,
     execute_tool_calls,
@@ -740,11 +741,13 @@ def _update_continuation_count(
     - 若续写内容少于阈值（默认 500 tokens），计入低产出计数
     - 连续多次低产出（默认 3 次）则终止，防止无限循环
     """
-    estimated_tokens = _estimate_text_tokens(
+    estimated_tokens = estimate_tokens_simple(
         json.dumps(message.content, ensure_ascii=False, default=str)
     )
     updated = (
-        consecutive_continuations + 1 if estimated_tokens < config.min_continuation_tokens else 0
+        consecutive_continuations + 1
+        if estimated_tokens < config.min_continuation_tokens
+        else 0
     )
     if updated >= config.max_consecutive_continuations:
         raise RuntimeError(
@@ -760,9 +763,6 @@ def _append_continuation_prompt(
 ) -> None:
     context.messages.append(message)
     context.messages.append(UserMessage(content="continue"))
-
-
-# ── 辅助函数 ──
 
 
 def _tools_to_definitions(tools: list[AgentTool] | None) -> list[ToolDefinition]:
@@ -793,14 +793,3 @@ def _cancelled_message(signal: CancellationSignal | None) -> AssistantMessage:
         stop_reason="aborted",
         error_message=_cancel_reason(signal),
     )
-
-
-def _estimate_text_tokens(text: str) -> int:
-    """粗略估算文本 token 数。
-
-    使用 4 字符/token 作为保守估计：
-    - 英文约 4 字符/token
-    - 中文约 2 字符/token
-    - 此处取保守值以避免低估 token 消耗
-    """
-    return max(1, len(text) // 4)
