@@ -69,13 +69,13 @@ class ToolSpec:
 
 ToolExecutionStatus = Literal["ok", "denied", "error", "approval_required"]
 
-STATUS_OK: ToolExecutionStatus = "ok"
-STATUS_DENIED: ToolExecutionStatus = "denied"
-STATUS_ERROR: ToolExecutionStatus = "error"
-STATUS_APPROVAL_REQUIRED: ToolExecutionStatus = "approval_required"
+_STATUS_OK: ToolExecutionStatus = "ok"
+_STATUS_DENIED: ToolExecutionStatus = "denied"
+_STATUS_ERROR: ToolExecutionStatus = "error"
+_STATUS_APPROVAL_REQUIRED: ToolExecutionStatus = "approval_required"
 
-RISK_LOW = "low"
-RISK_HIGH = "high"
+_RISK_LOW = "low"
+_RISK_HIGH = "high"
 
 
 @dataclass(frozen=True)
@@ -127,6 +127,11 @@ def run_tool(
     approval_callback: ApprovalCallback | None = None,
     permission_policy: PermissionPolicy | None = None,
 ) -> str:
+    """测试辅助函数：执行工具并返回内容字符串。
+
+    生产代码应使用 run_tool_result() 以获取完整的执行结果（包括状态和元数据）。
+    此函数仅为测试代码提供简化的字符串返回值。
+    """
     return run_tool_result(
         registry,
         action,
@@ -152,7 +157,7 @@ def run_tool_result(
     tool = registry.get(action)
     if tool is None:
         return ToolExecutionResult(
-            STATUS_ERROR,
+            _STATUS_ERROR,
             f"unknown tool: {action}. available tools: {', '.join(sorted(registry))}",
         )
     action_input_text = stringify_tool_input(action_input)
@@ -167,7 +172,7 @@ def run_tool_result(
     )
     if perm_result.blocked:
         status = (
-            STATUS_APPROVAL_REQUIRED if perm_result.decision == "ask" else STATUS_DENIED
+            _STATUS_APPROVAL_REQUIRED if perm_result.decision == "ask" else _STATUS_DENIED
         )
         return ToolExecutionResult(
             status, perm_result.reason, metadata=perm_result.metadata
@@ -179,12 +184,12 @@ def run_tool_result(
             _tool_output_metadata(raw_content),
             perm_result.metadata,
         )
-        return ToolExecutionResult(STATUS_OK, content, metadata=metadata)
+        return ToolExecutionResult(_STATUS_OK, content, metadata=metadata)
     except Exception as exc:
         meta = {"error": str(exc)}
         if perm_result.metadata:
             meta.update(perm_result.metadata)
-        return ToolExecutionResult(STATUS_ERROR, f"tool error: {exc}", meta)
+        return ToolExecutionResult(_STATUS_ERROR, f"tool error: {exc}", meta)
 
 
 def _tool_output_metadata(output: str) -> dict[str, Any] | None:

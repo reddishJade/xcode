@@ -9,7 +9,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from xcode.agent.messages import BRANCH_SUMMARY_PREFIX, BRANCH_SUMMARY_SUFFIX
+from xcode.agent.messages import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
 from xcode.agent.config import CompactInstructions
 from ..skills import ToolSpec
 
@@ -136,10 +136,23 @@ def context_collapse_clean(content: str) -> str:
 
 
 def stale_snip_file_reads(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """裁剪旧的 read_file 工具结果，仅保留最新一次读取。"""
+    """裁剪旧的 read_file 工具结果，仅保留最新一次读取。
+
+    两阶段算法设计：
+    第一阶段：建立 tool_use_id → file_path 映射
+    - 遍历 assistant 消息中的 tool_use，记录 read_file 调用的文件路径
+
+    第二阶段：按文件路径分组，裁剪旧读取结果
+    - 收集每个文件的所有 tool_result
+    - 保留最新一次结果，旧结果内容替换为 "[Content snipped - re-read if needed]"
+
+    设计原因：
+    避免上下文被重复的文件内容污染，特别是大文件多次读取时。
+    """
     compacted = deepcopy(messages)
     tool_use_id_to_path: dict[str, str] = {}
 
+    # 第一阶段：建立 tool_use_id → file_path 映射
     for message in compacted:
         if message.get("role") == "assistant":
             content = message.get("content")
@@ -157,6 +170,7 @@ def stale_snip_file_reads(messages: list[dict[str, Any]]) -> list[dict[str, Any]
                                 norm_path = Path(path_val).as_posix()
                                 tool_use_id_to_path[tool_use_id] = norm_path
 
+    # 第二阶段：按文件路径分组，收集所有 tool_result
     path_to_results: dict[str, list[tuple[int, int, dict[str, Any]]]] = {}
     for message_index, message in enumerate(compacted):
         content = message.get("content")
@@ -170,6 +184,7 @@ def stale_snip_file_reads(messages: list[dict[str, Any]]) -> list[dict[str, Any]
                             path_to_results[path] = []
                         path_to_results[path].append((message_index, part_index, part))
 
+    # 裁剪：保留每个文件的最新读取结果
     for path, results in path_to_results.items():
         if len(results) > 1:
             for _msg_idx, _part_idx, part in results[:-1]:
@@ -432,7 +447,7 @@ def build_branch_summary_message(
 ) -> dict[str, Any]:
     """构建 LLM 可见的分支摘要消息。"""
     summary = _summarize_branch_messages(messages, summarize_fn)
-    content = BRANCH_SUMMARY_PREFIX + summary + BRANCH_SUMMARY_SUFFIX
+    content = BRANCH_SUMMARY_PREFIX + summary + SUMMARY_SUFFIX
     return {
         "role": "user",
         "content": [{"type": "text", "text": content}],

@@ -78,10 +78,13 @@ type AgentMessage = (
 
 # ── 消息转换（LLM 格式）──
 
+# 使用 <summary> XML 标签包裹压缩摘要的设计原因：
+# 1. 结构化标记：便于 LLM 区分摘要内容与正常对话
+# 2. 显式边界：避免摘要文本与后续消息混淆
+# 3. 解析友好：工具可通过 XML 标签提取摘要用于分析或审计
 COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
-COMPACTION_SUMMARY_SUFFIX = "\n</summary>"
 BRANCH_SUMMARY_PREFIX = "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n"
-BRANCH_SUMMARY_SUFFIX = "\n</summary>"
+SUMMARY_SUFFIX = "\n</summary>"
 
 
 def convert_to_llm(messages: list[AgentMessage]) -> list[dict[str, Any]]:
@@ -126,7 +129,7 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
             "content": [
                 {
                     "type": "text",
-                    "text": BRANCH_SUMMARY_PREFIX + m.summary + BRANCH_SUMMARY_SUFFIX,
+                    "text": BRANCH_SUMMARY_PREFIX + m.summary + SUMMARY_SUFFIX,
                 }
             ],
         }
@@ -139,7 +142,7 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
                     "type": "text",
                     "text": COMPACTION_SUMMARY_PREFIX
                     + m.summary
-                    + COMPACTION_SUMMARY_SUFFIX,
+                    + SUMMARY_SUFFIX,
                 }
             ],
         }
@@ -180,6 +183,9 @@ def _convert_assistant(m: AssistantMessage) -> dict[str, Any]:
     if m.reasoning_content is not None:
         result["reasoning_content"] = m.reasoning_content
     if content_blocks:
+        # 允许 content 为 None 的设计原因：
+        # OpenAI API 允许纯工具调用消息（仅 tool_calls 无 content）。
+        # 当消息只包含工具调用而无文本时，content 应为 None 而非空字符串。
         result["content"] = (
             "".join(
                 b.get("text", "") for b in content_blocks if b.get("type") == "text"
