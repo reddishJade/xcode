@@ -201,19 +201,6 @@ class SettingsSandboxPermissionPolicy:
                 if str(r_dir).lower() in input_lower:
                     return "deny"
 
-        # 兼容旧配置格式 (deniedTools/allowedTools)
-        denied_tools = self.settings.get("deniedTools")
-        allowed_tools = self.settings.get("allowedTools")
-
-        if isinstance(denied_tools, list) and tool_name in denied_tools:
-            return "deny"
-
-        if isinstance(allowed_tools, list):
-            if tool_name in allowed_tools:
-                return "allow"
-            else:
-                return "ask"
-
         return None
 
 

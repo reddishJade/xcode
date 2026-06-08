@@ -224,14 +224,40 @@ def _load_global_config() -> XcodeRuntimeConfig:
 
 
 def _merge_configs(base: XcodeRuntimeConfig, override: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
-    """合并两个配置，override 优先。
+    """合并两个配置，override 非默认字段覆盖 base。
 
-    仅合并非默认值字段，保持 dataclass 不可变性。
+    实现字段级深度合并，保持 dataclass 不可变性。
     """
-    # 简化实现：直接用 override 替换 base 的非默认字段
-    # 完整实现需要逐字段深度合并，此处暂时返回 override
-    # TODO: 实现字段级精细合并
-    return override if override != XcodeRuntimeConfig() else base
+    from dataclasses import fields, replace, MISSING
+
+    # 如果 override 完全是默认值，返回 base
+    if override == XcodeRuntimeConfig():
+        return base
+
+    # 逐字段合并
+    merged_fields = {}
+
+    for field in fields(XcodeRuntimeConfig):
+        base_value = getattr(base, field.name)
+        override_value = getattr(override, field.name)
+
+        # 获取默认值
+        if field.default is not MISSING:
+            default_value = field.default
+        elif field.default_factory is not MISSING:
+            default_value = field.default_factory()  # type: ignore
+        else:
+            # 无默认值的字段，override 优先
+            merged_fields[field.name] = override_value
+            continue
+
+        # 如果 override 是默认值，使用 base
+        if override_value == default_value:
+            merged_fields[field.name] = base_value
+        else:
+            merged_fields[field.name] = override_value
+
+    return replace(base, **merged_fields)
 
 
 def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
@@ -273,14 +299,6 @@ def dataclass_replace(obj: Any, **changes: Any) -> Any:
     """替换 dataclass 字段值，保持不可变性。"""
     from dataclasses import replace
     return replace(obj, **changes)
-
-
-def discover_runtime_config_legacy(
-    project_root: Path, explicit_path: Path | None = None
-) -> XcodeRuntimeConfig:
-    """旧版配置发现，仅加载项目配置。"""
-    config_path = explicit_path or project_root / "xcode.config.json"
-    return load_runtime_config(config_path)
 
 
 def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
