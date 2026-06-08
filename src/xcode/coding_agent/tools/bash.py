@@ -8,6 +8,7 @@ from typing import Any
 
 from xcode.harness.execution_env import ExecutionEnv, SubprocessExecutionEnv
 from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.harness.observability.permissions import PermissionDecision
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 
@@ -20,6 +21,54 @@ MAX_TIMEOUT_SECONDS = 120      # 最大超时：防止长时间挂起阻塞 Agen
 
 SpawnHook = Callable[[str, Path], tuple[str, Path]]
 """Hook to adjust command and cwd before execution. Receives (command, cwd), returns (command, cwd)."""
+
+
+# 危险命令模式（拒绝执行）
+DANGEROUS_PATTERNS = [
+    "rm -rf /",
+    "rm -rf /*",
+    "mkfs.",
+    "> /dev/sda",
+    "dd if=",
+    "chmod -R 777",
+    "chown -R root",
+]
+
+# 高风险写操作命令前缀（需要用户确认）
+HIGH_RISK_WRITE_COMMANDS = [
+    "rm ",
+    "rm\t",
+    "mv ",
+    "mv\t",
+    "git reset --hard",
+    "git clean -f",
+    "git push --force",
+    "git push -f",
+]
+
+
+def _bash_risk_evaluator(tool_input: dict[str, Any]) -> PermissionDecision:
+    """评估 bash 命令的风险级别。
+
+    返回：
+    - "deny"  — 危险命令，直接拒绝
+    - "ask"   — 高风险写操作，需要用户确认
+    - "allow" — 普通命令，放行
+    """
+    command = str(tool_input.get("command", "")).strip().lower()
+
+    # 1. 检查危险命令模式
+    for pattern in DANGEROUS_PATTERNS:
+        if pattern in command:
+            return "deny"
+
+    # 2. 检查高风险写操作
+    for prefix in HIGH_RISK_WRITE_COMMANDS:
+        if command.startswith(prefix):
+            return "ask"
+
+    # 3. 普通命令放行
+    return "allow"
 
 
 def build_bash_tool(
@@ -74,7 +123,8 @@ def build_bash_tool(
         description="Run a shell command in the project root.",
         input_hint='JSON: {"command": "git status --short", "timeout": 30}',
         handler=bash,
-        risk="low",
+        risk="high",
+        risk_evaluator=_bash_risk_evaluator,
         prompt_snippet="Run a shell command in the project root",
         prompt_guidelines=(
             "Bash output may be truncated; use the reported full output path when present.",
