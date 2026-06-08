@@ -17,7 +17,7 @@ from xcode.ai.events import (
     ToolCallEvent,
 )
 from xcode.ai.types import StreamOptions, ToolDefinition
-from xcode.agent.types import TextContent
+from xcode.agent.types import TextContent, ThinkingContent
 
 
 class TextProvider:
@@ -150,6 +150,22 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
                 }
             ],
         )
+
+    def test_assistant_thinking_content_becomes_reasoning_content(self) -> None:
+        """思考块在 provider 边界保留为 reasoning_content。"""
+        converted = convert_to_llm(
+            [
+                AssistantMessage(
+                    content=[
+                        ThinkingContent(thinking="think"),
+                        TextContent(text="answer"),
+                    ]
+                )
+            ]
+        )
+
+        self.assertEqual(converted[0]["content"], "answer")
+        self.assertEqual(converted[0]["reasoning_content"], "think")
 
 
 # ── 新增功能测试 ──

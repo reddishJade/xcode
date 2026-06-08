@@ -178,7 +178,11 @@ def _convert_block(block: ContentBlock) -> dict[str, Any] | None:
 def _convert_assistant(m: AssistantMessage) -> dict[str, Any]:
     content_blocks: list[dict[str, Any]] = []
     tool_calls: list[dict[str, Any]] = []
+    thinking_parts: list[str] = []
     for block in m.content:
+        if isinstance(block, ThinkingContent):
+            thinking_parts.append(block.thinking)
+            continue
         converted = _convert_block(block)
         if converted is None:
             continue
@@ -190,6 +194,8 @@ def _convert_assistant(m: AssistantMessage) -> dict[str, Any]:
     result: dict[str, Any] = {"role": "assistant"}
     if m.reasoning_content is not None:
         result["reasoning_content"] = m.reasoning_content
+    elif thinking_parts:
+        result["reasoning_content"] = "".join(thinking_parts)
     if content_blocks:
         # 允许 content 为 None 的设计原因：
         # OpenAI API 允许纯工具调用消息（仅 tool_calls 无 content）。
