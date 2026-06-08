@@ -88,10 +88,6 @@ def _print_stream(events) -> None:
         if event.type == "text_delta":
             print(str(event.data), end="", flush=True)
             answer_parts.append(str(event.data))
-        elif event.type == "tool_use":
-            print(f"\n[tool] {event.data.name}", flush=True)
-        elif event.type == "tool_result":
-            print(f"\n[tool_result] {event.data.tool_use_id}", flush=True)
         elif event.type == "final" and not answer_parts:
             print(event.data.answer)
             answer_parts.append(event.data.answer)
