@@ -192,6 +192,8 @@ def _build_llm_profile(
     )
     if transport in {"openai_chat", "openai_responses", "deepseek_chat"}:
         kwargs["reasoning_effort"] = profile.reasoning_effort
+    if transport in {"openai_chat", "openai_responses"}:
+        kwargs["response_format"] = profile.response_format
     if transport == "chatglm_chat":
         kwargs["clear_thinking"] = profile.clear_thinking
         kwargs["tool_stream"] = profile.tool_stream

@@ -28,6 +28,7 @@ class OpenAIChatProvider(OpenAICompatProvider):
         thinking: bool = True,
         reasoning_effort: str | None = None,
         runtime: ProviderRuntime | None = None,
+        response_format: dict[str, Any] | None = None,
         client=None,
     ) -> None:
         super().__init__(
@@ -41,11 +42,13 @@ class OpenAIChatProvider(OpenAICompatProvider):
             transport="openai_chat",
             import_error_msg="Missing dependency: openai. Install project requirements first.",
         )
+        self.response_format = response_format
 
     def _stream_sync(
         self,
         messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
+        response_format: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
         chat_messages = to_chat_messages(messages)
@@ -63,6 +66,9 @@ class OpenAIChatProvider(OpenAICompatProvider):
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        effective_format = response_format or self.response_format
+        if effective_format:
+            params["response_format"] = effective_format
         self._build_openai_reasoning_params(params)
 
         yield from self._call_chat_api(params, len(chat_messages))
@@ -87,6 +93,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         reasoning_effort: str | None = None,
         runtime: ProviderRuntime | None = None,
         prompt_cache_key: str | None = None,
+        response_format: dict[str, Any] | None = None,
         client=None,
     ) -> None:
         super().__init__(
@@ -104,6 +111,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         self.previous_response_id: str | None = None
         self._last_sent_message_index: int = 0
         self._pending_sent_message_index: int = 0
+        self.response_format = response_format
         self.metrics["previous_response_id"] = None
 
     async def stream(
@@ -122,9 +130,13 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         self,
         messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
+        response_format: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
         params = self._responses_kwargs(messages, tools, stream=True)
+        effective_format = response_format or self.response_format
+        if effective_format:
+            params["text"] = _responses_text_config(effective_format)
         self._apply_responses_options(params)
         client = self._responses_client()
         create = cast(Any, client.responses.create)
@@ -242,3 +254,17 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             getattr(output_details, "reasoning_tokens", 0) if output_details else 0
         )
         self.metrics["reasoning_tokens"] = reasoning or 0
+
+
+def _responses_text_config(response_format: dict[str, Any]) -> dict[str, object]:
+    """将 Chat 风格 response_format 转为 Responses text 配置。"""
+    if response_format.get("type") != "json_schema":
+        return {"format": response_format}
+
+    json_schema = response_format.get("json_schema")
+    if not isinstance(json_schema, dict):
+        return {"format": response_format}
+
+    flattened = dict(json_schema)
+    flattened["type"] = "json_schema"
+    return {"format": flattened}

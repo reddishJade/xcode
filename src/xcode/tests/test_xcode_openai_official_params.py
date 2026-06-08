@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
 import unittest
 from typing import Any
 
-import asyncio
-
+from xcode.ai.providers.factory import _build_llm_profile
 from xcode.ai.providers.openai import OpenAIChatProvider, OpenAIResponsesProvider
+from xcode.ai.providers.runtime import ProviderRuntime
 from xcode.ai.types import StreamOptions
 
 
@@ -87,6 +89,87 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
             self.assertEqual(kwargs["timeout"], 2.5)
 
         asyncio.run(run_test())
+
+    def test_chat_provider_sends_configured_response_format(self) -> None:
+        """OpenAI Chat 使用 Chat Completions 的 response_format 字段。"""
+        client = FakeOpenAIClient()
+        provider = OpenAIChatProvider(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-5.4",
+            response_format={"type": "json_object"},
+            client=client,
+        )
+
+        list(provider._stream_sync([{"role": "user", "content": "json"}], ()))
+
+        self.assertEqual(
+            client.chat.completions.kwargs["response_format"],
+            {"type": "json_object"},
+        )
+
+    def test_responses_provider_maps_response_format_to_text_config(self) -> None:
+        """Responses 使用 text.format 承载结构化输出配置。"""
+        client = FakeOpenAIClient()
+        provider = OpenAIResponsesProvider(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-5.4",
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "answer",
+                    "schema": {
+                        "type": "object",
+                        "properties": {"text": {"type": "string"}},
+                        "required": ["text"],
+                    },
+                    "strict": True,
+                },
+            },
+            client=client,
+        )
+
+        list(provider._stream_sync([{"role": "user", "content": "json"}], ()))
+
+        text_config = client.responses.kwargs["text"]
+        self.assertEqual(text_config["format"]["type"], "json_schema")
+        self.assertEqual(text_config["format"]["name"], "answer")
+        self.assertTrue(text_config["format"]["strict"])
+
+    def test_factory_preserves_openai_response_format(self) -> None:
+        """factory 构建 OpenAI provider 时保留结构化输出配置。"""
+        provider = _build_llm_profile(
+            MockProfile(transport="openai_responses"),
+            profile_name="main",
+            env_files=(),
+            runtime=ProviderRuntime(),
+        )
+
+        self.assertIsInstance(provider, OpenAIResponsesProvider)
+        assert isinstance(provider, OpenAIResponsesProvider)
+        self.assertEqual(provider.response_format, {"type": "json_object"})
+
+
+@dataclass(frozen=True)
+class MockProfile:
+    """模拟 provider profile 配置。"""
+
+    transport: str
+    chat_model: str = "gpt-5.4"
+    base_url: str = "https://api.openai.com/v1"
+    api_key: str = "test-key"
+    thinking: bool = True
+    reasoning_effort: str | None = "high"
+    clear_thinking: bool = False
+    tool_stream: bool = True
+    response_format: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        """为测试 profile 设置默认结构化输出配置。"""
+        if self.response_format is not None:
+            return
+        object.__setattr__(self, "response_format", {"type": "json_object"})
 
 
 class FakeOpenAIClient:
