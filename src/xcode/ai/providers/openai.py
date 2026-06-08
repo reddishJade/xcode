@@ -322,12 +322,9 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             converted = [*self._stateless_persisted_items, *converted]
 
         if self.previous_response_id is not None:
+            instructions = None
             converted = [
-                item
-                for item in converted
-                if item.get("type") == "function_call_output"
-                or item.get("type") == "shell_call_output"
-                or item.get("role") in {"user", "system", "developer"}
+                item for item in converted if _is_incremental_responses_input(item)
             ]
 
         self._pending_sent_message_index = len(messages)
@@ -643,6 +640,13 @@ def _merge_responses_instructions(
         if text:
             parts.append(text)
     return "\n\n".join(parts)
+
+
+def _is_incremental_responses_input(item: dict[str, Any]) -> bool:
+    """保留 previous_response_id 后仍需显式回传的输入项。"""
+    if item.get("type") in {"function_call_output", "shell_call_output"}:
+        return True
+    return item.get("role") == "user"
 
 
 def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:

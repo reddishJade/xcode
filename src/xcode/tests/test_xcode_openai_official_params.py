@@ -237,6 +237,63 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
         )
         self.assertNotIn("Stable instructions.", str(kwargs["input"]))
 
+    def test_responses_previous_response_id_skips_repeated_instructions(self) -> None:
+        """previous_response_id 后不重复发送 system/developer 指令。"""
+        client = FakeOpenAIClient(
+            response_outputs=[
+                [
+                    FakeResponsesStreamEvent(
+                        "response.completed",
+                        response=FakeResponsesResponse(response_id="r1"),
+                    )
+                ],
+                [
+                    FakeResponsesStreamEvent(
+                        "response.completed",
+                        response=FakeResponsesResponse(response_id="r2"),
+                    )
+                ],
+            ]
+        )
+        provider = OpenAIResponsesProvider(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-5.4",
+            client=client,
+        )
+        system_prompt = (
+            "Stable instructions."
+            f"\n\n{SYSTEM_PROMPT_DYNAMIC_BOUNDARY}\n\n"
+            "<environment>dynamic</environment>"
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "one"},
+        ]
+
+        list(provider._stream_sync(messages, ()))
+        messages.extend(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "two"},
+            ]
+        )
+        list(provider._stream_sync(messages, ()))
+
+        second_call = client.responses.calls[1]
+        self.assertEqual(second_call["previous_response_id"], "r1")
+        self.assertNotIn("instructions", second_call)
+        self.assertEqual(
+            second_call["input"],
+            [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "two"}],
+                }
+            ],
+        )
+
     def test_factory_preserves_openai_response_format(self) -> None:
         """factory 构建 OpenAI provider 时保留结构化输出配置。"""
         provider = _build_llm_profile(
