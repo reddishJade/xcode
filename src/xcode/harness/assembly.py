@@ -277,7 +277,7 @@ def build_tool_registry(
 
         registry += build_progress_tools(TaskStore(project_root))
 
-    skills_dir = skills_dir or project_root / "xcode" / "skills"
+    skills_dir = skills_dir or project_root / ".agents" / "skills"
     skill_loader = None
     if "skills" in enabled and skills_dir.exists():
         skill_loader = SkillLoader(skills_dir)
