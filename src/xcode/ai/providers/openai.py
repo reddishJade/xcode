@@ -38,6 +38,22 @@ _RESPONSES_OPTION_FIELDS = (
     "user",
 )
 
+_RESPONSES_INPUT_TOKEN_COUNT_FIELDS = frozenset(
+    {
+        "conversation",
+        "input",
+        "instructions",
+        "model",
+        "parallel_tool_calls",
+        "previous_response_id",
+        "reasoning",
+        "text",
+        "tool_choice",
+        "tools",
+        "truncation",
+    }
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 _CACHE_RETENTION_TO_PROMPT_CACHE_RETENTION: dict[
@@ -179,6 +195,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             params["text"] = _responses_text_config(effective_format)
         self._apply_responses_options(params)
         client = self._responses_client()
+        self._record_input_token_count(client, params)
         create = cast(Any, client.responses.create)
         stream = self.runtime.run(lambda: create(**params))
         message_count = len(params["input"])
@@ -320,6 +337,37 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             return self.client
         return self.client.with_options(api_key=opts.api_key)
 
+    def _record_input_token_count(
+        self,
+        client: Any,
+        params: dict[str, object],
+    ) -> None:
+        """调用 Responses input_tokens 接口记录官方输入 token 数。"""
+        try:
+            count = cast(Any, client.responses.input_tokens.count)
+        except AttributeError as error:
+            self.metrics["input_token_count_error"] = str(error)
+            _LOGGER.warning("OpenAI Responses input token count API is unavailable")
+            return
+
+        count_kwargs = _responses_input_token_count_kwargs(params)
+        try:
+            response = self.runtime.run(lambda: count(**count_kwargs))
+        except RuntimeError as error:
+            self.metrics["input_token_count_error"] = str(error)
+            _LOGGER.warning(
+                "OpenAI Responses input token count failed: %s",
+                error,
+            )
+            return
+
+        input_tokens = getattr(response, "input_tokens", None)
+        if input_tokens is None:
+            self.metrics["input_token_count_error"] = "missing input_tokens"
+            _LOGGER.warning("OpenAI Responses input token count response is missing")
+            return
+        self.metrics["input_tokens"] = int(input_tokens)
+
     def _ensure_stateless_reasoning_options(self, params: dict[str, object]) -> None:
         """store=false 时请求 encrypted reasoning 以便后续回灌。"""
         if params.get("store") is not False or not self.thinking:
@@ -376,6 +424,21 @@ def _responses_text_config(response_format: dict[str, Any]) -> dict[str, object]
     return {"format": flattened}
 
 
+def _responses_input_token_count_kwargs(
+    params: dict[str, object],
+) -> dict[str, object]:
+    """从 Responses create 参数提取 input_tokens.count 支持的字段。"""
+    result = {
+        field_name: params[field_name]
+        for field_name in _RESPONSES_INPUT_TOKEN_COUNT_FIELDS
+        if field_name in params
+    }
+    for field_name in ("extra_headers", "timeout"):
+        if field_name in params:
+            result[field_name] = params[field_name]
+    return result
+
+
 def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:
     """提示 Chat Completions 不支持 Responses 内建工具。"""
     for tool in tools:
@@ -414,7 +477,15 @@ def _serialize_response_output_item(item: object) -> dict[str, Any]:
             return dumped
 
     result: dict[str, Any] = {"type": str(getattr(item, "type", ""))}
-    for field_name in ("id", "summary", "encrypted_content", "content", "call_id", "name", "arguments"):
+    for field_name in (
+        "id",
+        "summary",
+        "encrypted_content",
+        "content",
+        "call_id",
+        "name",
+        "arguments",
+    ):
         value = getattr(item, field_name, None)
         if value is not None:
             result[field_name] = value

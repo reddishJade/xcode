@@ -238,6 +238,57 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_responses_provider_counts_input_tokens(self) -> None:
+        """Responses 调用官方 input_tokens 计数接口并记录 metrics。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient(input_token_count=42)
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                response_format={"type": "json_object"},
+                client=client,
+            )
+            tool = ToolDefinition(
+                name="lookup",
+                description="Lookup records.",
+                schema={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            )
+            options = StreamOptions(
+                instructions="Use files carefully.",
+                max_tokens=200,
+                parallel_tool_calls=False,
+                truncation="auto",
+                timeout_ms=1500,
+            )
+
+            _events = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "hi"}],
+                    [tool],
+                    options=options,
+                )
+            ]
+
+            kwargs = client.responses.input_tokens.kwargs
+            self.assertEqual(provider.metrics["input_tokens"], 42)
+            self.assertEqual(kwargs["model"], "gpt-5.4")
+            self.assertEqual(kwargs["instructions"], "Use files carefully.")
+            self.assertIs(kwargs["parallel_tool_calls"], False)
+            self.assertEqual(kwargs["truncation"], "auto")
+            self.assertEqual(kwargs["timeout"], 1.5)
+            self.assertEqual(kwargs["text"]["format"], {"type": "json_object"})
+            self.assertEqual(kwargs["tools"][0]["name"], "lookup")
+            self.assertNotIn("stream", kwargs)
+            self.assertNotIn("max_output_tokens", kwargs)
+
+        asyncio.run(run_test())
+
     def test_responses_provider_maps_cache_retention(self) -> None:
         """Responses 将通用缓存保留策略映射到官方 prompt cache 参数。"""
 
@@ -569,9 +620,13 @@ class MockProfile:
 class FakeOpenAIClient:
     """记录 Chat Completions 请求参数的测试客户端。"""
 
-    def __init__(self, response_outputs: list[list[Any]] | None = None) -> None:
+    def __init__(
+        self,
+        response_outputs: list[list[Any]] | None = None,
+        input_token_count: int = 0,
+    ) -> None:
         self.chat = FakeChat()
-        self.responses = FakeResponses(response_outputs or [])
+        self.responses = FakeResponses(response_outputs or [], input_token_count)
         self.override_api_key: str | None = None
 
     def with_options(self, *, api_key: str) -> FakeOpenAIClient:
@@ -602,10 +657,11 @@ class FakeCompletions:
 class FakeResponses:
     """记录 Responses create 调用参数。"""
 
-    def __init__(self, outputs: list[list[Any]]) -> None:
+    def __init__(self, outputs: list[list[Any]], input_token_count: int) -> None:
         self.kwargs: dict[str, Any] = {}
         self.calls: list[dict[str, Any]] = []
         self.outputs = outputs
+        self.input_tokens = FakeInputTokens(input_token_count)
 
     def create(self, **kwargs: Any) -> Any:
         """返回空流并保存请求。"""
@@ -614,6 +670,26 @@ class FakeResponses:
         if self.outputs:
             return iter(self.outputs.pop(0))
         return iter([])
+
+
+class FakeInputTokens:
+    """记录 Responses input_tokens.count 调用参数。"""
+
+    def __init__(self, input_token_count: int) -> None:
+        self.kwargs: dict[str, Any] = {}
+        self.input_token_count = input_token_count
+
+    def count(self, **kwargs: Any) -> FakeInputTokenCountResponse:
+        """返回固定输入 token 数并保存请求。"""
+        self.kwargs = kwargs
+        return FakeInputTokenCountResponse(self.input_token_count)
+
+
+@dataclass(frozen=True)
+class FakeInputTokenCountResponse:
+    """模拟 Responses input token 计数响应。"""
+
+    input_tokens: int
 
 
 class FakeResponsesStreamEvent:
