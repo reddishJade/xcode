@@ -247,6 +247,28 @@ class TestToolCatalogFingerprint(unittest.TestCase):
         fp2 = tool_catalog_fingerprint(tools2)
         self.assertEqual(fp1, fp2)
 
+    def test_fingerprint_includes_builtin_tool_metadata(self) -> None:
+        """测试内建工具元数据变化会改变指纹。"""
+        tools1 = [
+            ToolDefinition(
+                name="shell",
+                description="Run shell.",
+                schema={},
+                builtin={"type": "shell", "environment": {"type": "local"}},
+            ),
+        ]
+        tools2 = [
+            ToolDefinition(
+                name="shell",
+                description="Run shell.",
+                schema={},
+                builtin={"type": "web_search_preview"},
+            ),
+        ]
+        fp1 = tool_catalog_fingerprint(tools1)
+        fp2 = tool_catalog_fingerprint(tools2)
+        self.assertNotEqual(fp1, fp2)
+
 
 if __name__ == "__main__":
     unittest.main()

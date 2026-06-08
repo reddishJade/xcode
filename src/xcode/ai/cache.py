@@ -85,13 +85,14 @@ def canonical_tool_schema(tool: ToolDefinition) -> dict[str, Any]:
 
     确保同一工具的 schema 在不同调用间字节稳定。
     """
-    return _sort_dict_recursive(
-        {
-            "name": tool.name,
-            "description": tool.description,
-            "schema": tool.schema,
-        }
-    )
+    result: dict[str, Any] = {
+        "name": tool.name,
+        "description": tool.description,
+        "schema": tool.schema,
+    }
+    if tool.builtin is not None:
+        result["builtin"] = tool.builtin
+    return _sort_dict_recursive(result)
 
 
 def _sort_dict_recursive(obj: Any) -> Any:

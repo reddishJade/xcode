@@ -4,6 +4,7 @@ import logging
 from collections.abc import AsyncIterator, Iterator
 from typing import Any, cast
 
+from xcode.ai.cache import tool_catalog_fingerprint
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import (
     CacheRetention,
@@ -354,8 +355,9 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
 
         if self.previous_response_id is not None:
             kwargs["previous_response_id"] = self.previous_response_id
-        if self.prompt_cache_key:
-            kwargs["prompt_cache_key"] = self.prompt_cache_key
+        prompt_cache_key = _responses_prompt_cache_key(self.prompt_cache_key, tools)
+        if prompt_cache_key:
+            kwargs["prompt_cache_key"] = prompt_cache_key
         return kwargs
 
     def _apply_responses_options(self, params: dict[str, object]) -> None:
@@ -568,6 +570,21 @@ def _responses_retrieve_kwargs(
     if opts.timeout_ms is not None:
         result["timeout"] = opts.timeout_ms / 1000
     return result
+
+
+def _responses_prompt_cache_key(
+    base_key: str | None,
+    tools: tuple[ToolDefinition, ...],
+) -> str | None:
+    """将工具目录指纹接入 Responses prompt_cache_key。"""
+    if not base_key and not tools:
+        return None
+
+    fingerprint = tool_catalog_fingerprint(list(tools))
+    tool_key = f"tools:{fingerprint}"
+    if not base_key:
+        return tool_key
+    return f"{base_key}:{tool_key}"
 
 
 def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:

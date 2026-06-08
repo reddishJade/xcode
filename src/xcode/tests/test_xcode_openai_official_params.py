@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from xcode.agent.messages import UserMessage, convert_to_llm
 from xcode.agent.types import FileContent, ImageContent, TextContent
+from xcode.ai.cache import tool_catalog_fingerprint
 from xcode.ai.events import FinalMessage, ReasoningDelta, TextDelta, ToolCallEvent
 from xcode.ai.providers.codec import to_responses_input, to_responses_tool
 from xcode.ai.providers.factory import _build_llm_profile
@@ -548,6 +549,104 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
                 client.responses.kwargs["prompt_cache_retention"],
                 "in_memory",
             )
+
+        asyncio.run(run_test())
+
+    def test_responses_provider_adds_tool_fingerprint_prompt_cache_key(self) -> None:
+        """Responses prompt_cache_key 包含当前工具目录指纹。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient()
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                client=client,
+            )
+            tools = [
+                ToolDefinition(
+                    name="lookup",
+                    description="Lookup records.",
+                    schema={
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                )
+            ]
+
+            _events = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "hi"}],
+                    tools,
+                )
+            ]
+
+            fingerprint = tool_catalog_fingerprint(tools)
+            self.assertEqual(
+                client.responses.kwargs["prompt_cache_key"],
+                f"tools:{fingerprint}",
+            )
+
+        asyncio.run(run_test())
+
+    def test_responses_provider_combines_base_prompt_cache_key(self) -> None:
+        """配置的 prompt_cache_key 会追加工具目录指纹。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient()
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                prompt_cache_key="xcode-main",
+                client=client,
+            )
+            tools = [
+                ToolDefinition(
+                    name="write_file",
+                    description="Write a file.",
+                    schema={"type": "object"},
+                )
+            ]
+
+            _events = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "hi"}],
+                    tools,
+                )
+            ]
+
+            fingerprint = tool_catalog_fingerprint(tools)
+            self.assertEqual(
+                client.responses.kwargs["prompt_cache_key"],
+                f"xcode-main:tools:{fingerprint}",
+            )
+
+        asyncio.run(run_test())
+
+    def test_responses_provider_omits_empty_prompt_cache_key(self) -> None:
+        """没有基础 key 和工具目录时不发送 prompt_cache_key。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient()
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                client=client,
+            )
+
+            _events = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "hi"}],
+                    [],
+                )
+            ]
+
+            self.assertNotIn("prompt_cache_key", client.responses.kwargs)
 
         asyncio.run(run_test())
 
