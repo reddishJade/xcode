@@ -71,7 +71,6 @@ class ProviderRuntimeConfig:
 
 @dataclass(frozen=True)
 class ToolsRuntimeConfig:
-    network_commands: str = "ask"
     enabled_groups: tuple[str, ...] = ("core",)
     shell: str = "auto"
 
@@ -164,7 +163,6 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
             ),
         ),
         tools=ToolsRuntimeConfig(
-            network_commands=bash.get("network_commands", "ask"),
             enabled_groups=tuple(tools.get("enabled_groups", ("core",))),
             shell=str(bash.get("shell", "auto")),
         ),
