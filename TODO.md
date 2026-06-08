@@ -11,87 +11,52 @@
 
 ---
 
-## 已完成
+## OpenAI Responses API parity
 
-### P1 评估基础设施
+已完成：
 
-- 已接入本地 HumanEval 与 SWE-bench Lite JSON/JSONL benchmark loader。
-- 已将 Pass@k 改为无偏估计量 `1 - C(n-c,k)/C(n,k)`。
-- 已为内置 eval suites 补充 `llm_judge_criteria`，触发现有 LLM-as-judge 路径。
+- [x] 将 `StreamOptions.cache_retention` 映射到 OpenAI `prompt_cache_retention`。
 
-### P2 Session 并发安全
+计划：
 
-- 已为 `SessionStore` 写操作增加 `filelock` 保护。
-- 已覆盖 append、fork、clean fork、rewind、compact 与 metadata 写入路径。
+- [ ] 添加 `FileContent` 内容块类型，并补全 agent 消息到 Responses file input 的类型链路。
+- [ ] 添加 `/responses/input_tokens` token counting API 集成，避免只依赖本地估算。
+- [ ] 添加服务端压缩 `context_management` 集成，保留现有本地压缩作为明确路径。
+- [ ] 添加 background mode 的结果获取能力，支持后台响应轮询或恢复读取。
+- [ ] 将 `tool_catalog_fingerprint` 动态接入 `prompt_cache_key`，减少工具目录变化导致的缓存错配。
 
-### P3 分支摘要自动压缩
+## OpenAI native shell / skills alignment
 
-- 已为 `LayeredCompactor` 增加非活跃分支摘要层。
-- 已在 token 压力触发时将带分支 metadata 的非活跃消息替换为分支摘要消息。
+- Design the minimal native OpenAI shell path using `ToolDefinition.builtin` with `{"type": "shell", "environment": {"type": "local"}}`.
+- Add an agent/tool bridge for the Responses builtin shell without removing the existing `bash` function tool.
+- Execute Responses `shell_call` requests locally and return official `shell_call_output` items with `stdout`, `stderr`, and `outcome`.
+- Attach `SkillLoader.to_local_shell_skills()` metadata to the native local shell environment when skills are enabled.
+- Add targeted tests for builtin shell tool definitions, local shell output round trips, and skill metadata attachment.
+- Validate each implementation step with targeted `ruff`, `mypy`, `pyright`, and `unittest` commands.
+- Commit each logical step separately with exact-path staging only.
 
-### P4 Turn Snapshot 隔离
+## OpenAI prompting and citation alignment
 
-- 已增加 `TurnSnapshot` 冻结 dataclass，包含 config/registry/tool_map/provider 等 turn 依赖。
-- 已增加 `_turn_snapshot()` 在 `arun_stream()` 开头冻结快照（`deepcopy(config)` + `tuple(registry)`）。
-- turn 内所有操作均使用快照引用而非 `self` 全局引用。
+- [ ] Step 1: Map internal `system` instructions to OpenAI Responses `developer` role while preserving Chat Completions behavior.
+- [ ] Step 2: Move stable Responses API instructions into the `instructions` request parameter instead of mixing them into `input`.
+- [ ] Step 3: Adjust `previous_response_id` incremental input filtering so system/developer instructions are not duplicated across turns.
+- [ ] Step 4: Reorder prompt modules toward `Identity -> Instructions -> Tools -> Context` while keeping stable prompt content first for cache hits.
+- [ ] Step 5: Add a Markdown `# Identity` section heading to the core identity prompt.
+- [ ] Step 6: Replace prompt stable-cache mtime keys with content hashes for `AGENTS.md` and `CLAUDE.md`.
+- [ ] Step 7: Design citation marker support for file/search outputs using OpenAI's `\ue200cite\ue202...\ue201` format before implementation.
+- [ ] Validate and commit each logical step separately with exact-path staging only.
 
-### P5 会话持久化协议
+## OpenAI reasoning API alignment
 
-- 已显式记录 `jsonl-v1` 会话索引协议。
-- 已在 index 中写入恢复边界 `current_transcript_and_session_tree`。
-- 已保持旧 index 读取兼容。
+已完成：
 
-### P6 分支导航
+- [x] Step 1: 从 `THINKING_LEVELS` 中移除无效的 `"max"` 值（OpenAI 不支持该值）。
 
-- 已增加 `SessionStore.switch_branch()`。
-- 已增加 `/branch list|tree|<id|title>` 命令复用会话树切换分支。
+计划：
 
-### P7 类型化事件流（含 P9 订阅事件）
-
-- 已定义 `HarnessEvent` union 与类型化事件 dataclass。
-- 已增加 `HookManager.subscribe()` / `unsubscribe()`。
-- 已保留 `HookManager.register()` 作为内部桥接。
-
-### P7 Tasks+Progress 编排
-
-- 已增加长任务运行状态 `TaskRunState`。
-- 已支持中断恢复、租约超时释放、重试预算和子任务分发。
-- 已通过 `progress` 实验组暴露对应编排工具。
-
-### P8 类型化事件流（含 P9 订阅事件）
-
-- 与 P7 类型化事件流重复，已随 P7 统一完成。
-
-### P9 Daemon 生命周期
-
-- 已增加 `DaemonHealth` 健康快照。
-- 已增加 `register_callback()` 事件回调。
-- 已增加任务失败计数、错误事件和 `ensure_healthy()` 自愈重启。
-
-### P10 维护契约补齐（source-review §10）
-
-- 已在 `tool_catalog.py` docstring 中注明新增 `build_*_tools()` 须同步注册 `_builders()`。
-
-### P11 Provider 代码清理（source-review §10）
-
-- 已将 Responses API stream usage 拦截提取到 `ProviderMetricsMixin._intercept_responses_stream()`。
-- 已保留 `OpenAIResponsesProvider` 内的 stateful response id 更新逻辑。
-
-### P12 模型模式解析
-
-- 已增加纯函数 `parse_model_mode()`。
-- 已支持 `/model [profile/]name[:thinking]`。
-- 已保留 `/model <name> --thinking <level>` 用法。
-
-### P13 队列模式
-
-- 已增加 opt-in `/queue on|off`。
-- 已支持流式 turn 期间读取 queued follow-up，并在当前 turn 结束后注入 agent follow-up 队列。
-
-### P14 ExecutionEnv 抽象
-
-- 已定义 `ExecutionEnv` protocol（`run(argv, cwd, timeout, cancel_event) → ExecutionResult`）。
-- 已增加 `SubprocessExecutionEnv` 默认实现（提取自 `bash.py` 的子进程管理逻辑）。
-- 已增加 `SandboxExecutionEnv` 用于测试/mock 注入（记录调用，支持预设返回）。
-- 已接入 `bash` 工具（替换原有的未使用 `BashOperations` Protocol，新增 `env` 参数）。
-- 已通过 `registry.py` / `assembly.py` 将 `env` 参数透传至顶层注入点。
+- [ ] Step 2: 为 `ThinkingBudgets` 数据类添加 `xhigh` 字段（与 `THINKING_LEVELS` 保持一致）。
+- [ ] Step 3: 在 `StreamOptions` 和 `OpenAIResponsesProvider` 中添加 `reasoning.summary` 支持。
+- [ ] Step 4: 扩展 `_reasoning_output_items` 保留 `function_call` 类型输出项（无状态回灌完整性）。
+- [ ] Step 5: 在 `AssistantMessage`、`to_responses_input` 中添加 `phase` 字段透传。
+- [ ] Step 6: 在 Responses API 中将 system 消息转为 developer role（推理模型推荐做法）。
+- [ ] Step 7: 在 `responses_stream_to_events` 中添加 `incomplete` 状态检测（max_output_tokens 耗尽检测）。

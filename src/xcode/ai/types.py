@@ -81,12 +81,14 @@ class ThinkingBudgets:
     - low: 低强度思考
     - medium: 中等强度思考
     - high: 高强度思考（深度推理）
+    - xhigh: 极高强度思考（深度研究）
     """
 
     minimal: int = 0
     low: int = 0
     medium: int = 0
     high: int = 0
+    xhigh: int = 0
 
 
 @dataclass(frozen=True)
