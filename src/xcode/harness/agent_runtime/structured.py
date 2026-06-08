@@ -338,7 +338,7 @@ class StructuredAgent:
                     )
                 )
             )
-        self._agent._tools = self._tools_for_mode(self.registry, "act")
+        self._agent.update_tools(self._tools_for_mode(self.registry, "act"))
         return "Plan ready. Present it to the user for confirmation."
 
     def _tools_for_mode(
@@ -424,7 +424,7 @@ class StructuredAgent:
                 if self._plan_enter_step >= self._max_plan_turns:
                     self._plan_enter_step = 0
                     self._current_mode = "act"
-                    self._agent._tools = self._tools_for_mode(snapshot.registry, "act")
+                    self._agent.update_tools(self._tools_for_mode(snapshot.registry, "act"))
                     self.steer(
                         SystemMessage(
                             content=(
