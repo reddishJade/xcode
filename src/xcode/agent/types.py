@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -63,3 +63,13 @@ class ToolResultContent:
     tool_use_id: str = ""
     content: str = ""
     status: str = "ok"
+
+
+@dataclass(frozen=True)
+class ShellCallOutputContent:
+    """Responses shell_call_output 内容块。"""
+
+    type: str = "shell_call_output"
+    call_id: str = ""
+    output: list[dict[str, Any]] = field(default_factory=list)
+    max_output_length: int | None = None

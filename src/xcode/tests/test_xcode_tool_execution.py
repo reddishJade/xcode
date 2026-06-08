@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from typing import cast
 
 from xcode.agent.tool_execution import partition_tool_calls_for_execution
 from xcode.agent.config import AgentContext
 from xcode.agent.protocols import AgentTool
-from xcode.agent.types import ToolCallContent
+from xcode.agent.types import ShellCallOutputContent, ToolCallContent
 from xcode.harness.agent_runtime.tool_adapter import adapt_tool_specs
-from xcode.harness.skills import ToolSpec
+from xcode.harness.skills import (
+    AGENT_CONTENT_BLOCKS_METADATA_KEY,
+    ToolOutput,
+    ToolSpec,
+)
 
 
 class AgentToolExecutionTests(unittest.TestCase):
@@ -54,6 +59,36 @@ class AgentToolExecutionTests(unittest.TestCase):
         )
 
         self.assertEqual(tool.builtin, builtin)
+
+    def test_toolspec_adapter_preserves_shell_output_content(self) -> None:
+        """ToolOutput 元数据中的 shell 输出块会保留给 agent loop。"""
+        output = ToolOutput(
+            "summary",
+            metadata={
+                AGENT_CONTENT_BLOCKS_METADATA_KEY: [
+                    ShellCallOutputContent(
+                        output=[
+                            {
+                                "stdout": "ok",
+                                "stderr": "",
+                                "outcome": {"type": "exit", "exit_code": 0},
+                            }
+                        ]
+                    )
+                ]
+            },
+        )
+        (tool,) = adapt_tool_specs(
+            (ToolSpec("shell", "Run shell.", "{}", lambda _data: output),)
+        )
+
+        result = asyncio.run(tool.execute("call-1", {}))
+
+        self.assertIsInstance(result.content[1], ShellCallOutputContent)
+        block = result.content[1]
+        assert isinstance(block, ShellCallOutputContent)
+        self.assertEqual(block.call_id, "call-1")
+        self.assertEqual(block.output[0]["stdout"], "ok")
 
     def test_partition_tool_calls_for_execution_keeps_sequential_barriers(self) -> None:
         tools = adapt_tool_specs(

@@ -6,6 +6,7 @@ from typing import Any, Literal, Protocol
 from xcode.agent.types import (
     FileContent,
     ImageContent,
+    ShellCallOutputContent,
     TextContent,
     ThinkingContent,
     ToolCallContent,
@@ -19,16 +20,19 @@ type ToolExecutionMode = Literal["sequential", "parallel"]
 type ContentBlock = (
     TextContent | ImageContent | FileContent | ToolCallContent | ThinkingContent
 )
+type ToolResultContentBlock = (
+    TextContent | ImageContent | FileContent | ShellCallOutputContent
+)
 
 
 class AgentToolResult:
-    content: list[TextContent | ImageContent | FileContent]
+    content: list[ToolResultContentBlock]
     details: Any | None = None
     terminate: bool = False
 
     def __init__(
         self,
-        content: list[TextContent | ImageContent | FileContent] | None = None,
+        content: list[ToolResultContentBlock] | None = None,
         details: Any | None = None,
         terminate: bool = False,
     ) -> None:

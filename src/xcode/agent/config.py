@@ -13,11 +13,9 @@ from .protocols import (
     AgentTool,
     AgentToolResult,
     CancellationSignal,
-    FileContent,
-    ImageContent,
     QueueMode,
-    TextContent,
     ToolExecutionMode,
+    ToolResultContentBlock,
 )
 
 """Agent 循环配置与上下文类型。"""
@@ -61,7 +59,7 @@ class AfterToolCallContext:
 
 @dataclass
 class AfterToolCallResult:
-    content: list[TextContent | ImageContent | FileContent] | None = None
+    content: list[ToolResultContentBlock] | None = None
     details: Any = None
     is_error: bool | None = None
     terminate: bool | None = None

@@ -25,6 +25,7 @@ ToolInput = dict[str, Any]
 ActionHandler = Callable[[ToolInput], str]
 RiskEvaluator = Callable[[ToolInput], str]
 ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
+AGENT_CONTENT_BLOCKS_METADATA_KEY = "agent_content_blocks"
 
 
 class ToolOutput(str):

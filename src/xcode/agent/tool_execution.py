@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from xcode.agent.types import FileContent, ImageContent, TextContent, ToolCallContent
+from xcode.agent.types import ShellCallOutputContent, TextContent, ToolCallContent
 from .config import (
     AfterToolCallContext,
     AgentContext,
@@ -31,11 +31,9 @@ from .events import (
     ToolExecutionUpdateEvent,
 )
 from .messages import AssistantMessage, ToolResultMessage
-from .protocols import AgentToolResult, CancellationSignal
+from .protocols import AgentToolResult, CancellationSignal, ToolResultContentBlock
 
 logger = logging.getLogger(__name__)
-
-type ToolResultContentBlock = TextContent | ImageContent | FileContent
 
 
 @dataclass
@@ -340,12 +338,19 @@ def _tool_result_message(
     content: list[ToolResultContentBlock],
     is_error: bool,
 ) -> ToolResultMessage:
+    result_content: str | list[ToolResultContentBlock]
+    if not content:
+        result_content = ""
+    elif any(isinstance(item, ShellCallOutputContent) for item in content):
+        result_content = content
+    else:
+        result_content = "".join(
+            item.text for item in content if isinstance(item, TextContent)
+        )
     return ToolResultMessage(
         tool_call_id=tool_call.id,
         tool_name=tool_call.name,
-        content="".join(c.text for c in content if isinstance(c, TextContent))
-        if content
-        else "",
+        content=result_content,
         is_error=is_error,
     )
 

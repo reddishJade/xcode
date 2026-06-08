@@ -321,6 +321,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
                 item
                 for item in converted
                 if item.get("type") == "function_call_output"
+                or item.get("type") == "shell_call_output"
                 or item.get("role") in {"user", "system", "developer"}
             ]
 

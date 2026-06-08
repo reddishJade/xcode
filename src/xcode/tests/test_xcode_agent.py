@@ -16,8 +16,14 @@ from xcode.ai.events import (
     ToolCall,
     ToolCallEvent,
 )
+from xcode.ai.providers.codec import to_responses_input
 from xcode.ai.types import StreamOptions, ToolDefinition
-from xcode.agent.types import TextContent, ThinkingContent, ToolCallContent
+from xcode.agent.types import (
+    ShellCallOutputContent,
+    TextContent,
+    ThinkingContent,
+    ToolCallContent,
+)
 
 
 class TextProvider:
@@ -53,6 +59,38 @@ class ToolProvider:
         self.messages.append(messages)
         if self.calls == 1:
             yield ToolCallEvent([ToolCall("call-1", "echo", {"text": "hello"})])
+            return
+        yield TextDelta("done")
+
+
+class ShellProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.messages: list[list[Message]] = []
+
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
+    ):
+        self.calls += 1
+        self.messages.append(messages)
+        if self.calls == 1:
+            yield ToolCallEvent(
+                [
+                    ToolCall(
+                        "call_1",
+                        "shell",
+                        {
+                            "commands": ["python --version"],
+                            "timeout_ms": 1000,
+                            "max_output_length": 4096,
+                        },
+                    )
+                ]
+            )
             return
         yield TextDelta("done")
 
@@ -98,6 +136,40 @@ class BuiltinShellTool:
         on_update=None,
     ) -> AgentToolResult:
         return AgentToolResult(content=[TextContent(text="ok")])
+
+
+class ShellOutputTool:
+    name = "shell"
+    label = "Shell"
+    description = "Run shell commands."
+    parameters = {"type": "object"}
+    execution_mode: ToolExecutionMode | None = "sequential"
+    examples: list[dict[str, Any]] = []
+    builtin: dict[str, Any] = {"type": "shell", "environment": {"type": "local"}}
+
+    async def execute(
+        self,
+        tool_call_id: str,
+        params: dict[str, Any],
+        signal: Any | None = None,
+        on_update=None,
+    ) -> AgentToolResult:
+        return AgentToolResult(
+            content=[
+                TextContent(text="Python 3.11\n"),
+                ShellCallOutputContent(
+                    call_id=tool_call_id,
+                    max_output_length=int(params["max_output_length"]),
+                    output=[
+                        {
+                            "stdout": "Python 3.11\n",
+                            "stderr": "",
+                            "outcome": {"type": "exit", "exit_code": 0},
+                        }
+                    ],
+                ),
+            ]
+        )
 
 
 class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
@@ -187,6 +259,42 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
                     "role": "tool",
                     "tool_call_id": "call-1",
                     "content": "output",
+                }
+            ],
+        )
+
+    async def test_shell_output_round_trips_as_responses_input(self) -> None:
+        """Responses shell 调用结果会作为官方 shell_call_output 回传。"""
+        provider = ShellProvider()
+        tool = ShellOutputTool()
+
+        await run_agent_loop(
+            prompts=[UserMessage(content="use shell")],
+            context=AgentContext(tools=[tool]),
+            config=AgentLoopConfig(
+                provider=provider,
+                convert_to_llm=convert_to_llm,
+            ),
+            emit=lambda _event: None,
+        )
+
+        tool_result_message = provider.messages[1][-1]
+        self.assertEqual(tool_result_message["role"], "user")
+        responses_input = to_responses_input([tool_result_message])
+        self.assertEqual(
+            responses_input,
+            [
+                {
+                    "type": "shell_call_output",
+                    "call_id": "call_1",
+                    "max_output_length": 4096,
+                    "output": [
+                        {
+                            "stdout": "Python 3.11\n",
+                            "stderr": "",
+                            "outcome": {"type": "exit", "exit_code": 0},
+                        }
+                    ],
                 }
             ],
         )

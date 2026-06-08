@@ -529,6 +529,82 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         self.assertEqual(function_call_outputs[0]["call_id"], "call1")
         self.assertEqual(function_call_outputs[0]["output"], "tool output")
 
+    def test_responses_tool_loop_keeps_shell_call_output(self) -> None:
+        """previous_response_id 增量输入保留 shell_call_output。"""
+        llm = OpenAIResponsesProvider.__new__(OpenAIResponsesProvider)
+        llm.model = "model"
+        llm.thinking = True
+        llm.reasoning_effort = None
+        llm.client = FakeOpenAIClient(
+            response_outputs=[
+                [
+                    FakeResponsesStreamEvent(
+                        "response.completed", FakeResponsesResponse("r1")
+                    ),
+                ],
+                [
+                    FakeResponsesStreamEvent(
+                        "response.output_text.delta", delta="done"
+                    ),
+                    FakeResponsesStreamEvent(
+                        "response.completed", FakeResponsesResponse("r2")
+                    ),
+                ],
+            ]
+        )
+        llm.runtime = ProviderRuntime()
+        llm.transport = "openai_responses"
+        llm.prompt_cache_key = None
+        llm.response_format = None
+        llm.previous_response_id = None
+        llm.metrics = {}
+        llm._last_sent_message_index = 0
+        llm._pending_sent_message_index = 0
+        llm._pending_store_response = True
+        llm._stateless_persisted_items = []
+
+        messages: list[dict[str, Any]] = [{"role": "user", "content": "call shell"}]
+        list(llm._stream_sync(messages, ()))
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "shell_call_output",
+                        "call_id": "call1",
+                        "output": [
+                            {
+                                "stdout": "ok",
+                                "stderr": "",
+                                "outcome": {"type": "exit", "exit_code": 0},
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        list(llm._stream_sync(messages, ()))
+
+        second_call = llm.client.responses.calls[1]
+        self.assertEqual(second_call["previous_response_id"], "r1")
+        self.assertEqual(
+            second_call["input"],
+            [
+                {
+                    "type": "shell_call_output",
+                    "call_id": "call1",
+                    "output": [
+                        {
+                            "stdout": "ok",
+                            "stderr": "",
+                            "outcome": {"type": "exit", "exit_code": 0},
+                        }
+                    ],
+                }
+            ],
+        )
+
 
 class FakeOpenAIClient:
     def __init__(

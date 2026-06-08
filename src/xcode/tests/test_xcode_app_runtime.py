@@ -89,6 +89,66 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             },
         )
 
+    def test_responses_registry_includes_native_shell_and_bash(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _patched_provider_bundle([], transport="openai_responses"),
+        ):
+            app = build_app(
+                project_root=Path(tmp),
+                runtime_config=XcodeRuntimeConfig(),
+            )
+
+        tools = {tool.name: tool for tool in app.registry}
+        self.assertIn("bash", tools)
+        self.assertIn("shell", tools)
+        self.assertEqual(
+            tools["shell"].builtin,
+            {"type": "shell", "environment": {"type": "local"}},
+        )
+
+    def test_responses_shell_environment_includes_skill_metadata(self) -> None:
+        runtime_config = XcodeRuntimeConfig(
+            tools=ToolsRuntimeConfig(enabled_groups=("core", "skills")),
+        )
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _patched_provider_bundle([], transport="openai_responses"),
+        ):
+            root = Path(tmp)
+            skills_dir = root / "skills"
+            skill_dir = skills_dir / "csv"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\n"
+                "name: csv-insights\n"
+                "description: Summarize CSV files.\n"
+                "---\n\n"
+                "Body.",
+                encoding="utf-8",
+            )
+
+            app = build_app(
+                project_root=root,
+                runtime_config=runtime_config,
+                skills_dir=skills_dir,
+            )
+
+        tools = {tool.name: tool for tool in app.registry}
+        shell_builtin = tools["shell"].builtin
+        assert shell_builtin is not None
+        environment = shell_builtin["environment"]
+        self.assertEqual(
+            environment["skills"],
+            [
+                {
+                    "name": "csv-insights",
+                    "description": "Summarize CSV files.",
+                    "path": skill_dir.as_posix(),
+                }
+            ],
+        )
+
     def test_default_runtime_does_not_enable_experimental_components(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             root = Path(tmp)
@@ -488,8 +548,13 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
 
 class MockProvider(ModelProvider):
-    def __init__(self, seen_child_tools: list[list[str]]):
+    def __init__(
+        self,
+        seen_child_tools: list[list[str]],
+        transport: str = "",
+    ) -> None:
         self.seen_child_tools = seen_child_tools
+        self.transport = transport
 
     async def stream(
         self,
@@ -509,8 +574,11 @@ class MockProvider(ModelProvider):
         return "ok"
 
 
-def _patched_provider_bundle(seen_child_tools: list[list[str]]):
-    provider = MockProvider(seen_child_tools)
+def _patched_provider_bundle(
+    seen_child_tools: list[list[str]],
+    transport: str = "",
+):
+    provider = MockProvider(seen_child_tools, transport=transport)
     bundle = SimpleNamespace(
         llm=provider,
         llms={
