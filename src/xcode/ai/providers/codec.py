@@ -7,10 +7,10 @@ Schema 转换、消息格式转换（Chat Completions / Responses API）。
 from __future__ import annotations
 
 import copy
+import logging
 
 import orjson
 from typing import Any, Protocol
-
 
 
 class _ChatToolCallFunction(Protocol):
@@ -98,6 +98,18 @@ def to_chat_tool(
     }
 
 
+_KNOWN_BUILTIN_TOOL_TYPES = frozenset(
+    {
+        "web_search_preview",
+        "web_search",
+        "file_search",
+        "code_interpreter",
+        "shell",
+        "computer_use_preview",
+    }
+)
+
+
 def to_responses_tool(
     name: str,
     description: str,
@@ -109,8 +121,23 @@ def to_responses_tool(
 
     Responses API 中 function tool 的 name/description/parameters 为顶层字段，
     且支持 strict 模式保证输出 schema 一致性。
+
+    builtin 工具（如 web_search、shell）直接透传，
+    但必须包含非空 type 字段且值为已知内置类型。
     """
     if builtin is not None:
+        tool_type = builtin.get("type")
+        if not isinstance(tool_type, str) or not tool_type:
+            raise ValueError(
+                "builtin tool definition must have a non-empty 'type' field, "
+                f"got: {builtin}"
+            )
+        if tool_type not in _KNOWN_BUILTIN_TOOL_TYPES:
+            logging.getLogger(__name__).warning(
+                "builtin tool type=%r is not in the known types list; "
+                "may not be supported by the current API version",
+                tool_type,
+            )
         return dict(builtin)
     resolved = schema or {
         "type": "object",

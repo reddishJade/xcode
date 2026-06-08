@@ -303,6 +303,16 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
 
         self.assertEqual(encoded, {"type": "web_search_preview"})
 
+    def test_responses_builtin_tool_rejects_missing_type(self) -> None:
+        """builtin 工具缺少 type 字段时抛出 ValueError。"""
+        with self.assertRaises(ValueError):
+            to_responses_tool("bad", "desc", None, builtin={})
+
+    def test_responses_builtin_tool_rejects_empty_type(self) -> None:
+        """builtin 工具 type 为空字符串时抛出 ValueError。"""
+        with self.assertRaises(ValueError):
+            to_responses_tool("bad", "desc", None, builtin={"type": ""})
+
     def test_responses_input_supports_image_and_file_blocks(self) -> None:
         """Responses input 支持图像和文件内容块。"""
         converted = to_responses_input(
