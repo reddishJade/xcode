@@ -287,7 +287,10 @@ def build_tool_registry(
     registry += (build_search_tools_tool(registry),)
 
     if "subagent" in enabled or "experimental" in enabled:
-        child_llms = llm_profiles_dict(llm, llm_profiles)
+        child_llms = dict(llm_profiles or {})
+        if not child_llms:
+            child_llms[PROFILE_MAIN] = llm
+        child_llms.setdefault(PROFILE_SUBAGENT, child_llms[PROFILE_MAIN])
 
         async def run_child(prompt, model_profile=PROFILE_SUBAGENT, cwd_override=None):
             effective_registry = child_registry
@@ -307,9 +310,11 @@ def build_tool_registry(
             ).run_async(prompt)
             return result.answer
 
-        worktree_runner = (
-            _build_worktree_runner(project_root) if "worktree" in enabled else None
-        )
+        if "worktree" in enabled:
+            from xcode.experimental.worktree import WorktreeTaskRunner
+            worktree_runner = WorktreeTaskRunner(project_root)
+        else:
+            worktree_runner = None
         managed_runner = ManagedSubagentRunner(
             run_child,
             available_profiles=tuple(child_llms),
@@ -320,22 +325,6 @@ def build_tool_registry(
         if "subagent" in enabled:
             registry += build_managed_subagent_tools(managed_runner)
     return registry, skill_loader, shell_spec, tuple(closers)
-
-
-def llm_profiles_dict(
-    llm: ModelProvider, llm_profiles: Mapping[str, ModelProvider] | None
-) -> dict[str, ModelProvider]:
-    profiles = dict(llm_profiles or {})
-    if not profiles:
-        profiles[PROFILE_MAIN] = llm
-    profiles.setdefault(PROFILE_SUBAGENT, profiles[PROFILE_MAIN])
-    return profiles
-
-
-def _build_worktree_runner(project_root: Path):
-    from xcode.experimental.worktree import WorktreeTaskRunner
-
-    return WorktreeTaskRunner(project_root)
 
 
 # ── 实验性服务 ──
