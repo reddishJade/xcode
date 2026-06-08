@@ -11,7 +11,6 @@ import copy
 import orjson
 from typing import Any, Protocol
 
-from . import stream_codec
 
 
 class _ChatToolCallFunction(Protocol):
@@ -104,7 +103,13 @@ def to_responses_tool(
     description: str,
     schema: dict | None,
     builtin: dict[str, Any] | None = None,
+    strict: bool = False,
 ) -> dict[str, Any]:
+    """将工具定义转换为 Responses API 扁平格式。
+
+    Responses API 中 function tool 的 name/description/parameters 为顶层字段，
+    且支持 strict 模式保证输出 schema 一致性。
+    """
     if builtin is not None:
         return dict(builtin)
     resolved = schema or {
@@ -113,12 +118,17 @@ def to_responses_tool(
             "input": {"type": "string", "description": description},
         },
     }
-    return {
+    if strict:
+        resolved = make_schema_strict(resolved)
+    result: dict[str, Any] = {
         "type": "function",
         "name": name,
         "description": description,
         "parameters": resolved,
     }
+    if strict:
+        result["strict"] = True
+    return result
 
 
 # Provider 之间无需转换的目标列表（共享 reasoning_content 协议）

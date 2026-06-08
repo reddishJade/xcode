@@ -220,12 +220,13 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         kwargs: dict[str, object] = {
             "model": self.model,
             "input": converted,
-            "tools": [
+"tools": [
                 to_responses_tool(
                     t.name,
                     t.description,
                     t.schema,
                     t.builtin,
+                    strict=True,
                 )
                 for t in tools
             ],
