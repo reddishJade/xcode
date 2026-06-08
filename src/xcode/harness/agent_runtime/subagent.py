@@ -22,18 +22,49 @@ from ...agent.messages import BranchSummaryMessage
 
 SubagentStatus = Literal["running", "done", "cancelled", "failed"]
 RunChild = Callable[[str, str, Path | None], Awaitable[str]]
+SubagentLifecycleCallback = Callable[["SubagentLifecycleEvent"], None]
+
+
+@dataclass(frozen=True)
+class SubagentStartEvent:
+    """子 Agent 任务开始事件。"""
+
+    job_id: str
+    prompt: str
+    model_profile: str
+    isolation: str
+    cwd_override: Path | None = None
+    worktree_task_id: str | None = None
+    type: str = "subagent_start"
+
+
+@dataclass(frozen=True)
+class SubagentEndEvent:
+    """子 Agent 任务结束事件。"""
+
+    job_id: str
+    status: SubagentStatus
+    error: str | None = None
+    type: str = "subagent_end"
+
+
+type SubagentLifecycleEvent = SubagentStartEvent | SubagentEndEvent
 
 
 @dataclass
 class SubagentJob:
+    """子 Agent 任务状态。"""
+
     id: str
     prompt: str
+    model_profile: str
     created_at: datetime
     timeout_seconds: float | None
     future: concurrent.futures.Future[str]
     isolation: str = "context"
     cwd_override: Path | None = None
     worktree_task_id: str | None = None
+    end_event_emitted: bool = False
 
     def status(self) -> SubagentStatus:
         if self.future.cancelled():
@@ -58,12 +89,14 @@ class ManagedSubagentRunner:
         default_profile: str = PROFILE_SUBAGENT,
         worktree_runner=None,
         worker: IsolatedAsyncWorker | None = None,
+        lifecycle_callback: SubagentLifecycleCallback | None = None,
     ) -> None:
         self.run_child = run_child
         self.timeout_seconds = timeout_seconds
         self.available_profiles = available_profiles
         self.default_profile = default_profile
         self.worktree_runner = worktree_runner
+        self.lifecycle_callback = lifecycle_callback
         self._worker = worker or IsolatedAsyncWorker(name="xcode-subagent-worker")
         self._jobs: dict[str, SubagentJob] = {}
         self._ids = itertools.count(1)
@@ -96,6 +129,7 @@ class ManagedSubagentRunner:
         self._jobs[job_id] = SubagentJob(
             id=job_id,
             prompt=prompt,
+            model_profile=profile,
             created_at=datetime.now(),
             timeout_seconds=self.timeout_seconds,
             future=future,
@@ -103,6 +137,7 @@ class ManagedSubagentRunner:
             cwd_override=cwd_override,
             worktree_task_id=worktree_task_id,
         )
+        self._emit_start(self._jobs[job_id])
         return job_id
 
     def status(self, job_id: str) -> str:
@@ -114,7 +149,16 @@ class ManagedSubagentRunner:
     def result(self, job_id: str, timeout: float | None = None) -> str:
         job = self._require_job(job_id)
         try:
-            return job.future.result(timeout=timeout)
+            result = job.future.result(timeout=timeout)
+        except concurrent.futures.CancelledError:
+            self._emit_end(job, "cancelled")
+            raise
+        except Exception as exc:
+            self._emit_end(job, "failed", f"{type(exc).__name__}: {exc}")
+            raise
+        else:
+            self._emit_end(job, "done")
+            return result
         finally:
             if job.future.done():
                 self._jobs.pop(job_id, None)
@@ -124,6 +168,8 @@ class ManagedSubagentRunner:
         if job is None:
             return f"unknown job: {job_id}"
         ok = job.future.cancel()
+        if ok:
+            self._emit_end(job, "cancelled")
         if job.future.done():
             self._jobs.pop(job_id, None)
         return "cancel requested" if ok else "already completed"
@@ -161,6 +207,33 @@ class ManagedSubagentRunner:
             return self._jobs[job_id]
         except KeyError:
             raise KeyError(f"unknown subagent job: {job_id}") from None
+
+    def _emit_start(self, job: SubagentJob) -> None:
+        if self.lifecycle_callback is None:
+            return
+        self.lifecycle_callback(
+            SubagentStartEvent(
+                job_id=job.id,
+                prompt=job.prompt,
+                model_profile=job.model_profile,
+                isolation=job.isolation,
+                cwd_override=job.cwd_override,
+                worktree_task_id=job.worktree_task_id,
+            )
+        )
+
+    def _emit_end(
+        self,
+        job: SubagentJob,
+        status: SubagentStatus,
+        error: str | None = None,
+    ) -> None:
+        if self.lifecycle_callback is None or job.end_event_emitted:
+            return
+        job.end_event_emitted = True
+        self.lifecycle_callback(
+            SubagentEndEvent(job_id=job.id, status=status, error=error)
+        )
 
 
 def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpec, ...]:

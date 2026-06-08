@@ -10,6 +10,8 @@ from unittest.mock import patch
 from xcode.harness.agent_runtime.async_worker import IsolatedAsyncWorker
 from xcode.harness.agent_runtime import (
     ManagedSubagentRunner,
+    SubagentEndEvent,
+    SubagentStartEvent,
     build_managed_subagent_tools,
 )
 
@@ -51,6 +53,42 @@ class XcodeSubagentToolTests(unittest.TestCase):
             self.assertIn("status=done", checked)
             self.assertIn("done work", checked)
             self.assertEqual(runner.status(job_id), "unknown")
+        finally:
+            runner.shutdown()
+
+    def test_managed_subagent_runner_emits_lifecycle_events(self) -> None:
+        events: list[SubagentStartEvent | SubagentEndEvent] = []
+
+        async def run_child(
+            prompt: str, model_profile: str, cwd_override: Path | None
+        ) -> str:
+            return f"{model_profile}:{prompt}:{cwd_override}"
+
+        runner = ManagedSubagentRunner(
+            run_child,
+            timeout_seconds=1,
+            lifecycle_callback=events.append,
+        )
+        try:
+            job_id = runner.submit("work")
+            self._wait_status(runner, job_id, "done")
+
+            self.assertEqual(runner.result(job_id), "subagent:work:None")
+
+            self.assertEqual(
+                [event.type for event in events], ["subagent_start", "subagent_end"]
+            )
+            start = events[0]
+            end = events[1]
+            self.assertIsInstance(start, SubagentStartEvent)
+            self.assertIsInstance(end, SubagentEndEvent)
+            assert isinstance(start, SubagentStartEvent)
+            assert isinstance(end, SubagentEndEvent)
+            self.assertEqual(start.job_id, job_id)
+            self.assertEqual(start.model_profile, "subagent")
+            self.assertEqual(start.isolation, "context")
+            self.assertEqual(end.job_id, job_id)
+            self.assertEqual(end.status, "done")
         finally:
             runner.shutdown()
 

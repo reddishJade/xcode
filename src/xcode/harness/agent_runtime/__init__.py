@@ -11,7 +11,12 @@ from .prompting import (
 from .structured import StructuredAgent
 from .event_translation import StructuredAgentEvent
 from .result import StructuredAgentResult
-from .subagent import ManagedSubagentRunner, build_managed_subagent_tools
+from .subagent import (
+    ManagedSubagentRunner,
+    SubagentEndEvent,
+    SubagentStartEvent,
+    build_managed_subagent_tools,
+)
 
 __all__ = [
     "CancellationToken",
@@ -21,6 +26,8 @@ __all__ = [
     "StructuredAgent",
     "StructuredAgentEvent",
     "StructuredAgentResult",
+    "SubagentEndEvent",
+    "SubagentStartEvent",
     "SystemPromptBuilder",
     "build_managed_subagent_tools",
     "build_runtime_context_provider",
