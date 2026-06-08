@@ -781,8 +781,14 @@ def _tools_to_definitions(tools: list[AgentTool] | None) -> list[ToolDefinition]
                     f'output="{ex.get("output", "")}"'
                 )
             desc += "\n".join(example_lines)
+        builtin = getattr(t, "builtin", None)
         result.append(
-            ToolDefinition(name=t.name, description=desc, schema=t.parameters)
+            ToolDefinition(
+                name=t.name,
+                description=desc,
+                schema=t.parameters,
+                builtin=builtin if isinstance(builtin, dict) else None,
+            )
         )
     return result
 

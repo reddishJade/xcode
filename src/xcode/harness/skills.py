@@ -65,6 +65,7 @@ class ToolSpec:
     examples: list[dict[str, Any]] = field(default_factory=list)
     prompt_snippet: str | None = None
     prompt_guidelines: tuple[str, ...] = ()
+    builtin: dict[str, Any] | None = None
 
 
 ToolExecutionStatus = Literal["ok", "denied", "error", "approval_required"]
@@ -172,7 +173,9 @@ def run_tool_result(
     )
     if perm_result.blocked:
         status = (
-            _STATUS_APPROVAL_REQUIRED if perm_result.decision == "ask" else _STATUS_DENIED
+            _STATUS_APPROVAL_REQUIRED
+            if perm_result.decision == "ask"
+            else _STATUS_DENIED
         )
         return ToolExecutionResult(
             status, perm_result.reason, metadata=perm_result.metadata

@@ -38,6 +38,23 @@ class AgentToolExecutionTests(unittest.TestCase):
         self.assertEqual(write_tool.execution_mode, "sequential")
         self.assertEqual(explicit_parallel.execution_mode, "parallel")
 
+    def test_toolspec_adapter_preserves_builtin_metadata(self) -> None:
+        """ToolSpec builtin 元数据会传递给 AgentTool。"""
+        builtin = {"type": "shell", "environment": {"type": "local"}}
+        (tool,) = adapt_tool_specs(
+            (
+                ToolSpec(
+                    "shell",
+                    "Run shell.",
+                    "{}",
+                    lambda _data: "",
+                    builtin=builtin,
+                ),
+            )
+        )
+
+        self.assertEqual(tool.builtin, builtin)
+
     def test_partition_tool_calls_for_execution_keeps_sequential_barriers(self) -> None:
         tools = adapt_tool_specs(
             (

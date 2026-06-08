@@ -79,6 +79,27 @@ class EchoTool:
         return AgentToolResult(content=[TextContent(text=str(params["text"]))])
 
 
+class BuiltinShellTool:
+    """模拟带 Responses builtin shell 元数据的 AgentTool。"""
+
+    name = "shell"
+    label = "Shell"
+    description = "Run shell commands."
+    parameters = {"type": "object"}
+    execution_mode: ToolExecutionMode | None = "sequential"
+    examples: list[dict[str, Any]] = []
+    builtin: dict[str, Any] = {"type": "shell", "environment": {"type": "local"}}
+
+    async def execute(
+        self,
+        tool_call_id: str,
+        params: dict[str, Any],
+        signal: Any | None = None,
+        on_update=None,
+    ) -> AgentToolResult:
+        return AgentToolResult(content=[TextContent(text="ok")])
+
+
 class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_streams_text_from_injected_provider(self) -> None:
         provider = TextProvider()
@@ -101,6 +122,25 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
         assert isinstance(final, AssistantMessage)
         self.assertEqual(final.content, [TextContent(text="ok")])
         self.assertEqual(events[-1].type, "agent_end")
+
+    async def test_builtin_tool_metadata_reaches_provider(self) -> None:
+        """AgentTool builtin 元数据会传递到 provider 工具定义。"""
+        provider = TextProvider()
+        tool = BuiltinShellTool()
+
+        await run_agent_loop(
+            prompts=[UserMessage(content="hello")],
+            context=AgentContext(tools=[tool]),
+            config=AgentLoopConfig(
+                provider=provider,
+                convert_to_llm=convert_to_llm,
+            ),
+            emit=lambda _event: None,
+        )
+
+        assert provider.tools is not None
+        self.assertEqual(provider.tools[0].name, "shell")
+        self.assertEqual(provider.tools[0].builtin, tool.builtin)
 
     async def test_executes_tools_without_harness_context(self) -> None:
         provider = ToolProvider()
