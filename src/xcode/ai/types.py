@@ -67,20 +67,6 @@ class Model[TApi: Api]:
     thinking_level_map: dict[str, str | None] | None = None
 
 
-@dataclass(frozen=True)
-class ThinkingConfig:
-    """统一 thinking 配置。
-
-    - enabled: 是否启用 thinking
-    - effort: reasoning effort 级别（None 表示使用 provider 默认）
-    - clear_thinking: 是否在轮次间清除 thinking 历史
-    """
-
-    enabled: bool = True
-    effort: str | None = None
-    clear_thinking: bool = False
-
-
 @dataclass
 class ThinkingBudgets:
     minimal: int = 0

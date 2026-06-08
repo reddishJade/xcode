@@ -172,10 +172,6 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
     )
 
 
-def to_agent_config(config: XcodeRuntimeConfig) -> AgentConfig:
-    return config.agent
-
-
 def resolve_config_path(project_root: Path, path: Path | None) -> Path | None:
     if path is None:
         return None

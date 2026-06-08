@@ -11,7 +11,6 @@ from xcode.harness.config import (
     discover_runtime_config,
     load_runtime_config,
     resolve_config_path,
-    to_agent_config,
 )
 
 
@@ -135,7 +134,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             )
 
             config = load_runtime_config(path)
-            agent = to_agent_config(config)
+            agent = config.agent
 
             self.assertEqual(agent.max_steps, 8)
             self.assertEqual(agent.tool_workers, 1)

@@ -40,8 +40,8 @@ class XcodeSkillCoreTests(unittest.TestCase):
         )
 
     def test_tool_prompt_handles_empty_registry(self) -> None:
-        prompt = skills.build_tool_prompt(skills.BASE_REGISTRY)
-        self.assertEqual(prompt, "")
+        prompt = skills.build_tool_prompt(())
+        self.assertEqual(prompt, "(none)")
 
 
 if __name__ == "__main__":

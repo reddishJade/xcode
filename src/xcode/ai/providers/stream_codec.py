@@ -236,26 +236,3 @@ def responses_stream_to_events(
     elif completed:
         final_text = response_text or accumulated_text
         yield FinalMessage(final_text, "end_turn")
-
-
-def responses_to_events(
-    response: _Response,
-) -> list[TextDelta | FinalMessage | ToolCallEvent]:
-    events: list[TextDelta | FinalMessage | ToolCallEvent] = []
-    text = response.output_text
-    if text:
-        events.append(TextDelta(str(text)))
-    calls = []
-    for item in response.output or []:
-        item_type = item.type
-        if item_type == "message":
-            for content in item.content or []:
-                if content.text:
-                    events.append(TextDelta(str(content.text)))
-        elif item_type in {"function_call", "tool_call"}:
-            calls.append(tool_call_from_response_item(item))
-    if calls:
-        events.append(ToolCallEvent([ToolCall(**c) for c in calls]))
-    else:
-        events.append(FinalMessage(str(text or ""), "end_turn"))
-    return events

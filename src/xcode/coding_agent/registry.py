@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from xcode.harness.execution_env import ExecutionEnv
-from xcode.harness.skills import BASE_REGISTRY, ToolSpec
+from xcode.harness.skills import ToolSpec
 from xcode.coding_agent.tools import build_bash_tool, build_code_tools, build_file_tools
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ def build_project_scoped_registry(
     cancel_event: threading.Event | None = None,
     env: ExecutionEnv | None = None,
 ) -> tuple[ToolSpec, ...]:
-    registry = BASE_REGISTRY
+    registry: tuple[ToolSpec, ...] = ()
     registry += build_file_tools(
         project_root, context_state=contextual_state, cancel_event=cancel_event
     )

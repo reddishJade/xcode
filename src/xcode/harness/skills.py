@@ -206,6 +206,3 @@ def _merge_metadata(
 
 def stringify_tool_input(action_input: ToolInput) -> str:
     return json.dumps(action_input, ensure_ascii=False, sort_keys=True)
-
-
-BASE_REGISTRY: tuple[ToolSpec, ...] = ()

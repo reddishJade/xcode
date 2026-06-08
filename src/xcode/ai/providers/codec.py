@@ -380,11 +380,3 @@ def _content_blocks_to_responses_input(
 
     converted.extend(function_calls)
     return converted
-
-
-def tool_call_from_chat(call: _ChatToolCall) -> dict[str, Any]:
-    return {
-        "id": call.id,
-        "name": call.function.name,
-        "input": stream_codec.parse_tool_arguments(call.function.arguments),
-    }

@@ -28,7 +28,6 @@ class OpenAIChatProvider(OpenAICompatProvider):
         thinking: bool = True,
         reasoning_effort: str | None = None,
         runtime: ProviderRuntime | None = None,
-        prompt_cache_key: str | None = None,
         client=None,
     ) -> None:
         super().__init__(
@@ -42,8 +41,6 @@ class OpenAIChatProvider(OpenAICompatProvider):
             transport="openai_chat",
             import_error_msg="Missing dependency: openai. Install project requirements first.",
         )
-        self.prompt_cache_key = prompt_cache_key
-        self.metrics["previous_response_id"] = None
 
     def _stream_sync(
         self,

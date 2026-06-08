@@ -22,7 +22,6 @@ from xcode.harness.config import (
     XcodeRuntimeConfig,
     discover_runtime_config,
     resolve_config_path,
-    to_agent_config,
 )
 from xcode.harness.agent_runtime import (
     CancellationToken,
@@ -103,7 +102,7 @@ def resolve_config(
     runtime_config: XcodeRuntimeConfig | None,
 ) -> ResolvedConfig:
     runtime_config = runtime_config or discover_runtime_config(project_root)
-    agent_config = agent_config or to_agent_config(runtime_config)
+    agent_config = agent_config or runtime_config.agent
     skills_dir = skills_dir or resolve_config_path(
         project_root, runtime_config.paths.skills_dir
     )
