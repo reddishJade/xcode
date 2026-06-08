@@ -9,7 +9,6 @@ from xcode.ai.types import StreamOptions, ToolDefinition
 
 from .codec import to_chat_messages, to_chat_tool
 from .openai_compat import OpenAICompatProvider
-from .stream_codec import chat_stream_to_events
 
 """智谱 AI ChatGLM provider（兼容 OpenAI Chat API）。
 
@@ -86,20 +85,16 @@ class ChatGLMProvider(OpenAICompatProvider):
         thinking: bool | None = None,
         **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
-        kwargs = self._chat_kwargs(
+        params = self._chat_kwargs(
             messages,
             tools,
             stream=True,
             response_format=response_format,
             thinking=thinking,
         )
-        openai_messages = cast(list[dict[str, Any]], kwargs["messages"])
+        openai_messages = cast(list[dict[str, Any]], params["messages"])
 
-        create = cast(Any, self.client.chat.completions.create)
-        stream = self.runtime.run(lambda: create(**kwargs))
-        yield from chat_stream_to_events(
-            self._intercept_stream(stream, len(openai_messages))
-        )
+        yield from self._call_chat_api(params, len(openai_messages))
 
     def _chat_kwargs(
         self,
