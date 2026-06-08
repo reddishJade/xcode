@@ -65,6 +65,8 @@ _CACHE_RETENTION_TO_PROMPT_CACHE_RETENTION: dict[
     "long": "24h",
 }
 
+_SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "<system-prompt-dynamic-boundary />"
+
 
 class OpenAIChatProvider(OpenAICompatProvider):
     """OpenAI Chat Completions provider（兼容所有 OpenAI API 兼容服务）。
@@ -312,7 +314,10 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         else:
             raw_input_messages = messages[self._last_sent_message_index :]
 
-        converted = to_responses_input(raw_input_messages)
+        instructions, input_messages = _extract_responses_instructions(
+            raw_input_messages
+        )
+        converted = to_responses_input(input_messages)
         if self.previous_response_id is None and self._stateless_persisted_items:
             converted = [*self._stateless_persisted_items, *converted]
 
@@ -356,6 +361,8 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
 
         if self.previous_response_id is not None:
             kwargs["previous_response_id"] = self.previous_response_id
+        if instructions:
+            kwargs["instructions"] = instructions
         prompt_cache_key = _responses_prompt_cache_key(self.prompt_cache_key, tools)
         if prompt_cache_key:
             kwargs["prompt_cache_key"] = prompt_cache_key
@@ -385,7 +392,12 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         for field_name in _RESPONSES_OPTION_FIELDS:
             value = getattr(opts, field_name)
             if value is not None:
-                params[field_name] = value
+                if field_name == "instructions":
+                    params[field_name] = _merge_responses_instructions(
+                        params.get("instructions"), value
+                    )
+                else:
+                    params[field_name] = value
         if (
             opts.server_compact_threshold is not None
             and "context_management" not in params
@@ -586,6 +598,51 @@ def _responses_prompt_cache_key(
     if not base_key:
         return tool_key
     return f"{base_key}:{tool_key}"
+
+
+def _extract_responses_instructions(
+    messages: list[dict[str, Any]],
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """将稳定 system/developer 前缀移到 Responses instructions 参数。"""
+    instruction_parts: list[str] = []
+    input_messages: list[dict[str, Any]] = []
+    for message in messages:
+        role = str(message.get("role", ""))
+        content = message.get("content")
+        if (
+            role in {"system", "developer"}
+            and isinstance(content, str)
+            and _SYSTEM_PROMPT_DYNAMIC_BOUNDARY in content
+        ):
+            stable, dynamic = content.split(_SYSTEM_PROMPT_DYNAMIC_BOUNDARY, 1)
+            stable = stable.strip()
+            dynamic = dynamic.strip()
+            if stable:
+                instruction_parts.append(stable)
+            if dynamic:
+                dynamic_message = dict(message)
+                dynamic_message["content"] = dynamic
+                input_messages.append(dynamic_message)
+            continue
+        input_messages.append(message)
+
+    instructions = "\n\n".join(instruction_parts)
+    return instructions or None, input_messages
+
+
+def _merge_responses_instructions(
+    existing: object,
+    explicit: object,
+) -> str:
+    """合并运行期稳定指令和显式请求指令。"""
+    parts: list[str] = []
+    for item in (existing, explicit):
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts)
 
 
 def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:

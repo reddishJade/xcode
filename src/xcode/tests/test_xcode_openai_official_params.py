@@ -15,6 +15,7 @@ from xcode.ai.providers.openai import OpenAIChatProvider, OpenAIResponsesProvide
 from xcode.ai.providers.runtime import ProviderRuntime
 from xcode.ai.providers.stream_codec import responses_stream_to_events
 from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.harness.agent_runtime.prompting import SYSTEM_PROMPT_DYNAMIC_BOUNDARY
 
 
 class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
@@ -138,6 +139,36 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
             logs.output[0],
         )
 
+    def test_chat_provider_keeps_system_prompt_in_messages(self) -> None:
+        """Chat Completions 保留完整 system 消息。"""
+        client = FakeOpenAIClient()
+        provider = OpenAIChatProvider(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-5.4",
+            client=client,
+        )
+        system_prompt = (
+            "Stable instructions."
+            f"\n\n{SYSTEM_PROMPT_DYNAMIC_BOUNDARY}\n\n"
+            "<environment>dynamic</environment>"
+        )
+
+        list(
+            provider._stream_sync(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "hi"},
+                ],
+                (),
+            )
+        )
+
+        messages = client.chat.completions.kwargs["messages"]
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[0]["content"], system_prompt)
+        self.assertNotIn("instructions", client.chat.completions.kwargs)
+
     def test_responses_provider_maps_response_format_to_text_config(self) -> None:
         """Responses 使用 text.format 承载结构化输出配置。"""
         client = FakeOpenAIClient()
@@ -166,6 +197,45 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
         self.assertEqual(text_config["format"]["type"], "json_schema")
         self.assertEqual(text_config["format"]["name"], "answer")
         self.assertTrue(text_config["format"]["strict"])
+
+    def test_responses_provider_moves_stable_prompt_to_instructions(self) -> None:
+        """Responses 将稳定 prompt 前缀移入 instructions 参数。"""
+        client = FakeOpenAIClient()
+        provider = OpenAIResponsesProvider(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-5.4",
+            client=client,
+        )
+        system_prompt = (
+            "Stable instructions."
+            f"\n\n{SYSTEM_PROMPT_DYNAMIC_BOUNDARY}\n\n"
+            "<environment>dynamic</environment>"
+        )
+
+        list(
+            provider._stream_sync(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "hi"},
+                ],
+                (),
+            )
+        )
+
+        kwargs = client.responses.kwargs
+        self.assertEqual(kwargs["instructions"], "Stable instructions.")
+        self.assertEqual(kwargs["input"][0]["role"], "developer")
+        self.assertEqual(
+            kwargs["input"][0]["content"],
+            [
+                {
+                    "type": "input_text",
+                    "text": "<environment>dynamic</environment>",
+                }
+            ],
+        )
+        self.assertNotIn("Stable instructions.", str(kwargs["input"]))
 
     def test_factory_preserves_openai_response_format(self) -> None:
         """factory 构建 OpenAI provider 时保留结构化输出配置。"""
