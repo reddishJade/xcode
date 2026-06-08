@@ -116,6 +116,7 @@ class StreamOptions:
     thinking_level: str | None = None
     background: bool | None = None
     context_management: list[dict[str, Any]] | None = None
+    server_compact_threshold: int | None = None
     conversation: dict[str, Any] | str | None = None
     include: list[str] | None = None
     instructions: str | None = None

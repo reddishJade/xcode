@@ -309,6 +309,15 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             value = getattr(opts, field_name)
             if value is not None:
                 params[field_name] = value
+        if (
+            opts.server_compact_threshold is not None
+            and "context_management" not in params
+        ):
+            context_management = _responses_compaction_context_management(
+                opts.server_compact_threshold
+            )
+            if context_management:
+                params["context_management"] = context_management
         # cache_retention 映射到 prompt_cache_retention，显式设置优先
         if "prompt_cache_retention" not in params:
             retention = _map_cache_retention(opts.cache_retention)
@@ -437,6 +446,20 @@ def _responses_input_token_count_kwargs(
         if field_name in params:
             result[field_name] = params[field_name]
     return result
+
+
+def _responses_compaction_context_management(
+    compact_threshold: int,
+) -> list[dict[str, object]]:
+    """构造 Responses 服务端压缩配置。"""
+    if compact_threshold <= 0:
+        return []
+    return [
+        {
+            "type": "compaction",
+            "compact_threshold": compact_threshold,
+        }
+    ]
 
 
 def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:

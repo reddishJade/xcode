@@ -289,6 +289,67 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_responses_provider_maps_server_compact_threshold(self) -> None:
+        """Responses 将服务端压缩阈值映射到 context_management。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient()
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                client=client,
+            )
+
+            _events = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "hi"}],
+                    [],
+                    options=StreamOptions(server_compact_threshold=12000),
+                )
+            ]
+
+            self.assertEqual(
+                client.responses.kwargs["context_management"],
+                [{"type": "compaction", "compact_threshold": 12000}],
+            )
+            self.assertNotIn(
+                "context_management",
+                client.responses.input_tokens.kwargs,
+            )
+
+        asyncio.run(run_test())
+
+    def test_responses_provider_prefers_explicit_context_management(self) -> None:
+        """显式 context_management 优先于服务端压缩阈值快捷配置。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient()
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                client=client,
+            )
+            explicit = [{"type": "compaction", "compact_threshold": 8000}]
+
+            _events = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "hi"}],
+                    [],
+                    options=StreamOptions(
+                        context_management=explicit,
+                        server_compact_threshold=12000,
+                    ),
+                )
+            ]
+
+            self.assertEqual(client.responses.kwargs["context_management"], explicit)
+
+        asyncio.run(run_test())
+
     def test_responses_provider_maps_cache_retention(self) -> None:
         """Responses 将通用缓存保留策略映射到官方 prompt cache 参数。"""
 
