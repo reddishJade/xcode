@@ -19,6 +19,7 @@ from xcode.ai.events import (
 )
 from xcode.harness.agent_runtime import (
     CancellationToken,
+    RunState,
     StructuredAgent,
     StructuredAgentEvent,
 )
@@ -102,6 +103,37 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         self.assertEqual(
             [event.type for event in second_events],
             ["message_start", "text_delta", "assistant", "turn_end", "final"],
+        )
+
+    def test_load_run_state_restores_history_messages(self) -> None:
+        seen_messages: list[list[dict[str, Any]]] = []
+
+        def factory(
+            messages: list[dict[str, Any]],
+            _tools: list[Any],
+        ) -> list[ProviderEvent]:
+            seen_messages.append(messages)
+            return [TextDelta("restored"), FinalMessage("", "end_turn")]
+
+        run_state = RunState(
+            messages=[
+                {"role": "user", "content": "previous question"},
+                {"role": "assistant", "content": "previous answer"},
+            ],
+            current_mode="act",
+        )
+        agent = StructuredAgent(provider=FakeProvider(factory), registry=())
+
+        agent.load_run_state(RunState.from_dict(run_state.to_dict()))
+        result = agent.run("next question")
+
+        self.assertEqual(result.answer, "restored")
+        self.assertIsNotNone(result.run_state)
+        assert result.run_state is not None
+        self.assertEqual(result.run_state.current_mode, "act")
+        self.assertEqual(
+            [message["role"] for message in seen_messages[0]],
+            ["user", "assistant", "user"],
         )
 
     def test_provider_events_drive_main_loop(self) -> None:

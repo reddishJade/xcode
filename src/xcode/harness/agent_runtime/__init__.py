@@ -10,7 +10,7 @@ from .prompting import (
 )
 from .structured import StructuredAgent
 from .event_translation import StructuredAgentEvent
-from .result import StructuredAgentResult
+from .result import RunState, StructuredAgentResult
 from .subagent import (
     ManagedSubagentRunner,
     SubagentEndEvent,
@@ -23,6 +23,7 @@ __all__ = [
     "ContextualRetrievalState",
     "ManagedSubagentRunner",
     "PromptContext",
+    "RunState",
     "StructuredAgent",
     "StructuredAgentEvent",
     "StructuredAgentResult",

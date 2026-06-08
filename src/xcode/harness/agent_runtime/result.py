@@ -14,6 +14,37 @@ from .event_translation import StructuredAgentEvent
 
 
 @dataclass(frozen=True)
+class RunState:
+    """可序列化的运行状态快照。"""
+
+    messages: list[dict[str, Any]]
+    current_mode: str = "act"
+    last_agent: str = "main"
+    needs_follow_up: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换为 JSON 可序列化字典。"""
+        return {
+            "messages": self.messages,
+            "current_mode": self.current_mode,
+            "last_agent": self.last_agent,
+            "needs_follow_up": self.needs_follow_up,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RunState":
+        """从 JSON 字典恢复运行状态。"""
+        raw_messages = payload.get("messages", [])
+        messages = raw_messages if isinstance(raw_messages, list) else []
+        return cls(
+            messages=[msg for msg in messages if isinstance(msg, dict)],
+            current_mode=str(payload.get("current_mode", "act")),
+            last_agent=str(payload.get("last_agent", "main")),
+            needs_follow_up=bool(payload.get("needs_follow_up", False)),
+        )
+
+
+@dataclass(frozen=True)
 class StructuredAgentResult:
     answer: str
     messages: list[dict[str, Any]]
@@ -25,10 +56,11 @@ class StructuredAgentResult:
     watchdog_reason: str | None = None
     needs_follow_up: bool = False
     last_agent: str = "main"
+    run_state: RunState | None = None
 
 
 def _build_structured_result(
-    result: AgentLoopResult, max_steps: int
+    result: AgentLoopResult, max_steps: int, current_mode: str = "act"
 ) -> StructuredAgentResult:
     """将 AgentLoopResult 转换为 StructuredAgentResult。"""
     answer_parts: list[str] = []
@@ -87,6 +119,7 @@ def _build_structured_result(
         metrics=metrics,
         stopped_by_watchdog=result.stopped_by_watchdog,
         watchdog_reason=result.watchdog_reason,
+        run_state=RunState(messages=messages, current_mode=current_mode),
     )
 
 

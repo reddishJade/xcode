@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ...agent.agent import Agent
 from ...agent.messages import convert_to_llm
@@ -24,13 +25,15 @@ from ...agent.config import (
 )
 from ...agent.messages import (
     AgentMessage,
+    AssistantMessage,
     SystemMessage,
     ToolResultMessage,
     UserMessage,
 )
+from ...agent.protocols import ContentBlock
 from xcode.ai.events import ToolCall as ToolUseBlock
 from xcode.ai.providers.protocol import ModelProvider
-from xcode.agent.types import ToolCallContent
+from xcode.agent.types import TextContent, ToolCallContent
 from .agent_helpers import (
     run_coro_sync,
     aiter_to_sync_iter,
@@ -49,6 +52,7 @@ from .result import (
     _build_structured_result,
     _final_event,
     _tool_result_text,
+    RunState,
     StructuredAgentResult,
 )
 from .tool_adapter import adapt_tool_specs
@@ -176,6 +180,12 @@ class StructuredAgent:
         """用外部会话记录替换当前会话历史。"""
         self._conversation_history = deepcopy(messages)
 
+    def load_run_state(self, run_state: RunState) -> None:
+        """用可序列化运行状态恢复当前会话。"""
+        self._conversation_history = _messages_from_run_state(run_state)
+        if run_state.current_mode in {"act", "plan", "review"}:
+            self._current_mode = cast(ExecutionMode, run_state.current_mode)
+
     def history_messages(self) -> list[AgentMessage]:
         """返回当前会话历史副本。"""
         return deepcopy(self._conversation_history)
@@ -280,7 +290,9 @@ class StructuredAgent:
             if context_messages
             else result
         )
-        final = _build_structured_result(visible_result, snapshot.config.max_steps)
+        final = _build_structured_result(
+            visible_result, snapshot.config.max_steps, self._current_mode
+        )
         yield _final_event(result.steps, final)
 
     # ── 模式切换 ──
@@ -424,7 +436,9 @@ class StructuredAgent:
                 if self._plan_enter_step >= self._max_plan_turns:
                     self._plan_enter_step = 0
                     self._current_mode = "act"
-                    self._agent.update_tools(self._tools_for_mode(snapshot.registry, "act"))
+                    self._agent.update_tools(
+                        self._tools_for_mode(snapshot.registry, "act")
+                    )
                     self.steer(
                         SystemMessage(
                             content=(
@@ -704,3 +718,65 @@ def _tool_results_count_as_progress(
         if spec and spec.read_only:
             return True
     return False
+
+
+def _messages_from_run_state(run_state: RunState) -> list[AgentMessage]:
+    """从可序列化运行状态恢复模型可见消息。"""
+    messages: list[AgentMessage] = []
+    for item in run_state.messages:
+        message = _message_from_dict(item)
+        if message is not None:
+            messages.append(message)
+    return messages
+
+
+def _message_from_dict(item: dict[str, Any]) -> AgentMessage | None:
+    role = str(item.get("role", ""))
+    if role == "system":
+        return SystemMessage(content=str(item.get("content", "")))
+    if role == "user":
+        return UserMessage(content=str(item.get("content", "")))
+    if role == "assistant":
+        return _assistant_from_dict(item)
+    if role == "tool":
+        return ToolResultMessage(
+            tool_call_id=str(item.get("tool_call_id", "")),
+            content=str(item.get("content", "")),
+        )
+    return None
+
+
+def _assistant_from_dict(item: dict[str, Any]) -> AssistantMessage:
+    content: list[ContentBlock] = []
+    text = item.get("content")
+    if isinstance(text, str) and text:
+        content.append(TextContent(text=text))
+    tool_calls = item.get("tool_calls", [])
+    if isinstance(tool_calls, list):
+        for tool_call in tool_calls:
+            parsed = _tool_call_from_dict(tool_call)
+            if parsed is not None:
+                content.append(parsed)
+    return AssistantMessage(content=content)
+
+
+def _tool_call_from_dict(item: object) -> ToolCallContent | None:
+    if not isinstance(item, dict):
+        return None
+    function = item.get("function", {})
+    if not isinstance(function, dict):
+        return None
+    name = str(function.get("name", "")).strip()
+    tool_call_id = str(item.get("id", "")).strip()
+    if not name or not tool_call_id:
+        return None
+    arguments = function.get("arguments", {})
+    if isinstance(arguments, str):
+        try:
+            decoded = json.loads(arguments)
+        except json.JSONDecodeError:
+            decoded = {}
+        arguments = decoded
+    if not isinstance(arguments, dict):
+        arguments = {}
+    return ToolCallContent(id=tool_call_id, name=name, arguments=arguments)
