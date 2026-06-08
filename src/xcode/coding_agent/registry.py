@@ -13,7 +13,12 @@ from typing import TYPE_CHECKING
 
 from xcode.harness.execution_env import ExecutionEnv
 from xcode.harness.skills import ToolSpec
-from xcode.coding_agent.tools import build_bash_tool, build_code_tools, build_file_tools
+from xcode.coding_agent.tools import (
+    build_bash_tool,
+    build_code_tools,
+    build_file_tools,
+    build_plan_mode_tools,
+)
 
 if TYPE_CHECKING:
     from xcode.harness.agent_runtime import ContextualRetrievalState
@@ -41,4 +46,5 @@ def build_project_scoped_registry(
             env=env,
         ),
     )
+    registry += build_plan_mode_tools(project_root)
     return tuple(t for t in registry if t.group in enabled)
