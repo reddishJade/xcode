@@ -6,7 +6,7 @@ import unittest
 from typing import Any, cast
 
 from xcode.agent.types import ImageContent
-from xcode.ai.events import ReasoningDelta
+from xcode.ai.events import ReasoningDelta, ToolCallEvent
 from xcode.ai.providers.codec import to_responses_input, to_responses_tool
 from xcode.ai.providers.factory import _build_llm_profile
 from xcode.ai.providers.openai import OpenAIChatProvider, OpenAIResponsesProvider
@@ -365,6 +365,45 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
         assert isinstance(events[0], ReasoningDelta)
         self.assertEqual(events[0].chunk, "why")
 
+    def test_responses_stream_decodes_shell_call(self) -> None:
+        """Responses shell_call item 会转为内部工具调用事件。"""
+        events = list(
+            responses_stream_to_events(
+                cast(
+                    Any,
+                    [
+                        FakeResponsesStreamEvent(
+                            "response.output_item.done",
+                            item=FakeResponsesOutputItem(
+                                item_type="shell_call",
+                                call_id="call_1",
+                                action=FakeShellAction(
+                                    commands=["python --version"],
+                                    timeout_ms=120000,
+                                    max_output_length=4096,
+                                ),
+                            ),
+                            output_index=0,
+                        )
+                    ],
+                )
+            )
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertIsInstance(events[0], ToolCallEvent)
+        tool_event = cast(ToolCallEvent, events[0])
+        self.assertEqual(tool_event.calls[0].id, "call_1")
+        self.assertEqual(tool_event.calls[0].name, "shell")
+        self.assertEqual(
+            tool_event.calls[0].input,
+            {
+                "commands": ["python --version"],
+                "timeout_ms": 120000,
+                "max_output_length": 4096,
+            },
+        )
+
     def test_responses_builtin_tool_is_passed_through(self) -> None:
         """Responses 内建工具定义不包成 function tool。"""
         tool = ToolDefinition(
@@ -511,10 +550,45 @@ class FakeResponsesStreamEvent:
         event_type: str,
         response: FakeResponsesResponse | None = None,
         delta: str | None = None,
+        item: FakeResponsesOutputItem | None = None,
+        output_index: int = 0,
     ) -> None:
         self.type = event_type
         self.response = response
         self.delta = delta
+        self.item = item
+        self.output_index = output_index
+
+
+class FakeResponsesOutputItem:
+    """模拟 Responses 输出 item。"""
+
+    def __init__(
+        self,
+        item_type: str,
+        call_id: str | None = None,
+        action: FakeShellAction | None = None,
+    ) -> None:
+        self.type = item_type
+        self.call_id = call_id
+        self.id = None
+        self.name = None
+        self.arguments = None
+        self.action = action
+
+
+class FakeShellAction:
+    """模拟 Responses shell action。"""
+
+    def __init__(
+        self,
+        commands: list[str],
+        timeout_ms: int,
+        max_output_length: int,
+    ) -> None:
+        self.commands = commands
+        self.timeout_ms = timeout_ms
+        self.max_output_length = max_output_length
 
 
 class FakeResponsesResponse:

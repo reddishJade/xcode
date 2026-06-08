@@ -84,6 +84,8 @@ class _ResponseOutputItem(Protocol):
     def name(self) -> str | None: ...
     @property
     def arguments(self) -> str | None: ...
+    @property
+    def action(self) -> Any | None: ...
 
 
 class _Response(Protocol):
@@ -121,6 +123,42 @@ def tool_call_from_response_item(item: _ResponseOutputItem) -> dict[str, Any]:
         "name": str(item.name or ""),
         "input": parse_tool_arguments(str(item.arguments or "{}")),
     }
+
+
+def shell_call_from_response_item(item: _ResponseOutputItem) -> ToolCall:
+    """将 Responses shell_call item 转换为内部工具调用。"""
+    return ToolCall(
+        id=str(item.call_id or item.id or ""),
+        name="shell",
+        input=_shell_action_input(item.action),
+    )
+
+
+def _shell_action_input(action: Any | None) -> dict[str, Any]:
+    """保留官方 shell action 字段，供后续执行层处理。"""
+    if action is None:
+        return {}
+    commands = _action_value(action, "commands")
+    timeout_ms = _action_value(action, "timeout_ms")
+    max_output_length = _action_value(action, "max_output_length")
+
+    result: dict[str, Any] = {}
+    if isinstance(commands, list):
+        result["commands"] = [str(command) for command in commands]
+    elif commands is not None:
+        result["commands"] = [str(commands)]
+    if timeout_ms is not None:
+        result["timeout_ms"] = timeout_ms
+    if max_output_length is not None:
+        result["max_output_length"] = max_output_length
+    return result
+
+
+def _action_value(action: Any, key: str) -> Any | None:
+    """从 SDK action 对象或 dict 中读取字段。"""
+    if isinstance(action, dict):
+        return action.get(key)
+    return getattr(action, key, None)
 
 
 # ── 流式事件解码 ──
@@ -173,6 +211,7 @@ def responses_stream_to_events(
 ) -> Iterator[TextDelta | ReasoningDelta | ToolCallEvent | UsageUpdate | FinalMessage]:
     """处理 Responses API 流式事件。"""
     pending_calls: dict[int, dict[str, str]] = {}
+    pending_shell_calls: dict[int, ToolCall] = {}
     accumulated_text = ""
     completed = False
     response_text = ""
@@ -210,6 +249,9 @@ def responses_stream_to_events(
                     pending_calls[index]["name"] = str(name)
                     if arguments:
                         pending_calls[index]["arguments"] = str(arguments)
+                elif item_type == "shell_call":
+                    index = getattr(event, "output_index", 0)
+                    pending_shell_calls[index] = shell_call_from_response_item(item)
         elif event_type == "response.completed":
             completed = True
             response = getattr(event, "response", None)
@@ -225,13 +267,17 @@ def responses_stream_to_events(
                     )
                     yield UsageUpdate(int(input_tokens), int(output_tokens))
 
-    if pending_calls:
-        ready = [
-            ToolCall(
-                id=c["id"], name=c["name"], input=parse_tool_arguments(c["arguments"])
+    if pending_calls or pending_shell_calls:
+        ready_by_index = {
+            index: ToolCall(
+                id=call["id"],
+                name=call["name"],
+                input=parse_tool_arguments(call["arguments"]),
             )
-            for _, c in sorted(pending_calls.items())
-        ]
+            for index, call in pending_calls.items()
+        }
+        ready_by_index.update(pending_shell_calls)
+        ready = [call for _, call in sorted(ready_by_index.items())]
         yield ToolCallEvent(ready)
     elif completed:
         final_text = response_text or accumulated_text
