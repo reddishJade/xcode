@@ -32,6 +32,20 @@ class AgentConfig:
 
 
 @dataclass(frozen=True)
+class RequestHygieneConfig:
+    """请求 hygiene 配置。
+
+    控制发给模型的消息历史压缩策略，不影响磁盘/session 保存的完整历史。
+    """
+
+    enabled: bool = True
+    max_tool_result_bytes: int = 8000
+    max_tool_arg_length: int = 1000
+    keep_head_lines: int = 50
+    keep_tail_lines: int = 50
+
+
+@dataclass(frozen=True)
 class ModelProfileRuntimeConfig:
     transport: ProviderTransport = "openai_chat"
     chat_model: str = "deepseek-v4-flash"
@@ -108,6 +122,7 @@ class XcodeRuntimeConfig:
     paths: PathsRuntimeConfig = PathsRuntimeConfig()
     observability: ObservabilityRuntimeConfig = ObservabilityRuntimeConfig()
     daemon: DaemonRuntimeConfig = DaemonRuntimeConfig()
+    request_hygiene: RequestHygieneConfig = RequestHygieneConfig()
 
 
 # ── 配置发现 ──
@@ -133,6 +148,7 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
     paths = data.get("paths", {})
     observability = data.get("observability", {})
     daemon = data.get("daemon", {})
+    request_hygiene = data.get("request_hygiene", {})
     return XcodeRuntimeConfig(
         provider=ProviderRuntimeConfig(
             model_profiles=_load_model_profiles(provider),
@@ -168,6 +184,13 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
         daemon=DaemonRuntimeConfig(
             enabled=bool(daemon.get("enabled", False)),
             interval_seconds=int(daemon.get("interval_seconds", 30)),
+        ),
+        request_hygiene=RequestHygieneConfig(
+            enabled=bool(request_hygiene.get("enabled", True)),
+            max_tool_result_bytes=int(request_hygiene.get("max_tool_result_bytes", 8000)),
+            max_tool_arg_length=int(request_hygiene.get("max_tool_arg_length", 1000)),
+            keep_head_lines=int(request_hygiene.get("keep_head_lines", 50)),
+            keep_tail_lines=int(request_hygiene.get("keep_tail_lines", 50)),
         ),
     )
 

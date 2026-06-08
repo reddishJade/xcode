@@ -142,6 +142,45 @@
 
 ---
 
+## request_hygiene
+
+请求 hygiene 配置控制发给模型的消息历史压缩策略，**不影响磁盘/session 保存的完整历史**。
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | 是否启用请求 hygiene。 |
+| `max_tool_result_bytes` | int | `8000` | tool_result 最大字节数，超过时保留 head + tail + signal lines。 |
+| `max_tool_arg_length` | int | `1000` | 已完成工具调用的参数字符串最大长度，超过时替换为占位符。 |
+| `keep_head_lines` | int | `50` | 压缩 tool_result 时保留的头部行数。 |
+| `keep_tail_lines` | int | `50` | 压缩 tool_result 时保留的尾部行数。 |
+
+### Hygiene 规则
+
+1. **超大 tool_result**：
+   - 按字节/行数上限保留 head + tail
+   - 中间区域提取错误/警告等 signal lines（包含 error/exception/warning/failed 关键字）
+   - 添加省略标记说明压缩行数
+
+2. **base64 payload**：
+   - 检测连续 base64 字符比例 > 90%
+   - 替换为 `<base64 data, {size} bytes>`
+
+3. **超长工具参数**：
+   - 仅压缩已完成（有对应 tool_result）的工具调用
+   - 超长字符串参数替换为 `<truncated, {length} chars>`
+   - 嵌套字典递归压缩
+
+### 设计原因
+
+避免超长工具输出和参数污染缓存热前缀占比，同时保留错误信息用于调试。磁盘日志仍保留完整历史，方便回放和审计。
+
+### 实现位置
+
+- `src/xcode/agent/history.py` - `apply_request_hygiene()` / `repair_tool_pairing()`
+- `src/xcode/harness/config.py` - `RequestHygieneConfig`
+
+---
+
 ## paths
 
 | 字段 | 类型 | 默认值 | 说明 |
@@ -319,6 +358,13 @@ MCP server 不写入 `xcode.config.json` 的 `tools` 段，而是放在 `.local/
   "daemon": {
     "enabled": false,
     "interval_seconds": 30
+  },
+  "request_hygiene": {
+    "enabled": true,
+    "max_tool_result_bytes": 8000,
+    "max_tool_arg_length": 1000,
+    "keep_head_lines": 50,
+    "keep_tail_lines": 50
   }
 }
 ```
