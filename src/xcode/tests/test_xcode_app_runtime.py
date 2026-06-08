@@ -63,7 +63,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
     def test_default_tool_groups_do_not_construct_optional_groups(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             with patch(
-                "xcode.harness.assembly._build_worktree_runner",
+                "xcode.experimental.worktree.WorktreeTaskRunner",
                 side_effect=AssertionError,
             ):
                 app = build_app(
@@ -463,7 +463,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             with (
                 patch("xcode.harness.assembly.build_providers", return_value=bundle),
                 patch(
-                    "xcode.harness.assembly._build_worktree_runner",
+                    "xcode.experimental.worktree.WorktreeTaskRunner",
                     lambda project_root: FakeWorktreeRunner(project_root),
                 ),
             ):

@@ -8,7 +8,7 @@ from typing import Any
 from ...agent.config import AfterToolCallContext, AgentLoopResult
 from ...agent.messages import AssistantMessage
 from xcode.ai.events import ToolCall as ToolUseBlock
-from xcode.ai.types import TextContent, ToolCallContent
+from xcode.agent.types import TextContent, ToolCallContent
 from .agent_helpers import text_from_blocks, to_dict
 from .event_translation import StructuredAgentEvent
 

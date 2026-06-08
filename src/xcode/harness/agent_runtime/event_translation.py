@@ -21,7 +21,7 @@ from ...agent.events import (
 )
 from ...agent.messages import AssistantMessage
 from xcode.ai.events import ToolCall as ToolUseBlock
-from xcode.ai.types import TextContent, ToolCallContent
+from xcode.agent.types import TextContent, ToolCallContent
 
 
 @dataclass(frozen=True)

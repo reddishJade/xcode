@@ -16,7 +16,8 @@ from xcode.ai.events import (
     ToolCall,
     ToolCallEvent,
 )
-from xcode.ai.types import StreamOptions, TextContent, ToolDefinition
+from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.agent.types import TextContent
 
 
 class TextProvider:

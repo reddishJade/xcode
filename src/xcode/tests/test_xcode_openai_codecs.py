@@ -11,7 +11,7 @@ from xcode.agent.messages import (
     CompactionSummaryMessage,
     ToolResultMessage,
 )
-from xcode.ai.types import ToolCallContent
+from xcode.agent.types import ToolCallContent
 from xcode.ai.events import ReasoningDelta, TextDelta, ToolCallEvent
 from xcode.ai.providers.codec import to_chat_messages, to_chat_tool
 from xcode.ai.providers.stream_codec import chat_stream_to_events

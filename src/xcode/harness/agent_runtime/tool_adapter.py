@@ -18,7 +18,7 @@ from ...agent.protocols import (
     ToolExecutionMode,
     ToolUpdateCallback,
 )
-from xcode.ai.types import TextContent
+from xcode.agent.types import TextContent
 from ..skills import ToolSpec, stringify_tool_input
 from ..observability import (
     PermissionCheckResult,

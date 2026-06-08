@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Literal, Protocol
 
-from xcode.ai.types import ImageContent, TextContent, ThinkingContent, ToolCallContent
+from xcode.agent.types import ImageContent, TextContent, ThinkingContent, ToolCallContent
 
 """Agent core protocols and base types."""
 
