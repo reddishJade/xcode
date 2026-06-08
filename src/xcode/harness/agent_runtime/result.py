@@ -24,6 +24,7 @@ class StructuredAgentResult:
     stopped_by_watchdog: bool = False
     watchdog_reason: str | None = None
     needs_follow_up: bool = False
+    last_agent: str = "main"
 
 
 def _build_structured_result(
@@ -81,6 +82,7 @@ def _build_structured_result(
         messages=messages,
         steps=result.steps,
         tool_calls=tool_calls,
+        last_agent="main",
         stopped_by_limit=result.stopped_by_limit,
         metrics=metrics,
         stopped_by_watchdog=result.stopped_by_watchdog,

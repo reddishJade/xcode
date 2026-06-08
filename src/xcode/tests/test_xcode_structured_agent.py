@@ -62,6 +62,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         self.assertEqual(result.answer, "done")
         self.assertEqual(result.steps, 1)
+        self.assertEqual(result.last_agent, "main")
         self.assertEqual(result.tool_calls, [])
         assert result.metrics is not None
         self.assertEqual(result.metrics["llm_calls"], 1)
