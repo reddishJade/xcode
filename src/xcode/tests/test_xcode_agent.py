@@ -128,6 +128,29 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
         assert isinstance(final, AssistantMessage)
         self.assertEqual(final.content, [TextContent(text="done")])
 
+    def test_tool_result_converts_to_plain_tool_message(self) -> None:
+        """工具结果在 provider 边界使用 OpenAI 兼容消息。"""
+        converted = convert_to_llm(
+            [
+                ToolResultMessage(
+                    tool_call_id="call-1",
+                    content="output",
+                    is_error=False,
+                )
+            ]
+        )
+
+        self.assertEqual(
+            converted,
+            [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call-1",
+                    "content": "output",
+                }
+            ],
+        )
+
 
 # ── 新增功能测试 ──
 

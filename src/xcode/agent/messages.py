@@ -4,7 +4,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from xcode.ai.events import StopReason
-from xcode.agent.types import ImageContent, TextContent, ThinkingContent, ToolCallContent
+from xcode.agent.types import (
+    ImageContent,
+    TextContent,
+    ThinkingContent,
+    ToolCallContent,
+)
 
 from .protocols import ContentBlock
 
@@ -107,20 +112,10 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
         return _convert_assistant(m)
 
     if isinstance(m, ToolResultMessage):
-        status = "ok"
-        if m.is_error:
-            status = "interrupted" if "interrupted" in str(m.content) else "error"
         return {
             "role": "tool",
             "tool_call_id": m.tool_call_id,
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": m.tool_call_id,
-                    "content": m.content,
-                    "status": status,
-                }
-            ],
+            "content": _tool_result_content_text(m.content),
         }
 
     if isinstance(m, BranchSummaryMessage):
@@ -140,14 +135,27 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
             "content": [
                 {
                     "type": "text",
-                    "text": COMPACTION_SUMMARY_PREFIX
-                    + m.summary
-                    + SUMMARY_SUFFIX,
+                    "text": COMPACTION_SUMMARY_PREFIX + m.summary + SUMMARY_SUFFIX,
                 }
             ],
         }
 
     return None
+
+
+def _tool_result_content_text(content: object) -> str:
+    """将工具结果内容压平成 provider 可接受的文本。"""
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, TextContent):
+                parts.append(item.text)
+            elif isinstance(item, ImageContent):
+                parts.append(str(item))
+            else:
+                parts.append(str(item))
+        return "".join(parts)
+    return str(content)
 
 
 def _convert_block(block: ContentBlock) -> dict[str, Any] | None:
