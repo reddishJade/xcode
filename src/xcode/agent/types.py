@@ -26,6 +26,17 @@ class ImageContent:
 
 
 @dataclass(frozen=True)
+class FileContent:
+    """文件内容块。"""
+
+    type: str = "file"
+    source: dict[str, Any] | None = None
+    file_id: str | None = None
+    filename: str | None = None
+    file_data: str | None = None
+
+
+@dataclass(frozen=True)
 class ToolCallContent:
     """工具调用内容块。"""
 

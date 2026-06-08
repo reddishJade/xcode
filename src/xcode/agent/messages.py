@@ -7,6 +7,7 @@ import orjson
 
 from xcode.ai.events import StopReason
 from xcode.agent.types import (
+    FileContent,
     ImageContent,
     TextContent,
     ThinkingContent,
@@ -30,7 +31,7 @@ class SystemMessage:
 @dataclass
 class UserMessage:
     role: str = "user"
-    content: str | list[TextContent | ImageContent] = ""
+    content: str | list[TextContent | ImageContent | FileContent] = ""
     timestamp: int = 0
 
 
@@ -53,7 +54,7 @@ class ToolResultMessage:
     role: str = "tool_result"
     tool_call_id: str = ""
     tool_name: str = ""
-    content: str | list[TextContent | ImageContent] = ""
+    content: str | list[TextContent | ImageContent | FileContent] = ""
     is_error: bool = False
     timestamp: int = 0
 
@@ -154,6 +155,8 @@ def _tool_result_content_text(content: object) -> str:
             if isinstance(item, TextContent):
                 parts.append(item.text)
             elif isinstance(item, ImageContent):
+                parts.append(str(item))
+            elif isinstance(item, FileContent):
                 parts.append(str(item))
             else:
                 parts.append(str(item))

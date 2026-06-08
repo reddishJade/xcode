@@ -17,13 +17,25 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from xcode.agent.types import ImageContent, TextContent, ToolCallContent
-from .config import AfterToolCallContext, AgentContext, AgentLoopConfig, BeforeToolCallContext
-from .events import AgentEvent, ToolExecutionEndEvent, ToolExecutionStartEvent, ToolExecutionUpdateEvent
+from xcode.agent.types import FileContent, ImageContent, TextContent, ToolCallContent
+from .config import (
+    AfterToolCallContext,
+    AgentContext,
+    AgentLoopConfig,
+    BeforeToolCallContext,
+)
+from .events import (
+    AgentEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
+)
 from .messages import AssistantMessage, ToolResultMessage
 from .protocols import AgentToolResult, CancellationSignal
 
 logger = logging.getLogger(__name__)
+
+type ToolResultContentBlock = TextContent | ImageContent | FileContent
 
 
 @dataclass
@@ -278,7 +290,7 @@ async def _run_tool_handler(
     args: dict[str, Any],
     signal: CancellationSignal | None,
     on_update: Callable[[AgentToolResult], None],
-) -> tuple[AgentToolResult, list[TextContent | ImageContent], bool, bool]:
+) -> tuple[AgentToolResult, list[ToolResultContentBlock], bool, bool]:
     try:
         tool_result = await tool.execute(
             tool_call.id, args, signal, on_update=on_update
@@ -297,10 +309,10 @@ def _run_after_tool_hook(
     tool_result: AgentToolResult,
     is_error: bool,
     terminate: bool,
-    content: list[TextContent | ImageContent],
+    content: list[ToolResultContentBlock],
     config: AgentLoopConfig,
     signal: CancellationSignal | None,
-) -> tuple[list[TextContent | ImageContent], bool, bool]:
+) -> tuple[list[ToolResultContentBlock], bool, bool]:
     if not config.after_tool_call:
         return content, is_error, terminate
     after_ctx = AfterToolCallContext(
@@ -325,7 +337,7 @@ def _run_after_tool_hook(
 
 def _tool_result_message(
     tool_call: ToolCallContent,
-    content: list[TextContent | ImageContent],
+    content: list[ToolResultContentBlock],
     is_error: bool,
 ) -> ToolResultMessage:
     return ToolResultMessage(

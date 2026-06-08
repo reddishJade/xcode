@@ -5,7 +5,8 @@ from dataclasses import dataclass
 import unittest
 from typing import Any, cast
 
-from xcode.agent.types import ImageContent
+from xcode.agent.messages import UserMessage, convert_to_llm
+from xcode.agent.types import FileContent, ImageContent, TextContent
 from xcode.ai.events import ReasoningDelta, ToolCallEvent
 from xcode.ai.providers.codec import to_responses_input, to_responses_tool
 from xcode.ai.providers.factory import _build_llm_profile
@@ -457,6 +458,37 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
             {"type": "input_image", "image_url": "https://example.test/a.png"},
         )
         self.assertEqual(content[2], {"type": "input_file", "file_id": "file_123"})
+
+    def test_agent_file_content_reaches_responses_input(self) -> None:
+        """Agent 文件内容块会转换为 Responses input_file。"""
+        messages = convert_to_llm(
+            [
+                UserMessage(
+                    content=[
+                        TextContent(text="inspect"),
+                        FileContent(file_id="file_123"),
+                        FileContent(
+                            filename="notes.txt",
+                            file_data="data:text/plain;base64,SGVsbG8=",
+                        ),
+                    ]
+                )
+            ]
+        )
+
+        converted = to_responses_input(messages)
+
+        content = converted[0]["content"]
+        self.assertEqual(content[0], {"type": "input_text", "text": "inspect"})
+        self.assertEqual(content[1], {"type": "input_file", "file_id": "file_123"})
+        self.assertEqual(
+            content[2],
+            {
+                "type": "input_file",
+                "filename": "notes.txt",
+                "file_data": "data:text/plain;base64,SGVsbG8=",
+            },
+        )
 
     def test_responses_input_supports_shell_call_output_blocks(self) -> None:
         """Responses input 支持官方 shell_call_output 项。"""

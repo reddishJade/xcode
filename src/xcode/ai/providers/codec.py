@@ -259,14 +259,14 @@ def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if role == "assistant" and "tool_calls" in message:
             text_content = str(content) if content else None
             if text_content:
-                msg: dict[str, Any] = {
+                assistant_message: dict[str, Any] = {
                     "type": "message",
                     "role": "assistant",
                     "content": [{"type": "output_text", "text": text_content}],
                 }
                 if message.get("phase"):
-                    msg["phase"] = message["phase"]
-                converted.append(msg)
+                    assistant_message["phase"] = message["phase"]
+                converted.append(assistant_message)
             for call in message["tool_calls"]:
                 if isinstance(call, dict):
                     func = call.get("function", {})
@@ -287,14 +287,14 @@ def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             text = str(content) if content is not None else ""
             if role == "assistant":
-                msg: dict[str, Any] = {
+                assistant_text_message: dict[str, Any] = {
                     "type": "message",
                     "role": "assistant",
                     "content": [{"type": "output_text", "text": text}],
                 }
                 if message.get("phase"):
-                    msg["phase"] = message["phase"]
-                converted.append(msg)
+                    assistant_text_message["phase"] = message["phase"]
+                converted.append(assistant_text_message)
             else:
                 converted.append(
                     {
@@ -470,10 +470,18 @@ def _responses_file_part(part: object) -> dict[str, Any]:
     source = _part_value(part, "source", None)
     if isinstance(source, dict):
         return {"type": "input_file", **source}
-    return {
-        "type": "input_file",
-        "file_id": _part_value(part, "file_id", ""),
-    }
+
+    result: dict[str, Any] = {"type": "input_file"}
+    file_id = _part_value(part, "file_id", None)
+    filename = _part_value(part, "filename", None)
+    file_data = _part_value(part, "file_data", None)
+    if file_id:
+        result["file_id"] = file_id
+    if filename:
+        result["filename"] = filename
+    if file_data:
+        result["file_data"] = file_data
+    return result
 
 
 def _responses_shell_call_output_part(part: object) -> dict[str, Any]:

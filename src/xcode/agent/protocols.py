@@ -3,24 +3,32 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Literal, Protocol
 
-from xcode.agent.types import ImageContent, TextContent, ThinkingContent, ToolCallContent
+from xcode.agent.types import (
+    FileContent,
+    ImageContent,
+    TextContent,
+    ThinkingContent,
+    ToolCallContent,
+)
 
 """Agent core protocols and base types."""
 
 type QueueMode = Literal["all", "one-at-a-time"]
 type ToolExecutionMode = Literal["sequential", "parallel"]
 
-type ContentBlock = TextContent | ImageContent | ToolCallContent | ThinkingContent
+type ContentBlock = (
+    TextContent | ImageContent | FileContent | ToolCallContent | ThinkingContent
+)
 
 
 class AgentToolResult:
-    content: list[TextContent | ImageContent]
+    content: list[TextContent | ImageContent | FileContent]
     details: Any | None = None
     terminate: bool = False
 
     def __init__(
         self,
-        content: list[TextContent | ImageContent] | None = None,
+        content: list[TextContent | ImageContent | FileContent] | None = None,
         details: Any | None = None,
         terminate: bool = False,
     ) -> None:

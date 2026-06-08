@@ -13,6 +13,7 @@ from .protocols import (
     AgentTool,
     AgentToolResult,
     CancellationSignal,
+    FileContent,
     ImageContent,
     QueueMode,
     TextContent,
@@ -60,7 +61,7 @@ class AfterToolCallContext:
 
 @dataclass
 class AfterToolCallResult:
-    content: list[TextContent | ImageContent] | None = None
+    content: list[TextContent | ImageContent | FileContent] | None = None
     details: Any = None
     is_error: bool | None = None
     terminate: bool | None = None
@@ -190,8 +191,8 @@ class AgentLoopConfig:
     min_continuation_tokens: int = 500
 
     # 看门狗限制（经验阈值，可根据实际任务调整）
-    watchdog_repeated_tool_limit: int = 3    # 连续重复同一工具签名 3 次则终止
-    max_consecutive_idle_steps: int = 4      # 连续 4 次工具调用无产出则终止
+    watchdog_repeated_tool_limit: int = 3  # 连续重复同一工具签名 3 次则终止
+    max_consecutive_idle_steps: int = 4  # 连续 4 次工具调用无产出则终止
 
     should_compact: ShouldCompactHook | None = None
     compact: CompactHook | None = None
