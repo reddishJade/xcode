@@ -170,12 +170,19 @@ async def _execute_one(
 ) -> tuple[ToolResultMessage, bool]:
     """Execute a single tool call. Returns (result_message, terminate)."""
     try:
-        return await _execute_one_impl(
+        result_msg, terminate = await _execute_one_impl(
             current_context, assistant_message, tool_call, config, signal, emit
         )
+        return result_msg, terminate
     except BaseException:
         logger.exception("Unexpected error executing tool %s", tool_call.name)
-        return _error_result(tool_call, "unexpected tool execution error")
+        result_msg, terminate = _error_result(
+            tool_call, "unexpected tool execution error"
+        )
+        return result_msg, terminate
+    finally:
+        if "result_msg" in locals():
+            _emit_tool_end(tool_call, result_msg, result_msg.is_error, emit)
 
 
 async def _execute_one_impl(
@@ -231,7 +238,6 @@ async def _execute_one_impl(
     )
 
     result_msg = _tool_result_message(tool_call, content, is_error)
-    _emit_tool_end(tool_call, result_msg, is_error, emit)
     return result_msg, terminate
 
 

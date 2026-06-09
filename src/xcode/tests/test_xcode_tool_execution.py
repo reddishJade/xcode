@@ -4,8 +4,17 @@ import asyncio
 import unittest
 from typing import cast
 
-from xcode.agent.tool_execution import partition_tool_calls_for_execution
-from xcode.agent.config import AgentContext
+from xcode.agent.tool_execution import (
+    execute_tool_calls,
+    partition_tool_calls_for_execution,
+)
+from xcode.agent.config import (
+    AgentContext,
+    AgentLoopConfig,
+    BeforeToolCallContext,
+    BeforeToolCallResult,
+)
+from xcode.agent.messages import AssistantMessage
 from xcode.agent.protocols import AgentTool
 from xcode.agent.types import ShellCallOutputContent, ToolCallContent
 from xcode.harness.observability import HITLResult
@@ -161,6 +170,60 @@ class AgentToolExecutionTests(unittest.TestCase):
             [[tool_call.id for tool_call in batch] for batch in batches],
             [["c1", "c2"], ["c3"], ["c4"], ["c5"]],
         )
+
+    def test_unknown_tool_emits_end_event(self) -> None:
+        events = []
+        tool_call = ToolCallContent(id="missing-1", name="missing")
+
+        result = asyncio.run(
+            execute_tool_calls(
+                AgentContext(),
+                AssistantMessage(content=[tool_call]),
+                [tool_call],
+                AgentLoopConfig(),
+                None,
+                events.append,
+            )
+        )
+
+        self.assertTrue(result.results[0].is_error)
+        self.assertEqual(
+            [event.type for event in events],
+            ["tool_execution_start", "tool_execution_end"],
+        )
+        self.assertTrue(events[-1].is_error)
+
+    def test_before_tool_block_emits_end_event(self) -> None:
+        events = []
+        (tool,) = adapt_tool_specs(
+            (ToolSpec("echo", "Echo.", "text", lambda _data: "ok"),)
+        )
+        tool_call = ToolCallContent(id="echo-1", name="echo")
+
+        def block_tool(
+            _ctx: BeforeToolCallContext,
+            _signal: object,
+        ) -> BeforeToolCallResult:
+            return BeforeToolCallResult(block=True, reason="blocked")
+
+        result = asyncio.run(
+            execute_tool_calls(
+                AgentContext(tools=cast(list[AgentTool], [tool])),
+                AssistantMessage(content=[tool_call]),
+                [tool_call],
+                AgentLoopConfig(before_tool_call=block_tool),
+                None,
+                events.append,
+            )
+        )
+
+        self.assertTrue(result.results[0].is_error)
+        self.assertEqual(result.results[0].content, "blocked")
+        self.assertEqual(
+            [event.type for event in events],
+            ["tool_execution_start", "tool_execution_end"],
+        )
+        self.assertTrue(events[-1].is_error)
 
 
 if __name__ == "__main__":
