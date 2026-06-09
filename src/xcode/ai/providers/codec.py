@@ -13,6 +13,27 @@ import orjson
 from typing import Any, Protocol
 
 
+_UNSUPPORTED_STRICT_SCHEMA_KEYS = frozenset(
+    {
+        "default",
+        "format",
+        "maximum",
+        "maxItems",
+        "maxLength",
+        "maxProperties",
+        "minimum",
+        "minItems",
+        "minLength",
+        "minProperties",
+        "multipleOf",
+        "pattern",
+        "patternProperties",
+        "propertyNames",
+        "uniqueItems",
+    }
+)
+
+
 class _ChatToolCallFunction(Protocol):
     @property
     def name(self) -> str: ...
@@ -32,8 +53,9 @@ def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
 
     OpenAI strict mode 约束：
     - object 类型必须声明所有字段为 required
+    - 原本可选字段用 null union 表达
     - 不允许 additionalProperties（必须显式禁止）
-    - 不支持约束字段（minLength/maxLength/minItems/maxItems）
+    - 不支持细粒度校验约束字段
 
     这些限制确保模型生成的 JSON 严格匹配 schema，避免幻觉字段。
     """
@@ -46,15 +68,20 @@ def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
         t = node.get("type")
         if t == "object" or "properties" in node:
             properties = node.get("properties", {})
-            if properties:
+            existing_required = node.get("required", [])
+            required = (
+                set(existing_required) if isinstance(existing_required, list) else set()
+            )
+            if isinstance(properties, dict) and properties:
+                node["properties"] = {
+                    key: _nullable_schema(value) if key not in required else value
+                    for key, value in properties.items()
+                }
                 node["required"] = list(properties.keys())
                 node["additionalProperties"] = False
 
-        # 移除 OpenAI strict mode 不支持的约束字段
-        node.pop("minLength", None)
-        node.pop("maxLength", None)
-        node.pop("minItems", None)
-        node.pop("maxItems", None)
+        for key in _UNSUPPORTED_STRICT_SCHEMA_KEYS:
+            node.pop(key, None)
 
         if "properties" in node:
             node["properties"] = {k: process(v) for k, v in node["properties"].items()}
@@ -70,6 +97,31 @@ def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
         return node
 
     return process(s)
+
+
+def _nullable_schema(schema: Any) -> Any:
+    """把原可选字段编码为 strict schema 可接受的 null union。"""
+    if not isinstance(schema, dict):
+        return schema
+    result = copy.deepcopy(schema)
+    schema_type = result.get("type")
+    if isinstance(schema_type, list):
+        if "null" not in schema_type:
+            result["type"] = [*schema_type, "null"]
+        return result
+    if isinstance(schema_type, str):
+        if schema_type != "null":
+            result["type"] = [schema_type, "null"]
+        return result
+    if "anyOf" in result:
+        any_of = result.get("anyOf")
+        if isinstance(any_of, list):
+            has_null = any(
+                isinstance(item, dict) and item.get("type") == "null" for item in any_of
+            )
+            if not has_null:
+                result["anyOf"] = [*any_of, {"type": "null"}]
+    return result
 
 
 def to_chat_tool(

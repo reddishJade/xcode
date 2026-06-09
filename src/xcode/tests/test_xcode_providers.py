@@ -215,12 +215,38 @@ class XcodeProviderRuntimeTests(unittest.TestCase):
 
 
 class XcodeStructuredProviderTests(unittest.TestCase):
+    def _make_openai_chat_provider(
+        self,
+        client: FakeOpenAIClient,
+    ) -> OpenAIChatProvider:
+        """构造 OpenAI Chat 测试 provider。"""
+        return OpenAIChatProvider(
+            api_key="test-key",
+            base_url="https://api.openai.test/v1",
+            model="model",
+            thinking=True,
+            reasoning_effort=None,
+            runtime=ProviderRuntime(),
+            client=client,
+        )
+
+    def _make_openai_responses_provider(
+        self,
+        client: FakeOpenAIClient,
+    ) -> OpenAIResponsesProvider:
+        """构造 OpenAI Responses 测试 provider。"""
+        return OpenAIResponsesProvider(
+            api_key="test-key",
+            base_url="https://api.openai.test/v1",
+            model="model",
+            thinking=True,
+            reasoning_effort=None,
+            runtime=ProviderRuntime(),
+            client=client,
+        )
+
     def test_stream_converts_tool_schema_and_tool_calls(self) -> None:
-        llm = OpenAIChatProvider.__new__(OpenAIChatProvider)
-        llm.model = "model"
-        llm.thinking = True
-        llm.reasoning_effort = None
-        llm.client = FakeOpenAIClient(
+        client = FakeOpenAIClient(
             stream_chunks=[
                 FakeStreamChunk(
                     tool_call=FakeStreamToolCall(
@@ -232,8 +258,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
                 ),
             ]
         )
-        llm.runtime = ProviderRuntime()
-        llm.transport = "openai_chat"
+        llm = self._make_openai_chat_provider(client)
         tool = ToolDefinition(
             name="echo",
             description="Echo input.",
@@ -255,19 +280,12 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         assert isinstance(tool_call, ToolCallEvent)
         self.assertEqual(tool_call.calls[0].name, "echo")
         self.assertEqual(tool_call.calls[0].input, {"text": "hello"})
-        sent_tool = llm.client.chat.completions.kwargs["tools"][0]
+        sent_tool = client.chat.completions.kwargs["tools"][0]
         self.assertEqual(sent_tool["function"]["parameters"], tool.schema)
 
     def test_stream_converts_tool_results_to_openai_messages(self) -> None:
-        llm = OpenAIChatProvider.__new__(OpenAIChatProvider)
-        llm.model = "model"
-        llm.thinking = True
-        llm.reasoning_effort = None
-        llm.client = FakeOpenAIClient(
-            stream_chunks=[FakeStreamChunk(content="done")],
-        )
-        llm.runtime = ProviderRuntime()
-        llm.transport = "openai_chat"
+        client = FakeOpenAIClient(stream_chunks=[FakeStreamChunk(content="done")])
+        llm = self._make_openai_chat_provider(client)
 
         events = list(
             llm._stream_sync(
@@ -298,7 +316,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             )
         )
 
-        sent_messages = llm.client.chat.completions.kwargs["messages"]
+        sent_messages = client.chat.completions.kwargs["messages"]
         self.assertEqual(sent_messages[0]["role"], "assistant")
         self.assertEqual(sent_messages[1]["role"], "tool")
         self.assertEqual(
@@ -306,11 +324,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         )
 
     def test_stream_yields_text_and_tool_call_deltas(self) -> None:
-        llm = OpenAIChatProvider.__new__(OpenAIChatProvider)
-        llm.model = "model"
-        llm.thinking = True
-        llm.reasoning_effort = None
-        llm.client = FakeOpenAIClient(
+        client = FakeOpenAIClient(
             stream_chunks=[
                 FakeStreamChunk(content="he"),
                 FakeStreamChunk(content="llo"),
@@ -330,8 +344,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
                 ),
             ]
         )
-        llm.runtime = ProviderRuntime()
-        llm.transport = "openai_chat"
+        llm = self._make_openai_chat_provider(client)
 
         events = list(llm._stream_sync([{"role": "user", "content": "go"}], ()))
 
@@ -346,13 +359,10 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         self.assertEqual(events[-1].calls[0].id, "call-1")
         self.assertEqual(events[-1].calls[0].name, "echo")
         self.assertEqual(events[-1].calls[0].input, {"text": "hi"})
-        self.assertTrue(llm.client.chat.completions.kwargs["stream"])
+        self.assertTrue(client.chat.completions.kwargs["stream"])
 
     def test_responses_stream_with_previous_response_id(self) -> None:
-        llm = OpenAIResponsesProvider.__new__(OpenAIResponsesProvider)
-        llm.model = "model"
-        llm.thinking = True
-        llm.client = FakeOpenAIClient(
+        client = FakeOpenAIClient(
             response_outputs=[
                 [
                     FakeResponsesStreamEvent("response.output_text.delta", delta="he"),
@@ -369,14 +379,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
                 ],
             ]
         )
-        llm.runtime = ProviderRuntime()
-        llm.transport = "openai_responses"
-        llm.prompt_cache_key = None
-        llm.previous_response_id = None
-        llm.reasoning_effort = None
-        llm.metrics = {}
-        llm._last_sent_message_index = 0
-        llm._pending_sent_message_index = 0
+        llm = self._make_openai_responses_provider(client)
 
         messages = [{"role": "user", "content": "one"}]
         first = list(llm._stream_sync(messages, ()))
@@ -394,18 +397,14 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         )
         assert isinstance(second[-1], FinalMessage)
         self.assertEqual(second[-1].content, "ok-r2")
-        calls = llm.client.responses.calls
+        calls = client.responses.calls
         self.assertNotIn("previous_response_id", calls[0])
         self.assertEqual(calls[1]["previous_response_id"], "r1")
 
     def test_responses_stream_yields_text_delta_immediately(self) -> None:
         """验证 streaming 行为：TextDelta 在流迭代过程中立即产出，
         而不是等底层 iterator 全部耗尽后才产出。"""
-        llm = OpenAIResponsesProvider.__new__(OpenAIResponsesProvider)
-        llm.model = "model"
-        llm.thinking = True
-        llm.reasoning_effort = None
-        llm.client = FakeOpenAIClient(
+        client = FakeOpenAIClient(
             response_outputs=[
                 [
                     FakeResponsesStreamEvent("response.output_text.delta", delta="he"),
@@ -416,13 +415,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
                 ],
             ]
         )
-        llm.runtime = ProviderRuntime()
-        llm.transport = "openai_responses"
-        llm.prompt_cache_key = None
-        llm.previous_response_id = None
-        llm.metrics = {}
-        llm._last_sent_message_index = 0
-        llm._pending_sent_message_index = 0
+        llm = self._make_openai_responses_provider(client)
 
         events = llm._stream_sync([{"role": "user", "content": "hi"}], ())
 
@@ -450,11 +443,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         """第二轮 messages 包含 assistant tool_calls 和 tool result 时，
         实际发给 responses.create() 的 input 只有 function_call_output，
         没有重复的 function_call。"""
-        llm = OpenAIResponsesProvider.__new__(OpenAIResponsesProvider)
-        llm.model = "model"
-        llm.thinking = True
-        llm.reasoning_effort = None
-        llm.client = FakeOpenAIClient(
+        client = FakeOpenAIClient(
             response_outputs=[
                 # 第一轮：返回 function_call 的流
                 [
@@ -473,21 +462,15 @@ class XcodeStructuredProviderTests(unittest.TestCase):
                 ],
             ]
         )
-        llm.runtime = ProviderRuntime()
-        llm.transport = "openai_responses"
-        llm.prompt_cache_key = None
-        llm.previous_response_id = None
-        llm.metrics = {}
-        llm._last_sent_message_index = 0
-        llm._pending_sent_message_index = 0
+        llm = self._make_openai_responses_provider(client)
 
         # 第一轮：用户消息
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": "call tool"},
         ]
         list(llm._stream_sync(messages, ()))
-        self.assertEqual(len(llm.client.responses.calls), 1)
-        first_call = llm.client.responses.calls[0]
+        self.assertEqual(len(client.responses.calls), 1)
+        first_call = client.responses.calls[0]
         self.assertNotIn("previous_response_id", first_call)
 
         # 第二轮：包含 assistant tool_calls + tool result
@@ -513,8 +496,8 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         )
 
         list(llm._stream_sync(messages, ()))
-        self.assertEqual(len(llm.client.responses.calls), 2)
-        second_call = llm.client.responses.calls[1]
+        self.assertEqual(len(client.responses.calls), 2)
+        second_call = client.responses.calls[1]
         self.assertEqual(second_call["previous_response_id"], "r1")
 
         # input 中只能有 function_call_output，不能有 function_call
@@ -531,11 +514,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
 
     def test_responses_tool_loop_keeps_shell_call_output(self) -> None:
         """previous_response_id 增量输入保留 shell_call_output。"""
-        llm = OpenAIResponsesProvider.__new__(OpenAIResponsesProvider)
-        llm.model = "model"
-        llm.thinking = True
-        llm.reasoning_effort = None
-        llm.client = FakeOpenAIClient(
+        client = FakeOpenAIClient(
             response_outputs=[
                 [
                     FakeResponsesStreamEvent(
@@ -552,16 +531,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
                 ],
             ]
         )
-        llm.runtime = ProviderRuntime()
-        llm.transport = "openai_responses"
-        llm.prompt_cache_key = None
-        llm.response_format = None
-        llm.previous_response_id = None
-        llm.metrics = {}
-        llm._last_sent_message_index = 0
-        llm._pending_sent_message_index = 0
-        llm._pending_store_response = True
-        llm._stateless_persisted_items = []
+        llm = self._make_openai_responses_provider(client)
 
         messages: list[dict[str, Any]] = [{"role": "user", "content": "call shell"}]
         list(llm._stream_sync(messages, ()))
@@ -586,7 +556,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
 
         list(llm._stream_sync(messages, ()))
 
-        second_call = llm.client.responses.calls[1]
+        second_call = client.responses.calls[1]
         self.assertEqual(second_call["previous_response_id"], "r1")
         self.assertEqual(
             second_call["input"],
@@ -932,7 +902,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         self.assertEqual(provider.metrics["completion_tokens"], 50)
         self.assertEqual(provider.metrics["total_tokens"], 150)
         self.assertEqual(provider.metrics["cached_tokens"], 20)
-        self.assertEqual(provider.metrics["cache_hit_ratio"], 0.2)
+        self.assertEqual(provider.metrics["cache_hit_rate"], 0.2)
         self.assertEqual(provider.metrics["reasoning_tokens"], 10)
         self.assertEqual(provider.metrics["sent_messages"], 2)
 

@@ -277,6 +277,12 @@ def responses_stream_to_events(
                 usage_update = _usage_update_from_response_usage(usage)
                 if usage_update is not None:
                     yield usage_update
+        elif _is_terminal_error_event(event_type):
+            yield _final_message_from_terminal_event(
+                event,
+                accumulated_text,
+            )
+            return
 
     if pending_calls or pending_shell_calls:
         ready_by_index = {
@@ -377,6 +383,45 @@ def _response_status(response: _Response) -> str | None:
     """读取 Responses 响应状态。"""
     raw_status = getattr(response, "status", None)
     return str(raw_status) if raw_status else None
+
+
+def _is_terminal_error_event(event_type: str) -> bool:
+    """判断 Responses 流事件是否表示异常终止。"""
+    return event_type in {
+        "response.failed",
+        "response.incomplete",
+        "response.cancelled",
+        "response.error",
+    }
+
+
+def _final_message_from_terminal_event(
+    event: object,
+    accumulated_text: str,
+) -> FinalMessage:
+    """从异常终止事件构造统一 FinalMessage。"""
+    response = getattr(event, "response", None)
+    response_text = ""
+    status = None
+    if response is not None:
+        response_text = str(getattr(response, "output_text", "") or "")
+        status = _response_status(response)
+    text = response_text or accumulated_text or _event_error_text(event)
+    if status == "incomplete" or getattr(event, "type", "") == "response.incomplete":
+        return FinalMessage(text, "max_tokens")
+    return FinalMessage(text, "error")
+
+
+def _event_error_text(event: object) -> str:
+    """提取 Responses error 事件中的诊断文本。"""
+    error = getattr(event, "error", None)
+    if error is None:
+        return "Responses stream ended with an error"
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("code")
+        return str(message) if message else str(error)
+    message = getattr(error, "message", None) or getattr(error, "code", None)
+    return str(message) if message else str(error)
 
 
 def _is_reasoning_delta_event(event_type: str) -> bool:

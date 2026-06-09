@@ -48,6 +48,16 @@ class _FallbackSwitchingProvider:
     def reasoning_effort(self) -> str | None:
         return getattr(self.active_provider, "reasoning_effort", None)
 
+    def reset_conversation_state(self) -> None:
+        """清理主备 provider 的服务端会话状态。"""
+        for provider in (self._primary, self._fallback):
+            reset = getattr(provider, "reset_conversation_state", None)
+            if callable(reset):
+                reset()
+        self._consecutive_errors = 0
+        self._fallback_successes = 0
+        self._using_fallback = False
+
     async def stream(
         self,
         messages: list[dict[str, Any]],

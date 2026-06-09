@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from typing import Any, cast
+from unittest.mock import patch
 
 from xcode.ai.providers.codec import (
     to_chat_messages,
@@ -83,9 +84,15 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
             handler=lambda _data: "",
             schema={
                 "type": "object",
+                "required": ["text"],
                 "properties": {
                     "text": {"type": "string", "minLength": 1, "maxLength": 10},
-                    "items": {"type": "array", "minItems": 1},
+                    "items": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 3,
+                        "items": {"type": "string"},
+                    },
                 },
             },
         )
@@ -100,6 +107,9 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
         self.assertNotIn("minLength", params["properties"]["text"])
         self.assertNotIn("maxLength", params["properties"]["text"])
         self.assertNotIn("minItems", params["properties"]["items"])
+        self.assertNotIn("maxItems", params["properties"]["items"])
+        self.assertEqual(params["properties"]["text"]["type"], "string")
+        self.assertEqual(params["properties"]["items"]["type"], ["array", "null"])
 
     def test_multi_chunk_tool_calls_streaming_concatenation(self) -> None:
         client = FakeOpenAIClient(
@@ -139,6 +149,7 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
 
     def test_stream_options_injection_via_public_entry(self) -> None:
         """验证 StreamOptions 通过 provider.stream() 注入到请求。"""
+
         async def run_test():
             captured_params: dict[str, Any] = {}
 
@@ -184,7 +195,6 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
             return iter([FakeStreamChunk(content="ok")])
 
         client = FakeOpenAIClient(stream_chunks=[])
-        client.chat.completions.create = capture_create
         provider = DeepSeekProvider(
             api_key="ds-key",
             base_url="https://api.deepseek.com",
@@ -192,13 +202,14 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
             client=client,
         )
 
-        events = list(
-            provider._stream_sync(
-                [{"role": "user", "content": "Hi"}],
-                (),
-                response_format={"type": "json_object"},
+        with patch.object(client.chat.completions, "create", capture_create):
+            events = list(
+                provider._stream_sync(
+                    [{"role": "user", "content": "Hi"}],
+                    (),
+                    response_format={"type": "json_object"},
+                )
             )
-        )
 
         self.assertEqual(
             captured_params.get("response_format"), {"type": "json_object"}

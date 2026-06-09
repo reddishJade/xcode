@@ -173,6 +173,15 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         self.response_format = response_format
         self.metrics["previous_response_id"] = None
 
+    def reset_conversation_state(self) -> None:
+        """清理 Responses 服务端会话游标。"""
+        self.previous_response_id = None
+        self._last_sent_message_index = 0
+        self._pending_sent_message_index = 0
+        self._pending_store_response = True
+        self._stateless_persisted_items = []
+        self.metrics["previous_response_id"] = None
+
     async def stream(
         self,
         messages: list[dict[str, Any]],
@@ -314,15 +323,16 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         else:
             raw_input_messages = messages[self._last_sent_message_index :]
 
-        instructions, input_messages = _extract_responses_instructions(
-            raw_input_messages
+        instructions, input_messages = _extract_responses_instructions(messages)
+        _ignored_incremental_instructions, incremental_messages = (
+            _extract_responses_instructions(raw_input_messages)
         )
+        input_messages = incremental_messages
         converted = to_responses_input(input_messages)
         if self.previous_response_id is None and self._stateless_persisted_items:
             converted = [*self._stateless_persisted_items, *converted]
 
         if self.previous_response_id is not None:
-            instructions = None
             converted = [
                 item for item in converted if _is_incremental_responses_input(item)
             ]
@@ -602,6 +612,7 @@ def _extract_responses_instructions(
 ) -> tuple[str | None, list[dict[str, Any]]]:
     """将稳定 system/developer 前缀移到 Responses instructions 参数。"""
     instruction_parts: list[str] = []
+    seen_instruction_parts: set[str] = set()
     input_messages: list[dict[str, Any]] = []
     for message in messages:
         role = str(message.get("role", ""))
@@ -614,8 +625,9 @@ def _extract_responses_instructions(
             stable, dynamic = content.split(_SYSTEM_PROMPT_DYNAMIC_BOUNDARY, 1)
             stable = stable.strip()
             dynamic = dynamic.strip()
-            if stable:
+            if stable and stable not in seen_instruction_parts:
                 instruction_parts.append(stable)
+                seen_instruction_parts.add(stable)
             if dynamic:
                 dynamic_message = dict(message)
                 dynamic_message["content"] = dynamic
@@ -633,12 +645,14 @@ def _merge_responses_instructions(
 ) -> str:
     """合并运行期稳定指令和显式请求指令。"""
     parts: list[str] = []
+    seen: set[str] = set()
     for item in (existing, explicit):
         if item is None:
             continue
         text = str(item).strip()
-        if text:
+        if text and text not in seen:
             parts.append(text)
+            seen.add(text)
     return "\n\n".join(parts)
 
 

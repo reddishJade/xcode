@@ -23,8 +23,22 @@ from xcode.harness.agent_runtime import (
     StructuredAgent,
     StructuredAgentEvent,
 )
+from xcode.agent.messages import UserMessage
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
+
+
+class ResettableFakeProvider(FakeProvider):
+    """记录会话状态重置次数的测试 provider。"""
+
+    def __init__(self) -> None:
+        events: list[ProviderEvent] = [TextDelta("ok"), FinalMessage("", "end_turn")]
+        super().__init__(events)
+        self.reset_count = 0
+
+    def reset_conversation_state(self) -> None:
+        """记录重置调用。"""
+        self.reset_count += 1
 
 
 class XcodeStructuredAgentTests(unittest.TestCase):
@@ -135,6 +149,16 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             [message["role"] for message in seen_messages[0]],
             ["user", "assistant", "user"],
         )
+
+    def test_history_replacement_resets_provider_conversation_state(self) -> None:
+        provider = ResettableFakeProvider()
+        agent = StructuredAgent(provider=provider, registry=())
+
+        agent.clear_history()
+        agent.load_history([UserMessage(content="old")])
+        agent.load_run_state(RunState(messages=[], current_mode="act"))
+
+        self.assertEqual(provider.reset_count, 3)
 
     def test_provider_events_drive_main_loop(self) -> None:
         events: list[ProviderEvent] = [TextDelta("done"), FinalMessage("", "end_turn")]

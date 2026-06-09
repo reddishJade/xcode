@@ -237,8 +237,8 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
         )
         self.assertNotIn("Stable instructions.", str(kwargs["input"]))
 
-    def test_responses_previous_response_id_skips_repeated_instructions(self) -> None:
-        """previous_response_id 后不重复发送 system/developer 指令。"""
+    def test_responses_previous_response_id_keeps_current_instructions(self) -> None:
+        """previous_response_id 后仍发送当前请求 instructions。"""
         client = FakeOpenAIClient(
             response_outputs=[
                 [
@@ -282,7 +282,7 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
 
         second_call = client.responses.calls[1]
         self.assertEqual(second_call["previous_response_id"], "r1")
-        self.assertNotIn("instructions", second_call)
+        self.assertEqual(second_call["instructions"], "Stable instructions.")
         self.assertEqual(
             second_call["input"],
             [
@@ -293,6 +293,49 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_responses_reset_conversation_state_clears_server_cursor(self) -> None:
+        """清理会话状态后不再发送 previous_response_id。"""
+
+        async def run_test() -> None:
+            client = FakeOpenAIClient(
+                response_outputs=[
+                    [
+                        FakeResponsesStreamEvent(
+                            "response.completed",
+                            response=FakeResponsesResponse(response_id="r1"),
+                        )
+                    ],
+                    [],
+                ]
+            )
+            provider = OpenAIResponsesProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.4",
+                client=client,
+            )
+
+            _first = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "first"}], []
+                )
+            ]
+            provider.reset_conversation_state()
+            _second = [
+                event
+                async for event in provider.stream(
+                    [{"role": "user", "content": "second"}], []
+                )
+            ]
+
+            second_call = client.responses.calls[1]
+            self.assertNotIn("previous_response_id", second_call)
+            self.assertEqual(second_call["input"][0]["content"][0]["text"], "second")
+            self.assertIsNone(provider.metrics["previous_response_id"])
+
+        asyncio.run(run_test())
 
     def test_factory_preserves_openai_response_format(self) -> None:
         """factory 构建 OpenAI provider 时保留结构化输出配置。"""
@@ -887,6 +930,47 @@ class XcodeOpenAIOfficialParamsTests(unittest.TestCase):
                 "max_output_length": 4096,
             },
         )
+
+    def test_responses_stream_failed_yields_error_final(self) -> None:
+        """Responses failed 事件会转为 error stop reason。"""
+        events = list(
+            responses_stream_to_events(
+                cast(
+                    Any,
+                    [
+                        FakeResponsesStreamEvent(
+                            "response.output_text.delta",
+                            delta="partial",
+                        ),
+                        FakeResponsesStreamEvent(
+                            "response.failed",
+                            response=FakeResponsesResponse(
+                                response_id="r_failed",
+                                output_text="failed text",
+                                status="failed",
+                            ),
+                        ),
+                    ],
+                )
+            )
+        )
+
+        self.assertIsInstance(events[-1], FinalMessage)
+        final = cast(FinalMessage, events[-1])
+        self.assertEqual(final.content, "failed text")
+        self.assertEqual(final.stop_reason, "error")
+
+    def test_responses_stream_incomplete_yields_max_tokens_final(self) -> None:
+        """Responses incomplete 事件会转为 max_tokens stop reason。"""
+        events = list(
+            responses_stream_to_events(
+                cast(Any, [FakeResponsesStreamEvent("response.incomplete")])
+            )
+        )
+
+        self.assertIsInstance(events[-1], FinalMessage)
+        final = cast(FinalMessage, events[-1])
+        self.assertEqual(final.stop_reason, "max_tokens")
 
     def test_responses_builtin_tool_is_passed_through(self) -> None:
         """Responses 内建工具定义不包成 function tool。"""
