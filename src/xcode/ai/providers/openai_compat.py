@@ -92,7 +92,7 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         params: dict[str, Any] = {
             "model": self.model,
             "messages": api_messages,
-            "tools": [to_chat_tool(t.name, t.description, t.schema) for t in tools],
+            "tools": [to_chat_tool(t.name, t.description, t.parameters) for t in tools],
             "stream": True,
         }
         self._build_thinking_params(params)

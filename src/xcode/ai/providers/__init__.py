@@ -1,6 +1,5 @@
 """Provider 适配器注册。"""
 
-from .anthropic import AnthropicProvider
 from .chatglm import ChatGLMProvider
 from .deepseek import DeepSeekProvider
 from .factory import ProviderBundle, ProviderSettings, build_provider_bundle
@@ -19,14 +18,12 @@ from .openai import OpenAIChatProvider
 
 PROVIDER_REGISTRY: dict[str, type] = {
     "openai_chat": OpenAIChatProvider,
-    "anthropic_messages": AnthropicProvider,
     "chatglm_chat": ChatGLMProvider,
     "deepseek_chat": DeepSeekProvider,
     "mimo_chat": MiMoProvider,
 }
 
 __all__ = [
-    "AnthropicProvider",
     "ChatGLMProvider",
     "DeepSeekProvider",
     "FauxProvider",
