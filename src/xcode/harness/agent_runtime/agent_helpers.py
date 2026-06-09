@@ -54,14 +54,14 @@ def _tool_result_message_to_dict(msg: ToolResultMessage) -> dict[str, Any]:
                     }
                 )
             elif isinstance(item, ShellCallOutputContent):
-                content.append(
-                    {
-                        "type": item.type,
-                        "call_id": item.call_id,
-                        "output": item.output,
-                        "max_output_length": item.max_output_length,
-                    }
-                )
+                shell_block: dict[str, Any] = {
+                    "type": item.type,
+                    "call_id": item.call_id,
+                    "output": item.output,
+                }
+                if item.max_output_length is not None:
+                    shell_block["max_output_length"] = item.max_output_length
+                content.append(shell_block)
         return {"role": "tool", "tool_call_id": msg.tool_call_id, "content": content}
     return {
         "role": "tool",

@@ -169,6 +169,7 @@ async def _execute_one(
     emit: Callable[[AgentEvent], None],
 ) -> tuple[ToolResultMessage, bool]:
     """Execute a single tool call. Returns (result_message, terminate)."""
+    result_msg: ToolResultMessage | None = None
     try:
         result_msg, terminate = await _execute_one_impl(
             current_context, assistant_message, tool_call, config, signal, emit
@@ -181,7 +182,7 @@ async def _execute_one(
         )
         return result_msg, terminate
     finally:
-        if "result_msg" in locals():
+        if result_msg is not None:
             _emit_tool_end(tool_call, result_msg, result_msg.is_error, emit)
 
 

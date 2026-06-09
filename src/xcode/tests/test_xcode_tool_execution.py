@@ -14,9 +14,10 @@ from xcode.agent.config import (
     BeforeToolCallContext,
     BeforeToolCallResult,
 )
+from xcode.agent.events import AgentEvent, ToolExecutionEndEvent
 from xcode.agent.messages import AssistantMessage
 from xcode.agent.protocols import AgentTool
-from xcode.agent.types import ShellCallOutputContent, ToolCallContent
+from xcode.agent.types import ShellCallOutputContent, TextContent, ToolCallContent
 from xcode.harness.observability import HITLResult
 from xcode.harness.agent_runtime.tool_adapter import adapt_tool_specs
 from xcode.harness.skills import (
@@ -116,7 +117,10 @@ class AgentToolExecutionTests(unittest.TestCase):
 
         self.assertFalse(called)
         self.assertTrue(result.is_error)
-        self.assertIn("requires approval", result.content[0].text)
+        block = result.content[0]
+        self.assertIsInstance(block, TextContent)
+        assert isinstance(block, TextContent)
+        self.assertIn("requires approval", block.text)
 
     def test_toolspec_adapter_runs_high_risk_after_approval(self) -> None:
         (tool,) = adapt_tool_specs(
@@ -131,7 +135,10 @@ class AgentToolExecutionTests(unittest.TestCase):
         result = asyncio.run(tool.execute("call-1", {}))
 
         self.assertFalse(result.is_error)
-        self.assertEqual(result.content[0].text, "changed")
+        block = result.content[0]
+        self.assertIsInstance(block, TextContent)
+        assert isinstance(block, TextContent)
+        self.assertEqual(block.text, "changed")
 
     def test_partition_tool_calls_for_execution_keeps_sequential_barriers(self) -> None:
         tools = adapt_tool_specs(
@@ -172,7 +179,7 @@ class AgentToolExecutionTests(unittest.TestCase):
         )
 
     def test_unknown_tool_emits_end_event(self) -> None:
-        events = []
+        events: list[AgentEvent] = []
         tool_call = ToolCallContent(id="missing-1", name="missing")
 
         result = asyncio.run(
@@ -191,10 +198,13 @@ class AgentToolExecutionTests(unittest.TestCase):
             [event.type for event in events],
             ["tool_execution_start", "tool_execution_end"],
         )
-        self.assertTrue(events[-1].is_error)
+        end_event = events[-1]
+        self.assertIsInstance(end_event, ToolExecutionEndEvent)
+        assert isinstance(end_event, ToolExecutionEndEvent)
+        self.assertTrue(end_event.is_error)
 
     def test_before_tool_block_emits_end_event(self) -> None:
-        events = []
+        events: list[AgentEvent] = []
         (tool,) = adapt_tool_specs(
             (ToolSpec("echo", "Echo.", "text", lambda _data: "ok"),)
         )
@@ -223,7 +233,10 @@ class AgentToolExecutionTests(unittest.TestCase):
             [event.type for event in events],
             ["tool_execution_start", "tool_execution_end"],
         )
-        self.assertTrue(events[-1].is_error)
+        end_event = events[-1]
+        self.assertIsInstance(end_event, ToolExecutionEndEvent)
+        assert isinstance(end_event, ToolExecutionEndEvent)
+        self.assertTrue(end_event.is_error)
 
 
 if __name__ == "__main__":
