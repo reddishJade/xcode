@@ -109,6 +109,30 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
             # 4. Any other non-whitelisted tool should ask
             self.assertEqual(policy.decide("write_file", '{"path": "a.txt"}'), "ask")
 
+    def test_settings_sandbox_restricted_dirs_override_allowed_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            settings_path = project_root / ".local" / "settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "security": {
+                            "allow_tools": ["read_file"],
+                            "restricted_dirs": ["secrets"],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            policy = SettingsSandboxPermissionPolicy(settings_path)
+
+            self.assertEqual(
+                policy.decide("read_file", '{"path": "secrets/key.txt"}'),
+                "deny",
+            )
+
     def test_dynamic_plugin_loader(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp)

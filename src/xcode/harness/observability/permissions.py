@@ -177,7 +177,15 @@ class SettingsSandboxPermissionPolicy:
             return {}
 
     def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
-        security = self.settings.get("security", {})
+        security = self._security_settings()
+
+        # Layer 2: 受限目录边界必须先于 allow 规则生效
+        restricted_dirs = security.get("restricted_dirs", [])
+        if isinstance(restricted_dirs, list) and restricted_dirs:
+            input_lower = action_input.lower()
+            for r_dir in restricted_dirs:
+                if str(r_dir).lower() in input_lower:
+                    return "deny"
 
         # Layer 3: 工具规则 (deny > ask > allow)
         deny_tools = security.get("deny_tools", [])
@@ -192,16 +200,25 @@ class SettingsSandboxPermissionPolicy:
 
         if isinstance(allow_tools, list) and tool_name in allow_tools:
             return "allow"
-
-        # Layer 2: 受限目录边界
-        restricted_dirs = security.get("restricted_dirs", [])
-        if isinstance(restricted_dirs, list) and restricted_dirs:
-            input_lower = action_input.lower()
-            for r_dir in restricted_dirs:
-                if str(r_dir).lower() in input_lower:
-                    return "deny"
+        if isinstance(allow_tools, list) and allow_tools:
+            return "ask"
 
         return None
+
+    def _security_settings(self) -> dict[str, Any]:
+        """读取安全配置，并兼容早期顶层 camelCase 键。"""
+        security = self.settings.get("security", {})
+        normalized = dict(security) if isinstance(security, dict) else {}
+        legacy_keys = {
+            "allowedTools": "allow_tools",
+            "deniedTools": "deny_tools",
+            "askTools": "ask_tools",
+            "restrictedDirs": "restricted_dirs",
+        }
+        for old_key, new_key in legacy_keys.items():
+            if new_key not in normalized and old_key in self.settings:
+                normalized[new_key] = self.settings[old_key]
+        return normalized
 
 
 class CompositePermissionPolicy(PermissionPolicy):
