@@ -461,9 +461,9 @@ def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
                             )
                         ]
                     ),
-                    FinalMessage("", "end_turn"),
+                    FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta("finished"), FinalMessage("", "end_turn")],
+                [TextDelta(chunk="finished"), FinalMessage(content="", stop_reason="end_turn")],
             ]
         )
         tools = (
@@ -478,7 +478,7 @@ def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
         )
     else:
         provider = _StaticProvider(
-            [[TextDelta("offline ok"), FinalMessage("offline ok", "end_turn")]]
+            [[TextDelta(chunk="offline ok"), FinalMessage(content="offline ok", stop_reason="end_turn")]]
         )
         tools = ()
     return XcodeApp(
@@ -505,7 +505,7 @@ class _StaticProvider(ModelProvider):
         try:
             events = next(self._turns)
         except StopIteration:
-            events = [FinalMessage("", "end_turn")]
+            events = [FinalMessage(content="", stop_reason="end_turn")]
         for event in events:
             yield event
 
