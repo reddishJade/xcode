@@ -1,79 +1,20 @@
+"""工具参数校验层。
+
+基于 jsonschema 的标准 JSON Schema 校验。
+与 ToolDefinition.parameters 配合使用。
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
+import jsonschema
+
 from .types import ToolDefinition
-
-"""工具参数校验层。
-
-基于 JSON Schema 的轻量校验，无外部依赖。
-与 ToolDefinition.schema 配合使用。
-"""
 
 
 class ToolValidationError(ValueError):
     """工具参数校验失败时抛出。"""
-
-
-_TYPE_NAMES: dict[type, str] = {
-    str: "string",
-    int: "integer",
-    float: "number",
-    bool: "boolean",
-    list: "array",
-    dict: "object",
-}
-
-
-def _validate_value(
-    value: object,
-    schema: dict[str, Any],
-    path: str = "",
-) -> list[str]:
-    errors: list[str] = []
-
-    if "type" in schema:
-        expected = schema["type"]
-        actual = _TYPE_NAMES.get(type(value), type(value).__name__)
-
-        # Python 类型兼容性特殊处理：
-        # 1. bool 是 int 的子类，但 JSON Schema 中 boolean ≠ integer
-        if expected == "integer" and actual == "number" and isinstance(value, bool):
-            errors.append(f"{path}: expected integer, got boolean")
-        # 2. 允许整数值的 float 通过 integer 校验（LLM 常输出 1.0）
-        elif expected == "integer" and actual == "number" and isinstance(value, float):
-            if value != int(value):
-                errors.append(f"{path}: expected integer, got float {value}")
-        # 3. float 通过 integer 校验（已处理非整数情况）
-        elif expected == "integer" and actual == "number":
-            pass
-        # 4. number 类型接受 integer（JSON Schema 标准）
-        elif expected != actual and not (expected == "number" and actual == "integer"):
-            errors.append(f"{path}: expected {expected}, got {actual}")
-
-    if "enum" in schema and value not in schema["enum"]:
-        errors.append(f"{path}: value {value!r} not in {schema['enum']}")
-
-    if isinstance(value, dict) and "properties" in schema:
-        props = schema["properties"]
-        additional = schema.get("additionalProperties", True)
-
-        for key in schema.get("required", []):
-            if key not in value:
-                errors.append(f"{path}.{key}: required field missing")
-
-        for key, val in value.items():
-            sub_path = f"{path}.{key}" if path else key
-            if key in props:
-                errors.extend(_validate_value(val, props[key], sub_path))
-            elif not additional:
-                errors.append(f"{sub_path}: unexpected field")
-
-    if isinstance(value, list) and "items" in schema:
-        for i, item in enumerate(list(value)):
-            errors.extend(_validate_value(item, schema["items"], f"{path}[{i}]"))
-
-    return errors
 
 
 def validate_tool_call(
@@ -99,11 +40,16 @@ def validate_tool_call(
         msg = f"Unknown tool: {name}. Available: {[t.name for t in tools]}"
         raise ToolValidationError(msg)
 
-    if not tool.schema:
+    if not tool.parameters:
         return arguments
 
-    errors = _validate_value(arguments, tool.schema, name)
-    if errors:
-        raise ToolValidationError("; ".join(errors))
+    try:
+        jsonschema.validate(
+            instance=arguments,
+            schema=tool.parameters,
+        )
+    except jsonschema.ValidationError as exc:
+        path = ".".join(str(p) for p in exc.absolute_path) if exc.absolute_path else name
+        raise ToolValidationError(f"{path}: {exc.message}") from exc
 
     return arguments

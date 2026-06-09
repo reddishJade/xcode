@@ -74,10 +74,10 @@ class XcodePermissionsTests(unittest.TestCase):
 
         responses: list[list[ProviderEvent]] = [
             [
-                ToolCallEvent([ToolCall("x", "echo", {"input": "hello"})]),
-                FinalMessage("", "end_turn"),
+                ToolCallEvent(calls=[ToolCall(id="x", name="echo", input={"input": "hello"})]),
+                FinalMessage(content="", stop_reason="end_turn"),
             ],
-            [TextDelta("done"), FinalMessage("", "end_turn")],
+            [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
         ]
         provider = FakeProvider(responses)
         agent = StructuredAgent(

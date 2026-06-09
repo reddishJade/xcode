@@ -21,20 +21,18 @@ from xcode.harness.skills import ToolSpec
 
 
 class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
-    def test_reasoning_content_and_usage_are_extracted_in_streaming(self) -> None:
-        client = FakeOpenAIClient(
-            stream_chunks=[
-                FakeStreamChunk(reasoning_content="Thinking 1"),
-                FakeStreamChunk(content="Hello"),
-                FakeStreamChunk(usage=FakeUsage(100, 20)),
-            ]
-        )
+    @patch("litellm.completion")
+    def test_reasoning_content_and_usage_are_extracted_in_streaming(self, mock_completion) -> None:
+        mock_completion.return_value = iter([
+            FakeStreamChunk(reasoning_content="Thinking 1"),
+            FakeStreamChunk(content="Hello"),
+            FakeStreamChunk(usage=FakeUsage(100, 20)),
+        ])
         provider = DeepSeekProvider(
             api_key="ds-key",
             base_url="https://api.deepseek.com",
             model="deepseek-reasoner",
             thinking=True,
-            client=client,
         )
 
         events = list(provider._stream_sync([{"role": "user", "content": "Hi"}], ()))
@@ -111,31 +109,29 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
         self.assertEqual(params["properties"]["text"]["type"], "string")
         self.assertEqual(params["properties"]["items"]["type"], ["array", "null"])
 
-    def test_multi_chunk_tool_calls_streaming_concatenation(self) -> None:
-        client = FakeOpenAIClient(
-            stream_chunks=[
-                FakeStreamChunk(
-                    tool_call=FakeStreamToolCall(
-                        index=0,
-                        call_id="call-1",
-                        name="echo",
-                        arguments='{"text": ',
-                    )
-                ),
-                FakeStreamChunk(
-                    tool_call=FakeStreamToolCall(
-                        index=0,
-                        arguments='"hi"}',
-                    )
-                ),
-            ]
-        )
+    @patch("litellm.completion")
+    def test_multi_chunk_tool_calls_streaming_concatenation(self, mock_completion) -> None:
+        mock_completion.return_value = iter([
+            FakeStreamChunk(
+                tool_call=FakeStreamToolCall(
+                    index=0,
+                    call_id="call-1",
+                    name="echo",
+                    arguments='{"text": ',
+                )
+            ),
+            FakeStreamChunk(
+                tool_call=FakeStreamToolCall(
+                    index=0,
+                    arguments='"hi"}',
+                )
+            ),
+        ])
         provider = DeepSeekProvider(
             api_key="ds-key",
             base_url="https://api.deepseek.com",
             model="deepseek-chat",
             thinking=False,
-            client=client,
         )
 
         events = list(
@@ -147,25 +143,24 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
         self.assertEqual(ready_call.calls[0].name, "echo")
         self.assertEqual(ready_call.calls[0].input, {"text": "hi"})
 
-    def test_stream_options_injection_via_public_entry(self) -> None:
+    @patch("litellm.completion")
+    def test_stream_options_injection_via_public_entry(self, mock_completion) -> None:
         """验证 StreamOptions 通过 provider.stream() 注入到请求。"""
+        captured_params: dict[str, Any] = {}
+
+        def capture_completion(**kwargs):
+            captured_params.update(kwargs)
+            return iter([FakeStreamChunk(content="ok")])
+
+        mock_completion.side_effect = capture_completion
+
+        provider = DeepSeekProvider(
+            api_key="ds-key",
+            base_url="https://api.deepseek.com",
+            model="deepseek-chat",
+        )
 
         async def run_test():
-            captured_params: dict[str, Any] = {}
-
-            def capture_create(**kwargs):
-                captured_params.update(kwargs)
-                return iter([FakeStreamChunk(content="ok")])
-
-            client = FakeOpenAIClient(stream_chunks=[])
-            client.chat.completions.create = capture_create
-            provider = DeepSeekProvider(
-                api_key="ds-key",
-                base_url="https://api.deepseek.com",
-                model="deepseek-chat",
-                client=client,
-            )
-
             options = StreamOptions(
                 headers={"X-Custom": "test-header"},
                 session_id="test-session-123",
@@ -177,67 +172,49 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
                     [{"role": "user", "content": "Hi"}], [], options=options
                 )
             ]
+            return events
 
-            self.assertEqual(captured_params.get("api_key"), "override-key")
-            extra_headers = captured_params.get("extra_headers", {})
-            self.assertEqual(extra_headers.get("X-Custom"), "test-header")
-            self.assertEqual(extra_headers.get("x-session-id"), "test-session-123")
-            self.assertTrue(len(events) > 0)
+        events = asyncio.run(run_test())
 
-        asyncio.run(run_test())
+        self.assertEqual(captured_params.get("api_key"), "override-key")
+        extra_headers = captured_params.get("extra_headers", {})
+        self.assertEqual(extra_headers.get("X-Custom"), "test-header")
+        self.assertEqual(extra_headers.get("x-session-id"), "test-session-123")
+        self.assertTrue(len(events) > 0)
 
-    def test_response_format_passed_to_request(self) -> None:
+    @patch("litellm.completion")
+    def test_response_format_passed_to_request(self, mock_completion) -> None:
         """验证 response_format 传递到实际请求参数。"""
         captured_params: dict[str, Any] = {}
 
-        def capture_create(**kwargs):
+        def capture_completion(**kwargs):
             captured_params.update(kwargs)
             return iter([FakeStreamChunk(content="ok")])
 
-        client = FakeOpenAIClient(stream_chunks=[])
+        mock_completion.side_effect = capture_completion
+
         provider = DeepSeekProvider(
             api_key="ds-key",
             base_url="https://api.deepseek.com",
             model="deepseek-chat",
-            client=client,
         )
 
-        with patch.object(client.chat.completions, "create", capture_create):
-            events = list(
-                provider._stream_sync(
-                    [{"role": "user", "content": "Hi"}],
-                    (),
-                    response_format={"type": "json_object"},
-                )
+        events = list(
+            provider._stream_sync(
+                [{"role": "user", "content": "Hi"}],
+                (),
+                response_format={"type": "json_object"},
             )
+        )
 
         self.assertEqual(
             captured_params.get("response_format"), {"type": "json_object"}
         )
-        # 验证 JSON mode 防御逻辑注入了 'json' 关键字
         messages = captured_params.get("messages", [])
         self.assertTrue(len(messages) > 0)
         content = messages[0].get("content", "")
         self.assertIn("json", content.lower())
         self.assertTrue(len(events) > 0)
-
-
-class FakeOpenAIClient:
-    def __init__(self, stream_chunks=None) -> None:
-        self.chat = FakeChat(stream_chunks)
-
-
-class FakeChat:
-    def __init__(self, stream_chunks) -> None:
-        self.completions = FakeCompletions(stream_chunks)
-
-
-class FakeCompletions:
-    def __init__(self, stream_chunks) -> None:
-        self.stream_chunks = stream_chunks
-
-    def create(self, **kwargs):
-        return iter(self.stream_chunks or [])
 
 
 class FakeStreamChunk:

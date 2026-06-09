@@ -146,42 +146,11 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
 
 def _convert_tool_result(m: ToolResultMessage) -> dict[str, Any]:
     """将工具结果转换为 provider 边界格式。"""
-    if _has_shell_call_output(m.content):
-        return {
-            "role": "user",
-            "content": _shell_call_output_parts(m.content),
-        }
     return {
         "role": "tool",
         "tool_call_id": m.tool_call_id,
         "content": _tool_result_content_text(m.content),
     }
-
-
-def _has_shell_call_output(content: object) -> bool:
-    """判断工具结果是否包含官方 shell 输出块。"""
-    if not isinstance(content, list):
-        return False
-    return any(isinstance(item, ShellCallOutputContent) for item in content)
-
-
-def _shell_call_output_parts(content: object) -> list[dict[str, Any]]:
-    """提取官方 shell_call_output 输入项。"""
-    if not isinstance(content, list):
-        return []
-    parts: list[dict[str, Any]] = []
-    for item in content:
-        if not isinstance(item, ShellCallOutputContent):
-            continue
-        part: dict[str, Any] = {
-            "type": item.type,
-            "call_id": item.call_id,
-            "output": item.output,
-        }
-        if item.max_output_length is not None:
-            part["max_output_length"] = item.max_output_length
-        parts.append(part)
-    return parts
 
 
 def _tool_result_content_text(content: object) -> str:

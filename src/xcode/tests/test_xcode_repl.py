@@ -1080,7 +1080,7 @@ class ToolEventApp:
         yield StructuredAgentEvent(
             "tool_use",
             1,
-            ToolCall("call_1", "grep_search", {"pattern": "mcp", "path": "src/xcode"}),
+            ToolCall(id="call_1", name="grep_search", input={"pattern": "mcp", "path": "src/xcode"}),
         )
         yield StructuredAgentEvent(
             "tool_result",
@@ -1182,7 +1182,7 @@ class InterruptingToolApp:
         yield StructuredAgentEvent(
             "tool_use",
             1,
-            ToolCall("call_1", "bash", {"command": "cd .. && git diff .gitignore"}),
+            ToolCall(id="call_1", name="bash", input={"command": "cd .. && git diff .gitignore"}),
         )
         raise KeyboardInterrupt()
 

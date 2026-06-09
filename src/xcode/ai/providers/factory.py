@@ -1,3 +1,5 @@
+"""Provider 工厂：从配置构造 provider 实例。"""
+
 from __future__ import annotations
 
 import os
@@ -99,12 +101,6 @@ def _resolve_api_key(
     3. provider 官方环境变量（各家官方 SDK 约定）
     4. OPENAI_API_KEY（OpenAI-compatible 兼容层通用约定）
     5. API_KEY（通用回退）
-
-    provider 官方环境变量映射表基于各家 SDK 文档：
-    - Anthropic: ANTHROPIC_API_KEY
-    - ChatGLM: CHATGLM_API_KEY / ZHIPUAI_API_KEY / BIGMODEL_API_KEY（历史兼容）
-    - DeepSeek: DEEPSEEK_API_KEY
-    - MiMo: MIMO_API_KEY
     """
     if configured:
         return configured
@@ -179,7 +175,6 @@ def _build_llm_profile(
     # Anthropic Messages API 特殊处理原因：
     # 1. 官方 SDK 无 base_url 参数（非 OpenAI-compatible）
     # 2. 无 thinking/reasoning_effort 等扩展参数
-    # 3. 重试和限流由 ProviderRuntime 统一处理，不在 provider 构造时注入
     if transport == "anthropic_messages":
         return provider_cls(**kwargs)
 
@@ -190,9 +185,9 @@ def _build_llm_profile(
             "runtime": runtime,
         }
     )
-    if transport in {"openai_chat", "openai_responses", "deepseek_chat"}:
+    if transport in {"openai_chat", "deepseek_chat"}:
         kwargs["reasoning_effort"] = profile.reasoning_effort
-    if transport in {"openai_chat", "openai_responses"}:
+    if transport in {"openai_chat"}:
         kwargs["response_format"] = profile.response_format
     if transport == "chatglm_chat":
         kwargs["clear_thinking"] = profile.clear_thinking

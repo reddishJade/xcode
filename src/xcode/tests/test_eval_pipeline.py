@@ -32,7 +32,7 @@ from xcode.evals.runner import _build_run_metrics
 from xcode.evals.sandbox import UnsafeEvalTaskError
 from xcode.evals.tasks import SUITES
 from xcode.tests.fixtures import FakeProvider
-from xcode.evals.schema import TrialResult
+from xcode.evals.parameters import TrialResult
 
 
 class EvalPipelineTests(unittest.TestCase):
@@ -405,10 +405,10 @@ class EvalPipelineTests(unittest.TestCase):
 def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
     responses: list[list[ProviderEvent]] = [
         [
-            ToolCallEvent([ToolCall("a", "echo", {"input": "hello"})]),
-            FinalMessage("", "end_turn"),
+            ToolCallEvent(calls=[ToolCall(id="a", name="echo", input={"input": "hello"})]),
+            FinalMessage(content="", stop_reason="end_turn"),
         ],
-        [TextDelta("finished"), FinalMessage("", "end_turn")],
+        [TextDelta(chunk="finished"), FinalMessage(content="", stop_reason="end_turn")],
     ]
     tool = ToolSpec("echo", "Echo input.", "text", lambda value: value["input"])
     return XcodeApp(
@@ -422,8 +422,8 @@ def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
 
 def _text_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
     responses: list[ProviderEvent] = [
-        TextDelta("async ok"),
-        FinalMessage("", "end_turn"),
+        TextDelta(chunk="async ok"),
+        FinalMessage(content="", stop_reason="end_turn"),
     ]
     return XcodeApp(
         agent=StructuredAgent(
@@ -446,10 +446,10 @@ def _editing_app(project_root: Path) -> XcodeApp:
     tool = ToolSpec("edit_file", "Edit file.", "text", edit_file)
     responses: list[list[ProviderEvent]] = [
         [
-            ToolCallEvent([ToolCall("edit", "edit_file", {"path": "math_utils.py"})]),
-            FinalMessage("", "end_turn"),
+            ToolCallEvent(calls=[ToolCall(id="edit", name="edit_file", input={"path": "math_utils.py"})]),
+            FinalMessage(content="", stop_reason="end_turn"),
         ],
-        [TextDelta("done"), FinalMessage("", "end_turn")],
+        [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
     ]
     return XcodeApp(
         agent=StructuredAgent(
@@ -470,10 +470,10 @@ def _validation_app(project_root: Path) -> XcodeApp:
     tool = ToolSpec("write_file", "Write validation file.", "text", write_ok)
     responses: list[list[ProviderEvent]] = [
         [
-            ToolCallEvent([ToolCall("write", "write_file", {"path": "ok.txt"})]),
-            FinalMessage("", "end_turn"),
+            ToolCallEvent(calls=[ToolCall(id="write", name="write_file", input={"path": "ok.txt"})]),
+            FinalMessage(content="", stop_reason="end_turn"),
         ],
-        [TextDelta("done"), FinalMessage("", "end_turn")],
+        [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
     ]
     return XcodeApp(
         agent=StructuredAgent(

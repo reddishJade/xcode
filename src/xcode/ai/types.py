@@ -1,11 +1,11 @@
+"""AI 层类型定义：Model、Transport、Thinking、Usage 等核心类型。"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import orjson
-
-"""AI 层类型定义：Model、Transport、Thinking、Usage 等核心类型。"""
+from pydantic import BaseModel, ConfigDict, Field
 
 KnownApi = Literal[
     "openai-completions",
@@ -39,8 +39,11 @@ TextVerbosity = Literal["low", "medium", "high"]
 Truncation = Literal["auto", "disabled"]
 
 
-@dataclass(frozen=True)
-class Cost:
+class Cost(BaseModel):
+    """LLM 调用成本（美元/百万 token）。"""
+
+    model_config = ConfigDict(frozen=True)
+
     input: float = 0.0
     output: float = 0.0
     cache_read: float = 0.0
@@ -48,32 +51,37 @@ class Cost:
     total: float = 0.0
 
 
-@dataclass(frozen=True)
-class Usage:
+class Usage(BaseModel):
+    """LLM 调用用量。"""
+
+    model_config = ConfigDict(frozen=True)
+
     input: int = 0
     output: int = 0
     cache_read: int = 0
     cache_write: int = 0
     total_tokens: int = 0
-    cost: Cost = field(default_factory=Cost)
+    cost: Cost = Field(default_factory=Cost)
 
 
-@dataclass(frozen=True)
-class Model[TApi: Api]:
+class Model(BaseModel):
+    """模型元数据。"""
+
+    model_config = ConfigDict(frozen=True)
+
     id: str
     name: str
-    api: TApi
+    api: str
     provider: str
     base_url: str = ""
     reasoning: bool = False
     context_window: int = 0
     max_tokens: int = 0
-    cost: Cost = field(default_factory=Cost)
+    cost: Cost = Field(default_factory=Cost)
     thinking_level_map: dict[str, str | None] | None = None
 
 
-@dataclass
-class ThinkingBudgets:
+class ThinkingBudgets(BaseModel):
     """Extended thinking token 预算配置。
 
     用于支持 extended thinking 的模型（如 o1/o3/DeepSeek R1），
@@ -92,9 +100,10 @@ class ThinkingBudgets:
     xhigh: int = 0
 
 
-@dataclass(frozen=True)
-class StreamOptions:
+class StreamOptions(BaseModel):
     """单次 provider 请求的可选覆盖参数。"""
+
+    model_config = ConfigDict(frozen=True)
 
     temperature: float | None = None
     max_tokens: int | None = None
@@ -114,36 +123,21 @@ class StreamOptions:
     on_response: Any | None = None
     thinking_budgets: ThinkingBudgets | None = None
     thinking_level: str | None = None
-    background: bool | None = None
-    context_management: list[dict[str, Any]] | None = None
-    server_compact_threshold: int | None = None
-    conversation: dict[str, Any] | str | None = None
-    include: list[str] | None = None
-    instructions: str | None = None
-    max_tool_calls: int | None = None
-    moderation: dict[str, Any] | None = None
-    parallel_tool_calls: bool | None = None
-    prompt: dict[str, Any] | None = None
-    prompt_cache_retention: PromptCacheRetention | None = None
-    safety_identifier: str | None = None
-    service_tier: ServiceTier | None = None
-    store: bool | None = None
     tool_choice: str | dict[str, Any] | None = None
     top_logprobs: int | None = None
     top_p: float | None = None
-    truncation: Truncation | None = None
     user: str | None = None
-    verbosity: TextVerbosity | None = None
     response_extra_params: dict[str, Any] | None = None
 
 
-@dataclass(frozen=True)
-class ToolDefinition:
+class ToolDefinition(BaseModel):
     """LLM 可见的工具 schema。"""
+
+    model_config = ConfigDict(frozen=True)
 
     name: str
     description: str
-    schema: dict[str, Any]
+    parameters: dict[str, Any]
     builtin: dict[str, Any] | None = None
 
 

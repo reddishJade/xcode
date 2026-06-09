@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 
@@ -51,24 +51,6 @@ class ProviderMetricsMixin:
             if usage:
                 self._record_usage(chunk, message_count)
             yield chunk
-
-    def _intercept_responses_stream(
-        self,
-        events: Iterable[Any],
-        message_count: int,
-        on_response_completed: Callable[[Any], None] | None = None,
-    ) -> Iterator[Any]:
-        """拦截 Responses API 完成事件并记录 usage。"""
-        self._ensure_metrics()
-        self.metrics["sent_messages"] = message_count
-        for raw_event in events:
-            if str(getattr(raw_event, "type", "")).endswith(".completed"):
-                response = getattr(raw_event, "response", None)
-                if response is not None:
-                    if on_response_completed is not None:
-                        on_response_completed(response)
-                    self._record_usage(response, message_count)
-            yield raw_event
 
     def _record_usage(self, response: Any, sent_messages: int) -> None:
         """记录 usage 指标。

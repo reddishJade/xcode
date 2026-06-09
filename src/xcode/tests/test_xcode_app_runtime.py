@@ -90,66 +90,6 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             },
         )
 
-    def test_responses_registry_includes_native_shell_and_bash(self) -> None:
-        with (
-            tempfile.TemporaryDirectory() as tmp,
-            _patched_provider_bundle([], transport="openai_responses"),
-        ):
-            app = build_app(
-                project_root=Path(tmp),
-                runtime_config=XcodeRuntimeConfig(),
-            )
-
-        tools = {tool.name: tool for tool in app.registry}
-        self.assertIn("bash", tools)
-        self.assertIn("shell", tools)
-        self.assertEqual(
-            tools["shell"].builtin,
-            {"type": "shell", "environment": {"type": "local"}},
-        )
-
-    def test_responses_shell_environment_includes_skill_metadata(self) -> None:
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core", "skills")),
-        )
-        with (
-            tempfile.TemporaryDirectory() as tmp,
-            _patched_provider_bundle([], transport="openai_responses"),
-        ):
-            root = Path(tmp)
-            skills_dir = root / "skills"
-            skill_dir = skills_dir / "csv"
-            skill_dir.mkdir(parents=True)
-            (skill_dir / "SKILL.md").write_text(
-                "---\n"
-                "name: csv-insights\n"
-                "description: Summarize CSV files.\n"
-                "---\n\n"
-                "Body.",
-                encoding="utf-8",
-            )
-
-            app = build_app(
-                project_root=root,
-                runtime_config=runtime_config,
-                skills_dir=skills_dir,
-            )
-
-        tools = {tool.name: tool for tool in app.registry}
-        shell_builtin = tools["shell"].builtin
-        assert shell_builtin is not None
-        environment = shell_builtin["environment"]
-        self.assertEqual(
-            environment["skills"],
-            [
-                {
-                    "name": "csv-insights",
-                    "description": "Summarize CSV files.",
-                    "path": skill_dir.as_posix(),
-                }
-            ],
-        )
-
     def test_default_runtime_does_not_enable_experimental_components(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             root = Path(tmp)
@@ -330,10 +270,10 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                             )
                         ]
                     )
-                    yield FinalMessage("", "tool_use")
+                    yield FinalMessage(content="", stop_reason="tool_use")
                     return
-                yield TextDelta("done")
-                yield FinalMessage("", "end_turn")
+                yield TextDelta(chunk="done")
+                yield FinalMessage(content="", stop_reason="end_turn")
 
         provider = WritingProvider([])
         bundle = SimpleNamespace(
@@ -360,13 +300,13 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         class ReadingProvider(MockProvider):
             async def stream(self, messages, tools, options=None, **kwargs):
                 if messages and messages[-1]["role"] == "tool":
-                    yield TextDelta("done")
-                    yield FinalMessage("", "end_turn")
+                    yield TextDelta(chunk="done")
+                    yield FinalMessage(content="", stop_reason="end_turn")
                     return
                 yield ToolCallEvent(
-                    [ToolCall("read-1", "read_file", {"path": "a.txt"})]
+                    [ToolCall(id="read-1", name="read_file", input={"path": "a.txt"})]
                 )
-                yield FinalMessage("", "tool_use")
+                yield FinalMessage(content="", stop_reason="tool_use")
 
         provider = ReadingProvider([])
         bundle = SimpleNamespace(
@@ -419,11 +359,11 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 self.calls += 1
                 if self.calls == 1:
                     yield ToolCallEvent(
-                        [ToolCall("read-1", "read_file", {"path": "a.txt"})]
+                        [ToolCall(id="read-1", name="read_file", input={"path": "a.txt"})]
                     )
                 else:
-                    yield TextDelta("done")
-                    yield FinalMessage("", "end_turn")
+                    yield TextDelta(chunk="done")
+                    yield FinalMessage(content="", stop_reason="end_turn")
 
             def complete(self, prompt: str) -> str:
                 return "done"
@@ -560,12 +500,12 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 if messages and isinstance(messages[-1].get("content"), list):
                     result_block = messages[-1]["content"][0]
                     seen_reads.append(str(result_block.get("content", "")))
-                    yield TextDelta("child done")
-                    yield FinalMessage("", "end_turn")
+                    yield TextDelta(chunk="child done")
+                    yield FinalMessage(content="", stop_reason="end_turn")
                     return
-                yield TextDelta("child done")
+                yield TextDelta(chunk="child done")
                 yield ToolCallEvent(
-                    [ToolCall("read-1", "read_file", {"path": "marker.txt"})]
+                    [ToolCall(id="read-1", name="read_file", input={"path": "marker.txt"})]
                 )
 
             def complete(self, prompt: str) -> str:
@@ -643,8 +583,8 @@ class MockProvider(ModelProvider):
         **kwargs: Any,
     ) -> AsyncIterator[ProviderEvent]:
         self.seen_child_tools.append([tool.name for tool in tools])
-        yield TextDelta("child done")
-        yield FinalMessage("", "end_turn")
+        yield TextDelta(chunk="child done")
+        yield FinalMessage(content="", stop_reason="end_turn")
 
     def complete(self, prompt: str) -> str:
         return "done"

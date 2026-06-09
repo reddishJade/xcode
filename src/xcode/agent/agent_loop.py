@@ -623,7 +623,7 @@ async def _collect_provider_events(
             events.append(event)
         return events
     except Exception as e:
-        return [FinalMessage(f"Provider error: {e}", "error")]
+        return [FinalMessage(content=f"Provider error: {e}", stop_reason="error")]
 
 
 def _provider_events_to_response(
@@ -794,7 +794,7 @@ def _tools_to_definitions(tools: list[AgentTool] | None) -> list[ToolDefinition]
             ToolDefinition(
                 name=t.name,
                 description=desc,
-                schema=t.parameters,
+                parameters=t.parameters,
                 builtin=builtin if isinstance(builtin, dict) else None,
             )
         )

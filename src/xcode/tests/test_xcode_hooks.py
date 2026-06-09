@@ -50,10 +50,10 @@ class XcodeHookTests(unittest.TestCase):
         )
         responses: list[list[ProviderEvent]] = [
             [
-                ToolCallEvent([ToolCall("x", "echo", {"input": "hi"})]),
-                FinalMessage("", "end_turn"),
+                ToolCallEvent(calls=[ToolCall(id="x", name="echo", input={"input": "hi"})]),
+                FinalMessage(content="", stop_reason="end_turn"),
             ],
-            [TextDelta("done"), FinalMessage("", "end_turn")],
+            [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
         ]
         provider = FakeProvider(responses)
         agent = StructuredAgent(
@@ -72,10 +72,10 @@ class XcodeHookTests(unittest.TestCase):
         hooks.register("on_error", lambda record: seen.append(record.error))
         responses: list[list[ProviderEvent]] = [
             [
-                ToolCallEvent([ToolCall("x", "boom", {})]),
-                FinalMessage("", "end_turn"),
+                ToolCallEvent(calls=[ToolCall(id="x", name="boom", input={})]),
+                FinalMessage(content="", stop_reason="end_turn"),
             ],
-            [TextDelta("done"), FinalMessage("", "end_turn")],
+            [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
         ]
         provider = FakeProvider(responses)
 

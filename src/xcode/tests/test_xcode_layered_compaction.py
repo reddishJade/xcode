@@ -121,10 +121,10 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallEvent([ToolCall("c", "compact", {})]),
-                    FinalMessage("", "end_turn"),
+                    ToolCallEvent(calls=[ToolCall(id="c", name="compact", input={})]),
+                    FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
+                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
             ]
         )
         seen_lengths: list[int] = []
@@ -151,10 +151,10 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallEvent([ToolCall("c", "compact", {})]),
-                    FinalMessage("", "end_turn"),
+                    ToolCallEvent(calls=[ToolCall(id="c", name="compact", input={})]),
+                    FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
+                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
             ]
         )
         seen_tokens: list[int] = []

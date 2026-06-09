@@ -1,9 +1,10 @@
+"""Provider 流式事件协议。"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Literal
 
-"""Provider 流式事件协议。"""
+from pydantic import BaseModel, ConfigDict
 
 type Message = dict[str, Any]
 type StopReason = Literal[
@@ -18,37 +19,55 @@ type StopReason = Literal[
 ]
 
 
-@dataclass(frozen=True)
-class ToolCall:
+class ToolCall(BaseModel):
+    """单次工具调用。"""
+
+    model_config = ConfigDict(frozen=True)
+
     id: str
     name: str
     input: dict[str, Any]
 
 
-@dataclass(frozen=True)
-class TextDelta:
+class TextDelta(BaseModel):
+    """文本增量。"""
+
+    model_config = ConfigDict(frozen=True)
+
     chunk: str
 
 
-@dataclass(frozen=True)
-class ToolCallEvent:
+class ToolCallEvent(BaseModel):
+    """一组工具调用。"""
+
+    model_config = ConfigDict(frozen=True)
+
     calls: list[ToolCall]
 
 
-@dataclass(frozen=True)
-class UsageUpdate:
+class UsageUpdate(BaseModel):
+    """token 用量更新。"""
+
+    model_config = ConfigDict(frozen=True)
+
     input_tokens: int
     output_tokens: int
 
 
-@dataclass(frozen=True)
-class FinalMessage:
+class FinalMessage(BaseModel):
+    """流式响应终止消息。"""
+
+    model_config = ConfigDict(frozen=True)
+
     content: str
     stop_reason: StopReason
 
 
-@dataclass(frozen=True)
-class ReasoningDelta:
+class ReasoningDelta(BaseModel):
+    """推理内容增量。"""
+
+    model_config = ConfigDict(frozen=True)
+
     chunk: str
 
 

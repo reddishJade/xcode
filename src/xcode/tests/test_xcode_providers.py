@@ -3,9 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
-from typing import Any, cast
+from typing import Any
 from xcode.ai.events import TextDelta, ToolCallEvent, FinalMessage
 from xcode.ai.types import ToolDefinition
 from dotenv import dotenv_values
@@ -18,9 +18,72 @@ from xcode.ai.providers.factory import (
     get_config_value,
     _resolve_api_key,
 )
-from xcode.ai.providers.openai import OpenAIChatProvider, OpenAIResponsesProvider
+from xcode.ai.providers.openai import OpenAIChatProvider
 from xcode.ai.providers.chatglm import ChatGLMProvider
 from xcode.harness.config import ModelProfileRuntimeConfig
+
+
+# ── 测试辅助：捕获 litellm.completion 参数 ──
+
+_captured_completion_kwargs: dict[str, Any] = {}
+
+
+def _mock_completion(**kwargs: Any) -> Any:
+    """模拟 litellm.completion()，捕获参数并返回空流。"""
+    _captured_completion_kwargs.clear()
+    _captured_completion_kwargs.update(kwargs)
+    return iter([])
+
+
+def _mock_completion_with_chunks(chunks: list) -> Any:
+    """返回一个工厂函数，用指定 chunks 模拟 litellm.completion()。"""
+    def _factory(**kwargs: Any) -> Any:
+        _captured_completion_kwargs.clear()
+        _captured_completion_kwargs.update(kwargs)
+        return iter(chunks)
+    return _factory
+
+
+def _get_captured_kwargs() -> dict[str, Any]:
+    """获取最近一次 litellm.completion() 调用的参数。"""
+    return _captured_completion_kwargs
+
+
+# ── 流式 chunk 模拟对象 ──
+
+
+class FakeStreamChunk:
+    def __init__(self, content=None, tool_call=None, reasoning=None) -> None:
+        self.choices = [FakeStreamChoice(content, tool_call, reasoning)]
+        self.usage = None
+
+
+class FakeStreamChoice:
+    def __init__(self, content, tool_call, reasoning=None) -> None:
+        self.delta = FakeStreamDelta(content, tool_call, reasoning)
+
+
+class FakeStreamDelta:
+    def __init__(self, content, tool_call, reasoning=None) -> None:
+        self.content = content
+        self.tool_calls = [tool_call] if tool_call is not None else []
+        self.reasoning_content = reasoning
+
+
+class FakeStreamToolCall:
+    def __init__(self, index, call_id=None, name=None, arguments=None) -> None:
+        self.index = index
+        self.id = call_id
+        self.function = FakeStreamFunction(name, arguments)
+
+
+class FakeStreamFunction:
+    def __init__(self, name, arguments) -> None:
+        self.name = name
+        self.arguments = arguments
+
+
+# ── Env / Factory 测试 ──
 
 
 class XcodeProviderEnvTests(unittest.TestCase):
@@ -48,7 +111,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
                             "main": ModelProfileRuntimeConfig(
                                 chat_model="main-model",
                                 base_url="https://main.test",
-                                transport="openai_responses",
+                                transport="openai_chat",
                             ),
                             "subagent": ModelProfileRuntimeConfig(
                                 chat_model="small-model",
@@ -58,11 +121,11 @@ class XcodeProviderEnvTests(unittest.TestCase):
                     )
                 )
 
-                self.assertIsInstance(bundle.llm, OpenAIResponsesProvider)
-                llm = cast(OpenAIResponsesProvider, bundle.llm)
-                subagent = cast(OpenAIChatProvider, bundle.llms["subagent"])
-                judge = cast(OpenAIResponsesProvider, bundle.llms["judge"])
-                self.assertEqual(llm.transport, "openai_responses")
+                self.assertIsInstance(bundle.llm, OpenAIChatProvider)
+                llm = bundle.llm
+                subagent = bundle.llms["subagent"]
+                judge = bundle.llms["judge"]
+                self.assertEqual(llm.transport, "openai_chat")
                 self.assertEqual(llm.model, "main-model")
                 self.assertEqual(subagent.model, "small-model")
                 self.assertEqual(judge.model, "main-model")
@@ -119,7 +182,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 provider = bundle.llm
                 self.assertIsInstance(provider, ChatGLMProvider)
                 assert isinstance(provider, ChatGLMProvider)
-                self.assertEqual(provider.client.api_key, "glm-key")
+                self.assertEqual(provider.api_key, "glm-key")
                 self.assertEqual(provider.model, "glm-4.7")
                 self.assertTrue(provider.clear_thinking)
                 self.assertFalse(provider.tool_stream)
@@ -147,8 +210,8 @@ class XcodeProviderEnvTests(unittest.TestCase):
                     )
                 )
 
-                llm = cast(OpenAIChatProvider, bundle.llm)
-                self.assertEqual(llm.client.api_key, "configured")
+                llm = bundle.llm
+                self.assertEqual(llm.api_key, "configured")
 
     def test_profile_api_key_overrides_openai_api_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -175,10 +238,13 @@ class XcodeProviderEnvTests(unittest.TestCase):
                     )
                 )
 
-                main = cast(OpenAIChatProvider, bundle.llms["main"])
-                subagent = cast(OpenAIChatProvider, bundle.llms["subagent"])
-                self.assertEqual(main.client.api_key, "openai")
-                self.assertEqual(subagent.client.api_key, "subagent")
+                main = bundle.llms["main"]
+                subagent = bundle.llms["subagent"]
+                self.assertEqual(main.api_key, "openai")
+                self.assertEqual(subagent.api_key, "subagent")
+
+
+# ── Runtime 测试 ──
 
 
 class XcodeProviderRuntimeTests(unittest.TestCase):
@@ -214,55 +280,34 @@ class XcodeProviderRuntimeTests(unittest.TestCase):
         self.assertEqual(sleeps, [0.8000000000000007])
 
 
+# ── OpenAI Chat 测试 ──
+
+
 class XcodeStructuredProviderTests(unittest.TestCase):
-    def _make_openai_chat_provider(
-        self,
-        client: FakeOpenAIClient,
-    ) -> OpenAIChatProvider:
-        """构造 OpenAI Chat 测试 provider。"""
-        return OpenAIChatProvider(
+    @patch("litellm.completion")
+    def test_stream_converts_tool_schema_and_tool_calls(self, mock_completion) -> None:
+        mock_completion.return_value = iter([
+            FakeStreamChunk(
+                tool_call=FakeStreamToolCall(
+                    index=0,
+                    call_id="call-1",
+                    name="echo",
+                    arguments='{"text": "hello"}',
+                )
+            ),
+        ])
+        llm = OpenAIChatProvider(
             api_key="test-key",
             base_url="https://api.openai.test/v1",
             model="model",
             thinking=True,
             reasoning_effort=None,
             runtime=ProviderRuntime(),
-            client=client,
         )
-
-    def _make_openai_responses_provider(
-        self,
-        client: FakeOpenAIClient,
-    ) -> OpenAIResponsesProvider:
-        """构造 OpenAI Responses 测试 provider。"""
-        return OpenAIResponsesProvider(
-            api_key="test-key",
-            base_url="https://api.openai.test/v1",
-            model="model",
-            thinking=True,
-            reasoning_effort=None,
-            runtime=ProviderRuntime(),
-            client=client,
-        )
-
-    def test_stream_converts_tool_schema_and_tool_calls(self) -> None:
-        client = FakeOpenAIClient(
-            stream_chunks=[
-                FakeStreamChunk(
-                    tool_call=FakeStreamToolCall(
-                        index=0,
-                        call_id="call-1",
-                        name="echo",
-                        arguments='{"text": "hello"}',
-                    )
-                ),
-            ]
-        )
-        llm = self._make_openai_chat_provider(client)
         tool = ToolDefinition(
             name="echo",
             description="Echo input.",
-            schema={
+            parameters={
                 "type": "object",
                 "properties": {"text": {"type": "string"}},
                 "required": ["text"],
@@ -280,12 +325,20 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         assert isinstance(tool_call, ToolCallEvent)
         self.assertEqual(tool_call.calls[0].name, "echo")
         self.assertEqual(tool_call.calls[0].input, {"text": "hello"})
-        sent_tool = client.chat.completions.kwargs["tools"][0]
-        self.assertEqual(sent_tool["function"]["parameters"], tool.schema)
+        sent_tool = mock_completion.call_args.kwargs["tools"][0]
+        self.assertEqual(sent_tool["function"]["parameters"], tool.parameters)
 
-    def test_stream_converts_tool_results_to_openai_messages(self) -> None:
-        client = FakeOpenAIClient(stream_chunks=[FakeStreamChunk(content="done")])
-        llm = self._make_openai_chat_provider(client)
+    @patch("litellm.completion")
+    def test_stream_converts_tool_results_to_openai_messages(self, mock_completion) -> None:
+        mock_completion.return_value = iter([FakeStreamChunk(content="done")])
+        llm = OpenAIChatProvider(
+            api_key="test-key",
+            base_url="https://api.openai.test/v1",
+            model="model",
+            thinking=True,
+            reasoning_effort=None,
+            runtime=ProviderRuntime(),
+        )
 
         events = list(
             llm._stream_sync(
@@ -316,35 +369,41 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             )
         )
 
-        sent_messages = client.chat.completions.kwargs["messages"]
+        sent_messages = mock_completion.call_args.kwargs["messages"]
         self.assertEqual(sent_messages[0]["role"], "assistant")
         self.assertEqual(sent_messages[1]["role"], "tool")
         self.assertEqual(
             [e for e in events if isinstance(e, TextDelta)][0].chunk, "done"
         )
 
-    def test_stream_yields_text_and_tool_call_deltas(self) -> None:
-        client = FakeOpenAIClient(
-            stream_chunks=[
-                FakeStreamChunk(content="he"),
-                FakeStreamChunk(content="llo"),
-                FakeStreamChunk(
-                    tool_call=FakeStreamToolCall(
-                        index=0,
-                        call_id="call-1",
-                        name="echo",
-                        arguments='{"text": ',
-                    )
-                ),
-                FakeStreamChunk(
-                    tool_call=FakeStreamToolCall(
-                        index=0,
-                        arguments='"hi"}',
-                    )
-                ),
-            ]
+    @patch("litellm.completion")
+    def test_stream_yields_text_and_tool_call_deltas(self, mock_completion) -> None:
+        mock_completion.return_value = iter([
+            FakeStreamChunk(content="he"),
+            FakeStreamChunk(content="llo"),
+            FakeStreamChunk(
+                tool_call=FakeStreamToolCall(
+                    index=0,
+                    call_id="call-1",
+                    name="echo",
+                    arguments='{"text": ',
+                )
+            ),
+            FakeStreamChunk(
+                tool_call=FakeStreamToolCall(
+                    index=0,
+                    arguments='"hi"}',
+                )
+            ),
+        ])
+        llm = OpenAIChatProvider(
+            api_key="test-key",
+            base_url="https://api.openai.test/v1",
+            model="model",
+            thinking=True,
+            reasoning_effort=None,
+            runtime=ProviderRuntime(),
         )
-        llm = self._make_openai_chat_provider(client)
 
         events = list(llm._stream_sync([{"role": "user", "content": "go"}], ()))
 
@@ -359,384 +418,63 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         self.assertEqual(events[-1].calls[0].id, "call-1")
         self.assertEqual(events[-1].calls[0].name, "echo")
         self.assertEqual(events[-1].calls[0].input, {"text": "hi"})
-        self.assertTrue(client.chat.completions.kwargs["stream"])
-
-    def test_responses_stream_with_previous_response_id(self) -> None:
-        client = FakeOpenAIClient(
-            response_outputs=[
-                [
-                    FakeResponsesStreamEvent("response.output_text.delta", delta="he"),
-                    FakeResponsesStreamEvent("response.output_text.delta", delta="llo"),
-                    FakeResponsesStreamEvent(
-                        "response.completed", FakeResponsesResponse("r1")
-                    ),
-                ],
-                [
-                    FakeResponsesStreamEvent("response.output_text.delta", delta="ok"),
-                    FakeResponsesStreamEvent(
-                        "response.completed", FakeResponsesResponse("r2")
-                    ),
-                ],
-            ]
-        )
-        llm = self._make_openai_responses_provider(client)
-
-        messages = [{"role": "user", "content": "one"}]
-        first = list(llm._stream_sync(messages, ()))
-        messages.append({"role": "user", "content": "two"})
-        second = list(llm._stream_sync(messages, ()))
-
-        self.assertEqual(
-            [event.chunk for event in first if isinstance(event, TextDelta)],
-            ["he", "llo"],
-        )
-        assert isinstance(first[-1], FinalMessage)
-        self.assertEqual(first[-1].content, "ok-r1")
-        self.assertEqual(
-            [event.chunk for event in second if isinstance(event, TextDelta)], ["ok"]
-        )
-        assert isinstance(second[-1], FinalMessage)
-        self.assertEqual(second[-1].content, "ok-r2")
-        calls = client.responses.calls
-        self.assertNotIn("previous_response_id", calls[0])
-        self.assertEqual(calls[1]["previous_response_id"], "r1")
-
-    def test_responses_stream_yields_text_delta_immediately(self) -> None:
-        """验证 streaming 行为：TextDelta 在流迭代过程中立即产出，
-        而不是等底层 iterator 全部耗尽后才产出。"""
-        client = FakeOpenAIClient(
-            response_outputs=[
-                [
-                    FakeResponsesStreamEvent("response.output_text.delta", delta="he"),
-                    FakeResponsesStreamEvent("response.output_text.delta", delta="llo"),
-                    FakeResponsesStreamEvent(
-                        "response.completed", FakeResponsesResponse("r1")
-                    ),
-                ],
-            ]
-        )
-        llm = self._make_openai_responses_provider(client)
-
-        events = llm._stream_sync([{"role": "user", "content": "hi"}], ())
-
-        # 第一个事件应该是 TextDelta，立即产出（completed 事件尚未到达）
-        first = next(events)
-        self.assertIsInstance(first, TextDelta)
-        assert isinstance(first, TextDelta)
-        self.assertEqual(first.chunk, "he")
-
-        # 第二个事件也是 TextDelta，在 completed 之前产出
-        second = next(events)
-        self.assertIsInstance(second, TextDelta)
-        assert isinstance(second, TextDelta)
-        self.assertEqual(second.chunk, "llo")
-
-        # 第三个事件应该是 FinalMessage（completed 已处理）
-        third = next(events)
-        self.assertIsInstance(third, FinalMessage)
-
-        # 迭代器已耗尽
-        with self.assertRaises(StopIteration):
-            next(events)
-
-    def test_responses_tool_loop_does_not_resend_function_call(self) -> None:
-        """第二轮 messages 包含 assistant tool_calls 和 tool result 时，
-        实际发给 responses.create() 的 input 只有 function_call_output，
-        没有重复的 function_call。"""
-        client = FakeOpenAIClient(
-            response_outputs=[
-                # 第一轮：返回 function_call 的流
-                [
-                    FakeResponsesStreamEvent(
-                        "response.completed", FakeResponsesResponse("r1")
-                    ),
-                ],
-                # 第二轮：返回文本的流
-                [
-                    FakeResponsesStreamEvent(
-                        "response.output_text.delta", delta="done"
-                    ),
-                    FakeResponsesStreamEvent(
-                        "response.completed", FakeResponsesResponse("r2")
-                    ),
-                ],
-            ]
-        )
-        llm = self._make_openai_responses_provider(client)
-
-        # 第一轮：用户消息
-        messages: list[dict[str, Any]] = [
-            {"role": "user", "content": "call tool"},
-        ]
-        list(llm._stream_sync(messages, ()))
-        self.assertEqual(len(client.responses.calls), 1)
-        first_call = client.responses.calls[0]
-        self.assertNotIn("previous_response_id", first_call)
-
-        # 第二轮：包含 assistant tool_calls + tool result
-        messages.append(
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "call1",
-                        "type": "function",
-                        "function": {"name": "echo", "arguments": "{}"},
-                    }
-                ],
-            }
-        )
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": "call1",
-                "content": "tool output",
-            }
-        )
-
-        list(llm._stream_sync(messages, ()))
-        self.assertEqual(len(client.responses.calls), 2)
-        second_call = client.responses.calls[1]
-        self.assertEqual(second_call["previous_response_id"], "r1")
-
-        # input 中只能有 function_call_output，不能有 function_call
-        input_items = second_call["input"]
-        self.assertTrue(
-            all(item.get("type") != "function_call" for item in input_items)
-        )
-        function_call_outputs = [
-            item for item in input_items if item.get("type") == "function_call_output"
-        ]
-        self.assertEqual(len(function_call_outputs), 1)
-        self.assertEqual(function_call_outputs[0]["call_id"], "call1")
-        self.assertEqual(function_call_outputs[0]["output"], "tool output")
-
-    def test_responses_tool_loop_keeps_shell_call_output(self) -> None:
-        """previous_response_id 增量输入保留 shell_call_output。"""
-        client = FakeOpenAIClient(
-            response_outputs=[
-                [
-                    FakeResponsesStreamEvent(
-                        "response.completed", FakeResponsesResponse("r1")
-                    ),
-                ],
-                [
-                    FakeResponsesStreamEvent(
-                        "response.output_text.delta", delta="done"
-                    ),
-                    FakeResponsesStreamEvent(
-                        "response.completed", FakeResponsesResponse("r2")
-                    ),
-                ],
-            ]
-        )
-        llm = self._make_openai_responses_provider(client)
-
-        messages: list[dict[str, Any]] = [{"role": "user", "content": "call shell"}]
-        list(llm._stream_sync(messages, ()))
-        messages.append(
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "shell_call_output",
-                        "call_id": "call1",
-                        "output": [
-                            {
-                                "stdout": "ok",
-                                "stderr": "",
-                                "outcome": {"type": "exit", "exit_code": 0},
-                            }
-                        ],
-                    }
-                ],
-            }
-        )
-
-        list(llm._stream_sync(messages, ()))
-
-        second_call = client.responses.calls[1]
-        self.assertEqual(second_call["previous_response_id"], "r1")
-        self.assertEqual(
-            second_call["input"],
-            [
-                {
-                    "type": "shell_call_output",
-                    "call_id": "call1",
-                    "output": [
-                        {
-                            "stdout": "ok",
-                            "stderr": "",
-                            "outcome": {"type": "exit", "exit_code": 0},
-                        }
-                    ],
-                }
-            ],
-        )
+        self.assertTrue(mock_completion.call_args.kwargs["stream"])
 
 
-class FakeOpenAIClient:
-    def __init__(
-        self, content=None, tool_calls=None, stream_chunks=None, response_outputs=None
-    ) -> None:
-        self.chat = FakeChat(content, tool_calls, stream_chunks)
-        self.responses = FakeResponses(response_outputs or [])
+# ── ChatGLM 测试 ──
 
 
-class FakeResponses:
-    def __init__(self, outputs) -> None:
-        self.outputs = list(outputs)
-        self.calls: list[dict[str, Any]] = []
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
-        return self.outputs.pop(0)
-
-
-class FakeResponsesResponse:
-    def __init__(self, response_id) -> None:
-        self.id = response_id
-        self.output_text = f"ok-{response_id}"
-        self.output: list[Any] = []
-        self.usage = None
-
-
-class FakeResponsesStreamEvent:
-    def __init__(self, type_: str, response=None, delta=None) -> None:
-        self.type = type_
-        self.response = response
-        self.delta = delta
-
-
-class FakeChat:
-    def __init__(self, content, tool_calls, stream_chunks) -> None:
-        self.completions = FakeCompletions(content, tool_calls, stream_chunks)
-
-
-class FakeCompletions:
-    def __init__(self, content, tool_calls, stream_chunks) -> None:
-        self.content = content
-        self.tool_calls = tool_calls
-        self.stream_chunks = stream_chunks
-        self.kwargs: dict[str, Any] = {}
-
-    def create(self, **kwargs):
-        self.kwargs = kwargs
-        if kwargs.get("stream"):
-            return iter(self.stream_chunks or [])
-        return FakeResponse(self.content, self.tool_calls)
-
-
-class FakeResponse:
-    def __init__(self, content, tool_calls) -> None:
-        self.choices = [FakeChoice(content, tool_calls)]
-
-
-class FakeChoice:
-    def __init__(self, content, tool_calls) -> None:
-        self.message = FakeMessage(content, tool_calls)
-
-
-class FakeMessage:
-    def __init__(self, content, tool_calls) -> None:
-        self.content = content
-        self.tool_calls = tool_calls if tool_calls is not None else [FakeToolCall()]
-
-
-class FakeToolCall:
-    id = "call-1"
-
-    class function:
-        name = "echo"
-        arguments = '{"text": "hello"}'
-
-
-class FakeStreamChunk:
-    def __init__(self, content=None, tool_call=None) -> None:
-        self.choices = [FakeStreamChoice(content, tool_call)]
-        self.usage = None
-
-
-class FakeStreamChoice:
-    def __init__(self, content, tool_call) -> None:
-        self.delta = FakeStreamDelta(content, tool_call)
-
-
-class FakeStreamDelta:
-    def __init__(self, content, tool_call) -> None:
-        self.content = content
-        self.tool_calls = [tool_call] if tool_call is not None else []
-        self.reasoning_content = None
-
-
-class FakeStreamToolCall:
-    def __init__(self, index, call_id=None, name=None, arguments=None) -> None:
-        self.index = index
-        self.id = call_id
-        self.function = FakeStreamFunction(name, arguments)
-
-
-class FakeStreamFunction:
-    def __init__(self, name, arguments) -> None:
-        self.name = name
-        self.arguments = arguments
-
-
-def _glm_kwargs(provider: ChatGLMProvider) -> dict[str, Any]:
-    client = cast(FakeGLMClient, provider.client)
-    return client.chat.completions.kwargs
+def _make_glm_provider(**overrides: Any) -> ChatGLMProvider:
+    kwargs: dict[str, Any] = dict(
+        api_key="test-key",
+        model="glm-4-flash",
+        thinking=True,
+        clear_thinking=False,
+        tool_stream=True,
+    )
+    kwargs.update(overrides)
+    return ChatGLMProvider(**kwargs)
 
 
 class XcodeChatGLMProviderTests(unittest.TestCase):
     """ChatGLM provider 边界测试：thinking 清理、tool_stream、参数组合。"""
 
-    def _make_provider(self, **overrides: Any) -> ChatGLMProvider:
-        from xcode.ai.providers.chatglm import ChatGLMProvider
-
-        kwargs: dict[str, Any] = dict(
-            api_key="test-key",
-            model="glm-4-flash",
-            thinking=True,
-            clear_thinking=False,
-            tool_stream=True,
-            client=FakeGLMClient(),
-        )
-        kwargs.update(overrides)
-        return ChatGLMProvider(**kwargs)
-
-    def test_thinking_disabled_sets_extra_body(self) -> None:
+    @patch("litellm.completion")
+    def test_thinking_disabled_sets_extra_body(self, mock_completion) -> None:
         """thinking=False 时 extra_body 为 disabled。"""
-        provider = self._make_provider(thinking=False, client=FakeGLMClient())
-        # 消费生成器以触发 _stream_sync 内部代码
+        mock_completion.return_value = iter([])
+        provider = _make_glm_provider(thinking=False)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = _glm_kwargs(provider)
-        extra = kwargs.get("extra_body", {})
+        extra = mock_completion.call_args.kwargs.get("extra_body", {})
         self.assertEqual(extra.get("thinking", {}).get("type"), "disabled")
 
-    def test_thinking_enabled_clear_false(self) -> None:
+    @patch("litellm.completion")
+    def test_thinking_enabled_clear_false(self, mock_completion) -> None:
         """clear_thinking=False 时 extra_body 包含 clear_thinking=false。"""
-        provider = self._make_provider(clear_thinking=False, client=FakeGLMClient())
+        mock_completion.return_value = iter([])
+        provider = _make_glm_provider(clear_thinking=False)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = _glm_kwargs(provider)
-        extra = kwargs.get("extra_body", {})
+        extra = mock_completion.call_args.kwargs.get("extra_body", {})
         thinking = extra.get("thinking", {})
         self.assertEqual(thinking.get("type"), "enabled")
         self.assertIs(thinking.get("clear_thinking"), False)
 
-    def test_thinking_enabled_clear_true(self) -> None:
+    @patch("litellm.completion")
+    def test_thinking_enabled_clear_true(self, mock_completion) -> None:
         """clear_thinking=True 时 extra_body 包含 clear_thinking=true。"""
-        provider = self._make_provider(clear_thinking=True, client=FakeGLMClient())
+        mock_completion.return_value = iter([])
+        provider = _make_glm_provider(clear_thinking=True)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = _glm_kwargs(provider)
-        extra = kwargs.get("extra_body", {})
+        extra = mock_completion.call_args.kwargs.get("extra_body", {})
         thinking = extra.get("thinking", {})
         self.assertEqual(thinking.get("type"), "enabled")
         self.assertIs(thinking.get("clear_thinking"), True)
 
-    def test_turn_level_thinking_override_is_per_request(self) -> None:
+    @patch("litellm.completion")
+    def test_turn_level_thinking_override_is_per_request(self, mock_completion) -> None:
         """单次请求可覆盖 thinking，不改变 provider 默认值。"""
-        provider = self._make_provider(thinking=True, client=FakeGLMClient())
+        mock_completion.return_value = iter([])
+        provider = _make_glm_provider(thinking=True)
 
         list(
             provider._stream_sync(
@@ -745,53 +483,54 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
                 thinking=False,
             )
         )
-        first = _glm_kwargs(provider)["extra_body"]["thinking"]
+        first = mock_completion.call_args.kwargs["extra_body"]["thinking"]
         self.assertEqual(first["type"], "disabled")
         self.assertTrue(provider.thinking)
 
         list(provider._stream_sync([{"role": "user", "content": "hard"}], ()))
-        second = _glm_kwargs(provider)["extra_body"]["thinking"]
+        second = mock_completion.call_args.kwargs["extra_body"]["thinking"]
         self.assertEqual(second["type"], "enabled")
 
-    def test_structured_output_response_format_is_sent(self) -> None:
+    @patch("litellm.completion")
+    def test_structured_output_response_format_is_sent(self, mock_completion) -> None:
         """结构化输出透传 response_format。"""
-        provider = self._make_provider(
-            response_format={"type": "json_object"},
-            client=FakeGLMClient(),
-        )
+        mock_completion.return_value = iter([])
+        provider = _make_glm_provider(response_format={"type": "json_object"})
         list(provider._stream_sync([{"role": "user", "content": "json"}], ()))
 
-        kwargs = _glm_kwargs(provider)
+        kwargs = mock_completion.call_args.kwargs
         self.assertEqual(kwargs["response_format"], {"type": "json_object"})
 
-    def test_tool_stream_disabled(self) -> None:
+    @patch("litellm.completion")
+    def test_tool_stream_disabled(self, mock_completion) -> None:
         """tool_stream=False 时不传 tool_stream 参数。"""
-        provider = self._make_provider(tool_stream=False, client=FakeGLMClient())
+        mock_completion.return_value = iter([])
+        provider = _make_glm_provider(tool_stream=False)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = _glm_kwargs(provider)
-        self.assertNotIn("tool_stream", kwargs)
+        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        self.assertNotIn("tool_stream", extra)
 
-    def test_tool_stream_enabled_for_supported_model(self) -> None:
+    @patch("litellm.completion")
+    def test_tool_stream_enabled_for_supported_model(self, mock_completion) -> None:
         """支持的模型开启 tool_stream 时传 tool_stream=true。"""
-        provider = self._make_provider(
-            model="glm-4.7", tool_stream=True, client=FakeGLMClient()
-        )
+        mock_completion.return_value = iter([])
+        provider = _make_glm_provider(model="glm-4.7", tool_stream=True)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = _glm_kwargs(provider)
-        self.assertIs(kwargs.get("tool_stream"), True)
+        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        self.assertIs(extra.get("tool_stream"), True)
 
-    def test_tool_stream_omitted_for_unsupported_model(self) -> None:
+    @patch("litellm.completion")
+    def test_tool_stream_omitted_for_unsupported_model(self, mock_completion) -> None:
         """不支持的模型不传 tool_stream 参数。"""
-        provider = self._make_provider(
-            model="glm-4-flash", tool_stream=True, client=FakeGLMClient()
-        )
+        mock_completion.return_value = iter([])
+        provider = _make_glm_provider(model="glm-4-flash", tool_stream=True)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = _glm_kwargs(provider)
-        self.assertNotIn("tool_stream", kwargs)
+        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        self.assertNotIn("tool_stream", extra)
 
     def test_clean_reasoning_no_tool_loop(self) -> None:
         """clear_thinking=True 时清除所有历史 reasoning_content。"""
-        provider = self._make_provider(clear_thinking=True)
+        provider = _make_glm_provider(clear_thinking=True)
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
@@ -803,7 +542,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
 
     def test_clean_reasoning_retains_all_when_clear_false(self) -> None:
         """clear_thinking=False 时保留所有 reasoning_content。"""
-        provider = self._make_provider(clear_thinking=False)
+        provider = _make_glm_provider(clear_thinking=False)
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
@@ -822,7 +561,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
 
     def test_clean_reasoning_clear_true_removes_tool_loop_reasoning(self) -> None:
         """clear_thinking=True 时工具循环也清除 reasoning_content。"""
-        provider = self._make_provider(clear_thinking=True)
+        provider = _make_glm_provider(clear_thinking=True)
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1", "reasoning_content": "think1"},
@@ -841,34 +580,34 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         self.assertNotIn("reasoning_content", cleaned[1])
         self.assertNotIn("reasoning_content", cleaned[3])
 
-    def test_thinking_true_streams_reasoning(self) -> None:
+    @patch("litellm.completion")
+    def test_thinking_true_streams_reasoning(self, mock_completion) -> None:
         """thinking=True 时流包含 reasoning delta。"""
         from xcode.ai.events import ReasoningDelta
 
-        client = FakeGLMClient(
-            stream_chunks=[
-                FakeGLMChunk(content="hello", reasoning="thinking..."),
-                FakeGLMChunk(content=" world"),
-            ]
-        )
-        provider = self._make_provider(client=client)
+        mock_completion.return_value = iter([
+            FakeStreamChunk(content="hello", reasoning="thinking..."),
+            FakeStreamChunk(content=" world"),
+        ])
+        provider = _make_glm_provider()
         events = list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         reasoning_events = [e for e in events if isinstance(e, ReasoningDelta)]
         self.assertEqual(len(reasoning_events), 1)
         self.assertEqual(reasoning_events[0].chunk, "thinking...")
 
-    def test_combo_tool_stream_plus_clear_thinking(self) -> None:
+    @patch("litellm.completion")
+    def test_combo_tool_stream_plus_clear_thinking(self, mock_completion) -> None:
         """tool_stream=True + clear_thinking=True 组合参数正确传递。"""
-        provider = self._make_provider(
+        mock_completion.return_value = iter([])
+        provider = _make_glm_provider(
             model="glm-4.7",
             tool_stream=True,
             clear_thinking=True,
-            client=FakeGLMClient(),
         )
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        kwargs = _glm_kwargs(provider)
-        self.assertIs(kwargs["tool_stream"], True)
-        self.assertIs(kwargs["extra_body"]["thinking"]["clear_thinking"], True)
+        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        self.assertIs(extra["tool_stream"], True)
+        self.assertIs(extra["thinking"]["clear_thinking"], True)
 
     def test_record_usage_cached_and_reasoning_tokens(self) -> None:
         """usage 统计记录 cached_tokens 和 reasoning_tokens。"""
@@ -888,7 +627,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             "FakeCompletionDetails", ["reasoning_tokens"]
         )
 
-        class FakeResponse:
+        class FakeUsageResponse:
             usage = FakeUsage(
                 prompt_tokens=100,
                 completion_tokens=50,
@@ -896,8 +635,8 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
                 completion_tokens_details=FakeCompletionDetails(reasoning_tokens=10),
             )
 
-        provider = self._make_provider()
-        provider._record_usage(FakeResponse(), sent_messages=2)
+        provider = _make_glm_provider()
+        provider._record_usage(FakeUsageResponse(), sent_messages=2)
         self.assertEqual(provider.metrics["prompt_tokens"], 100)
         self.assertEqual(provider.metrics["completion_tokens"], 50)
         self.assertEqual(provider.metrics["total_tokens"], 150)
@@ -920,7 +659,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             ],
         )
 
-        class FakeResponseNoDetails:
+        class FakeUsageNoDetails:
             usage = FakeUsage(
                 prompt_tokens=50,
                 completion_tokens=30,
@@ -928,54 +667,14 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
                 completion_tokens_details=None,
             )
 
-        provider = self._make_provider()
-        provider._record_usage(FakeResponseNoDetails(), sent_messages=1)
+        provider = _make_glm_provider()
+        provider._record_usage(FakeUsageNoDetails(), sent_messages=1)
         self.assertEqual(provider.metrics["cached_tokens"], 0)
         self.assertEqual(provider.metrics["reasoning_tokens"], 0)
 
     def test_transport_is_chatglm(self) -> None:
-        provider = self._make_provider()
+        provider = _make_glm_provider()
         self.assertEqual(provider.transport, "chatglm_chat")
-
-
-class FakeGLMClient:
-    """模拟 OpenAI Chat Completion 客户端，用于 ChatGLM provider 测试。"""
-
-    def __init__(self, stream_chunks=None) -> None:
-        self.chat = FakeGLMChat(stream_chunks or [])
-
-
-class FakeGLMChat:
-    def __init__(self, stream_chunks) -> None:
-        self.completions = FakeGLMCompletions(stream_chunks)
-
-
-class FakeGLMCompletions:
-    def __init__(self, stream_chunks) -> None:
-        self.stream_chunks = stream_chunks
-        self.kwargs: dict[str, Any] = {}
-
-    def create(self, **kwargs):
-        self.kwargs = kwargs
-        return iter(self.stream_chunks or [FakeGLMChunk(content="ok")])
-
-
-class FakeGLMChunk:
-    def __init__(self, content="", reasoning=None) -> None:
-        self.choices = [FakeGLMChoice(content, reasoning)]
-        self.usage = None
-
-
-class FakeGLMChoice:
-    def __init__(self, content, reasoning) -> None:
-        self.delta = FakeGLMDelta(content, reasoning)
-
-
-class FakeGLMDelta:
-    def __init__(self, content, reasoning) -> None:
-        self.content = content
-        self.reasoning_content = reasoning
-        self.tool_calls: list[Any] = []
 
 
 if __name__ == "__main__":

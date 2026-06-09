@@ -137,7 +137,7 @@ class TestToolSchemaCanonical(unittest.TestCase):
         tool = ToolDefinition(
             name="test_tool",
             description="A test tool",
-            schema={
+            parameters={
                 "type": "object",
                 "properties": {
                     "z_param": {"type": "string"},
@@ -159,7 +159,7 @@ class TestToolSchemaCanonical(unittest.TestCase):
         tool = ToolDefinition(
             name="nested_tool",
             description="Nested schema",
-            schema={
+            parameters={
                 "z_top": {
                     "z_nested": "value",
                     "a_nested": "value",
@@ -175,9 +175,9 @@ class TestToolSchemaCanonical(unittest.TestCase):
     def test_canonical_tools_sorts_by_name(self):
         """测试工具列表按 name 排序。"""
         tools = [
-            ToolDefinition(name="zebra", description="Z", schema={}),
-            ToolDefinition(name="apple", description="A", schema={}),
-            ToolDefinition(name="middle", description="M", schema={}),
+            ToolDefinition(name="zebra", description="Z", parameters={}),
+            ToolDefinition(name="apple", description="A", parameters={}),
+            ToolDefinition(name="middle", description="M", parameters={}),
         ]
         result = canonical_tools(tools)
         self.assertEqual([t["name"] for t in result], ["apple", "middle", "zebra"])
@@ -189,12 +189,12 @@ class TestToolCatalogFingerprint(unittest.TestCase):
     def test_fingerprint_stable_same_tools(self):
         """测试相同工具生成相同指纹。"""
         tools1 = [
-            ToolDefinition(name="tool_a", description="A", schema={"type": "object"}),
-            ToolDefinition(name="tool_b", description="B", schema={"type": "string"}),
+            ToolDefinition(name="tool_a", description="A", parameters={"type": "object"}),
+            ToolDefinition(name="tool_b", description="B", parameters={"type": "string"}),
         ]
         tools2 = [
-            ToolDefinition(name="tool_a", description="A", schema={"type": "object"}),
-            ToolDefinition(name="tool_b", description="B", schema={"type": "string"}),
+            ToolDefinition(name="tool_a", description="A", parameters={"type": "object"}),
+            ToolDefinition(name="tool_b", description="B", parameters={"type": "string"}),
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
@@ -204,12 +204,12 @@ class TestToolCatalogFingerprint(unittest.TestCase):
     def test_fingerprint_stable_different_order(self):
         """测试不同顺序生成相同指纹（排序后稳定）。"""
         tools1 = [
-            ToolDefinition(name="tool_b", description="B", schema={"type": "string"}),
-            ToolDefinition(name="tool_a", description="A", schema={"type": "object"}),
+            ToolDefinition(name="tool_b", description="B", parameters={"type": "string"}),
+            ToolDefinition(name="tool_a", description="A", parameters={"type": "object"}),
         ]
         tools2 = [
-            ToolDefinition(name="tool_a", description="A", schema={"type": "object"}),
-            ToolDefinition(name="tool_b", description="B", schema={"type": "string"}),
+            ToolDefinition(name="tool_a", description="A", parameters={"type": "object"}),
+            ToolDefinition(name="tool_b", description="B", parameters={"type": "string"}),
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
@@ -218,10 +218,10 @@ class TestToolCatalogFingerprint(unittest.TestCase):
     def test_fingerprint_different_tools(self):
         """测试不同工具生成不同指纹。"""
         tools1 = [
-            ToolDefinition(name="tool_a", description="A", schema={"type": "object"}),
+            ToolDefinition(name="tool_a", description="A", parameters={"type": "object"}),
         ]
         tools2 = [
-            ToolDefinition(name="tool_b", description="B", schema={"type": "string"}),
+            ToolDefinition(name="tool_b", description="B", parameters={"type": "string"}),
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
@@ -233,14 +233,14 @@ class TestToolCatalogFingerprint(unittest.TestCase):
             ToolDefinition(
                 name="tool",
                 description="Test",
-                schema={"z_key": "z", "a_key": "a"},
+                parameters={"z_key": "z", "a_key": "a"},
             ),
         ]
         tools2 = [
             ToolDefinition(
                 name="tool",
                 description="Test",
-                schema={"a_key": "a", "z_key": "z"},
+                parameters={"a_key": "a", "z_key": "z"},
             ),
         ]
         fp1 = tool_catalog_fingerprint(tools1)
@@ -253,7 +253,7 @@ class TestToolCatalogFingerprint(unittest.TestCase):
             ToolDefinition(
                 name="shell",
                 description="Run shell.",
-                schema={},
+                parameters={},
                 builtin={"type": "shell", "environment": {"type": "local"}},
             ),
         ]
@@ -261,7 +261,7 @@ class TestToolCatalogFingerprint(unittest.TestCase):
             ToolDefinition(
                 name="shell",
                 description="Run shell.",
-                schema={},
+                parameters={},
                 builtin={"type": "web_search_preview"},
             ),
         ]

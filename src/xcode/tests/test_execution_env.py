@@ -12,7 +12,7 @@ from xcode.harness.execution_env import (
     SubprocessExecutionEnv,
 )
 from xcode.agent.types import ShellCallOutputContent
-from xcode.coding_agent.tools import ShellSpec, build_bash_tool, build_native_shell_tool
+from xcode.coding_agent.tools import ShellSpec, build_bash_tool
 from xcode.harness.skills import AGENT_CONTENT_BLOCKS_METADATA_KEY, ToolOutput
 
 
@@ -127,60 +127,6 @@ class TestBashWithMockEnv(unittest.TestCase):
             output = tool.handler({"command": "exit 42"})
             self.assertIn("exit code: 42", output)
 
-
-class TestNativeShellWithMockEnv(unittest.TestCase):
-    def test_native_shell_returns_official_output_block(self) -> None:
-        env = MockExecutionEnv()
-        env.enqueue(ExecutionResult(stdout="Python 3.11\n", stderr="", returncode=0))
-
-        with tempfile.TemporaryDirectory() as tmp:
-            shell_spec = ShellSpec("sh", ("sh", "-c"), "posix")
-            tool = build_native_shell_tool(Path(tmp), shell_spec=shell_spec, env=env)
-            output = cast(
-                ToolOutput,
-                tool.handler(
-                    {
-                        "commands": ["python --version"],
-                        "timeout_ms": 2500,
-                        "max_output_length": 4096,
-                    }
-                ),
-            )
-
-        self.assertEqual(env.calls[0][0], ["sh", "-c", "python --version"])
-        self.assertEqual(env.calls[0][2], 3)
-        blocks = output.metadata[AGENT_CONTENT_BLOCKS_METADATA_KEY]
-        self.assertIsInstance(blocks[0], ShellCallOutputContent)
-        block = blocks[0]
-        assert isinstance(block, ShellCallOutputContent)
-        self.assertEqual(block.max_output_length, 4096)
-        self.assertEqual(
-            block.output,
-            [
-                {
-                    "stdout": "Python 3.11\n",
-                    "stderr": "",
-                    "outcome": {"type": "exit", "exit_code": 0},
-                }
-            ],
-        )
-
-    def test_native_shell_timeout_uses_timeout_outcome(self) -> None:
-        env = MockExecutionEnv()
-        env.enqueue(ExecutionResult(returncode=-1, timed_out=True))
-
-        with tempfile.TemporaryDirectory() as tmp:
-            shell_spec = ShellSpec("sh", ("sh", "-c"), "posix")
-            tool = build_native_shell_tool(Path(tmp), shell_spec=shell_spec, env=env)
-            output = cast(
-                ToolOutput,
-                tool.handler({"commands": ["sleep 10"], "timeout_ms": 1000}),
-            )
-
-        blocks = output.metadata[AGENT_CONTENT_BLOCKS_METADATA_KEY]
-        block = blocks[0]
-        assert isinstance(block, ShellCallOutputContent)
-        self.assertEqual(block.output[0]["outcome"], {"type": "timeout"})
 
 
 if __name__ == "__main__":

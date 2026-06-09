@@ -24,10 +24,10 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         # Mock provider returning max_tokens with small response blocks
         responses = iter(
             [
-                [TextDelta("a"), FinalMessage("", "max_tokens")],
-                [TextDelta("b"), FinalMessage("", "max_tokens")],
-                [TextDelta("c"), FinalMessage("", "max_tokens")],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
+                [TextDelta(chunk="a"), FinalMessage(content="", stop_reason="max_tokens")],
+                [TextDelta(chunk="b"), FinalMessage(content="", stop_reason="max_tokens")],
+                [TextDelta(chunk="c"), FinalMessage(content="", stop_reason="max_tokens")],
+                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
             ]
         )
 
@@ -60,22 +60,22 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallEvent([ToolCall("call_1", "read_file", {"path": "a.txt"})]),
-                    FinalMessage("", "tool_use"),
+                    ToolCallEvent(calls=[ToolCall(id="call_1", name="read_file", input={"path": "a.txt"})]),
+                    FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent([ToolCall("call_2", "read_file", {"path": "b.txt"})]),
-                    FinalMessage("", "tool_use"),
+                    ToolCallEvent(calls=[ToolCall(id="call_2", name="read_file", input={"path": "b.txt"})]),
+                    FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent([ToolCall("call_3", "read_file", {"path": "c.txt"})]),
-                    FinalMessage("", "tool_use"),
+                    ToolCallEvent(calls=[ToolCall(id="call_3", name="read_file", input={"path": "c.txt"})]),
+                    FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent([ToolCall("call_4", "read_file", {"path": "d.txt"})]),
-                    FinalMessage("", "tool_use"),
+                    ToolCallEvent(calls=[ToolCall(id="call_4", name="read_file", input={"path": "d.txt"})]),
+                    FinalMessage(content="", stop_reason="tool_use"),
                 ],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
+                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
             ]
         )
 
@@ -108,22 +108,22 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallEvent([ToolCall("call_1", "read_file", {"path": "a.txt"})]),
-                    FinalMessage("", "tool_use"),
+                    ToolCallEvent(calls=[ToolCall(id="call_1", name="read_file", input={"path": "a.txt"})]),
+                    FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent([ToolCall("call_2", "read_file", {"path": "b.txt"})]),
-                    FinalMessage("", "tool_use"),
+                    ToolCallEvent(calls=[ToolCall(id="call_2", name="read_file", input={"path": "b.txt"})]),
+                    FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent([ToolCall("call_3", "read_file", {"path": "c.txt"})]),
-                    FinalMessage("", "tool_use"),
+                    ToolCallEvent(calls=[ToolCall(id="call_3", name="read_file", input={"path": "c.txt"})]),
+                    FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent([ToolCall("call_4", "read_file", {"path": "d.txt"})]),
-                    FinalMessage("", "tool_use"),
+                    ToolCallEvent(calls=[ToolCall(id="call_4", name="read_file", input={"path": "d.txt"})]),
+                    FinalMessage(content="", stop_reason="tool_use"),
                 ],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
+                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
             ]
         )
 
@@ -169,8 +169,8 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
             ):
                 nonlocal fallback_calls
                 fallback_calls += 1
-                yield TextDelta("fallback done")
-                yield FinalMessage("", "end_turn")
+                yield TextDelta(chunk="fallback done")
+                yield FinalMessage(content="", stop_reason="end_turn")
 
         agent = StructuredAgent(
             provider=OverloadedProvider(),

@@ -258,10 +258,6 @@ def build_tool_registry(
     skill_loader = None
     if "skills" in enabled and skills_dir.exists():
         skill_loader = SkillLoader(skills_dir)
-    local_shell_skills = (
-        tuple(skill_loader.to_local_shell_skills()) if skill_loader is not None else ()
-    )
-    include_native_shell = _uses_openai_responses_transport(llm)
     registry = build_project_scoped_registry(
         project_root=project_root,
         enabled=enabled,
@@ -269,8 +265,6 @@ def build_tool_registry(
         shell_spec=shell_spec,
         cancel_event=cancel_event,
         env=env,
-        include_native_shell=include_native_shell,
-        local_shell_skills=local_shell_skills,
     )
     if "worktree" in enabled:
         from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
@@ -316,7 +310,6 @@ def build_tool_registry(
                     shell_spec=shell_spec,
                     cancel_event=cancel_event,
                     env=env,
-                    include_native_shell=include_native_shell,
                     local_shell_skills=local_shell_skills,
                 )
             result = await StructuredAgent(
@@ -342,11 +335,6 @@ def build_tool_registry(
         if "subagent" in enabled:
             registry += build_managed_subagent_tools(managed_runner)
     return registry, skill_loader, shell_spec, tuple(closers)
-
-
-def _uses_openai_responses_transport(llm: ModelProvider) -> bool:
-    """判断主 provider 是否支持 Responses builtin tools。"""
-    return getattr(llm, "transport", "") == "openai_responses"
 
 
 # ── 实验性服务 ──

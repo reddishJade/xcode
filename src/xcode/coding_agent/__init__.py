@@ -3,7 +3,6 @@ from .tools import (
     build_bash_tool,
     build_code_tools,
     build_file_tools,
-    build_native_shell_tool,
     detect_shell,
     build_shell_argv,
 )
@@ -13,7 +12,6 @@ __all__ = [
     "build_bash_tool",
     "build_code_tools",
     "build_file_tools",
-    "build_native_shell_tool",
     "build_project_scoped_registry",
     "ShellSpec",
     "detect_shell",

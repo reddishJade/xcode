@@ -1,13 +1,12 @@
 """OpenAI tool schema and message format codecs.
 
-Schema 转换、消息格式转换（Chat Completions / Responses API）。
+Schema 转换、消息格式转换（Chat Completions）。
 流式事件解码见 stream_codec.py。
 """
 
 from __future__ import annotations
 
 import copy
-import logging
 
 import orjson
 from typing import Any, Protocol
@@ -127,6 +126,7 @@ def _nullable_schema(schema: Any) -> Any:
 def to_chat_tool(
     name: str, description: str, schema: dict | None, strict: bool = False
 ) -> dict[str, Any]:
+    """将工具定义转换为 Chat Completions 格式。"""
     resolved = schema or {
         "type": "object",
         "properties": {
@@ -150,71 +150,8 @@ def to_chat_tool(
     }
 
 
-_KNOWN_BUILTIN_TOOL_TYPES = frozenset(
-    {
-        "web_search_preview",
-        "web_search",
-        "file_search",
-        "code_interpreter",
-        "shell",
-        "computer_use_preview",
-    }
-)
-
-
-def to_responses_tool(
-    name: str,
-    description: str,
-    schema: dict | None,
-    builtin: dict[str, Any] | None = None,
-    strict: bool = False,
-) -> dict[str, Any]:
-    """将工具定义转换为 Responses API 扁平格式。
-
-    Responses API 中 function tool 的 name/description/parameters 为顶层字段，
-    且支持 strict 模式保证输出 schema 一致性。
-
-    builtin 工具（如 web_search、shell）直接透传，
-    但必须包含非空 type 字段且值为已知内置类型。
-    """
-    if builtin is not None:
-        tool_type = builtin.get("type")
-        if not isinstance(tool_type, str) or not tool_type:
-            raise ValueError(
-                "builtin tool definition must have a non-empty 'type' field, "
-                f"got: {builtin}"
-            )
-        if tool_type not in _KNOWN_BUILTIN_TOOL_TYPES:
-            logging.getLogger(__name__).warning(
-                "builtin tool type=%r is not in the known types list; "
-                "may not be supported by the current API version",
-                tool_type,
-            )
-        return dict(builtin)
-    resolved = schema or {
-        "type": "object",
-        "properties": {
-            "input": {"type": "string", "description": description},
-        },
-    }
-    if strict:
-        resolved = make_schema_strict(resolved)
-    result: dict[str, Any] = {
-        "type": "function",
-        "name": name,
-        "description": description,
-        "parameters": resolved,
-    }
-    if strict:
-        result["strict"] = True
-    return result
-
-
 # Provider 之间无需转换的目标列表（共享 reasoning_content 协议）
 _REASONING_CONTENT_TRANSPORTS = {"deepseek_chat", "chatglm_chat", "mimo_chat"}
-
-# 通过 reasoning_content 字段流式传输思考内容的 provider 列表
-# （来自这些 provider 的消息保留 reasoning_content；发往非这些 provider 时需转为文本）
 
 
 def _has_reasoning_content(messages: list[dict[str, Any]]) -> bool:
@@ -228,6 +165,11 @@ def normalize_cross_provider_messages(
     messages: list[dict[str, Any]],
     target_transport: str,
 ) -> list[dict[str, Any]]:
+    """跨 provider 消息归一化。
+
+    当消息来自不同 provider 时（如 DeepSeek → MiMo），
+    将 provider 专有字段（如 reasoning_content）转为通用文本格式。
+    """
     if not _has_reasoning_content(messages):
         return messages
 
@@ -287,74 +229,6 @@ def to_chat_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if "prefix" in message:
                 result["prefix"] = message["prefix"]
             converted.append(result)
-    return converted
-
-
-def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """转换为 Responses API 格式。tool result 使用 type:"function_call_output"。"""
-    converted: list[dict[str, Any]] = []
-    for message in messages:
-        role = str(message.get("role", "user"))
-        responses_role = "developer" if role == "system" else role
-        content = message.get("content")
-
-        if role == "tool" and "tool_call_id" in message:
-            converted.append(
-                {
-                    "type": "function_call_output",
-                    "call_id": message["tool_call_id"],
-                    "output": str(content) if content is not None else "",
-                }
-            )
-            continue
-
-        if role == "assistant" and "tool_calls" in message:
-            text_content = str(content) if content else None
-            if text_content:
-                assistant_message: dict[str, Any] = {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": text_content}],
-                }
-                if message.get("phase"):
-                    assistant_message["phase"] = message["phase"]
-                converted.append(assistant_message)
-            for call in message["tool_calls"]:
-                if isinstance(call, dict):
-                    func = call.get("function", {})
-                    converted.append(
-                        {
-                            "type": "function_call",
-                            "call_id": call.get("id", ""),
-                            "name": func.get("name", ""),
-                            "arguments": func.get("arguments", "{}"),
-                        }
-                    )
-            continue
-
-        if isinstance(content, list):
-            converted.extend(
-                _content_blocks_to_responses_input(responses_role, content)
-            )
-        else:
-            text = str(content) if content is not None else ""
-            if role == "assistant":
-                assistant_text_message: dict[str, Any] = {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": text}],
-                }
-                if message.get("phase"):
-                    assistant_text_message["phase"] = message["phase"]
-                converted.append(assistant_text_message)
-            else:
-                converted.append(
-                    {
-                        "type": "message",
-                        "role": responses_role,
-                        "content": [{"type": "input_text", "text": text}],
-                    }
-                )
     return converted
 
 
@@ -433,117 +307,3 @@ def _content_blocks_to_chat_messages(
             msg["prefix"] = prefix
         converted.insert(0, msg)
     return converted
-
-
-def _content_blocks_to_responses_input(
-    role: str, content: list
-) -> list[dict[str, Any]]:
-    """将内容块转换为 Responses API 格式。"""
-    converted: list[dict[str, Any]] = []
-    function_calls = []
-    message_content: list[dict[str, Any]] = []
-
-    for part in content:
-        if not isinstance(part, dict) and not hasattr(part, "type"):
-            message_content.append(_responses_text_part(role, str(part)))
-            continue
-        part_type = str(_part_value(part, "type", ""))
-        if part_type == "tool_result":
-            converted.append(
-                {
-                    "type": "function_call_output",
-                    "call_id": str(_part_value(part, "tool_use_id", "")),
-                    "output": str(_part_value(part, "content", "")),
-                }
-            )
-        elif part_type == "shell_call_output":
-            converted.append(_responses_shell_call_output_part(part))
-        elif part_type == "tool_use":
-            function_calls.append(
-                {
-                    "type": "function_call",
-                    "call_id": str(_part_value(part, "id", "")),
-                    "name": str(_part_value(part, "name", "")),
-                    "arguments": orjson.dumps(_part_value(part, "input", {})).decode(),
-                }
-            )
-        elif part_type == "text":
-            text = str(_part_value(part, "text", ""))
-            message_content.append(_responses_text_part(role, text))
-        elif part_type in {"image", "image_url", "input_image"}:
-            message_content.append(_responses_image_part(part))
-        elif part_type in {"file", "input_file"}:
-            message_content.append(_responses_file_part(part))
-
-    if message_content:
-        converted.append(
-            {
-                "type": "message",
-                "role": role,
-                "content": message_content,
-            }
-        )
-
-    converted.extend(function_calls)
-    return converted
-
-
-def _part_value(part: object, key: str, default: Any = None) -> Any:
-    """从 dict 或内容块对象读取字段。"""
-    if isinstance(part, dict):
-        return part.get(key, default)
-    return getattr(part, key, default)
-
-
-def _responses_text_part(role: str, text: str) -> dict[str, Any]:
-    """构造 Responses 文本内容块。"""
-    if role == "assistant":
-        return {"type": "output_text", "text": text}
-    return {"type": "input_text", "text": text}
-
-
-def _responses_image_part(part: object) -> dict[str, Any]:
-    """构造 Responses 图像输入块。"""
-    source = _part_value(part, "source", None)
-    if isinstance(source, dict):
-        result = {"type": "input_image", **source}
-    else:
-        result = {
-            "type": "input_image",
-            "image_url": _part_value(part, "image_url", ""),
-        }
-    if "url" in result and "image_url" not in result:
-        result["image_url"] = result.pop("url")
-    return result
-
-
-def _responses_file_part(part: object) -> dict[str, Any]:
-    """构造 Responses 文件输入块。"""
-    source = _part_value(part, "source", None)
-    if isinstance(source, dict):
-        return {"type": "input_file", **source}
-
-    result: dict[str, Any] = {"type": "input_file"}
-    file_id = _part_value(part, "file_id", None)
-    filename = _part_value(part, "filename", None)
-    file_data = _part_value(part, "file_data", None)
-    if file_id:
-        result["file_id"] = file_id
-    if filename:
-        result["filename"] = filename
-    if file_data:
-        result["file_data"] = file_data
-    return result
-
-
-def _responses_shell_call_output_part(part: object) -> dict[str, Any]:
-    """构造 Responses shell_call_output 输入项。"""
-    result: dict[str, Any] = {
-        "type": "shell_call_output",
-        "call_id": str(_part_value(part, "call_id", "")),
-        "output": _part_value(part, "output", []),
-    }
-    max_output_length = _part_value(part, "max_output_length", None)
-    if max_output_length is not None:
-        result["max_output_length"] = max_output_length
-    return result

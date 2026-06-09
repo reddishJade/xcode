@@ -67,7 +67,7 @@ class ToolResultContent:
 
 @dataclass(frozen=True)
 class ShellCallOutputContent:
-    """Responses shell_call_output 内容块。"""
+    """Shell 调用输出内容块。"""
 
     type: str = "shell_call_output"
     call_id: str = ""

@@ -18,12 +18,12 @@ from xcode.harness.skills import ToolSpec
 class ExecutionModeTests(unittest.TestCase):
     def test_act_validation_requires_approval(self) -> None:
         policy = ActPolicy()
-        result = policy.check_call(ToolCall("t1", "run_validation", {}))
+        result = policy.check_call(ToolCall(id="t1", name="run_validation", input={}))
         self.assertEqual(result, "ask")
 
     def test_act_bash_still_allowed(self) -> None:
         policy = ActPolicy()
-        result = policy.check_call(ToolCall("t1", "bash", {"command": "echo hello"}))
+        result = policy.check_call(ToolCall(id="t1", name="bash", input={"command": "echo hello"}))
         self.assertEqual(result, "allow")
 
 

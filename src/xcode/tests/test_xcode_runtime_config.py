@@ -45,7 +45,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             path = Path(tmp) / "xcode.config.json"
             path.write_text(
                 '{"provider":{"model_profiles":{'
-                '"main":{"transport":"openai_responses",'
+                '"main":{"transport":"openai_chat",'
                 '"chat_model":"main-test","base_url":"https://main.test"},'
                 '"subagent":{"chat_model":"subagent-test"}}},'
                 '"agent":{"max_steps":9,"compact_threshold":20,'
@@ -64,7 +64,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             config = load_runtime_config(path)
 
             self.assertEqual(
-                config.provider.model_profiles["main"].transport, "openai_responses"
+                config.provider.model_profiles["main"].transport, "openai_chat"
             )
             self.assertEqual(
                 config.provider.model_profiles["main"].chat_model, "main-test"

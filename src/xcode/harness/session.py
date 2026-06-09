@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, UTC
+import filelock
 import json
 import logging
 import os
@@ -9,7 +10,16 @@ from pathlib import Path
 import shutil
 from typing import Any
 
-import filelock
+from pydantic import BaseModel
+
+
+class _PydanticEncoder(json.JSONEncoder):
+    """处理 pydantic 模型的 JSON 序列化。"""
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, BaseModel):
+            return obj.model_dump()
+        return super().default(obj)
 
 # 会话摘要字符限制（终端显示和可读性优化）
 SUMMARY_USER_CHARS = 120         # 用户消息摘要：约一行终端显示
@@ -86,7 +96,7 @@ class SessionStore:
                 created_at=datetime.now(UTC).isoformat(timespec="seconds"),
             )
             with self.current_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+                handle.write(json.dumps(asdict(record), ensure_ascii=False, cls=_PydanticEncoder) + "\n")
             if record_type == "user":
                 self.ensure_metadata(str(content))
 
@@ -189,7 +199,7 @@ class SessionStore:
             kept = records[:keep_until]
             with self.current_path.open("w", encoding="utf-8") as handle:
                 for record in kept:
-                    handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+                    handle.write(json.dumps(asdict(record), ensure_ascii=False, cls=_PydanticEncoder) + "\n")
             return len(records) - len(kept)
 
     def compact_current_session(self, max_tool_result_chars: int = 200) -> int:

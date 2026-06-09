@@ -7,7 +7,6 @@ from typing import Any, Literal, cast
 
 ProviderTransport = Literal[
     "openai_chat",
-    "openai_responses",
     "anthropic_messages",
     "chatglm_chat",
     "deepseek_chat",

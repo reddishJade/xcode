@@ -1,8 +1,17 @@
+"""OpenAI Chat Completions 兼容 provider 基类。
+
+DeepSeek、ChatGLM、MiMo 和 OpenAIChat 共享的客户端创建、
+流式调用和指标记录模式提取到此类中。子类只需实现 _stream_sync
+和 provider 专有的参数构建逻辑。
+
+使用 litellm 作为统一的 LLM 调用层，支持所有 OpenAI-compatible API。
+"""
+
 from __future__ import annotations
 
 import copy
 from collections.abc import AsyncIterator, Iterator
-from typing import Any, cast
+from typing import Any
 
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
@@ -11,13 +20,6 @@ from .codec import normalize_cross_provider_messages, to_chat_messages, to_chat_
 from .metrics import ProviderMetricsMixin
 from .runtime import ProviderRuntime
 from .stream_codec import chat_stream_to_events
-
-"""OpenAI Chat Completions 兼容 provider 基类。
-
-DeepSeek、ChatGLM、MiMo 和 OpenAIChat 共享的客户端创建、
-流式调用和指标记录模式提取到此类中。子类只需实现 _stream_sync
-和 provider 专有的参数构建逻辑。
-"""
 
 
 class OpenAICompatProvider(ProviderMetricsMixin):
@@ -42,17 +44,10 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         thinking: bool = True,
         reasoning_effort: str | None = None,
         runtime: ProviderRuntime | None = None,
-        client: Any | None = None,
         transport: str = "openai_chat",
-        import_error_msg: str = "Missing dependency: openai.",
     ) -> None:
-        if client is None:
-            try:
-                from openai import OpenAI
-            except ImportError as exc:
-                raise RuntimeError(import_error_msg) from exc
-            client = OpenAI(api_key=api_key, base_url=base_url)
-        self.client = client
+        self.api_key = api_key
+        self.base_url = base_url
         self.model = model
         self.thinking = thinking
         self.reasoning_effort = reasoning_effort
@@ -108,21 +103,46 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         params: dict[str, Any],
         message_count: int,
     ) -> Iterator[ProviderEvent]:
-        """调用 chat.completions.create 并通过 _intercept_usage 流式返回事件。"""
+        """调用 litellm.completion() 并通过 _intercept_usage 流式返回事件。"""
+        import litellm
+
         opts = getattr(self, "_current_options", None)
+
+        # 构建 litellm 参数
+        completion_params: dict[str, Any] = {
+            "model": params["model"],
+            "messages": params["messages"],
+            "stream": True,
+        }
+
+        # 透传标准参数
+        for key in ("tools", "response_format", "reasoning_effort", "max_tokens"):
+            if key in params:
+                completion_params[key] = params[key]
+
+        # extra_body 包含 provider 专有参数
+        if "extra_body" in params:
+            completion_params["extra_body"] = params["extra_body"]
+
+        # stream_options → stream_usage（litellm 格式转换）
+        if "stream_options" in params:
+            completion_params["stream_usage"] = True
+        else:
+            completion_params["stream_usage"] = True
+
+        # 请求级覆盖
         if opts:
             if opts.api_key:
-                params["api_key"] = opts.api_key
+                completion_params["api_key"] = opts.api_key
             extra_headers: dict[str, str] = {}
             if opts.session_id:
                 extra_headers["x-session-id"] = opts.session_id
             if opts.headers:
                 extra_headers.update(opts.headers)
             if extra_headers:
-                params["extra_headers"] = extra_headers
+                completion_params["extra_headers"] = extra_headers
 
-        create = cast(Any, self.client.chat.completions.create)
-        stream = self.runtime.run(lambda: create(**params))
+        stream = self.runtime.run(lambda: litellm.completion(**completion_params))
         return chat_stream_to_events(self._intercept_stream(stream, message_count))
 
     # --- Unified thinking abstractions ---

@@ -42,12 +42,10 @@ class XcodeAuditTests(unittest.TestCase):
             path = Path(temp_dir) / "audit.jsonl"
             responses: list[list[ProviderEvent]] = [
                 [
-                    ToolCallEvent(
-                        [ToolCall("t1", "echo", {"input": "sk-1234567890abcdef"})]
-                    ),
-                    FinalMessage("", "end_turn"),
+                    ToolCallEvent(calls=[ToolCall(id="t1", name="echo", input={"input": "sk-1234567890abcdef"})]),
+                    FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
+                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
             ]
             provider = FakeProvider(responses)
             agent = StructuredAgent(
@@ -107,10 +105,10 @@ class XcodeAuditTests(unittest.TestCase):
 
             responses: list[list[ProviderEvent]] = [
                 [
-                    ToolCallEvent([ToolCall("t1", "danger", {"input": "go"})]),
-                    FinalMessage("", "end_turn"),
+                    ToolCallEvent(calls=[ToolCall(id="t1", name="danger", input={"input": "go"})]),
+                    FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta("done"), FinalMessage("", "end_turn")],
+                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
             ]
             provider = FakeProvider(responses)
             agent = StructuredAgent(
