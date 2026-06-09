@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from xcode.evals.parameters import EvalReport, EvalTask, TrialResult
+from xcode.evals.schema import EvalReport, EvalTask, TrialResult
 
 
 def build_swebench_predictions(

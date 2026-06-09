@@ -109,6 +109,7 @@ class StructuredAgent:
             audit_logger=audit_logger,
             session_id=session_id,
         )
+        self.audit_logger = audit_logger
         self._history = HistoryManager()
 
         # 适配 ToolSpec → AgentTool，创建 Agent 实例

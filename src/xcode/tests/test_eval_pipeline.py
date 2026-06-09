@@ -32,7 +32,7 @@ from xcode.evals.runner import _build_run_metrics
 from xcode.evals.sandbox import UnsafeEvalTaskError
 from xcode.evals.tasks import SUITES
 from xcode.tests.fixtures import FakeProvider
-from xcode.evals.parameters import TrialResult
+from xcode.evals.schema import TrialResult
 
 
 class EvalPipelineTests(unittest.TestCase):
