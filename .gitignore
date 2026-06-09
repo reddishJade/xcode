@@ -16,6 +16,7 @@ docs/agent.md
 docs/claude.md
 docs/llm.md
 docs/rag.md
+opencode.json*
 packages/
 tmp/
 uv.lock
