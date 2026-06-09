@@ -293,7 +293,12 @@ async def _run_tool_handler(
         tool_result = await tool.execute(
             tool_call.id, args, signal, on_update=on_update
         )
-        return tool_result, tool_result.content, False, tool_result.terminate
+        return (
+            tool_result,
+            tool_result.content,
+            tool_result.is_error,
+            tool_result.terminate,
+        )
     except Exception as e:
         tool_result = AgentToolResult(content=[TextContent(text=f"Tool error: {e}")])
         return tool_result, tool_result.content, True, False

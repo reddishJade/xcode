@@ -28,16 +28,19 @@ type ToolResultContentBlock = (
 class AgentToolResult:
     content: list[ToolResultContentBlock]
     details: Any | None = None
+    is_error: bool = False
     terminate: bool = False
 
     def __init__(
         self,
         content: list[ToolResultContentBlock] | None = None,
         details: Any | None = None,
+        is_error: bool = False,
         terminate: bool = False,
     ) -> None:
         self.content = content or []
         self.details = details
+        self.is_error = is_error
         self.terminate = terminate
 
 

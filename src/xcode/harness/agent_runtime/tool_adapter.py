@@ -102,9 +102,13 @@ class ToolSpecAdapter:
             approval_callback=self._approval_callback,
             tool_spec=self._spec,
             tool_input=params,
+            high_risk_requires_approval=True,
         )
         if result.blocked:
-            return AgentToolResult(content=[TextContent(text=result.reason)])
+            return AgentToolResult(
+                content=[TextContent(text=result.reason)],
+                is_error=True,
+            )
 
         content = await asyncio.to_thread(self._spec.handler, params)
         return AgentToolResult(content=_tool_result_content(content, tool_call_id))

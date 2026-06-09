@@ -95,10 +95,16 @@ class XcodeAuditTests(unittest.TestCase):
             self.assertEqual(record["final_status"], "ok")
             self.assertTrue(record["approved"])
 
-    def test_tool_result_status_used_instead_of_string_prefix(self) -> None:
+    def test_high_risk_tool_without_approval_records_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "audit.jsonl"
-            # Tool with high risk that returns output resembling old approval prefix
+            called = False
+
+            def danger(_data: dict) -> str:
+                nonlocal called
+                called = True
+                return "approval required but actually ran"
+
             responses: list[list[ProviderEvent]] = [
                 [
                     ToolCallEvent([ToolCall("t1", "danger", {"input": "go"})]),
@@ -114,7 +120,7 @@ class XcodeAuditTests(unittest.TestCase):
                         "danger",
                         "Danger.",
                         "text",
-                        lambda _data: "approval required but actually ran",
+                        danger,
                         risk="high",
                     ),
                 ),
@@ -125,11 +131,10 @@ class XcodeAuditTests(unittest.TestCase):
             agent.run("go")
 
             record = json.loads(path.read_text(encoding="utf-8").strip())
-            # The tool ran successfully (no approval callback → returns approval_required via run_tool_result)
-            # We verify that we get structured status, not string-prefix-based approval
+            self.assertFalse(called)
             self.assertEqual(record["tool"], "danger")
-            self.assertIn("final_status", record)
-            self.assertIn("approved", record)
+            self.assertEqual(record["final_status"], "error")
+            self.assertTrue(record["approved"])
 
     def test_run_tool_result_redacts_output(self) -> None:
         tool = ToolSpec(

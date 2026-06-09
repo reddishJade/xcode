@@ -11,7 +11,8 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 from ...agent.messages import convert_to_llm
-from ...agent.messages import AgentMessage
+from ...agent.messages import AgentMessage, ToolResultMessage
+from ...agent.types import ShellCallOutputContent, TextContent
 from .cancellation import CancellationToken
 from .compaction import (
     budget_large_tool_outputs,
@@ -30,9 +31,67 @@ if TYPE_CHECKING:
 
 def to_dict(msg: AgentMessage) -> dict[str, Any]:
     """将类型化消息转为 dict（保持 state.messages 的 dict 格式）。"""
+    if isinstance(msg, ToolResultMessage):
+        return _tool_result_message_to_dict(msg)
     result = convert_to_llm([msg])
     assert result, f"convert_to_llm returned empty for {type(msg).__name__}"
     return result[0]
+
+
+def _tool_result_message_to_dict(msg: ToolResultMessage) -> dict[str, Any]:
+    """将工具结果保留为状态可见的结构化记录。"""
+    status = _tool_result_status(msg)
+    if isinstance(msg.content, list):
+        content = []
+        for item in msg.content:
+            if isinstance(item, TextContent):
+                content.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": msg.tool_call_id,
+                        "content": item.text,
+                        "status": status,
+                    }
+                )
+            elif isinstance(item, ShellCallOutputContent):
+                content.append(
+                    {
+                        "type": item.type,
+                        "call_id": item.call_id,
+                        "output": item.output,
+                        "max_output_length": item.max_output_length,
+                    }
+                )
+        return {"role": "tool", "tool_call_id": msg.tool_call_id, "content": content}
+    return {
+        "role": "tool",
+        "tool_call_id": msg.tool_call_id,
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": msg.tool_call_id,
+                "content": str(msg.content),
+                "status": status,
+            }
+        ],
+    }
+
+
+def _tool_result_status(msg: ToolResultMessage) -> str:
+    """根据工具结果错误状态生成 UI 可见状态。"""
+    if not msg.is_error:
+        return "ok"
+    text = _tool_result_text(msg.content).lower()
+    if "interrupt" in text or "cancel" in text:
+        return "interrupted"
+    return "error"
+
+
+def _tool_result_text(content: object) -> str:
+    """提取工具结果文本，用于状态归类。"""
+    if isinstance(content, list):
+        return "".join(item.text for item in content if isinstance(item, TextContent))
+    return str(content)
 
 
 def text_from_blocks(blocks: list[dict[str, Any]]) -> str:

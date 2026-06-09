@@ -8,6 +8,7 @@ from xcode.agent.tool_execution import partition_tool_calls_for_execution
 from xcode.agent.config import AgentContext
 from xcode.agent.protocols import AgentTool
 from xcode.agent.types import ShellCallOutputContent, ToolCallContent
+from xcode.harness.observability import HITLResult
 from xcode.harness.agent_runtime.tool_adapter import adapt_tool_specs
 from xcode.harness.skills import (
     AGENT_CONTENT_BLOCKS_METADATA_KEY,
@@ -89,6 +90,39 @@ class AgentToolExecutionTests(unittest.TestCase):
         assert isinstance(block, ShellCallOutputContent)
         self.assertEqual(block.call_id, "call-1")
         self.assertEqual(block.output[0]["stdout"], "ok")
+
+    def test_toolspec_adapter_blocks_high_risk_without_approval(self) -> None:
+        called = False
+
+        def handler(_data: dict) -> str:
+            nonlocal called
+            called = True
+            return "changed"
+
+        (tool,) = adapt_tool_specs(
+            (ToolSpec("write", "Write.", "text", handler, risk="high"),)
+        )
+
+        result = asyncio.run(tool.execute("call-1", {}))
+
+        self.assertFalse(called)
+        self.assertTrue(result.is_error)
+        self.assertIn("requires approval", result.content[0].text)
+
+    def test_toolspec_adapter_runs_high_risk_after_approval(self) -> None:
+        (tool,) = adapt_tool_specs(
+            (
+                ToolSpec(
+                    "write", "Write.", "text", lambda _data: "changed", risk="high"
+                ),
+            ),
+            approval_callback=lambda _tool, _input: HITLResult("allow", "once"),
+        )
+
+        result = asyncio.run(tool.execute("call-1", {}))
+
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.content[0].text, "changed")
 
     def test_partition_tool_calls_for_execution_keeps_sequential_barriers(self) -> None:
         tools = adapt_tool_specs(
