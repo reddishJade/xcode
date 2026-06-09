@@ -53,6 +53,7 @@ class StructuredAgentResult:
     stopped_by_limit: bool = False
     metrics: dict[str, Any] | None = None
     stopped_by_watchdog: bool = False
+    stopped_by_error: bool = False
     watchdog_reason: str | None = None
     needs_follow_up: bool = False
     last_agent: str = "main"
@@ -116,6 +117,7 @@ def _build_structured_result(
         tool_calls=tool_calls,
         last_agent="main",
         stopped_by_limit=result.stopped_by_limit,
+        stopped_by_error=result.stopped_by_error,
         metrics=metrics,
         stopped_by_watchdog=result.stopped_by_watchdog,
         watchdog_reason=result.watchdog_reason,

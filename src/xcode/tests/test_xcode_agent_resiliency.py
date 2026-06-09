@@ -41,9 +41,10 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
             config=AgentConfig(max_steps=5),
         )
 
-        with self.assertRaises(RuntimeError) as ctx:
-            agent.run("test diminishing returns")
-        self.assertIn("Diminishing Returns", str(ctx.exception))
+        result = agent.run("test diminishing returns")
+
+        self.assertIn("Diminishing Returns", result.answer)
+        self.assertTrue(result.stopped_by_error)
 
     def test_semantic_idle_failsafe_triggers_in_act_mode(self) -> None:
         # Define a read-only tool (not productive)
@@ -145,7 +146,13 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         fallback_calls = 0
 
         class OverloadedProvider:
-            async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
+            async def stream(
+                self,
+                messages,
+                tools,
+                options: StreamOptions | None = None,
+                **kwargs: Any,
+            ):
                 nonlocal primary_calls
                 primary_calls += 1
                 if False:
@@ -153,7 +160,13 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
                 raise RuntimeError("529 Service Overloaded")
 
         class FallbackProvider:
-            async def stream(self, messages, tools, options: StreamOptions | None = None, **kwargs: Any):
+            async def stream(
+                self,
+                messages,
+                tools,
+                options: StreamOptions | None = None,
+                **kwargs: Any,
+            ):
                 nonlocal fallback_calls
                 fallback_calls += 1
                 yield TextDelta("fallback done")

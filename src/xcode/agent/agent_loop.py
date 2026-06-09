@@ -276,13 +276,15 @@ async def _run_loop(
         # ── 错误/中止 → 退出 ──
         if stop_reason in ("error", "aborted"):
             emit(_turn_end_event(message, []))
-            emit(_agent_end_event(new_messages))
-            return AgentLoopResult(
+            result = AgentLoopResult(
                 messages=new_messages,
                 steps=step,
+                stopped_by_error=stop_reason == "error",
                 metrics=metrics,
                 active_provider=state.active_provider,
             )
+            emit(_agent_end_event(new_messages, result))
+            return result
 
         # ── 提取工具调用 ──
         tool_calls = [b for b in message.content if isinstance(b, ToolCallContent)]
@@ -564,15 +566,23 @@ async def _run_inner_loop(
             if should_retry:
                 continue
             if fallback_message is not None:
-                return None
+                context.messages.append(fallback_message)
+                return fallback_message, "error", provider
             emit(_message_end_event(message))
             return message, stop_reason, provider
 
         # ── max_tokens 续写 ──
         if _should_continue_max_tokens(stop_reason, config):
-            state.consecutive_continuations = _update_continuation_count(
+            continuation_count = _update_continuation_count(
                 message, state.consecutive_continuations, config
             )
+            if continuation_count is None:
+                fallback = _continuation_limit_message(config)
+                context.messages.append(fallback)
+                emit(_message_start_event(fallback))
+                emit(_message_end_event(fallback))
+                return fallback, "error", provider
+            state.consecutive_continuations = continuation_count
             _append_continuation_prompt(context, message)
             continue
 
@@ -733,7 +743,7 @@ def _update_continuation_count(
     message: AssistantMessage,
     consecutive_continuations: int,
     config: AgentLoopConfig,
-) -> int:
+) -> int | None:
     """检测模型是否陷入低产出续写循环。
 
     续写机制设计：
@@ -750,11 +760,23 @@ def _update_continuation_count(
         else 0
     )
     if updated >= config.max_consecutive_continuations:
-        raise RuntimeError(
-            "Diminishing Returns: consecutive output token increments "
-            f"below {config.min_continuation_tokens} limit."
-        )
+        return None
     return updated
+
+
+def _continuation_limit_message(config: AgentLoopConfig) -> AssistantMessage:
+    """构造续写保护触发后的结构化错误消息。"""
+    return AssistantMessage(
+        content=[
+            TextContent(
+                text=(
+                    "Diminishing Returns: consecutive output token increments "
+                    f"below {config.min_continuation_tokens} limit."
+                )
+            )
+        ],
+        stop_reason="error",
+    )
 
 
 def _append_continuation_prompt(

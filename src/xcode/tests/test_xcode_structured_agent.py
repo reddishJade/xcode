@@ -744,9 +744,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             provider=FakeProvider(factory),
             registry=(),
         )
-        with self.assertRaises(RuntimeError) as ctx:
-            agent.run("hello")
-        self.assertIn("Diminishing Returns", str(ctx.exception))
+        result = agent.run("hello")
+
+        self.assertTrue(result.stopped_by_error)
+        self.assertIn("Diminishing Returns", result.answer)
 
     def test_transient_error_retry(self) -> None:
         import unittest.mock as mock
@@ -768,6 +769,23 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             self.assertEqual(result.answer, "success")
             self.assertEqual(len(calls), 3)
             self.assertEqual(mock_sleep.call_count, 2)
+
+    def test_provider_error_retry_exhaustion_returns_fallback_message(self) -> None:
+        import unittest.mock as mock
+
+        def factory(_messages, _tools) -> list[ProviderEvent]:
+            raise RuntimeError("provider down")
+
+        agent = StructuredAgent(
+            provider=FakeProvider(factory),
+            registry=(),
+        )
+
+        with mock.patch("asyncio.sleep", new=mock.AsyncMock()):
+            result = agent.run("hello")
+
+        self.assertTrue(result.stopped_by_error)
+        self.assertIn("I encountered an error.", result.answer)
 
 
 if __name__ == "__main__":
