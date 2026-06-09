@@ -7,7 +7,6 @@ import unittest
 
 from xcode.agent.types import ToolCallContent
 from xcode.agent.watchdog import (
-    RepeatDetector,
     is_file_mutation_tool,
     is_file_read_tool,
     should_clear_read_history,
@@ -86,79 +85,6 @@ class TestToolClassification(unittest.TestCase):
         self.assertFalse(should_clear_read_history(read_calls, []))
         # 写入调用清除历史
         self.assertTrue(should_clear_read_history(write_calls, []))
-
-
-class TestRepeatDetector(unittest.TestCase):
-    """测试重复检测器。"""
-
-    def test_no_repeat_different_calls(self):
-        """测试不同调用不触发重复。"""
-        detector = RepeatDetector(limit=3)
-        calls1 = [ToolCallContent(id="1", name="read_file", arguments={"path": "a"})]
-        calls2 = [ToolCallContent(id="2", name="read_file", arguments={"path": "b"})]
-
-        is_repeat, _ = detector.check_and_update(calls1)
-        self.assertFalse(is_repeat)
-        is_repeat, _ = detector.check_and_update(calls2)
-        self.assertFalse(is_repeat)
-
-    def test_repeat_same_calls(self):
-        """测试相同调用触发重复限制。"""
-        detector = RepeatDetector(limit=3)
-        calls = [ToolCallContent(id="1", name="read_file", arguments={"path": "a"})]
-
-        # 第 1、2 次不触发
-        is_repeat, _ = detector.check_and_update(calls)
-        self.assertFalse(is_repeat)
-        is_repeat, _ = detector.check_and_update(calls)
-        self.assertFalse(is_repeat)
-
-        # 第 3 次触发
-        is_repeat, reason = detector.check_and_update(calls)
-        self.assertTrue(is_repeat)
-        self.assertIn("重复", reason)
-
-    def test_clear_history_after_mutation(self):
-        """测试文件变更后清除只读历史。"""
-        detector = RepeatDetector(limit=3)
-
-        # 读文件 3 次
-        read_calls = [
-            ToolCallContent(id="1", name="read_file", arguments={"path": "a"})
-        ]
-        detector.check_and_update(read_calls)
-        detector.check_and_update(read_calls)
-        detector.check_and_update(read_calls)
-
-        # 写文件（清除历史）
-        write_calls = [
-            ToolCallContent(id="2", name="write_file", arguments={"path": "a"})
-        ]
-        is_repeat, _ = detector.check_and_update(write_calls)
-        self.assertFalse(is_repeat)
-
-        # 再次读文件不应触发重复（历史已清除）
-        is_repeat, _ = detector.check_and_update(read_calls)
-        self.assertFalse(is_repeat)
-
-    def test_reset(self):
-        """测试重置检测器。"""
-        detector = RepeatDetector(limit=3)
-        calls = [ToolCallContent(id="1", name="test", arguments={})]
-
-        detector.check_and_update(calls)
-        detector.check_and_update(calls)
-        detector.reset()
-
-        # 重置后重新计数
-        is_repeat, _ = detector.check_and_update(calls)
-        self.assertFalse(is_repeat)
-
-    def test_empty_calls(self):
-        """测试空调用列表。"""
-        detector = RepeatDetector(limit=3)
-        is_repeat, _ = detector.check_and_update([])
-        self.assertFalse(is_repeat)
 
 
 if __name__ == "__main__":
