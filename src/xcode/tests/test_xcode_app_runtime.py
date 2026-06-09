@@ -87,6 +87,8 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 "search_tools",
                 "evaluate_python",
                 "reset_namespace",
+                "request_plan_mode",
+                "exit_plan_mode",
             },
         )
 

@@ -9,8 +9,11 @@ from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
 
 class TestWorktreeTaskRunner(unittest.TestCase):
     def setUp(self) -> None:
-        self.repo_root = Path("/fake/repo/root").resolve()
-        self.worktrees_dir = Path("/fake/repo/root/.xcode-worktrees").resolve()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self.tmp.name) / "repo"
+        self.repo_root.mkdir(parents=True, exist_ok=True)
+        self.worktrees_dir = self.repo_root / ".xcode-worktrees"
+        self.worktrees_dir.mkdir(parents=True, exist_ok=True)
         self.commands_run: list[tuple[list[str], Path]] = []
         self.mock_responses: dict[str, str | Exception] = {}
 
@@ -24,6 +27,9 @@ class TestWorktreeTaskRunner(unittest.TestCase):
                     raise response
                 return response
         return ""
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
 
     def test_create_worktree_task(self) -> None:
         runner = WorktreeTaskRunner(

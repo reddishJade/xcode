@@ -187,6 +187,7 @@ class StructuredAgent:
     ) -> AsyncIterator[StructuredAgentEvent]:
         snapshot = self._turn_snapshot()
         effective_mode = mode or snapshot.config.execution_mode
+        self._mode._current_mode = effective_mode
         active_registry = self._mode.filter_tools_for_mode(snapshot.registry)
         self.cancellation_token.reset()
 
