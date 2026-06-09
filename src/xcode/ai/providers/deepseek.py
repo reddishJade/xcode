@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterator
 from typing import Any
 
 from xcode.ai.types import ToolDefinition
 
-from .codec import to_chat_messages, to_chat_tool
+from .codec import to_chat_tool
 from .openai_compat import OpenAICompatProvider
 
 """DeepSeek provider（兼容 OpenAI Chat API，带 reasoning_content 支持）。"""
@@ -48,58 +47,39 @@ class DeepSeekProvider(OpenAICompatProvider):
         self.metrics["prompt_cache_hit_tokens"] = 0
         self.metrics["prompt_cache_miss_tokens"] = 0
 
-    def _stream_sync(
+    def _build_chat_params(
         self,
-        messages: list[dict[str, Any]],
+        api_messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
-        response_format: dict[str, Any] | None = None,
-        max_tokens: int | None = None,
         **kwargs: Any,
-    ) -> Iterator[Any]:
+    ) -> dict[str, Any]:
         if self.thinking:
-            kwargs.pop("temperature", None)
-            kwargs.pop("top_p", None)
-            kwargs.pop("presence_penalty", None)
-            kwargs.pop("frequency_penalty", None)
+            for key in ("temperature", "top_p", "presence_penalty", "frequency_penalty"):
+                kwargs.pop(key, None)
 
-        cleaned_messages = self._clean_reasoning_content(messages)
-        api_messages = to_chat_messages(cleaned_messages)
-
-        # 优先使用运行时传递的 response_format，回退到构造时配置
-        effective_format = response_format or self.response_format
+        effective_format = kwargs.pop("response_format", None) or self.response_format
         if effective_format and effective_format.get("type") == "json_object":
             api_messages = self._ensure_json_word(api_messages)
 
-        strict_tools = kwargs.pop("strict_tools", getattr(self, "strict_tools", False))
+        strict = kwargs.pop("strict_tools", getattr(self, "strict_tools", False))
+        max_tokens = kwargs.pop("max_tokens", None)
 
         params: dict[str, Any] = {
             "model": self.model,
             "messages": api_messages,
-            "tools": [
-                to_chat_tool(
-                    getattr(t, "name", ""),
-                    getattr(t, "description", ""),
-                    getattr(t, "schema", None),
-                    strict=strict_tools,
-                )
-                for t in tools
-            ],
+            "tools": [to_chat_tool(t.name, t.description, t.schema, strict=strict) for t in tools],
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-
         if effective_format:
             params["response_format"] = effective_format
         if max_tokens:
             params["max_tokens"] = max_tokens
-
         self._build_thinking_params(params)
-
         for k, v in kwargs.items():
             if k not in params:
                 params[k] = v
-
-        yield from self._call_chat_api(params, len(api_messages))
+        return params
 
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]
@@ -193,24 +173,4 @@ class DeepSeekProvider(OpenAICompatProvider):
                     )
         return messages
 
-    def _record_usage(self, response, sent_messages: int) -> None:
-        """记录 DeepSeek usage，优先使用原生缓存字段。"""
-        from xcode.ai.cache import extract_cache_usage
 
-        self.metrics["sent_messages"] = sent_messages
-        usage = getattr(response, "usage", None)
-        if usage:
-            # 使用统一的缓存提取逻辑
-            cache_usage = extract_cache_usage(response)
-            self.metrics["prompt_cache_hit_tokens"] = cache_usage.hit_tokens
-            self.metrics["prompt_cache_miss_tokens"] = cache_usage.miss_tokens
-            self.metrics["cached_tokens"] = cache_usage.hit_tokens
-            self.metrics["cache_hit_rate"] = cache_usage.hit_rate
-
-            completion_details = getattr(usage, "completion_tokens_details", None)
-            reasoning = (
-                getattr(completion_details, "reasoning_tokens", 0)
-                if completion_details
-                else 0
-            )
-            self.metrics["reasoning_tokens"] = reasoning or 0

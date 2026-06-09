@@ -7,7 +7,7 @@ from typing import Any, cast
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
 
-from .codec import to_chat_messages, to_chat_tool
+from .codec import to_chat_tool
 from .openai_compat import OpenAICompatProvider
 
 """智谱 AI ChatGLM provider（兼容 OpenAI Chat API）。
@@ -56,7 +56,6 @@ class ChatGLMProvider(OpenAICompatProvider):
         self.metrics["prompt_tokens"] = 0
         self.metrics["completion_tokens"] = 0
         self.metrics["total_tokens"] = 0
-        self.metrics["cache_hit_ratio"] = 0.0
 
     async def stream(
         self,
@@ -83,50 +82,41 @@ class ChatGLMProvider(OpenAICompatProvider):
         tools: tuple[ToolDefinition, ...],
         response_format: dict[str, Any] | None = None,
         thinking: bool | None = None,
-        **_kwargs: Any,
+        **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
-        params = self._chat_kwargs(
-            messages,
-            tools,
-            stream=True,
-            response_format=response_format,
-            thinking=thinking,
+        clean = self._clean_reasoning_content(messages)
+        from .codec import to_chat_messages
+        api_messages = to_chat_messages(clean)
+        params = self._build_chat_params(
+            api_messages, tools, response_format=response_format, thinking=thinking, **kwargs
         )
-        openai_messages = cast(list[dict[str, Any]], params["messages"])
+        yield from self._call_chat_api(params, len(api_messages))
 
-        yield from self._call_chat_api(params, len(openai_messages))
-
-    def _chat_kwargs(
+    def _build_chat_params(
         self,
-        messages: list[dict[str, Any]],
+        api_messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
-        *,
-        stream: bool,
-        response_format: dict[str, Any] | None = None,
-        thinking: bool | None = None,
-    ) -> dict[str, object]:
-        cleaned_messages = self._clean_reasoning_content(messages)
-        openai_messages = to_chat_messages(cleaned_messages)
-        effective_thinking = self.thinking if thinking is None else thinking
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        thinking_override = kwargs.pop("thinking", None)
+        effective_thinking = self.thinking if thinking_override is None else thinking_override
+        effective_format = kwargs.pop("response_format", None) or self.response_format
 
-        kwargs: dict[str, object] = {
+        params: dict[str, Any] = {
             "model": self.model,
-            "messages": openai_messages,
+            "messages": api_messages,
             "tools": [to_chat_tool(t.name, t.description, t.schema) for t in tools],
-            "stream": stream,
+            "stream": True,
         }
-        effective_response_format = response_format or self.response_format
-        if effective_response_format:
-            kwargs["response_format"] = effective_response_format
-
-        if stream and self.tool_stream and _supports_tool_stream(self.model):
-            kwargs["tool_stream"] = True
-
-        self._build_thinking_params(kwargs, effective_thinking)
-        extra_body = cast(dict[str, Any], kwargs.setdefault("extra_body", {}))
+        if effective_format:
+            params["response_format"] = effective_format
+        if self.tool_stream and _supports_tool_stream(self.model):
+            params["tool_stream"] = True
+        self._build_thinking_params(params, effective_thinking)
+        extra_body = cast(dict[str, Any], params.setdefault("extra_body", {}))
         thinking_body = cast(dict[str, Any], extra_body.setdefault("thinking", {}))
         thinking_body["clear_thinking"] = self.clear_thinking
-        return kwargs
+        return params
 
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]
@@ -143,39 +133,18 @@ class ChatGLMProvider(OpenAICompatProvider):
         return cleaned
 
     def _record_usage(self, response, sent_messages: int) -> None:
-        """记录 ChatGLM usage，使用兼容字段提取缓存统计。"""
-        from xcode.ai.cache import extract_cache_usage
-
-        self.metrics["sent_messages"] = sent_messages
+        """记录 ChatGLM usage，添加 provider 专属 token 统计。"""
+        super()._record_usage(response, sent_messages)
         usage = getattr(response, "usage", None)
         if usage:
             prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
             completion_tokens = getattr(usage, "completion_tokens", 0) or 0
             total_tokens = getattr(
-                usage,
-                "total_tokens",
-                prompt_tokens + completion_tokens,
+                usage, "total_tokens", prompt_tokens + completion_tokens
             )
             self.metrics["prompt_tokens"] = prompt_tokens
             self.metrics["completion_tokens"] = completion_tokens
             self.metrics["total_tokens"] = total_tokens or 0
-
-            # 使用统一的缓存提取逻辑
-            cache_usage = extract_cache_usage(response)
-            self.metrics["cached_tokens"] = cache_usage.hit_tokens
-            self.metrics["cache_hit_rate"] = cache_usage.hit_rate
-            # ChatGLM 使用兼容字段，hit/miss 分解不是官方字段
-            if cache_usage.hit_tokens > 0:
-                self.metrics["cache_hit_tokens"] = cache_usage.hit_tokens
-                self.metrics["cache_miss_tokens"] = cache_usage.miss_tokens
-
-            completion_details = getattr(usage, "completion_tokens_details", None)
-            reasoning = (
-                getattr(completion_details, "reasoning_tokens", 0)
-                if completion_details
-                else 0
-            )
-            self.metrics["reasoning_tokens"] = reasoning or 0
 
 
 def _supports_tool_stream(model: str) -> bool:

@@ -7,7 +7,7 @@ from typing import Any, cast
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
 
-from .codec import normalize_cross_provider_messages
+from .codec import normalize_cross_provider_messages, to_chat_messages, to_chat_tool
 from .metrics import ProviderMetricsMixin
 from .runtime import ProviderRuntime
 from .stream_codec import chat_stream_to_events
@@ -79,7 +79,29 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         tools: tuple[ToolDefinition, ...],
         **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
-        raise NotImplementedError
+        clean = self._clean_reasoning_content(messages)
+        api_messages = to_chat_messages(clean)
+        params = self._build_chat_params(api_messages, tools, **kwargs)
+        yield from self._call_chat_api(params, len(api_messages))
+
+    def _build_chat_params(
+        self,
+        api_messages: list[dict[str, Any]],
+        tools: tuple[ToolDefinition, ...],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """构建 Chat Completions 请求参数。
+
+        子类可覆写以添加 provider 专有字段（如 response_format、tool_stream）。
+        """
+        params: dict[str, Any] = {
+            "model": self.model,
+            "messages": api_messages,
+            "tools": [to_chat_tool(t.name, t.description, t.schema) for t in tools],
+            "stream": True,
+        }
+        self._build_thinking_params(params)
+        return params
 
     def _call_chat_api(
         self,
