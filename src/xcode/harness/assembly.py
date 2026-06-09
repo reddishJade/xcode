@@ -17,8 +17,10 @@ from xcode.harness.execution_env import ExecutionEnv
 
 from xcode.harness.config import (
     AgentConfig,
+    ApprovalPolicy,
     PROFILE_MAIN,
     PROFILE_SUBAGENT,
+    SecurityRuntimeConfig,
     XcodeRuntimeConfig,
     discover_runtime_config,
     resolve_config_path,
@@ -33,7 +35,12 @@ from xcode.harness.agent_runtime import (
 )
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.ai.providers.protocol import ModelProvider
-from xcode.harness.observability import JsonlAuditLogger, HookManager
+from xcode.harness.observability import (
+    JsonlAuditLogger,
+    HookManager,
+    PermissionPolicy,
+    PermissionRule,
+)
 from xcode.harness.observability.hooks import HookEvent
 from xcode.harness.skills import ToolInput, ToolSpec
 from xcode.harness.skill_loader import SkillLoader, build_skill_loader_tool
@@ -430,4 +437,28 @@ def build_agent(
         cancellation_token=cancellation_token,
         fallback_provider=fallback_provider,
         project_root=project_root,
+        permission_policy=_permission_policy_from_security(runtime_config.security),
+        high_risk_requires_approval=_high_risk_requires_approval(
+            runtime_config.security.resolve_approval_policy()
+        ),
     )
+
+
+def _permission_policy_from_security(
+    security: SecurityRuntimeConfig,
+) -> PermissionPolicy | None:
+    """将运行时 security 配置转换为工具权限规则。"""
+    rules: list[PermissionRule] = []
+    rules.extend(PermissionRule(tool, "deny") for tool in security.deny_tools)
+    rules.extend(PermissionRule(tool, "ask") for tool in security.ask_tools)
+    rules.extend(PermissionRule(tool, "allow") for tool in security.allow_tools)
+    if security.resolve_approval_policy() == "always":
+        rules.append(PermissionRule("*", "ask"))
+    if not rules:
+        return None
+    return PermissionPolicy(tuple(rules))
+
+
+def _high_risk_requires_approval(approval_policy: ApprovalPolicy) -> bool:
+    """判断高风险工具是否默认需要人工审批。"""
+    return approval_policy in {"always", "high_risk_only"}

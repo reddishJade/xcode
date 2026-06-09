@@ -46,10 +46,12 @@ class ToolSpecAdapter:
         *,
         approval_callback: Any | None = None,
         permission_policy: PermissionPolicy | None = None,
+        high_risk_requires_approval: bool = True,
     ) -> None:
         self._spec = spec
         self._approval_callback = approval_callback
         self._permission_policy = permission_policy
+        self._high_risk_requires_approval = high_risk_requires_approval
 
     @property
     def name(self) -> str:
@@ -102,7 +104,7 @@ class ToolSpecAdapter:
             approval_callback=self._approval_callback,
             tool_spec=self._spec,
             tool_input=params,
-            high_risk_requires_approval=True,
+            high_risk_requires_approval=self._high_risk_requires_approval,
         )
         if result.blocked:
             return AgentToolResult(
@@ -119,6 +121,7 @@ def adapt_tool_specs(
     *,
     approval_callback: Any | None = None,
     permission_policy: PermissionPolicy | None = None,
+    high_risk_requires_approval: bool = True,
 ) -> list[ToolSpecAdapter]:
     """批量将 ToolSpec 适配为 AgentTool。"""
     return [
@@ -126,6 +129,7 @@ def adapt_tool_specs(
             spec,
             approval_callback=approval_callback,
             permission_policy=permission_policy,
+            high_risk_requires_approval=high_risk_requires_approval,
         )
         for spec in specs
     ]

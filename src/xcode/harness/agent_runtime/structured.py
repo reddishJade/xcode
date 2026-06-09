@@ -82,6 +82,7 @@ class TurnSnapshot:
     tool_map: dict[str, ToolSpec]
     approval_callback: ApprovalCallback | None
     permission_policy: PermissionPolicy | None
+    high_risk_requires_approval: bool
     provider: ModelProvider
     runtime_context_provider: RuntimeContextProvider | None
 
@@ -106,6 +107,7 @@ class StructuredAgent:
         audit_logger: Callable[[AuditRecord], None] | None = None,
         session_id: str = "local",
         permission_policy: PermissionPolicy | None = None,
+        high_risk_requires_approval: bool = True,
         hook_manager: HookManager | None = None,
         runtime_context_provider: RuntimeContextProvider | None = None,
         cancellation_token: CancellationToken | None = None,
@@ -131,6 +133,7 @@ class StructuredAgent:
         self.permission_policy = _resolve_permission_policy(
             project_root, permission_policy
         )
+        self.high_risk_requires_approval = high_risk_requires_approval
         self.hook_manager = hook_manager
         self.runtime_context_provider = runtime_context_provider
         self.cancellation_token = cancellation_token or CancellationToken()
@@ -152,6 +155,7 @@ class StructuredAgent:
             registry,
             approval_callback=approval_callback,
             permission_policy=self.permission_policy,
+            high_risk_requires_approval=self.high_risk_requires_approval,
         )
         adapted_tools.extend(self._build_mode_switch_tools())
         self._agent = Agent(adapted_tools)
@@ -238,6 +242,7 @@ class StructuredAgent:
             active_registry,
             approval_callback=snapshot.approval_callback,
             permission_policy=snapshot.permission_policy,
+            high_risk_requires_approval=snapshot.high_risk_requires_approval,
         )
         self._agent = Agent(adapted_tools)
 
@@ -362,6 +367,7 @@ class StructuredAgent:
             filtered,
             approval_callback=self.approval_callback,
             permission_policy=self.permission_policy,
+            high_risk_requires_approval=self.high_risk_requires_approval,
         )
         adapted.extend(self._build_mode_switch_tools())
         return adapted
@@ -674,6 +680,7 @@ class StructuredAgent:
             tool_map={tool.name: tool for tool in registry},
             approval_callback=self.approval_callback,
             permission_policy=self.permission_policy,
+            high_risk_requires_approval=self.high_risk_requires_approval,
             provider=self.provider,
             runtime_context_provider=self.runtime_context_provider,
         )

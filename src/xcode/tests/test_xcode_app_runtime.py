@@ -26,6 +26,7 @@ from xcode.harness.config import (
     DaemonRuntimeConfig,
     ObservabilityRuntimeConfig,
     PathsRuntimeConfig,
+    SecurityRuntimeConfig,
     ToolsRuntimeConfig,
     XcodeRuntimeConfig,
 )
@@ -309,6 +310,84 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertEqual(app.agent.config.max_steps, 7)
         self.assertEqual(app.agent.config.tool_workers, 2)
         self.assertIsNotNone(app.agent.audit_logger)
+
+    def test_security_approval_policy_never_allows_high_risk_tools(self) -> None:
+        calls = []
+        runtime_config = XcodeRuntimeConfig(
+            security=SecurityRuntimeConfig(approval_policy="never"),
+        )
+
+        class WritingProvider(MockProvider):
+            async def stream(self, messages, tools, options=None, **kwargs):
+                calls.append(messages)
+                if len(calls) == 1:
+                    yield ToolCallEvent(
+                        [
+                            ToolCall(
+                                "write-1",
+                                "write_file",
+                                {"path": "ok.txt", "content": "ok"},
+                            )
+                        ]
+                    )
+                    yield FinalMessage("", "tool_use")
+                    return
+                yield TextDelta("done")
+                yield FinalMessage("", "end_turn")
+
+        provider = WritingProvider([])
+        bundle = SimpleNamespace(
+            llm=provider,
+            llms={"main": provider, "subagent": provider, "fallback": provider},
+            embedding=object(),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("xcode.harness.assembly.build_providers", return_value=bundle):
+                app = build_app(project_root=root, runtime_config=runtime_config)
+            result = app.agent.run("write")
+
+            self.assertEqual(result.answer, "done")
+            self.assertEqual((root / "ok.txt").read_text(encoding="utf-8"), "ok")
+
+    def test_security_approval_policy_always_blocks_low_risk_without_callback(
+        self,
+    ) -> None:
+        runtime_config = XcodeRuntimeConfig(
+            security=SecurityRuntimeConfig(approval_policy="always"),
+        )
+
+        class ReadingProvider(MockProvider):
+            async def stream(self, messages, tools, options=None, **kwargs):
+                if messages and messages[-1]["role"] == "tool":
+                    yield TextDelta("done")
+                    yield FinalMessage("", "end_turn")
+                    return
+                yield ToolCallEvent(
+                    [ToolCall("read-1", "read_file", {"path": "a.txt"})]
+                )
+                yield FinalMessage("", "tool_use")
+
+        provider = ReadingProvider([])
+        bundle = SimpleNamespace(
+            llm=provider,
+            llms={"main": provider, "subagent": provider, "fallback": provider},
+            embedding=object(),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("content", encoding="utf-8")
+            with patch("xcode.harness.assembly.build_providers", return_value=bundle):
+                app = build_app(project_root=root, runtime_config=runtime_config)
+            result = app.agent.run("read")
+
+        tool_result = next(
+            message["content"][0]
+            for message in result.messages
+            if message.get("role") == "tool"
+        )
+        self.assertEqual(tool_result["status"], "error")
+        self.assertIn("requires approval", tool_result["content"])
 
     def test_build_app_discovers_project_root_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
