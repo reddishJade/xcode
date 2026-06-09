@@ -61,9 +61,10 @@ from .compaction import estimate_tokens_simple
 from .tool_execution import (
     ExecutedToolBatch,
     execute_tool_calls,
-    _is_cancelled,
-    _cancel_reason,
+    is_cancelled,
+    cancel_reason,
 )
+from .watchdog import tool_calls_signature
 
 
 # ── 事件辅助构造 ──
@@ -104,21 +105,6 @@ def _message_update_event(message: AgentMessage) -> MessageUpdateEvent:
 
 
 # ── 工具签名（用于重复工具看门狗）──
-
-
-def _tool_signature(calls: list[ToolCallContent]) -> str:
-    """生成工具调用签名，用于检测重复调用。
-
-    签名生成规则：
-    - 排序工具调用：忽略调用顺序，只关注工具集合
-    - 分隔符 "|"：避免与 JSON 中的常见字符冲突
-    - 参数归一化：sort_keys 确保参数顺序不影响签名
-    """
-    parts = []
-    for c in calls:
-        args_str = json.dumps(c.arguments or {}, sort_keys=True, default=str)
-        parts.append(f"{c.name}:{args_str}")
-    return "|".join(sorted(parts))
 
 
 def _is_tool_productive_default(
@@ -199,7 +185,7 @@ async def _run_loop(
         metrics.steps = step
 
         # ── 取消检查 ──
-        if _is_cancelled(signal):
+        if is_cancelled(signal):
             return _finish_loop(
                 new_messages,
                 step,
@@ -476,7 +462,7 @@ def _update_repeated_tool_watchdog(
     - 工具名相同但参数不同视为有效重试（如搜索不同关键词）
     - 签名完全相同（包括参数）才视为无效重复
     """
-    sig = _tool_signature(tool_calls)
+    sig = tool_calls_signature(tool_calls)
     if sig == state.last_tool_signature:
         state.repeated_tool_count += 1
     else:
@@ -534,7 +520,7 @@ async def _run_inner_loop(
     """
     provider = state.active_provider
     while True:
-        if _is_cancelled(signal):
+        if is_cancelled(signal):
             return _cancelled_message(signal), "aborted", provider
 
         if provider is None:
@@ -819,5 +805,5 @@ def _cancelled_message(signal: CancellationSignal | None) -> AssistantMessage:
     return AssistantMessage(
         content=[],
         stop_reason="aborted",
-        error_message=_cancel_reason(signal),
+        error_message=cancel_reason(signal),
     )

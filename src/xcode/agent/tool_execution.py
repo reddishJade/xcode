@@ -82,7 +82,7 @@ async def execute_tool_calls(
             )
         results.extend(executed.results)
         terminate_flags.append(executed.terminate)
-        if _is_cancelled(signal):
+        if is_cancelled(signal):
             break
 
     all_terminate = len(terminate_flags) > 0 and all(terminate_flags)
@@ -114,7 +114,7 @@ async def _execute_sequential(
         )
         results.append(result)
         terminate_flags.append(terminate)
-        if _is_cancelled(signal):
+        if is_cancelled(signal):
             break
     all_terminate = len(terminate_flags) > 0 and all(terminate_flags)
     return ExecutedToolBatch(results=results, terminate=all_terminate)
@@ -202,8 +202,8 @@ async def _execute_one_impl(
 
     args = tool_call.arguments or {}
 
-    if _is_cancelled(signal):
-        return _error_result(tool_call, _cancel_reason(signal))
+    if is_cancelled(signal):
+        return _error_result(tool_call, cancel_reason(signal))
 
     before_block = _run_before_tool_hook(
         current_context, assistant_message, tool_call, args, config, signal
@@ -383,11 +383,11 @@ def _emit_tool_end(
     )
 
 
-def _is_cancelled(signal: CancellationSignal | None) -> bool:
+def is_cancelled(signal: CancellationSignal | None) -> bool:
     return bool(signal and signal.is_cancelled())
 
 
-def _cancel_reason(signal: CancellationSignal | None) -> str:
+def cancel_reason(signal: CancellationSignal | None) -> str:
     if signal is None:
         return "interrupted by user"
     return signal.reason
