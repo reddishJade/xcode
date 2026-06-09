@@ -20,24 +20,23 @@ def estimate_tokens_simple(text: str) -> int:
 
 def estimate_message_tokens(messages: list[AgentMessage]) -> int:
     """估算消息列表的 token 总数（简单版本）。"""
+    import json
+
+    from xcode.agent.types import TextContent, ThinkingContent, ToolCallContent
+
     total = 0
     for msg in messages:
         if isinstance(msg, AssistantMessage):
-            # Assistant 消息可能有文本和工具调用
             for block in msg.content:
-                # 使用类型检查避免属性访问警告
-                block_type = type(block).__name__
-                if block_type == "TextContent" and hasattr(block, "text"):
+                if isinstance(block, TextContent):
                     total += estimate_tokens_simple(block.text)
-                elif block_type == "ThinkingContent" and hasattr(block, "thinking"):
+                elif isinstance(block, ThinkingContent):
                     total += estimate_tokens_simple(block.thinking)
-                elif block_type == "ToolCallContent" and hasattr(block, "arguments"):
-                    import json
+                elif isinstance(block, ToolCallContent):
                     total += estimate_tokens_simple(
                         json.dumps(block.arguments or {}, default=str)
                     )
         elif hasattr(msg, "content"):
-            # User/Tool messages
             content = msg.content
             if isinstance(content, str):
                 total += estimate_tokens_simple(content)

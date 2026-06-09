@@ -9,7 +9,7 @@ import re
 from typing import Any
 
 from xcode.agent.messages import AgentMessage, AssistantMessage, ToolResultMessage
-from xcode.agent.types import ToolCallContent, ToolResultContent
+from xcode.agent.types import ToolCallContent
 
 
 def repair_tool_pairing(messages: list[AgentMessage]) -> list[AgentMessage]:
@@ -33,13 +33,11 @@ def repair_tool_pairing(messages: list[AgentMessage]) -> list[AgentMessage]:
                 if isinstance(block, ToolCallContent):
                     tool_call_ids.add(block.id)
 
-    # 收集所有 tool_result 对应的 tool_use_id
+    # 收集所有 tool_result 的 tool_call_id
     tool_result_ids: set[str] = set()
     for msg in messages:
-        if isinstance(msg, ToolResultMessage):
-            for block in msg.content:
-                if isinstance(block, ToolResultContent):
-                    tool_result_ids.add(block.tool_use_id)
+        if isinstance(msg, ToolResultMessage) and msg.tool_call_id:
+            tool_result_ids.add(msg.tool_call_id)
 
     # 过滤消息
     repaired: list[AgentMessage] = []
@@ -53,7 +51,6 @@ def repair_tool_pairing(messages: list[AgentMessage]) -> list[AgentMessage]:
                         filtered_content.append(block)
                 else:
                     filtered_content.append(block)
-            # 如果还有内容，保留消息
             if filtered_content:
                 repaired.append(
                     AssistantMessage(
@@ -65,20 +62,9 @@ def repair_tool_pairing(messages: list[AgentMessage]) -> list[AgentMessage]:
                 )
         elif isinstance(msg, ToolResultMessage):
             # 过滤掉孤儿 tool_result
-            filtered_content = []
-            for block in msg.content:
-                if isinstance(block, ToolResultContent):
-                    if block.tool_use_id in tool_call_ids:
-                        filtered_content.append(block)
-                else:
-                    filtered_content.append(block)
-            # 如果还有内容，保留消息
-            if filtered_content:
-                repaired.append(
-                    ToolResultMessage(content=filtered_content, is_error=msg.is_error)
-                )
+            if msg.tool_call_id in tool_call_ids:
+                repaired.append(msg)
         else:
-            # 其他消息类型原样保留
             repaired.append(msg)
 
     return repaired
@@ -108,10 +94,8 @@ def apply_request_hygiene(
     # 收集已完成的 tool_call ids
     completed_tool_ids: set[str] = set()
     for msg in messages:
-        if isinstance(msg, ToolResultMessage):
-            for block in msg.content:
-                if isinstance(block, ToolResultContent):
-                    completed_tool_ids.add(block.tool_use_id)
+        if isinstance(msg, ToolResultMessage) and msg.tool_call_id:
+            completed_tool_ids.add(msg.tool_call_id)
 
     for msg in messages:
         if isinstance(msg, AssistantMessage):
@@ -142,27 +126,42 @@ def apply_request_hygiene(
             )
         elif isinstance(msg, ToolResultMessage):
             # 清理超大 tool_result
-            cleaned_content = []
-            for block in msg.content:
-                if isinstance(block, ToolResultContent):
-                    cleaned_text = _truncate_tool_result(
-                        block.content,
-                        max_tool_result_bytes,
-                        keep_head_lines,
-                        keep_tail_lines,
+            if isinstance(msg.content, str):
+                truncated = _truncate_tool_result(
+                    msg.content, max_tool_result_bytes, keep_head_lines, keep_tail_lines
+                )
+                cleaned.append(
+                    ToolResultMessage(
+                        tool_call_id=msg.tool_call_id,
+                        tool_name=msg.tool_name,
+                        content=truncated,
+                        is_error=msg.is_error,
                     )
-                    cleaned_content.append(
-                        ToolResultContent(
-                            tool_use_id=block.tool_use_id,
-                            content=cleaned_text,
-                            status=block.status,
+                )
+            else:
+                from xcode.agent.types import TextContent
+
+                cleaned_blocks = []
+                for block in msg.content:
+                    if isinstance(block, TextContent):
+                        cleaned_blocks.append(
+                            TextContent(
+                                text=_truncate_tool_result(
+                                    block.text, max_tool_result_bytes,
+                                    keep_head_lines, keep_tail_lines,
+                                )
+                            )
                         )
+                    else:
+                        cleaned_blocks.append(block)
+                cleaned.append(
+                    ToolResultMessage(
+                        tool_call_id=msg.tool_call_id,
+                        tool_name=msg.tool_name,
+                        content=cleaned_blocks,
+                        is_error=msg.is_error,
                     )
-                else:
-                    cleaned_content.append(block)
-            cleaned.append(
-                ToolResultMessage(content=cleaned_content, is_error=msg.is_error)
-            )
+                )
         else:
             cleaned.append(msg)
 

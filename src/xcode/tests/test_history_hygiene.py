@@ -10,7 +10,7 @@ from xcode.agent.history import (
     repair_tool_pairing,
 )
 from xcode.agent.messages import AssistantMessage, ToolResultMessage, UserMessage
-from xcode.agent.types import TextContent, ToolCallContent, ToolResultContent
+from xcode.agent.types import TextContent, ToolCallContent
 
 
 class TestRepairToolPairing(unittest.TestCase):
@@ -21,17 +21,12 @@ class TestRepairToolPairing(unittest.TestCase):
         messages = [
             UserMessage(content=[TextContent(text="test")]),
             ToolResultMessage(
-                content=[
-                    ToolResultContent(
-                        tool_use_id="orphan_id",
-                        content="orphan result",
-                    )
-                ],
+                tool_call_id="orphan_id",
+                content="orphan result",
                 is_error=False,
             ),
         ]
         repaired = repair_tool_pairing(messages)
-        # 孤儿 result 应被移除
         self.assertEqual(len(repaired), 1)
         self.assertIsInstance(repaired[0], UserMessage)
 
@@ -50,7 +45,6 @@ class TestRepairToolPairing(unittest.TestCase):
             UserMessage(content=[TextContent(text="test")]),
         ]
         repaired = repair_tool_pairing(messages)
-        # 未完成 call 的 assistant 消息应被移除
         self.assertEqual(len(repaired), 1)
         self.assertIsInstance(repaired[0], UserMessage)
 
@@ -67,12 +61,8 @@ class TestRepairToolPairing(unittest.TestCase):
                 ],
             ),
             ToolResultMessage(
-                content=[
-                    ToolResultContent(
-                        tool_use_id="valid_id",
-                        content="result",
-                    )
-                ],
+                tool_call_id="valid_id",
+                content="result",
                 is_error=False,
             ),
         ]
@@ -100,18 +90,13 @@ class TestRepairToolPairing(unittest.TestCase):
                 ],
             ),
             ToolResultMessage(
-                content=[
-                    ToolResultContent(
-                        tool_use_id="call_1",
-                        content="result",
-                    )
-                ],
+                tool_call_id="call_1",
+                content="result",
                 is_error=False,
             ),
         ]
         repaired = repair_tool_pairing(messages)
         self.assertEqual(len(repaired), 2)
-        # assistant 消息应保留 text + 有效 call
         assistant = repaired[0]
         self.assertIsInstance(assistant, AssistantMessage)
         self.assertEqual(len(assistant.content), 2)
@@ -136,12 +121,8 @@ class TestApplyRequestHygiene(unittest.TestCase):
                 ],
             ),
             ToolResultMessage(
-                content=[
-                    ToolResultContent(
-                        tool_use_id="call_1",
-                        content=large_content,
-                    )
-                ],
+                tool_call_id="call_1",
+                content=large_content,
                 is_error=False,
             ),
         ]
@@ -152,11 +133,9 @@ class TestApplyRequestHygiene(unittest.TestCase):
         )
         result_msg = cleaned[1]
         self.assertIsInstance(result_msg, ToolResultMessage)
-        result_content = result_msg.content[0].content
-        # 应包含省略标记
-        self.assertIn("omitted", result_content)
-        # 行数应减少
-        self.assertLess(len(result_content.splitlines()), 200)
+        result_text = result_msg.content
+        self.assertIn("omitted", result_text)
+        self.assertLess(len(result_text.splitlines()), 200)
 
     def test_hygiene_truncates_tool_args(self):
         """测试压缩超长工具参数。"""
@@ -172,12 +151,8 @@ class TestApplyRequestHygiene(unittest.TestCase):
                 ],
             ),
             ToolResultMessage(
-                content=[
-                    ToolResultContent(
-                        tool_use_id="call_1",
-                        content="success",
-                    )
-                ],
+                tool_call_id="call_1",
+                content="success",
                 is_error=False,
             ),
         ]
@@ -186,7 +161,6 @@ class TestApplyRequestHygiene(unittest.TestCase):
         self.assertIsInstance(assistant, AssistantMessage)
         call = assistant.content[0]
         self.assertIsInstance(call, ToolCallContent)
-        # 参数应被压缩
         self.assertIn("truncated", str(call.arguments.get("content")))
 
     def test_hygiene_detects_base64(self):
@@ -203,21 +177,16 @@ class TestApplyRequestHygiene(unittest.TestCase):
                 ],
             ),
             ToolResultMessage(
-                content=[
-                    ToolResultContent(
-                        tool_use_id="call_1",
-                        content=base64_content,
-                    )
-                ],
+                tool_call_id="call_1",
+                content=base64_content,
                 is_error=False,
             ),
         ]
         cleaned = apply_request_hygiene(messages)
         result_msg = cleaned[1]
-        result_content = result_msg.content[0].content
-        # 应替换为占位符
-        self.assertIn("base64", result_content)
-        self.assertIn("bytes", result_content)
+        result_text = result_msg.content
+        self.assertIn("base64", result_text)
+        self.assertIn("bytes", result_text)
 
     def test_hygiene_preserves_signal_lines(self):
         """测试保留错误/警告信号行。"""
@@ -238,12 +207,8 @@ class TestApplyRequestHygiene(unittest.TestCase):
                 ],
             ),
             ToolResultMessage(
-                content=[
-                    ToolResultContent(
-                        tool_use_id="call_1",
-                        content=content,
-                    )
-                ],
+                tool_call_id="call_1",
+                content=content,
                 is_error=False,
             ),
         ]
@@ -253,9 +218,8 @@ class TestApplyRequestHygiene(unittest.TestCase):
             keep_tail_lines=10,
         )
         result_msg = cleaned[1]
-        result_content = result_msg.content[0].content
-        # 应保留 ERROR 行
-        self.assertIn("ERROR: something went wrong", result_content)
+        result_text = result_msg.content
+        self.assertIn("ERROR: something went wrong", result_text)
 
     def test_hygiene_no_truncate_small_content(self):
         """测试小内容不压缩。"""
@@ -271,18 +235,13 @@ class TestApplyRequestHygiene(unittest.TestCase):
                 ],
             ),
             ToolResultMessage(
-                content=[
-                    ToolResultContent(
-                        tool_use_id="call_1",
-                        content=small_content,
-                    )
-                ],
+                tool_call_id="call_1",
+                content=small_content,
                 is_error=False,
             ),
         ]
         cleaned = apply_request_hygiene(messages)
-        # 应保持不变
-        self.assertEqual(cleaned[1].content[0].content, small_content)
+        self.assertEqual(cleaned[1].content, small_content)
         self.assertEqual(
             cleaned[0].content[0].arguments.get("param"),
             "short",
