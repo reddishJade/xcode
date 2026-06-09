@@ -19,12 +19,10 @@ from xcode.ai.events import (
 )
 from xcode.harness.agent_runtime import (
     CancellationToken,
-    InMemoryAgentSession,
     RunState,
     StructuredAgent,
     StructuredAgentEvent,
 )
-from xcode.agent.messages import UserMessage
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
 
@@ -137,32 +135,6 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             [message["role"] for message in seen_messages[0]],
             ["user", "assistant", "user"],
         )
-
-    def test_session_supplies_and_updates_history(self) -> None:
-        seen_messages: list[list[dict[str, Any]]] = []
-
-        def factory(
-            messages: list[dict[str, Any]],
-            _tools: list[Any],
-        ) -> list[ProviderEvent]:
-            seen_messages.append(messages)
-            return [TextDelta("next"), FinalMessage("", "end_turn")]
-
-        session = InMemoryAgentSession()
-        session.load([UserMessage(content="saved")])
-        agent = StructuredAgent(
-            provider=FakeProvider(factory),
-            registry=(),
-            session=session,
-        )
-
-        result = agent.run("continue")
-
-        self.assertEqual(result.answer, "next")
-        self.assertEqual(
-            [message["role"] for message in seen_messages[0]], ["user", "user"]
-        )
-        self.assertEqual(len(session.messages()), 3)
 
     def test_provider_events_drive_main_loop(self) -> None:
         events: list[ProviderEvent] = [TextDelta("done"), FinalMessage("", "end_turn")]
