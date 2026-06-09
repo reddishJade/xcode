@@ -264,9 +264,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                     yield ToolCallEvent(
                         [
                             ToolCall(
-                                "write-1",
-                                "write_file",
-                                {"path": "ok.txt", "content": "ok"},
+                                id="write-1", name="write_file", input={"path": "ok.txt", "content": "ok"},
                             )
                         ]
                     )
