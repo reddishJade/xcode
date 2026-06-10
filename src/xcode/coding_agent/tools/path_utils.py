@@ -18,7 +18,7 @@ _BLOCKED_SPEC = pathspec.PathSpec.from_lines(
         ".venv/",
         "__pycache__/",
         ".env",
-        ".local/chroma_db/",
+        "**/.local/chroma_db/",
     ],
 )
 
