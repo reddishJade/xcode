@@ -124,7 +124,10 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
                     ToolCallEvent(calls=[ToolCall(id="c", name="compact", input={})]),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="done"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
         seen_lengths: list[int] = []
@@ -154,7 +157,10 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
                     ToolCallEvent(calls=[ToolCall(id="c", name="compact", input={})]),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="done"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
         seen_tokens: list[int] = []
@@ -175,6 +181,36 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
 
         self.assertEqual(result.answer, "done")
         self.assertLess(seen_tokens[-1], seen_tokens[0] + 100)
+
+    def test_structured_agent_sends_compacted_messages_to_provider(self) -> None:
+        seen_messages: list[list[Any]] = []
+
+        def compact(_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            return [{"role": "user", "content": "[Compressed]\nkept facts"}]
+
+        def factory(messages: list[Any], _tools: list[Any]) -> list[Any]:
+            seen_messages.append(messages)
+            return [
+                TextDelta(chunk="done"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ]
+
+        provider = FakeProvider(factory)
+        agent = StructuredAgent(
+            provider=provider,
+            registry=(),
+            config=AgentConfig(max_steps=1, compact_token_threshold=1),
+            compactor=compact,
+        )
+
+        result = agent.run("work " + ("long " * 40))
+
+        self.assertEqual(result.answer, "done")
+        self.assertEqual(len(seen_messages), 1)
+        self.assertEqual(
+            seen_messages[0],
+            [{"role": "user", "content": "[Compressed]\nkept facts"}],
+        )
 
     def test_estimate_message_tokens(self) -> None:
         messages = [
