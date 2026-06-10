@@ -3,7 +3,6 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 import tempfile
-from typing import cast
 import unittest
 
 from xcode.harness.execution_env import (
@@ -11,9 +10,7 @@ from xcode.harness.execution_env import (
     MockExecutionEnv,
     SubprocessExecutionEnv,
 )
-from xcode.agent.types import ShellCallOutputContent
-from xcode.coding_agent.tools import ShellSpec, build_bash_tool
-from xcode.harness.skills import AGENT_CONTENT_BLOCKS_METADATA_KEY, ToolOutput
+from xcode.coding_agent.tools import build_bash_tool
 
 
 class TestSubprocessExecutionEnv(unittest.TestCase):

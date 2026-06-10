@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from xcode.ai.providers.factory import _build_llm_profile

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from xcode.cli.setup_wizard import PROVIDER_PRESETS, run_setup_wizard
+from xcode.cli.setup_wizard import run_setup_wizard
 
 
 class XcodeSetupWizardTests(unittest.TestCase):

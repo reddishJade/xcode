@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
 
 from xcode.coding_agent.tools.shell_adapter import (

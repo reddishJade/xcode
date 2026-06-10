@@ -11,7 +11,7 @@ from xcode.agent.compaction import (
     get_model_soft_threshold,
     should_compact_token_aware,
 )
-from xcode.agent.messages import AssistantMessage, UserMessage
+from xcode.agent.messages import UserMessage
 from xcode.agent.types import TextContent
 
 
