@@ -155,12 +155,29 @@ def _run_agent_turn(
         _, partial_text = state.pending_partial
         state.pending_partial = None
         if partial_text:
-            agent_text = (
-                f"[Context: assistant was interrupted mid-response]\n"
-                f"{partial_text}\n"
-                f"[end of partial response]\n"
-                f"{agent_text}"
-            )
+            agent = getattr(app, "agent", None)
+            steer = getattr(agent, "steer", None)
+            if callable(steer):
+                from xcode.agent.messages import AssistantMessage
+                from xcode.agent.types import TextContent
+
+                steer(
+                    AssistantMessage(
+                        content=[
+                            TextContent(
+                                text="[assistant was interrupted mid-response]\n"
+                                f"{partial_text}"
+                            )
+                        ]
+                    )
+                )
+            else:
+                agent_text = (
+                    f"[Context: assistant was interrupted mid-response]\n"
+                    f"{partial_text}\n"
+                    f"[end of partial response]\n"
+                    f"{agent_text}"
+                )
 
     try:
         for event in app.ask_stream(agent_text, mode=state.mode):

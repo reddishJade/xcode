@@ -121,6 +121,7 @@ class StructuredAgent:
         )
         self.audit_logger = audit_logger
         self._history = HistoryManager()
+        self._resumed_notice: str | None = None
 
         # 适配 ToolSpec → AgentTool，创建 Agent 实例
         adapted = adapt_tool_specs(
@@ -154,6 +155,10 @@ class StructuredAgent:
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history.load(messages)
         self._reset_provider_conversation_state()
+
+    def set_resumed_notice(self, notice: str) -> None:
+        """设置会话恢复通知，将在下一轮 system prompt 中注入一次。"""
+        self._resumed_notice = notice
 
     def load_run_state(self, run_state: RunState) -> None:
         self._history.load_run_state(run_state)
@@ -392,14 +397,18 @@ class StructuredAgent:
 
         typed: list[AgentMessage] = []
         notice = mode_notice(mode)
+        parts: list[str] = []
         if snapshot.runtime_context_provider is not None:
-            parts = snapshot.runtime_context_provider(question)
-            if notice:
-                parts.append(notice)
-            if parts:
-                typed.append(SystemMessage(content="\n\n".join(p for p in parts if p)))
-        elif notice:
-            typed.append(SystemMessage(content=notice))
+            parts = list(snapshot.runtime_context_provider(question))
+        if self._resumed_notice is not None:
+            parts.append(
+                f"<session-notices>\n{self._resumed_notice}\n</session-notices>"
+            )
+            self._resumed_notice = None
+        if notice:
+            parts.append(notice)
+        if parts:
+            typed.append(SystemMessage(content="\n\n".join(p for p in parts if p)))
         return typed
 
     def _turn_snapshot(self) -> TurnSnapshot:

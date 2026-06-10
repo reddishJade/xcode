@@ -53,21 +53,58 @@ def sync_agent_history(app: Any, store: SessionStore) -> None:
     load_history = getattr(agent, "load_history", None)
     if not callable(load_history):
         return
-    load_history(records_to_agent_messages(store.load_records()))
+    records = store.load_records()
+    load_history(records_to_agent_messages(records))
+    _restore_contextual_state(app, records)
+    set_notice = getattr(agent, "set_resumed_notice", None)
+    if callable(set_notice):
+        set_notice(
+            "This conversation was resumed from a previous session. "
+            "The transcript history above has been loaded as context. "
+            "Continue the task as if the session was uninterrupted."
+        )
+
+
+def _restore_contextual_state(app: Any, records: list[SessionRecord]) -> None:
+    """从 transcript 记录中恢复 ContextualRetrievalState 的活跃上下文。"""
+    contextual_state = getattr(app, "contextual_state", None)
+    if contextual_state is None:
+        return
+    for record in records:
+        if record.type != "event" or not isinstance(record.content, dict):
+            continue
+        event_type = str(record.content.get("type", ""))
+        event_data = record.content.get("data")
+        if event_type == "file_references" and isinstance(event_data, list):
+            for ref in event_data:
+                path = ref.get("path", "") if isinstance(ref, dict) else ""
+                if path:
+                    contextual_state.record_file(path)
+        elif event_type == "tool_result" and isinstance(event_data, dict):
+            tool_name = str(event_data.get("tool_use_id", "") or "")
+            content = str(event_data.get("content", "") or "")
+            if tool_name:
+                contextual_state.record_tool_result(tool_name, content)
 
 
 def records_to_agent_messages(records: list[SessionRecord]) -> list[AgentMessage]:
-    """把 transcript 记录转换为模型可见的简化会话历史。"""
+    """把 transcript 记录转换为模型可见的简化会话历史。
+
+    事件级 assistant 记录（带工具调用）已经捕获了对应轮次的文本内容，
+    因此跳过后续重复的"assistant"文本摘要记录，避免模型看到重复消息。
+    """
     messages: list[AgentMessage] = []
     pending_tool_calls: list[ToolCallContent] = []
     seen_tool_call_ids: set[str] = set()
+    has_event_assistant_since_last_user = False
     for record in records:
         if record.type == "user":
             messages.append(UserMessage(content=str(record.content)))
+            has_event_assistant_since_last_user = False
             continue
         if record.type == "assistant":
             text = str(record.content).strip()
-            if text:
+            if text and not has_event_assistant_since_last_user:
                 messages.append(AssistantMessage(content=[TextContent(text=text)]))
             continue
         if record.type != "event" or not isinstance(record.content, dict):
@@ -81,6 +118,7 @@ def records_to_agent_messages(records: list[SessionRecord]) -> list[AgentMessage
                 pending_tool_calls,
                 seen_tool_call_ids,
             )
+            has_event_assistant_since_last_user = True
             continue
         if event_type == "tool_use":
             _queue_tool_use_event(event_data, pending_tool_calls, seen_tool_call_ids)
