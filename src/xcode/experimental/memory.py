@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from collections.abc import Sequence
 
-from rank_bm25 import BM25Okapi
+from .bm25 import BM25Okapi
 from .memory_parsing import (
     MemoryRecord,
     MemorySearchEvalCase,
@@ -88,7 +88,21 @@ class MemoryManager:
         query_words = tokenize(query)
 
         bm25 = BM25Okapi(corpus)
-        scores = bm25.get_scores(query_words)
+        raw = list(bm25.get_scores(query_words))
+
+        # 归一化 BM25 得分到 [0,1]。rank_bm25 的标准 IDF 在小语料下
+        # 得分差异可能极小或全零，此时退化到 term 命中率来保持区分度
+        if not raw:
+            scores = []
+        elif max(raw) - min(raw) > 1e-6:
+            lo, hi = min(raw), max(raw)
+            scores = [(s - lo) / (hi - lo) for s in raw]
+        else:
+            query_set = set(query_words)
+            scores = [
+                sum(q in b for q in query_set) / max(len(query_words), 1)
+                for b in corpus
+            ]
 
         ranked: list[MemoryRecord] = []
         for score, record in zip(scores, records, strict=True):

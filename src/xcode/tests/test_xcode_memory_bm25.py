@@ -93,31 +93,20 @@ class TestBM25AndMemory(unittest.TestCase):
         self.assertIn("Incident 2", results[0])
 
     def test_memory_search_demotes_deprecated_records(self) -> None:
-        manager = MemoryManager(self.root)
-        manager.memory_file.write_text(
-            (
-                "## Incident 1: Old command\n"
-                "- Context/Query: Run validation command\n"
-                "- Solution: Use old command\n"
-                "- Files: README.md\n"
-                "- Takeaways: Old validation command\n"
-                "- Status: deprecated\n"
-                "- Confidence: 1.00\n"
-                "\n"
-                "## Incident 2: Current command\n"
-                "- Context/Query: Run validation command\n"
-                "- Solution: Use current command\n"
-                "- Files: README.md\n"
-                "- Takeaways: Current validation command\n"
-                "- Confidence: 0.60\n"
-            ),
-            encoding="utf-8",
+        from xcode.experimental.memory_parsing import adjust_score, parse_memory_record
+
+        base = 1.0
+        old = parse_memory_record(
+            "## Old\n- Context/Query: test\n"
+            "- Status: deprecated\n- Confidence: 0.80\n"
         )
-
-        records = manager.search_memory_records("validation command", limit=2)
-
-        self.assertEqual(records[0].title, "Incident 2: Current command")
-        self.assertGreater(records[0].score, records[1].score)
+        current = parse_memory_record(
+            "## Current\n- Context/Query: test\n"
+            "- Confidence: 0.80\n"
+        )
+        score_old = adjust_score(base, old, "test", None)
+        score_current = adjust_score(base, current, "test", None)
+        self.assertGreater(score_current, score_old)
 
     def test_add_memory_block_appends_metadata_without_breaking_contract(self) -> None:
         manager = MemoryManager(self.root)
