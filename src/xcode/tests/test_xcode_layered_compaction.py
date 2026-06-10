@@ -13,7 +13,7 @@ from xcode.harness.agent_runtime.compaction import (
     micro_compact_tool_results,
     summarize_inactive_branches,
 )
-from xcode.harness.config import AgentConfig
+from xcode.harness.config import AgentConfig, RequestHygieneConfig
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.agent_helpers import budget_messages_for_provider
 
@@ -25,6 +25,8 @@ from xcode.ai.events import (
     ToolCallEvent,
     ToolCall,
 )
+from xcode.agent.messages import AssistantMessage, ToolResultMessage
+from xcode.agent.types import ToolCallContent
 
 
 class XcodeLayeredCompactionTests(unittest.TestCase):
@@ -211,6 +213,62 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             seen_messages[0],
             [{"role": "user", "content": "[Compressed]\nkept facts"}],
         )
+
+    def test_structured_agent_applies_request_hygiene_only_to_provider_request(
+        self,
+    ) -> None:
+        large_content = "\n".join(f"line {index}" for index in range(200))
+        seen_messages: list[list[Any]] = []
+
+        def factory(messages: list[Any], _tools: list[Any]) -> list[Any]:
+            seen_messages.append(messages)
+            return [
+                TextDelta(chunk="done"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ]
+
+        provider = FakeProvider(factory)
+        agent = StructuredAgent(
+            provider=provider,
+            registry=(),
+            config=AgentConfig(max_steps=1),
+            request_hygiene=RequestHygieneConfig(
+                keep_head_lines=5,
+                keep_tail_lines=5,
+            ),
+        )
+        agent.load_history(
+            [
+                AssistantMessage(
+                    content=[
+                        ToolCallContent(
+                            id="call_1",
+                            name="bash",
+                            arguments={},
+                        )
+                    ]
+                ),
+                ToolResultMessage(
+                    tool_call_id="call_1",
+                    tool_name="bash",
+                    content=large_content,
+                ),
+            ]
+        )
+
+        result = agent.run("continue")
+
+        self.assertEqual(result.answer, "done")
+        tool_message = next(
+            message for message in seen_messages[0] if message.get("role") == "tool"
+        )
+        self.assertIn("omitted", tool_message["content"])
+        self.assertLess(len(tool_message["content"].splitlines()), 200)
+
+        history = agent.history_messages()
+        history_result = history[1]
+        assert isinstance(history_result, ToolResultMessage)
+        self.assertEqual(history_result.content, large_content)
 
     def test_estimate_message_tokens(self) -> None:
         messages = [

@@ -422,6 +422,7 @@ def build_agent(
         cancellation_token=cancellation_token,
         fallback_provider=fallback_provider,
         project_root=project_root,
+        request_hygiene=runtime_config.request_hygiene,
         permission_policy=_permission_policy_from_security(runtime_config.security),
         high_risk_requires_approval=_high_risk_requires_approval(
             runtime_config.security.resolve_approval_policy()

@@ -47,9 +47,10 @@ from .result import (
 )
 from .tool_adapter import adapt_tool_specs
 from .tool_gate import ToolGate, ToolGateSnapshot
-from ..config import AgentConfig, ExecutionMode
+from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import HookManager, HookRecord, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec
+from ...agent.history import apply_request_hygiene
 
 
 __all__ = ["StructuredAgent"]
@@ -94,6 +95,7 @@ class StructuredAgent:
         cancellation_token: CancellationToken | None = None,
         fallback_provider: ModelProvider | None = None,
         project_root: Path | None = None,
+        request_hygiene: RequestHygieneConfig | None = None,
     ) -> None:
         self.provider: ModelProvider = provider
         if fallback_provider is not None:
@@ -110,6 +112,7 @@ class StructuredAgent:
         self._compact_controller = compact_controller
         self.runtime_context_provider = runtime_context_provider
         self.cancellation_token = cancellation_token or CancellationToken()
+        self.request_hygiene = request_hygiene or RequestHygieneConfig()
 
         # 组件
         self._mode = ModeManager()
@@ -320,6 +323,7 @@ class StructuredAgent:
             max_consecutive_idle_steps=4,
             should_compact=should_compact,
             compact=compact,
+            transform_context=self._loop_transform_context,
             is_tool_productive=self._gate.build_is_tool_productive_hook(gate_snapshot),
             before_tool_call=self._gate.build_before_tool_hook(gate_snapshot),
             after_tool_call=self._gate.build_after_tool_hook(gate_snapshot),
@@ -345,6 +349,23 @@ class StructuredAgent:
         dict_messages = [to_dict(m) for m in messages]
         compacted = self.compactor(dict_messages)
         return _messages_from_compacted_dicts(compacted)
+
+    def _loop_transform_context(
+        self,
+        messages: list[AgentMessage],
+        _signal: object,
+    ) -> list[AgentMessage]:
+        """在请求边界裁剪上下文副本，不污染持久历史。"""
+        hygiene = self.request_hygiene
+        if not hygiene.enabled:
+            return messages
+        return apply_request_hygiene(
+            messages,
+            max_tool_result_bytes=hygiene.max_tool_result_bytes,
+            max_tool_arg_length=hygiene.max_tool_arg_length,
+            keep_head_lines=hygiene.keep_head_lines,
+            keep_tail_lines=hygiene.keep_tail_lines,
+        )
 
     def _loop_prepare_next_turn(
         self, snapshot: TurnSnapshot
