@@ -96,7 +96,7 @@ Do not run end-to-end suites that require specific external environment variable
 
 - `src/xcode/experimental/` is opt-in.
 - Each experimental capability must have a dedicated `tools.enabled_groups` entry.
-- `experimental` is the total enable switch and must expand to all experimental groups.
+- `experimental` is the total enable switch and must expand only to experimental groups.
 - `bm25` is an internal implementation detail of `memory`, not a separate group.
 - New experimental tools must document group, risk, schema, read-only behavior, and tests.
 

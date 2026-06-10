@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from xcode.experimental.daemon import HeartbeatDaemon
-from xcode.experimental.mailbox import AgentMailbox
-from xcode.experimental.tasks import TaskStore
+from xcode.harness.daemon import HeartbeatDaemon
+from xcode.harness.mailbox import AgentMailbox
+from xcode.harness.task_store import TaskStore
 
 
 class TestHeartbeatDaemon(unittest.TestCase):
@@ -105,7 +105,7 @@ class TestHeartbeatDaemon(unittest.TestCase):
             # 模拟 git status 存在脏文件输出
             mock_res = MagicMock()
             mock_res.returncode = 0
-            mock_res.stdout = " M xcode/experimental/daemon.py\n?? untracked.txt\n"
+            mock_res.stdout = " M xcode/harness/daemon.py\n?? untracked.txt\n"
             mock_run.return_value = mock_res
 
             alerts = self.daemon.check_git_status()

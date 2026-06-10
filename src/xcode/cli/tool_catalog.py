@@ -23,8 +23,8 @@ from xcode.coding_agent.tools import (
     build_file_tools,
 )
 
-from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
-from xcode.experimental.tasks import TaskStore, build_task_tools
+from xcode.coding_agent.tools.worktree import WorktreeTaskRunner, build_worktree_tools
+from xcode.harness.task_store import TaskStore, build_task_tools
 
 
 def _builders(base_tmp: Path) -> list[tuple[str, Callable[[], Any]]]:
@@ -83,14 +83,14 @@ def _build_mcp_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
 
 
 def _build_mailbox_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
+    from xcode.harness.mailbox import AgentMailbox, build_mailbox_tools
 
     return build_mailbox_tools(AgentMailbox(base_tmp))
 
 
 def _build_progress_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    from xcode.experimental.progress import build_progress_tools
-    from xcode.experimental.tasks import TaskStore
+    from xcode.harness.task_progress import build_progress_tools
+    from xcode.harness.task_store import TaskStore
 
     return build_progress_tools(TaskStore(base_tmp))
 

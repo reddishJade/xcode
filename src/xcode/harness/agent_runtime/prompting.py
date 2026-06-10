@@ -11,7 +11,6 @@ from typing import Any
 
 from .git_preflight import build_git_preflight
 from .contextual import ContextualRetrievalState
-from ...experimental.tasks import TaskStore
 from ...harness.skill_loader import SkillLoader
 from xcode.harness.config import DEFAULT_PROMPT_MODULES
 from xcode.harness.skills import ToolSpec, build_tool_guidelines, build_tool_prompt
@@ -245,6 +244,8 @@ def _build_volatile_region(context: PromptContext, enabled: set[str]) -> list[st
 def _build_post_compact_metadata(project_root: Path) -> list[str]:
     active_tasks = []
     try:
+        from xcode.harness.task_store import TaskStore
+
         store = TaskStore(project_root)
         for task in store.list():
             if task.status in ("pending", "claimed"):

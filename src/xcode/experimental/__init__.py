@@ -1,11 +1,5 @@
-"""Experimental extensions for Xcode.
+"""仍保留实验性的扩展模块。
 
-Modules here are preserved as teaching / research assets but are not
-part of the default coding agent harness path. They are opt-in via
-`tools.enabled_groups` or imported explicitly when needed.
-
-Modules:
-- tasks: TaskStore (JSON-file task persistence)
-- worktree: WorktreeTaskRunner, build_worktree_tools (git worktree isolation)
-- mcp: Model Context Protocol (MCP) clients and integration
+正式 opt-in 能力已经迁移到 `harness/` 和 `coding_agent/tools/`。
+此包只保留仍需审核的动态插件等研究性能力。
 """

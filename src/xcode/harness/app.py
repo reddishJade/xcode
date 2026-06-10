@@ -20,9 +20,9 @@ from .assembly import (
 )
 
 if TYPE_CHECKING:
-    from xcode.experimental.daemon import HeartbeatDaemon
-    from xcode.experimental.mailbox import AgentMailbox
-    from xcode.experimental.progress import TaskProgress
+    from xcode.harness.daemon import HeartbeatDaemon
+    from xcode.harness.mailbox import AgentMailbox
+    from xcode.harness.task_progress import TaskProgress
 
 
 @dataclass
@@ -184,7 +184,7 @@ def build_app(
         plugins_hooks=plugins_data.get("hooks"),
     )
 
-    experimental_services = _assembly.load_experimental_services(
+    opt_in_services = _assembly.load_opt_in_services(
         project_root, cfg.runtime_config, enabled
     )
 
@@ -192,9 +192,9 @@ def build_app(
         agent=agent,
         registry=registry,
         contextual_state=infra.contextual_state,
-        daemon=experimental_services.daemon,
-        mailbox=experimental_services.mailbox,
-        progress=experimental_services.progress,
+        daemon=opt_in_services.daemon,
+        mailbox=opt_in_services.mailbox,
+        progress=opt_in_services.progress,
         _env_files=cfg.env_files,
         _model_profiles=cfg.runtime_config.provider.model_profiles,
         _closers=closers,

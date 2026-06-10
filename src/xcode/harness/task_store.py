@@ -1,23 +1,23 @@
-from __future__ import annotations
-
-from contextlib import contextmanager
-from dataclasses import asdict, dataclass
-from functools import partial
-from pathlib import Path
-from collections.abc import Iterator
-from typing import Any
-import json
-
-from ..harness.skills import ToolInput, ToolSpec
-import os
-import time
-import uuid
-
-"""轻量任务存储。
+"""轻量任务存储和任务工具。
 
 每个任务保存为 `.local/tasks.json.d/{id}.json`，`.highwatermark` 记录已经分配
 过的最大顺序 ID。目录锁用于保护 ID 分配、更新和领取，避免并发写入互相覆盖。
 """
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from functools import partial
+from pathlib import Path
+from typing import Any
+
+from xcode.harness.skills import ToolInput, ToolSpec
 
 
 PENDING = "pending"
@@ -297,15 +297,16 @@ def resolve_blocked(tasks: list[TaskRecord]) -> list[dict[str, Any]]:
         blocking = [dep for dep in blocked_by if dep not in completed_ids]
         if blocking:
             blocking_names = [
-                task_map[d].title if d in task_map else f"#{d}"
-                for d in blocking
+                task_map[d].title if d in task_map else f"#{d}" for d in blocking
             ]
-            blocked.append({
-                "task_id": t.id,
-                "task_title": t.title,
-                "blocked_by_ids": blocking,
-                "blocked_by_titles": blocking_names,
-            })
+            blocked.append(
+                {
+                    "task_id": t.id,
+                    "task_title": t.title,
+                    "blocked_by_ids": blocking,
+                    "blocked_by_titles": blocking_names,
+                }
+            )
     return blocked
 
 
@@ -548,7 +549,7 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="resolve_blocked",
             description="Show which tasks are blocked by unfinished dependencies.",
-            input_hint='{}',
+            input_hint="{}",
             handler=partial(_resolve_blocked, store),
             risk="low",
             schema=RESOLVE_BLOCKED_SCHEMA,

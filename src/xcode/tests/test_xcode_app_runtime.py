@@ -64,7 +64,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
     def test_default_tool_groups_do_not_construct_optional_groups(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             with patch(
-                "xcode.experimental.worktree.WorktreeTaskRunner",
+                "xcode.coding_agent.tools.worktree.WorktreeTaskRunner",
                 side_effect=AssertionError,
             ):
                 app = build_app(
@@ -137,15 +137,15 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             )
 
         names = {tool.name for tool in app.registry}
-        self.assertIn("create_worktree_task", names)
-        self.assertIn("create_task", names)
-        self.assertIn("send_mailbox_message", names)
-        self.assertIn("save_task_progress", names)
+        self.assertNotIn("create_worktree_task", names)
+        self.assertNotIn("create_task", names)
+        self.assertNotIn("send_mailbox_message", names)
+        self.assertNotIn("save_task_progress", names)
         self.assertIn("plugin_tool", names)
         self.assertIsNotNone(_layered_compactor(app).on_compact)
-        self.assertIsNotNone(app.daemon)
-        self.assertIsNotNone(app.mailbox)
-        self.assertIsNotNone(app.progress)
+        self.assertIsNone(app.daemon)
+        self.assertIsNone(app.mailbox)
+        self.assertIsNone(app.progress)
 
     def test_individual_experimental_feature_groups_enable_individual_features(
         self,
@@ -254,7 +254,6 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertIsNotNone(app.agent.audit_logger)
 
     def test_security_approval_policy_never_allows_high_risk_tools(self) -> None:
-        calls = []
         runtime_config = XcodeRuntimeConfig(
             security=SecurityRuntimeConfig(approval_policy="never"),
         )
@@ -267,7 +266,15 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             async def stream(self, messages, tools, options=None, **kwargs):
                 self.stream_calls.append(messages)
                 if len(self.stream_calls) == 1:
-                    yield ToolCallEvent(calls=[ToolCall(id="write-1", name="write_file", input={"path": "ok.txt", "content": "ok"})])
+                    yield ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="write-1",
+                                name="write_file",
+                                input={"path": "ok.txt", "content": "ok"},
+                            )
+                        ]
+                    )
                     yield FinalMessage(content="", stop_reason="tool_use")
                     return
                 yield TextDelta(chunk="done")
@@ -296,7 +303,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         )
 
         class ReadingProvider(MockProvider):
-            def __init__(self, seen_child_tools, transport=''):
+            def __init__(self, seen_child_tools, transport=""):
                 super().__init__(seen_child_tools, transport)
                 self.stream_calls = []
 
@@ -306,7 +313,10 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                     yield TextDelta(chunk="done")
                     yield FinalMessage(content="", stop_reason="end_turn")
                     return
-                yield ToolCallEvent(calls=[ToolCall(id="read-1", name="read_file", input={"path": "a.txt"})]
+                yield ToolCallEvent(
+                    calls=[
+                        ToolCall(id="read-1", name="read_file", input={"path": "a.txt"})
+                    ]
                 )
                 yield FinalMessage(content="", stop_reason="tool_use")
 
@@ -360,7 +370,12 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
                 self.calls += 1
                 if self.calls == 1:
-                    yield ToolCallEvent(calls=[ToolCall(id="read-1", name="read_file", input={"path": "a.txt"})]
+                    yield ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="read-1", name="read_file", input={"path": "a.txt"}
+                            )
+                        ]
                     )
                 else:
                     yield TextDelta(chunk="done")
@@ -504,7 +519,12 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                     yield FinalMessage(content="", stop_reason="end_turn")
                     return
                 yield TextDelta(chunk="child done")
-                yield ToolCallEvent(calls=[ToolCall(id="read-1", name="read_file", input={"path": "marker.txt"})]
+                yield ToolCallEvent(
+                    calls=[
+                        ToolCall(
+                            id="read-1", name="read_file", input={"path": "marker.txt"}
+                        )
+                    ]
                 )
                 yield FinalMessage(content="", stop_reason="tool_use")
 
@@ -542,7 +562,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             with (
                 patch("xcode.harness.assembly.build_providers", return_value=bundle),
                 patch(
-                    "xcode.experimental.worktree.WorktreeTaskRunner",
+                    "xcode.coding_agent.tools.worktree.WorktreeTaskRunner",
                     lambda project_root: FakeWorktreeRunner(project_root),
                 ),
             ):

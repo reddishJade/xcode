@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
+from xcode.coding_agent.tools.worktree import WorktreeTaskRunner, build_worktree_tools
 
 
 class TestWorktreeTaskRunner(unittest.TestCase):

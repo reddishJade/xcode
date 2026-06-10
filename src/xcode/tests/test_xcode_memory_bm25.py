@@ -80,7 +80,7 @@ class TestBM25AndMemory(unittest.TestCase):
                 "## Incident 2: Timeout in tasks\n"
                 "- Context/Query: Timeout retry failure\n"
                 "- Solution: Retry task claim\n"
-                "- Files: experimental/tasks.py\n"
+                "- Files: harness/task_store.py\n"
                 "- Takeaways: Task timeouts need lock retry\n"
                 "- Scope: tasks\n"
                 "- Confidence: 0.60\n"
@@ -143,7 +143,7 @@ class TestBM25AndMemory(unittest.TestCase):
                 "## Incident 2: Task lock\n"
                 "- Context/Query: Task file lock conflict\n"
                 "- Solution: Use exclusive directory lock\n"
-                "- Files: experimental/tasks.py\n"
+                "- Files: harness/task_store.py\n"
                 "- Takeaways: Task claiming needs atomic lock\n"
             ),
             encoding="utf-8",

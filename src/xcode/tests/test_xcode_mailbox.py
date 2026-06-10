@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 import logging
 
-from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
-from xcode.experimental.tasks import TaskStore
+from xcode.harness.mailbox import AgentMailbox, build_mailbox_tools
+from xcode.harness.task_store import TaskStore
 
 
 class TestTaskStoreAndMailbox(unittest.TestCase):
@@ -14,7 +14,7 @@ class TestTaskStoreAndMailbox(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         # Suppress logging warnings to avoid cluttering test outputs
-        logging.getLogger("xcode.experimental.mailbox").setLevel(logging.ERROR)
+        logging.getLogger("xcode.harness.mailbox").setLevel(logging.ERROR)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

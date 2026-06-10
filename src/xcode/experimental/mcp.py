@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..harness.skills import ToolInput, ToolSpec
+from xcode.harness.skills import ToolInput, ToolSpec
 
 from . import mcp_client as _mcp_mod
 

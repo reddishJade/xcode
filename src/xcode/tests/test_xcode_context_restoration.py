@@ -10,7 +10,7 @@ from xcode.harness.agent_runtime.compaction import (
     context_collapse_clean,
 )
 from xcode.harness.agent_runtime.prompting import PromptContext, SystemPromptBuilder
-from xcode.experimental.tasks import TaskStore
+from xcode.harness.task_store import TaskStore
 
 
 class XcodeContextRestorationTests(unittest.TestCase):

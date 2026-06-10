@@ -1,7 +1,7 @@
 """应用装配工厂函数。
 
 从 app.py 提取的配置解析、共享基础设施构建、provider 组装、
-工具注册、agent 构建和实验性服务加载逻辑。
+工具注册、agent 构建和可选服务加载逻辑。
 """
 
 from __future__ import annotations
@@ -53,26 +53,21 @@ from xcode.ai.providers.factory import (
 )
 
 if TYPE_CHECKING:
-    from xcode.experimental.daemon import HeartbeatDaemon
-    from xcode.experimental.mailbox import AgentMailbox
-    from xcode.experimental.progress import TaskProgress
+    from xcode.harness.daemon import HeartbeatDaemon
+    from xcode.harness.mailbox import AgentMailbox
+    from xcode.harness.task_progress import TaskProgress
 
 EXPERIMENTAL_FEATURE_GROUPS = frozenset(
     {
-        "worktree",
         "mcp",
-        "tasks",
         "memory",
         "plugins",
-        "daemon",
-        "mailbox",
-        "progress",
     }
 )
 
 
 @dataclass(frozen=True)
-class ExperimentalServices:
+class OptInServices:
     daemon: HeartbeatDaemon | None = None
     mailbox: AgentMailbox | None = None
     progress: type[TaskProgress] | None = None
@@ -265,7 +260,10 @@ def build_tool_registry(
         env=env,
     )
     if "worktree" in enabled:
-        from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
+        from xcode.coding_agent.tools.worktree import (
+            WorktreeTaskRunner,
+            build_worktree_tools,
+        )
 
         registry += build_worktree_tools(WorktreeTaskRunner(project_root))
     if "mcp" in enabled:
@@ -273,16 +271,16 @@ def build_tool_registry(
 
         registry += build_mcp_tools(project_root)
     if "tasks" in enabled:
-        from xcode.experimental.tasks import TaskStore, build_task_tools
+        from xcode.harness.task_store import TaskStore, build_task_tools
 
         registry += build_task_tools(TaskStore(project_root))
     if "mailbox" in enabled:
-        from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
+        from xcode.harness.mailbox import AgentMailbox, build_mailbox_tools
 
         registry += build_mailbox_tools(AgentMailbox(project_root))
     if "progress" in enabled:
-        from xcode.experimental.progress import build_progress_tools
-        from xcode.experimental.tasks import TaskStore
+        from xcode.harness.task_progress import build_progress_tools
+        from xcode.harness.task_store import TaskStore
 
         registry += build_progress_tools(TaskStore(project_root))
 
@@ -292,7 +290,7 @@ def build_tool_registry(
     child_registry = registry
     registry += (build_search_tools_tool(registry),)
 
-    if "subagent" in enabled or "experimental" in enabled:
+    if "subagent" in enabled:
         child_llms = dict(llm_profiles or {})
         if not child_llms:
             child_llms[PROFILE_MAIN] = llm
@@ -317,7 +315,7 @@ def build_tool_registry(
             return result.answer
 
         if "worktree" in enabled:
-            from xcode.experimental.worktree import WorktreeTaskRunner
+            from xcode.coding_agent.tools.worktree import WorktreeTaskRunner
 
             worktree_runner = WorktreeTaskRunner(project_root)
         else:
@@ -334,17 +332,17 @@ def build_tool_registry(
     return registry, skill_loader, shell_spec, tuple(closers)
 
 
-# ── 实验性服务 ──
+# ── 可选服务 ──
 
 
-def load_experimental_services(
+def load_opt_in_services(
     project_root: Path,
     runtime_config: XcodeRuntimeConfig,
     enabled: set[str],
-) -> ExperimentalServices:
+) -> OptInServices:
     daemon = None
     if "daemon" in enabled:
-        from xcode.experimental.daemon import HeartbeatDaemon
+        from xcode.harness.daemon import HeartbeatDaemon
 
         daemon = HeartbeatDaemon(
             project_root=project_root,
@@ -352,15 +350,15 @@ def load_experimental_services(
         )
     mailbox = None
     if "mailbox" in enabled:
-        from xcode.experimental.mailbox import AgentMailbox
+        from xcode.harness.mailbox import AgentMailbox
 
         mailbox = AgentMailbox(project_root)
     progress = None
     if "progress" in enabled:
-        from xcode.experimental.progress import TaskProgress
+        from xcode.harness.task_progress import TaskProgress
 
         progress = TaskProgress
-    return ExperimentalServices(daemon=daemon, mailbox=mailbox, progress=progress)
+    return OptInServices(daemon=daemon, mailbox=mailbox, progress=progress)
 
 
 # ── Agent 构建 ──

@@ -218,15 +218,15 @@
 | `core` | 默认启用 | `read_file`、`write_file`、`edit_file`、`glob_files`、`grep_search`、`ls`、`bash` |
 | `skills` | 可选 | `load_skill` |
 | `subagent` | 可选 | `submit_subagent`、`check_subagent`、`cancel_subagent` |
-| `worktree` | experimental | `create_worktree_task`、`remove_worktree_task` |
+| `worktree` | 可选 | `create_worktree_task`、`remove_worktree_task` |
 | `mcp` | experimental | 从 MCP server 动态生成 `mcp__server__tool`；延迟模式会额外提供 fetch/search 工具 |
-| `tasks` | experimental | `create_task`、`update_task`、`list_tasks`、`get_task` |
-| `mailbox` | experimental | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
-| `progress` | experimental | `save_task_progress`、`resume_task_progress` |
+| `tasks` | 可选 | `create_task`、`update_task`、`list_tasks`、`get_task` |
+| `mailbox` | 可选 | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
+| `progress` | 可选 | `save_task_progress`、`resume_task_progress` |
 | `memory` | experimental | 启用压缩摘要写入 `MEMORY.md` 的 consolidation hook |
 | `plugins` | experimental | 扫描 `.local/plugins/*.py` 并注册暴露的工具和 hooks |
-| `daemon` | experimental | 构造 `HeartbeatDaemon` |
-| `experimental` | 总开关 | 展开为全部 experimental group |
+| `daemon` | 可选 | 构造 `HeartbeatDaemon` |
+| `experimental` | 总开关 | 展开为 `mcp`、`memory` 和 `plugins` |
 
 `bm25` 是 `memory` 的内部检索实现，不单独作为启用入口。
 
@@ -293,7 +293,7 @@ MCP server 不写入 `xcode.config.json` 的 `tools` 段，而是放在 `.local/
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `enabled` | bool | `false` | 是否允许构造 `HeartbeatDaemon`。还必须启用 `daemon` 或 `experimental` group。 |
+| `enabled` | bool | `false` | 是否允许构造 `HeartbeatDaemon`。还必须启用 `daemon` group。 |
 | `interval_seconds` | int | `30` | 心跳轮询间隔。 |
 
 ---

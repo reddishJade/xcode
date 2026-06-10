@@ -118,7 +118,7 @@ src/xcode/main.py
 | 模块 | 职责 |
 | --- | --- |
 | `app.py` | 应用装配入口，委托 `assembly.py` |
-| `assembly.py` | 装配核心：config 解析、shared infra、provider bundle、experimental services |
+| `assembly.py` | 装配核心：config 解析、shared infra、provider bundle、opt-in services |
 | `config.py` | runtime config dataclass、配置读取、相对路径解析 |
 | `session.py` | JSONL 会话存储、索引、resume、fork、plan artifact |
 | `skills.py` | `ToolSpec`、工具输入解析、HITL 执行和脱敏入口 |
@@ -172,23 +172,22 @@ src/xcode/main.py
 | `cli.py` | `xcode-eval` / `python -m xcode.evals.cli` |
 | `adapters/` | 外部 benchmark adapter registry 与 SWE-bench predictions helper |
 
-### `src/xcode/experimental/`
+### Opt-in 扩展能力
 
-实验性能力层，默认不加载。每项能力都有独立启用 group，`experimental` group 会展开为全部实验性能力。
+正式扩展能力默认不加载。每项能力都有独立启用 group。`mcp`、`memory` 和 `plugins` 仍保留在 `experimental/`，`experimental` group 只展开这些实验性能力。
 
 | 文件 | group | 职责 |
 | --- | --- | --- |
-| `worktree.py` | `worktree` | Git worktree 任务隔离；工具：`create_worktree_task`、`remove_worktree_task` |
-| `mcp.py` | `mcp` | stdio MCP client、schema cache、动态 MCP tool proxy |
-| `mcp_client.py` | internal | MCP stdio JSON-RPC 客户端，被 `mcp.py` 引用 |
-| `tasks.py` | `tasks` | JSON/filelock 任务存储、依赖排序、Kanban 视图；工具：`create_task`、`update_task`、`list_tasks`、`get_task` |
-| `mailbox.py` | `mailbox` | append-only JSONL mailbox；工具：`send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
-| `progress.py` | `progress` | 长任务 checklist 保存/恢复；工具：`save_task_progress`、`resume_task_progress` |
-| `memory.py` | `memory` | `MEMORY.md` 记忆块校验、BM25 召回、压缩摘要 consolidation |
-| `memory_parsing.py` | internal | 记忆块解析数据类型，被 `memory.py` 引用 |
-| `bm25.py` | internal | `memory` 使用的纯 Python BM25Okapi，随 `memory` group 启用 |
-| `plugins.py` | `plugins` | `.local/plugins/*.py` 动态加载，收集 tools/hooks/skills |
-| `daemon.py` | `daemon` | `HeartbeatDaemon`，轮询 mailbox/git/tasks；`DaemonHealth` 健康快照、`ensure_healthy()` 自愈重启 |
+| `coding_agent/tools/worktree.py` | `worktree` | Git worktree 任务隔离；工具：`create_worktree_task`、`remove_worktree_task` |
+| `experimental/mcp.py` | `mcp` | stdio MCP client、schema cache、动态 MCP tool proxy |
+| `experimental/mcp_client.py` | internal | MCP stdio JSON-RPC 客户端，被 `mcp.py` 引用 |
+| `harness/task_store.py` | `tasks` | JSON/filelock 任务存储、依赖排序、Kanban 视图；工具：`create_task`、`update_task`、`list_tasks`、`get_task` |
+| `harness/mailbox.py` | `mailbox` | append-only JSONL mailbox；工具：`send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
+| `harness/task_progress.py` | `progress` | 长任务 checklist 保存/恢复；工具：`save_task_progress`、`resume_task_progress` |
+| `experimental/memory.py` | `memory` | `MEMORY.md` 记忆块校验、BM25 召回、压缩摘要 consolidation |
+| `experimental/memory_parsing.py` | internal | 记忆块解析数据类型，被 `memory.py` 引用 |
+| `experimental/plugins.py` | `plugins` | `.local/plugins/*.py` 动态加载，收集 tools/hooks/skills |
+| `harness/daemon.py` | `daemon` | `HeartbeatDaemon`，轮询 mailbox/git/tasks；`DaemonHealth` 健康快照、`ensure_healthy()` 自愈重启 |
 
 ---
 
@@ -197,7 +196,7 @@ src/xcode/main.py
 **Core 是默认启用的设计原因**：
 - 零配置可用：用户无需编写配置文件即可开始使用基础 coding 能力
 - 最小安全集合：file/search/bash 是本地只读或可审计的操作，风险可控
-- 渐进增强：用户根据需要逐步启用 skills/subagent/experimental 功能
+- 渐进增强：用户根据需要逐步启用 skills/subagent/扩展功能
 
 工具实现归 `coding_agent/` 层所有。默认 `enabled_groups=("core",)`，可见工具为：
 
@@ -209,18 +208,18 @@ src/xcode/main.py
 - `ls`
 - `bash`
 
-可选非 experimental group：
+可选 group：
 
 - `skills`：`load_skill`
 - `subagent`：`submit_subagent`、`check_subagent`、`cancel_subagent`
 
-**Experimental 必须 opt-in 的设计原因**：
-- **稳定性边界**：experimental 功能未经生产验证，可能引入破坏性变更
+**扩展能力必须 opt-in 的设计原因**：
+- **稳定性边界**：扩展能力会扩大副作用面，默认路径应保持小而稳定
 - **依赖隔离**：避免默认加载重型依赖（如 MCP stdio 管理、BM25 索引）
 - **权限最小化**：worktree/tasks/mailbox 等涉及文件系统副作用，需要用户显式授权
 - **成本可控**：daemon/memory 等持久化功能会增加存储和计算开销
 
-experimental group：
+扩展 group：
 
 - `worktree`
 - `mcp`
@@ -230,7 +229,7 @@ experimental group：
 - `memory`
 - `plugins`
 - `daemon`
-- `experimental`：展开为全部 experimental group
+- `experimental`：展开为 `mcp`、`memory` 和 `plugins`
 
 ---
 
@@ -241,17 +240,17 @@ experimental group：
 - `.local/session_artifacts/`：Plan artifact
 - `.local/mcp_cache.json`：MCP schema cache
 - `.local/mcp_config.json`：本地 MCP server 配置
-- `.local/tasks.json.d/`：实验性 task store
-- `.team/inbox/`：实验性 mailbox
+- `.local/tasks.json.d/`：task store
+- `.team/inbox/`：mailbox
 - `.local/plugins/`：实验性插件目录
 
-这些路径由不同模块按需创建；默认 core 路径不会创建 experimental 状态。
+这些路径由不同模块按需创建；默认 core 路径不会创建扩展状态。
 
 ---
 
 ## 测试目录
 
-`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和 experimental 组件。常用命令：
+`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和扩展组件。常用命令：
 
 ```powershell
 uv run python -m unittest discover src\xcode\tests

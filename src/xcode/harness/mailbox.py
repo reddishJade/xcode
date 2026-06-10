@@ -1,3 +1,5 @@
+"""本地 append-only Agent mailbox。"""
+
 from __future__ import annotations
 
 import json
@@ -6,11 +8,9 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from typing import Protocol
-
-from ..harness.skills import ToolInput, ToolSpec
+from xcode.harness.skills import ToolInput, ToolSpec
 
 
 class MailboxTransport(Protocol):
@@ -24,7 +24,8 @@ class MailboxTransport(Protocol):
 
     def acknowledge_message(self, message_id: str, recipient_id: str) -> None: ...
 
-logger = logging.getLogger("xcode.experimental.mailbox")
+
+logger = logging.getLogger("xcode.harness.mailbox")
 
 
 class LocalFileMailboxTransport:

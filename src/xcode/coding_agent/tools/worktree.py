@@ -1,3 +1,5 @@
+"""托管实现任务使用的 Git worktree 隔离工具。"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -7,9 +9,7 @@ from pathlib import Path
 import subprocess
 import uuid
 
-from ..harness.skills import ToolInput, ToolSpec
-
-"""托管实现任务使用的 Git worktree 隔离。"""
+from xcode.harness.skills import ToolInput, ToolSpec
 
 
 CommandRunner = Callable[[list[str], Path], str]

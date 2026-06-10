@@ -10,7 +10,7 @@ from xcode.harness.observability.permissions import (
 )
 from xcode.experimental.plugins import PluginManager
 from xcode.experimental.mcp import build_mcp_tools
-from xcode.experimental.tasks import (
+from xcode.harness.task_store import (
     TaskStore,
     resolve_task_dependencies,
     render_kanban_view,

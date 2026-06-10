@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from xcode.experimental.tasks import CLAIMED, PENDING, TaskStore
+from xcode.harness.task_store import CLAIMED, PENDING, TaskStore
 
 
 class XcodeTaskStoreTests(unittest.TestCase):
@@ -85,7 +85,7 @@ class XcodeTaskStoreTests(unittest.TestCase):
             )
 
     def test_task_tool_handlers(self) -> None:
-        from xcode.experimental.tasks import build_task_tools
+        from xcode.harness.task_store import build_task_tools
 
         with tempfile.TemporaryDirectory() as temp_dir:
             store = TaskStore(Path(temp_dir))

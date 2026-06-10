@@ -1,3 +1,5 @@
+"""任务进度断点和长任务租约状态。"""
+
 from __future__ import annotations
 
 import calendar
@@ -7,10 +9,10 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from ..harness.skills import ToolInput, ToolSpec
-from .tasks import CLAIMED, PENDING, TaskStore
+from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.harness.task_store import CLAIMED, PENDING, TaskStore
 
-logger = logging.getLogger("xcode.experimental.progress")
+logger = logging.getLogger("xcode.harness.task_progress")
 
 
 @dataclass(frozen=True)

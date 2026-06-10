@@ -55,17 +55,17 @@ src/xcode/main.py
 - 通过 `coding_agent/registry.py` 构造 coding 产品工具 registry。
 - 构造 provider bundle。
 - 构造 `StructuredAgent`。
-- 按 opt-in group 连接 experimental 组件。
+- 按 opt-in group 连接可选组件。
 
 装配依赖方向：`assembly.py` → `coding_agent/registry.py` → `coding_agent/tools/`
 
 `EXPERIMENTAL_FEATURE_GROUPS` 当前展开为：
 
 ```text
-worktree, mcp, tasks, memory, plugins, daemon, mailbox, progress
+mcp, memory, plugins
 ```
 
-`experimental` 是总开关。启用它等价于启用全部上述 group。`bm25` 归属 `memory` 内部实现。
+`experimental` 是实验能力总开关。启用它等价于启用全部上述 group。`tasks`、`mailbox`、`progress`、`daemon`、`worktree` 已转正为独立 opt-in group。
 
 ---
 
@@ -216,13 +216,13 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 ---
 
-## 8. Experimental Feature Review
+## 8. Opt-in Feature Review
 
-所有 experimental 能力默认关闭。启用方式是把对应 group 加入 `tools.enabled_groups`。
+所有扩展能力默认关闭。启用方式是把对应 group 加入 `tools.enabled_groups`。`mcp`、`memory` 和 `plugins` 仍属于 experimental。
 
 ### `mcp`
 
-文件：`src/xcode/experimental/mcp.py`
+文件：`src/xcode/experimental/mcp.py`、`src/xcode/experimental/mcp_client.py`
 
 能力：
 
@@ -241,7 +241,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 ### `tasks`
 
-文件：`src/xcode/experimental/tasks.py`
+文件：`src/xcode/harness/task_store.py`
 
 能力：
 
@@ -257,7 +257,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 ### `worktree`
 
-文件：`src/xcode/experimental/worktree.py`
+文件：`src/xcode/coding_agent/tools/worktree.py`
 
 能力：
 
@@ -272,7 +272,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 ### `mailbox`
 
-文件：`src/xcode/experimental/mailbox.py`
+文件：`src/xcode/harness/mailbox.py`
 
 能力：
 
@@ -287,7 +287,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 ### `progress`
 
-文件：`src/xcode/experimental/progress.py`
+文件：`src/xcode/harness/task_progress.py`
 
 能力：
 
@@ -302,7 +302,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 ### `memory`
 
-文件：`src/xcode/experimental/memory.py`、`src/xcode/experimental/bm25.py`
+文件：`src/xcode/experimental/memory.py`、`src/xcode/experimental/memory_parsing.py`
 
 能力：
 
@@ -336,7 +336,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 ### `daemon`
 
-文件：`src/xcode/experimental/daemon.py`
+文件：`src/xcode/harness/daemon.py`
 
 能力：
 
@@ -349,7 +349,7 @@ REPL 支持 `/plan`、`/review`、`/act`。执行模式由 `execution_modes.py` 
 
 边界：
 
-- `build_app()` 在启用 `daemon` 或 `experimental` 后构造 daemon。
+- `build_app()` 在启用 `daemon` 后构造 daemon。
 
 ### `execution_env`
 
@@ -409,7 +409,7 @@ Git 工作区补丁记录在 trial metrics 的 `model_patch` 字段中。SWE-ben
 ## 11. 维护规则
 
 1. 不要绕过 `ToolSpecAdapter` 和 `agent/tool_execution.py` 直接执行工具 handler。
-2. 不要默认启用 `src/xcode/experimental/` 中的能力。
+2. 不要默认启用扩展能力。
 3. 新 experimental 能力必须有独立 group；`experimental` 总开关应同步展开它。
 4. 新工具必须声明 group、risk、schema 和 read-only/concurrency 属性。
 5. 修改工具或 group 后，应更新 `CONFIG.md`、`README.md`、`docs/code-organization.md` 和相关测试。

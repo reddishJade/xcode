@@ -1,17 +1,19 @@
+"""后台服务生命周期与心跳任务。"""
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
 import threading
 import time
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any
 
-from .mailbox import AgentMailbox
-from .tasks import TaskStore
+from xcode.harness.mailbox import AgentMailbox
+from xcode.harness.task_store import TaskStore
 
-logger = logging.getLogger("xcode.experimental.daemon")
+logger = logging.getLogger("xcode.harness.daemon")
 
 
 @dataclass(frozen=True)

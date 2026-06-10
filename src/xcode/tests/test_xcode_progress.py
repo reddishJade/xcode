@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from xcode.experimental.tasks import TaskStore
-from xcode.experimental.progress import TaskProgress, build_progress_tools
+from xcode.harness.task_store import TaskStore
+from xcode.harness.task_progress import TaskProgress, build_progress_tools
 
 
 class TestTaskProgress(unittest.TestCase):

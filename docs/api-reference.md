@@ -1093,10 +1093,6 @@ class EvalRunner:
 
 | 子模块 | 说明 |
 |---|---|
-| `daemon` | `HeartbeatDaemon` — 心跳守护线程 |
-| `mailbox` | `AgentMailbox` — Agent 信箱 |
-| `progress` | `TaskProgress` — 任务进度追踪 |
+| `memory` | `MemoryManager` — `MEMORY.md` 记忆系统 |
 | `plugins` | `PluginManager` — 插件系统 |
-| `tasks` | `TaskStore` — JSON 文件任务持久化 |
-| `worktree` | `WorktreeTaskRunner`, `build_worktree_tools` — git worktree 隔离 |
 | `mcp` | MCP (Model Context Protocol) 客户端集成 |
