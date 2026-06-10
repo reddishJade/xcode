@@ -349,6 +349,7 @@ class StructuredAgent:
         cancellation_token: CancellationToken | None = None,
         fallback_provider: ModelProvider | None = None,
         project_root: Path | None = None,
+        request_hygiene: RequestHygieneConfig | None = None,
     )
 
     def steer(self, msg: AgentMessage) -> None
@@ -368,6 +369,12 @@ class StructuredAgent:
 StructuredCompactor = Callable[[list[dict]], list[dict]]
 RuntimeContextProvider = Callable[[str], list[str]]
 ```
+
+**压缩与请求裁剪**:
+
+- `compactor` 负责状态级上下文压缩；触发后返回的新消息会替换后续模型请求上下文。
+- `request_hygiene` 负责请求边界裁剪，只影响发送给 provider 的消息副本，不修改 `HistoryManager` 和 session 日志。
+- 压缩触发优先使用上一轮 provider 返回的 `prompt_tokens`，没有真实 usage 时回退到配置的消息数和估算 token 阈值。
 
 ### 4.2 事件翻译 —— event_translation
 
