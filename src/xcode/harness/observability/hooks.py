@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
 from typing import Any, Literal
+
+from blinker import Signal
 
 """类型安全的执行框架事件钩子系统。"""
 
@@ -20,6 +21,15 @@ HookEvent = Literal[
 ]
 HookCallback = Callable[["HookRecord"], None]
 HarnessCallback = Callable[["HarnessEvent"], None]
+
+_HOOK_EVENTS: tuple[HookEvent, ...] = (
+    "pre_tool",
+    "post_tool",
+    "on_error",
+    "on_compact",
+    "before_agent_start",
+    "before_provider_request",
+)
 
 
 @dataclass(frozen=True)
@@ -101,46 +111,33 @@ type HarnessEvent = (
 
 class HookManager:
     def __init__(self) -> None:
-        self._callbacks: dict[HookEvent, list[HookCallback]] = defaultdict(list)
-        self._subscribers: dict[HookEvent, list[HarnessCallback]] = defaultdict(list)
+        self._registered: dict[HookEvent, Signal] = {
+            event: Signal() for event in _HOOK_EVENTS
+        }
+        self._subscribed: dict[HookEvent, Signal] = {
+            event: Signal() for event in _HOOK_EVENTS
+        }
 
     def register(self, event: HookEvent, callback: HookCallback) -> None:
-        """注册钩子。"""
-        self._callbacks[event].append(callback)
+        self._registered[event].connect(callback, weak=False)
 
     def remove(self, event: HookEvent, callback: HookCallback) -> None:
-        """移除钩子。"""
-        try:
-            self._callbacks[event].remove(callback)
-        except ValueError:
-            return
+        self._registered[event].disconnect(callback)
 
     def subscribe(self, event: HookEvent, callback: HarnessCallback) -> None:
-        """订阅类型化 harness 事件。"""
-        self._subscribers[event].append(callback)
+        self._subscribed[event].connect(callback, weak=False)
 
     def unsubscribe(self, event: HookEvent, callback: HarnessCallback) -> None:
-        """取消类型化 harness 事件订阅。"""
-        try:
-            self._subscribers[event].remove(callback)
-        except ValueError:
-            return
+        self._subscribed[event].disconnect(callback)
 
     def emit(self, record: HookRecord) -> list[Any]:
-        results: list[Any] = []
-        for callback in self._callbacks.get(record.event, []):
-            try:
-                result = callback(record)
-                results.append(result)
-            except Exception:
-                logger.debug("hook callback %s raised", callback, exc_info=True)
-        event = _harness_event_from_hook(record)
-        for callback in self._subscribers.get(record.event, []):
-            try:
-                result = callback(event)
-                results.append(result)
-            except Exception:
-                logger.debug("event subscriber %s raised", callback, exc_info=True)
+        results: list[Any] = [
+            rv for _receiver, rv in self._registered[record.event].send(record)
+        ]
+        converted = _harness_event_from_hook(record)
+        results.extend(
+            rv for _receiver, rv in self._subscribed[record.event].send(converted)
+        )
         return results
 
 
