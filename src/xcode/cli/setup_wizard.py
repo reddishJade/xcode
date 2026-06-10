@@ -7,6 +7,11 @@ from typing import Any
 
 from dotenv import dotenv_values
 
+from .reasoning_effort import (
+    reasoning_effort_levels_for_transport,
+    supports_reasoning_effort,
+)
+
 CONFIG_FILENAME = "xcode.config.json"
 
 PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
@@ -148,22 +153,6 @@ def run_setup_wizard(project_root: Path) -> None:
     if model is None:
         model = model_default
 
-    # 确认
-    print()
-    print("  Summary:")
-    print(f"    Provider  : {preset['label']}")
-    print(f"    Model     : {model}")
-    if base_url:
-        print(f"    Base URL  : {base_url}")
-    print(
-        f"    API Key   : {'*' * max(0, len(api_key) - 4)}{api_key[-4:] if api_key else '(empty)'}"
-    )
-    print()
-    confirm = questionary.confirm("Save this configuration?", default=True).ask()
-    if not confirm:
-        print("  Setup skipped. You can configure later by editing xcode.config.json.")
-        return
-
     transport = "openai_chat"
     if provider_key == "anthropic":
         transport = "anthropic_messages"
@@ -174,6 +163,36 @@ def run_setup_wizard(project_root: Path) -> None:
     elif provider_key == "chatglm":
         transport = "chatglm_chat"
 
+    reasoning_effort = None
+    if supports_reasoning_effort(transport):
+        effort_default = "high"
+        effort = questionary.select(
+            "Reasoning effort:",
+            choices=list(reasoning_effort_levels_for_transport(transport)),
+            default=effort_default,
+        ).ask()
+        if effort is None:
+            effort = effort_default
+        reasoning_effort = effort
+
+    # 确认
+    print()
+    print("  Summary:")
+    print(f"    Provider  : {preset['label']}")
+    print(f"    Model     : {model}")
+    if base_url:
+        print(f"    Base URL  : {base_url}")
+    if reasoning_effort is not None:
+        print(f"    Effort    : {reasoning_effort}")
+    print(
+        f"    API Key   : {'*' * max(0, len(api_key) - 4)}{api_key[-4:] if api_key else '(empty)'}"
+    )
+    print()
+    confirm = questionary.confirm("Save this configuration?", default=True).ask()
+    if not confirm:
+        print("  Setup skipped. You can configure later by editing xcode.config.json.")
+        return
+
     config_data = {
         "provider": {
             "provider_type": provider_key,
@@ -183,6 +202,11 @@ def run_setup_wizard(project_root: Path) -> None:
                     "chat_model": model,
                     "base_url": base_url,
                     "api_key": api_key,
+                    **(
+                        {"reasoning_effort": reasoning_effort}
+                        if reasoning_effort is not None
+                        else {}
+                    ),
                 }
             },
         }

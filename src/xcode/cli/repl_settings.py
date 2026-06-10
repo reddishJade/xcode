@@ -7,6 +7,9 @@ from xcode.harness.observability import (
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
+from .reasoning_effort import (
+    reasoning_effort_levels_for_transport,
+)
 
 
 class ModelControlApp(Protocol):
@@ -142,15 +145,27 @@ def handle_model_command(command: str, app: object) -> None:
 
 def handle_effort_command(command: str, app: object) -> None:
     parts = command.split(maxsplit=1)
+    info = _model_info(app)
+    transport = info.get("transport", "") if info else ""
+    supported_levels = reasoning_effort_levels_for_transport(transport)
     if len(parts) == 1:
-        info = _model_info(app)
         current = info.get("reasoning_effort", "not set") if info else "unknown"
         print(f"  Reasoning effort: {current}")
+        if supported_levels:
+            print(f"  Supported: {'/'.join(supported_levels)}")
+        else:
+            print("  Supported: not available for current provider")
         return
 
     level = parts[1].lower()
-    if level not in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
-        print("Invalid effort level. Use: off/minimal/low/medium/high/xhigh/max")
+    if not supported_levels:
+        print("Current provider does not support reasoning effort.")
+        return
+    if level not in supported_levels:
+        print(
+            f"Invalid effort level for {transport or 'current provider'}. "
+            f"Use: {'/'.join(supported_levels)}"
+        )
         return
 
     if not _is_model_control_app(app):

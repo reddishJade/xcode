@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from xcode.harness.skills import ToolSpec
+
+from .reasoning_effort import normalize_reasoning_effort_options
 
 """REPL 命令、工具名和 @file 引用补全。"""
 
@@ -37,10 +39,12 @@ class ReplCompleter(Completer):
         project_root: Path,
         registry: Iterable[ToolSpec] = (),
         command_names: Iterable[str] = (),
+        effort_options: Iterable[str] | Callable[[], Iterable[str]] = (),
     ) -> None:
         self.project_root = project_root.resolve()
         self.tool_names = tuple(sorted(tool.name for tool in registry))
         self.command_names = tuple(command_names)
+        self._effort_options = effort_options
         self._directory_cache: dict[Path, tuple[str, ...]] = {}
 
     def get_completions(self, document, complete_event):
@@ -60,6 +64,12 @@ class ReplCompleter(Completer):
             yield completion
 
     def complete(self, text_before_cursor: str) -> list[CompletionItem]:
+        if (
+            text_before_cursor.startswith("/effort")
+            and len(text_before_cursor) > len("/effort")
+            and text_before_cursor[len("/effort")].isspace()
+        ):
+            return self._complete_effort(text_before_cursor)
         if text_before_cursor.startswith("/tool "):
             return self._complete_tool_name(text_before_cursor)
         if text_before_cursor.startswith("/"):
@@ -97,6 +107,28 @@ class ReplCompleter(Completer):
                 self.project_root, partial, self._directory_cache
             )
         ]
+
+    def _complete_effort(self, text: str) -> list[CompletionItem]:
+        parts = text.split(maxsplit=1)
+        partial = parts[1] if len(parts) == 2 else ""
+        options = self._current_effort_options()
+        if not partial:
+            return [
+                CompletionItem(option, -len(partial), "effort") for option in options
+            ]
+        return [
+            CompletionItem(option, -len(partial), "effort")
+            for option in options
+            if option.startswith(partial)
+        ]
+
+    def _current_effort_options(self) -> tuple[str, ...]:
+        options = (
+            self._effort_options()
+            if callable(self._effort_options)
+            else self._effort_options
+        )
+        return normalize_reasoning_effort_options(options)
 
     def _complete_shell(self, text: str) -> list[CompletionItem]:
         marker = _active_shell_word(text)

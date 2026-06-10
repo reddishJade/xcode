@@ -567,6 +567,20 @@ class XcodeReplTests(unittest.TestCase):
 
         self.assertEqual([item.text for item in items], ["/queue"])
 
+    def test_repl_completer_suggests_effort_levels(self) -> None:
+        completer = ReplCompleter(
+            Path.cwd(),
+            command_names=COMMAND_NAMES,
+            effort_options=("off", "minimal", "low", "medium", "high", "xhigh", "max"),
+        )
+
+        items = completer.complete("/effort me")
+
+        self.assertEqual(
+            [item.text for item in items],
+            ["medium"],
+        )
+
     def test_handle_command_keeps_quit_alias(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))
@@ -1080,7 +1094,11 @@ class ToolEventApp:
         yield StructuredAgentEvent(
             "tool_use",
             1,
-            ToolCall(id="call_1", name="grep_search", input={"pattern": "mcp", "path": "src/xcode"}),
+            ToolCall(
+                id="call_1",
+                name="grep_search",
+                input={"pattern": "mcp", "path": "src/xcode"},
+            ),
         )
         yield StructuredAgentEvent(
             "tool_result",
@@ -1182,7 +1200,11 @@ class InterruptingToolApp:
         yield StructuredAgentEvent(
             "tool_use",
             1,
-            ToolCall(id="call_1", name="bash", input={"command": "cd .. && git diff .gitignore"}),
+            ToolCall(
+                id="call_1",
+                name="bash",
+                input={"command": "cd .. && git diff .gitignore"},
+            ),
         )
         raise KeyboardInterrupt()
 

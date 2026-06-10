@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import sys
 import textwrap
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from rich.console import Console
@@ -173,6 +174,7 @@ def create_prompt_session(
     project_root: Path | None = None,
     registry: tuple[ToolSpec, ...] = (),
     command_names: tuple[str, ...] = (),
+    effort_options: Iterable[str] | Callable[[], Iterable[str]] = (),
 ) -> PromptLike:
     try:
         from prompt_toolkit import PromptSession
@@ -206,7 +208,12 @@ def create_prompt_session(
         else:
             event.app.exit(exception=KeyboardInterrupt())
 
-    completer = ReplCompleter(project_root or Path.cwd(), registry, command_names)
+    completer = ReplCompleter(
+        project_root or Path.cwd(),
+        registry,
+        command_names,
+        effort_options,
+    )
 
     history = None
     try:

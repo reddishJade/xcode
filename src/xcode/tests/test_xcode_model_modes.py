@@ -5,7 +5,7 @@ from io import StringIO
 import unittest
 
 from xcode.ai.model_modes import parse_model_mode
-from xcode.cli.repl_settings import handle_model_command
+from xcode.cli.repl_settings import handle_effort_command, handle_model_command
 
 
 class XcodeModelModeTests(unittest.TestCase):
@@ -38,6 +38,24 @@ class XcodeModelModeTests(unittest.TestCase):
         self.assertFalse(app.calls[0]["thinking"])
         self.assertIsNone(app.calls[0]["reasoning_effort"])
 
+    def test_effort_command_applies_supported_levels(self) -> None:
+        app = _EffortApp(transport="openai_chat")
+
+        with redirect_stdout(StringIO()):
+            handle_effort_command("/effort xhigh", app)
+
+        self.assertEqual(app.calls[0]["reasoning_effort"], "xhigh")
+
+    def test_effort_command_rejects_unsupported_transports(self) -> None:
+        app = _EffortApp(transport="chatglm_chat")
+        output = StringIO()
+
+        with redirect_stdout(output):
+            handle_effort_command("/effort high", app)
+
+        self.assertEqual(app.calls, [])
+        self.assertIn("does not support reasoning effort", output.getvalue())
+
 
 class _ModelApp:
     def __init__(self) -> None:
@@ -45,6 +63,41 @@ class _ModelApp:
 
     def get_model_info(self) -> dict[str, str]:
         return {"model": "old"}
+
+    def set_model(
+        self,
+        *,
+        model: str,
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        self.calls.append(
+            {
+                "model": model,
+                "profile": profile,
+                "base_url": base_url,
+                "api_key": api_key,
+                "thinking": thinking,
+                "reasoning_effort": reasoning_effort,
+            }
+        )
+        return model
+
+
+class _EffortApp:
+    def __init__(self, transport: str) -> None:
+        self.transport = transport
+        self.calls: list[dict[str, object]] = []
+
+    def get_model_info(self) -> dict[str, str]:
+        return {
+            "model": "current",
+            "transport": self.transport,
+            "reasoning_effort": "high",
+        }
 
     def set_model(
         self,

@@ -88,11 +88,13 @@ class XcodeApp:
         provider = getattr(self.agent, "provider", None)
         model_name = getattr(provider, "model", "unknown") if provider else "unknown"
         base_url = getattr(provider, "base_url", "") if provider else ""
+        transport = getattr(provider, "transport", "") if provider else ""
         thinking = getattr(provider, "thinking", None)
         reasoning_effort = getattr(provider, "reasoning_effort", None)
         info: dict[str, str] = {
             "model": model_name,
             "base_url": base_url,
+            "transport": transport,
             "profile": "main",
         }
         if thinking is not None:

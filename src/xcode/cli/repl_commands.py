@@ -333,7 +333,7 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/effort": CommandEntry(
         handler=cmd_effort,
         desc="Show current reasoning effort.",
-        args_desc="<level>",
+        args_desc="<off|minimal|low|medium|high|xhigh|max>",
         accepts_args=True,
     ),
     "/thinking": CommandEntry(

@@ -30,6 +30,7 @@ from .repl_rendering import (
     should_print_reasoning_summary,
     single_line_preview,
 )
+from .reasoning_effort import reasoning_effort_levels_for_transport
 from .repl_sessions import (
     print_saved_conversation,
     resume_interactively,
@@ -66,7 +67,18 @@ def run_repl(
     store = SessionStore(sessions_dir, project_root=root)
     markdown_renderer = renderer or TerminalMarkdownRenderer()
     registry = tuple(getattr(app, "registry", ()) or ())
-    session = prompt_session or create_prompt_session(root, registry, COMMAND_NAMES)
+
+    def _effort_options() -> tuple[str, ...]:
+        provider = getattr(getattr(app, "agent", None), "provider", None)
+        transport = getattr(provider, "transport", "") if provider else ""
+        return reasoning_effort_levels_for_transport(transport)
+
+    session = prompt_session or create_prompt_session(
+        root,
+        registry,
+        COMMAND_NAMES,
+        _effort_options,
+    )
     state = ReplState()
     session_policy = SessionPermissionPolicy()
     persistent_store = PersistentPermissionStore(root / ".local" / "hitl_policy.json")
