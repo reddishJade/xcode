@@ -7,9 +7,7 @@ from xcode.ai.events import ProviderEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
 
 
-type RouterFn = Callable[
-    [list[dict[str, Any]], list[ToolDefinition]], str
-]
+type RouterFn = Callable[[list[dict[str, Any]], list[ToolDefinition]], str]
 """路由函数：根据消息和工具定义，返回 provider 名称以选择目标 provider。"""
 
 
@@ -61,14 +59,18 @@ class RouterProvider:
 
         self._last_provider = name
         try:
-            async for event in provider.stream(messages, tools, options=options, **kwargs):
+            async for event in provider.stream(
+                messages, tools, options=options, **kwargs
+            ):
                 yield event
         except Exception:
             if self._fallback and self._fallback != name:
                 fb = self._providers.get(self._fallback)
                 if fb is not None:
                     self._last_provider = self._fallback
-                    async for event in fb.stream(messages, tools, options=options, **kwargs):
+                    async for event in fb.stream(
+                        messages, tools, options=options, **kwargs
+                    ):
                         yield event
                     return
             raise

@@ -49,7 +49,9 @@ def validate_tool_call(
             schema=tool.parameters,
         )
     except jsonschema.ValidationError as exc:
-        path = ".".join(str(p) for p in exc.absolute_path) if exc.absolute_path else name
+        path = (
+            ".".join(str(p) for p in exc.absolute_path) if exc.absolute_path else name
+        )
         raise ToolValidationError(f"{path}: {exc.message}") from exc
 
     return arguments

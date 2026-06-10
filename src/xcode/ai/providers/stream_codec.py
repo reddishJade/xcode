@@ -90,7 +90,10 @@ def chat_stream_to_events(
     for chunk in stream:
         usage = chunk.usage
         if usage is not None:
-            yield UsageUpdate(input_tokens=usage.prompt_tokens or 0, output_tokens=usage.completion_tokens or 0)
+            yield UsageUpdate(
+                input_tokens=usage.prompt_tokens or 0,
+                output_tokens=usage.completion_tokens or 0,
+            )
 
         choices = chunk.choices
         if not choices:
