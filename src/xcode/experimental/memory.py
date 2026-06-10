@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from collections.abc import Sequence
 
-from .bm25 import BM25Okapi
+from rank_bm25 import BM25Okapi
 from .memory_parsing import (
     MemoryRecord,
     MemorySearchEvalCase,
