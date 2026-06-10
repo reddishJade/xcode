@@ -32,7 +32,7 @@ from .truncate import truncate_head, format_size
 """
 
 # 文件读写限制（防止内存耗尽和输出截断）
-MAX_READ_BYTES = 1_000_000   # 单文件读取限制：1MB
+MAX_READ_BYTES = 1_000_000  # 单文件读取限制：1MB
 MAX_WRITE_BYTES = 1_000_000  # 单文件写入限制：1MB
 
 
@@ -241,38 +241,14 @@ def build_file_tools(
     )
 
 
-_IMAGE_MIME_BY_EXTENSION: dict[str, str] = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-}
-
-_IMAGE_MAGIC: list[tuple[bytes, str]] = [
-    (b"\x89PNG\r\n\x1a\n", "image/png"),
-    (b"\xff\xd8\xff", "image/jpeg"),
-    (b"GIF87a", "image/gif"),
-    (b"GIF89a", "image/gif"),
-    (b"BM", "image/bmp"),
-]
-
-
 def _detect_image(path: Path, operations: FileOperations) -> str | None:
-    ext = path.suffix.lower()
-    mime = _IMAGE_MIME_BY_EXTENSION.get(ext)
-    if mime:
-        return mime
     try:
-        header = operations.read_bytes(path)[:16]
+        buf = operations.read_bytes(path)
     except Exception:
         return None
-    for magic, mime in _IMAGE_MAGIC:
-        if header.startswith(magic):
-            return mime
-    if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
-        return "image/webp"
-    return None
+    import filetype
+
+    return filetype.guess_mime(buf)
 
 
 def _read_file(
@@ -334,7 +310,14 @@ def _read_image(
         resized.save(buf, format=save_format)
         new_w, new_h = resized.width, resized.height
         data = buf.getvalue()
-        mime = _IMAGE_MIME_BY_EXTENSION.get(f".{save_format.lower()}", mime)
+        _img_mime: dict[str, str] = {
+            "jpeg": "image/jpeg",
+            "jpg": "image/jpeg",
+            "png": "image/png",
+            "gif": "image/gif",
+            "webp": "image/webp",
+        }
+        mime = _img_mime.get(save_format.lower(), mime)
     else:
         new_w, new_h = orig_w, orig_h
     b64 = base64.b64encode(data).decode("ascii")
