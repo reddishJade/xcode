@@ -43,6 +43,10 @@ class XcodeMiMoStreamOptionsTests(unittest.TestCase):
 
         events = asyncio.run(run_test())
 
+        self.assertEqual(captured_params.get("model"), "openai/mimo-v2.5-pro")
+        self.assertEqual(
+            captured_params.get("base_url"), "https://api.xiaomimimo.com/v1"
+        )
         self.assertEqual(captured_params.get("api_key"), "override-key")
         extra_headers = captured_params.get("extra_headers", {})
         self.assertEqual(extra_headers.get("X-Custom"), "test-header")

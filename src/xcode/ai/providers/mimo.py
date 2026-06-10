@@ -60,6 +60,10 @@ class MiMoProvider(OpenAICompatProvider):
 
         yield from self._call_chat_api(params, len(openai_messages))
 
+    def _completion_model(self, model: str) -> str:
+        """返回 litellm 可识别的 OpenAI-compatible 模型标识。"""
+        return self._openai_compatible_completion_model(model)
+
     def _record_usage(self, response, sent_messages: int) -> None:
         """记录 MiMo usage，提取缓存和 reasoning 统计。"""
         from xcode.ai.cache import extract_cache_usage

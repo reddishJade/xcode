@@ -125,6 +125,10 @@ class ChatGLMProvider(OpenAICompatProvider):
         thinking_body["clear_thinking"] = self.clear_thinking
         return kwargs
 
+    def _completion_model(self, model: str) -> str:
+        """返回 litellm 可识别的 OpenAI-compatible 模型标识。"""
+        return self._openai_compatible_completion_model(model)
+
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:

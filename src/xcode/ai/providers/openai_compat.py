@@ -110,9 +110,11 @@ class OpenAICompatProvider(ProviderMetricsMixin):
 
         # 构建 litellm 参数
         completion_params: dict[str, Any] = {
-            "model": params["model"],
+            "model": self._completion_model(str(params["model"])),
             "messages": params["messages"],
             "stream": True,
+            "api_key": self.api_key,
+            "base_url": self.base_url,
         }
 
         # 透传标准参数
@@ -144,6 +146,16 @@ class OpenAICompatProvider(ProviderMetricsMixin):
 
         stream = self.runtime.run(lambda: litellm.completion(**completion_params))
         return chat_stream_to_events(self._intercept_stream(stream, message_count))
+
+    def _completion_model(self, model: str) -> str:
+        """返回传给 litellm 的模型标识。"""
+        return model
+
+    def _openai_compatible_completion_model(self, model: str) -> str:
+        """返回 OpenAI-compatible 服务在 litellm 中的模型标识。"""
+        if "/" in model:
+            return model
+        return f"openai/{model}"
 
     # --- Unified thinking abstractions ---
 

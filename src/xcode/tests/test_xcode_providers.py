@@ -37,10 +37,12 @@ def _mock_completion(**kwargs: Any) -> Any:
 
 def _mock_completion_with_chunks(chunks: list) -> Any:
     """返回一个工厂函数，用指定 chunks 模拟 litellm.completion()。"""
+
     def _factory(**kwargs: Any) -> Any:
         _captured_completion_kwargs.clear()
         _captured_completion_kwargs.update(kwargs)
         return iter(chunks)
+
     return _factory
 
 
@@ -123,8 +125,11 @@ class XcodeProviderEnvTests(unittest.TestCase):
 
                 self.assertIsInstance(bundle.llm, OpenAIChatProvider)
                 llm = bundle.llm
+                assert isinstance(llm, OpenAIChatProvider)
                 subagent = bundle.llms["subagent"]
+                assert isinstance(subagent, OpenAIChatProvider)
                 judge = bundle.llms["judge"]
+                assert isinstance(judge, OpenAIChatProvider)
                 self.assertEqual(llm.transport, "openai_chat")
                 self.assertEqual(llm.model, "main-model")
                 self.assertEqual(subagent.model, "small-model")
@@ -211,6 +216,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 )
 
                 llm = bundle.llm
+                assert isinstance(llm, OpenAIChatProvider)
                 self.assertEqual(llm.api_key, "configured")
 
     def test_profile_api_key_overrides_openai_api_key(self) -> None:
@@ -239,7 +245,9 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 )
 
                 main = bundle.llms["main"]
+                assert isinstance(main, OpenAIChatProvider)
                 subagent = bundle.llms["subagent"]
+                assert isinstance(subagent, OpenAIChatProvider)
                 self.assertEqual(main.api_key, "openai")
                 self.assertEqual(subagent.api_key, "subagent")
 
@@ -286,16 +294,18 @@ class XcodeProviderRuntimeTests(unittest.TestCase):
 class XcodeStructuredProviderTests(unittest.TestCase):
     @patch("litellm.completion")
     def test_stream_converts_tool_schema_and_tool_calls(self, mock_completion) -> None:
-        mock_completion.return_value = iter([
-            FakeStreamChunk(
-                tool_call=FakeStreamToolCall(
-                    index=0,
-                    call_id="call-1",
-                    name="echo",
-                    arguments='{"text": "hello"}',
-                )
-            ),
-        ])
+        mock_completion.return_value = iter(
+            [
+                FakeStreamChunk(
+                    tool_call=FakeStreamToolCall(
+                        index=0,
+                        call_id="call-1",
+                        name="echo",
+                        arguments='{"text": "hello"}',
+                    )
+                ),
+            ]
+        )
         llm = OpenAIChatProvider(
             api_key="test-key",
             base_url="https://api.openai.test/v1",
@@ -329,7 +339,9 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         self.assertEqual(sent_tool["function"]["parameters"], tool.parameters)
 
     @patch("litellm.completion")
-    def test_stream_converts_tool_results_to_openai_messages(self, mock_completion) -> None:
+    def test_stream_converts_tool_results_to_openai_messages(
+        self, mock_completion
+    ) -> None:
         mock_completion.return_value = iter([FakeStreamChunk(content="done")])
         llm = OpenAIChatProvider(
             api_key="test-key",
@@ -378,24 +390,26 @@ class XcodeStructuredProviderTests(unittest.TestCase):
 
     @patch("litellm.completion")
     def test_stream_yields_text_and_tool_call_deltas(self, mock_completion) -> None:
-        mock_completion.return_value = iter([
-            FakeStreamChunk(content="he"),
-            FakeStreamChunk(content="llo"),
-            FakeStreamChunk(
-                tool_call=FakeStreamToolCall(
-                    index=0,
-                    call_id="call-1",
-                    name="echo",
-                    arguments='{"text": ',
-                )
-            ),
-            FakeStreamChunk(
-                tool_call=FakeStreamToolCall(
-                    index=0,
-                    arguments='"hi"}',
-                )
-            ),
-        ])
+        mock_completion.return_value = iter(
+            [
+                FakeStreamChunk(content="he"),
+                FakeStreamChunk(content="llo"),
+                FakeStreamChunk(
+                    tool_call=FakeStreamToolCall(
+                        index=0,
+                        call_id="call-1",
+                        name="echo",
+                        arguments='{"text": ',
+                    )
+                ),
+                FakeStreamChunk(
+                    tool_call=FakeStreamToolCall(
+                        index=0,
+                        arguments='"hi"}',
+                    )
+                ),
+            ]
+        )
         llm = OpenAIChatProvider(
             api_key="test-key",
             base_url="https://api.openai.test/v1",
@@ -447,6 +461,24 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         extra = mock_completion.call_args.kwargs.get("extra_body", {})
         self.assertEqual(extra.get("thinking", {}).get("type"), "disabled")
+
+    @patch("litellm.completion")
+    def test_litellm_uses_openai_compatible_model_and_credentials(
+        self, mock_completion
+    ) -> None:
+        """ChatGLM 裸模型名转为 litellm 可识别的 OpenAI-compatible 标识。"""
+        mock_completion.return_value = iter([])
+        provider = _make_glm_provider(
+            api_key="glm-key",
+            base_url="https://open.bigmodel.cn/api/paas/v4/",
+        )
+
+        list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
+
+        kwargs = mock_completion.call_args.kwargs
+        self.assertEqual(kwargs["model"], "openai/glm-4-flash")
+        self.assertEqual(kwargs["api_key"], "glm-key")
+        self.assertEqual(kwargs["base_url"], "https://open.bigmodel.cn/api/paas/v4/")
 
     @patch("litellm.completion")
     def test_thinking_enabled_clear_false(self, mock_completion) -> None:
@@ -585,10 +617,12 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         """thinking=True 时流包含 reasoning delta。"""
         from xcode.ai.events import ReasoningDelta
 
-        mock_completion.return_value = iter([
-            FakeStreamChunk(content="hello", reasoning="thinking..."),
-            FakeStreamChunk(content=" world"),
-        ])
+        mock_completion.return_value = iter(
+            [
+                FakeStreamChunk(content="hello", reasoning="thinking..."),
+                FakeStreamChunk(content=" world"),
+            ]
+        )
         provider = _make_glm_provider()
         events = list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         reasoning_events = [e for e in events if isinstance(e, ReasoningDelta)]

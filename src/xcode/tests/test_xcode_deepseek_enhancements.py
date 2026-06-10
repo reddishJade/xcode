@@ -22,12 +22,16 @@ from xcode.harness.skills import ToolSpec
 
 class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
     @patch("litellm.completion")
-    def test_reasoning_content_and_usage_are_extracted_in_streaming(self, mock_completion) -> None:
-        mock_completion.return_value = iter([
-            FakeStreamChunk(reasoning_content="Thinking 1"),
-            FakeStreamChunk(content="Hello"),
-            FakeStreamChunk(usage=FakeUsage(100, 20)),
-        ])
+    def test_reasoning_content_and_usage_are_extracted_in_streaming(
+        self, mock_completion
+    ) -> None:
+        mock_completion.return_value = iter(
+            [
+                FakeStreamChunk(reasoning_content="Thinking 1"),
+                FakeStreamChunk(content="Hello"),
+                FakeStreamChunk(usage=FakeUsage(100, 20)),
+            ]
+        )
         provider = DeepSeekProvider(
             api_key="ds-key",
             base_url="https://api.deepseek.com",
@@ -110,23 +114,27 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
         self.assertEqual(params["properties"]["items"]["type"], ["array", "null"])
 
     @patch("litellm.completion")
-    def test_multi_chunk_tool_calls_streaming_concatenation(self, mock_completion) -> None:
-        mock_completion.return_value = iter([
-            FakeStreamChunk(
-                tool_call=FakeStreamToolCall(
-                    index=0,
-                    call_id="call-1",
-                    name="echo",
-                    arguments='{"text": ',
-                )
-            ),
-            FakeStreamChunk(
-                tool_call=FakeStreamToolCall(
-                    index=0,
-                    arguments='"hi"}',
-                )
-            ),
-        ])
+    def test_multi_chunk_tool_calls_streaming_concatenation(
+        self, mock_completion
+    ) -> None:
+        mock_completion.return_value = iter(
+            [
+                FakeStreamChunk(
+                    tool_call=FakeStreamToolCall(
+                        index=0,
+                        call_id="call-1",
+                        name="echo",
+                        arguments='{"text": ',
+                    )
+                ),
+                FakeStreamChunk(
+                    tool_call=FakeStreamToolCall(
+                        index=0,
+                        arguments='"hi"}',
+                    )
+                ),
+            ]
+        )
         provider = DeepSeekProvider(
             api_key="ds-key",
             base_url="https://api.deepseek.com",
@@ -176,6 +184,8 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
 
         events = asyncio.run(run_test())
 
+        self.assertEqual(captured_params.get("model"), "openai/deepseek-chat")
+        self.assertEqual(captured_params.get("base_url"), "https://api.deepseek.com")
         self.assertEqual(captured_params.get("api_key"), "override-key")
         extra_headers = captured_params.get("extra_headers", {})
         self.assertEqual(extra_headers.get("X-Custom"), "test-header")
