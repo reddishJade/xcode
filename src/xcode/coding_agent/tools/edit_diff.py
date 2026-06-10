@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import unicodedata
 from difflib import unified_diff
 from typing import Any
 
@@ -32,46 +31,42 @@ def strip_bom(content: str) -> tuple[str, str]:
 
 
 def normalize_for_fuzzy_match(text: str) -> str:
-    """\u5f52\u4e00\u5316\u6587\u672c\u4ee5\u5bb9\u5fcd LLM \u8f93\u51fa\u7684 Unicode \u53d8\u4f53\u3002
+    import unicodedata
 
-    \u8bbe\u8ba1\u539f\u56e0\uff1a
-    LLM \u751f\u6210\u7684\u4ee3\u7801\u7247\u6bb5\u5e38\u5305\u542b\u667a\u80fd\u5f15\u53f7\u3001\u5168\u89d2\u7a7a\u683c\u7b49\u6392\u7248\u5b57\u7b26\uff0c
-    \u5bfc\u81f4\u5b8c\u5168\u5339\u914d\u5931\u8d25\u3002\u5f52\u4e00\u5316\u5c06\u8fd9\u4e9b\u53d8\u4f53\u6620\u5c04\u5230 ASCII \u7b49\u4ef7\u5b57\u7b26\uff1a
-    - NFKC: \u517c\u5bb9\u6027\u5206\u89e3\uff08\u5168\u89d2\u2192\u534a\u89d2\uff0c\u8fde\u5b57\u2192\u5355\u5b57\u7b26\uff09
-    - \u667a\u80fd\u5f15\u53f7 \u2192 ASCII \u5f15\u53f7\uff08'"/\uff09
-    - \u5404\u7c7b\u8fde\u5b57\u7b26/\u51cf\u53f7 \u2192 ASCII \u8fde\u5b57\u7b26\uff08-\uff09
-    - \u5404\u7c7b\u7a7a\u683c \u2192 ASCII \u7a7a\u683c\uff08U+0020\uff09
-
-    \u8fd9\u907f\u514d\u4e86\u56e0\u6392\u7248\u5dee\u5f02\u5bfc\u81f4\u7684 Edit \u5de5\u5177\u8c03\u7528\u5931\u8d25\u3002
-    """
     result = unicodedata.normalize("NFKC", text)
     result = "\n".join(line.rstrip() for line in result.split("\n"))
-    # \u667a\u80fd\u5355\u5f15\u53f7 \u2192 ASCII \u5355\u5f15\u53f7
-    for src in ["\u2018", "\u2019", "\u201a", "\u201b"]:
-        result = result.replace(src, "'")
-    # \u667a\u80fd\u53cc\u5f15\u53f7 \u2192 ASCII \u53cc\u5f15\u53f7
-    for src in ["\u201c", "\u201d", "\u201e", "\u201f"]:
-        result = result.replace(src, '"')
-    # \u5404\u7c7b\u8fde\u5b57\u7b26/\u51cf\u53f7 \u2192 ASCII \u8fde\u5b57\u7b26
-    for src in ["\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2015", "\u2212"]:
-        result = result.replace(src, "-")
-    # \u5404\u7c7b\u7a7a\u683c \u2192 ASCII \u7a7a\u683c
-    for src in [
-        "\u00a0",
-        "\u2002",
-        "\u2003",
-        "\u2004",
-        "\u2005",
-        "\u2006",
-        "\u2007",
-        "\u2008",
-        "\u2009",
-        "\u200a",
-        "\u202f",
-        "\u205f",
-        "\u3000",
-    ]:
-        result = result.replace(src, " ")
+    table: dict[str, str] = {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201a": "'",
+        "\u201b": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u201e": '"',
+        "\u201f": '"',
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2012": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2015": "-",
+        "\u2212": "-",
+        "\u00a0": " ",
+        "\u2002": " ",
+        "\u2003": " ",
+        "\u2004": " ",
+        "\u2005": " ",
+        "\u2006": " ",
+        "\u2007": " ",
+        "\u2008": " ",
+        "\u2009": " ",
+        "\u200a": " ",
+        "\u202f": " ",
+        "\u205f": " ",
+        "\u3000": " ",
+    }
+    for src, dst in table.items():
+        result = result.replace(src, dst)
     return result
 
 
