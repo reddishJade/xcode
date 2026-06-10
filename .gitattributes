@@ -1,12 +1,7 @@
-# 自动处理行尾符：提交时转为 LF，检出时按平台转换
-* text=auto
-*.py text eol=lf
-*.md text eol=lf
-*.json text eol=lf
-*.toml text eol=lf
-*.cfg text eol=lf
-*.yml text eol=lf
-*.yaml text eol=lf
-*.sh text eol=lf
-*.bat text eol=crlf
-*.cmd text eol=crlf
+# 统一行尾：强制使用 LF，避免 Windows/Linux 间无意义的 diff
+# 所有文本文件在仓库中以 LF 存储并以 LF 检出
+* text=auto eol=lf
+
+# 如有需要，可在此处添加二进制或例外（例如保留 CRLF 的脚本）
+# *.bat binary
+# *.cmd binary
