@@ -65,7 +65,6 @@ After modifying Python files:
 ```powershell
 uv run ruff check <modified-files> --fix
 uv run ruff format <modified-files>
-uv run mypy <modified-files>
 uv run pyright <modified-files>
 ```
 

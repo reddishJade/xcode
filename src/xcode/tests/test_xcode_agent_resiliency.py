@@ -186,7 +186,7 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         # After fallback, the wrapper should be using the fallback provider
         wrapper = agent.provider
         self.assertIsInstance(wrapper, _FallbackSwitchingProvider)
-        self.assertTrue(wrapper._using_fallback)  # type: ignore[attr-defined]
+        self.assertTrue(wrapper._using_fallback)  # pyright: ignore[reportAttributeAccessIssue]
 
 
 if __name__ == "__main__":

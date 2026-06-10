@@ -125,7 +125,7 @@ except ValueError:
 
 ### 7. Enforce PEP 8 Through Tooling
 
-- Format with `ruff`, check with `ruff` / `mypy` / `pyright`.
+- Format with `ruff`, check with `ruff` / `pyright`.
 - Line length ≤ 88 (ruff default).
 - Import order: standard library → third-party → local.
 - Zero `# noqa` or `# type: ignore` must pass lint. If one is necessary, document the reason inline.
@@ -238,7 +238,6 @@ Run only for modified files or related functionality.
 # 静态检查与格式化
 uv run ruff check <modified-files> --fix
 uv run ruff format <modified-files>
-uv run mypy <modified-files>
 uv run pyright <modified-files>
 
 # 针对性测试
