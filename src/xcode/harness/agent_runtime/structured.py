@@ -18,6 +18,10 @@ from ...agent.config import (
     AgentLoopConfig,
     AgentLoopTurnUpdate,
 )
+from ...agent.compaction import (
+    extract_prompt_tokens_from_usage,
+    get_model_soft_threshold,
+)
 from ...agent.messages import (
     AgentMessage,
     AssistantMessage,
@@ -113,6 +117,7 @@ class StructuredAgent:
         self.runtime_context_provider = runtime_context_provider
         self.cancellation_token = cancellation_token or CancellationToken()
         self.request_hygiene = request_hygiene or RequestHygieneConfig()
+        self._last_prompt_tokens: int | None = None
 
         # 组件
         self._mode = ModeManager()
@@ -261,6 +266,7 @@ class StructuredAgent:
                 self._original_provider = wrapper._primary
 
         self._history.save_turn(result.messages)
+        self._record_last_prompt_tokens(result.messages)
 
         visible_result = (
             replace(result, messages=context_messages + result.messages)
@@ -404,6 +410,11 @@ class StructuredAgent:
             return False
         if self.manual_compact_requested and self.manual_compact_requested():
             return True
+        if self._last_prompt_tokens is not None:
+            model_name = getattr(snapshot.provider, "model", None)
+            return self._last_prompt_tokens >= get_model_soft_threshold(
+                str(model_name) if model_name is not None else None
+            )
         return (
             snapshot.config.compact_threshold > 0
             and len(messages) > snapshot.config.compact_threshold
@@ -449,6 +460,17 @@ class StructuredAgent:
         reset = getattr(self.provider, "reset_conversation_state", None)
         if callable(reset):
             reset()
+
+    def _record_last_prompt_tokens(self, messages: list[AgentMessage]) -> None:
+        """记录最近一次 provider 返回的 prompt token。"""
+        self._last_prompt_tokens = None
+        for message in reversed(messages):
+            if not isinstance(message, AssistantMessage):
+                continue
+            prompt_tokens = extract_prompt_tokens_from_usage(message.usage)
+            if prompt_tokens is not None:
+                self._last_prompt_tokens = prompt_tokens
+                return
 
 
 # ── 模块级辅助 ──

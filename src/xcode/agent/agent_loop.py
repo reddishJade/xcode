@@ -635,6 +635,9 @@ def _provider_events_to_response(
     reasoning_parts: list[str] = []
     tool_calls_found: list[ToolCallContent] = []
     stop_reason: StopReason = "end_turn"
+    input_tokens = 0
+    output_tokens = 0
+    has_usage = False
 
     for event in events:
         if isinstance(event, TextDelta):
@@ -647,16 +650,27 @@ def _provider_events_to_response(
         elif isinstance(event, UsageUpdate):
             metrics.input_tokens += event.input_tokens
             metrics.output_tokens += event.output_tokens
+            input_tokens += event.input_tokens
+            output_tokens += event.output_tokens
+            has_usage = True
         if isinstance(event, FinalMessage):
             stop_reason = event.stop_reason or "end_turn"
 
     content_blocks: list[ContentBlock] = [TextContent(text="".join(text_parts))]
     content_blocks.extend(tool_calls_found)
+    usage = None
+    if has_usage:
+        usage = {
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        }
     return _ProviderResponse(
         message=AssistantMessage(
             content=content_blocks,
             reasoning_content="".join(reasoning_parts) if reasoning_parts else None,
             stop_reason=stop_reason,
+            usage=usage,
         ),
         stop_reason=stop_reason,
     )

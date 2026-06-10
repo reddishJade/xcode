@@ -24,6 +24,7 @@ from xcode.ai.events import (
     FinalMessage,
     ToolCallEvent,
     ToolCall,
+    UsageUpdate,
 )
 from xcode.agent.messages import AssistantMessage, ToolResultMessage
 from xcode.agent.types import ToolCallContent
@@ -269,6 +270,47 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
         history_result = history[1]
         assert isinstance(history_result, ToolResultMessage)
         self.assertEqual(history_result.content, large_content)
+
+    def test_structured_agent_compacts_after_high_provider_prompt_tokens(self) -> None:
+        seen_messages: list[list[Any]] = []
+        responses = iter(
+            [
+                [
+                    UsageUpdate(input_tokens=40_000, output_tokens=10),
+                    TextDelta(chunk="first"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
+                [
+                    TextDelta(chunk="second"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
+            ]
+        )
+
+        def compact(_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            return [{"role": "user", "content": "[Compressed]\nfrom real tokens"}]
+
+        def factory(messages: list[Any], _tools: list[Any]) -> list[Any]:
+            seen_messages.append(messages)
+            return next(responses)
+
+        provider = FakeProvider(factory)
+        agent = StructuredAgent(
+            provider=provider,
+            registry=(),
+            config=AgentConfig(max_steps=1),
+            compactor=compact,
+        )
+
+        first = agent.run("first")
+        second = agent.run("second")
+
+        self.assertEqual(first.answer, "first")
+        self.assertEqual(second.answer, "second")
+        self.assertEqual(
+            seen_messages[1],
+            [{"role": "user", "content": "[Compressed]\nfrom real tokens"}],
+        )
 
     def test_estimate_message_tokens(self) -> None:
         messages = [
