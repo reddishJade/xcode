@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from xcode.experimental.bm25 import BM25Okapi
+from rank_bm25 import BM25Okapi
 from xcode.experimental.memory import MemoryManager, MemorySearchEvalCase
 
 
@@ -97,12 +97,10 @@ class TestBM25AndMemory(unittest.TestCase):
 
         base = 1.0
         old = parse_memory_record(
-            "## Old\n- Context/Query: test\n"
-            "- Status: deprecated\n- Confidence: 0.80\n"
+            "## Old\n- Context/Query: test\n- Status: deprecated\n- Confidence: 0.80\n"
         )
         current = parse_memory_record(
-            "## Current\n- Context/Query: test\n"
-            "- Confidence: 0.80\n"
+            "## Current\n- Context/Query: test\n- Confidence: 0.80\n"
         )
         score_old = adjust_score(base, old, "test", None)
         score_current = adjust_score(base, current, "test", None)
