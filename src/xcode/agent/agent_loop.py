@@ -638,6 +638,7 @@ def _provider_events_to_response(
     input_tokens = 0
     output_tokens = 0
     has_usage = False
+    final_content: str | None = None
 
     for event in events:
         if isinstance(event, TextDelta):
@@ -655,6 +656,11 @@ def _provider_events_to_response(
             has_usage = True
         if isinstance(event, FinalMessage):
             stop_reason = event.stop_reason or "end_turn"
+            if event.content:
+                final_content = event.content
+
+    if final_content and not text_parts:
+        text_parts.append(final_content)
 
     content_blocks: list[ContentBlock] = [TextContent(text="".join(text_parts))]
     content_blocks.extend(tool_calls_found)
@@ -670,6 +676,7 @@ def _provider_events_to_response(
             content=content_blocks,
             reasoning_content="".join(reasoning_parts) if reasoning_parts else None,
             stop_reason=stop_reason,
+            error_message=final_content if stop_reason == "error" else None,
             usage=usage,
         ),
         stop_reason=stop_reason,

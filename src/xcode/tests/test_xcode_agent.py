@@ -41,6 +41,24 @@ class TextProvider:
         yield TextDelta(chunk="ok")
 
 
+class ErrorTextProvider:
+    def __init__(self) -> None:
+        self.messages: list[Message] | None = None
+
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: Any,
+    ):
+        self.messages = messages
+        yield FinalMessage(
+            content="Provider error: boom",
+            stop_reason="error",
+        )
+
+
 class ToolProvider:
     def __init__(self) -> None:
         self.calls = 0
@@ -56,7 +74,9 @@ class ToolProvider:
         self.calls += 1
         self.messages.append(messages)
         if self.calls == 1:
-            yield ToolCallEvent(calls=[ToolCall(id="call-1", name="echo", input={"text": "hello"})])
+            yield ToolCallEvent(
+                calls=[ToolCall(id="call-1", name="echo", input={"text": "hello"})]
+            )
             return
         yield TextDelta(chunk="done")
 
@@ -126,6 +146,26 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
         assert isinstance(final, AssistantMessage)
         self.assertEqual(final.content, [TextContent(text="ok")])
         self.assertEqual(events[-1].type, "agent_end")
+
+    async def test_provider_error_text_is_preserved(self) -> None:
+        provider = ErrorTextProvider()
+
+        result = await run_agent_loop(
+            prompts=[UserMessage(content="hello")],
+            context=AgentContext(),
+            config=AgentLoopConfig(
+                provider=provider,
+                convert_to_llm=convert_to_llm,
+                max_step_retries=0,
+            ),
+            emit=lambda _event: None,
+        )
+
+        final = result.messages[-1]
+        self.assertIsInstance(final, AssistantMessage)
+        assert isinstance(final, AssistantMessage)
+        self.assertEqual(final.content, [TextContent(text="Provider error: boom")])
+        self.assertEqual(final.error_message, "Provider error: boom")
 
     async def test_builtin_tool_metadata_reaches_provider(self) -> None:
         """AgentTool builtin 元数据会传递到 provider 工具定义。"""
@@ -245,7 +285,9 @@ class StepLimitProvider:
         self, messages, tools, options: StreamOptions | None = None, **kwargs: Any
     ):
         self.calls += 1
-        yield ToolCallEvent(calls=[ToolCall(id=f"call-{self.calls}", name="noop", input={})])
+        yield ToolCallEvent(
+            calls=[ToolCall(id=f"call-{self.calls}", name="noop", input={})]
+        )
 
 
 class NoopTool:
@@ -290,7 +332,7 @@ class MaxTokensProvider:
         self.calls += 1
         if self.calls <= self.max_tokens_count:
             yield TextDelta(chunk="partial" * 100)
-            yield FinalMessage("", stop_reason="max_tokens")
+            yield FinalMessage(content="", stop_reason="max_tokens")
         else:
             yield TextDelta(chunk="final")
 
@@ -301,7 +343,9 @@ class RepeatedToolProvider:
     async def stream(
         self, messages, tools, options: StreamOptions | None = None, **kwargs: Any
     ):
-        yield ToolCallEvent(calls=[ToolCall(id="same-call", name="echo", input={"text": "hi"})])
+        yield ToolCallEvent(
+            calls=[ToolCall(id="same-call", name="echo", input={"text": "hi"})]
+        )
 
 
 class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
@@ -431,7 +475,11 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
                 **kwargs: Any,
             ):
                 self.call_count += 1
-                yield ToolCallEvent(calls=[ToolCall(id=f"call-{self.call_count}", name="fail", input={})])
+                yield ToolCallEvent(
+                    calls=[
+                        ToolCall(id=f"call-{self.call_count}", name="fail", input={})
+                    ]
+                )
 
         provider = FailToolProvider()
         tool = AlwaysFailTool()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from collections.abc import Sequence
-from typing import cast
+from typing import Any, cast
 
 from xcode.agent.messages import convert_to_llm
 from xcode.agent.messages import (
@@ -186,6 +186,22 @@ class OpenAIStreamCodecTest(unittest.TestCase):
         final_text = cast(TextDelta, events[2])
         self.assertEqual(final_text.chunk, "Hello")
 
+    def test_chat_stream_handles_chunks_without_usage_attribute(self) -> None:
+        events = list(
+            chat_stream_to_events(
+                cast(
+                    Any,
+                    [
+                        FakeStreamChunkNoUsage(content="hello"),
+                    ],
+                )
+            )
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertIsInstance(events[0], TextDelta)
+        self.assertEqual(cast(TextDelta, events[0]).chunk, "hello")
+
 
 class FakeStreamChunk:
     def __init__(
@@ -204,6 +220,11 @@ class FakeStreamChunk:
     @property
     def usage(self) -> None:
         return self._usage
+
+
+class FakeStreamChunkNoUsage:
+    def __init__(self, content: str | None = None) -> None:
+        self.choices = [FakeStreamChoice(content, None, None)]
 
 
 class FakeStreamChoice:

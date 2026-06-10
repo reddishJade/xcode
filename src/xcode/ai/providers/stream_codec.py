@@ -88,7 +88,7 @@ def chat_stream_to_events(
         lambda: {"id": "", "name": "", "arguments": ""}
     )
     for chunk in stream:
-        usage = chunk.usage
+        usage = getattr(chunk, "usage", None)
         if usage is not None:
             yield UsageUpdate(
                 input_tokens=usage.prompt_tokens or 0,
