@@ -367,7 +367,6 @@ class StructuredAgent:
     ) -> list[AgentMessage]:
         from .execution_modes import mode_notice
 
-        self._mode._current_mode = mode
         typed: list[AgentMessage] = []
         notice = mode_notice(mode)
         if snapshot.runtime_context_provider is not None:

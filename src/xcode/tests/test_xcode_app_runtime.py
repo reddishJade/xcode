@@ -260,16 +260,14 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         )
 
         class WritingProvider(MockProvider):
+            def __init__(self, seen_child_tools, transport=""):
+                super().__init__(seen_child_tools, transport)
+                self.stream_calls = []
+
             async def stream(self, messages, tools, options=None, **kwargs):
-                calls.append(messages)
-                if len(calls) == 1:
-                    yield ToolCallEvent(
-                        [
-                            ToolCall(
-                                id="write-1", name="write_file", input={"path": "ok.txt", "content": "ok"},
-                            )
-                        ]
-                    )
+                self.stream_calls.append(messages)
+                if len(self.stream_calls) == 1:
+                    yield ToolCallEvent(calls=[ToolCall(id="write-1", name="write_file", input={"path": "ok.txt", "content": "ok"})])
                     yield FinalMessage(content="", stop_reason="tool_use")
                     return
                 yield TextDelta(chunk="done")
@@ -298,13 +296,17 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         )
 
         class ReadingProvider(MockProvider):
+            def __init__(self, seen_child_tools, transport=''):
+                super().__init__(seen_child_tools, transport)
+                self.stream_calls = []
+
             async def stream(self, messages, tools, options=None, **kwargs):
-                if messages and messages[-1]["role"] == "tool":
+                self.stream_calls.append(messages)
+                if len(self.stream_calls) == 2:
                     yield TextDelta(chunk="done")
                     yield FinalMessage(content="", stop_reason="end_turn")
                     return
-                yield ToolCallEvent(
-                    [ToolCall(id="read-1", name="read_file", input={"path": "a.txt"})]
+                yield ToolCallEvent(calls=[ToolCall(id="read-1", name="read_file", input={"path": "a.txt"})]
                 )
                 yield FinalMessage(content="", stop_reason="tool_use")
 
@@ -358,8 +360,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
                 self.calls += 1
                 if self.calls == 1:
-                    yield ToolCallEvent(
-                        [ToolCall(id="read-1", name="read_file", input={"path": "a.txt"})]
+                    yield ToolCallEvent(calls=[ToolCall(id="read-1", name="read_file", input={"path": "a.txt"})]
                     )
                 else:
                     yield TextDelta(chunk="done")
@@ -497,16 +498,15 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 options: StreamOptions | None = None,
                 **kwargs: Any,
             ) -> AsyncIterator[ProviderEvent]:
-                if messages and isinstance(messages[-1].get("content"), list):
-                    result_block = messages[-1]["content"][0]
-                    seen_reads.append(str(result_block.get("content", "")))
+                if messages and messages[-1].get("role") == "tool":
+                    seen_reads.append(str(messages[-1].get("content", "")))
                     yield TextDelta(chunk="child done")
                     yield FinalMessage(content="", stop_reason="end_turn")
                     return
                 yield TextDelta(chunk="child done")
-                yield ToolCallEvent(
-                    [ToolCall(id="read-1", name="read_file", input={"path": "marker.txt"})]
+                yield ToolCallEvent(calls=[ToolCall(id="read-1", name="read_file", input={"path": "marker.txt"})]
                 )
+                yield FinalMessage(content="", stop_reason="tool_use")
 
             def complete(self, prompt: str) -> str:
                 return "done"

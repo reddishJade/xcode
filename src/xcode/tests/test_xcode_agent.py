@@ -245,7 +245,7 @@ class StepLimitProvider:
         self, messages, tools, options: StreamOptions | None = None, **kwargs: Any
     ):
         self.calls += 1
-        yield ToolCallEvent(calls=[ToolCall(f"call-{self.calls}", "noop", {})])
+        yield ToolCallEvent(calls=[ToolCall(id=f"call-{self.calls}", name="noop", input={})])
 
 
 class NoopTool:
@@ -431,7 +431,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
                 **kwargs: Any,
             ):
                 self.call_count += 1
-                yield ToolCallEvent(calls=[ToolCall(f"call-{self.call_count}", "fail", {})])
+                yield ToolCallEvent(calls=[ToolCall(id=f"call-{self.call_count}", name="fail", input={})])
 
         provider = FailToolProvider()
         tool = AlwaysFailTool()

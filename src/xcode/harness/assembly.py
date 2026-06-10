@@ -310,7 +310,6 @@ def build_tool_registry(
                     shell_spec=shell_spec,
                     cancel_event=cancel_event,
                     env=env,
-                    local_shell_skills=local_shell_skills,
                 )
             result = await StructuredAgent(
                 provider=child_llms[model_profile],
