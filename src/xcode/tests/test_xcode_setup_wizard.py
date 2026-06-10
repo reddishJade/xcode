@@ -6,27 +6,40 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from xcode.cli.setup_wizard import run_setup_wizard
+from xcode.cli.setup_wizard import PROVIDER_PRESETS, run_setup_wizard
 
 
 class XcodeSetupWizardTests(unittest.TestCase):
     def test_provider_choices_write_canonical_transport_names(self) -> None:
-        cases = [
-            ("1", "openai_chat"),
-            ("2", "anthropic_messages"),
-            ("3", "deepseek_chat"),
-            ("4", "mimo_chat"),
-            ("5", "chatglm_chat"),
-        ]
-        for provider_choice, expected_transport in cases:
-            with self.subTest(provider_choice=provider_choice):
+        transport_map = {
+            "OpenAI": "openai_chat",
+            "Anthropic": "anthropic_messages",
+            "DeepSeek": "deepseek_chat",
+            "Xiaomi MiMo": "mimo_chat",
+            "ChatGLM": "chatglm_chat",
+        }
+        for provider_label, expected_transport in transport_map.items():
+            with self.subTest(provider_label=provider_label):
                 with tempfile.TemporaryDirectory() as temp_dir:
                     path = Path(temp_dir) / "xcode.config.json"
-                    answers = iter([provider_choice, "test-key", "", "", "y"])
 
-                    with patch("builtins.input", lambda _prompt: next(answers)):
-                        with patch("builtins.print"):
-                            run_setup_wizard(Path(temp_dir))
+                    with (
+                        patch("questionary.select") as mock_select,
+                        patch("questionary.text") as mock_text,
+                        patch("questionary.confirm") as mock_confirm,
+                        patch("builtins.print"),
+                    ):
+                        select_responses = iter([provider_label, "gpt-4o"])
+                        mock_select.side_effect = lambda *a, **kw: type(
+                            "Q", (), {"ask": lambda _self=None: next(select_responses)}
+                        )()
+                        text_responses = iter(["test-key", ""])
+                        mock_text.side_effect = lambda *a, **kw: type(
+                            "Q", (), {"ask": lambda _self=None: next(text_responses)}
+                        )()
+                        mock_confirm.return_value.ask.return_value = True
+
+                        run_setup_wizard(Path(temp_dir))
 
                     data = json.loads(path.read_text(encoding="utf-8"))
                     transport = data["provider"]["model_profiles"]["main"]["transport"]
