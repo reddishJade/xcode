@@ -104,6 +104,8 @@ def has_valid_config(project_root: Path) -> bool:
 
 def run_setup_wizard(project_root: Path) -> None:
     """首次启动配置向导。"""
+    import questionary
+
     print()
     print("=" * 60)
     print("  Welcome to Xcode - AI Coding Agent")
@@ -112,25 +114,11 @@ def run_setup_wizard(project_root: Path) -> None:
     print("No API key configured. Let's set up your LLM provider.")
     print()
 
-    providers_by_num: dict[int, str] = {}
-    num = 1
-    for key, preset in PROVIDER_PRESETS.items():
-        print(f"  [{num}] {preset['label']}")
-        providers_by_num[num] = key
-        num += 1
-    print()
-
-    while True:
-        raw = input(f"Select provider (1-{len(providers_by_num)}): ").strip()
-        try:
-            choice = int(raw)
-            if choice in providers_by_num:
-                break
-        except ValueError:
-            pass
-        print(f"Please enter a number between 1 and {len(providers_by_num)}.")
-
-    provider_key = providers_by_num[choice]
+    choices = {preset["label"]: key for key, preset in PROVIDER_PRESETS.items()}
+    provider_label = questionary.select("Select provider:", choices=list(choices)).ask()
+    if provider_label is None:
+        return
+    provider_key = choices[provider_label]
     preset = PROVIDER_PRESETS[provider_key]
 
     print()
@@ -138,24 +126,27 @@ def run_setup_wizard(project_root: Path) -> None:
 
     env_key = preset["env_key"]
     env_val = os.environ.get(env_key) or ""
-    default_key = env_val or ""
 
-    api_key = input(f"  API Key [{default_key[:4]}... if set in env]: ").strip()
+    api_key = questionary.text(
+        "API Key:", default=env_val[:16] if env_val else ""
+    ).ask()
     if not api_key:
         api_key = env_val
 
     default_base_url = preset["base_url"]
     env_base_url = os.environ.get(preset["env_base_url"], "")
-    base_url_hint = env_base_url or default_base_url or "(default)"
-    base_url = input(f"  Base URL [{base_url_hint}]: ").strip()
+    base_url = questionary.text(
+        "Base URL:", default=env_base_url or default_base_url
+    ).ask()
     if not base_url:
         base_url = env_base_url or default_base_url
 
-    default_model = preset["default_model"]
-    model_hint = ", ".join(preset["models"])
-    model = input(f"  Model [{default_model}] ({model_hint}): ").strip()
-    if not model:
-        model = default_model
+    model_default = preset["default_model"]
+    model = questionary.select(
+        "Model:", choices=preset["models"], default=model_default
+    ).ask()
+    if model is None:
+        model = model_default
 
     # 确认
     print()
@@ -168,8 +159,8 @@ def run_setup_wizard(project_root: Path) -> None:
         f"    API Key   : {'*' * max(0, len(api_key) - 4)}{api_key[-4:] if api_key else '(empty)'}"
     )
     print()
-    confirm = input("  Save this configuration? [Y/n]: ").strip().lower()
-    if confirm in ("n", "no"):
+    confirm = questionary.confirm("Save this configuration?", default=True).ask()
+    if not confirm:
         print("  Setup skipped. You can configure later by editing xcode.config.json.")
         return
 

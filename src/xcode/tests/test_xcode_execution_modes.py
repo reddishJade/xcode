@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 import unittest
 
@@ -8,7 +7,6 @@ from xcode.ai.events import ToolCall
 from xcode.cli.repl_hitl import ReplHITLHandler
 from xcode.harness.agent_runtime.execution_modes import ActPolicy
 from xcode.harness.observability import (
-    HITLResult,
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
@@ -23,7 +21,9 @@ class ExecutionModeTests(unittest.TestCase):
 
     def test_act_bash_still_allowed(self) -> None:
         policy = ActPolicy()
-        result = policy.check_call(ToolCall(id="t1", name="bash", input={"command": "echo hello"}))
+        result = policy.check_call(
+            ToolCall(id="t1", name="bash", input={"command": "echo hello"})
+        )
         self.assertEqual(result, "allow")
 
 
@@ -35,12 +35,16 @@ class ReplHITLHandlerTests(unittest.TestCase):
         self.tool = ToolSpec("bash", "Bash.", "text", lambda _data: "")
 
     def test_handler_allow_once(self) -> None:
-        result = self.handler._apply_choice("1", self.tool, {"command": "echo hello"})
+        result = self.handler._apply_choice(
+            "允许（仅本次）", self.tool, {"command": "echo hello"}
+        )
         self.assertEqual(result.decision, "allow")
         self.assertEqual(result.scope, "once")
 
     def test_handler_session_scope(self) -> None:
-        result = self.handler._apply_choice("2", self.tool, {"command": "echo hello"})
+        result = self.handler._apply_choice(
+            "此次对话中允许", self.tool, {"command": "echo hello"}
+        )
         self.assertEqual(result.decision, "allow")
         self.assertEqual(result.scope, "session")
         self.assertIsNotNone(
@@ -53,44 +57,22 @@ class ReplHITLHandlerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = PersistentPermissionStore(Path(tmp) / "hitl.json")
             handler = ReplHITLHandler(SessionPermissionPolicy(), store)
-            result = handler._apply_choice("3", self.tool, {"command": "git push"})
+            result = handler._apply_choice(
+                "始终允许", self.tool, {"command": "git push"}
+            )
             self.assertEqual(result.decision, "allow")
             self.assertEqual(result.scope, "permanent")
             loaded = store.load()
             self.assertIsNotNone(loaded.decide("bash", '{"command": "git push"}'))
 
     def test_handler_deny(self) -> None:
-        result = self.handler._apply_choice("4", self.tool, {"command": "git add ."})
+        result = self.handler._apply_choice("拒绝", self.tool, {"command": "git add ."})
         self.assertEqual(result.decision, "deny")
         self.assertEqual(result.scope, "once")
 
     def test_unknown_choice_treated_as_deny(self) -> None:
-        result = self.handler._apply_choice("x", self.tool, {})
+        result = self.handler._apply_choice(None, self.tool, {})
         self.assertEqual(result.decision, "deny")
-
-    def test_async_context_uses_plain_input_not_radiolist(self) -> None:
-        import builtins
-        from unittest.mock import patch
-
-        async def main() -> HITLResult:
-            with (
-                patch("xcode.cli.repl_hitl.has_radiolist", return_value=True),
-                patch.object(
-                    builtins,
-                    "input",
-                    return_value="1",
-                ) as mock_input,
-            ):
-                result = self.handler(self.tool, {"command": "echo hello"})
-                self.assertTrue(mock_input.called)
-                prompt_text = mock_input.call_args.args[0]
-                self.assertTrue(prompt_text.startswith("\r\033[K\n"))
-                self.assertIn("approve [1-4]> ", prompt_text)
-                return result
-
-        result = asyncio.run(main())
-        self.assertEqual(result.decision, "allow")
-        self.assertEqual(result.scope, "once")
 
     def test_session_policy_auto_allows_within_session(self) -> None:
         self.session_policy.grant("bash", "allow", "git commit")
