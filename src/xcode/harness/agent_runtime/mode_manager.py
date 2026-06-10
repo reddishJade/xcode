@@ -52,11 +52,11 @@ class ModeManager:
         """检查当前工具调用是否需要计划确认。"""
         if not self._plan_pending_confirmation:
             return False
-        from xcode.ai.events import ToolCall as ToolUseBlock
+        from xcode.ai.events import ToolCall
 
         policy = policy_for_mode("plan")
         decision = policy.check_call(
-            ToolUseBlock(id="", name=tool_name, input=tool_args)
+            ToolCall(id="", name=tool_name, input=tool_args)
         )
         return decision != "allow"
 

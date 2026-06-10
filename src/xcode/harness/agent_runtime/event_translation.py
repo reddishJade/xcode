@@ -20,7 +20,7 @@ from ...agent.events import (
     TurnStartEvent,
 )
 from ...agent.messages import AssistantMessage
-from xcode.ai.events import ToolCall as ToolUseBlock
+from xcode.ai.events import ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
 
 
@@ -101,7 +101,7 @@ def _translate_event(
         return None
 
     if isinstance(event, ToolExecutionStartEvent):
-        tool_use = ToolUseBlock(
+        tool_use = ToolCall(
             id=event.tool_call_id,
             name=event.tool_name,
             input=event.args or {},

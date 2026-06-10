@@ -23,7 +23,7 @@ from xcode.harness.config import discover_runtime_config
 from xcode.harness.skills import ToolSpec
 from xcode.harness.observability import HITLResult
 
-from .adapters import BENCHMARK_ADAPTERS
+from .adapters.registry import BENCHMARK_ADAPTERS
 from .benchmarks import load_benchmark
 from .runner import EvalRunner
 from .sandbox import trial_project_root

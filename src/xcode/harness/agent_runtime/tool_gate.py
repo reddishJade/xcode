@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from xcode.ai.events import ToolCall as ToolUseBlock
+from xcode.ai.events import ToolCall
 
 from ...agent.config import (
     AfterToolCallContext,
@@ -100,7 +100,7 @@ class ToolGate:
 
             effective_policy = policy_for_mode(self._mode.current_mode)
             decision = effective_policy.check_call(
-                ToolUseBlock(id=tool_call.id, name=tool_call.name, input=args)
+                ToolCall(id=tool_call.id, name=tool_call.name, input=args)
             )
             if decision == "deny":
                 return BeforeToolCallResult(
@@ -148,7 +148,7 @@ class ToolGate:
                 return True
             return _tool_results_count_as_progress(
                 [
-                    ToolUseBlock(id="", name=tc.name, input=tc.arguments or {})
+                    ToolCall(id="", name=tc.name, input=tc.arguments or {})
                     for tc in tool_calls
                 ],
                 tool_results,
@@ -249,7 +249,7 @@ def _tool_result_text(ctx: AfterToolCallContext) -> str:
 
 
 def _tool_results_count_as_progress(
-    tool_uses: list[ToolUseBlock],
+    tool_uses: list[ToolCall],
     tool_results: list[Any],
     tool_map: dict[str, ToolSpec],
 ) -> bool:

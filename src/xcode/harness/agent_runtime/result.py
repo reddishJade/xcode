@@ -7,7 +7,7 @@ from typing import Any
 
 from ...agent.config import AfterToolCallContext, AgentLoopResult
 from ...agent.messages import AssistantMessage
-from xcode.ai.events import ToolCall as ToolUseBlock
+from xcode.ai.events import ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
 from .agent_helpers import text_from_blocks, to_dict
 from .event_translation import StructuredAgentEvent
@@ -49,7 +49,7 @@ class StructuredAgentResult:
     answer: str
     messages: list[dict[str, Any]]
     steps: int
-    tool_calls: list[ToolUseBlock]
+    tool_calls: list[ToolCall]
     stopped_by_limit: bool = False
     metrics: dict[str, Any] | None = None
     stopped_by_watchdog: bool = False
@@ -65,7 +65,7 @@ def _build_structured_result(
 ) -> StructuredAgentResult:
     """将 AgentLoopResult 转换为 StructuredAgentResult。"""
     answer_parts: list[str] = []
-    tool_calls: list[ToolUseBlock] = []
+    tool_calls: list[ToolCall] = []
     messages: list[dict[str, Any]] = []
     for msg in result.messages:
         messages.append(to_dict(msg))
@@ -82,7 +82,7 @@ def _build_structured_result(
         for block in msg.content:
             if isinstance(block, ToolCallContent):
                 tool_calls.append(
-                    ToolUseBlock(
+                    ToolCall(
                         id=block.id,
                         name=block.name,
                         input=block.arguments or {},

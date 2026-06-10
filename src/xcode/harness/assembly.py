@@ -44,10 +44,8 @@ from xcode.harness.observability import (
 from xcode.harness.observability.hooks import HookEvent
 from xcode.harness.skills import ToolInput, ToolSpec
 from xcode.harness.skill_loader import SkillLoader, build_skill_loader_tool
-from xcode.coding_agent import (
-    ShellSpec,
-    build_project_scoped_registry,
-)
+from xcode.coding_agent.registry import build_project_scoped_registry
+from xcode.coding_agent.tools import ShellSpec
 from xcode.ai.providers.factory import (
     ModelProfileProto,
     ProviderSettings,
