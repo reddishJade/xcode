@@ -105,15 +105,11 @@ class ReplCompleter(Completer):
         word, start_position, word_index = marker
         if word_index == 0:
             return []
-
-        partial = _unescape_shell_word(word)
-        if any(char in partial for char in "*?[]$"):
+        if any(char in word for char in "*?[]$"):
             return []
         return [
             CompletionItem(_escape_shell_path(path), start_position, "file")
-            for path in _matching_files(
-                self.project_root, partial, self._directory_cache
-            )
+            for path in _matching_files(self.project_root, word, self._directory_cache)
         ]
 
 
@@ -142,71 +138,19 @@ def _active_shell_word(text: str) -> tuple[str, int, int] | None:
 
 
 def _shell_words(text: str) -> list[tuple[str, int]]:
+    import shlex
+
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        return []
     words: list[tuple[str, int]] = []
-    current: list[str] = []
-    start: int | None = None
-    quote: str | None = None
-    escaped = False
-
-    for index, char in enumerate(text):
-        if escaped:
-            if start is None:
-                start = index - 1
-            current.append("\\" + char)
-            escaped = False
-            continue
-        if char == "\\":
-            if start is None:
-                start = index
-            escaped = True
-            continue
-        if quote is not None:
-            current.append(char)
-            if char == quote:
-                quote = None
-            continue
-        if char in {"'", '"'}:
-            if start is None:
-                start = index
-            quote = char
-            current.append(char)
-            continue
-        if char.isspace():
-            if start is not None:
-                words.append(("".join(current), start))
-                current = []
-                start = None
-            continue
-        if start is None:
-            start = index
-        current.append(char)
-
-    if escaped:
-        current.append("\\")
-    if start is not None:
-        words.append(("".join(current), start))
+    pos = 0
+    for token in tokens:
+        start = text.index(token, pos)
+        words.append((token, start))
+        pos = start + len(token)
     return words
-
-
-def _unescape_shell_word(word: str) -> str:
-    if len(word) >= 1 and word[0] in {"'", '"'}:
-        word = word[1:]
-    if len(word) >= 1 and word[-1] in {"'", '"'}:
-        word = word[:-1]
-
-    result = []
-    escaped = False
-    for char in word:
-        if escaped:
-            result.append(char)
-            escaped = False
-        elif char == "\\":
-            escaped = True
-        else:
-            result.append(char)
-    if escaped:
-        result.append("\\")
-    return "".join(result)
 
 
 def _escape_shell_path(path: str) -> str:
