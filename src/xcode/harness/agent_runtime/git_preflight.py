@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Git 输出限制和缓存配置
 MAX_SECTION_CHARS = 6_000  # Git 输出截断：避免大 diff 撑爆 system prompt
-CACHE_TTL = 5.0            # 缓存有效期（秒）：减少频繁 git 调用开销
+CACHE_TTL = 5.0  # 缓存有效期（秒）：减少频繁 git 调用开销
 
 _cache: dict[str, tuple[float, str]] = {}
 

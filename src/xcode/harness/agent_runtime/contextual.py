@@ -32,9 +32,9 @@ class ContextualRetrievalState:
         self,
         project_root: Path,
         # 上下文预算限制（基于 system prompt token 预算设计）
-        max_files: int = 8,          # 约占 200 token 预算
-        max_results: int = 6,        # 约占 150 token 预算
-        max_tool_calls: int = 8,     # 约占 200 token 预算
+        max_files: int = 8,  # 约占 200 token 预算
+        max_results: int = 6,  # 约占 150 token 预算
+        max_tool_calls: int = 8,  # 约占 200 token 预算
     ) -> None:
         self.project_root = project_root.resolve()
         self.max_files = max_files

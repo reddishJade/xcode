@@ -16,15 +16,16 @@ from pydantic import BaseModel
 class _PydanticEncoder(json.JSONEncoder):
     """处理 pydantic 模型的 JSON 序列化。"""
 
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, BaseModel):
-            return obj.model_dump()
-        return super().default(obj)
+    def default(self, o: Any) -> Any:
+        if isinstance(o, BaseModel):
+            return o.model_dump()
+        return super().default(o)
+
 
 # 会话摘要字符限制（终端显示和可读性优化）
-SUMMARY_USER_CHARS = 120         # 用户消息摘要：约一行终端显示
-SUMMARY_ASSISTANT_CHARS = 180    # 助手消息摘要：约一行半终端显示
-SUMMARY_TITLE_CHARS = 160        # 会话标题：适配文件浏览器列宽度
+SUMMARY_USER_CHARS = 120  # 用户消息摘要：约一行终端显示
+SUMMARY_ASSISTANT_CHARS = 180  # 助手消息摘要：约一行半终端显示
+SUMMARY_TITLE_CHARS = 160  # 会话标题：适配文件浏览器列宽度
 
 # 会话存储协议版本
 SESSION_INDEX_VERSION = 1
@@ -96,7 +97,10 @@ class SessionStore:
                 created_at=datetime.now(UTC).isoformat(timespec="seconds"),
             )
             with self.current_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(asdict(record), ensure_ascii=False, cls=_PydanticEncoder) + "\n")
+                handle.write(
+                    json.dumps(asdict(record), ensure_ascii=False, cls=_PydanticEncoder)
+                    + "\n"
+                )
             if record_type == "user":
                 self.ensure_metadata(str(content))
 
@@ -199,7 +203,12 @@ class SessionStore:
             kept = records[:keep_until]
             with self.current_path.open("w", encoding="utf-8") as handle:
                 for record in kept:
-                    handle.write(json.dumps(asdict(record), ensure_ascii=False, cls=_PydanticEncoder) + "\n")
+                    handle.write(
+                        json.dumps(
+                            asdict(record), ensure_ascii=False, cls=_PydanticEncoder
+                        )
+                        + "\n"
+                    )
             return len(records) - len(kept)
 
     def compact_current_session(self, max_tool_result_chars: int = 200) -> int:

@@ -48,9 +48,7 @@ class ModeManager:
         self._plan_pending_confirmation = True
         return "Plan ready. Present it to the user for confirmation.", plan_summary
 
-    def is_plan_confirmation_required(
-        self, tool_name: str, tool_args: object
-    ) -> bool:
+    def is_plan_confirmation_required(self, tool_name: str, tool_args: object) -> bool:
         """检查当前工具调用是否需要计划确认。"""
         if not self._plan_pending_confirmation:
             return False

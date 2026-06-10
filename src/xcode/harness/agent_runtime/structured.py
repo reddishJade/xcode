@@ -19,7 +19,6 @@ from ...agent.config import (
 )
 from ...agent.messages import (
     AgentMessage,
-    AssistantMessage,
     SystemMessage,
     UserMessage,
 )
@@ -27,11 +26,20 @@ from xcode.ai.providers.protocol import ModelProvider
 from .agent_helpers import run_coro_sync, aiter_to_sync_iter, to_dict
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
-from .event_translation import _StreamTranslationState, _translate_event, StructuredAgentEvent
+from .event_translation import (
+    _StreamTranslationState,
+    _translate_event,
+    StructuredAgentEvent,
+)
 from .fallback import _FallbackSwitchingProvider, _FallbackWithRetryPrimary
 from .history_manager import HistoryManager
 from .mode_manager import ModeManager
-from .result import _build_structured_result, _final_event, RunState, StructuredAgentResult
+from .result import (
+    _build_structured_result,
+    _final_event,
+    RunState,
+    StructuredAgentResult,
+)
 from .tool_adapter import adapt_tool_specs
 from .tool_gate import ToolGate, ToolGateSnapshot
 from ..config import AgentConfig, ExecutionMode
@@ -103,7 +111,9 @@ class StructuredAgent:
         self._gate = ToolGate(
             mode_manager=self._mode,
             approval_callback=approval_callback,
-            permission_policy=_resolve_permission_policy(project_root, permission_policy),
+            permission_policy=_resolve_permission_policy(
+                project_root, permission_policy
+            ),
             high_risk_requires_approval=high_risk_requires_approval,
             hook_manager=hook_manager,
             audit_logger=audit_logger,
@@ -191,7 +201,9 @@ class StructuredAgent:
         active_registry = self._mode.filter_tools_for_mode(snapshot.registry)
         self.cancellation_token.reset()
 
-        context_messages = self._turn_context_messages(question, effective_mode, snapshot)
+        context_messages = self._turn_context_messages(
+            question, effective_mode, snapshot
+        )
         history_messages = context_messages + self.history_messages()
         turn_messages: list[AgentMessage] = [UserMessage(content=question)]
 
@@ -206,13 +218,19 @@ class StructuredAgent:
         loop_config = self._build_loop_config(effective_mode, snapshot)
 
         self._gate._emit_hook(
-            HookRecord("before_agent_start", metadata={"question": question, "mode": effective_mode})
+            HookRecord(
+                "before_agent_start",
+                metadata={"question": question, "mode": effective_mode},
+            )
         )
 
         translation_state = _StreamTranslationState()
 
         async for event in self._agent.run_stream(
-            turn_messages, loop_config, signal=self.cancellation_token, history=history_messages
+            turn_messages,
+            loop_config,
+            signal=self.cancellation_token,
+            history=history_messages,
         ):
             translated = _translate_event(event, translation_state)
             if translated is not None:
@@ -247,7 +265,9 @@ class StructuredAgent:
         plan_spec, act_spec = self._mode.build_mode_switch_tools()
         return adapt_tool_specs((plan_spec, act_spec))
 
-    def _tools_for_mode(self, registry: tuple[ToolSpec, ...], mode: ExecutionMode) -> list[Any]:
+    def _tools_for_mode(
+        self, registry: tuple[ToolSpec, ...], mode: ExecutionMode
+    ) -> list[Any]:
         from .execution_modes import policy_for_mode
 
         policy = policy_for_mode(mode)
@@ -307,7 +327,9 @@ class StructuredAgent:
         return should_compact
 
     def _loop_compact(self, messages: list[AgentMessage]) -> list[AgentMessage]:
-        self._gate._emit_hook(HookRecord("on_compact", metadata={"messages": len(messages)}))
+        self._gate._emit_hook(
+            HookRecord("on_compact", metadata={"messages": len(messages)})
+        )
         if self.compactor is None:
             return messages
         dict_messages = [to_dict(m) for m in messages]
@@ -356,7 +378,8 @@ class StructuredAgent:
             and len(messages) > snapshot.config.compact_threshold
         ) or (
             snapshot.config.compact_token_threshold > 0
-            and estimate_message_tokens(messages) > snapshot.config.compact_token_threshold
+            and estimate_message_tokens(messages)
+            > snapshot.config.compact_token_threshold
         )
 
     def _turn_context_messages(

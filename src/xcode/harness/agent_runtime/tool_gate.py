@@ -18,7 +18,13 @@ from ...agent.config import (
 from ...agent.types import ToolCallContent
 from .execution_modes import policy_for_mode
 from .mode_manager import ModeManager
-from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy, redact_text
+from ..observability import (
+    AuditRecord,
+    HookManager,
+    HookRecord,
+    PermissionPolicy,
+    redact_text,
+)
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 
@@ -107,7 +113,9 @@ class ToolGate:
                     return approval
 
             self._emit_hook(
-                HookRecord("pre_tool", tool=tool_call.name, input=stringify_tool_input(args))
+                HookRecord(
+                    "pre_tool", tool=tool_call.name, input=stringify_tool_input(args)
+                )
             )
             return None
 
@@ -184,11 +192,18 @@ class ToolGate:
         tool_call = ctx.tool_call
         if ctx.is_error:
             self._emit_hook(
-                HookRecord("on_error", tool=tool_call.name, input=action_input, error=result_text)
+                HookRecord(
+                    "on_error",
+                    tool=tool_call.name,
+                    input=action_input,
+                    error=result_text,
+                )
             )
             return
         self._emit_hook(
-            HookRecord("post_tool", tool=tool_call.name, input=action_input, output=result_text)
+            HookRecord(
+                "post_tool", tool=tool_call.name, input=action_input, output=result_text
+            )
         )
 
     def _emit_audit(

@@ -377,6 +377,7 @@ def summarize_messages(
         raw = summarize_fn(older)
         if isinstance(raw, Awaitable):
             import asyncio
+
             raw = asyncio.get_event_loop().run_until_complete(raw)
         summary_content = str(raw).strip()
         if not summary_content.startswith("[Compressed]"):
