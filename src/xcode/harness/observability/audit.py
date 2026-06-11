@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, UTC
 import json
 from pathlib import Path
 import re
-from typing import Any
 
 """工具执行审计与敏感信息脱敏。"""
 
@@ -33,6 +32,23 @@ class AuditRecord:
     approval_scope: str | None = None
     user_decision: str | None = None
 
+    def to_dict(self, timestamp: str | None = None) -> dict[str, str | bool | None]:
+        created_at = self.timestamp or timestamp or datetime.now(UTC).isoformat()
+        return {
+            "session_id": self.session_id,
+            "tool": self.tool,
+            "static_risk": self.static_risk,
+            "dynamic_decision": self.dynamic_decision,
+            "policy_decision": self.policy_decision,
+            "final_status": self.final_status,
+            "approved": self.approved,
+            "redacted_input": self.redacted_input,
+            "redacted_output": self.redacted_output,
+            "timestamp": created_at,
+            "approval_scope": self.approval_scope,
+            "user_decision": self.user_decision,
+        }
+
 
 class JsonlAuditLogger:
     def __init__(self, path: Path) -> None:
@@ -40,14 +56,11 @@ class JsonlAuditLogger:
 
     def write(self, record: AuditRecord) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = asdict(record)
-        if not payload["timestamp"]:
-            payload["timestamp"] = datetime.now(UTC).isoformat()
         with self.path.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            file.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
 
 
-def redact_text(value: Any) -> str:
+def redact_text(value: object) -> str:
     text = str(value)
     for pattern in SECRET_PATTERNS:
         text = pattern.sub(_redact_match, text)
