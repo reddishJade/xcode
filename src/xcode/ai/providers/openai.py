@@ -44,6 +44,18 @@ class OpenAIChatProvider(OpenAICompatProvider):
         )
         self.response_format = response_format
 
+    def _build_thinking_params(
+        self,
+        params: dict[str, Any],
+        thinking_override: bool | None = None,
+    ) -> None:
+        """OpenAI 使用 reasoning_effort 而非 extra_body.thinking。"""
+        effective = self.thinking if thinking_override is None else thinking_override
+        if self.reasoning_effort:
+            params["reasoning_effort"] = self.reasoning_effort
+        elif not effective:
+            params["reasoning_effort"] = "none"
+
     def _build_chat_params(
         self,
         api_messages: list[dict[str, Any]],
@@ -54,18 +66,10 @@ class OpenAIChatProvider(OpenAICompatProvider):
         effective_format = kwargs.get("response_format") or self.response_format
         if effective_format:
             params["response_format"] = effective_format
-        self._build_openai_reasoning_params(params)
         return params
 
     def _warn_builtin_tools(self, tools: tuple[ToolDefinition, ...]) -> None:
         _warn_chat_builtin_tools(tools)
-
-    def _build_openai_reasoning_params(self, params: dict[str, object]) -> None:
-        """写入官方 OpenAI Chat Completions reasoning 参数。"""
-        if self.reasoning_effort:
-            params["reasoning_effort"] = self.reasoning_effort
-        elif not self.thinking:
-            params["reasoning_effort"] = "none"
 
 
 def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:
