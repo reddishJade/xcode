@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from xcode.harness.config import ExecutionMode
+from xcode.harness.config import AgentConfig, ExecutionMode, XcodeRuntimeConfig
 from xcode.harness.agent_runtime import ContextualRetrievalState, StructuredAgent
 from xcode.harness.skills import ToolSpec
 from . import assembly as _assembly
@@ -132,10 +132,10 @@ class XcodeApp:
 def build_app(
     project_root: Path,
     env_files: tuple[Path, ...] | None = None,
-    agent_config: Any | None = None,
+    agent_config: AgentConfig | None = None,
     skills_dir: Path | None = None,
     audit_path: Path | None = None,
-    runtime_config: Any | None = None,
+    runtime_config: XcodeRuntimeConfig | None = None,
 ) -> XcodeApp:
     """装配完整的 Xcode 应用。"""
     cfg = _assembly.resolve_config(
