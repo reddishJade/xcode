@@ -16,13 +16,13 @@ from xcode.agent.types import (
     ToolResultContent,
 )
 
-from .protocols import ContentBlock, ToolResultContentBlock
+from .protocols import ContentBlock
 
 """Agent 消息类型与消息转换。"""
 
 type UserContent = str | list[TextContent | ImageContent | FileContent]
 type ToolResultMessageContent = (
-    str | list[TextContent | ImageContent | FileContent | ToolResultContent]
+    str | list[TextContent | ImageContent | FileContent | ToolResultContent | ShellCallOutputContent]
 )
 
 # ── 消息类型 ──
