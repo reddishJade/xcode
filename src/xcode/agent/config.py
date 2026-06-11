@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal
 
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import StreamOptions, ThinkingLevel, ToolDefinition
-from xcode.agent.types import ToolCallContent
+from xcode.agent.types import ToolArguments, ToolCallContent
 
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage
 from .protocols import (
@@ -16,6 +16,7 @@ from .protocols import (
     QueueMode,
     ToolExecutionMode,
     ToolResultContentBlock,
+    ToolResultDetails,
 )
 
 """Agent 循环配置与上下文类型。"""
@@ -37,7 +38,7 @@ class AgentContext:
 class BeforeToolCallContext:
     assistant_message: AssistantMessage
     tool_call: ToolCallContent
-    args: dict[str, Any]
+    args: ToolArguments
     context: AgentContext
 
 
@@ -51,7 +52,7 @@ class BeforeToolCallResult:
 class AfterToolCallContext:
     assistant_message: AssistantMessage
     tool_call: ToolCallContent
-    args: dict[str, Any]
+    args: ToolArguments
     result: AgentToolResult
     is_error: bool
     context: AgentContext
@@ -60,7 +61,7 @@ class AfterToolCallContext:
 @dataclass
 class AfterToolCallResult:
     content: list[ToolResultContentBlock] | None = None
-    details: Any = None
+    details: ToolResultDetails | None = None
     is_error: bool | None = None
     terminate: bool | None = None
 
