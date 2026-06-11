@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 
+from xcode.agent.config import AgentLoopConfig, _LoopRunState
+from xcode.agent.messages import ToolResultMessage
 from xcode.agent.types import ToolCallContent
 
 
@@ -75,3 +77,60 @@ def should_clear_read_history(
     设计原因：避免"编辑后复读"被误判为重复调用。
     """
     return any(is_file_mutation_tool(c.name) for c in new_calls)
+
+
+def is_tool_productive_default(
+    tool_calls: list[ToolCallContent],
+    tool_results: list[ToolResultMessage],
+) -> bool:
+    """默认生产力检查：有任何非错误结果即视为有生产力。"""
+    return any(not r.is_error for r in tool_results)
+
+
+def update_repeated_tool_watchdog(
+    state: _LoopRunState,
+    tool_calls: list[ToolCallContent],
+    config: AgentLoopConfig,
+) -> str | None:
+    """检测工具调用是否重复，防止无限循环。
+
+    比较工具签名而非工具名的原因：
+    - 工具名相同但参数不同视为有效重试（如搜索不同关键词）
+    - 签名完全相同（包括参数）才视为无效重复
+    """
+    sig = tool_calls_signature(tool_calls)
+    if sig == state.last_tool_signature:
+        state.repeated_tool_count += 1
+    else:
+        state.repeated_tool_count = 0
+        state.last_tool_signature = sig
+
+    if (
+        config.watchdog_repeated_tool_limit > 0
+        and state.repeated_tool_count >= config.watchdog_repeated_tool_limit
+    ):
+        return f"watchdog stopped repeated tool call: {tool_calls[0].name}"
+    return None
+
+
+def update_idle_tool_watchdog(
+    state: _LoopRunState,
+    tool_calls: list[ToolCallContent],
+    tool_results: list[ToolResultMessage],
+    config: AgentLoopConfig,
+) -> str | None:
+    is_productive = config.is_tool_productive or is_tool_productive_default
+    if is_productive(tool_calls, tool_results):
+        state.consecutive_idle_steps = 0
+    else:
+        state.consecutive_idle_steps += 1
+
+    if (
+        config.max_consecutive_idle_steps > 0
+        and state.consecutive_idle_steps >= config.max_consecutive_idle_steps
+    ):
+        return (
+            f"Watchdog triggered: {state.consecutive_idle_steps} consecutive steps "
+            f"without productive tool calls."
+        )
+    return None

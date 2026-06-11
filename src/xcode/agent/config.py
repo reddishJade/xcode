@@ -22,6 +22,20 @@ from .protocols import (
 )
 
 
+@dataclass
+class _LoopRunState:
+    """Agent 循环运行时状态，由 agent_loop.py 持有并更新。"""
+
+    first_turn: bool = True
+    pending_messages: list[AgentMessage] = field(default_factory=list)
+    last_tool_signature: str | None = None
+    repeated_tool_count: int = 0
+    consecutive_idle_steps: int = 0
+    consecutive_continuations: int = 0
+    step_retries: int = 0
+    active_provider: StreamProvider | None = None
+
+
 # ── 上下文 ──
 
 

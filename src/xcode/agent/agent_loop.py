@@ -20,22 +20,8 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from time import perf_counter
 
 from xcode.ai.providers.protocol import StreamProvider
-
-from xcode.ai.events import (
-    FinalMessage,
-    Message,
-    ProviderEvent,
-    ReasoningDelta,
-    StopReason,
-    TextDelta,
-    ToolCallEvent,
-    UsageUpdate,
-)
-from xcode.ai.types import ToolDefinition
 from xcode.agent.types import TextContent, ToolCallContent
 from .config import (
     AgentContext,
@@ -43,6 +29,7 @@ from .config import (
     AgentLoopMetrics,
     AgentLoopResult,
     ShouldStopAfterTurnContext,
+    _LoopRunState,
 )
 from .events import (
     AgentEndEvent,
@@ -52,13 +39,11 @@ from .events import (
     CompactionEvent,
     MessageEndEvent,
     MessageStartEvent,
-    MessageUpdateEvent,
-    ThinkingUpdateEvent,
     TurnEndEvent,
     TurnStartEvent,
 )
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
-from .protocols import AgentTool, CancellationSignal, ContentBlock
+from .protocols import CancellationSignal
 from .compaction import estimate_tokens_simple
 from .tool_execution import (
     ExecutedToolBatch,
@@ -66,7 +51,11 @@ from .tool_execution import (
     is_cancelled,
     cancel_reason,
 )
-from .watchdog import tool_calls_signature
+from .watchdog import (
+    update_repeated_tool_watchdog,
+    update_idle_tool_watchdog,
+)
+from ._provider import call_provider
 
 
 # ── 事件辅助构造 ──
@@ -102,21 +91,6 @@ def _message_end_event(message: AgentMessage) -> MessageEndEvent:
     return MessageEndEvent(message=message)
 
 
-def _message_update_event(message: AgentMessage) -> MessageUpdateEvent:
-    return MessageUpdateEvent(message=message)
-
-
-# ── 工具签名（用于重复工具看门狗）──
-
-
-def _is_tool_productive_default(
-    tool_calls: list[ToolCallContent],
-    tool_results: list[ToolResultMessage],
-) -> bool:
-    """默认生产力检查：有任何非错误结果即视为有生产力。"""
-    return any(not r.is_error for r in tool_results)
-
-
 # ── 公共 API ──
 
 
@@ -146,25 +120,7 @@ async def run_agent_loop(
     return await _run_loop(current_context, new_messages, config, emit, signal)
 
 
-# ── 内部循环 ──
-
-
-@dataclass
-class _ProviderResponse:
-    message: AssistantMessage
-    stop_reason: StopReason
-
-
-@dataclass
-class _LoopRunState:
-    first_turn: bool = True
-    pending_messages: list[AgentMessage] = field(default_factory=list)
-    last_tool_signature: str | None = None
-    repeated_tool_count: int = 0
-    consecutive_idle_steps: int = 0
-    consecutive_continuations: int = 0
-    step_retries: int = 0
-    active_provider: StreamProvider | None = None
+# ── 外层循环 ──
 
 
 async def _run_loop(
@@ -302,7 +258,7 @@ async def _run_loop(
         emit(_turn_end_event(message, tool_results))
 
         # ── 重复工具看门狗 ──
-        repeated_watchdog_reason = _update_repeated_tool_watchdog(
+        repeated_watchdog_reason = update_repeated_tool_watchdog(
             state, tool_calls, config
         )
         if repeated_watchdog_reason:
@@ -317,7 +273,7 @@ async def _run_loop(
             )
 
         # ── 空闲步骤看门狗 ──
-        idle_watchdog_reason = _update_idle_tool_watchdog(
+        idle_watchdog_reason = update_idle_tool_watchdog(
             state, tool_calls, tool_results, config
         )
         if idle_watchdog_reason:
@@ -453,55 +409,6 @@ def _append_tool_results(
         metrics.tool_calls += 1
 
 
-def _update_repeated_tool_watchdog(
-    state: _LoopRunState,
-    tool_calls: list[ToolCallContent],
-    config: AgentLoopConfig,
-) -> str | None:
-    """检测工具调用是否重复，防止无限循环。
-
-    比较工具签名而非工具名的原因：
-    - 工具名相同但参数不同视为有效重试（如搜索不同关键词）
-    - 签名完全相同（包括参数）才视为无效重复
-    """
-    sig = tool_calls_signature(tool_calls)
-    if sig == state.last_tool_signature:
-        state.repeated_tool_count += 1
-    else:
-        state.repeated_tool_count = 0
-        state.last_tool_signature = sig
-
-    if (
-        config.watchdog_repeated_tool_limit > 0
-        and state.repeated_tool_count >= config.watchdog_repeated_tool_limit
-    ):
-        return f"watchdog stopped repeated tool call: {tool_calls[0].name}"
-    return None
-
-
-def _update_idle_tool_watchdog(
-    state: _LoopRunState,
-    tool_calls: list[ToolCallContent],
-    tool_results: list[ToolResultMessage],
-    config: AgentLoopConfig,
-) -> str | None:
-    is_productive = config.is_tool_productive or _is_tool_productive_default
-    if is_productive(tool_calls, tool_results):
-        state.consecutive_idle_steps = 0
-    else:
-        state.consecutive_idle_steps += 1
-
-    if (
-        config.max_consecutive_idle_steps > 0
-        and state.consecutive_idle_steps >= config.max_consecutive_idle_steps
-    ):
-        return (
-            f"Watchdog triggered: {state.consecutive_idle_steps} consecutive steps "
-            f"without productive tool calls."
-        )
-    return None
-
-
 # ── 内层循环 ──
 
 
@@ -534,7 +441,7 @@ async def _run_inner_loop(
             emit(_message_end_event(msg))
             return msg, "end_turn", provider
 
-        response = await _call_provider(
+        response = await call_provider(
             context,
             config,
             emit,
@@ -580,137 +487,6 @@ async def _run_inner_loop(
         state.step_retries = 0
         state.consecutive_continuations = 0
         return message, stop_reason, provider
-
-
-async def _call_provider(
-    context: AgentContext,
-    config: AgentLoopConfig,
-    emit: Callable[[AgentEvent], None],
-    signal: CancellationSignal | None,
-    metrics: AgentLoopMetrics,
-    provider: StreamProvider,
-) -> _ProviderResponse:
-    messages = context.messages
-    if config.transform_context:
-        messages = config.transform_context(messages, signal)
-
-    convert_fn = config.convert_to_llm or (lambda msgs: [])
-    llm_messages = convert_fn(messages)
-    tool_definitions = _tools_to_definitions(context.tools)
-    if config.before_provider_request:
-        config.before_provider_request(llm_messages, tool_definitions)
-
-    started = perf_counter()
-    events = await _collect_provider_events(
-        provider,
-        llm_messages,
-        tool_definitions,
-        config,
-    )
-    elapsed = round((perf_counter() - started) * 1000, 3)
-    metrics.model_latencies_ms.append(elapsed)
-    return _provider_events_to_response(events, metrics, emit)
-
-
-async def _collect_provider_events(
-    provider: StreamProvider,
-    llm_messages: list[Message],
-    tool_definitions: list[ToolDefinition],
-    config: AgentLoopConfig,
-) -> list[ProviderEvent]:
-    try:
-        events: list[ProviderEvent] = []
-        kwargs = {}
-        if config.options is not None:
-            kwargs["options"] = config.options
-        async for event in provider.stream(llm_messages, tool_definitions, **kwargs):
-            events.append(event)
-        return events
-    except Exception as e:
-        return [FinalMessage(content=f"Provider error: {e}", stop_reason="error")]
-
-
-def _provider_events_to_response(
-    events: list[ProviderEvent],
-    metrics: AgentLoopMetrics,
-    emit: Callable[[AgentEvent], None],
-) -> _ProviderResponse:
-    text_parts: list[str] = []
-    reasoning_parts: list[str] = []
-    tool_calls_found: list[ToolCallContent] = []
-    stop_reason: StopReason = "end_turn"
-    input_tokens = 0
-    output_tokens = 0
-    has_usage = False
-    final_content: str | None = None
-
-    for event in events:
-        if isinstance(event, TextDelta):
-            _append_text_delta(text_parts, event, emit)
-        elif isinstance(event, ReasoningDelta):
-            reasoning_parts.append(event.chunk)
-            emit(ThinkingUpdateEvent(reasoning_content=event.chunk))
-        elif isinstance(event, ToolCallEvent):
-            tool_calls_found.extend(_tool_call_content_blocks(event))
-        elif isinstance(event, UsageUpdate):
-            metrics.input_tokens += event.input_tokens
-            metrics.output_tokens += event.output_tokens
-            input_tokens += event.input_tokens
-            output_tokens += event.output_tokens
-            has_usage = True
-        if isinstance(event, FinalMessage):
-            stop_reason = event.stop_reason or "end_turn"
-            if event.content:
-                final_content = event.content
-
-    if final_content and not text_parts:
-        text_parts.append(final_content)
-
-    content_blocks: list[ContentBlock] = [TextContent(text="".join(text_parts))]
-    content_blocks.extend(tool_calls_found)
-    usage = None
-    if has_usage:
-        usage = {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-        }
-    return _ProviderResponse(
-        message=AssistantMessage(
-            content=content_blocks,
-            reasoning_content="".join(reasoning_parts) if reasoning_parts else None,
-            stop_reason=stop_reason,
-            error_message=final_content if stop_reason == "error" else None,
-            usage=usage,
-        ),
-        stop_reason=stop_reason,
-    )
-
-
-def _append_text_delta(
-    text_parts: list[str],
-    event: TextDelta,
-    emit: Callable[[AgentEvent], None],
-) -> None:
-    text_parts.append(event.chunk)
-    emit(
-        _message_update_event(
-            AssistantMessage(
-                content=[TextContent(text="".join(text_parts))],
-            )
-        )
-    )
-
-
-def _tool_call_content_blocks(event: ToolCallEvent) -> list[ToolCallContent]:
-    return [
-        ToolCallContent(
-            id=call.id,
-            name=call.name,
-            arguments=dict(call.input),
-        )
-        for call in event.calls
-    ]
 
 
 async def _handle_provider_error(
@@ -796,34 +572,6 @@ def _append_continuation_prompt(
 ) -> None:
     context.messages.append(message)
     context.messages.append(UserMessage(content="continue"))
-
-
-def _tools_to_definitions(tools: list[AgentTool] | None) -> list[ToolDefinition]:
-    if not tools:
-        return []
-    result: list[ToolDefinition] = []
-    for t in tools:
-        desc = t.description
-        examples = getattr(t, "examples", [])
-        if examples:
-            example_lines = ["", "Examples:"]
-            for ex in examples:
-                example_lines.append(
-                    f"  - {ex.get('name', '')}: "
-                    f"input={json.dumps(ex.get('input', {}), ensure_ascii=False)}, "
-                    f'output="{ex.get("output", "")}"'
-                )
-            desc += "\n".join(example_lines)
-        builtin = getattr(t, "builtin", None)
-        result.append(
-            ToolDefinition(
-                name=t.name,
-                description=desc,
-                parameters=dict(t.parameters),
-                builtin=builtin if isinstance(builtin, dict) else None,
-            )
-        )
-    return result
 
 
 def _cancelled_message(signal: CancellationSignal | None) -> AssistantMessage:
