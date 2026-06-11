@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from ...agent.protocols import (
     AgentTool,
@@ -19,9 +18,10 @@ from ...agent.protocols import (
     ToolResultContentBlock,
     ToolUpdateCallback,
 )
-from xcode.agent.types import ShellCallOutputContent, TextContent
+from xcode.agent.types import ShellCallOutputContent, TextContent, ToolArguments
 from ..skills import (
     AGENT_CONTENT_BLOCKS_METADATA_KEY,
+    ApprovalCallback,
     ToolSpec,
     stringify_tool_input,
 )
@@ -44,7 +44,7 @@ class ToolSpecAdapter:
         self,
         spec: ToolSpec,
         *,
-        approval_callback: Any | None = None,
+        approval_callback: ApprovalCallback | None = None,
         permission_policy: PermissionPolicy | None = None,
         high_risk_requires_approval: bool = True,
     ) -> None:
@@ -66,15 +66,15 @@ class ToolSpecAdapter:
         return self._spec.description
 
     @property
-    def parameters(self) -> dict[str, Any]:
+    def parameters(self) -> dict[str, object]:
         return self._spec.schema or {"type": "object"}
 
     @property
-    def examples(self) -> list[dict[str, Any]]:
+    def examples(self) -> list[dict[str, object]]:
         return list(self._spec.examples)
 
     @property
-    def builtin(self) -> dict[str, Any] | None:
+    def builtin(self) -> dict[str, object] | None:
         return self._spec.builtin
 
     @property
@@ -92,18 +92,19 @@ class ToolSpecAdapter:
     async def execute(
         self,
         tool_call_id: str,
-        params: dict[str, Any],
+        params: ToolArguments,
         signal: CancellationSignal | None = None,
         on_update: ToolUpdateCallback | None = None,
     ) -> AgentToolResult:
-        action_input = stringify_tool_input(params)
+        tool_input = _tool_input_from_arguments(params)
+        action_input = stringify_tool_input(tool_input)
         result: PermissionCheckResult = check_tool_permission(
             self._spec.name,
             action_input,
             permission_policy=self._permission_policy,
             approval_callback=self._approval_callback,
             tool_spec=self._spec,
-            tool_input=params,
+            tool_input=tool_input,
             high_risk_requires_approval=self._high_risk_requires_approval,
         )
         if result.blocked:
@@ -112,17 +113,17 @@ class ToolSpecAdapter:
                 is_error=True,
             )
 
-        content = await asyncio.to_thread(self._spec.handler, params)
+        content = await asyncio.to_thread(self._spec.handler, tool_input)
         return AgentToolResult(content=_tool_result_content(content, tool_call_id))
 
 
 def adapt_tool_specs(
     specs: tuple[ToolSpec, ...],
     *,
-    approval_callback: Any | None = None,
+    approval_callback: ApprovalCallback | None = None,
     permission_policy: PermissionPolicy | None = None,
     high_risk_requires_approval: bool = True,
-) -> list[ToolSpecAdapter]:
+) -> list[AgentTool]:
     """批量将 ToolSpec 适配为 AgentTool。"""
     return [
         ToolSpecAdapter(
@@ -179,8 +180,7 @@ def _redacted_shell_call_output(
     )
 
 
-def _redacted_shell_output_item(item: dict[str, Any]) -> dict[str, Any]:
-    """脱敏单个 shell 输出片段。"""
+def _redacted_shell_output_item(item: dict[str, object]) -> dict[str, object]:
     redacted = dict(item)
     stdout = redacted.get("stdout")
     stderr = redacted.get("stderr")
@@ -206,7 +206,6 @@ def create_tool_spec_from_agent_tool(tool: AgentTool) -> ToolSpec:
         result = asyncio.run(execute_async(data))
         return "".join(c.text for c in result.content if isinstance(c, TextContent))
 
-    mode = getattr(tool, "execution_mode", None)
     return ToolSpec(
         name=tool.name,
         description=tool.description,
@@ -218,6 +217,10 @@ def create_tool_spec_from_agent_tool(tool: AgentTool) -> ToolSpec:
         handler=sync_handler,
         risk="low",
         schema=tool.parameters,
-        execution_mode=mode,
-        examples=list(getattr(tool, "examples", [])),
+        execution_mode=tool.execution_mode,
+        examples=list(tool.examples),
     )
+
+
+def _tool_input_from_arguments(arguments: ToolArguments) -> dict[str, object]:
+    return dict(arguments)

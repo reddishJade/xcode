@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any
 
-from xcode.ai.events import ProviderEvent
+from xcode.ai.events import Message, ProviderEvent
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
 
@@ -38,7 +37,7 @@ class _FallbackSwitchingProvider:
 
     @property
     def model(self) -> str:
-        return getattr(self.active_provider, "model", "unknown")
+        return self.active_provider.model
 
     @property
     def base_url(self) -> str:
@@ -50,11 +49,11 @@ class _FallbackSwitchingProvider:
 
     @property
     def thinking(self) -> bool:
-        return getattr(self.active_provider, "thinking", True)
+        return self.active_provider.thinking
 
     @property
     def reasoning_effort(self) -> str | None:
-        return getattr(self.active_provider, "reasoning_effort", None)
+        return self.active_provider.reasoning_effort
 
     def reset_conversation_state(self) -> None:
         """清理主备 provider 的服务端会话状态。"""
@@ -68,10 +67,10 @@ class _FallbackSwitchingProvider:
 
     async def stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[Message],
         tools: list[ToolDefinition],
         options: StreamOptions | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> AsyncIterator[ProviderEvent]:
         provider = self._fallback if self._using_fallback else self._primary
         try:
@@ -98,11 +97,11 @@ class _FallbackSwitchingProvider:
 
     @staticmethod
     async def _stream_with(
-        provider: Any,
-        messages: list[dict[str, Any]],
+        provider: ModelProvider,
+        messages: list[Message],
         tools: list[ToolDefinition],
         options: StreamOptions | None,
-        kwargs: dict[str, Any],
+        kwargs: dict[str, object],
     ) -> AsyncIterator[ProviderEvent]:
         try:
             async for event in provider.stream(
@@ -119,10 +118,10 @@ class _FallbackWithRetryPrimary(_FallbackSwitchingProvider):
 
     async def stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[Message],
         tools: list[ToolDefinition],
         options: StreamOptions | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> AsyncIterator[ProviderEvent]:
         provider = self._fallback if self._using_fallback else self._primary
         try:
