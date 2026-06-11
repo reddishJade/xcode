@@ -126,7 +126,7 @@ def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
     env_val = os.environ.get(env_key) or ""
 
     api_key = questionary.text(
-        "API Key:", default=env_val[:16] if env_val else ""
+        "API Key:", default=env_val[:16] if env_val else "sk-"
     ).ask()
     if api_key is None:
         return ("cancelled", None)
