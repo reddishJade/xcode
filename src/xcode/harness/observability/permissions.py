@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, TypeVar
+
+from ..session import JsonValue
 
 """工具执行的 allow/deny/ask 权限策略与 HITL 授权模型。
 
@@ -17,6 +20,9 @@ Layer 3: deny_tools, ask_tools, allow_tools (deny > ask > allow)
 PermissionDecision = Literal["allow", "deny", "ask"]
 HITLDecision = Literal["allow", "deny"]
 HITLScope = Literal["once", "session", "permanent"]
+PermissionRiskEvaluator = Callable[[dict[str, Any]], PermissionDecision]
+type PermissionMetadata = dict[str, JsonValue]
+type PermissionRuleData = dict[str, JsonValue]
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,28 @@ class PermissionRule:
     tool: str
     decision: PermissionDecision
     input_contains: str | None = None
+
+
+@dataclass(frozen=True)
+class SandboxSecuritySettings:
+    deny_tools: tuple[str, ...] = ()
+    ask_tools: tuple[str, ...] = ()
+    allow_tools: tuple[str, ...] = ()
+    restricted_dirs: tuple[str, ...] = ()
+
+
+class PermissionToolSpec(Protocol):
+    @property
+    def risk(self) -> str: ...
+
+    @property
+    def risk_evaluator(self) -> PermissionRiskEvaluator | None: ...
+
+
+_PermissionToolSpecT = TypeVar("_PermissionToolSpecT", bound=PermissionToolSpec)
+PermissionApprovalCallback = Callable[
+    [_PermissionToolSpecT, dict[str, Any]], HITLResult
+]
 
 
 class PermissionPolicy:
@@ -98,21 +126,11 @@ class PersistentPermissionStore:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             if not isinstance(raw, list):
                 return PermissionPolicy()
-            rules = []
-            for r in raw:
-                if not isinstance(r, dict):
-                    continue
-                tool = r.get("tool", "")
-                decision = r.get("decision", "")
-                if decision not in ("allow", "deny", "ask"):
-                    continue
-                rules.append(
-                    PermissionRule(
-                        tool=tool,
-                        decision=decision,
-                        input_contains=r.get("input_contains"),
-                    )
-                )
+            rules = [
+                rule
+                for item in raw
+                if (rule := _permission_rule_from_data(item)) is not None
+            ]
             return PermissionPolicy(tuple(rules))
         except (OSError, json.JSONDecodeError):
             return PermissionPolicy()
@@ -148,9 +166,9 @@ class PersistentPermissionStore:
 
     def _write(self, rules: tuple[PermissionRule, ...]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data: list[dict[str, Any]] = []
+        data: list[PermissionRuleData] = []
         for r in rules:
-            entry: dict[str, Any] = {"tool": r.tool, "decision": r.decision}
+            entry: PermissionRuleData = {"tool": r.tool, "decision": r.decision}
             if r.input_contains is not None:
                 entry["input_contains"] = r.input_contains
             data.append(entry)
@@ -166,59 +184,32 @@ class SettingsSandboxPermissionPolicy:
 
     def __init__(self, settings_path: Path) -> None:
         self.settings_path = settings_path
-        self.settings = self._load()
+        self.security = self._load()
 
-    def _load(self) -> dict[str, Any]:
+    def _load(self) -> SandboxSecuritySettings:
         if not self.settings_path.exists():
-            return {}
+            return SandboxSecuritySettings()
         try:
-            return json.loads(self.settings_path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
+            raw = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return SandboxSecuritySettings()
+        return _sandbox_security_settings(raw)
 
     def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
-        security = self._security_settings()
-
-        # Layer 2: 受限目录边界必须先于 allow 规则生效
-        restricted_dirs = security.get("restricted_dirs", [])
-        if isinstance(restricted_dirs, list) and restricted_dirs:
-            input_lower = action_input.lower()
-            for r_dir in restricted_dirs:
-                if str(r_dir).lower() in input_lower:
-                    return "deny"
-
-        # Layer 3: 工具规则 (deny > ask > allow)
-        deny_tools = security.get("deny_tools", [])
-        ask_tools = security.get("ask_tools", [])
-        allow_tools = security.get("allow_tools", [])
-
-        if isinstance(deny_tools, list) and tool_name in deny_tools:
+        if tool_name in self.security.deny_tools:
             return "deny"
-
-        if isinstance(ask_tools, list) and tool_name in ask_tools:
+        if tool_name in self.security.ask_tools:
             return "ask"
-
-        if isinstance(allow_tools, list) and tool_name in allow_tools:
+        if tool_name in self.security.allow_tools:
             return "allow"
-        if isinstance(allow_tools, list) and allow_tools:
+        if self.security.allow_tools:
             return "ask"
 
+        input_lower = action_input.lower()
+        for restricted_dir in self.security.restricted_dirs:
+            if restricted_dir.lower() in input_lower:
+                return "deny"
         return None
-
-    def _security_settings(self) -> dict[str, Any]:
-        """读取安全配置，并兼容早期顶层 camelCase 键。"""
-        security = self.settings.get("security", {})
-        normalized = dict(security) if isinstance(security, dict) else {}
-        legacy_keys = {
-            "allowedTools": "allow_tools",
-            "deniedTools": "deny_tools",
-            "askTools": "ask_tools",
-            "restrictedDirs": "restricted_dirs",
-        }
-        for old_key, new_key in legacy_keys.items():
-            if new_key not in normalized and old_key in self.settings:
-                normalized[new_key] = self.settings[old_key]
-        return normalized
 
 
 class CompositePermissionPolicy(PermissionPolicy):
@@ -238,6 +229,52 @@ class CompositePermissionPolicy(PermissionPolicy):
         if self.inner is not None:
             return self.inner.decide(tool_name, action_input)
         return None
+
+
+def _sandbox_security_settings(raw: object) -> SandboxSecuritySettings:
+    if not isinstance(raw, dict):
+        return SandboxSecuritySettings()
+    security = raw.get("security")
+    if not isinstance(security, dict):
+        return SandboxSecuritySettings()
+    return SandboxSecuritySettings(
+        deny_tools=_string_tuple(security.get("deny_tools")),
+        ask_tools=_string_tuple(security.get("ask_tools")),
+        allow_tools=_string_tuple(security.get("allow_tools")),
+        restricted_dirs=_string_tuple(security.get("restricted_dirs")),
+    )
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str))
+
+
+def _permission_rule_from_data(value: object) -> PermissionRule | None:
+    if not isinstance(value, dict):
+        return None
+    tool = value.get("tool")
+    decision = value.get("decision")
+    if not isinstance(tool, str) or not tool:
+        return None
+    if decision not in ("allow", "deny", "ask"):
+        return None
+    input_contains = value.get("input_contains")
+    return PermissionRule(
+        tool=tool,
+        decision=decision,
+        input_contains=input_contains if isinstance(input_contains, str) else None,
+    )
+
+
+def _approval_metadata(
+    user_decision: HITLDecision, approval_scope: HITLScope
+) -> PermissionMetadata:
+    return {
+        "user_decision": user_decision,
+        "approval_scope": approval_scope,
+    }
 
 
 # ── 统一权限决策 ──
@@ -260,19 +297,15 @@ class PermissionCheckResult:
     blocked: bool
     reason: str = ""
     decision: Literal["allow", "deny", "ask"] = "allow"
-    metadata: dict[str, Any] | None = None
+    metadata: PermissionMetadata | None = None
 
 
 def _ask_or_deny(
-    approval_callback: Any | None,
-    tool_spec: Any | None,
+    approval_callback: PermissionApprovalCallback[_PermissionToolSpecT] | None,
+    tool_spec: _PermissionToolSpecT | None,
     tool_input: dict[str, Any] | None,
     tool_name: str,
 ) -> PermissionCheckResult:
-    """统一的 'ask or deny' 审批路径。
-
-    有 callback 时提交 HITL；无 callback 时返回 decision="ask" 阻断。
-    """
     if approval_callback is not None and tool_spec is not None:
         hitl = approval_callback(tool_spec, tool_input or {})
         if hitl.decision == "deny":
@@ -280,12 +313,12 @@ def _ask_or_deny(
                 blocked=True,
                 reason=f"tool {tool_name} denied by user{DENIED_BY_USER_GUIDANCE}",
                 decision="deny",
-                metadata={"user_decision": "deny", "approval_scope": hitl.scope},
+                metadata=_approval_metadata("deny", hitl.scope),
             )
         return PermissionCheckResult(
             blocked=False,
             decision="allow",
-            metadata={"user_decision": "allow", "approval_scope": hitl.scope},
+            metadata=_approval_metadata("allow", hitl.scope),
         )
     return PermissionCheckResult(
         blocked=True,
@@ -299,8 +332,8 @@ def check_tool_permission(
     action_input: str,
     *,
     permission_policy: PermissionPolicy | None = None,
-    approval_callback: Any | None = None,
-    tool_spec: Any | None = None,
+    approval_callback: PermissionApprovalCallback[_PermissionToolSpecT] | None = None,
+    tool_spec: _PermissionToolSpecT | None = None,
     tool_input: dict[str, Any] | None = None,
     high_risk_requires_approval: bool = False,
 ) -> PermissionCheckResult:
