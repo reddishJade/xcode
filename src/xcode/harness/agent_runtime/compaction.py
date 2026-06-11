@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 
+import asyncio
 from copy import deepcopy
 from datetime import datetime
 import json
@@ -9,6 +10,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from xcode.agent.compaction import estimate_tokens
 from xcode.agent.message_converter import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
 from xcode.agent.config import CompactInstructions
 from ..skills import ToolSpec
@@ -316,8 +318,6 @@ def micro_compact_tool_results(
 
 
 def estimate_text_tokens(text: str) -> int:
-    """委托给 agent 层的估算实现，避免重复。"""
-    from xcode.agent.compaction import estimate_tokens
     return estimate_tokens(text)
 
 
@@ -373,8 +373,6 @@ def summarize_messages(
     if summarize_fn:
         raw = summarize_fn(older)
         if isinstance(raw, Awaitable):
-            import asyncio
-
             raw = asyncio.get_event_loop().run_until_complete(raw)
         summary_content = str(raw).strip()
         if not summary_content.startswith("[Compressed]"):
@@ -495,8 +493,6 @@ def _summarize_branch_messages(
     if summarize_fn is not None:
         raw = summarize_fn(messages)
         if isinstance(raw, Awaitable):
-            import asyncio
-
             raw = asyncio.get_event_loop().run_until_complete(raw)
         summary = context_collapse_clean(str(raw).strip())
         if summary:

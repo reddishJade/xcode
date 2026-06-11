@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from xcode.harness.skills import ToolInput, ToolSpec
+import filelock
 
 
 class MailboxTransport(Protocol):
@@ -45,8 +46,6 @@ class LocalFileMailboxTransport:
     def send_message(
         self, sender_id: str, recipient_id: str, type_name: str, payload: dict[str, Any]
     ) -> str:
-        import filelock
-
         self.inbox_dir.mkdir(parents=True, exist_ok=True)
         message_id = str(uuid.uuid4())
         event = {
@@ -73,8 +72,6 @@ class LocalFileMailboxTransport:
         return message_id
 
     def read_unread_messages(self, recipient_id: str) -> list[dict[str, Any]]:
-        import filelock
-
         self.inbox_dir.mkdir(parents=True, exist_ok=True)
         path = self._mailbox_path(recipient_id)
         if not path.exists():
@@ -110,8 +107,6 @@ class LocalFileMailboxTransport:
         return sorted(unread, key=lambda m: m.get("created_at", ""))
 
     def acknowledge_message(self, message_id: str, recipient_id: str) -> None:
-        import filelock
-
         self.inbox_dir.mkdir(parents=True, exist_ok=True)
         event = {
             "event": "ack",
