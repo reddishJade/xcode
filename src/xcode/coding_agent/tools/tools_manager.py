@@ -4,33 +4,43 @@ from __future__ import annotations
 
 import logging
 import shutil
-from typing import Any
+from collections.abc import Callable
+from dataclasses import dataclass
 
 logger = logging.getLogger("xcode.coding_agent.tools.tools_manager")
 
-_TOOLS: dict[str, dict[str, Any]] = {
-    "fd": {
-        "binary_name": "fd",
-        "system_names": ["fd", "fdfind"],
-    },
-    "rg": {
-        "binary_name": "rg",
-        "system_names": ["rg"],
-    },
+ToolResolver = Callable[[str], str | None]
+
+
+@dataclass(frozen=True)
+class ExternalToolDefinition:
+    display_name: str
+    candidate_names: tuple[str, ...]
+
+
+_TOOLS: dict[str, ExternalToolDefinition] = {
+    "fd": ExternalToolDefinition(display_name="fd", candidate_names=("fd", "fdfind")),
+    "rg": ExternalToolDefinition(display_name="rg", candidate_names=("rg",)),
 }
 
 
 def get_tool_path(tool: str) -> str | None:
     """检查工具是否在系统 PATH 中可用。"""
-    config = _TOOLS.get(tool)
-    if not config:
+    definition = _TOOLS.get(tool)
+    if definition is None:
         return None
 
-    for name in config["system_names"]:
-        found = shutil.which(name)
+    return _resolve_tool_path(definition, shutil.which)
+
+
+def _resolve_tool_path(
+    definition: ExternalToolDefinition,
+    resolver: ToolResolver,
+) -> str | None:
+    for name in definition.candidate_names:
+        found = resolver(name)
         if found:
             return found
-
     return None
 
 
@@ -43,14 +53,14 @@ def ensure_tool(tool: str, silent: bool = False) -> str | None:
     if existing:
         return existing
 
-    config = _TOOLS.get(tool)
-    if not config:
+    definition = _TOOLS.get(tool)
+    if definition is None:
         return None
 
     if not silent:
         logger.warning(
             "%s not found in PATH. Please install it manually.",
-            config["binary_name"],
+            definition.display_name,
         )
 
     return None
