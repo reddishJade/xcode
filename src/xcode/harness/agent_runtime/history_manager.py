@@ -16,6 +16,7 @@ from ...agent.messages import (
 )
 from ...agent.protocols import ContentBlock
 from ...agent.types import TextContent, ToolCallContent
+from ..config import ExecutionMode
 from .result import RunState
 
 type SerializedMessage = dict[str, object]
@@ -52,11 +53,11 @@ class HistoryManager:
         self._history.extend(messages)
 
     @property
-    def current_mode_from_state(self) -> str | None:
+    def current_mode_from_state(self) -> ExecutionMode | None:
         """从 RunState 恢复时可能附带的模式信息。"""
         return getattr(self, "_restored_mode", None)
 
-    def restore_mode(self, run_state: RunState) -> str | None:
+    def restore_mode(self, run_state: RunState) -> ExecutionMode | None:
         """从 RunState 提取模式信息。"""
         mode = run_state.current_mode
         if mode in {"act", "plan", "review"}:

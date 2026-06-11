@@ -16,8 +16,10 @@ from ...agent.config import (
     IsToolProductiveHook,
 )
 from ...agent.protocols import CancellationSignal
+from ...agent.protocols import AgentTool
 from ...agent.types import ToolCallContent
 from .execution_modes import ExecutionModeState, policy_for_mode
+from .tool_adapter import adapt_tool_specs
 from ..observability import (
     AuditRecord,
     HookManager,
@@ -75,6 +77,26 @@ class ToolGate:
             permission_policy=self._permission_policy,
             high_risk_requires_approval=self._high_risk_requires_approval,
             tool_map={},
+        )
+
+    def snapshot_for(self, registry: tuple[ToolSpec, ...]) -> ToolGateSnapshot:
+        """为单个 turn 创建包含工具映射的门控快照。"""
+        return ToolGateSnapshot(
+            approval_callback=self._approval_callback,
+            permission_policy=self._permission_policy,
+            high_risk_requires_approval=self._high_risk_requires_approval,
+            tool_map={tool.name: tool for tool in registry},
+        )
+
+    def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
+        """将 ToolSpec 注册表适配为带当前门控配置的 AgentTool。"""
+        return list(
+            adapt_tool_specs(
+                registry,
+                approval_callback=self._approval_callback,
+                permission_policy=self._permission_policy,
+                high_risk_requires_approval=self._high_risk_requires_approval,
+            )
         )
 
     # ── 钩子构建 ──

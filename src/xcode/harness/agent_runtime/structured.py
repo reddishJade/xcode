@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from ...agent.agent import Agent
 from ...agent.messages import convert_to_llm
@@ -50,8 +50,7 @@ from .result import (
     RunState,
     StructuredAgentResult,
 )
-from .tool_adapter import adapt_tool_specs
-from .tool_gate import ToolGate, ToolGateSnapshot
+from .tool_gate import ToolGate
 from .prompting import PROMPT_VERSION
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
@@ -140,16 +139,7 @@ class StructuredAgent:
         self._resumed_notice: str | None = None
 
         # 适配 ToolSpec → AgentTool，创建 Agent 实例
-        adapted = cast(
-            list[AgentTool],
-            adapt_tool_specs(
-                registry,
-                approval_callback=approval_callback,
-                permission_policy=self._gate._permission_policy,
-                high_risk_requires_approval=high_risk_requires_approval,
-            ),
-        )
-        self._agent = Agent(adapted)
+        self._agent = Agent(self._gate.adapt_tools(registry))
 
     # ── 公共 API ──
 
@@ -162,12 +152,6 @@ class StructuredAgent:
     def request_compaction(self) -> None:
         if self._compact_controller is not None:
             self._compact_controller.request()
-
-    def confirm_plan(self) -> None:
-        """确认计划。
-
-        Plan 模式现在由外层显式控制，不再通过模型工具提交待确认计划。
-        """
 
     def clear_history(self) -> None:
         self._history.clear()
@@ -186,7 +170,7 @@ class StructuredAgent:
         self._reset_provider_conversation_state()
         restored = self._history.restore_mode(run_state)
         if restored is not None:
-            self._mode.set_mode(cast(ExecutionMode, restored))
+            self._mode.set_mode(restored)
 
     def history_messages(self) -> list[AgentMessage]:
         return self._history.messages()
@@ -233,13 +217,7 @@ class StructuredAgent:
         history_messages = context_messages + self.history_messages()
         turn_messages: list[AgentMessage] = [UserMessage(content=question)]
 
-        adapted = adapt_tool_specs(
-            active_registry,
-            approval_callback=self._gate._approval_callback,
-            permission_policy=self._gate._permission_policy,
-            high_risk_requires_approval=self._gate._high_risk_requires_approval,
-        )
-        self._agent = Agent(cast(list[AgentTool], adapted))
+        self._agent = Agent(self._gate.adapt_tools(active_registry))
 
         loop_config = self._build_loop_config(effective_mode, snapshot)
 
@@ -296,29 +274,14 @@ class StructuredAgent:
 
         policy = policy_for_mode(mode)
         filtered = policy.filter_tools(registry)
-        adapted = cast(
-            list[AgentTool],
-            adapt_tool_specs(
-                filtered,
-                approval_callback=self._gate._approval_callback,
-                permission_policy=self._gate._permission_policy,
-                high_risk_requires_approval=self._gate._high_risk_requires_approval,
-            ),
-        )
-        return adapted
+        return self._gate.adapt_tools(filtered)
 
     # ── 配置构建 ──
 
     def _build_loop_config(
         self, mode: ExecutionMode, snapshot: TurnSnapshot
     ) -> AgentLoopConfig:
-        tool_map = {t.name: t for t in snapshot.registry}
-        gate_snapshot = ToolGateSnapshot(
-            approval_callback=self._gate._approval_callback,
-            permission_policy=self._gate._permission_policy,
-            high_risk_requires_approval=self._gate._high_risk_requires_approval,
-            tool_map=tool_map,
-        )
+        gate_snapshot = self._gate.snapshot_for(snapshot.registry)
 
         should_compact = self._loop_should_compact(snapshot) if self.compactor else None
         compact = self._loop_compact if self.compactor else None
