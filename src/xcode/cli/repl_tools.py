@@ -18,7 +18,6 @@ from .repl_rendering import (
 )
 from .tool_catalog import build_tool_catalog
 from xcode.harness.agent_runtime.event_translation import (
-    AssistantEventBlock,
     AssistantStructuredEvent,
     AssistantTextBlock,
     AssistantToolUseBlock,
@@ -283,7 +282,7 @@ def print_tool_call_rich(label: str, console: Console | None = None) -> None:
 
 
 def print_tool_result_rich(
-    data: Any,
+    data: ToolResultBlock,
     verbose: bool,
     console: Console | None = None,
 ) -> None:
@@ -303,11 +302,11 @@ def print_tool_result_rich(
     target.print(Text(f"  ← {mark} {summary}", style=border))
 
 
-def final_stop_reason(data: Any) -> str | None:
-    if getattr(data, "stopped_by_limit", False):
+def final_stop_reason(data: StructuredAgentResult) -> str | None:
+    if data.stopped_by_limit:
         return "[stopped] step limit reached"
-    if getattr(data, "stopped_by_watchdog", False):
-        reason = getattr(data, "watchdog_reason", "repeated tool calls detected")
+    if data.stopped_by_watchdog:
+        reason = data.watchdog_reason or "repeated tool calls detected"
         return f"[stopped] {reason}"
     return None
 

@@ -48,6 +48,22 @@ from .repl_tools import (
     summarize_intents,
     tool_intent,
 )
+from xcode.harness.agent_runtime.event_translation import (
+    AssistantEventBlock,
+    AssistantStructuredEvent,
+    AssistantToolUseBlock,
+    FinalStructuredEvent,
+    ReasoningDeltaStructuredEvent,
+    StructuredAgentEvent,
+    TextDeltaStructuredEvent,
+    ToolResultBlock,
+    ToolResultStructuredEvent,
+    ToolUpdateData,
+    ToolUpdateStructuredEvent,
+    ToolUseStructuredEvent,
+)
+from xcode.ai.events import ToolCall
+from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.observability import (
     PersistentPermissionStore,
     SessionPermissionPolicy,
@@ -322,24 +338,24 @@ class _ReplTurnRenderer:
         self.tool_call_labels: dict[str, str] = {}
         self._progress_tool_id: str | None = None
 
-    def handle_event(self, event: Any) -> None:
-        if event.type == "reasoning_delta":
+    def handle_event(self, event: StructuredAgentEvent) -> None:
+        if isinstance(event, ReasoningDeltaStructuredEvent):
             self._handle_reasoning_delta(event.data)
             return
 
         self._finish_reasoning_preview()
-        if event.type == "text_delta":
+        if isinstance(event, TextDeltaStructuredEvent):
             self._handle_text_delta(event.data)
-        elif event.type == "assistant":
+        elif isinstance(event, AssistantStructuredEvent):
             self._handle_assistant_event(event.data)
-        elif event.type == "tool_use":
+        elif isinstance(event, ToolUseStructuredEvent):
             self._record_tool_call(event.data)
-        elif event.type == "tool_update":
+        elif isinstance(event, ToolUpdateStructuredEvent):
             self._handle_tool_update(event.data)
-        elif event.type == "tool_result":
+        elif isinstance(event, ToolResultStructuredEvent):
             self._record_tool_result(event.data)
             self._clear_progress()
-        elif event.type == "final":
+        elif isinstance(event, FinalStructuredEvent):
             self._handle_final_event(event.data)
 
     def partial_state(self) -> tuple[str, str]:
@@ -359,22 +375,24 @@ class _ReplTurnRenderer:
     def clear_line(self) -> None:
         self._safe_write("\r\033[K")
 
-    def _handle_reasoning_delta(self, event_data: Any) -> None:
+    def _handle_reasoning_delta(self, event_data: str) -> None:
         self._flush_tool_group()
         if self.reasoning_started_at is None:
             self.reasoning_started_at = time.perf_counter()
-        self.reasoning_text += str(event_data)
+        self.reasoning_text += event_data
         lines = reasoning_preview_lines(self.reasoning_text)
         if lines:
             self.reasoning_preview.update(lines)
 
-    def _handle_text_delta(self, event_data: Any) -> None:
+    def _handle_text_delta(self, event_data: str) -> None:
         self._flush_tool_group()
-        self.current_step_thoughts.append(str(event_data))
+        self.current_step_thoughts.append(event_data)
         self.streamed_text = True
         self.answer_stream.update("".join(self.current_step_thoughts))
 
-    def _handle_assistant_event(self, event_data: Any) -> None:
+    def _handle_assistant_event(
+        self, event_data: tuple[AssistantEventBlock, ...]
+    ) -> None:
         if not _assistant_has_tool_calls(event_data):
             return
         thoughts = "".join(self.current_step_thoughts).strip()
@@ -386,11 +404,11 @@ class _ReplTurnRenderer:
         self.current_step_thoughts = []
         self.streamed_text = False
 
-    def _handle_final_event(self, event_data: Any) -> None:
+    def _handle_final_event(self, event_data: StructuredAgentResult) -> None:
         self._flush_tool_group()
         final_answer = "".join(self.current_step_thoughts).strip()
-        if not final_answer and getattr(event_data, "answer", None):
-            final_answer = str(event_data.answer).strip()
+        if not final_answer and event_data.answer:
+            final_answer = event_data.answer.strip()
         if final_answer:
             self.step_answers.append(final_answer)
             if self.streamed_text:
@@ -403,7 +421,7 @@ class _ReplTurnRenderer:
             self.streamed_text = False
         self.stopped_reason = final_stop_reason(event_data)
 
-    def _record_tool_call(self, event_data: Any) -> None:
+    def _record_tool_call(self, event_data: ToolCall) -> None:
         label = brief_input(event_data.name, event_data.input)
         intent = tool_intent(event_data.name, event_data.input)
         self.tool_call_labels[event_data.id] = label
@@ -421,7 +439,7 @@ class _ReplTurnRenderer:
         if intent not in self.tool_group["intents"]:
             self.tool_group["intents"].append(intent)
 
-    def _record_tool_result(self, event_data: Any) -> None:
+    def _record_tool_result(self, event_data: ToolResultBlock) -> None:
         if self.state.verbose:
             print_tool_result_rich(event_data, self.state.verbose, self.live_console)
             return
@@ -440,9 +458,9 @@ class _ReplTurnRenderer:
             self.clear_line()
             self._progress_tool_id = None
 
-    def _handle_tool_update(self, event_data: Any) -> None:
-        tool_id = str(event_data.get("tool_call_id", ""))
-        partial = str(event_data.get("partial_result", ""))
+    def _handle_tool_update(self, event_data: ToolUpdateData) -> None:
+        tool_id = event_data.tool_call_id
+        partial = event_data.partial_result
         if not tool_id or not partial:
             return
         if self._progress_tool_id != tool_id:
@@ -513,12 +531,10 @@ class _ReplTurnRenderer:
             sys.stdout.flush()
 
 
-def _assistant_has_tool_calls(data: Any) -> bool:
-    if not isinstance(data, list):
-        return False
-    return any(
-        isinstance(block, dict) and block.get("type") == "tool_use" for block in data
-    )
+def _assistant_has_tool_calls(
+    data: tuple[AssistantEventBlock, ...],
+) -> bool:
+    return any(isinstance(block, AssistantToolUseBlock) for block in data)
 
 
 def _print_raw_output(text: str) -> None:
