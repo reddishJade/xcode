@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from xcode.harness.config import AgentConfig, ExecutionMode, XcodeRuntimeConfig
-from xcode.harness.agent_runtime import ContextualRetrievalState, StructuredAgent
+from xcode.harness.agent_runtime import (
+    ContextualRetrievalState,
+    StructuredAgent,
+    StructuredAgentEvent,
+)
 from xcode.harness.skills import ToolSpec
 from . import assembly as _assembly
 from .assembly import (
@@ -112,12 +116,12 @@ class XcodeApp:
 
     def ask_stream(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> Iterator[Any]:
+    ) -> Iterator[StructuredAgentEvent]:
         yield from self.agent.run_stream(question, mode=mode)
 
     async def aask_stream(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncIterator[StructuredAgentEvent]:
         async for event in self.agent.arun_stream(question, mode=mode):
             yield event
 

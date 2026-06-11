@@ -18,6 +18,7 @@ from .repl_rendering import (
 )
 from .tool_catalog import build_tool_catalog
 from xcode.harness.agent_runtime.event_translation import (
+    AssistantEventBlock,
     AssistantStructuredEvent,
     AssistantTextBlock,
     AssistantToolUseBlock,
@@ -33,6 +34,7 @@ from xcode.harness.agent_runtime.event_translation import (
     ToolUseStructuredEvent,
     TurnEndStructuredEvent,
 )
+from xcode.harness.app import XcodeApp
 from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.skills import ToolInput, ToolSpec, run_tool_result
 
@@ -40,12 +42,12 @@ from xcode.harness.skills import ToolInput, ToolSpec, run_tool_result
 _console = Console(file=sys.stdout)
 
 
-def run_tool_command(command: str, app: Any) -> str:
+def run_tool_command(command: str, app: XcodeApp) -> str:
     parts = command.split(maxsplit=2)
     if len(parts) < 2:
         return "usage: /tool NAME INPUT\n/tool list - show enabled tools by group"
     tool_name = parts[1]
-    registry: tuple[ToolSpec, ...] = tuple(getattr(app, "registry", ()) or ())
+    registry: tuple[ToolSpec, ...] = app.registry or ()
     if tool_name == "list":
         catalog = build_tool_catalog()
         enabled_names = {t.name for t in registry}
@@ -103,7 +105,7 @@ def run_tool_command(command: str, app: Any) -> str:
     return result.content
 
 
-def run_shell_shortcut(command: str, app: Any) -> str:
+def run_shell_shortcut(command: str, app: XcodeApp) -> str:
     shell_command = command[1:].strip()
     if not shell_command:
         return "usage: !COMMAND"
@@ -217,9 +219,7 @@ def _event_payload(event: StructuredAgentEvent) -> object:
             ]
         }
     if isinstance(event, AssistantStructuredEvent):
-        return [
-            _assistant_block_payload(block) for block in event.data
-        ]
+        return [_assistant_block_payload(block) for block in event.data]
     if isinstance(event, ToolUseStructuredEvent):
         return {"id": event.data.id, "name": event.data.name, "input": event.data.input}
     if isinstance(event, ToolUpdateStructuredEvent):
@@ -263,7 +263,7 @@ def _event_payload(event: StructuredAgentEvent) -> object:
     raise TypeError(f"unsupported event: {type(event).__name__}")
 
 
-def _assistant_block_payload(block: object) -> dict[str, object]:
+def _assistant_block_payload(block: AssistantEventBlock) -> dict[str, object]:
     if isinstance(block, AssistantTextBlock):
         return {"type": "text", "text": block.text}
     if isinstance(block, AssistantToolUseBlock):

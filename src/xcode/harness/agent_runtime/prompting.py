@@ -8,14 +8,14 @@ from dataclasses import dataclass
 import platform
 from pathlib import Path
 
-type PromptCacheKey = tuple[object, ...]
-
 from .git_preflight import build_git_preflight
 from .contextual import ContextualRetrievalState
 from ...harness.skill_loader import SkillLoader
 from xcode.harness.config import DEFAULT_PROMPT_MODULES
 from xcode.harness.skills import ToolSpec, build_tool_guidelines, build_tool_prompt
 from xcode.coding_agent.tools import ShellSpec
+
+type PromptCacheKey = tuple[object, ...]
 
 
 CORE_IDENTITY = """# Identity
@@ -261,7 +261,7 @@ class StableRegionBuilder:
         self._stable_cache: str | None = None
         self._stable_key: PromptCacheKey | None = None
         self._tool_prompt_cache: str | None = None
-        self._tool_prompt_key: tuple[Any, ...] | None = None
+        self._tool_prompt_key: PromptCacheKey | None = None
 
     def build(self, context: PromptContext, enabled: set[str]) -> str:
         stable_enabled = enabled.intersection(STABLE_PROMPT_MODULE_ORDER)
@@ -306,7 +306,7 @@ class StableRegionBuilder:
         return stable_prompt
 
     def _tool_prompt_section(
-        self, registry: tuple[ToolSpec, ...], registry_key: tuple[Any, ...]
+        self, registry: tuple[ToolSpec, ...], registry_key: PromptCacheKey
     ) -> str:
         if (
             self._tool_prompt_cache is not None
@@ -400,7 +400,7 @@ class VolatileRegionBuilder:
         return volatile_parts
 
 
-def _registry_prompt_key(registry: tuple[ToolSpec, ...]) -> tuple[Any, ...]:
+def _registry_prompt_key(registry: tuple[ToolSpec, ...]) -> PromptCacheKey:
     """提取工具 prompt 可见字段作为缓存键。"""
     return tuple(
         (

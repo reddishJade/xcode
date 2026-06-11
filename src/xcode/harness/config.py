@@ -327,18 +327,14 @@ def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
     sandbox_mode = os.getenv("XCODE_SANDBOX_MODE")
     security_updates: dict[str, Any] = {}
 
-    parsed_permission_mode = _parse_permission_mode(
-        os.getenv("XCODE_PERMISSION_MODE")
-    )
+    parsed_permission_mode = _parse_permission_mode(os.getenv("XCODE_PERMISSION_MODE"))
     if parsed_permission_mode is not None:
         security_updates["permission_mode"] = parsed_permission_mode
 
     if sandbox_mode in ("true", "false"):
         security_updates["sandbox_mode"] = sandbox_mode == "true"
 
-    parsed_approval_policy = _parse_approval_policy(
-        os.getenv("XCODE_APPROVAL_POLICY")
-    )
+    parsed_approval_policy = _parse_approval_policy(os.getenv("XCODE_APPROVAL_POLICY"))
     if parsed_approval_policy is not None:
         security_updates["approval_policy"] = parsed_approval_policy
 
@@ -377,7 +373,9 @@ def _parse_approval_policy(value: object) -> ApprovalPolicy | None:
             return None
 
 
-def _load_provider_transport(value: object, default: ProviderTransport) -> ProviderTransport:
+def _load_provider_transport(
+    value: object, default: ProviderTransport
+) -> ProviderTransport:
     if not isinstance(value, str):
         return default
     match value:
@@ -397,19 +395,6 @@ def _load_provider_transport(value: object, default: ProviderTransport) -> Provi
 
 def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
     return _load_json_config(path)
-
-
-def _int_value(value: object, default: int) -> int:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default
 
 
 def _string_tuple(value: object, default: tuple[str, ...]) -> tuple[str, ...]:

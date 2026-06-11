@@ -54,7 +54,7 @@ from .tool_adapter import adapt_tool_specs
 from .tool_gate import ToolGate, ToolGateSnapshot
 from .prompting import PROMPT_VERSION
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
-from ..observability import HookManager, HookRecord, PermissionPolicy
+from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec
 from ...agent.history import apply_request_hygiene
 
@@ -92,7 +92,7 @@ class StructuredAgent:
         compactor: StructuredCompactor | None = None,
         manual_compact_requested: Callable[[], bool] | None = None,
         compact_controller: CompactController | None = None,
-        audit_logger: Callable[[Any], None] | None = None,
+        audit_logger: Callable[[AuditRecord], None] | None = None,
         session_id: str = "local",
         permission_policy: PermissionPolicy | None = None,
         high_risk_requires_approval: bool = True,
@@ -283,13 +283,13 @@ class StructuredAgent:
 
     # ── 模式切换 ──
 
-    def _build_mode_switch_agent_tools(self) -> list[Any]:
+    def _build_mode_switch_agent_tools(self) -> list[AgentTool]:
         plan_spec, act_spec = self._mode.build_mode_switch_tools()
         return adapt_tool_specs((plan_spec, act_spec))
 
     def _tools_for_mode(
         self, registry: tuple[ToolSpec, ...], mode: ExecutionMode
-    ) -> list[Any]:
+    ) -> list[AgentTool]:
         from .execution_modes import policy_for_mode
 
         policy = policy_for_mode(mode)

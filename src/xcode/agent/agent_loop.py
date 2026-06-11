@@ -22,10 +22,12 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from time import perf_counter
-from typing import Any
+
+from xcode.ai.providers.protocol import ModelProvider
 
 from xcode.ai.events import (
     FinalMessage,
+    Message,
     ProviderEvent,
     ReasoningDelta,
     StopReason,
@@ -162,7 +164,7 @@ class _LoopRunState:
     consecutive_idle_steps: int = 0
     consecutive_continuations: int = 0
     step_retries: int = 0
-    active_provider: Any = None
+    active_provider: ModelProvider | None = None
 
 
 async def _run_loop(
@@ -376,7 +378,7 @@ def _finish_loop(
     new_messages: list[AgentMessage],
     step: int,
     metrics: AgentLoopMetrics,
-    active_provider: Any,
+    active_provider: ModelProvider | None,
     emit: Callable[[AgentEvent], None],
     *,
     stopped_by_watchdog: bool = False,
@@ -511,7 +513,7 @@ async def _run_inner_loop(
     metrics: AgentLoopMetrics,
     step: int,
     state: _LoopRunState,
-) -> tuple[AssistantMessage, str, Any] | None:
+) -> tuple[AssistantMessage, str, ModelProvider | None] | None:
     """内层循环：模型调用 → 错误重试 → max_tokens 续写。
 
     通过 state 对象共享 step_retries / consecutive_continuations 计数器，
@@ -586,7 +588,7 @@ async def _call_provider(
     emit: Callable[[AgentEvent], None],
     signal: CancellationSignal | None,
     metrics: AgentLoopMetrics,
-    provider: Any,
+    provider: ModelProvider,
 ) -> _ProviderResponse:
     messages = context.messages
     if config.transform_context:
@@ -611,8 +613,8 @@ async def _call_provider(
 
 
 async def _collect_provider_events(
-    provider: Any,
-    llm_messages: list[Any],
+    provider: ModelProvider,
+    llm_messages: list[Message],
     tool_definitions: list[ToolDefinition],
     config: AgentLoopConfig,
 ) -> list[ProviderEvent]:

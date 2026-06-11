@@ -72,6 +72,7 @@ class TurnEndStructuredEvent:
 
 
 @dataclass(frozen=True)
+@dataclass(frozen=True)
 class AssistantTextBlock:
     text: str
 

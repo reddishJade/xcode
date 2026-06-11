@@ -68,24 +68,27 @@ from xcode.harness.observability import (
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
+from xcode.harness.app import XcodeApp
 from xcode.harness.session import SessionStore
 from xcode.agent.messages import UserMessage
 
 
-def current_effort_options(app: Any) -> tuple[str, ...]:
+def current_effort_options(app: XcodeApp) -> tuple[str, ...]:
     """返回当前 active provider 支持的 reasoning effort 选项。"""
-    provider = getattr(getattr(app, "agent", None), "provider", None)
+    agent = app.agent
+    provider = agent.provider if agent else None
     provider = getattr(provider, "active_provider", provider)
     transport = getattr(provider, "transport", "") if provider else ""
     return reasoning_effort_levels_for_transport(transport)
 
 
-def current_model_options(app: Any) -> tuple[str, ...]:
+def current_model_options(app: XcodeApp) -> tuple[str, ...]:
     """返回所有注册的模型 ID 列表（含当前模型，即便非预设）。"""
     all_models: list[str] = []
     for provider_name in get_providers():
         all_models.extend(m.id for m in get_models(provider_name))
-    provider = getattr(getattr(app, "agent", None), "provider", None)
+    agent = app.agent
+    provider = agent.provider if agent else None
     provider = getattr(provider, "active_provider", provider)
     current_model = getattr(provider, "model", "") if provider else ""
     if current_model and current_model not in all_models:
@@ -94,7 +97,7 @@ def current_model_options(app: Any) -> tuple[str, ...]:
 
 
 def run_repl(
-    app: Any,
+    app: XcodeApp,
     sessions_dir: Path,
     prompt_session: PromptLike | None = None,
     resume_latest: bool = False,
@@ -188,7 +191,7 @@ def run_repl(
 
 
 def _run_agent_turn(
-    app: Any,
+    app: XcodeApp,
     store: SessionStore,
     markdown_renderer: MarkdownRenderer,
     state: ReplState,
