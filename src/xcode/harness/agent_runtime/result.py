@@ -2,27 +2,29 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 
 from ...agent.config import AfterToolCallContext, AgentLoopResult
 from ...agent.messages import AssistantMessage
 from xcode.ai.events import ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
+from ..config import ExecutionMode
 from .agent_helpers import text_from_blocks, to_dict
 from .event_translation import StructuredAgentEvent
+from .execution_modes import parse_execution_mode
 
 
 @dataclass(frozen=True)
 class RunState:
     """可序列化的运行状态快照。"""
 
-    messages: list[dict[str, Any]]
-    current_mode: str = "act"
+    messages: list[dict[str, object]]
+    current_mode: ExecutionMode = "act"
     last_agent: str = "main"
     needs_follow_up: bool = False
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         """转换为 JSON 可序列化字典。"""
         return {
             "messages": self.messages,
@@ -32,13 +34,14 @@ class RunState:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "RunState":
+    def from_dict(cls, payload: object) -> "RunState":
         """从 JSON 字典恢复运行状态。"""
+        if not isinstance(payload, Mapping):
+            return cls(messages=[])
         raw_messages = payload.get("messages", [])
-        messages = raw_messages if isinstance(raw_messages, list) else []
         return cls(
-            messages=[msg for msg in messages if isinstance(msg, dict)],
-            current_mode=str(payload.get("current_mode", "act")),
+            messages=_message_dicts(raw_messages),
+            current_mode=parse_execution_mode(payload.get("current_mode")) or "act",
             last_agent=str(payload.get("last_agent", "main")),
             needs_follow_up=bool(payload.get("needs_follow_up", False)),
         )
@@ -47,11 +50,11 @@ class RunState:
 @dataclass(frozen=True)
 class StructuredAgentResult:
     answer: str
-    messages: list[dict[str, Any]]
+    messages: list[dict[str, object]]
     steps: int
     tool_calls: list[ToolCall]
     stopped_by_limit: bool = False
-    metrics: dict[str, Any] | None = None
+    metrics: dict[str, object] | None = None
     stopped_by_watchdog: bool = False
     stopped_by_error: bool = False
     watchdog_reason: str | None = None
@@ -61,12 +64,12 @@ class StructuredAgentResult:
 
 
 def _build_structured_result(
-    result: AgentLoopResult, max_steps: int, current_mode: str = "act"
+    result: AgentLoopResult, max_steps: int, current_mode: ExecutionMode = "act"
 ) -> StructuredAgentResult:
     """将 AgentLoopResult 转换为 StructuredAgentResult。"""
     answer_parts: list[str] = []
     tool_calls: list[ToolCall] = []
-    messages: list[dict[str, Any]] = []
+    messages: list[dict[str, object]] = []
     for msg in result.messages:
         messages.append(to_dict(msg))
         if not isinstance(msg, AssistantMessage):
@@ -123,6 +126,12 @@ def _build_structured_result(
         watchdog_reason=result.watchdog_reason,
         run_state=RunState(messages=messages, current_mode=current_mode),
     )
+
+
+def _message_dicts(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
 
 
 def _tool_result_text(ctx: AfterToolCallContext) -> str:
