@@ -18,8 +18,8 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     "openai": {
         "label": "OpenAI",
         "base_url": "",
-        "models": ["gpt-4o", "gpt-4o-mini", "o3", "o4-mini"],
-        "default_model": "gpt-4o",
+        "models": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
+        "default_model": "gpt-5.5",
         "env_key": "OPENAI_API_KEY",
         "env_base_url": "OPENAI_BASE_URL",
     },
@@ -107,8 +107,8 @@ def has_valid_config(project_root: Path) -> bool:
     return False
 
 
-def run_setup_wizard(project_root: Path) -> None:
-    """首次启动配置向导。"""
+def run_setup_wizard(project_root: Path) -> bool:
+    """首次启动配置向导。返回 True 表示已保存配置，False 表示取消。"""
     import questionary
 
     print()
@@ -122,7 +122,7 @@ def run_setup_wizard(project_root: Path) -> None:
     choices = {preset["label"]: key for key, preset in PROVIDER_PRESETS.items()}
     provider_label = questionary.select("Select provider:", choices=list(choices)).ask()
     if provider_label is None:
-        return
+        return False
     provider_key = choices[provider_label]
     preset = PROVIDER_PRESETS[provider_key]
 
@@ -135,6 +135,8 @@ def run_setup_wizard(project_root: Path) -> None:
     api_key = questionary.text(
         "API Key:", default=env_val[:16] if env_val else ""
     ).ask()
+    if api_key is None:
+        return False
     if not api_key:
         api_key = env_val
 
@@ -143,15 +145,24 @@ def run_setup_wizard(project_root: Path) -> None:
     base_url = questionary.text(
         "Base URL:", default=env_base_url or default_base_url
     ).ask()
+    if base_url is None:
+        return False
     if not base_url:
         base_url = env_base_url or default_base_url
 
     model_default = preset["default_model"]
+    model_choices = [*preset["models"], "Custom (enter name)"]
     model = questionary.select(
-        "Model:", choices=preset["models"], default=model_default
+        "Model:", choices=model_choices, default=model_default
     ).ask()
     if model is None:
-        model = model_default
+        return False
+    if model == "Custom (enter name)":
+        model = questionary.text("Model name:").ask()
+        if model is None:
+            return False
+        if not model:
+            model = model_default
 
     transport = "openai_chat"
     if provider_key == "anthropic":
@@ -172,7 +183,7 @@ def run_setup_wizard(project_root: Path) -> None:
             default=effort_default,
         ).ask()
         if effort is None:
-            effort = effort_default
+            return False
         reasoning_effort = effort
 
     # 确认
@@ -189,9 +200,11 @@ def run_setup_wizard(project_root: Path) -> None:
     )
     print()
     confirm = questionary.confirm("Save this configuration?", default=True).ask()
-    if not confirm:
-        print("  Setup skipped. You can configure later by editing xcode.config.json.")
-        return
+    if confirm is None or not confirm:
+        print(
+            "  Setup cancelled. You can configure later by editing xcode.config.json."
+        )
+        return False
 
     config_data = {
         "provider": {
@@ -237,3 +250,4 @@ def run_setup_wizard(project_root: Path) -> None:
     )
     print(f"  Configuration saved to {CONFIG_FILENAME}")
     print()
+    return True

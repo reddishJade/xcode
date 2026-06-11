@@ -40,7 +40,12 @@ def main() -> int:
 
     if args.setup or not has_valid_config(project_root):
         if sys.stdin.isatty():
-            run_setup_wizard(project_root)
+            try:
+                ok = run_setup_wizard(project_root)
+            except KeyboardInterrupt:
+                return 0
+            if not ok:
+                return 0
         else:
             if not has_valid_config(project_root):
                 print(
