@@ -40,24 +40,11 @@ class MiMoProvider(OpenAICompatProvider):
         )
 
     def _record_usage(self, response, sent_messages: int) -> None:
-        """记录 MiMo usage，提取缓存和 reasoning 统计。"""
-        from xcode.ai.cache import extract_cache_usage
-
-        self.metrics["sent_messages"] = sent_messages
-        usage = getattr(response, "usage", None)
-        if usage:
-            # 使用统一的缓存提取逻辑
-            cache_usage = extract_cache_usage(response)
-            self.metrics["cached_tokens"] = cache_usage.hit_tokens
-            self.metrics["cache_hit_rate"] = cache_usage.hit_rate
-            if cache_usage.hit_tokens > 0:
-                self.metrics["cache_hit_tokens"] = cache_usage.hit_tokens
-                self.metrics["cache_miss_tokens"] = cache_usage.miss_tokens
-
-            completion_details = getattr(usage, "completion_tokens_details", None)
-            reasoning = (
-                getattr(completion_details, "reasoning_tokens", 0)
-                if completion_details
-                else 0
+        """记录 MiMo usage，复用基类通用逻辑后补充 MiMo 专属字段。"""
+        super()._record_usage(response, sent_messages)
+        cached = self.metrics.get("cached_tokens", 0)
+        if isinstance(cached, int) and cached > 0:
+            self.metrics["cache_hit_tokens"] = cached
+            self.metrics["cache_miss_tokens"] = self.metrics.get(
+                "prompt_cache_miss_tokens", 0
             )
-            self.metrics["reasoning_tokens"] = reasoning or 0

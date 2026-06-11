@@ -142,39 +142,23 @@ class ChatGLMProvider(OpenAICompatProvider):
         return cleaned
 
     def _record_usage(self, response, sent_messages: int) -> None:
-        """记录 ChatGLM usage，使用兼容字段提取缓存统计。"""
-        from xcode.ai.cache import extract_cache_usage
-
-        self.metrics["sent_messages"] = sent_messages
+        """记录 ChatGLM usage，复用基类通用逻辑后补充 ChatGLM 专属字段。"""
+        super()._record_usage(response, sent_messages)
         usage = getattr(response, "usage", None)
         if usage:
             prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
             completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-            total_tokens = getattr(
-                usage,
-                "total_tokens",
-                prompt_tokens + completion_tokens,
-            )
             self.metrics["prompt_tokens"] = prompt_tokens
             self.metrics["completion_tokens"] = completion_tokens
-            self.metrics["total_tokens"] = total_tokens or 0
-
-            # 使用统一的缓存提取逻辑
-            cache_usage = extract_cache_usage(response)
-            self.metrics["cached_tokens"] = cache_usage.hit_tokens
-            self.metrics["cache_hit_rate"] = cache_usage.hit_rate
-            # ChatGLM 使用兼容字段，hit/miss 分解不是官方字段
-            if cache_usage.hit_tokens > 0:
-                self.metrics["cache_hit_tokens"] = cache_usage.hit_tokens
-                self.metrics["cache_miss_tokens"] = cache_usage.miss_tokens
-
-            completion_details = getattr(usage, "completion_tokens_details", None)
-            reasoning = (
-                getattr(completion_details, "reasoning_tokens", 0)
-                if completion_details
-                else 0
+            self.metrics["total_tokens"] = (
+                getattr(usage, "total_tokens", 0) or prompt_tokens + completion_tokens
             )
-            self.metrics["reasoning_tokens"] = reasoning or 0
+            cached = self.metrics.get("cached_tokens", 0)
+            if isinstance(cached, int) and cached > 0:
+                self.metrics["cache_hit_tokens"] = cached
+                self.metrics["cache_miss_tokens"] = self.metrics.get(
+                    "prompt_cache_miss_tokens", 0
+                )
 
 
 def _supports_tool_stream(model: str) -> bool:

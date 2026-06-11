@@ -191,25 +191,3 @@ class DeepSeekProvider(OpenAICompatProvider):
                         {"type": "text", "text": "Note: Output must be in JSON format."}
                     )
         return messages
-
-    def _record_usage(self, response, sent_messages: int) -> None:
-        """记录 DeepSeek usage，优先使用原生缓存字段。"""
-        from xcode.ai.cache import extract_cache_usage
-
-        self.metrics["sent_messages"] = sent_messages
-        usage = getattr(response, "usage", None)
-        if usage:
-            # 使用统一的缓存提取逻辑
-            cache_usage = extract_cache_usage(response)
-            self.metrics["prompt_cache_hit_tokens"] = cache_usage.hit_tokens
-            self.metrics["prompt_cache_miss_tokens"] = cache_usage.miss_tokens
-            self.metrics["cached_tokens"] = cache_usage.hit_tokens
-            self.metrics["cache_hit_rate"] = cache_usage.hit_rate
-
-            completion_details = getattr(usage, "completion_tokens_details", None)
-            reasoning = (
-                getattr(completion_details, "reasoning_tokens", 0)
-                if completion_details
-                else 0
-            )
-            self.metrics["reasoning_tokens"] = reasoning or 0
