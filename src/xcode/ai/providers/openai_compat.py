@@ -50,7 +50,6 @@ class OpenAICompatProvider(ProviderMetricsMixin):
 
             client = _OpenAIClient(api_key=api_key, base_url=base_url)
         self.client = client
-        self.api_key = api_key
         self.base_url = base_url
         self.model = model
         self.thinking = thinking

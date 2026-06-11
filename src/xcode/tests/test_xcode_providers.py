@@ -169,7 +169,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 provider = bundle.llm
                 self.assertIsInstance(provider, ChatGLMProvider)
                 assert isinstance(provider, ChatGLMProvider)
-                self.assertEqual(provider.api_key, "glm-key")
+                self.assertEqual(provider.client.api_key, "glm-key")
                 self.assertEqual(provider.model, "glm-4.7")
                 self.assertTrue(provider.clear_thinking)
                 self.assertFalse(provider.tool_stream)
@@ -199,7 +199,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
 
                 llm = bundle.llm
                 assert isinstance(llm, OpenAIChatProvider)
-                self.assertEqual(llm.api_key, "configured")
+                self.assertEqual(llm.client.api_key, "configured")
 
     def test_profile_api_key_overrides_openai_api_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -230,8 +230,8 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 assert isinstance(main, OpenAIChatProvider)
                 subagent = bundle.llms["subagent"]
                 assert isinstance(subagent, OpenAIChatProvider)
-                self.assertEqual(main.api_key, "openai")
-                self.assertEqual(subagent.api_key, "subagent")
+                self.assertEqual(main.client.api_key, "openai")
+                self.assertEqual(subagent.client.api_key, "subagent")
 
 
 # ── Runtime 测试 ──
