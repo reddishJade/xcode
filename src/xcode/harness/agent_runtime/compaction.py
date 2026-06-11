@@ -315,20 +315,17 @@ def micro_compact_tool_results(
     return compacted
 
 
+def estimate_text_tokens(text: str) -> int:
+    """委托给 agent 层的估算实现，避免重复。"""
+    from xcode.agent.compaction import estimate_tokens_simple
+    return estimate_tokens_simple(text)
+
+
 def estimate_message_tokens(messages: list[dict[str, Any]]) -> int:
     return sum(
         estimate_text_tokens(json.dumps(message, ensure_ascii=False, default=str))
         for message in messages
     )
-
-
-def estimate_text_tokens(text: str) -> int:
-    try:
-        import tiktoken
-    except ImportError:
-        return max(1, len(text) // 4)
-    encoding = tiktoken.get_encoding("cl100k_base")
-    return len(encoding.encode(text))
 
 
 type SummarizeFn = Callable[[list[dict[str, Any]]], str | Awaitable[str]]
