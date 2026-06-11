@@ -23,7 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from time import perf_counter
 
-from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.providers.protocol import StreamProvider
 
 from xcode.ai.events import (
     FinalMessage,
@@ -164,7 +164,7 @@ class _LoopRunState:
     consecutive_idle_steps: int = 0
     consecutive_continuations: int = 0
     step_retries: int = 0
-    active_provider: ModelProvider | None = None
+    active_provider: StreamProvider | None = None
 
 
 async def _run_loop(
@@ -378,7 +378,7 @@ def _finish_loop(
     new_messages: list[AgentMessage],
     step: int,
     metrics: AgentLoopMetrics,
-    active_provider: ModelProvider | None,
+    active_provider: StreamProvider | None,
     emit: Callable[[AgentEvent], None],
     *,
     stopped_by_watchdog: bool = False,
@@ -513,7 +513,7 @@ async def _run_inner_loop(
     metrics: AgentLoopMetrics,
     step: int,
     state: _LoopRunState,
-) -> tuple[AssistantMessage, str, ModelProvider | None] | None:
+) -> tuple[AssistantMessage, str, StreamProvider | None] | None:
     """内层循环：模型调用 → 错误重试 → max_tokens 续写。
 
     通过 state 对象共享 step_retries / consecutive_continuations 计数器，
@@ -588,7 +588,7 @@ async def _call_provider(
     emit: Callable[[AgentEvent], None],
     signal: CancellationSignal | None,
     metrics: AgentLoopMetrics,
-    provider: ModelProvider,
+    provider: StreamProvider,
 ) -> _ProviderResponse:
     messages = context.messages
     if config.transform_context:
@@ -613,7 +613,7 @@ async def _call_provider(
 
 
 async def _collect_provider_events(
-    provider: ModelProvider,
+    provider: StreamProvider,
     llm_messages: list[Message],
     tool_definitions: list[ToolDefinition],
     config: AgentLoopConfig,
@@ -723,7 +723,7 @@ async def _handle_provider_error(
         delay = config.retry_backoff_base * (2 ** (step_retries - 1))
         await asyncio.sleep(delay)
         return True, None
-    if _has_empty_text_response(message):
+    if config.max_step_retries > 0 or _has_empty_text_response(message):
         msg = AssistantMessage(
             content=[TextContent(text="I encountered an error.")],
             stop_reason="error",
@@ -819,7 +819,7 @@ def _tools_to_definitions(tools: list[AgentTool] | None) -> list[ToolDefinition]
             ToolDefinition(
                 name=t.name,
                 description=desc,
-                parameters=t.parameters,
+                parameters=dict(t.parameters),
                 builtin=builtin if isinstance(builtin, dict) else None,
             )
         )

@@ -18,7 +18,7 @@ from xcode.ai.events import (
     ToolCall,
     ToolCallEvent,
 )
-from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.providers.protocol import StreamProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.config import (
@@ -331,13 +331,18 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 app = build_app(project_root=root, runtime_config=runtime_config)
             result = app.agent.run("read")
 
-        tool_result = next(
-            message["content"][0]
-            for message in result.messages
-            if message.get("role") == "tool"
-        )
+        tool_result: dict[str, object] | None = None
+        for message in result.messages:
+            if message.get("role") != "tool":
+                continue
+            content = message.get("content")
+            if isinstance(content, list) and content and isinstance(content[0], dict):
+                tool_result = content[0]
+                break
+
+        assert tool_result is not None
         self.assertEqual(tool_result["status"], "error")
-        self.assertIn("requires approval", tool_result["content"])
+        self.assertIn("requires approval", str(tool_result["content"]))
 
     def test_build_app_discovers_project_root_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
@@ -353,7 +358,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertEqual(app.agent.config.tool_workers, 1)
 
     def test_tool_execution_records_recent_tool_call_context(self) -> None:
-        class ReadingProvider(ModelProvider):
+        class ReadingProvider(StreamProvider):
             def __init__(self) -> None:
                 self.calls = 0
 
@@ -439,7 +444,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
     def test_subagent_receives_runtime_prompt_context(self) -> None:
         seen_messages: list[list[Message]] = []
 
-        class CapturingProvider(ModelProvider):
+        class CapturingProvider(StreamProvider):
             async def stream(
                 self,
                 messages: list[Message],
@@ -563,7 +568,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
     def test_worktree_subagent_runs_child_tools_in_worktree(self) -> None:
         seen_reads: list[str] = []
 
-        class ReadingProvider(ModelProvider):
+        class ReadingProvider(StreamProvider):
             async def stream(
                 self,
                 messages: list[Message],
@@ -644,7 +649,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertEqual(seen_reads, ["worktree"])
 
 
-class MockProvider(ModelProvider):
+class MockProvider(StreamProvider):
     def __init__(
         self,
         seen_child_tools: list[list[str]],

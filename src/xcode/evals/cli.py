@@ -503,12 +503,24 @@ class _StaticProvider(ModelProvider):
     def __init__(self, turns: list[list[ProviderEvent]]) -> None:
         self._turns = iter(turns)
 
+    @property
+    def model(self) -> str:
+        return "offline-static"
+
+    @property
+    def thinking(self) -> bool:
+        return False
+
+    @property
+    def reasoning_effort(self) -> str | None:
+        return None
+
     async def stream(
         self,
         messages: list[Message],
         tools: list[ToolDefinition],
         options: StreamOptions | None = None,
-        **kwargs: Any,
+        **_kwargs: object,
     ) -> AsyncIterator[ProviderEvent]:
         try:
             events = next(self._turns)

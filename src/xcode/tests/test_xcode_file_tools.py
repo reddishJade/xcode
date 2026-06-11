@@ -388,9 +388,11 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             )
 
             metadata = result.metadata or {}
+            patch = metadata.get("patch")
+            assert isinstance(patch, str)
             self.assertEqual(result.status, "ok")
-            self.assertIn("-two", metadata.get("patch", ""))
-            self.assertIn("+three", metadata.get("patch", ""))
+            self.assertIn("-two", patch)
+            self.assertIn("+three", patch)
             self.assertEqual(metadata.get("first_changed_line"), 2)
             self.assertEqual(path.read_text(encoding="utf-8"), "one\nthree\n")
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from xcode.ai.events import Message, ProviderEvent
-from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.providers.protocol import StreamProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
 
 
@@ -18,8 +18,8 @@ class _FallbackSwitchingProvider:
 
     def __init__(
         self,
-        primary: ModelProvider,
-        fallback: ModelProvider,
+        primary: StreamProvider,
+        fallback: StreamProvider,
         error_threshold: int = 3,
         fallback_success_threshold: int = 3,
     ) -> None:
@@ -32,12 +32,12 @@ class _FallbackSwitchingProvider:
         self._using_fallback: bool = False
 
     @property
-    def active_provider(self) -> ModelProvider:
+    def active_provider(self) -> StreamProvider:
         return self._fallback if self._using_fallback else self._primary
 
     @property
     def model(self) -> str:
-        return self.active_provider.model
+        return str(getattr(self.active_provider, "model", "unknown"))
 
     @property
     def base_url(self) -> str:
@@ -49,11 +49,12 @@ class _FallbackSwitchingProvider:
 
     @property
     def thinking(self) -> bool:
-        return self.active_provider.thinking
+        return bool(getattr(self.active_provider, "thinking", True))
 
     @property
     def reasoning_effort(self) -> str | None:
-        return self.active_provider.reasoning_effort
+        value = getattr(self.active_provider, "reasoning_effort", None)
+        return str(value) if value is not None else None
 
     def reset_conversation_state(self) -> None:
         """清理主备 provider 的服务端会话状态。"""
@@ -97,7 +98,7 @@ class _FallbackSwitchingProvider:
 
     @staticmethod
     async def _stream_with(
-        provider: ModelProvider,
+        provider: StreamProvider,
         messages: list[Message],
         tools: list[ToolDefinition],
         options: StreamOptions | None,

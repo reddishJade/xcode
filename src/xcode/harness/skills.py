@@ -1,3 +1,8 @@
+"""工具注册表与 HITL 执行门禁。
+
+ToolSpec 描述工具能力，dispatch map 根据工具名找到 handler。HITL 在执行
+handler 前根据 risk 字段和 permission policy 决定是否需要 approval callback。"""
+
 from __future__ import annotations
 
 
@@ -8,6 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ..agent.protocols import ToolExecutionMode
+from ..agent.types import ShellCallOutputContent
 from .observability import (
     HITLResult,
     PermissionPolicy,
@@ -24,7 +30,8 @@ handler 前根据 risk 字段和 permission policy 决定是否需要 approval c
 """
 
 ToolInput = dict[str, Any]
-type ToolMetadata = dict[str, JsonValue]
+type ToolMetadataValue = JsonValue | list[ShellCallOutputContent]
+type ToolMetadata = dict[str, ToolMetadataValue]
 ActionHandler = Callable[[ToolInput], str]
 ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
 AGENT_CONTENT_BLOCKS_METADATA_KEY = "agent_content_blocks"
@@ -181,7 +188,7 @@ def run_tool_result(
             else _STATUS_DENIED
         )
         return ToolExecutionResult(
-            status, perm_result.reason, metadata=perm_result.metadata
+            status, perm_result.reason, metadata=_merge_metadata(perm_result.metadata)
         )
     try:
         raw_content = tool.handler(action_input)
@@ -203,7 +210,7 @@ def _tool_output_metadata(output: str) -> ToolMetadata | None:
 
 
 def _merge_metadata(
-    *items: ToolMetadata | None,
+    *items: Mapping[str, ToolMetadataValue] | None,
 ) -> ToolMetadata | None:
     merged: ToolMetadata = {}
     for item in items:
@@ -213,12 +220,30 @@ def _merge_metadata(
 
 
 def _tool_metadata(value: object) -> ToolMetadata:
+    """规范化工具输出元数据，并保留 agent 专用结构化块。"""
     if not isinstance(value, Mapping):
         return {}
-    return {str(key): _json_value(item) for key, item in value.items()}
+    metadata: ToolMetadata = {}
+    for key, item in value.items():
+        normalized_key = str(key)
+        if normalized_key == AGENT_CONTENT_BLOCKS_METADATA_KEY:
+            blocks = _agent_content_blocks(item)
+            if blocks:
+                metadata[normalized_key] = blocks
+            continue
+        metadata[normalized_key] = _json_value(item)
+    return metadata
+
+
+def _agent_content_blocks(value: object) -> list[ShellCallOutputContent]:
+    """提取可传递给 agent loop 的结构化内容块。"""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, ShellCallOutputContent)]
 
 
 def _json_value(value: object) -> JsonValue:
+    """将任意值转换为可 JSON 序列化的元数据值。"""
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, list):

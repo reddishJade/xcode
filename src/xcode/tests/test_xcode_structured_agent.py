@@ -23,6 +23,7 @@ from xcode.harness.agent_runtime import (
     StructuredAgent,
     StructuredAgentEvent,
 )
+from xcode.harness.agent_runtime.event_translation import FinalStructuredEvent
 from xcode.agent.messages import UserMessage
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
@@ -45,6 +46,12 @@ class ResettableFakeProvider(FakeProvider):
 
 
 class XcodeStructuredAgentTests(unittest.TestCase):
+    def _assert_final_answer(self, event: StructuredAgentEvent, expected: str) -> None:
+        """断言最终事件包含指定答案。"""
+        self.assertIsInstance(event, FinalStructuredEvent)
+        assert isinstance(event, FinalStructuredEvent)
+        self.assertEqual(event.data.answer, expected)
+
     def test_chat_turn_still_uses_normal_runtime_boundary(self) -> None:
         seen_tools: list[list[str]] = []
 
@@ -554,7 +561,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 "final",
             ],
         )
-        self.assertEqual(events[-1].data.answer, "done")
+        self._assert_final_answer(events[-1], "done")
 
     def test_run_stream_yields_text_delta_events(self) -> None:
         mock_events: list[ProviderEvent] = [
@@ -581,7 +588,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             ],
         )
         self.assertEqual(events[1].data, "he")
-        self.assertEqual(events[-1].data.answer, "hello")
+        self._assert_final_answer(events[-1], "hello")
 
     def test_run_stream_uses_windows_selector_worker(self) -> None:
         if not hasattr(asyncio, "SelectorEventLoop"):
@@ -606,7 +613,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             events = list(agent.run_stream("go"))
 
         self.assertTrue(selector_loop.called)
-        self.assertEqual(events[-1].data.answer, "done")
+        self._assert_final_answer(events[-1], "done")
 
     def test_run_stream_does_not_call_asyncio_run_in_bridge(self) -> None:
         mock_events: list[ProviderEvent] = [
@@ -624,7 +631,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         ):
             events = list(agent.run_stream("go"))
 
-        self.assertEqual(events[-1].data.answer, "done")
+        self._assert_final_answer(events[-1], "done")
 
     def test_arun_returns_result_inside_event_loop(self) -> None:
         async def main():
@@ -687,7 +694,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 "final",
             ],
         )
-        self.assertEqual(events[-1].data.answer, "hello")
+        self._assert_final_answer(events[-1], "hello")
 
     def test_sync_api_rejects_active_event_loop(self) -> None:
         async def main():

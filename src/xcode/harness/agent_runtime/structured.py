@@ -32,7 +32,7 @@ from ...agent.messages import (
 )
 from ...agent.protocols import AgentTool, ContentBlock
 from ...agent.types import TextContent, ToolCallContent
-from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.providers.protocol import StreamProvider
 from .agent_helpers import run_coro_sync, aiter_to_sync_iter, to_dict
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
@@ -71,7 +71,7 @@ class TurnSnapshot:
 
     config: AgentConfig
     registry: tuple[ToolSpec, ...]
-    provider: ModelProvider
+    provider: StreamProvider
     runtime_context_provider: RuntimeContextProvider | None
 
 
@@ -85,7 +85,7 @@ class StructuredAgent:
 
     def __init__(
         self,
-        provider: ModelProvider,
+        provider: StreamProvider,
         registry: tuple[ToolSpec, ...],
         config: AgentConfig | None = None,
         approval_callback: ApprovalCallback | None = None,
@@ -99,11 +99,11 @@ class StructuredAgent:
         hook_manager: HookManager | None = None,
         runtime_context_provider: RuntimeContextProvider | None = None,
         cancellation_token: CancellationToken | None = None,
-        fallback_provider: ModelProvider | None = None,
+        fallback_provider: StreamProvider | None = None,
         project_root: Path | None = None,
         request_hygiene: RequestHygieneConfig | None = None,
     ) -> None:
-        self.provider: ModelProvider = provider
+        self.provider: StreamProvider = provider
         if fallback_provider is not None:
             self.provider = _FallbackWithRetryPrimary(provider, fallback_provider)
         self._original_provider = provider
@@ -140,14 +140,17 @@ class StructuredAgent:
         self._resumed_notice: str | None = None
 
         # 适配 ToolSpec → AgentTool，创建 Agent 实例
-        adapted = adapt_tool_specs(
-            registry,
-            approval_callback=approval_callback,
-            permission_policy=self._gate._permission_policy,
-            high_risk_requires_approval=high_risk_requires_approval,
+        adapted = cast(
+            list[AgentTool],
+            adapt_tool_specs(
+                registry,
+                approval_callback=approval_callback,
+                permission_policy=self._gate._permission_policy,
+                high_risk_requires_approval=high_risk_requires_approval,
+            ),
         )
         adapted.extend(self._build_mode_switch_agent_tools())
-        self._agent = Agent(cast(list[AgentTool], adapted))
+        self._agent = Agent(adapted)
 
     # ── 公共 API ──
 
@@ -285,7 +288,7 @@ class StructuredAgent:
 
     def _build_mode_switch_agent_tools(self) -> list[AgentTool]:
         plan_spec, act_spec = self._mode.build_mode_switch_tools()
-        return adapt_tool_specs((plan_spec, act_spec))
+        return cast(list[AgentTool], adapt_tool_specs((plan_spec, act_spec)))
 
     def _tools_for_mode(
         self, registry: tuple[ToolSpec, ...], mode: ExecutionMode
@@ -294,11 +297,14 @@ class StructuredAgent:
 
         policy = policy_for_mode(mode)
         filtered = policy.filter_tools(registry)
-        adapted = adapt_tool_specs(
-            filtered,
-            approval_callback=self._gate._approval_callback,
-            permission_policy=self._gate._permission_policy,
-            high_risk_requires_approval=self._gate._high_risk_requires_approval,
+        adapted = cast(
+            list[AgentTool],
+            adapt_tool_specs(
+                filtered,
+                approval_callback=self._gate._approval_callback,
+                permission_policy=self._gate._permission_policy,
+                high_risk_requires_approval=self._gate._high_risk_requires_approval,
+            ),
         )
         adapted.extend(self._build_mode_switch_agent_tools())
         return adapted

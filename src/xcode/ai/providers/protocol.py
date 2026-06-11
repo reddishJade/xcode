@@ -7,7 +7,19 @@ from xcode.ai.events import Message, ProviderEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
 
 
-class ModelProvider(Protocol):
+class StreamProvider(Protocol):
+    """Provider 的流式调用协议。"""
+
+    def stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: object,
+    ) -> AsyncIterator[ProviderEvent]: ...
+
+
+class ModelProvider(StreamProvider, Protocol):
     """Provider 的流式调用与运行时元数据协议。"""
 
     @property
@@ -18,11 +30,3 @@ class ModelProvider(Protocol):
 
     @property
     def reasoning_effort(self) -> str | None: ...
-
-    def stream(
-        self,
-        messages: list[Message],
-        tools: list[ToolDefinition],
-        options: StreamOptions | None = None,
-        **kwargs: object,
-    ) -> AsyncIterator[ProviderEvent]: ...

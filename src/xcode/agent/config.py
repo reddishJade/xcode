@@ -1,10 +1,12 @@
+"""Agent 循环配置与上下文类型。"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
-from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.providers.protocol import StreamProvider
 from xcode.ai.types import StreamOptions, ThinkingLevel, ToolDefinition
 from xcode.agent.types import ToolArguments, ToolCallContent
 
@@ -19,7 +21,6 @@ from .protocols import (
     ToolResultDetails,
 )
 
-"""Agent 循环配置与上下文类型。"""
 
 # ── 上下文 ──
 
@@ -159,7 +160,7 @@ class AgentLoopResult:
     stopped_by_error: bool = False
     watchdog_reason: str | None = None
     metrics: AgentLoopMetrics | None = None
-    active_provider: ModelProvider | None = None
+    active_provider: StreamProvider | None = None
 
 
 # ── 循环配置 ──
@@ -167,7 +168,7 @@ class AgentLoopResult:
 
 @dataclass
 class AgentLoopConfig:
-    provider: ModelProvider | None = None
+    provider: StreamProvider | None = None
     tool_execution: ToolExecutionMode = "parallel"
 
     convert_to_llm: MessageConverter | None = None

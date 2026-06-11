@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from ...agent.config import AfterToolCallContext, AgentLoopResult
 from ...agent.messages import AssistantMessage
@@ -19,12 +20,12 @@ from .execution_modes import parse_execution_mode
 class RunState:
     """可序列化的运行状态快照。"""
 
-    messages: list[dict[str, object]]
+    messages: list[dict[str, Any]]
     current_mode: ExecutionMode = "act"
     last_agent: str = "main"
     needs_follow_up: bool = False
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 可序列化字典。"""
         return {
             "messages": self.messages,
@@ -50,11 +51,11 @@ class RunState:
 @dataclass(frozen=True)
 class StructuredAgentResult:
     answer: str
-    messages: list[dict[str, object]]
+    messages: list[dict[str, Any]]
     steps: int
     tool_calls: list[ToolCall]
     stopped_by_limit: bool = False
-    metrics: dict[str, object] | None = None
+    metrics: dict[str, Any] | None = None
     stopped_by_watchdog: bool = False
     stopped_by_error: bool = False
     watchdog_reason: str | None = None
@@ -69,7 +70,7 @@ def _build_structured_result(
     """将 AgentLoopResult 转换为 StructuredAgentResult。"""
     answer_parts: list[str] = []
     tool_calls: list[ToolCall] = []
-    messages: list[dict[str, object]] = []
+    messages: list[dict[str, Any]] = []
     for msg in result.messages:
         messages.append(to_dict(msg))
         if not isinstance(msg, AssistantMessage):
@@ -128,7 +129,7 @@ def _build_structured_result(
     )
 
 
-def _message_dicts(value: object) -> list[dict[str, object]]:
+def _message_dicts(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, Mapping)]

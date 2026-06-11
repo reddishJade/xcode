@@ -22,7 +22,14 @@ from .protocols import ContentBlock
 
 type UserContent = str | list[TextContent | ImageContent | FileContent]
 type ToolResultMessageContent = (
-    str | list[TextContent | ImageContent | FileContent | ToolResultContent | ShellCallOutputContent]
+    str
+    | list[
+        TextContent
+        | ImageContent
+        | FileContent
+        | ToolResultContent
+        | ShellCallOutputContent
+    ]
 )
 
 # ── 消息类型 ──

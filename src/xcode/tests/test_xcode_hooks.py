@@ -124,7 +124,9 @@ class XcodeHookTests(unittest.TestCase):
         self.assertIn("prompt_version", event.metadata)
         self.assertTrue(str(event.metadata["prompt_version"]).startswith("prompt:"))
         self.assertIn("prompt_sha256", event.metadata)
-        self.assertGreater(event.metadata["system_prompt_bytes"], 0)
+        system_prompt_bytes = event.metadata["system_prompt_bytes"]
+        assert isinstance(system_prompt_bytes, int)
+        self.assertGreater(system_prompt_bytes, 0)
         self.assertEqual(event.tools[0]["name"], "echo")
 
 

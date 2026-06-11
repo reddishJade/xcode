@@ -1,6 +1,8 @@
+"""Agent 核心协议与基础类型。"""
+
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Literal, Protocol
 
 from xcode.agent.types import (
@@ -11,9 +13,9 @@ from xcode.agent.types import (
     ThinkingContent,
     ToolArguments,
     ToolCallContent,
+    ToolResultContent,
 )
 
-"""Agent core protocols and base types."""
 
 type QueueMode = Literal["all", "one-at-a-time"]
 type ToolExecutionMode = Literal["sequential", "parallel"]
@@ -23,7 +25,11 @@ type ContentBlock = (
     TextContent | ImageContent | FileContent | ToolCallContent | ThinkingContent
 )
 type ToolResultContentBlock = (
-    TextContent | ImageContent | FileContent | ShellCallOutputContent
+    TextContent
+    | ImageContent
+    | FileContent
+    | ToolResultContent
+    | ShellCallOutputContent
 )
 
 
@@ -67,7 +73,7 @@ class AgentTool(Protocol):
     def description(self) -> str: ...
 
     @property
-    def parameters(self) -> dict[str, object]: ...
+    def parameters(self) -> Mapping[str, object]: ...
 
     @property
     def execution_mode(self) -> ToolExecutionMode | None: ...

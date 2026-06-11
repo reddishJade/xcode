@@ -34,8 +34,13 @@ from .events import (
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
 )
-from .messages import AssistantMessage, ToolResultMessage
-from .protocols import AgentTool, AgentToolResult, CancellationSignal, ToolResultContentBlock
+from .messages import AssistantMessage, ToolResultMessage, ToolResultMessageContent
+from .protocols import (
+    AgentTool,
+    AgentToolResult,
+    CancellationSignal,
+    ToolResultContentBlock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +177,7 @@ async def _execute_one(
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
 ) -> tuple[ToolResultMessage, bool]:
-    """Execute a single tool call. Returns (result_message, terminate)."""
+    """执行单个工具调用，返回结果消息和终止标记。"""
     result_msg: ToolResultMessage | None = None
     try:
         result_msg, terminate = await _execute_one_impl(
@@ -198,13 +203,13 @@ async def _execute_one_impl(
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
 ) -> tuple[ToolResultMessage, bool]:
-    """Execute a single tool call. Returns (result_message, terminate)."""
+    """执行单个工具调用，返回结果消息和终止标记。"""
     tool = _find_tool(current_context, tool_call)
 
     if tool is None:
         return _error_result(tool_call, f"unknown tool: {tool_call.name}")
 
-    args = tool_call.arguments or {}
+    args: ToolArguments = tool_call.arguments or {}
 
     if is_cancelled(signal):
         return _error_result(tool_call, cancel_reason(signal))
@@ -246,7 +251,9 @@ async def _execute_one_impl(
     return result_msg, terminate
 
 
-def _find_tool(current_context: AgentContext, tool_call: ToolCallContent) -> AgentTool | None:
+def _find_tool(
+    current_context: AgentContext, tool_call: ToolCallContent
+) -> AgentTool | None:
     for candidate_tool in current_context.tools or []:
         if candidate_tool.name == tool_call.name:
             return candidate_tool
@@ -272,7 +279,7 @@ def _run_before_tool_hook(
     current_context: AgentContext,
     assistant_message: AssistantMessage,
     tool_call: ToolCallContent,
-    args: dict[str, Any],
+    args: ToolArguments,
     config: AgentLoopConfig,
     signal: CancellationSignal | None,
 ) -> tuple[ToolResultMessage, bool] | None:
@@ -294,9 +301,9 @@ def _run_before_tool_hook(
 
 
 async def _run_tool_handler(
-    tool: Any,
+    tool: AgentTool,
     tool_call: ToolCallContent,
-    args: dict[str, Any],
+    args: ToolArguments,
     signal: CancellationSignal | None,
     on_update: Callable[[AgentToolResult], None],
 ) -> tuple[AgentToolResult, list[ToolResultContentBlock], bool, bool]:
@@ -319,7 +326,7 @@ def _run_after_tool_hook(
     current_context: AgentContext,
     assistant_message: AssistantMessage,
     tool_call: ToolCallContent,
-    args: dict[str, Any],
+    args: ToolArguments,
     tool_result: AgentToolResult,
     is_error: bool,
     terminate: bool,
@@ -354,7 +361,7 @@ def _tool_result_message(
     content: list[ToolResultContentBlock],
     is_error: bool,
 ) -> ToolResultMessage:
-    result_content: str | list[ToolResultContentBlock]
+    result_content: ToolResultMessageContent
     if not content:
         result_content = ""
     elif any(isinstance(item, ShellCallOutputContent) for item in content):

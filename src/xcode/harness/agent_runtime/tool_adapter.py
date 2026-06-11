@@ -123,7 +123,7 @@ def adapt_tool_specs(
     approval_callback: ApprovalCallback | None = None,
     permission_policy: PermissionPolicy | None = None,
     high_risk_requires_approval: bool = True,
-) -> list[AgentTool]:
+) -> list[ToolSpecAdapter]:
     """批量将 ToolSpec 适配为 AgentTool。"""
     return [
         ToolSpecAdapter(
@@ -216,7 +216,7 @@ def create_tool_spec_from_agent_tool(tool: AgentTool) -> ToolSpec:
         ),
         handler=sync_handler,
         risk="low",
-        schema=tool.parameters,
+        schema=dict(tool.parameters),
         execution_mode=tool.execution_mode,
         examples=list(tool.examples),
     )
