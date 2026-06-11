@@ -1,27 +1,22 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from typing import Any
 
-from xcode.ai.events import ProviderEvent
+from xcode.ai.events import Message, ProviderEvent
+from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
 
 
-type RouterFn = Callable[[list[dict[str, Any]], list[ToolDefinition]], str]
+type RouterFn = Callable[[list[Message], list[ToolDefinition]], str]
 """路由函数：根据消息和工具定义，返回 provider 名称以选择目标 provider。"""
 
 
 class RouterProvider:
-    """根据路由函数在多个 provider 之间动态切换。
-
-    支持两种模式：
-    1. pre-route: 每次 stream() 调用前通过 RouterFn 选择 provider
-    2. fallback: 主 provider 失败时降级到备 provider
-    """
+    """根据路由函数在多个 provider 之间动态切换。"""
 
     def __init__(
         self,
-        providers: dict[str, Any],
+        providers: dict[str, ModelProvider],
         router: RouterFn | None = None,
         default: str = "",
         fallback: str | None = None,
@@ -34,19 +29,29 @@ class RouterProvider:
 
     @property
     def model(self) -> str:
-        provider = self._providers.get(self._last_provider)
-        return getattr(provider, "model", "unknown")
+        provider = self.active_provider
+        return provider.model if provider is not None else "unknown"
 
     @property
-    def active_provider(self) -> Any:
+    def thinking(self) -> bool:
+        provider = self.active_provider
+        return provider.thinking if provider is not None else True
+
+    @property
+    def reasoning_effort(self) -> str | None:
+        provider = self.active_provider
+        return provider.reasoning_effort if provider is not None else None
+
+    @property
+    def active_provider(self) -> ModelProvider | None:
         return self._providers.get(self._last_provider)
 
     async def stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[Message],
         tools: list[ToolDefinition],
         options: StreamOptions | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> AsyncIterator[ProviderEvent]:
         name = self._default
         if self._router:

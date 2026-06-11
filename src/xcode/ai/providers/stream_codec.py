@@ -9,7 +9,9 @@ from __future__ import annotations
 import orjson
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
-from typing import Any, Protocol
+from typing import Protocol
+
+from xcode.agent.types import ToolArguments
 
 from xcode.ai.events import (
     ReasoningDelta,
@@ -68,13 +70,19 @@ class _ChatCompletionChunk(Protocol):
 # ── 工具调用解析 ──
 
 
-def parse_tool_arguments(raw_arguments: str) -> dict[str, Any]:
+def parse_tool_arguments(raw_arguments: str) -> ToolArguments:
     """解析工具调用参数 JSON。"""
     try:
         result = orjson.loads((raw_arguments or "{}").encode())
-        return result if isinstance(result, dict) else {"input": str(result)}
+        return _tool_arguments(result) or {"input": str(result)}
     except orjson.JSONDecodeError:
         return {"input": raw_arguments}
+
+
+def _tool_arguments(value: object) -> ToolArguments | None:
+    if not isinstance(value, dict):
+        return None
+    return {str(key): item for key, item in value.items()}
 
 
 # ── 流式事件解码 ──

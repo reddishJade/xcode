@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -64,7 +65,7 @@ class ModelProfileConfig:
 @dataclass(frozen=True)
 class ProviderSettings:
     env_files: tuple[Path, ...]
-    model_profiles: dict[str, ModelProfileProto]
+    model_profiles: Mapping[str, ModelProfileProto]
     retry: RetryPolicy = RetryPolicy()
     rate_limit: RateLimitPolicy = RateLimitPolicy()
 

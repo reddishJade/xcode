@@ -86,7 +86,9 @@ class FauxProvider(ModelProvider):
         model: str = "faux-model",
         delay_seconds: float = 0.0,
     ) -> None:
-        self.model = model
+        self._model = model
+        self._thinking = True
+        self._reasoning_effort: str | None = None
         self._delay = delay_seconds
         self._queue: list[FauxResponse] = []
         self.call_count = 0
@@ -137,6 +139,18 @@ class FauxProvider(ModelProvider):
     def clear(self) -> None:
         self._queue.clear()
         self.call_count = 0
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def thinking(self) -> bool:
+        return self._thinking
+
+    @property
+    def reasoning_effort(self) -> str | None:
+        return self._reasoning_effort
 
     @property
     def pending_count(self) -> int:
