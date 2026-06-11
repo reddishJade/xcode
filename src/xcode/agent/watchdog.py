@@ -12,6 +12,30 @@ from xcode.agent.messages import ToolResultMessage
 from xcode.agent.types import ToolCallContent
 
 
+# 默认文件变更工具集和只读工具集，可由调用方按需替换
+DEFAULT_MUTATION_TOOLS: frozenset[str] = frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "bash",
+        "create_file",
+        "delete_file",
+        "move_file",
+        "rename_file",
+    }
+)
+
+DEFAULT_READ_TOOLS: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "grep_search",
+        "glob_files",
+        "ls",
+        "find_files",
+    }
+)
+
+
 def tool_call_signature(call: ToolCallContent) -> str:
     """生成单个工具调用的规范化签名。
 
@@ -34,41 +58,28 @@ def tool_calls_signature(calls: list[ToolCallContent]) -> str:
     return "|".join(sorted(parts))
 
 
-def is_file_mutation_tool(tool_name: str) -> bool:
-    """判断工具是否会修改文件。
-
-    文件变更类工具：write_file, edit_file, bash（可能修改文件）
-    """
-    mutation_tools = {
-        "write_file",
-        "edit_file",
-        "bash",
-        "create_file",
-        "delete_file",
-        "move_file",
-        "rename_file",
-    }
-    return tool_name in mutation_tools
+def is_file_mutation_tool(
+    tool_name: str,
+    mutation_tools: frozenset[str] | None = None,
+) -> bool:
+    """判断工具是否会修改文件。"""
+    return tool_name in (
+        mutation_tools if mutation_tools is not None else DEFAULT_MUTATION_TOOLS
+    )
 
 
-def is_file_read_tool(tool_name: str) -> bool:
-    """判断工具是否只读文件。
-
-    只读工具：read_file, grep_search, glob_files, ls
-    """
-    read_tools = {
-        "read_file",
-        "grep_search",
-        "glob_files",
-        "ls",
-        "find_files",
-    }
-    return tool_name in read_tools
+def is_file_read_tool(
+    tool_name: str,
+    read_tools: frozenset[str] | None = None,
+) -> bool:
+    """判断工具是否只读文件。"""
+    return tool_name in (read_tools if read_tools is not None else DEFAULT_READ_TOOLS)
 
 
 def should_clear_read_history(
     new_calls: list[ToolCallContent],
     read_history: list[str],
+    mutation_tools: frozenset[str] | None = None,
 ) -> bool:
     """判断是否应清除只读工具历史。
 
@@ -76,7 +87,7 @@ def should_clear_read_history(
 
     设计原因：避免"编辑后复读"被误判为重复调用。
     """
-    return any(is_file_mutation_tool(c.name) for c in new_calls)
+    return any(is_file_mutation_tool(c.name, mutation_tools) for c in new_calls)
 
 
 def is_tool_productive_default(
