@@ -104,7 +104,7 @@ class TaskStore:
         clean_title = title.strip()
         if not clean_title:
             raise ValueError("title is required")
-        with self._locked():
+        with self.locked():
             task_id = self._next_id()
             now = _timestamp()
             task = TaskRecord(
@@ -142,7 +142,7 @@ class TaskStore:
         status: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> TaskRecord:
-        with self._locked():
+        with self.locked():
             task = self.get(task_id)
             new_title = task.title if title is None else title.strip()
             if not new_title:
@@ -165,7 +165,7 @@ class TaskStore:
         clean_claimant = claimant.strip()
         if not clean_claimant:
             raise ValueError("claimant is required")
-        with self._locked():
+        with self.locked():
             task = self.get(task_id)
             if task.status != PENDING:
                 return None
@@ -203,7 +203,7 @@ class TaskStore:
         return self.tasks_dir / f"{int(task_id)}.json"
 
     @contextmanager
-    def _locked(self) -> Iterator[None]:
+    def locked(self) -> Iterator[None]:
         import filelock
 
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
@@ -317,7 +317,7 @@ def advance_task(store: TaskStore, task_id: int | str) -> list[TaskRecord]:
     待办任务，将它们的 block 状态移除（如果已无其他阻塞则解除阻塞）。
     返回所有受影响的任务列表。
     """
-    with store._locked():
+    with store.locked():
         updated = store.update(task_id, status="completed")
         affected = [updated]
 

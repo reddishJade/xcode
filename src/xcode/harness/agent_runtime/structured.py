@@ -27,7 +27,7 @@ from .events import (
     StructuredAgentEvent,
 )
 from .execution_modes import ExecutionModeState, policy_for_mode
-from .fallback import _FallbackSwitchingProvider, _FallbackWithRetryPrimary
+from .fallback import _FallbackWithRetryPrimary
 from .history_manager import HistoryManager
 from .result import (
     _build_structured_result,
@@ -68,7 +68,6 @@ class StructuredAgent:
         runtime = runtime or AgentRuntimeConfig()
         config = config or runtime.config
 
-        self._original_provider: StreamProvider = provider
         self.provider: StreamProvider = provider
         if runtime.fallback_provider is not None:
             self.provider = _FallbackWithRetryPrimary(
@@ -235,13 +234,6 @@ class StructuredAgent:
 
         result = self._agent.last_result
         assert result is not None
-
-        if isinstance(self.provider, _FallbackSwitchingProvider):
-            wrapper = self.provider
-            if wrapper._using_fallback:
-                self._original_provider = wrapper._fallback
-            else:
-                self._original_provider = wrapper._primary
 
         self._history.save_turn(result.messages)
         self._last_prompt_tokens = record_last_prompt_tokens(result.messages)

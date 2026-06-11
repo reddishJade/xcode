@@ -163,6 +163,11 @@ class ManagedSubagentRunner:
             if job.future.done():
                 self._jobs.pop(job_id, None)
 
+    def job_prompt(self, job_id: str) -> str:
+        """返回指定 job 的 prompt 文本。"""
+        job = self._require_job(job_id)
+        return job.prompt
+
     def cancel(self, job_id: str) -> str:
         job = self._jobs.get(job_id)
         if job is None:
@@ -263,8 +268,7 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
                 return f"status=failed\n{type(exc).__name__}: {exc}"
         try:
             raw_result = runner.result(job_id)
-            job = runner._jobs.get(job_id)
-            prompt = job.prompt if job else ""
+            prompt = runner.job_prompt(job_id)
             return f"status=done\n{build_branch_summary(job_id, prompt, raw_result).summary}"
         except KeyError as exc:
             return str(exc)
