@@ -251,6 +251,7 @@ def build_tool_registry(
     skill_loader = None
     if "skills" in enabled and skills_dir.exists():
         skill_loader = SkillLoader(skills_dir)
+
     registry = build_project_scoped_registry(
         project_root=project_root,
         enabled=enabled,
@@ -259,6 +260,39 @@ def build_tool_registry(
         cancel_event=cancel_event,
         env=env,
     )
+    registry = _extend_registry_with_features(
+        registry, project_root, enabled, skill_loader
+    )
+
+    child_registry = registry
+    registry += (build_search_tools_tool(registry),)
+
+    subagent_closers, subagent_tools = _build_subagent_integration(
+        project_root=project_root,
+        llm=llm,
+        llm_profiles=llm_profiles,
+        config=config,
+        runtime_config=runtime_config,
+        enabled=enabled,
+        child_registry=child_registry,
+        contextual_state=contextual_state,
+        skill_loader=skill_loader,
+        shell_spec=shell_spec,
+        cancel_event=cancel_event,
+        env=env,
+    )
+    closers.extend(subagent_closers)
+    registry += subagent_tools
+    return registry, skill_loader, shell_spec, tuple(closers)
+
+
+def _extend_registry_with_features(
+    registry: tuple[ToolSpec, ...],
+    project_root: Path,
+    enabled: set[str],
+    skill_loader: SkillLoader | None,
+) -> tuple[ToolSpec, ...]:
+    """添加可选功能工具到注册表。"""
     if "worktree" in enabled:
         from xcode.coding_agent.tools.worktree import (
             WorktreeTaskRunner,
@@ -283,67 +317,79 @@ def build_tool_registry(
         from xcode.harness.task_store import TaskStore
 
         registry += build_progress_tools(TaskStore(project_root))
-
     if skill_loader is not None:
         registry += (build_skill_loader_tool(skill_loader),)
+    return registry
 
-    child_registry = registry
-    registry += (build_search_tools_tool(registry),)
 
-    if "subagent" in enabled:
-        child_llms = dict(llm_profiles or {})
-        if not child_llms:
-            child_llms[PROFILE_MAIN] = llm
-        child_llms.setdefault(PROFILE_SUBAGENT, child_llms[PROFILE_MAIN])
+def _build_subagent_integration(
+    project_root: Path,
+    llm: ModelProvider,
+    llm_profiles: Mapping[str, ModelProvider] | None,
+    config: AgentConfig,
+    runtime_config: XcodeRuntimeConfig,
+    enabled: set[str],
+    child_registry: tuple[ToolSpec, ...],
+    contextual_state: ContextualRetrievalState | None,
+    skill_loader: SkillLoader | None,
+    shell_spec: ShellSpec,
+    cancel_event: threading.Event | None,
+    env: ExecutionEnv | None,
+) -> tuple[list[Callable[[], None]], tuple[ToolSpec, ...]]:
+    """构建子代理运行器和工具，返回 (closers, subagent_tools)。"""
+    if "subagent" not in enabled:
+        return [], ()
 
-        async def run_child(prompt, model_profile=PROFILE_SUBAGENT, cwd_override=None):
-            child_root = project_root.resolve()
-            child_contextual_state = contextual_state
-            effective_registry = child_registry
-            if cwd_override is not None:
-                child_root = Path(cwd_override).resolve()
-                child_contextual_state = ContextualRetrievalState(child_root)
-                effective_registry = build_project_scoped_registry(
-                    project_root=child_root,
-                    enabled=enabled,
-                    contextual_state=child_contextual_state,
+    child_llms = dict(llm_profiles or {})
+    if not child_llms:
+        child_llms[PROFILE_MAIN] = llm
+    child_llms.setdefault(PROFILE_SUBAGENT, child_llms[PROFILE_MAIN])
+
+    async def run_child(prompt, model_profile=PROFILE_SUBAGENT, cwd_override=None):
+        child_root = project_root.resolve()
+        child_contextual_state = contextual_state
+        effective_registry = child_registry
+        if cwd_override is not None:
+            child_root = Path(cwd_override).resolve()
+            child_contextual_state = ContextualRetrievalState(child_root)
+            effective_registry = build_project_scoped_registry(
+                project_root=child_root,
+                enabled=enabled,
+                contextual_state=child_contextual_state,
+                shell_spec=shell_spec,
+                cancel_event=cancel_event,
+                env=env,
+            )
+        result = await StructuredAgent(
+            provider=child_llms[model_profile],
+            registry=effective_registry,
+            config=config,
+            runtime=AgentRuntimeConfig(
+                runtime_context_provider=build_runtime_context_provider(
+                    child_root,
+                    effective_registry,
+                    skill_loader,
                     shell_spec=shell_spec,
-                    cancel_event=cancel_event,
-                    env=env,
-                )
-            result = await StructuredAgent(
-                provider=child_llms[model_profile],
-                registry=effective_registry,
-                config=config,
-                runtime=AgentRuntimeConfig(
-                    runtime_context_provider=build_runtime_context_provider(
-                        child_root,
-                        effective_registry,
-                        skill_loader,
-                        shell_spec=shell_spec,
-                        contextual_state=child_contextual_state,
-                        modules=runtime_config.prompt.modules,
-                    ),
+                    contextual_state=child_contextual_state,
+                    modules=runtime_config.prompt.modules,
                 ),
-            ).run_async(prompt)
-            return result.answer
+            ),
+        ).run_async(prompt)
+        return result.answer
 
-        if "worktree" in enabled:
-            from xcode.coding_agent.tools.worktree import WorktreeTaskRunner
+    if "worktree" in enabled:
+        from xcode.coding_agent.tools.worktree import WorktreeTaskRunner
 
-            worktree_runner = WorktreeTaskRunner(project_root)
-        else:
-            worktree_runner = None
-        managed_runner = ManagedSubagentRunner(
-            run_child,
-            available_profiles=tuple(child_llms),
-            default_profile=PROFILE_SUBAGENT,
-            worktree_runner=worktree_runner,
-        )
-        closers.append(managed_runner.shutdown)
-        if "subagent" in enabled:
-            registry += build_managed_subagent_tools(managed_runner)
-    return registry, skill_loader, shell_spec, tuple(closers)
+        worktree_runner = WorktreeTaskRunner(project_root)
+    else:
+        worktree_runner = None
+    managed_runner = ManagedSubagentRunner(
+        run_child,
+        available_profiles=tuple(child_llms),
+        default_profile=PROFILE_SUBAGENT,
+        worktree_runner=worktree_runner,
+    )
+    return [managed_runner.shutdown], build_managed_subagent_tools(managed_runner)
 
 
 # ── 可选服务 ──
