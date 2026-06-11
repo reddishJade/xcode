@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 from dotenv import dotenv_values
 
+from ._registry import PROVIDER_REGISTRY
 from .protocol import ModelProvider
 from .runtime import ProviderRuntime, RetryPolicy, RateLimitPolicy
 
@@ -162,7 +163,6 @@ def _build_llm_profile(
 ) -> ModelProvider:
     transport = profile.transport
     api_key = _resolve_api_key(profile.api_key, profile_name, env_files, transport)
-    from . import PROVIDER_REGISTRY
 
     provider_cls = PROVIDER_REGISTRY.get(transport)
     if provider_cls is None:
