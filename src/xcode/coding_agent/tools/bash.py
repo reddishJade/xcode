@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from xcode.harness.execution_env import ExecutionEnv, SubprocessExecutionEnv
+from xcode.harness.execution_env import ExecutionEnv, ExecutionResult, SubprocessExecutionEnv
 from xcode.harness.skills import ToolInput, ToolSpec
 from xcode.harness.observability.permissions import PermissionDecision
 from .output_accumulator import OutputAccumulator
@@ -21,6 +22,19 @@ MAX_TIMEOUT_SECONDS = 120  # 最大超时：防止长时间挂起阻塞 Agent �
 
 SpawnHook = Callable[[str, Path], tuple[str, Path]]
 """Hook to adjust command and cwd before execution. Receives (command, cwd), returns (command, cwd)."""
+
+
+@dataclass(frozen=True)
+class BashRequest:
+    command: str
+    timeout: int
+
+
+@dataclass(frozen=True)
+class BashExecutionPlan:
+    command: str
+    cwd: Path
+    timeout: int
 
 
 # 危险命令模式（拒绝执行）
@@ -85,35 +99,20 @@ def build_bash_tool(
     env = env or SubprocessExecutionEnv()
 
     def bash(data: ToolInput) -> str:
-        command = str(data.get("command") or data.get("input") or "").strip()
-        if not command:
-            raise ValueError("command is required")
-        if command_prefix:
-            command = f"{command_prefix}\n{command}"
-        if spawn_hook:
-            command, cwd = spawn_hook(command, root)
-        else:
-            cwd = root
-        timeout = _parse_timeout(data.get("timeout", DEFAULT_TIMEOUT_SECONDS))
-
-        argv = build_shell_argv(spec, command)
-        result = env.run(argv, cwd=cwd, timeout=timeout, cancel_event=cancel_event)
-
-        acc = OutputAccumulator()
-        for raw in [result.stdout.encode(), result.stderr.encode()]:
-            if raw:
-                acc.append(raw)
-
-        output = acc.snapshot()
-        acc.close()
-
-        if result.timed_out:
-            output += f"\nCommand timed out after {timeout}s"
-        elif result.cancelled:
-            output += "\nCommand cancelled"
-        elif result.returncode not in (0, None):
-            output = f"exit code: {result.returncode}\n{output}"
-
+        request = _parse_bash_request(data)
+        plan = _build_bash_execution_plan(
+            request,
+            root,
+            command_prefix=command_prefix,
+            spawn_hook=spawn_hook,
+        )
+        result = env.run(
+            build_shell_argv(spec, plan.command),
+            cwd=plan.cwd,
+            timeout=plan.timeout,
+            cancel_event=cancel_event,
+        )
+        output = _render_bash_output(result, plan.timeout)
         if on_progress:
             on_progress(output)
         return output
@@ -145,6 +144,51 @@ def build_bash_tool(
         },
         counts_as_progress=True,
     )
+
+
+def _parse_bash_request(data: ToolInput) -> BashRequest:
+    command = str(data.get("command") or data.get("input") or "").strip()
+    if not command:
+        raise ValueError("command is required")
+    return BashRequest(
+        command=command,
+        timeout=_parse_timeout(data.get("timeout", DEFAULT_TIMEOUT_SECONDS)),
+    )
+
+
+def _build_bash_execution_plan(
+    request: BashRequest,
+    root: Path,
+    *,
+    command_prefix: str | None,
+    spawn_hook: SpawnHook | None,
+) -> BashExecutionPlan:
+    command = request.command
+    if command_prefix:
+        command = f"{command_prefix}\n{command}"
+    cwd = root
+    if spawn_hook:
+        command, cwd = spawn_hook(command, root)
+    return BashExecutionPlan(command=command, cwd=cwd, timeout=request.timeout)
+
+
+def _render_bash_output(result: ExecutionResult, timeout: int) -> str:
+    acc = OutputAccumulator()
+    try:
+        for raw in [result.stdout.encode(), result.stderr.encode()]:
+            if raw:
+                acc.append(raw)
+        output = acc.snapshot()
+    finally:
+        acc.close()
+
+    if result.timed_out:
+        output += f"\nCommand timed out after {timeout}s"
+    elif result.cancelled:
+        output += "\nCommand cancelled"
+    elif result.returncode not in (0, None):
+        output = f"exit code: {result.returncode}\n{output}"
+    return output
 
 
 def _parse_timeout(value: Any) -> int:
