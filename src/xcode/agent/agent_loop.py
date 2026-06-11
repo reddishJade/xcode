@@ -43,7 +43,7 @@ from .events import (
 )
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
 from .protocols import CancellationSignal
-from .compaction import estimate_tokens_simple
+from .compaction import estimate_tokens
 from .tool_execution import (
     ExecutedToolBatch,
     execute_tool_calls,
@@ -554,7 +554,7 @@ def _update_continuation_count(
     - 若续写内容少于阈值（默认 500 tokens），计入低产出计数
     - 连续多次低产出（默认 3 次）则终止，防止无限循环
     """
-    estimated_tokens = estimate_tokens_simple(
+    estimated_tokens = estimate_tokens(
         json.dumps(message.content, ensure_ascii=False, default=str)
     )
     updated = (

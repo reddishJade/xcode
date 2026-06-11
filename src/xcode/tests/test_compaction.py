@@ -6,7 +6,7 @@
 import unittest
 
 from xcode.agent.compaction import (
-    estimate_tokens_simple,
+    estimate_tokens,
     extract_prompt_tokens_from_usage,
     get_model_soft_threshold,
     should_compact_token_aware,
@@ -20,9 +20,9 @@ class TestEstimateTokens(unittest.TestCase):
 
     def test_estimate_simple(self):
         """测试 tiktoken 估算。"""
-        self.assertEqual(estimate_tokens_simple(""), 1)
-        self.assertEqual(estimate_tokens_simple("test"), 1)
-        self.assertEqual(estimate_tokens_simple("test" * 10), 10)
+        self.assertEqual(estimate_tokens(""), 1)
+        self.assertEqual(estimate_tokens("test"), 1)
+        self.assertEqual(estimate_tokens("test" * 10), 10)
 
     def test_extract_prompt_tokens(self):
         """测试从 usage 提取 prompt_tokens。"""

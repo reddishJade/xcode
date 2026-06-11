@@ -28,7 +28,7 @@ def _get_encoding(name: str = _DEFAULT_ENCODING) -> tiktoken.Encoding:
     return _ENCODING_CACHE[name]
 
 
-def estimate_tokens_simple(text: str) -> int:
+def estimate_tokens(text: str) -> int:
     """基于 tiktoken cl100k_base 的 token 估算。
 
     tiktoken 是 pyproject.toml 声明的项目级依赖，agent 层直接使用。
@@ -52,21 +52,21 @@ def estimate_message_tokens(messages: Sequence[AgentMessage]) -> int:
         if isinstance(msg, AssistantMessage):
             for block in msg.content:
                 if isinstance(block, TextContent):
-                    total += estimate_tokens_simple(block.text)
+                    total += estimate_tokens(block.text)
                 elif isinstance(block, ThinkingContent):
-                    total += estimate_tokens_simple(block.thinking)
+                    total += estimate_tokens(block.thinking)
                 elif isinstance(block, ToolCallContent):
-                    total += estimate_tokens_simple(
+                    total += estimate_tokens(
                         json.dumps(block.arguments or {}, default=str)
                     )
         elif isinstance(msg, (SystemMessage, UserMessage, ToolResultMessage)):
             content = msg.content
             if isinstance(content, str):
-                total += estimate_tokens_simple(content)
+                total += estimate_tokens(content)
             elif isinstance(content, list):
                 for block in content:
                     if isinstance(block, TextContent):
-                        total += estimate_tokens_simple(block.text)
+                        total += estimate_tokens(block.text)
     return total
 
 

@@ -317,8 +317,8 @@ def micro_compact_tool_results(
 
 def estimate_text_tokens(text: str) -> int:
     """委托给 agent 层的估算实现，避免重复。"""
-    from xcode.agent.compaction import estimate_tokens_simple
-    return estimate_tokens_simple(text)
+    from xcode.agent.compaction import estimate_tokens
+    return estimate_tokens(text)
 
 
 def estimate_message_tokens(messages: list[dict[str, Any]]) -> int:
