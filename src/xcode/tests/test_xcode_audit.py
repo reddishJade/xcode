@@ -8,6 +8,7 @@ import unittest
 from xcode.harness.observability import AuditRecord, JsonlAuditLogger, redact_text
 from xcode.harness.skills import ToolSpec, run_tool
 from xcode.harness.agent_runtime import StructuredAgent
+from xcode.harness.agent_runtime.config import GateConfig
 
 
 from xcode.tests.fixtures import FakeProvider
@@ -78,8 +79,10 @@ class XcodeAuditTests(unittest.TestCase):
                         schema=INPUT_SCHEMA,
                     ),
                 ),
-                audit_logger=JsonlAuditLogger(path).write,
-                session_id="s1",
+                gate=GateConfig(
+                    audit_logger=JsonlAuditLogger(path).write,
+                    session_id="s1",
+                ),
             )
 
             agent.run("go")
@@ -153,8 +156,10 @@ class XcodeAuditTests(unittest.TestCase):
                         schema=INPUT_SCHEMA,
                     ),
                 ),
-                audit_logger=JsonlAuditLogger(path).write,
-                session_id="s2",
+                gate=GateConfig(
+                    audit_logger=JsonlAuditLogger(path).write,
+                    session_id="s2",
+                ),
             )
 
             agent.run("go")

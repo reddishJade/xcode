@@ -11,6 +11,7 @@ from xcode.ai.events import (
 )
 from xcode.ai.types import StreamOptions
 from xcode.harness.agent_runtime.structured import StructuredAgent
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig
 from xcode.harness.agent_runtime.fallback import _FallbackSwitchingProvider
 from xcode.harness.config import AgentConfig
 from xcode.harness.skills import ToolSpec
@@ -249,8 +250,8 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         agent = StructuredAgent(
             provider=OverloadedProvider(),
             registry=(),
-            fallback_provider=FallbackProvider(),
             config=AgentConfig(max_steps=2),
+            runtime=AgentRuntimeConfig(fallback_provider=FallbackProvider()),
         )
 
         result = agent.run("trigger fallback")

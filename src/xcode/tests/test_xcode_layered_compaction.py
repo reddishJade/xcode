@@ -15,6 +15,7 @@ from xcode.harness.agent_runtime.compaction import (
 )
 from xcode.harness.config import AgentConfig, RequestHygieneConfig
 from xcode.harness.agent_runtime import StructuredAgent
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig
 from xcode.harness.agent_runtime.agent_helpers import budget_messages_for_provider
 
 
@@ -144,8 +145,10 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             provider=provider,
             registry=(compact_tool,),
             config=AgentConfig(max_steps=3),
-            compactor=LayeredCompactor(max_recent_messages=1),
-            manual_compact_requested=controller.consume,
+            runtime=AgentRuntimeConfig(
+                compactor=LayeredCompactor(max_recent_messages=1),
+                compact_controller=controller,
+            ),
         )
 
         result = agent.run("work")
@@ -177,7 +180,9 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             provider=provider,
             registry=(build_compact_tool(CompactController()),),
             config=AgentConfig(max_steps=3, compact_token_threshold=1),
-            compactor=LayeredCompactor(max_recent_messages=1),
+            runtime=AgentRuntimeConfig(
+                compactor=LayeredCompactor(max_recent_messages=1),
+            ),
         )
 
         result = agent.run("work " + ("long " * 40))
@@ -203,7 +208,7 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             provider=provider,
             registry=(),
             config=AgentConfig(max_steps=1, compact_token_threshold=1),
-            compactor=compact,
+            runtime=AgentRuntimeConfig(compactor=compact),
         )
 
         result = agent.run("work " + ("long " * 40))
@@ -233,9 +238,11 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             provider=provider,
             registry=(),
             config=AgentConfig(max_steps=1),
-            request_hygiene=RequestHygieneConfig(
-                keep_head_lines=5,
-                keep_tail_lines=5,
+            runtime=AgentRuntimeConfig(
+                request_hygiene=RequestHygieneConfig(
+                    keep_head_lines=5,
+                    keep_tail_lines=5,
+                ),
             ),
         )
         agent.load_history(
@@ -299,7 +306,7 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             provider=provider,
             registry=(),
             config=AgentConfig(max_steps=1),
-            compactor=compact,
+            runtime=AgentRuntimeConfig(compactor=compact),
         )
 
         first = agent.run("first")

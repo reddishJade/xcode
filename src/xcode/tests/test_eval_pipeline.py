@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from xcode.harness.agent_runtime import StructuredAgent
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig
 from xcode.ai.events import (
     FinalMessage,
     ProviderEvent,
@@ -484,7 +485,7 @@ def _editing_app(project_root: Path) -> XcodeApp:
             provider=FakeProvider(responses),
             registry=(tool,),
             config=AgentConfig(max_steps=2),
-            project_root=project_root,
+            runtime=AgentRuntimeConfig(project_root=project_root),
         ),
         registry=(tool,),
     )
@@ -518,7 +519,7 @@ def _validation_app(project_root: Path) -> XcodeApp:
             provider=FakeProvider(responses),
             registry=(tool,),
             config=AgentConfig(max_steps=2),
-            project_root=project_root,
+            runtime=AgentRuntimeConfig(project_root=project_root),
         ),
         registry=(tool,),
     )

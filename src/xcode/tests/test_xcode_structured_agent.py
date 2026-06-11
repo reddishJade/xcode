@@ -23,6 +23,7 @@ from xcode.harness.agent_runtime import (
     StructuredAgent,
     StructuredAgentEvent,
 )
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig
 from xcode.harness.agent_runtime.events import FinalStructuredEvent
 from xcode.agent.messages import UserMessage
 from xcode.harness.skills import ToolSpec
@@ -103,9 +104,11 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         agent = StructuredAgent(
             provider=FakeProvider(factory),
             registry=(tool,),
-            runtime_context_provider=lambda _question: [
-                "<git-preflight>dirty</git-preflight>"
-            ],
+            runtime=AgentRuntimeConfig(
+                runtime_context_provider=lambda _question: [
+                    "<git-preflight>dirty</git-preflight>"
+                ],
+            ),
         )
 
         result = agent.run("hello, who are you?")
@@ -439,9 +442,11 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         agent = StructuredAgent(
             provider=FakeProvider(factory),
             registry=(),
-            runtime_context_provider=lambda _question: [
-                "<skill>Review workflow.</skill>"
-            ],
+            runtime=AgentRuntimeConfig(
+                runtime_context_provider=lambda _question: [
+                    "<skill>Review workflow.</skill>"
+                ],
+            ),
         )
 
         result = agent.run("please review this")
@@ -881,8 +886,8 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         agent = StructuredAgent(
             provider=FakeProvider(factory),
             registry=(tool,),
-            cancellation_token=token,
             config=AgentConfig(max_steps=2),
+            runtime=AgentRuntimeConfig(cancellation_token=token),
         )
 
         result = agent.run("go")

@@ -8,6 +8,7 @@ from xcode.harness.observability import PreToolEvent, PostToolEvent
 from xcode.harness.observability.hooks import BeforeProviderRequestEvent
 from xcode.harness.skills import ToolSpec
 from xcode.harness.agent_runtime import StructuredAgent
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 
 
 from xcode.tests.fixtures import FakeProvider
@@ -84,7 +85,7 @@ class XcodeHookTests(unittest.TestCase):
                     schema=INPUT_SCHEMA,
                 ),
             ),
-            hook_manager=hooks,
+            gate=GateConfig(hook_manager=hooks),
         )
 
         agent.run("go")
@@ -110,7 +111,7 @@ class XcodeHookTests(unittest.TestCase):
         agent = StructuredAgent(
             provider=provider,
             registry=(ToolSpec("boom", "Boom.", "empty", fail, schema=EMPTY_SCHEMA),),
-            hook_manager=hooks,
+            gate=GateConfig(hook_manager=hooks),
         )
 
         result = agent.run("go")
@@ -141,8 +142,12 @@ class XcodeHookTests(unittest.TestCase):
                     schema=INPUT_SCHEMA,
                 ),
             ),
-            hook_manager=hooks,
-            runtime_context_provider=lambda _question: ["<runtime>context</runtime>"],
+            gate=GateConfig(hook_manager=hooks),
+            runtime=AgentRuntimeConfig(
+                runtime_context_provider=lambda _question: [
+                    "<runtime>context</runtime>"
+                ],
+            ),
         )
 
         agent.run("go")

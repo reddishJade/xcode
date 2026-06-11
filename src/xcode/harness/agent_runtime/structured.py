@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import replace
-from pathlib import Path
 
 from xcode.ai.providers.protocol import StreamProvider
 
@@ -13,14 +12,14 @@ from ...agent.messages import AgentMessage, UserMessage
 from ...agent.protocols import AgentTool
 from .agent_helpers import aiter_to_sync_iter, run_coro_sync
 from .cancellation import CancellationToken
-from .compaction import CompactController
 from .config import (
+    AgentRuntimeConfig,
     build_loop_config,
     build_turn_context_messages,
     build_turn_snapshot,
+    GateConfig,
     record_last_prompt_tokens,
     resolve_permission_policy,
-    StructuredCompactor,
 )
 from .events import (
     _StreamTranslationState,
@@ -38,8 +37,8 @@ from .result import (
 )
 from .tool_gate import ToolGate
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
-from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
-from ..skills import ApprovalCallback, ToolSpec
+from ..observability import HookRecord
+from ..skills import ToolSpec
 
 _PROMPT_VERSION_CACHE: str | None = None
 
@@ -62,57 +61,46 @@ class StructuredAgent:
         provider: StreamProvider,
         registry: tuple[ToolSpec, ...],
         config: AgentConfig | None = None,
-        approval_callback: ApprovalCallback | None = None,
-        compactor: StructuredCompactor | None = None,
-        manual_compact_requested: Callable[[], bool] | None = None,
-        compact_controller: CompactController | None = None,
-        audit_logger: Callable[[AuditRecord], None] | None = None,
-        session_id: str = "local",
-        permission_policy: PermissionPolicy | None = None,
-        high_risk_requires_approval: bool = True,
-        hook_manager: HookManager | None = None,
-        runtime_context_provider: Callable[[str], list[str]] | None = None,
-        cancellation_token: CancellationToken | None = None,
-        fallback_provider: StreamProvider | None = None,
-        project_root: Path | None = None,
-        request_hygiene: RequestHygieneConfig | None = None,
+        gate: GateConfig | None = None,
+        runtime: AgentRuntimeConfig | None = None,
     ) -> None:
+        gate = gate or GateConfig()
+        runtime = runtime or AgentRuntimeConfig()
+        config = config or runtime.config
+
         self._original_provider: StreamProvider = provider
         self.provider: StreamProvider = provider
-        if fallback_provider is not None:
-            self.provider = _FallbackWithRetryPrimary(provider, fallback_provider)
-        self.project_root = project_root
+        if runtime.fallback_provider is not None:
+            self.provider = _FallbackWithRetryPrimary(
+                provider, runtime.fallback_provider
+            )
+        self.project_root = runtime.project_root
         self.registry = registry
         self.tool_map = {t.name: t for t in registry}
-        self.config = config or AgentConfig()
-        self.compactor = compactor
-        self.manual_compact_requested = manual_compact_requested or (
-            compact_controller.consume if compact_controller else None
-        )
-        self._compact_controller = compact_controller
-        self.runtime_context_provider = runtime_context_provider
-        self.cancellation_token = cancellation_token or CancellationToken()
-        self.request_hygiene = request_hygiene or RequestHygieneConfig()
+        self.config = config
+        self.compactor = runtime.compactor
+        self._compact_controller = runtime.compact_controller
+        self.runtime_context_provider = runtime.runtime_context_provider
+        self.cancellation_token = runtime.cancellation_token or CancellationToken()
+        self.request_hygiene = runtime.request_hygiene or RequestHygieneConfig()
         self._last_prompt_tokens: int | None = None
 
-        self._hook_manager = hook_manager
+        self._hook_manager = gate.hook_manager
         self._mode = ExecutionModeState()
         self._gate = ToolGate(
             mode_state=self._mode,
-            approval_callback=approval_callback,
+            approval_callback=gate.approval_callback,
             permission_policy=resolve_permission_policy(
-                project_root, permission_policy
+                runtime.project_root, gate.permission_policy
             ),
-            high_risk_requires_approval=high_risk_requires_approval,
-            hook_manager=hook_manager,
-            audit_logger=audit_logger,
-            session_id=session_id,
+            high_risk_requires_approval=gate.high_risk_requires_approval,
+            hook_manager=gate.hook_manager,
+            audit_logger=gate.audit_logger,
+            session_id=gate.session_id,
         )
-        self.audit_logger = audit_logger
+        self.audit_logger = gate.audit_logger
         self._history = HistoryManager()
         self._resumed_notice: str | None = None
-
-        self._agent = Agent(self._gate.adapt_tools(registry))
 
     # ── 公共 API ──
 
@@ -211,7 +199,9 @@ class StructuredAgent:
             gate=self._gate,
             registry=active_registry,
             compactor=self.compactor,
-            manual_compact_requested=self.manual_compact_requested,
+            manual_compact_requested=(
+                self._compact_controller.consume if self._compact_controller else None
+            ),
             request_hygiene=self.request_hygiene,
             compact_controller=self._compact_controller,
             last_prompt_tokens=self._last_prompt_tokens,

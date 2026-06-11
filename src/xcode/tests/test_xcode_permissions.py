@@ -14,6 +14,7 @@ from xcode.harness.observability import (
 )
 from xcode.harness.skills import ToolSpec, run_tool, run_tool_result
 from xcode.harness.agent_runtime import StructuredAgent
+from xcode.harness.agent_runtime.config import GateConfig
 
 
 from xcode.tests.fixtures import FakeProvider
@@ -101,7 +102,9 @@ class XcodePermissionsTests(unittest.TestCase):
                     schema=INPUT_SCHEMA,
                 ),
             ),
-            permission_policy=PermissionPolicy((PermissionRule("echo", "deny"),)),
+            gate=GateConfig(
+                permission_policy=PermissionPolicy((PermissionRule("echo", "deny"),)),
+            ),
         )
 
         result = agent.run("go")

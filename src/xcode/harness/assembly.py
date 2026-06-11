@@ -32,6 +32,7 @@ from xcode.harness.agent_runtime import (
     StructuredAgent,
     build_managed_subagent_tools,
 )
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.ai.providers.protocol import ModelProvider
@@ -314,13 +315,15 @@ def build_tool_registry(
                 provider=child_llms[model_profile],
                 registry=effective_registry,
                 config=config,
-                runtime_context_provider=build_runtime_context_provider(
-                    child_root,
-                    effective_registry,
-                    skill_loader,
-                    shell_spec=shell_spec,
-                    contextual_state=child_contextual_state,
-                    modules=runtime_config.prompt.modules,
+                runtime=AgentRuntimeConfig(
+                    runtime_context_provider=build_runtime_context_provider(
+                        child_root,
+                        effective_registry,
+                        skill_loader,
+                        shell_spec=shell_spec,
+                        contextual_state=child_contextual_state,
+                        modules=runtime_config.prompt.modules,
+                    ),
                 ),
             ).run_async(prompt)
             return result.answer
@@ -416,25 +419,29 @@ def build_agent(
         provider=llm,
         registry=registry,
         config=config,
-        audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
-        hook_manager=hook_manager,
-        runtime_context_provider=build_runtime_context_provider(
-            project_root,
-            registry,
-            skill_loader,
-            shell_spec=shell_spec,
-            contextual_state=contextual_state,
-            modules=runtime_config.prompt.modules,
+        gate=GateConfig(
+            permission_policy=_permission_policy_from_security(runtime_config.security),
+            high_risk_requires_approval=_high_risk_requires_approval(
+                runtime_config.security.resolve_approval_policy()
+            ),
+            hook_manager=hook_manager,
+            audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
         ),
-        compactor=compactor,
-        compact_controller=compact_controller,
-        cancellation_token=cancellation_token,
-        fallback_provider=fallback_provider,
-        project_root=project_root,
-        request_hygiene=runtime_config.request_hygiene,
-        permission_policy=_permission_policy_from_security(runtime_config.security),
-        high_risk_requires_approval=_high_risk_requires_approval(
-            runtime_config.security.resolve_approval_policy()
+        runtime=AgentRuntimeConfig(
+            compactor=compactor,
+            compact_controller=compact_controller,
+            cancellation_token=cancellation_token,
+            runtime_context_provider=build_runtime_context_provider(
+                project_root,
+                registry,
+                skill_loader,
+                shell_spec=shell_spec,
+                contextual_state=contextual_state,
+                modules=runtime_config.prompt.modules,
+            ),
+            fallback_provider=fallback_provider,
+            project_root=project_root,
+            request_hygiene=runtime_config.request_hygiene,
         ),
     )
 

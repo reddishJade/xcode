@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -23,12 +23,13 @@ from ...agent.messages import (
 )
 from ...agent.protocols import AgentTool
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
-from ..observability import HookRecord, PermissionPolicy
+from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
 from ..observability.permissions import (
     CompositePermissionPolicy,
     SettingsSandboxPermissionPolicy,
 )
-from ..skills import ToolSpec
+from ..skills import ApprovalCallback, ToolSpec
+from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
 from .execution_modes import ExecutionModeState, mode_notice
 from .message_codec import messages_from_compacted_dicts
@@ -36,6 +37,32 @@ from .tool_gate import ToolGate
 
 StructuredCompactor = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
 RuntimeContextProvider = Callable[[str], list[str]]
+
+
+@dataclass(frozen=True)
+class GateConfig:
+    """ToolGate 配置：审批、权限、审计、Hook。"""
+
+    approval_callback: ApprovalCallback | None = None
+    permission_policy: PermissionPolicy | None = None
+    high_risk_requires_approval: bool = True
+    hook_manager: HookManager | None = None
+    audit_logger: Callable[[AuditRecord], None] | None = None
+    session_id: str = "local"
+
+
+@dataclass
+class AgentRuntimeConfig:
+    """StructuredAgent 运行时基础设施配置。"""
+
+    config: AgentConfig = field(default_factory=AgentConfig)
+    compactor: StructuredCompactor | None = None
+    compact_controller: CompactController | None = None
+    cancellation_token: CancellationToken | None = None
+    runtime_context_provider: RuntimeContextProvider | None = None
+    fallback_provider: StreamProvider | None = None
+    project_root: Path | None = None
+    request_hygiene: RequestHygieneConfig | None = None
 
 
 @dataclass(frozen=True)
