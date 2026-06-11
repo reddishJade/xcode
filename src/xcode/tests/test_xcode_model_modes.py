@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from contextlib import redirect_stdout
 from io import StringIO
+from typing import cast
 import unittest
 
 from xcode.ai.model_modes import parse_model_mode
 from xcode.cli.repl_settings import handle_effort_command, handle_model_command
+from xcode.harness.app import XcodeApp
+from xcode.harness.agent_runtime import StructuredAgent
 
 
 class XcodeModelModeTests(unittest.TestCase):
@@ -55,6 +58,18 @@ class XcodeModelModeTests(unittest.TestCase):
 
         self.assertEqual(app.calls, [])
         self.assertIn("does not support reasoning effort", output.getvalue())
+
+    def test_get_model_info_uses_active_provider_transport(self) -> None:
+        agent = cast(
+            StructuredAgent,
+            _Agent(_ProviderWrapper(_Provider("deepseek_chat"))),
+        )
+        app = XcodeApp(agent=agent)
+
+        info = app.get_model_info()
+
+        self.assertEqual(info["transport"], "deepseek_chat")
+        self.assertEqual(info["reasoning_effort"], "high")
 
 
 class _ModelApp:
@@ -120,6 +135,25 @@ class _EffortApp:
             }
         )
         return model
+
+
+class _Provider:
+    def __init__(self, transport: str) -> None:
+        self.transport = transport
+        self.model = "current"
+        self.base_url = "https://example.test"
+        self.thinking = True
+        self.reasoning_effort = "high"
+
+
+class _ProviderWrapper:
+    def __init__(self, active_provider: _Provider) -> None:
+        self.active_provider = active_provider
+
+
+class _Agent:
+    def __init__(self, provider: _ProviderWrapper) -> None:
+        self.provider = provider
 
 
 if __name__ == "__main__":

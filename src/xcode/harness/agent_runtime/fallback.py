@@ -41,6 +41,14 @@ class _FallbackSwitchingProvider:
         return getattr(self.active_provider, "model", "unknown")
 
     @property
+    def base_url(self) -> str:
+        return getattr(self.active_provider, "base_url", "")
+
+    @property
+    def transport(self) -> str:
+        return getattr(self.active_provider, "transport", "")
+
+    @property
     def thinking(self) -> bool:
         return getattr(self.active_provider, "thinking", True)
 

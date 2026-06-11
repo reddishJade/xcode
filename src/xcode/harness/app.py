@@ -86,6 +86,7 @@ class XcodeApp:
 
     def get_model_info(self) -> dict[str, str]:
         provider = getattr(self.agent, "provider", None)
+        provider = getattr(provider, "active_provider", provider)
         model_name = getattr(provider, "model", "unknown") if provider else "unknown"
         base_url = getattr(provider, "base_url", "") if provider else ""
         transport = getattr(provider, "transport", "") if provider else ""

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from xcode.cli.completion import ReplCompleter
 from xcode.cli.commands import PromptText, ReplState
-from xcode.cli.repl import run_repl
+from xcode.cli.repl import current_effort_options, run_repl
 from xcode.cli.repl_commands import COMMAND_NAMES, handle_command
 from xcode.cli.repl_rendering import reasoning_preview_lines
 from xcode.cli.repl_tools import brief_input
@@ -580,6 +580,13 @@ class XcodeReplTests(unittest.TestCase):
             [item.text for item in items],
             ["medium"],
         )
+
+    def test_repl_effort_options_use_active_provider_transport(self) -> None:
+        app = _ActiveProviderApp("deepseek_chat")
+
+        options = current_effort_options(app)
+
+        self.assertEqual(options, ("off", "high", "max"))
 
     def test_handle_command_keeps_quit_alias(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1207,6 +1214,28 @@ class InterruptingToolApp:
             ),
         )
         raise KeyboardInterrupt()
+
+
+class _ActiveProvider:
+    def __init__(self, transport: str) -> None:
+        self.transport = transport
+
+
+class _ActiveProviderWrapper:
+    def __init__(self, active_provider: _ActiveProvider) -> None:
+        self.active_provider = active_provider
+
+
+class _ActiveProviderAgent:
+    def __init__(self, provider: _ActiveProviderWrapper) -> None:
+        self.provider = provider
+
+
+class _ActiveProviderApp:
+    def __init__(self, transport: str) -> None:
+        self.agent = _ActiveProviderAgent(
+            _ActiveProviderWrapper(_ActiveProvider(transport))
+        )
 
 
 class FakeRenderer:

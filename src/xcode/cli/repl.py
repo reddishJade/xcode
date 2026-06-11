@@ -55,6 +55,14 @@ from xcode.harness.session import SessionStore
 from xcode.agent.messages import UserMessage
 
 
+def current_effort_options(app: Any) -> tuple[str, ...]:
+    """返回当前 active provider 支持的 reasoning effort 选项。"""
+    provider = getattr(getattr(app, "agent", None), "provider", None)
+    provider = getattr(provider, "active_provider", provider)
+    transport = getattr(provider, "transport", "") if provider else ""
+    return reasoning_effort_levels_for_transport(transport)
+
+
 def run_repl(
     app: Any,
     sessions_dir: Path,
@@ -68,16 +76,11 @@ def run_repl(
     markdown_renderer = renderer or TerminalMarkdownRenderer()
     registry = tuple(getattr(app, "registry", ()) or ())
 
-    def _effort_options() -> tuple[str, ...]:
-        provider = getattr(getattr(app, "agent", None), "provider", None)
-        transport = getattr(provider, "transport", "") if provider else ""
-        return reasoning_effort_levels_for_transport(transport)
-
     session = prompt_session or create_prompt_session(
         root,
         registry,
         COMMAND_NAMES,
-        _effort_options,
+        lambda: current_effort_options(app),
     )
     state = ReplState()
     session_policy = SessionPermissionPolicy()
