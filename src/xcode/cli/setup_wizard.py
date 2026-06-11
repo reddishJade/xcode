@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -99,7 +100,7 @@ def has_valid_config(project_root: Path) -> bool:
     return False
 
 
-def run_setup_wizard(project_root: Path) -> bool:
+def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
     """首次启动配置向导。返回 True 表示已保存配置，False 表示取消。"""
     import questionary
 
@@ -114,7 +115,7 @@ def run_setup_wizard(project_root: Path) -> bool:
     choices = {preset["label"]: key for key, preset in PROVIDER_PRESETS.items()}
     provider_label = questionary.select("Select provider:", choices=list(choices)).ask()
     if provider_label is None:
-        return False
+        return ("cancelled", None)
     provider_key = choices[provider_label]
     preset = PROVIDER_PRESETS[provider_key]
 
@@ -128,7 +129,7 @@ def run_setup_wizard(project_root: Path) -> bool:
         "API Key:", default=env_val[:16] if env_val else ""
     ).ask()
     if api_key is None:
-        return False
+        return ("cancelled", None)
     if not api_key:
         api_key = env_val
 
@@ -138,7 +139,7 @@ def run_setup_wizard(project_root: Path) -> bool:
         "Base URL:", default=env_base_url or default_base_url
     ).ask()
     if base_url is None:
-        return False
+        return ("cancelled", None)
     if not base_url:
         base_url = env_base_url or default_base_url
 
@@ -148,11 +149,11 @@ def run_setup_wizard(project_root: Path) -> bool:
         "Model:", choices=model_choices, default=model_default
     ).ask()
     if model is None:
-        return False
+        return ("cancelled", None)
     if model == "Custom (enter name)":
         model = questionary.text("Model name:").ask()
         if model is None:
-            return False
+            return ("cancelled", None)
         if not model:
             model = model_default
 
@@ -169,7 +170,7 @@ def run_setup_wizard(project_root: Path) -> bool:
     if supports_reasoning_effort(transport):
         thinking = questionary.confirm("Enable thinking?", default=True).ask()
         if thinking is None:
-            return False
+            return ("cancelled", None)
         if thinking:
             effort_default = "high"
             effort = questionary.select(
@@ -178,7 +179,7 @@ def run_setup_wizard(project_root: Path) -> bool:
                 default=effort_default,
             ).ask()
             if effort is None:
-                return False
+                return ("cancelled", None)
             reasoning_effort = effort
 
     # 确认
@@ -196,11 +197,8 @@ def run_setup_wizard(project_root: Path) -> bool:
     )
     print()
     confirm = questionary.confirm("Save this configuration?", default=True).ask()
-    if confirm is None or not confirm:
-        print(
-            "  Setup cancelled. You can configure later by editing xcode.config.json."
-        )
-        return False
+    if confirm is None:
+        return ("cancelled", None)
 
     config_data = {
         "provider": {
@@ -241,10 +239,21 @@ def run_setup_wizard(project_root: Path) -> bool:
 
     merged = deep_merge(existing, config_data)
 
-    config_path.write_text(
+    if confirm:
+        config_path.write_text(
+            json.dumps(merged, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        print(f"  Configuration saved to {CONFIG_FILENAME}")
+        print()
+        return ("saved", None)
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".json", prefix="xcode_config_")
+    os.close(fd)
+    Path(tmp_path).write_text(
         json.dumps(merged, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    print(f"  Configuration saved to {CONFIG_FILENAME}")
+    print("  Running with temporary configuration (not saved).")
     print()
-    return True
+    return ("no_save", Path(tmp_path))

@@ -37,15 +37,19 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     project_root = args.project_root
+    temp_config: Path | None = None
 
     if args.setup or not has_valid_config(project_root):
         if sys.stdin.isatty():
             try:
-                ok = run_setup_wizard(project_root)
+                status, config_path = run_setup_wizard(project_root)
             except KeyboardInterrupt:
                 return 0
-            if not ok:
+            if status == "cancelled":
                 return 0
+            if status == "no_save" and config_path is not None:
+                temp_config = config_path
+                args.config = config_path
         else:
             if not has_valid_config(project_root):
                 print(
@@ -54,8 +58,12 @@ def main() -> int:
                     file=sys.stderr,
                 )
 
-    runtime_config = discover_runtime_config(project_root, args.config)
-    return _run(args, runtime_config)
+    try:
+        runtime_config = discover_runtime_config(project_root, args.config)
+        return _run(args, runtime_config)
+    finally:
+        if temp_config is not None and temp_config.exists():
+            temp_config.unlink()
 
 
 def _run(args, runtime_config) -> int:
