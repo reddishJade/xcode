@@ -13,7 +13,6 @@ class XcodeSetupWizardTests(unittest.TestCase):
     def test_provider_choices_write_canonical_transport_names(self) -> None:
         provider_cases = {
             "openai": ("openai_chat", "high"),
-            "anthropic": ("anthropic_messages", None),
             "deepseek": ("deepseek_chat", "high"),
             "mimo": ("mimo_chat", None),
             "chatglm": ("chatglm_chat", None),

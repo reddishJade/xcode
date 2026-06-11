@@ -164,17 +164,22 @@ def run_setup_wizard(project_root: Path) -> bool:
     elif provider_key == "chatglm":
         transport = "chatglm_chat"
 
-    reasoning_effort = None
+    thinking = True
+    reasoning_effort: str | None = None
     if supports_reasoning_effort(transport):
-        effort_default = "high"
-        effort = questionary.select(
-            "Reasoning effort:",
-            choices=list(reasoning_effort_levels_for_transport(transport)),
-            default=effort_default,
-        ).ask()
-        if effort is None:
+        thinking = questionary.confirm("Enable thinking?", default=True).ask()
+        if thinking is None:
             return False
-        reasoning_effort = effort
+        if thinking:
+            effort_default = "high"
+            effort = questionary.select(
+                "Reasoning effort:",
+                choices=list(reasoning_effort_levels_for_transport(transport)),
+                default=effort_default,
+            ).ask()
+            if effort is None:
+                return False
+            reasoning_effort = effort
 
     # 确认
     print()
@@ -183,6 +188,7 @@ def run_setup_wizard(project_root: Path) -> bool:
     print(f"    Model     : {model}")
     if base_url:
         print(f"    Base URL  : {base_url}")
+    print(f"    Thinking  : {'enabled' if thinking else 'disabled'}")
     if reasoning_effort is not None:
         print(f"    Effort    : {reasoning_effort}")
     print(
@@ -205,6 +211,7 @@ def run_setup_wizard(project_root: Path) -> bool:
                     "chat_model": model,
                     "base_url": base_url,
                     "api_key": api_key,
+                    "thinking": thinking,
                     **(
                         {"reasoning_effort": reasoning_effort}
                         if reasoning_effort is not None
