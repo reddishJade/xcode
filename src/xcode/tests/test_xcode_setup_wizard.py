@@ -25,7 +25,11 @@ class XcodeSetupWizardTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as temp_dir:
                     path = Path(temp_dir) / "xcode.config.json"
                     preset = PROVIDER_PRESETS[provider_key]
-                    select_responses = [preset["label"], preset["default_model"]]
+                    select_responses = [
+                        preset["label"],
+                        preset["default_model"],
+                        "enabled",
+                    ]
                     if expected_effort is not None:
                         select_responses.append(expected_effort)
 
