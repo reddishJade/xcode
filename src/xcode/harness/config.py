@@ -257,7 +257,9 @@ def _load_global_config() -> XcodeRuntimeConfig:
 def _load_json_config(path: Path | None) -> XcodeRuntimeConfig:
     if path is None or not path.exists():
         return XcodeRuntimeConfig()
-    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"runtime config must be a JSON object: {path}")
     return _from_dict_preserving_profiles(data)
 
 
@@ -271,18 +273,26 @@ def _from_dict_preserving_profiles(data: dict[str, Any]) -> XcodeRuntimeConfig:
 
 
 def _resolve_model_profiles(
-    raw_profiles: dict[str, Any],
-) -> dict[str, Any]:
-    main_raw = raw_profiles.get(PROFILE_MAIN, {})
-    resolved: dict[str, Any] = {PROFILE_MAIN: main_raw}
+    raw_profiles: dict[str, object],
+) -> dict[str, object]:
+    main_raw: dict[str, object] = {}
+    main_entry = raw_profiles.get(PROFILE_MAIN)
+    if isinstance(main_entry, dict):
+        main_raw = {str(k): v for k, v in main_entry.items()}
+    resolved: dict[str, object] = {PROFILE_MAIN: main_raw}
+    main_transport: ProviderTransport = "openai_chat"
+    main_transport_raw = main_raw.get("transport")
+    if isinstance(main_transport_raw, str):
+        main_transport = _load_provider_transport(main_transport_raw, main_transport)
+        main_raw["transport"] = main_transport
     for name, raw in raw_profiles.items():
         if name == PROFILE_MAIN:
             continue
         if isinstance(raw, str):
             resolved[name] = {**main_raw, "chat_model": raw}
         elif isinstance(raw, dict):
-            profile = dict(main_raw)
-            profile.update(raw)
+            profile: dict[str, object] = dict(main_raw)
+            profile.update({str(k): v for k, v in raw.items()})
             resolved[name] = profile
     resolved.setdefault(PROFILE_SUBAGENT, resolved.get(PROFILE_MAIN, {}))
     resolved.setdefault(PROFILE_FALLBACK, resolved.get(PROFILE_MAIN, {}))
@@ -314,20 +324,23 @@ def _merge_non_default(base: dict, override: dict, default: dict) -> dict:
 def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
     import os
 
-    permission_mode = os.getenv("XCODE_PERMISSION_MODE")
     sandbox_mode = os.getenv("XCODE_SANDBOX_MODE")
-    approval_policy = os.getenv("XCODE_APPROVAL_POLICY")
-
     security_updates: dict[str, Any] = {}
 
-    if permission_mode in ("strict", "normal", "permissive"):
-        security_updates["permission_mode"] = permission_mode
+    parsed_permission_mode = _parse_permission_mode(
+        os.getenv("XCODE_PERMISSION_MODE")
+    )
+    if parsed_permission_mode is not None:
+        security_updates["permission_mode"] = parsed_permission_mode
 
     if sandbox_mode in ("true", "false"):
         security_updates["sandbox_mode"] = sandbox_mode == "true"
 
-    if approval_policy in ("always", "high_risk_only", "never"):
-        security_updates["approval_policy"] = approval_policy
+    parsed_approval_policy = _parse_approval_policy(
+        os.getenv("XCODE_APPROVAL_POLICY")
+    )
+    if parsed_approval_policy is not None:
+        security_updates["approval_policy"] = parsed_approval_policy
 
     if security_updates:
         security = replace(config.security, **security_updates)
@@ -336,8 +349,73 @@ def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
     return config
 
 
+def _parse_permission_mode(value: object) -> PermissionMode | None:
+    if not isinstance(value, str):
+        return None
+    match value:
+        case "strict":
+            return "strict"
+        case "normal":
+            return "normal"
+        case "permissive":
+            return "permissive"
+        case _:
+            return None
+
+
+def _parse_approval_policy(value: object) -> ApprovalPolicy | None:
+    if not isinstance(value, str):
+        return None
+    match value:
+        case "always":
+            return "always"
+        case "high_risk_only":
+            return "high_risk_only"
+        case "never":
+            return "never"
+        case _:
+            return None
+
+
+def _load_provider_transport(value: object, default: ProviderTransport) -> ProviderTransport:
+    if not isinstance(value, str):
+        return default
+    match value:
+        case "openai_chat":
+            return "openai_chat"
+        case "anthropic_messages":
+            return "anthropic_messages"
+        case "chatglm_chat":
+            return "chatglm_chat"
+        case "deepseek_chat":
+            return "deepseek_chat"
+        case "mimo_chat":
+            return "mimo_chat"
+        case _:
+            return default
+
+
 def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
     return _load_json_config(path)
+
+
+def _int_value(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _string_tuple(value: object, default: tuple[str, ...]) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return default
+    return tuple(str(item) for item in value)
 
 
 def resolve_config_path(project_root: Path, path: Path | None) -> Path | None:
