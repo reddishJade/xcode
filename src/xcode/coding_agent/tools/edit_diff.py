@@ -1,7 +1,29 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from difflib import unified_diff
-from typing import Any
+
+
+@dataclass(frozen=True)
+class NormalizedEdit:
+    old_text: str
+    new_text: str
+
+
+@dataclass(frozen=True)
+class TextMatch:
+    found: bool
+    index: int
+    match_length: int
+    used_fuzzy: bool = False
+
+
+@dataclass(frozen=True)
+class MatchedEdit:
+    edit_index: int
+    match_index: int
+    match_length: int
+    new_text: str
 
 
 def detect_line_ending(content: str) -> str:
@@ -70,36 +92,27 @@ def normalize_for_fuzzy_match(text: str) -> str:
     return result
 
 
-def fuzzy_find_text(content: str, old_text: str) -> dict[str, Any]:
+def fuzzy_find_text(content: str, old_text: str) -> TextMatch:
     """查找文本位置，优先精确匹配，失败后尝试模糊匹配。
 
-    返回字典包含：
-    - found: 是否找到
-    - index: 匹配位置（字符索引）
-    - match_length: 匹配长度
-    - used_fuzzy: 是否使用了模糊匹配
+    返回 TextMatch，供后续编辑排序和重叠检测使用。
     """
     idx = content.find(old_text)
     if idx != -1:
-        return {
-            "found": True,
-            "index": idx,
-            "match_length": len(old_text),
-            "used_fuzzy": False,
-        }
+        return TextMatch(found=True, index=idx, match_length=len(old_text))
 
     fuzzy_content = normalize_for_fuzzy_match(content)
     fuzzy_old = normalize_for_fuzzy_match(old_text)
     idx = fuzzy_content.find(fuzzy_old)
     if idx != -1:
-        return {
-            "found": True,
-            "index": idx,
-            "match_length": len(fuzzy_old),
-            "used_fuzzy": True,
-        }
+        return TextMatch(
+            found=True,
+            index=idx,
+            match_length=len(fuzzy_old),
+            used_fuzzy=True,
+        )
 
-    return {"found": False, "index": -1, "match_length": 0, "used_fuzzy": False}
+    return TextMatch(found=False, index=-1, match_length=0)
 
 
 def _count_fuzzy_occurrences(content: str, old_text: str) -> int:
@@ -119,77 +132,114 @@ def apply_edits_fuzzy(
     确保每个 old_text 在文件中唯一匹配，否则报错。
     返回：(修改后的内容, 修改次数)
     """
-    normalized_edits = [
-        {
-            "old_text": normalize_to_lf(e["old_text"]),
-            "new_text": normalize_to_lf(e["new_text"]),
-        }
-        for e in edits
-    ]
-
-    for i, edit in enumerate(normalized_edits):
-        if not edit["old_text"]:
-            _raise_field_error(
-                "old_text must not be empty", path, i, len(normalized_edits)
-            )
-
-    matches = []
-    needs_fuzzy = False
-    for i, edit in enumerate(normalized_edits):
-        match = fuzzy_find_text(content, edit["old_text"])
-        if not match["found"]:
-            _raise_not_found(path, i, len(normalized_edits))
-        if match["used_fuzzy"]:
-            needs_fuzzy = True
-        matches.append(match)
-
-    base = content
-    if needs_fuzzy:
-        base = normalize_for_fuzzy_match(content)
-        matches = []
-        for i, edit in enumerate(normalized_edits):
-            match = fuzzy_find_text(base, edit["old_text"])
-            if not match["found"]:
-                _raise_not_found(path, i, len(normalized_edits))
-            matches.append(match)
-
-    for i, edit in enumerate(normalized_edits):
-        occurrences = _count_fuzzy_occurrences(base, edit["old_text"])
-        if occurrences > 1:
-            _raise_duplicate(path, i, len(normalized_edits), occurrences)
-
-    matched_edits: list[dict[str, Any]] = []
-    for i in range(len(normalized_edits)):
-        matched_edits.append(
-            {
-                "edit_index": i,
-                "match_index": matches[i]["index"],
-                "match_length": matches[i]["match_length"],
-                "new_text": normalized_edits[i]["new_text"],
-            }
-        )
-
-    matched_edits.sort(key=lambda m: m["match_index"])
-    for a, b in zip(matched_edits, matched_edits[1:]):
-        if a["match_index"] + a["match_length"] > b["match_index"]:
-            raise ValueError(
-                f"edits[{a['edit_index']}] and edits[{b['edit_index']}] "
-                f"overlap in {path}. "
-                "Merge them into one edit or target disjoint regions."
-            )
-
-    new_content = base
-    for m in reversed(matched_edits):
-        new_content = (
-            new_content[: m["match_index"]]
-            + m["new_text"]
-            + new_content[m["match_index"] + m["match_length"] :]
-        )
+    normalized_edits = _normalize_edits(edits)
+    _validate_edit_targets(normalized_edits, path)
+    base, matched_edits = _plan_fuzzy_edits(content, normalized_edits, path)
+    new_content = _apply_matched_edits(base, matched_edits)
 
     if base == new_content:
         _raise_no_change(path, len(normalized_edits))
 
     return new_content, len(matched_edits)
+
+
+def _normalize_edits(edits: list[dict[str, str]]) -> list[NormalizedEdit]:
+    return [
+        NormalizedEdit(
+            old_text=normalize_to_lf(edit["old_text"]),
+            new_text=normalize_to_lf(edit["new_text"]),
+        )
+        for edit in edits
+    ]
+
+
+def _validate_edit_targets(edits: list[NormalizedEdit], path: str) -> None:
+    for i, edit in enumerate(edits):
+        if not edit.old_text:
+            _raise_field_error("old_text must not be empty", path, i, len(edits))
+
+
+def _plan_fuzzy_edits(
+    content: str,
+    edits: list[NormalizedEdit],
+    path: str,
+) -> tuple[str, list[MatchedEdit]]:
+    matches, needs_fuzzy = _locate_edit_targets(content, edits, path)
+    base = content
+    if needs_fuzzy:
+        base = normalize_for_fuzzy_match(content)
+        matches, _ = _locate_edit_targets(base, edits, path)
+
+    _ensure_unique_targets(base, edits, path)
+    matched_edits = _build_matched_edits(edits, matches)
+    _ensure_disjoint_edits(matched_edits, path)
+    return base, matched_edits
+
+
+def _locate_edit_targets(
+    content: str,
+    edits: list[NormalizedEdit],
+    path: str,
+) -> tuple[list[TextMatch], bool]:
+    matches: list[TextMatch] = []
+    needs_fuzzy = False
+    for i, edit in enumerate(edits):
+        match = fuzzy_find_text(content, edit.old_text)
+        if not match.found:
+            _raise_not_found(path, i, len(edits))
+        if match.used_fuzzy:
+            needs_fuzzy = True
+        matches.append(match)
+    return matches, needs_fuzzy
+
+
+def _ensure_unique_targets(
+    content: str,
+    edits: list[NormalizedEdit],
+    path: str,
+) -> None:
+    for i, edit in enumerate(edits):
+        occurrences = _count_fuzzy_occurrences(content, edit.old_text)
+        if occurrences > 1:
+            _raise_duplicate(path, i, len(edits), occurrences)
+
+
+def _build_matched_edits(
+    edits: list[NormalizedEdit],
+    matches: list[TextMatch],
+) -> list[MatchedEdit]:
+    matched_edits: list[MatchedEdit] = []
+    for i, edit in enumerate(edits):
+        matched_edits.append(
+            MatchedEdit(
+                edit_index=i,
+                match_index=matches[i].index,
+                match_length=matches[i].match_length,
+                new_text=edit.new_text,
+            )
+        )
+    return sorted(matched_edits, key=lambda m: m.match_index)
+
+
+def _ensure_disjoint_edits(matched_edits: list[MatchedEdit], path: str) -> None:
+    for a, b in zip(matched_edits, matched_edits[1:]):
+        if a.match_index + a.match_length > b.match_index:
+            raise ValueError(
+                f"edits[{a.edit_index}] and edits[{b.edit_index}] "
+                f"overlap in {path}. "
+                "Merge them into one edit or target disjoint regions."
+            )
+
+
+def _apply_matched_edits(content: str, matched_edits: list[MatchedEdit]) -> str:
+    new_content = content
+    for m in reversed(matched_edits):
+        new_content = (
+            new_content[: m.match_index]
+            + m.new_text
+            + new_content[m.match_index + m.match_length :]
+        )
+    return new_content
 
 
 def generate_diff_string(old_content: str, new_content: str, path: str = "") -> str:
