@@ -45,6 +45,21 @@ class CommandContext:
 CommandHandler = Callable[[str, CommandContext], bool]
 
 
+COMMAND_GROUP_SESSION = "会话管理"
+COMMAND_GROUP_MODE = "模式控制"
+COMMAND_GROUP_MODEL = "模型配置"
+COMMAND_GROUP_INFO = "信息工具"
+COMMAND_GROUP_EXIT = "退出"
+
+COMMAND_GROUP_ORDER: dict[str, int] = {
+    COMMAND_GROUP_SESSION: 1,
+    COMMAND_GROUP_MODE: 2,
+    COMMAND_GROUP_MODEL: 3,
+    COMMAND_GROUP_INFO: 4,
+    COMMAND_GROUP_EXIT: 5,
+}
+
+
 @dataclass
 class CommandEntry:
     handler: CommandHandler
@@ -52,6 +67,7 @@ class CommandEntry:
     args_desc: str = ""
     accepts_args: bool = False
     visible: bool = True
+    group: str = ""
 
 
 def command_names(registry: dict[str, CommandEntry]) -> tuple[str, ...]:

@@ -3,6 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from .commands import (
+    COMMAND_GROUP_EXIT,
+    COMMAND_GROUP_INFO,
+    COMMAND_GROUP_MODE,
+    COMMAND_GROUP_MODEL,
+    COMMAND_GROUP_SESSION,
     CommandContext,
     CommandEntry,
     command_names,
@@ -317,96 +322,126 @@ def cmd_exit(cmd: str, ctx: CommandContext) -> bool:
 
 
 COMMAND_REGISTRY: dict[str, CommandEntry] = {
-    "/help": CommandEntry(handler=cmd_help, desc="Show this help."),
-    "/clear": CommandEntry(handler=cmd_clear, desc="Start a new session transcript."),
+    "/help": CommandEntry(
+        handler=cmd_help, desc="Show this help.", group=COMMAND_GROUP_INFO
+    ),
+    "/clear": CommandEntry(
+        handler=cmd_clear,
+        desc="Start a new session transcript.",
+        group=COMMAND_GROUP_SESSION,
+    ),
     "/fork": CommandEntry(
         handler=cmd_fork,
         desc="Fork current session into an independent branch.",
         args_desc="[explore|verify|isolate]",
         accepts_args=True,
+        group=COMMAND_GROUP_SESSION,
     ),
     "/rewind": CommandEntry(
         handler=cmd_rewind,
         desc="Remove the last N user turns from the transcript.",
         args_desc="N",
         accepts_args=True,
+        group=COMMAND_GROUP_SESSION,
     ),
     "/resume": CommandEntry(
         handler=cmd_resume,
         desc="Choose a recent conversation to resume.",
         accepts_args=True,
+        group=COMMAND_GROUP_SESSION,
     ),
-    "/sessions": CommandEntry(handler=cmd_sessions, desc="List recent conversations."),
+    "/sessions": CommandEntry(
+        handler=cmd_sessions,
+        desc="List and resume recent conversations.",
+        group=COMMAND_GROUP_SESSION,
+    ),
     "/tree": CommandEntry(
         handler=cmd_tree,
         desc="Show session fork tree.",
+        group=COMMAND_GROUP_SESSION,
     ),
     "/branch": CommandEntry(
         handler=cmd_branch,
         desc="List or switch session branches.",
         args_desc="list|tree|<id|title>",
         accepts_args=True,
+        group=COMMAND_GROUP_SESSION,
     ),
     "/model": CommandEntry(
         handler=cmd_model,
         desc="Show current model info.",
         args_desc="[profile/]name[:thinking] [--thinking <level>]",
         accepts_args=True,
+        group=COMMAND_GROUP_MODEL,
     ),
     "/effort": CommandEntry(
         handler=cmd_effort,
         desc="Show current reasoning effort.",
         args_desc="<off|minimal|low|medium|high|xhigh|max>",
         accepts_args=True,
+        group=COMMAND_GROUP_MODE,
     ),
     "/thinking": CommandEntry(
         handler=cmd_thinking,
         desc="Show current thinking state (on/off).",
         args_desc="on|off",
         accepts_args=True,
+        group=COMMAND_GROUP_MODE,
     ),
     "/plan": CommandEntry(
         handler=cmd_plan,
         desc="Enter Plan Mode: read-only inspection tools, no edits or shell.",
+        group=COMMAND_GROUP_MODE,
     ),
     "/review": CommandEntry(
         handler=cmd_review,
         desc="Enter Review Mode: read-only review, guarded validation.",
+        group=COMMAND_GROUP_MODE,
     ),
     "/act": CommandEntry(
         handler=cmd_act,
         desc="Enter Act Mode and allow normal tool use within policy.",
         accepts_args=True,
+        group=COMMAND_GROUP_MODE,
     ),
     "/verbose": CommandEntry(
         handler=cmd_verbose,
         desc="Show or hide tool call ids and result details.",
         args_desc="on|off",
         accepts_args=True,
+        group=COMMAND_GROUP_MODE,
     ),
     "/queue": CommandEntry(
         handler=cmd_queue,
         desc="Enable queued input while an agent turn is streaming.",
         args_desc="on|off",
         accepts_args=True,
+        group=COMMAND_GROUP_MODE,
     ),
     "/compact": CommandEntry(
         handler=cmd_compact,
         desc="Manually request context compaction and shrink the session log.",
+        group=COMMAND_GROUP_SESSION,
     ),
     "/permissions": CommandEntry(
         handler=cmd_permissions,
         desc="List / revoke / clear permission rules.",
         accepts_args=True,
+        group=COMMAND_GROUP_INFO,
     ),
     "/tool": CommandEntry(
         handler=cmd_tool,
         desc="Run one registered tool directly, or list tools.",
         args_desc="NAME INPUT|list",
         accepts_args=True,
+        group=COMMAND_GROUP_INFO,
     ),
-    "/exit": CommandEntry(handler=cmd_exit, desc="Exit the REPL."),
-    "/quit": CommandEntry(handler=cmd_exit, desc="Exit the REPL.", visible=False),
+    "/exit": CommandEntry(
+        handler=cmd_exit, desc="Exit the REPL.", group=COMMAND_GROUP_EXIT
+    ),
+    "/quit": CommandEntry(
+        handler=cmd_exit, desc="Exit the REPL.", visible=False, group=COMMAND_GROUP_EXIT
+    ),
 }
 
 COMMAND_NAMES = command_names(COMMAND_REGISTRY)

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Callable
 
 from xcode.harness.skills import ToolSpec
 
-from .commands import CommandEntry
+from .commands import COMMAND_GROUP_ORDER, CommandEntry
 from .reasoning_effort import normalize_reasoning_effort_options
 
 """REPL 命令、工具名和 @file 引用补全。"""
@@ -48,6 +48,7 @@ class ReplCompleter(Completer):
         self.tool_names = tuple(sorted(tool.name for tool in registry))
         self.command_names = tuple(command_names)
         self._command_meta: dict[str, str] = {}
+        self._command_group: dict[str, str] = {}
         if command_registry:
             for name, entry in command_registry.items():
                 if entry.visible:
@@ -55,6 +56,7 @@ class ReplCompleter(Completer):
                     if entry.args_desc:
                         meta = f"{meta} ({entry.args_desc})"
                     self._command_meta[name] = meta
+                    self._command_group[name] = entry.group
         self._effort_options = effort_options
         self._model_options = model_options
         self._directory_cache: dict[Path, tuple[str, ...]] = {}
@@ -97,14 +99,22 @@ class ReplCompleter(Completer):
         return self._complete_file_reference(text_before_cursor)
 
     def _complete_command(self, text: str) -> list[CompletionItem]:
+        matched = [
+            command for command in self.command_names if command.startswith(text)
+        ]
+        matched.sort(
+            key=lambda name: (
+                COMMAND_GROUP_ORDER.get(self._command_group.get(name, ""), 99),
+                name,
+            )
+        )
         return [
             CompletionItem(
                 command,
                 -len(text),
                 display_meta=self._command_meta.get(command, ""),
             )
-            for command in self.command_names
-            if command.startswith(text)
+            for command in matched
         ]
 
     def _complete_tool_name(self, text: str) -> list[CompletionItem]:
