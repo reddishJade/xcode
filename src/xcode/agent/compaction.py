@@ -1,11 +1,13 @@
 """Token 估算和压缩触发辅助工具。
 
-提供基于真实 provider usage 的 token 压力判断和压缩触发逻辑。
+提供基于 real provider usage 和 tiktoken 的 token 压力判断和压缩触发逻辑。
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+
+import tiktoken
 
 from xcode.agent.messages import (
     AgentMessage,
@@ -16,17 +18,31 @@ from xcode.agent.messages import (
 )
 
 
-def estimate_tokens_simple(text: str) -> int:
-    """简单 token 估算（基于 UTF-8 字节数，约 3 字节/token）。
+_ENCODING_CACHE: dict[str, tiktoken.Encoding] = {}
+_DEFAULT_ENCODING = "cl100k_base"
 
-    仅用于本地快速估算，不精确。实际 token 数以 provider 返回值为准。
-    相比 len//4，基于 UTF-8 字节的估算对中文等多字节内容更准确。
+
+def _get_encoding(name: str = _DEFAULT_ENCODING) -> tiktoken.Encoding:
+    if name not in _ENCODING_CACHE:
+        _ENCODING_CACHE[name] = tiktoken.get_encoding(name)
+    return _ENCODING_CACHE[name]
+
+
+def estimate_tokens_simple(text: str) -> int:
+    """基于 tiktoken cl100k_base 的 token 估算。
+
+    tiktoken 是 pyproject.toml 声明的项目级依赖，agent 层直接使用。
+    不可用时回退到字节估算（约 3 字节/token）。
     """
-    return max(1, len(text.encode("utf-8")) // 3)
+    try:
+        encoding = _get_encoding()
+        return max(1, len(encoding.encode(text)))
+    except Exception:
+        return max(1, len(text.encode("utf-8")) // 3)
 
 
 def estimate_message_tokens(messages: Sequence[AgentMessage]) -> int:
-    """估算消息列表的 token 总数（简单版本）。"""
+    """估算消息列表的 token 总数。"""
     import json
 
     from xcode.agent.types import TextContent, ThinkingContent, ToolCallContent

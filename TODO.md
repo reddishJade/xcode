@@ -25,20 +25,20 @@
 
 ## P0
 
-- [ ] 1. `agent_loop.py`（834 行）过大：混合 provider/watchdog/event/helper 逻辑，需拆出 `_provider.py` 并将 watchdog 更新函数移入 `watchdog.py`
-- [ ] 2. `messages.py` 领域类型（dataclass）与 LLM 格式转换逻辑混在一起，`convert_to_llm` 及辅助函数应抽到 `message_converter.py`
+- [x] 1. `agent_loop.py`（834 行）过大：混合 provider/watchdog/event/helper 逻辑，需拆出 `_provider.py` 并将 watchdog 更新函数移入 `watchdog.py`
+- [x] 2. `messages.py` 领域类型（dataclass）与 LLM 格式转换逻辑混在一起，`convert_to_llm` 及辅助函数应抽到 `message_converter.py`
 
 ## P1
 
-- [ ] 3. `config.py`（208 行）职责过多：Context types / Hook type aliases / Metrics / Result / AgentLoopConfig 挤在一处，建议抽出 `hooks.py` 和 `results.py`
-- [ ] 4. `watchdog.py` 硬编码工具名列表（`is_file_mutation_tool` / `is_file_read_tool`），应改为可配置
-- [ ] 5. `__init__.py` 为空，无公共 API 导出，调用方需深层导入
-- [ ] 6. `tool_execution.py`（470 行）边界过大，可抽出参数校验和分批逻辑
+- [x] 3. `config.py`（208 行）职责过多：Context types / Hook type aliases / Metrics / Result / AgentLoopConfig 挤在一处，建议抽出 `hooks.py` 和 `results.py`
+- [x] 4. `watchdog.py` 硬编码工具名列表（`is_file_mutation_tool` / `is_file_read_tool`），应改为可配置
+- [x] 5. `__init__.py` 为空，无公共 API 导出，调用方需深层导入
+- [x] 6. `tool_execution.py`（470 行）边界过大，可抽出参数校验和分批逻辑
 
 ## P2
 
-- [ ] 7. `agent.py` 用 `dataclasses.replace` 隐式修改 config，建议改为显式 Builder 模式
-- [ ] 8. `compaction.py` 的 `estimate_tokens_simple` 用 `len//4` 过于粗糙
+- [x] 7. `agent.py` 用 `dataclasses.replace` 隐式修改 config，建议改为显式 Builder 模式
+- [x] 8. `compaction.py` 的 `estimate_tokens_simple` 用 `len//4` 过于粗糙
 
 ---
 

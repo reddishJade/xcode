@@ -19,8 +19,8 @@ class TestEstimateTokens(unittest.TestCase):
     """测试 token 估算。"""
 
     def test_estimate_simple(self):
-        """测试简单 token 估算（4 字符/token）。"""
-        self.assertEqual(estimate_tokens_simple(""), 1)  # 最小 1
+        """测试 tiktoken 估算。"""
+        self.assertEqual(estimate_tokens_simple(""), 1)
         self.assertEqual(estimate_tokens_simple("test"), 1)
         self.assertEqual(estimate_tokens_simple("test" * 10), 10)
 
@@ -102,14 +102,13 @@ class TestShouldCompactTokenAware(unittest.TestCase):
 
     def test_compact_by_estimated_tokens(self):
         """测试估算 token 阈值触发。"""
-        # 生成足够多的消息
         messages = [
             UserMessage(content=[TextContent(text="x" * 1000)]) for _ in range(50)
         ]
         self.assertTrue(
             should_compact_token_aware(
                 messages,
-                compact_token_threshold=10000,
+                compact_token_threshold=5000,
             )
         )
 
