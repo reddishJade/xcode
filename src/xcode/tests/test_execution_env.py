@@ -6,11 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from xcode.harness.execution_env import (
-    ExecutionResult,
-    MockExecutionEnv,
-    SubprocessExecutionEnv,
-)
+from xcode.harness.execution_env import ExecutionResult, SubprocessExecutionEnv
+from xcode.tests.fixtures import MockExecutionEnv
 from xcode.coding_agent.tools import build_bash_tool
 
 

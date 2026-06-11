@@ -6,7 +6,8 @@ import tempfile
 import unittest
 
 from xcode.harness.observability import AuditRecord, JsonlAuditLogger, redact_text
-from xcode.harness.skills import ToolSpec, run_tool
+from xcode.harness.skills import ToolSpec
+from xcode.tests.fixtures import run_tool
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.config import GateConfig
 

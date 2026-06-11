@@ -7,7 +7,7 @@ import unittest
 from xcode.cli.repl_tools import parse_tool_input
 from xcode.coding_agent.tools import build_bash_tool
 from xcode.coding_agent.tools.bash import OutputAccumulator
-from xcode.harness.skills import run_tool
+from xcode.tests.fixtures import run_tool
 
 
 class XcodeBashToolTests(unittest.TestCase):

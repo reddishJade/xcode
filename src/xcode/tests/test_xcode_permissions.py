@@ -12,7 +12,8 @@ from xcode.harness.observability import (
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
-from xcode.harness.skills import ToolSpec, run_tool, run_tool_result
+from xcode.harness.skills import ToolSpec, run_tool_result
+from xcode.tests.fixtures import run_tool
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.config import GateConfig
 

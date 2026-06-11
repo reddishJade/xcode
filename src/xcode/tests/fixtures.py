@@ -1,10 +1,64 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from xcode.ai.events import ProviderEvent
 from xcode.ai.providers.faux import FauxProvider
+from xcode.harness.execution_env import ExecutionResult
+from xcode.harness.skills import (
+    ApprovalCallback,
+    PermissionPolicy,
+    ToolInput,
+    run_tool_result,
+)
+
+
+def run_tool(
+    registry: dict[str, Any],
+    action: str,
+    action_input: ToolInput,
+    approval_callback: ApprovalCallback | None = None,
+    permission_policy: PermissionPolicy | None = None,
+) -> str:
+    """测试辅助函数：执行工具并返回内容字符串。"""
+    return run_tool_result(
+        registry,
+        action,
+        action_input,
+        approval_callback,
+        permission_policy,
+    ).content
+
+
+class MockExecutionEnv:
+    """测试桩实现，记录调用并返回预设结果。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], Path, int]] = []
+        self._results: list[ExecutionResult] = []
+        self._result_index = 0
+
+    def enqueue(self, result: ExecutionResult) -> None:
+        self._results.append(result)
+
+    def run(
+        self,
+        argv: list[str],
+        cwd: Path,
+        timeout: int = 30,
+        cancel_event: threading.Event | None = None,
+    ) -> ExecutionResult:
+        self.calls.append((argv, cwd, timeout))
+        if self._result_index < len(self._results):
+            result = self._results[self._result_index]
+            self._result_index += 1
+            return result
+        return ExecutionResult(
+            stdout="", stderr="", returncode=0, timed_out=False, cancelled=False
+        )
 
 
 class FakeProvider(FauxProvider):

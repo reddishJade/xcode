@@ -6,7 +6,8 @@ import unittest
 
 from xcode.cli.repl_tools import parse_tool_input
 from xcode.harness.observability import HITLResult
-from xcode.harness.skills import run_tool, run_tool_result
+from xcode.harness.skills import run_tool_result
+from xcode.tests.fixtures import run_tool
 from xcode.coding_agent.tools import build_file_tools
 from xcode.coding_agent.tools.file import LocalFileOperations
 

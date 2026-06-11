@@ -13,7 +13,7 @@ from xcode.coding_agent.tools.shell_adapter import (
     _KNOWN_SHELLS,
 )
 from xcode.coding_agent.tools import build_bash_tool
-from xcode.harness.skills import run_tool
+from xcode.tests.fixtures import run_tool
 
 
 class XcodeShellAdapterTests(unittest.TestCase):
@@ -130,7 +130,7 @@ class XcodeShellAdapterTests(unittest.TestCase):
 
     def test_bash_tool_passes_shell_false_and_argv(self) -> None:
         """验证显式 shell_spec 时 argv 和 cwd 正确传递。"""
-        from xcode.harness.execution_env import MockExecutionEnv
+        from xcode.tests.fixtures import MockExecutionEnv
 
         env = MockExecutionEnv()
         spec = _KNOWN_SHELLS["bash"]

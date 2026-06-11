@@ -131,27 +131,6 @@ def build_tool_guidelines(registry: tuple[ToolSpec, ...]) -> str:
     return "\n".join(guidelines)
 
 
-def run_tool(
-    registry: dict[str, ToolSpec],
-    action: str,
-    action_input: ToolInput,
-    approval_callback: ApprovalCallback | None = None,
-    permission_policy: PermissionPolicy | None = None,
-) -> str:
-    """测试辅助函数：执行工具并返回内容字符串。
-
-    生产代码应使用 run_tool_result() 以获取完整的执行结果（包括状态和元数据）。
-    此函数仅为测试代码提供简化的字符串返回值。
-    """
-    return run_tool_result(
-        registry,
-        action,
-        action_input,
-        approval_callback,
-        permission_policy,
-    ).content
-
-
 def run_tool_result(
     registry: dict[str, ToolSpec],
     action: str,
