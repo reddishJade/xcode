@@ -1,3 +1,11 @@
+"""工具执行的 allow/deny/ask 权限策略与 HITL 授权模型。
+
+三层权限架构：
+Layer 1: permission_mode (strict/normal/permissive) - 用户入口
+Layer 2: sandbox_mode, approval_policy, network_access, writable_roots, restricted_dirs
+Layer 3: deny_tools, ask_tools, allow_tools (deny > ask > allow)
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -7,14 +15,6 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, TypeVar
 
 from ..session import JsonValue
-
-"""工具执行的 allow/deny/ask 权限策略与 HITL 授权模型。
-
-三层权限架构：
-Layer 1: permission_mode (strict/normal/permissive) - 用户入口
-Layer 2: sandbox_mode, approval_policy, network_access, writable_roots, restricted_dirs
-Layer 3: deny_tools, ask_tools, allow_tools (deny > ask > allow)
-"""
 
 
 PermissionDecision = Literal["allow", "deny", "ask"]
@@ -196,6 +196,11 @@ class SettingsSandboxPermissionPolicy:
         return _sandbox_security_settings(raw)
 
     def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
+        input_lower = action_input.lower()
+        for restricted_dir in self.security.restricted_dirs:
+            if restricted_dir.lower() in input_lower:
+                return "deny"
+
         if tool_name in self.security.deny_tools:
             return "deny"
         if tool_name in self.security.ask_tools:
@@ -204,11 +209,6 @@ class SettingsSandboxPermissionPolicy:
             return "allow"
         if self.security.allow_tools:
             return "ask"
-
-        input_lower = action_input.lower()
-        for restricted_dir in self.security.restricted_dirs:
-            if restricted_dir.lower() in input_lower:
-                return "deny"
         return None
 
 
@@ -235,13 +235,16 @@ def _sandbox_security_settings(raw: object) -> SandboxSecuritySettings:
     if not isinstance(raw, dict):
         return SandboxSecuritySettings()
     security = raw.get("security")
-    if not isinstance(security, dict):
-        return SandboxSecuritySettings()
+    source = security if isinstance(security, dict) else raw
     return SandboxSecuritySettings(
-        deny_tools=_string_tuple(security.get("deny_tools")),
-        ask_tools=_string_tuple(security.get("ask_tools")),
-        allow_tools=_string_tuple(security.get("allow_tools")),
-        restricted_dirs=_string_tuple(security.get("restricted_dirs")),
+        deny_tools=_string_tuple(source.get("deny_tools", source.get("deniedTools"))),
+        ask_tools=_string_tuple(source.get("ask_tools", source.get("askTools"))),
+        allow_tools=_string_tuple(
+            source.get("allow_tools", source.get("allowedTools"))
+        ),
+        restricted_dirs=_string_tuple(
+            source.get("restricted_dirs", source.get("restrictedDirs"))
+        ),
     )
 
 
