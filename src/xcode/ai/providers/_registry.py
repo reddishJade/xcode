@@ -9,6 +9,15 @@ from .faux import FauxProvider
 from .mimo import MiMoProvider
 from .openai import OpenAIChatProvider
 
+__all__ = [
+    "ChatGLMProvider",
+    "DeepSeekProvider",
+    "FauxProvider",
+    "MiMoProvider",
+    "OpenAIChatProvider",
+    "PROVIDER_REGISTRY",
+]
+
 PROVIDER_REGISTRY: dict[str, type] = {
     "openai_chat": OpenAIChatProvider,
     "chatglm_chat": ChatGLMProvider,
