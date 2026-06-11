@@ -141,31 +141,43 @@ class HookManager:
 
 def _harness_event_from_hook(record: HookRecord) -> HarnessEvent:
     metadata = _hook_metadata(record.metadata)
-    if record.event == "pre_tool":
+
+    def _pre_tool() -> PreToolEvent:
         return PreToolEvent(tool=record.tool, input=record.input)
-    if record.event == "post_tool":
-        return PostToolEvent(
-            tool=record.tool,
-            input=record.input,
-            output=record.output,
-        )
-    if record.event == "on_error":
+
+    def _post_tool() -> PostToolEvent:
+        return PostToolEvent(tool=record.tool, input=record.input, output=record.output)
+
+    def _on_error() -> ErrorEvent:
         return ErrorEvent(tool=record.tool, input=record.input, error=record.error)
-    if record.event == "on_compact":
+
+    def _on_compact() -> CompactEvent:
         return CompactEvent(metadata=metadata)
-    if record.event == "before_agent_start":
+
+    def _before_agent_start() -> BeforeAgentStartEvent:
         return BeforeAgentStartEvent(
             question=str(metadata.get("question", "")),
             mode=str(metadata.get("mode", "act")),
             metadata=metadata,
         )
-    if record.event == "before_provider_request":
+
+    def _before_provider_request() -> BeforeProviderRequestEvent:
         return BeforeProviderRequestEvent(
             messages=_hook_metadata_list(metadata.get("messages")),
             tools=_hook_metadata_list(metadata.get("tools")),
             metadata=metadata,
         )
-    return CompactEvent(metadata=metadata)
+
+    _DISPATCH: dict[str, Callable[[], HarnessEvent]] = {
+        "pre_tool": _pre_tool,
+        "post_tool": _post_tool,
+        "on_error": _on_error,
+        "on_compact": _on_compact,
+        "before_agent_start": _before_agent_start,
+        "before_provider_request": _before_provider_request,
+    }
+    builder = _DISPATCH.get(record.event)
+    return builder() if builder is not None else CompactEvent(metadata=metadata)
 
 
 def _hook_metadata(value: object) -> HookMetadata:
