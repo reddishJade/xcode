@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
-type Message = dict[str, Any]
+from xcode.agent.types import ToolArguments
+
+type Message = dict[str, object]
 type StopReason = Literal[
     "end_turn",
     "max_tokens",
@@ -24,7 +26,7 @@ class ToolCall:
 
     id: str
     name: str
-    input: dict[str, Any]
+    input: ToolArguments
 
 
 @dataclass(frozen=True)

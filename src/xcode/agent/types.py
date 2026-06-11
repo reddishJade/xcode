@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+
+type ContentSource = dict[str, object]
+type ToolArguments = dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -22,7 +24,7 @@ class ImageContent:
     """图像内容块。"""
 
     type: str = "image"
-    source: dict[str, Any] | None = None
+    source: ContentSource | None = None
 
 
 @dataclass(frozen=True)
@@ -30,7 +32,7 @@ class FileContent:
     """文件内容块。"""
 
     type: str = "file"
-    source: dict[str, Any] | None = None
+    source: ContentSource | None = None
     file_id: str | None = None
     filename: str | None = None
     file_data: str | None = None
@@ -43,7 +45,7 @@ class ToolCallContent:
     type: str = "tool_call"
     id: str = ""
     name: str = ""
-    arguments: dict[str, Any] | None = None
+    arguments: ToolArguments | None = None
 
 
 @dataclass(frozen=True)
@@ -71,5 +73,5 @@ class ShellCallOutputContent:
 
     type: str = "shell_call_output"
     call_id: str = ""
-    output: list[dict[str, Any]] = field(default_factory=list)
+    output: list[dict[str, object]] = field(default_factory=list)
     max_output_length: int | None = None
