@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
 from xcode.ai.providers.codec import (
     to_chat_messages,
@@ -20,12 +20,15 @@ from xcode.ai.types import StreamOptions
 from xcode.harness.skills import ToolSpec
 
 
+def _make_mock_client(chunks: list | None = None) -> MagicMock:
+    client = MagicMock()
+    client.chat.completions.create.return_value = iter(chunks or [])
+    return client
+
+
 class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
-    @patch("litellm.completion")
-    def test_reasoning_content_and_usage_are_extracted_in_streaming(
-        self, mock_completion
-    ) -> None:
-        mock_completion.return_value = iter(
+    def test_reasoning_content_and_usage_are_extracted_in_streaming(self) -> None:
+        client = _make_mock_client(
             [
                 FakeStreamChunk(reasoning_content="Thinking 1"),
                 FakeStreamChunk(content="Hello"),
@@ -37,6 +40,7 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
             base_url="https://api.deepseek.com",
             model="deepseek-reasoner",
             thinking=True,
+            client=client,
         )
 
         events = list(provider._stream_sync([{"role": "user", "content": "Hi"}], ()))
@@ -113,11 +117,8 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
         self.assertEqual(params["properties"]["text"]["type"], "string")
         self.assertEqual(params["properties"]["items"]["type"], ["array", "null"])
 
-    @patch("litellm.completion")
-    def test_multi_chunk_tool_calls_streaming_concatenation(
-        self, mock_completion
-    ) -> None:
-        mock_completion.return_value = iter(
+    def test_multi_chunk_tool_calls_streaming_concatenation(self) -> None:
+        client = _make_mock_client(
             [
                 FakeStreamChunk(
                     tool_call=FakeStreamToolCall(
@@ -140,6 +141,7 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
             base_url="https://api.deepseek.com",
             model="deepseek-chat",
             thinking=False,
+            client=client,
         )
 
         events = list(
@@ -151,21 +153,15 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
         self.assertEqual(ready_call.calls[0].name, "echo")
         self.assertEqual(ready_call.calls[0].input, {"text": "hi"})
 
-    @patch("litellm.completion")
-    def test_stream_options_injection_via_public_entry(self, mock_completion) -> None:
+    def test_stream_options_injection_via_public_entry(self) -> None:
         """验证 StreamOptions 通过 provider.stream() 注入到请求。"""
-        captured_params: dict[str, Any] = {}
-
-        def capture_completion(**kwargs):
-            captured_params.update(kwargs)
-            return iter([FakeStreamChunk(content="ok")])
-
-        mock_completion.side_effect = capture_completion
+        client = _make_mock_client([FakeStreamChunk(content="ok")])
 
         provider = DeepSeekProvider(
             api_key="ds-key",
             base_url="https://api.deepseek.com",
             model="deepseek-chat",
+            client=client,
         )
 
         async def run_test():
@@ -183,30 +179,24 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
             return events
 
         events = asyncio.run(run_test())
+        kwargs = client.chat.completions.create.call_args.kwargs
 
-        self.assertEqual(captured_params.get("model"), "openai/deepseek-chat")
-        self.assertEqual(captured_params.get("base_url"), "https://api.deepseek.com")
-        self.assertEqual(captured_params.get("api_key"), "override-key")
-        extra_headers = captured_params.get("extra_headers", {})
+        self.assertEqual(kwargs.get("model"), "deepseek-chat")
+        self.assertEqual(kwargs.get("api_key"), "override-key")
+        extra_headers = kwargs.get("extra_headers", {})
         self.assertEqual(extra_headers.get("X-Custom"), "test-header")
         self.assertEqual(extra_headers.get("x-session-id"), "test-session-123")
         self.assertTrue(len(events) > 0)
 
-    @patch("litellm.completion")
-    def test_response_format_passed_to_request(self, mock_completion) -> None:
+    def test_response_format_passed_to_request(self) -> None:
         """验证 response_format 传递到实际请求参数。"""
-        captured_params: dict[str, Any] = {}
-
-        def capture_completion(**kwargs):
-            captured_params.update(kwargs)
-            return iter([FakeStreamChunk(content="ok")])
-
-        mock_completion.side_effect = capture_completion
+        client = _make_mock_client([FakeStreamChunk(content="ok")])
 
         provider = DeepSeekProvider(
             api_key="ds-key",
             base_url="https://api.deepseek.com",
             model="deepseek-chat",
+            client=client,
         )
 
         events = list(
@@ -217,10 +207,9 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(
-            captured_params.get("response_format"), {"type": "json_object"}
-        )
-        messages = captured_params.get("messages", [])
+        kwargs = client.chat.completions.create.call_args.kwargs
+        self.assertEqual(kwargs.get("response_format"), {"type": "json_object"})
+        messages = kwargs.get("messages", [])
         self.assertTrue(len(messages) > 0)
         content = messages[0].get("content", "")
         self.assertIn("json", content.lower())

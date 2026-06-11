@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from typing import Any
 from xcode.ai.events import TextDelta, ToolCallEvent
@@ -23,32 +23,14 @@ from xcode.ai.providers.chatglm import ChatGLMProvider
 from xcode.harness.config import ModelProfileRuntimeConfig
 
 
-# ── 测试辅助：捕获 litellm.completion 参数 ──
-
-_captured_completion_kwargs: dict[str, Any] = {}
+# ── 测试辅助：创建 mock OpenAI 客户端 ──
 
 
-def _mock_completion(**kwargs: Any) -> Any:
-    """模拟 litellm.completion()，捕获参数并返回空流。"""
-    _captured_completion_kwargs.clear()
-    _captured_completion_kwargs.update(kwargs)
-    return iter([])
-
-
-def _mock_completion_with_chunks(chunks: list) -> Any:
-    """返回一个工厂函数，用指定 chunks 模拟 litellm.completion()。"""
-
-    def _factory(**kwargs: Any) -> Any:
-        _captured_completion_kwargs.clear()
-        _captured_completion_kwargs.update(kwargs)
-        return iter(chunks)
-
-    return _factory
-
-
-def _get_captured_kwargs() -> dict[str, Any]:
-    """获取最近一次 litellm.completion() 调用的参数。"""
-    return _captured_completion_kwargs
+def _make_mock_client(chunks: list | None = None) -> MagicMock:
+    """创建 mock openai.OpenAI 客户端，捕获请求参数。"""
+    client = MagicMock()
+    client.chat.completions.create.return_value = iter(chunks or [])
+    return client
 
 
 # ── 流式 chunk 模拟对象 ──
@@ -292,9 +274,8 @@ class XcodeProviderRuntimeTests(unittest.TestCase):
 
 
 class XcodeStructuredProviderTests(unittest.TestCase):
-    @patch("litellm.completion")
-    def test_stream_converts_tool_schema_and_tool_calls(self, mock_completion) -> None:
-        mock_completion.return_value = iter(
+    def test_stream_converts_tool_schema_and_tool_calls(self) -> None:
+        client = _make_mock_client(
             [
                 FakeStreamChunk(
                     tool_call=FakeStreamToolCall(
@@ -313,6 +294,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             thinking=True,
             reasoning_effort=None,
             runtime=ProviderRuntime(),
+            client=client,
         )
         tool = ToolDefinition(
             name="echo",
@@ -335,14 +317,11 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         assert isinstance(tool_call, ToolCallEvent)
         self.assertEqual(tool_call.calls[0].name, "echo")
         self.assertEqual(tool_call.calls[0].input, {"text": "hello"})
-        sent_tool = mock_completion.call_args.kwargs["tools"][0]
+        sent_tool = client.chat.completions.create.call_args.kwargs["tools"][0]
         self.assertEqual(sent_tool["function"]["parameters"], tool.parameters)
 
-    @patch("litellm.completion")
-    def test_stream_converts_tool_results_to_openai_messages(
-        self, mock_completion
-    ) -> None:
-        mock_completion.return_value = iter([FakeStreamChunk(content="done")])
+    def test_stream_converts_tool_results_to_openai_messages(self) -> None:
+        client = _make_mock_client([FakeStreamChunk(content="done")])
         llm = OpenAIChatProvider(
             api_key="test-key",
             base_url="https://api.openai.test/v1",
@@ -350,6 +329,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             thinking=True,
             reasoning_effort=None,
             runtime=ProviderRuntime(),
+            client=client,
         )
 
         events = list(
@@ -381,16 +361,15 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             )
         )
 
-        sent_messages = mock_completion.call_args.kwargs["messages"]
+        sent_messages = client.chat.completions.create.call_args.kwargs["messages"]
         self.assertEqual(sent_messages[0]["role"], "assistant")
         self.assertEqual(sent_messages[1]["role"], "tool")
         self.assertEqual(
             [e for e in events if isinstance(e, TextDelta)][0].chunk, "done"
         )
 
-    @patch("litellm.completion")
-    def test_stream_yields_text_and_tool_call_deltas(self, mock_completion) -> None:
-        mock_completion.return_value = iter(
+    def test_stream_yields_text_and_tool_call_deltas(self) -> None:
+        client = _make_mock_client(
             [
                 FakeStreamChunk(content="he"),
                 FakeStreamChunk(content="llo"),
@@ -417,6 +396,7 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             thinking=True,
             reasoning_effort=None,
             runtime=ProviderRuntime(),
+            client=client,
         )
 
         events = list(llm._stream_sync([{"role": "user", "content": "go"}], ()))
@@ -432,13 +412,13 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         self.assertEqual(events[-1].calls[0].id, "call-1")
         self.assertEqual(events[-1].calls[0].name, "echo")
         self.assertEqual(events[-1].calls[0].input, {"text": "hi"})
-        self.assertTrue(mock_completion.call_args.kwargs["stream"])
+        self.assertTrue(client.chat.completions.create.call_args.kwargs["stream"])
 
 
 # ── ChatGLM 测试 ──
 
 
-def _make_glm_provider(**overrides: Any) -> ChatGLMProvider:
+def _make_glm_provider(client: Any = None, **overrides: Any) -> ChatGLMProvider:
     kwargs: dict[str, Any] = dict(
         api_key="test-key",
         model="glm-4-flash",
@@ -446,6 +426,8 @@ def _make_glm_provider(**overrides: Any) -> ChatGLMProvider:
         clear_thinking=False,
         tool_stream=True,
     )
+    if client is not None:
+        kwargs["client"] = client
     kwargs.update(overrides)
     return ChatGLMProvider(**kwargs)
 
@@ -453,60 +435,52 @@ def _make_glm_provider(**overrides: Any) -> ChatGLMProvider:
 class XcodeChatGLMProviderTests(unittest.TestCase):
     """ChatGLM provider 边界测试：thinking 清理、tool_stream、参数组合。"""
 
-    @patch("litellm.completion")
-    def test_thinking_disabled_sets_extra_body(self, mock_completion) -> None:
+    def test_thinking_disabled_sets_extra_body(self) -> None:
         """thinking=False 时 extra_body 为 disabled。"""
-        mock_completion.return_value = iter([])
-        provider = _make_glm_provider(thinking=False)
+        client = _make_mock_client()
+        provider = _make_glm_provider(client=client, thinking=False)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
         self.assertEqual(extra.get("thinking", {}).get("type"), "disabled")
 
-    @patch("litellm.completion")
-    def test_litellm_uses_openai_compatible_model_and_credentials(
-        self, mock_completion
-    ) -> None:
-        """ChatGLM 裸模型名转为 litellm 可识别的 OpenAI-compatible 标识。"""
-        mock_completion.return_value = iter([])
+    def test_uses_openai_compatible_model_and_credentials(self) -> None:
+        """ChatGLM 参数正确传递到 OpenAI 客户端。"""
+        client = _make_mock_client()
         provider = _make_glm_provider(
+            client=client,
             api_key="glm-key",
             base_url="https://open.bigmodel.cn/api/paas/v4/",
         )
 
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
 
-        kwargs = mock_completion.call_args.kwargs
-        self.assertEqual(kwargs["model"], "openai/glm-4-flash")
-        self.assertEqual(kwargs["api_key"], "glm-key")
-        self.assertEqual(kwargs["base_url"], "https://open.bigmodel.cn/api/paas/v4/")
+        kwargs = client.chat.completions.create.call_args.kwargs
+        self.assertEqual(kwargs["model"], "glm-4-flash")
 
-    @patch("litellm.completion")
-    def test_thinking_enabled_clear_false(self, mock_completion) -> None:
+    def test_thinking_enabled_clear_false(self) -> None:
         """clear_thinking=False 时 extra_body 包含 clear_thinking=false。"""
-        mock_completion.return_value = iter([])
-        provider = _make_glm_provider(clear_thinking=False)
+        client = _make_mock_client()
+        provider = _make_glm_provider(client=client, clear_thinking=False)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
         thinking = extra.get("thinking", {})
         self.assertEqual(thinking.get("type"), "enabled")
         self.assertIs(thinking.get("clear_thinking"), False)
 
-    @patch("litellm.completion")
-    def test_thinking_enabled_clear_true(self, mock_completion) -> None:
+    def test_thinking_enabled_clear_true(self) -> None:
         """clear_thinking=True 时 extra_body 包含 clear_thinking=true。"""
-        mock_completion.return_value = iter([])
-        provider = _make_glm_provider(clear_thinking=True)
+        client = _make_mock_client()
+        provider = _make_glm_provider(client=client, clear_thinking=True)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
         thinking = extra.get("thinking", {})
         self.assertEqual(thinking.get("type"), "enabled")
         self.assertIs(thinking.get("clear_thinking"), True)
 
-    @patch("litellm.completion")
-    def test_turn_level_thinking_override_is_per_request(self, mock_completion) -> None:
+    def test_turn_level_thinking_override_is_per_request(self) -> None:
         """单次请求可覆盖 thinking，不改变 provider 默认值。"""
-        mock_completion.return_value = iter([])
-        provider = _make_glm_provider(thinking=True)
+        client = _make_mock_client()
+        provider = _make_glm_provider(client=client, thinking=True)
 
         list(
             provider._stream_sync(
@@ -515,49 +489,53 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
                 thinking=False,
             )
         )
-        first = mock_completion.call_args.kwargs["extra_body"]["thinking"]
+        first = client.chat.completions.create.call_args.kwargs["extra_body"][
+            "thinking"
+        ]
         self.assertEqual(first["type"], "disabled")
         self.assertTrue(provider.thinking)
 
         list(provider._stream_sync([{"role": "user", "content": "hard"}], ()))
-        second = mock_completion.call_args.kwargs["extra_body"]["thinking"]
+        second = client.chat.completions.create.call_args.kwargs["extra_body"][
+            "thinking"
+        ]
         self.assertEqual(second["type"], "enabled")
 
-    @patch("litellm.completion")
-    def test_structured_output_response_format_is_sent(self, mock_completion) -> None:
+    def test_structured_output_response_format_is_sent(self) -> None:
         """结构化输出透传 response_format。"""
-        mock_completion.return_value = iter([])
-        provider = _make_glm_provider(response_format={"type": "json_object"})
+        client = _make_mock_client()
+        provider = _make_glm_provider(
+            client=client, response_format={"type": "json_object"}
+        )
         list(provider._stream_sync([{"role": "user", "content": "json"}], ()))
 
-        kwargs = mock_completion.call_args.kwargs
+        kwargs = client.chat.completions.create.call_args.kwargs
         self.assertEqual(kwargs["response_format"], {"type": "json_object"})
 
-    @patch("litellm.completion")
-    def test_tool_stream_disabled(self, mock_completion) -> None:
+    def test_tool_stream_disabled(self) -> None:
         """tool_stream=False 时不传 tool_stream 参数。"""
-        mock_completion.return_value = iter([])
-        provider = _make_glm_provider(tool_stream=False)
+        client = _make_mock_client()
+        provider = _make_glm_provider(client=client, tool_stream=False)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
         self.assertNotIn("tool_stream", extra)
 
-    @patch("litellm.completion")
-    def test_tool_stream_enabled_for_supported_model(self, mock_completion) -> None:
+    def test_tool_stream_enabled_for_supported_model(self) -> None:
         """支持的模型开启 tool_stream 时传 tool_stream=true。"""
-        mock_completion.return_value = iter([])
-        provider = _make_glm_provider(model="glm-4.7", tool_stream=True)
+        client = _make_mock_client()
+        provider = _make_glm_provider(client=client, model="glm-4.7", tool_stream=True)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
         self.assertIs(extra.get("tool_stream"), True)
 
-    @patch("litellm.completion")
-    def test_tool_stream_omitted_for_unsupported_model(self, mock_completion) -> None:
+    def test_tool_stream_omitted_for_unsupported_model(self) -> None:
         """不支持的模型不传 tool_stream 参数。"""
-        mock_completion.return_value = iter([])
-        provider = _make_glm_provider(model="glm-4-flash", tool_stream=True)
+        client = _make_mock_client()
+        provider = _make_glm_provider(
+            client=client, model="glm-4-flash", tool_stream=True
+        )
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
         self.assertNotIn("tool_stream", extra)
 
     def test_clean_reasoning_no_tool_loop(self) -> None:
@@ -612,34 +590,33 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         self.assertNotIn("reasoning_content", cleaned[1])
         self.assertNotIn("reasoning_content", cleaned[3])
 
-    @patch("litellm.completion")
-    def test_thinking_true_streams_reasoning(self, mock_completion) -> None:
+    def test_thinking_true_streams_reasoning(self) -> None:
         """thinking=True 时流包含 reasoning delta。"""
         from xcode.ai.events import ReasoningDelta
 
-        mock_completion.return_value = iter(
+        client = _make_mock_client(
             [
                 FakeStreamChunk(content="hello", reasoning="thinking..."),
                 FakeStreamChunk(content=" world"),
             ]
         )
-        provider = _make_glm_provider()
+        provider = _make_glm_provider(client=client)
         events = list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         reasoning_events = [e for e in events if isinstance(e, ReasoningDelta)]
         self.assertEqual(len(reasoning_events), 1)
         self.assertEqual(reasoning_events[0].chunk, "thinking...")
 
-    @patch("litellm.completion")
-    def test_combo_tool_stream_plus_clear_thinking(self, mock_completion) -> None:
+    def test_combo_tool_stream_plus_clear_thinking(self) -> None:
         """tool_stream=True + clear_thinking=True 组合参数正确传递。"""
-        mock_completion.return_value = iter([])
+        client = _make_mock_client()
         provider = _make_glm_provider(
+            client=client,
             model="glm-4.7",
             tool_stream=True,
             clear_thinking=True,
         )
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
-        extra = mock_completion.call_args.kwargs.get("extra_body", {})
+        extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
         self.assertIs(extra["tool_stream"], True)
         self.assertIs(extra["thinking"]["clear_thinking"], True)
 

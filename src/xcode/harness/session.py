@@ -10,17 +10,6 @@ from pathlib import Path
 import shutil
 from typing import Any
 
-from pydantic import BaseModel
-
-
-class _PydanticEncoder(json.JSONEncoder):
-    """处理 pydantic 模型的 JSON 序列化。"""
-
-    def default(self, o: Any) -> Any:
-        if isinstance(o, BaseModel):
-            return o.model_dump()
-        return super().default(o)
-
 
 # 会话摘要字符限制（终端显示和可读性优化）
 SUMMARY_USER_CHARS = 120  # 用户消息摘要：约一行终端显示
@@ -97,10 +86,7 @@ class SessionStore:
                 created_at=datetime.now(UTC).isoformat(timespec="seconds"),
             )
             with self.current_path.open("a", encoding="utf-8") as handle:
-                handle.write(
-                    json.dumps(asdict(record), ensure_ascii=False, cls=_PydanticEncoder)
-                    + "\n"
-                )
+                handle.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
             if record_type == "user":
                 self.ensure_metadata(str(content))
 
@@ -205,7 +191,8 @@ class SessionStore:
                 for record in kept:
                     handle.write(
                         json.dumps(
-                            asdict(record), ensure_ascii=False, cls=_PydanticEncoder
+                            asdict(record),
+                            ensure_ascii=False,
                         )
                         + "\n"
                     )

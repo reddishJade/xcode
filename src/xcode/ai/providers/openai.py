@@ -33,6 +33,7 @@ class OpenAIChatProvider(OpenAICompatProvider):
         reasoning_effort: str | None = None,
         runtime: ProviderRuntime | None = None,
         response_format: dict[str, Any] | None = None,
+        client: Any | None = None,
     ) -> None:
         super().__init__(
             api_key,
@@ -42,6 +43,7 @@ class OpenAIChatProvider(OpenAICompatProvider):
             reasoning_effort=reasoning_effort,
             runtime=runtime,
             transport="openai_chat",
+            client=client,
         )
         self.response_format = response_format
 

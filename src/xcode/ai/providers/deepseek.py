@@ -30,6 +30,7 @@ class DeepSeekProvider(OpenAICompatProvider):
         runtime=None,
         strict_tools: bool = False,
         response_format: dict[str, Any] | None = None,
+        client: Any | None = None,
     ) -> None:
         super().__init__(
             api_key,
@@ -39,6 +40,7 @@ class DeepSeekProvider(OpenAICompatProvider):
             reasoning_effort=reasoning_effort,
             runtime=runtime,
             transport="deepseek_chat",
+            client=client,
         )
         self.strict_tools = strict_tools
         self.response_format = response_format
@@ -97,10 +99,6 @@ class DeepSeekProvider(OpenAICompatProvider):
                 params[k] = v
 
         yield from self._call_chat_api(params, len(api_messages))
-
-    def _completion_model(self, model: str) -> str:
-        """返回 litellm 可识别的 OpenAI-compatible 模型标识。"""
-        return self._openai_compatible_completion_model(model)
 
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]

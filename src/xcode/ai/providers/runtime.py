@@ -26,30 +26,24 @@ API_ERROR_MESSAGES: dict[int, str] = {
 
 
 def classify_api_error(exc: BaseException) -> str:
-    try:
-        from openai import APIStatusError
+    from openai import APIStatusError
 
-        if isinstance(exc, APIStatusError):
-            code = exc.status_code
-            msg = API_ERROR_MESSAGES.get(code)
-            if msg:
-                return f"{msg}（HTTP {code}）：{exc.message}"
-            return f"API 返回异常状态（HTTP {code}）：{exc.message}"
-    except ImportError:
-        pass
+    if isinstance(exc, APIStatusError):
+        code = exc.status_code
+        msg = API_ERROR_MESSAGES.get(code)
+        if msg:
+            return f"{msg}（HTTP {code}）：{exc.message}"
+        return f"API 返回异常状态（HTTP {code}）：{exc.message}"
     return f"请求失败：{exc}"
 
 
 def is_transient_provider_error(exc: BaseException) -> bool:
-    try:
-        from openai import APIStatusError, APITimeoutError, APIConnectionError
+    from openai import APIStatusError, APITimeoutError, APIConnectionError
 
-        if isinstance(exc, (APITimeoutError, APIConnectionError)):
-            return True
-        if isinstance(exc, APIStatusError):
-            return exc.status_code in (429, 500, 502, 503, 529)
-    except ImportError:
-        pass
+    if isinstance(exc, (APITimeoutError, APIConnectionError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in (429, 500, 502, 503, 529)
 
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return True

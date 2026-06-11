@@ -7,14 +7,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import Any
-
-from pydantic import BaseModel, ConfigDict, computed_field
 
 from xcode.ai.types import ToolDefinition
 
 
-class CacheUsage(BaseModel):
+@dataclass(frozen=True)
+class CacheUsage:
     """缓存使用统计。
 
     优先级规则：
@@ -23,18 +23,14 @@ class CacheUsage(BaseModel):
     3. 命中率公式：hit / (hit + miss)，而非 hit / prompt_tokens
     """
 
-    model_config = ConfigDict(frozen=True)
-
     hit_tokens: int = 0
     miss_tokens: int = 0
 
-    @computed_field
     @property
     def total_tokens(self) -> int:
         """缓存总 token 数（命中 + 未命中）。"""
         return self.hit_tokens + self.miss_tokens
 
-    @computed_field
     @property
     def hit_rate(self) -> float:
         """缓存命中率。

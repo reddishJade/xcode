@@ -3,8 +3,6 @@
 DeepSeek、ChatGLM、MiMo 和 OpenAIChat 共享的客户端创建、
 流式调用和指标记录模式提取到此类中。子类只需实现 _stream_sync
 和 provider 专有的参数构建逻辑。
-
-使用 litellm 作为统一的 LLM 调用层，支持所有 OpenAI-compatible API。
 """
 
 from __future__ import annotations
@@ -45,7 +43,13 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         reasoning_effort: str | None = None,
         runtime: ProviderRuntime | None = None,
         transport: str = "openai_chat",
+        client: Any | None = None,
     ) -> None:
+        if client is None:
+            from openai import OpenAI as _OpenAIClient
+
+            client = _OpenAIClient(api_key=api_key, base_url=base_url)
+        self.client = client
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
@@ -103,59 +107,23 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         params: dict[str, Any],
         message_count: int,
     ) -> Iterator[ProviderEvent]:
-        """调用 litellm.completion() 并通过 _intercept_usage 流式返回事件。"""
-        import litellm
-
+        """调用 openai.OpenAI.chat.completions.create 并通过 _intercept_usage 流式返回事件。"""
         opts = getattr(self, "_current_options", None)
-
-        # 构建 litellm 参数
-        completion_params: dict[str, Any] = {
-            "model": self._completion_model(str(params["model"])),
-            "messages": params["messages"],
-            "stream": True,
-            "api_key": self.api_key,
-            "base_url": self.base_url,
-        }
-
-        # 透传标准参数
-        for key in ("tools", "response_format", "reasoning_effort", "max_tokens"):
-            if key in params:
-                completion_params[key] = params[key]
-
-        # extra_body 包含 provider 专有参数
-        if "extra_body" in params:
-            completion_params["extra_body"] = params["extra_body"]
-
-        # stream_options → stream_usage（litellm 格式转换）
-        if "stream_options" in params:
-            completion_params["stream_usage"] = True
-        else:
-            completion_params["stream_usage"] = True
 
         # 请求级覆盖
         if opts:
             if opts.api_key:
-                completion_params["api_key"] = opts.api_key
+                params["api_key"] = opts.api_key
             extra_headers: dict[str, str] = {}
             if opts.session_id:
                 extra_headers["x-session-id"] = opts.session_id
             if opts.headers:
                 extra_headers.update(opts.headers)
             if extra_headers:
-                completion_params["extra_headers"] = extra_headers
+                params["extra_headers"] = extra_headers
 
-        stream = self.runtime.run(lambda: litellm.completion(**completion_params))
+        stream = self.runtime.run(lambda: self.client.chat.completions.create(**params))
         return chat_stream_to_events(self._intercept_stream(stream, message_count))
-
-    def _completion_model(self, model: str) -> str:
-        """返回传给 litellm 的模型标识。"""
-        return model
-
-    def _openai_compatible_completion_model(self, model: str) -> str:
-        """返回 OpenAI-compatible 服务在 litellm 中的模型标识。"""
-        if "/" in model:
-            return model
-        return f"openai/{model}"
 
     # --- Unified thinking abstractions ---
 

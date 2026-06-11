@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import orjson
-from pydantic import BaseModel, ConfigDict, Field
 
 KnownApi = Literal[
     "openai-completions",
@@ -39,10 +39,9 @@ TextVerbosity = Literal["low", "medium", "high"]
 Truncation = Literal["auto", "disabled"]
 
 
-class Cost(BaseModel):
+@dataclass(frozen=True)
+class Cost:
     """LLM 调用成本（美元/百万 token）。"""
-
-    model_config = ConfigDict(frozen=True)
 
     input: float = 0.0
     output: float = 0.0
@@ -51,23 +50,21 @@ class Cost(BaseModel):
     total: float = 0.0
 
 
-class Usage(BaseModel):
+@dataclass(frozen=True)
+class Usage:
     """LLM 调用用量。"""
-
-    model_config = ConfigDict(frozen=True)
 
     input: int = 0
     output: int = 0
     cache_read: int = 0
     cache_write: int = 0
     total_tokens: int = 0
-    cost: Cost = Field(default_factory=Cost)
+    cost: Cost = field(default_factory=Cost)
 
 
-class Model(BaseModel):
+@dataclass(frozen=True)
+class Model:
     """模型元数据。"""
-
-    model_config = ConfigDict(frozen=True)
 
     id: str
     name: str
@@ -77,11 +74,12 @@ class Model(BaseModel):
     reasoning: bool = False
     context_window: int = 0
     max_tokens: int = 0
-    cost: Cost = Field(default_factory=Cost)
+    cost: Cost = field(default_factory=Cost)
     thinking_level_map: dict[str, str | None] | None = None
 
 
-class ThinkingBudgets(BaseModel):
+@dataclass(frozen=True)
+class ThinkingBudgets:
     """Extended thinking token 预算配置。
 
     用于支持 extended thinking 的模型（如 o1/o3/DeepSeek R1），
@@ -100,10 +98,9 @@ class ThinkingBudgets(BaseModel):
     xhigh: int = 0
 
 
-class StreamOptions(BaseModel):
+@dataclass(frozen=True)
+class StreamOptions:
     """单次 provider 请求的可选覆盖参数。"""
-
-    model_config = ConfigDict(frozen=True)
 
     temperature: float | None = None
     max_tokens: int | None = None
@@ -130,10 +127,9 @@ class StreamOptions(BaseModel):
     response_extra_params: dict[str, Any] | None = None
 
 
-class ToolDefinition(BaseModel):
+@dataclass(frozen=True)
+class ToolDefinition:
     """LLM 可见的工具 schema。"""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     description: str

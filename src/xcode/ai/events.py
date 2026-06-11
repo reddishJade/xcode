@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Literal
-
-from pydantic import BaseModel, ConfigDict
 
 type Message = dict[str, Any]
 type StopReason = Literal[
@@ -19,54 +18,48 @@ type StopReason = Literal[
 ]
 
 
-class ToolCall(BaseModel):
+@dataclass(frozen=True)
+class ToolCall:
     """单次工具调用。"""
-
-    model_config = ConfigDict(frozen=True)
 
     id: str
     name: str
     input: dict[str, Any]
 
 
-class TextDelta(BaseModel):
+@dataclass(frozen=True)
+class TextDelta:
     """文本增量。"""
-
-    model_config = ConfigDict(frozen=True)
 
     chunk: str
 
 
-class ToolCallEvent(BaseModel):
+@dataclass(frozen=True)
+class ToolCallEvent:
     """一组工具调用。"""
-
-    model_config = ConfigDict(frozen=True)
 
     calls: list[ToolCall]
 
 
-class UsageUpdate(BaseModel):
+@dataclass(frozen=True)
+class UsageUpdate:
     """token 用量更新。"""
-
-    model_config = ConfigDict(frozen=True)
 
     input_tokens: int
     output_tokens: int
 
 
-class FinalMessage(BaseModel):
+@dataclass(frozen=True)
+class FinalMessage:
     """流式响应终止消息。"""
-
-    model_config = ConfigDict(frozen=True)
 
     content: str
     stop_reason: StopReason
 
 
-class ReasoningDelta(BaseModel):
+@dataclass(frozen=True)
+class ReasoningDelta:
     """推理内容增量。"""
-
-    model_config = ConfigDict(frozen=True)
 
     chunk: str
 

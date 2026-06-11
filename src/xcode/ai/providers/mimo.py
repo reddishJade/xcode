@@ -31,6 +31,7 @@ class MiMoProvider(OpenAICompatProvider):
         model: str = "mimo-v2.5-pro",
         thinking: bool = True,
         runtime=None,
+        client: Any | None = None,
     ) -> None:
         super().__init__(
             api_key,
@@ -39,6 +40,7 @@ class MiMoProvider(OpenAICompatProvider):
             thinking=thinking,
             runtime=runtime,
             transport="mimo_chat",
+            client=client,
         )
 
     def _stream_sync(
@@ -59,10 +61,6 @@ class MiMoProvider(OpenAICompatProvider):
         self._build_thinking_params(params)
 
         yield from self._call_chat_api(params, len(openai_messages))
-
-    def _completion_model(self, model: str) -> str:
-        """返回 litellm 可识别的 OpenAI-compatible 模型标识。"""
-        return self._openai_compatible_completion_model(model)
 
     def _record_usage(self, response, sent_messages: int) -> None:
         """记录 MiMo usage，提取缓存和 reasoning 统计。"""

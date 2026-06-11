@@ -2,29 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
 from xcode.ai.providers.chatglm import ChatGLMProvider
 from xcode.ai.types import StreamOptions
 
 
+def _make_mock_client(chunks: list | None = None) -> MagicMock:
+    client = MagicMock()
+    client.chat.completions.create.return_value = iter(chunks or [])
+    return client
+
+
 class XcodeChatGLMStreamOptionsTests(unittest.TestCase):
-    @patch("litellm.completion")
-    def test_stream_options_injection_via_public_entry(self, mock_completion) -> None:
+    def test_stream_options_injection_via_public_entry(self) -> None:
         """验证 StreamOptions 通过 provider.stream() 注入到 ChatGLM 请求。"""
-        captured_params: dict[str, Any] = {}
-
-        def capture_completion(**kwargs):
-            captured_params.update(kwargs)
-            return iter([FakeStreamChunk(content="ok")])
-
-        mock_completion.side_effect = capture_completion
+        client = _make_mock_client([FakeStreamChunk(content="ok")])
 
         provider = ChatGLMProvider(
             api_key="glm-key",
             base_url="https://open.bigmodel.cn/api/paas/v4/",
             model="glm-4-flash",
+            client=client,
         )
 
         async def run_test():
@@ -42,38 +41,30 @@ class XcodeChatGLMStreamOptionsTests(unittest.TestCase):
             return events
 
         events = asyncio.run(run_test())
+        kwargs = client.chat.completions.create.call_args.kwargs
 
-        self.assertEqual(captured_params.get("api_key"), "override-key")
-        extra_headers = captured_params.get("extra_headers", {})
+        self.assertEqual(kwargs.get("api_key"), "override-key")
+        extra_headers = kwargs.get("extra_headers", {})
         self.assertEqual(extra_headers.get("X-Custom"), "test-header")
         self.assertEqual(extra_headers.get("x-session-id"), "test-session-123")
         self.assertTrue(len(events) > 0)
 
-    @patch("litellm.completion")
-    def test_response_format_from_constructor(self, mock_completion) -> None:
+    def test_response_format_from_constructor(self) -> None:
         """验证构造时传递的 response_format 生效。"""
-        captured_params: dict[str, Any] = {}
-
-        def capture_completion(**kwargs):
-            captured_params.update(kwargs)
-            return iter([FakeStreamChunk(content="ok")])
-
-        mock_completion.side_effect = capture_completion
+        client = _make_mock_client([FakeStreamChunk(content="ok")])
 
         provider = ChatGLMProvider(
             api_key="glm-key",
             base_url="https://open.bigmodel.cn/api/paas/v4/",
             model="glm-4-flash",
             response_format={"type": "json_object"},
+            client=client,
         )
 
-        events = list(
-            provider._stream_sync([{"role": "user", "content": "Hi"}], ())
-        )
+        events = list(provider._stream_sync([{"role": "user", "content": "Hi"}], ()))
 
-        self.assertEqual(
-            captured_params.get("response_format"), {"type": "json_object"}
-        )
+        kwargs = client.chat.completions.create.call_args.kwargs
+        self.assertEqual(kwargs.get("response_format"), {"type": "json_object"})
         self.assertTrue(len(events) > 0)
 
 

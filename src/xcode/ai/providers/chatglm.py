@@ -36,6 +36,7 @@ class ChatGLMProvider(OpenAICompatProvider):
         tool_stream: bool = True,
         response_format: dict[str, Any] | None = None,
         runtime=None,
+        client: Any | None = None,
     ) -> None:
         super().__init__(
             api_key,
@@ -45,6 +46,7 @@ class ChatGLMProvider(OpenAICompatProvider):
             reasoning_effort=None,
             runtime=runtime,
             transport="chatglm_chat",
+            client=client,
         )
         self.clear_thinking = clear_thinking
         self.tool_stream = tool_stream
@@ -124,10 +126,6 @@ class ChatGLMProvider(OpenAICompatProvider):
         thinking_body = cast(dict[str, Any], extra_body.setdefault("thinking", {}))
         thinking_body["clear_thinking"] = self.clear_thinking
         return kwargs
-
-    def _completion_model(self, model: str) -> str:
-        """返回 litellm 可识别的 OpenAI-compatible 模型标识。"""
-        return self._openai_compatible_completion_model(model)
 
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]

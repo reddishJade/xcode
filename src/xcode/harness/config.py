@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+import types
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal
-
-from pydantic import BaseModel
+from typing import Any, Literal, Union, get_origin, get_type_hints
 
 ProviderTransport = Literal[
     "openai_chat",
@@ -35,7 +35,8 @@ DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
 )
 
 
-class AgentConfig(BaseModel):
+@dataclass
+class AgentConfig:
     max_steps: int = 20
     execution_mode: ExecutionMode = "act"
     compact_threshold: int = 0
@@ -45,7 +46,8 @@ class AgentConfig(BaseModel):
     watchdog_repeated_tool_limit: int = 3
 
 
-class RequestHygieneConfig(BaseModel):
+@dataclass
+class RequestHygieneConfig:
     enabled: bool = True
     max_tool_result_bytes: int = 8000
     max_tool_arg_length: int = 1000
@@ -53,7 +55,8 @@ class RequestHygieneConfig(BaseModel):
     keep_tail_lines: int = 50
 
 
-class ModelProfileRuntimeConfig(BaseModel):
+@dataclass
+class ModelProfileRuntimeConfig:
     transport: ProviderTransport = "openai_chat"
     chat_model: str = "deepseek-v4-flash"
     base_url: str = "https://api.deepseek.com"
@@ -65,15 +68,19 @@ class ModelProfileRuntimeConfig(BaseModel):
     response_format: dict[str, Any] | None = None
 
 
-class ProviderRuntimeConfig(BaseModel):
-    model_profiles: dict[str, ModelProfileRuntimeConfig] = {
-        PROFILE_MAIN: ModelProfileRuntimeConfig(),
-        PROFILE_SUBAGENT: ModelProfileRuntimeConfig(),
-        PROFILE_FALLBACK: ModelProfileRuntimeConfig(),
-    }
+@dataclass
+class ProviderRuntimeConfig:
+    model_profiles: dict[str, ModelProfileRuntimeConfig] = field(
+        default_factory=lambda: {
+            PROFILE_MAIN: ModelProfileRuntimeConfig(),
+            PROFILE_SUBAGENT: ModelProfileRuntimeConfig(),
+            PROFILE_FALLBACK: ModelProfileRuntimeConfig(),
+        }
+    )
 
 
-class SecurityRuntimeConfig(BaseModel):
+@dataclass
+class SecurityRuntimeConfig:
     permission_mode: PermissionMode = "normal"
     sandbox_mode: bool = False
     approval_policy: ApprovalPolicy = "high_risk_only"
@@ -100,44 +107,129 @@ class SecurityRuntimeConfig(BaseModel):
         return self.sandbox_mode
 
 
-class ToolsRuntimeConfig(BaseModel):
+@dataclass
+class ToolsRuntimeConfig:
     enabled_groups: tuple[str, ...] = ("core",)
     shell: str = "auto"
 
 
-class SkillsRuntimeConfig(BaseModel):
+@dataclass
+class SkillsRuntimeConfig:
     auto_trigger: bool = True
 
 
-class PromptRuntimeConfig(BaseModel):
+@dataclass
+class PromptRuntimeConfig:
     modules: tuple[str, ...] = DEFAULT_PROMPT_MODULES
 
 
-class PathsRuntimeConfig(BaseModel):
+@dataclass
+class PathsRuntimeConfig:
     sessions_dir: Path | None = None
     skills_dir: Path | None = None
 
 
-class ObservabilityRuntimeConfig(BaseModel):
+@dataclass
+class ObservabilityRuntimeConfig:
     audit_path: Path | None = None
 
 
-class DaemonRuntimeConfig(BaseModel):
+@dataclass
+class DaemonRuntimeConfig:
     enabled: bool = False
     interval_seconds: int = 30
 
 
-class XcodeRuntimeConfig(BaseModel):
-    provider: ProviderRuntimeConfig = ProviderRuntimeConfig()
-    agent: AgentConfig = AgentConfig()
-    tools: ToolsRuntimeConfig = ToolsRuntimeConfig()
-    skills: SkillsRuntimeConfig = SkillsRuntimeConfig()
-    prompt: PromptRuntimeConfig = PromptRuntimeConfig()
-    paths: PathsRuntimeConfig = PathsRuntimeConfig()
-    observability: ObservabilityRuntimeConfig = ObservabilityRuntimeConfig()
-    daemon: DaemonRuntimeConfig = DaemonRuntimeConfig()
-    request_hygiene: RequestHygieneConfig = RequestHygieneConfig()
-    security: SecurityRuntimeConfig = SecurityRuntimeConfig()
+@dataclass
+class XcodeRuntimeConfig:
+    provider: ProviderRuntimeConfig = field(default_factory=ProviderRuntimeConfig)
+    agent: AgentConfig = field(default_factory=AgentConfig)
+    tools: ToolsRuntimeConfig = field(default_factory=ToolsRuntimeConfig)
+    skills: SkillsRuntimeConfig = field(default_factory=SkillsRuntimeConfig)
+    prompt: PromptRuntimeConfig = field(default_factory=PromptRuntimeConfig)
+    paths: PathsRuntimeConfig = field(default_factory=PathsRuntimeConfig)
+    observability: ObservabilityRuntimeConfig = field(
+        default_factory=ObservabilityRuntimeConfig
+    )
+    daemon: DaemonRuntimeConfig = field(default_factory=DaemonRuntimeConfig)
+    request_hygiene: RequestHygieneConfig = field(default_factory=RequestHygieneConfig)
+    security: SecurityRuntimeConfig = field(default_factory=SecurityRuntimeConfig)
+
+
+# ── 序列化 / 反序列化 ──
+
+
+def _config_to_dict(config: XcodeRuntimeConfig) -> dict[str, Any]:
+    """将 XcodeRuntimeConfig 转为可 JSON 序列化的 dict。"""
+
+    def _to_dict(obj: Any) -> Any:
+        if isinstance(obj, Path):
+            return str(obj)
+        if hasattr(obj, "__dataclass_fields__"):
+            return {
+                f.name: _to_dict(getattr(obj, f.name))
+                for f in obj.__dataclass_fields__.values()
+            }
+        if isinstance(obj, dict):
+            return {k: _to_dict(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_to_dict(item) for item in obj]
+        return obj
+
+    return _to_dict(config)
+
+
+def _config_from_dict(data: dict[str, Any]) -> XcodeRuntimeConfig:
+    """从 dict 递归构建 XcodeRuntimeConfig。"""
+
+    def _build(cls: type, d: dict[str, Any]) -> Any:
+        field_types = get_type_hints(cls)
+        kwargs: dict[str, Any] = {}
+        for name, ftype in field_types.items():
+            if name not in d:
+                continue
+            val = d[name]
+            kwargs[name] = _resolve_value(ftype, val)
+        return cls(**kwargs)
+
+    def _resolve_value(ftype: Any, val: Any) -> Any:
+        if val is None:
+            return None
+
+        origin = get_origin(ftype)
+        args = getattr(ftype, "__args__", ())
+
+        # 处理 Union 类型 (如 Path | None, PathsRuntimeConfig | None)
+        if origin is types.UnionType or origin is Union:
+            non_none_args = [a for a in args if a is not type(None)]
+            if non_none_args:
+                return _resolve_value(non_none_args[0], val)
+            return val
+
+        # 处理嵌套 dataclass
+        if hasattr(ftype, "__dataclass_fields__"):
+            return _build(ftype, val)
+
+        # 处理 Path
+        if ftype is Path or (isinstance(ftype, type) and issubclass(ftype, Path)):
+            return Path(val) if val else None
+
+        # 处理元组
+        if origin is tuple:
+            if isinstance(val, list):
+                return tuple(val)
+            return val
+
+        # 处理字典
+        if origin is dict:
+            if args and len(args) >= 2:
+                vtype = args[1]
+                return {k: _resolve_value(vtype, v) for k, v in val.items()}
+            return val
+
+        return val
+
+    return _build(XcodeRuntimeConfig, data)
 
 
 # 配置发现
@@ -170,19 +262,17 @@ def _load_json_config(path: Path | None) -> XcodeRuntimeConfig:
 
 
 def _from_dict_preserving_profiles(data: dict[str, Any]) -> XcodeRuntimeConfig:
-    """从 dict 构造 config，保留 model_profiles 的 profile 继承逻辑。"""
     provider = data.get("provider", {})
     raw_profiles = provider.get("model_profiles", {})
     if isinstance(raw_profiles, dict):
         provider = dict(provider)
         provider["model_profiles"] = _resolve_model_profiles(raw_profiles)
-    return XcodeRuntimeConfig.model_validate({**data, "provider": provider})
+    return _config_from_dict({**data, "provider": provider})
 
 
 def _resolve_model_profiles(
     raw_profiles: dict[str, Any],
 ) -> dict[str, Any]:
-    """解析 model_profiles：继承 main profile 的默认值。"""
     main_raw = raw_profiles.get(PROFILE_MAIN, {})
     resolved: dict[str, Any] = {PROFILE_MAIN: main_raw}
     for name, raw in raw_profiles.items():
@@ -202,16 +292,14 @@ def _resolve_model_profiles(
 def _deep_merge_configs(
     base: XcodeRuntimeConfig, override: XcodeRuntimeConfig
 ) -> XcodeRuntimeConfig:
-    """深度合并两个配置，override 的非默认字段覆盖 base。"""
-    base_dict = base.model_dump()
-    override_dict = override.model_dump()
-    default_dict = XcodeRuntimeConfig().model_dump()
+    base_dict = _config_to_dict(base)
+    override_dict = _config_to_dict(override)
+    default_dict = _config_to_dict(XcodeRuntimeConfig())
     merged = _merge_non_default(base_dict, override_dict, default_dict)
-    return XcodeRuntimeConfig.model_validate(merged)
+    return _config_from_dict(merged)
 
 
 def _merge_non_default(base: dict, override: dict, default: dict) -> dict:
-    """递归合并，只覆盖非默认值。"""
     result = dict(base)
     for key, val in override.items():
         if key not in base:
@@ -242,14 +330,13 @@ def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
         security_updates["approval_policy"] = approval_policy
 
     if security_updates:
-        security = config.security.model_copy(update=security_updates)
-        config = config.model_copy(update={"security": security})
+        security = replace(config.security, **security_updates)
+        config = replace(config, security=security)
 
     return config
 
 
 def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
-    """加载单文件运行时配置（公开 API，用于测试）。"""
     return _load_json_config(path)
 
 
