@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import queue
-from collections.abc import AsyncIterator, Iterator
-from typing import Any
+from collections.abc import AsyncIterator, Coroutine, Iterator, Mapping
+from dataclasses import dataclass
+from typing import Any, TypeVar
 
 from ...agent.messages import convert_to_llm
 from ...agent.messages import AgentMessage, ToolResultMessage
@@ -24,6 +25,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .structured import StructuredAgentEvent
+
+T = TypeVar("T")
 
 
 # ── 消息/块 转换 ──
@@ -94,13 +97,17 @@ def _tool_result_text(content: object) -> str:
     return str(content)
 
 
-def text_from_blocks(blocks: list[dict[str, Any]]) -> str:
+def text_from_blocks(blocks: list[Mapping[str, object]]) -> str:
     parts = []
     for block in blocks:
         if block.get("type") == "text":
-            parts.append(str(block.get("text", "")))
+            text = block.get("text")
+            if text is not None:
+                parts.append(str(text))
         elif "text" in block:
-            parts.append(str(block["text"]))
+            text = block["text"]
+            if text is not None:
+                parts.append(str(text))
     return "".join(parts).strip()
 
 
@@ -123,44 +130,61 @@ def budget_messages_for_provider(
     )
 
 
-def run_coro_sync(coro):
+def run_coro_sync(coro: Coroutine[Any, Any, T]) -> T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    if hasattr(coro, "close"):
-        coro.close()
+    coro.close()
     raise RuntimeError(
         "StructuredAgent.run() cannot be called inside an active event loop; "
         "use await StructuredAgent.run_async() instead."
     )
 
 
+@dataclass(frozen=True)
+class _StreamItem:
+    event: StructuredAgentEvent
+
+
+@dataclass(frozen=True)
+class _StreamError:
+    error: BaseException
+
+
+@dataclass(frozen=True)
+class _StreamDone:
+    pass
+
+
+_StreamMessage = _StreamItem | _StreamError | _StreamDone
+
+
 def aiter_to_sync_iter(
     async_iter: AsyncIterator[StructuredAgentEvent],
     cancellation_token: CancellationToken,
 ) -> Iterator[StructuredAgentEvent]:
-    items: queue.Queue[tuple[str, Any]] = queue.Queue()
+    items: queue.Queue[_StreamMessage] = queue.Queue()
     worker = IsolatedAsyncWorker(name="xcode-sync-stream-worker")
 
     async def consume() -> None:
         try:
             async for event in async_iter:
-                items.put(("item", event))
+                items.put(_StreamItem(event))
         except BaseException as exc:
-            items.put(("error", exc))
+            items.put(_StreamError(exc))
         finally:
-            items.put(("done", None))
+            items.put(_StreamDone())
 
     future = worker.submit(consume())
     try:
         while True:
-            kind, payload = items.get()
-            if kind == "item":
-                yield payload
-            elif kind == "error":
-                raise payload
-            else:
+            message = items.get()
+            if isinstance(message, _StreamItem):
+                yield message.event
+            elif isinstance(message, _StreamError):
+                raise message.error
+            elif isinstance(message, _StreamDone):
                 return
     finally:
         if not future.done():
