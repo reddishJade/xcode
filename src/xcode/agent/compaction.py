@@ -17,11 +17,12 @@ from xcode.agent.messages import (
 
 
 def estimate_tokens_simple(text: str) -> int:
-    """简单 token 估算（4 字符/token）。
+    """简单 token 估算（基于 UTF-8 字节数，约 3 字节/token）。
 
-    仅用于本地快速估算，不精确。
+    仅用于本地快速估算，不精确。实际 token 数以 provider 返回值为准。
+    相比 len//4，基于 UTF-8 字节的估算对中文等多字节内容更准确。
     """
-    return max(1, len(text) // 4)
+    return max(1, len(text.encode("utf-8")) // 3)
 
 
 def estimate_message_tokens(messages: Sequence[AgentMessage]) -> int:
