@@ -13,11 +13,17 @@ from xcode.agent.types import (
     TextContent,
     ThinkingContent,
     ToolCallContent,
+    ToolResultContent,
 )
 
 from .protocols import ContentBlock, ToolResultContentBlock
 
 """Agent 消息类型与消息转换。"""
+
+type UserContent = str | list[TextContent | ImageContent | FileContent]
+type ToolResultMessageContent = (
+    str | list[TextContent | ImageContent | FileContent | ToolResultContent]
+)
 
 # ── 消息类型 ──
 
@@ -32,7 +38,7 @@ class SystemMessage:
 @dataclass
 class UserMessage:
     role: str = "user"
-    content: str | list[TextContent | ImageContent | FileContent] = ""
+    content: UserContent = ""
     timestamp: int = 0
 
 
@@ -55,7 +61,7 @@ class ToolResultMessage:
     role: str = "tool_result"
     tool_call_id: str = ""
     tool_name: str = ""
-    content: str | list[ToolResultContentBlock] = ""
+    content: ToolResultMessageContent = ""
     is_error: bool = False
     timestamp: int = 0
 
@@ -166,6 +172,8 @@ def _tool_result_content_text(content: object) -> str:
                 parts.append(str(item))
             elif isinstance(item, ShellCallOutputContent):
                 parts.append(str(item.output))
+            elif isinstance(item, ToolResultContent):
+                parts.append(item.content)
             else:
                 parts.append(str(item))
         return "".join(parts)
