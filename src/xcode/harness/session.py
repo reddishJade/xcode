@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+from collections.abc import Callable
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
@@ -161,7 +162,13 @@ class SessionStore:
         with self._lock:
             self.current_path = self._new_path()
 
-    def fork_into(self, fork_type: str | None = None) -> SessionMetadata:
+    def _fork_base(
+        self,
+        fork_type: str | None,
+        make_title: Callable[[SessionMetadata], str],
+        make_summary: Callable[[SessionMetadata], str],
+        copy_transcript: bool,
+    ) -> SessionMetadata:
         if fork_type is not None and fork_type not in FORK_TYPES:
             raise ValueError(
                 f"fork_type must be one of {FORK_TYPES}, got {fork_type!r}"
@@ -169,13 +176,13 @@ class SessionStore:
         with self._lock:
             parent = self.ensure_metadata()
             fork_path = self._new_path()
-            if self.current_path.exists():
+            if copy_transcript and self.current_path.exists():
                 shutil.copy2(self.current_path, fork_path)
             now = datetime.now(UTC).isoformat(timespec="seconds")
             meta = SessionMetadata(
                 id=self._session_id(fork_path),
-                title=f"Fork of {parent.title}",
-                summary=parent.summary,
+                title=make_title(parent),
+                summary=make_summary(parent),
                 project_path=parent.project_path,
                 transcript_path=self._relative_transcript_path(fork_path),
                 created_at=now,
@@ -187,31 +194,23 @@ class SessionStore:
             self.current_path = fork_path
             return meta
 
+    def fork_into(self, fork_type: str | None = None) -> SessionMetadata:
+        return self._fork_base(
+            fork_type=fork_type,
+            make_title=lambda p: f"Fork of {p.title}",
+            make_summary=lambda p: p.summary,
+            copy_transcript=True,
+        )
+
     def fork_clean_into(
         self, fork_type: str | None = None, title: str | None = None
     ) -> SessionMetadata:
-        if fork_type is not None and fork_type not in FORK_TYPES:
-            raise ValueError(
-                f"fork_type must be one of {FORK_TYPES}, got {fork_type!r}"
-            )
-        with self._lock:
-            parent = self.ensure_metadata()
-            fork_path = self._new_path()
-            now = datetime.now(UTC).isoformat(timespec="seconds")
-            meta = SessionMetadata(
-                id=self._session_id(fork_path),
-                title=title or f"Clean Fork of {parent.title}",
-                summary="Conversation started (clean fork).",
-                project_path=parent.project_path,
-                transcript_path=self._relative_transcript_path(fork_path),
-                created_at=now,
-                updated_at=now,
-                parent_id=parent.id,
-                fork_type=fork_type,
-            )
-            self._upsert_metadata(meta)
-            self.current_path = fork_path
-            return meta
+        return self._fork_base(
+            fork_type=fork_type,
+            make_title=lambda p: title or f"Clean Fork of {p.title}",
+            make_summary=lambda _: "Conversation started (clean fork).",
+            copy_transcript=False,
+        )
 
     def load_records(self, path: Path | None = None) -> list[SessionRecord]:
         target = path or self.current_path
