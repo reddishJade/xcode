@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from typing import Any, cast
 
 from xcode.ai.events import ProviderEvent
-from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.ai.types import ToolDefinition
 
 from .codec import to_chat_messages, to_chat_tool
 from .openai_compat import OpenAICompatProvider
@@ -55,25 +55,6 @@ class ChatGLMProvider(OpenAICompatProvider):
         self.metrics["prompt_tokens"] = 0
         self.metrics["completion_tokens"] = 0
         self.metrics["total_tokens"] = 0
-
-    async def stream(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[ToolDefinition],
-        options: StreamOptions | None = None,
-        *,
-        response_format: dict[str, Any] | None = None,
-        thinking: bool | None = None,
-        **_kwargs: Any,
-    ) -> AsyncIterator[ProviderEvent]:
-        self._current_options = options
-        for event in self._stream_sync(
-            messages,
-            tuple(tools),
-            response_format=response_format,
-            thinking=thinking,
-        ):
-            yield event
 
     def _stream_sync(
         self,
