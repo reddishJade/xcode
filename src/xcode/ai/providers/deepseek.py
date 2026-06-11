@@ -51,8 +51,6 @@ class DeepSeekProvider(OpenAICompatProvider):
         self,
         messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
-        response_format: dict[str, Any] | None = None,
-        max_tokens: int | None = None,
         **kwargs: Any,
     ) -> Iterator[Any]:
         if self.thinking:
@@ -64,7 +62,8 @@ class DeepSeekProvider(OpenAICompatProvider):
         cleaned_messages = self._clean_reasoning_content(messages)
         api_messages = to_chat_messages(cleaned_messages)
 
-        # 优先使用运行时传递的 response_format，回退到构造时配置
+        response_format = kwargs.pop("response_format", None)
+        max_tokens = kwargs.pop("max_tokens", None)
         effective_format = response_format or self.response_format
         if effective_format and effective_format.get("type") == "json_object":
             api_messages = self._ensure_json_word(api_messages)

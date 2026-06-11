@@ -59,16 +59,14 @@ class ChatGLMProvider(OpenAICompatProvider):
         self,
         messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
-        response_format: dict[str, Any] | None = None,
-        thinking: bool | None = None,
-        **_kwargs: Any,
+        **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
         params = self._chat_kwargs(
             messages,
             tools,
             stream=True,
-            response_format=response_format,
-            thinking=thinking,
+            response_format=kwargs.pop("response_format", None),
+            thinking=kwargs.pop("thinking", None),
         )
         openai_messages = cast(list[dict[str, Any]], params["messages"])
 
