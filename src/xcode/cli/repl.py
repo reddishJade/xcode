@@ -49,7 +49,7 @@ from .repl_tools import (
     summarize_intents,
     tool_intent,
 )
-from xcode.harness.agent_runtime.event_translation import (
+from xcode.harness.agent_runtime.events import (
     AssistantEventBlock,
     AssistantStructuredEvent,
     AssistantToolUseBlock,

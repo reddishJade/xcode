@@ -9,7 +9,7 @@ from .prompting import (
     build_runtime_context_provider,
 )
 from .structured import StructuredAgent
-from .event_translation import StructuredAgentEvent
+from .events import StructuredAgentEvent
 from .result import RunState, StructuredAgentResult
 from .subagent import (
     ManagedSubagentRunner,

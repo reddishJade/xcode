@@ -23,7 +23,7 @@ from xcode.harness.agent_runtime import (
     CancellationToken,
     StructuredAgentResult,
 )
-from xcode.harness.agent_runtime.event_translation import (
+from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
     ReasoningDeltaStructuredEvent,
     TextDeltaStructuredEvent,

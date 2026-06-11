@@ -23,7 +23,7 @@ from xcode.harness.agent_runtime import (
     StructuredAgent,
     StructuredAgentEvent,
 )
-from xcode.harness.agent_runtime.event_translation import FinalStructuredEvent
+from xcode.harness.agent_runtime.events import FinalStructuredEvent
 from xcode.agent.messages import UserMessage
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider

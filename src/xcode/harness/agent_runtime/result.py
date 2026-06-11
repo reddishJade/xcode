@@ -12,7 +12,7 @@ from xcode.ai.events import ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
 from ..config import ExecutionMode
 from .agent_helpers import text_from_blocks, to_dict
-from .event_translation import FinalStructuredEvent
+from .events import FinalStructuredEvent
 from .execution_modes import parse_execution_mode
 
 

@@ -18,7 +18,7 @@ from .repl_rendering import (
     single_line_preview,
 )
 from .tool_catalog import build_tool_catalog
-from xcode.harness.agent_runtime.event_translation import (
+from xcode.harness.agent_runtime.events import (
     AssistantEventBlock,
     AssistantStructuredEvent,
     AssistantTextBlock,

@@ -36,7 +36,7 @@ from xcode.ai.providers.protocol import StreamProvider
 from .agent_helpers import run_coro_sync, aiter_to_sync_iter, to_dict
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
-from .event_translation import (
+from .events import (
     _StreamTranslationState,
     _translate_event,
     StructuredAgentEvent,

@@ -92,7 +92,7 @@ class XcodePlanExitTests(unittest.TestCase):
                 def ask_stream(self, text: str, mode: str | None = None):
                     self.prompts.append(text)
                     from xcode.harness.agent_runtime import StructuredAgentResult
-                    from xcode.harness.agent_runtime.event_translation import (
+                    from xcode.harness.agent_runtime.events import (
                         FinalStructuredEvent,
                     )
 
