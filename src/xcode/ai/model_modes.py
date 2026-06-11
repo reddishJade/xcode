@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-THINKING_LEVELS = frozenset(("off", "minimal", "low", "medium", "high", "xhigh"))
+THINKING_LEVELS = frozenset(
+    ("off", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+)
 
 
 @dataclass(frozen=True)

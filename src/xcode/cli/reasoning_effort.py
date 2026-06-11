@@ -5,13 +5,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 EFFORT_COMMAND_LEVELS: tuple[str, ...] = (
-    "off",
+    "none",
     "minimal",
     "low",
     "medium",
     "high",
     "xhigh",
-    "max",
 )
 
 OPENAI_CHAT_EFFORT_LEVELS: tuple[str, ...] = EFFORT_COMMAND_LEVELS
