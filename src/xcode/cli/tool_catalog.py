@@ -14,9 +14,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 import tempfile
-from typing import Any
 
 from xcode.harness.skills import ToolSpec
+
+type ToolCatalogBuilder = Callable[[], tuple[ToolSpec, ...]]
 from xcode.coding_agent.tools import (
     build_bash_tool,
     build_code_tools,
@@ -27,53 +28,31 @@ from xcode.coding_agent.tools.worktree import WorktreeTaskRunner, build_worktree
 from xcode.harness.task_store import TaskStore, build_task_tools
 
 
-def _builders(base_tmp: Path) -> list[tuple[str, Callable[[], Any]]]:
+def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
     from xcode.harness.skill_loader import SkillLoader, build_skill_loader_tool
 
     return [
-        ("core", lambda: build_file_tools(base_tmp)),
-        ("core", lambda: build_code_tools(base_tmp)),
-        ("core", lambda: (build_bash_tool(base_tmp),)),
-        (
-            "skills",
-            lambda: (
-                build_skill_loader_tool(
-                    SkillLoader(base_tmp / "skills"),
-                ),
+        lambda: build_file_tools(base_tmp),
+        lambda: build_code_tools(base_tmp),
+        lambda: (build_bash_tool(base_tmp),),
+        lambda: (
+            build_skill_loader_tool(
+                SkillLoader(base_tmp / "skills"),
             ),
         ),
-        (
-            "worktree",
-            lambda: build_worktree_tools(
-                WorktreeTaskRunner(base_tmp),
-            ),
+        lambda: build_worktree_tools(
+            WorktreeTaskRunner(base_tmp),
         ),
-        (
-            "tasks",
-            lambda: build_task_tools(
-                TaskStore(base_tmp),
-            ),
+        lambda: build_task_tools(
+            TaskStore(base_tmp),
         ),
-        (
-            "mcp",
-            lambda: _build_mcp_catalog(base_tmp),
-        ),
-        (
-            "mailbox",
-            lambda: _build_mailbox_catalog(base_tmp),
-        ),
-        (
-            "progress",
-            lambda: _build_progress_catalog(base_tmp),
-        ),
+        lambda: _build_mcp_catalog(base_tmp),
+        lambda: _build_mailbox_catalog(base_tmp),
+        lambda: _build_progress_catalog(base_tmp),
     ]
 
 
 def _build_mcp_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    """在 temp dir 中构造空 MCP 配置并扫描工具名。
-
-    副作用限制在临时目录内；空配置下不应连接任何 MCP server。
-    """
     from xcode.experimental.mcp import build_mcp_tools
 
     mcp_config = base_tmp / "mcp_config.json"
@@ -96,16 +75,10 @@ def _build_progress_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
 
 
 def build_tool_catalog() -> dict[str, set[str]]:
-    """扫描所有工具构建函数，返回 {group: set_of_tool_names}。"""
     catalog: dict[str, set[str]] = {}
     with tempfile.TemporaryDirectory(prefix="xcode-catalog-") as temp_dir:
-        for _hint, builder in _builders(Path(temp_dir)):
-            specs = builder()
-            if not isinstance(specs, (tuple, list)):
-                specs = (specs,)
-            for spec in specs:
-                if not isinstance(spec, ToolSpec):
-                    continue
+        for builder in _builders(Path(temp_dir)):
+            for spec in builder():
                 group = spec.group
                 catalog.setdefault(group, set()).add(spec.name)
 
