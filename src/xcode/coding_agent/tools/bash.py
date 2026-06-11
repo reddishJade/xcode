@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from xcode.harness.execution_env import ExecutionEnv, ExecutionResult, SubprocessExecutionEnv
+from xcode.harness.execution_env import (
+    ExecutionEnv,
+    ExecutionResult,
+    SubprocessExecutionEnv,
+)
 from xcode.harness.skills import ToolInput, ToolSpec
 from xcode.harness.observability.permissions import PermissionDecision
 from .output_accumulator import OutputAccumulator

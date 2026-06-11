@@ -85,8 +85,13 @@ class SessionMetadata:
         if not isinstance(payload, dict):
             return None
         required = (
-            "id", "title", "summary", "project_path",
-            "transcript_path", "created_at", "updated_at",
+            "id",
+            "title",
+            "summary",
+            "project_path",
+            "transcript_path",
+            "created_at",
+            "updated_at",
         )
         values: dict[str, str] = {}
         for key in required:
