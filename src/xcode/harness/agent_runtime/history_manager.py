@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import json
-
 from ...agent.messages import (
     AgentMessage,
     AssistantMessage,
@@ -15,8 +13,9 @@ from ...agent.messages import (
     UserMessage,
 )
 from ...agent.protocols import ContentBlock
-from ...agent.types import TextContent, ToolCallContent
+from ...agent.types import TextContent
 from ..config import ExecutionMode
+from .message_codec import _tool_call_from_compacted
 from .result import RunState
 
 type SerializedMessage = dict[str, object]
@@ -102,29 +101,7 @@ def _assistant_from_dict(item: SerializedMessage) -> AssistantMessage:
     tool_calls = item.get("tool_calls", [])
     if isinstance(tool_calls, list):
         for tool_call in tool_calls:
-            parsed = _tool_call_from_dict(tool_call)
+            parsed = _tool_call_from_compacted(tool_call)
             if parsed is not None:
                 content.append(parsed)
     return AssistantMessage(content=content)
-
-
-def _tool_call_from_dict(item: object) -> ToolCallContent | None:
-    if not isinstance(item, dict):
-        return None
-    function = item.get("function", {})
-    if not isinstance(function, dict):
-        return None
-    name = str(function.get("name", "")).strip()
-    tool_call_id = str(item.get("id", "")).strip()
-    if not name or not tool_call_id:
-        return None
-    arguments = function.get("arguments", {})
-    if isinstance(arguments, str):
-        try:
-            decoded = json.loads(arguments)
-        except json.JSONDecodeError:
-            decoded = {}
-        arguments = decoded
-    if not isinstance(arguments, dict):
-        arguments = {}
-    return ToolCallContent(id=tool_call_id, name=name, arguments=arguments)
