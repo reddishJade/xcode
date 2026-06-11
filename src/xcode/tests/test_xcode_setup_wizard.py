@@ -34,7 +34,7 @@ class XcodeSetupWizardTests(unittest.TestCase):
                         select_responses.append(expected_effort)
 
                     with (
-                        patch("questionary.rawselect") as mock_select,
+                        patch("questionary.autocomplete") as mock_select,
                         patch("questionary.text") as mock_text,
                         patch("questionary.confirm") as mock_confirm,
                         patch("builtins.print"),

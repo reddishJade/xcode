@@ -113,7 +113,7 @@ def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
     print()
 
     choices = {preset["label"]: key for key, preset in PROVIDER_PRESETS.items()}
-    provider_label = questionary.rawselect(
+    provider_label = questionary.autocomplete(
         "Select provider:", choices=list(choices)
     ).ask()
     if provider_label is None:
@@ -147,7 +147,7 @@ def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
 
     model_default = preset["default_model"]
     model_choices = [*preset["models"], "Custom (enter name)"]
-    model = questionary.rawselect(
+    model = questionary.autocomplete(
         "Model:", choices=model_choices, default=model_default
     ).ask()
     if model is None:
@@ -167,7 +167,7 @@ def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
     elif provider_key == "chatglm":
         transport = "chatglm_chat"
 
-    thinking_choice = questionary.rawselect(
+    thinking_choice = questionary.autocomplete(
         "Thinking:", choices=["enabled", "disabled"], default="enabled"
     ).ask()
     if thinking_choice is None:
@@ -176,7 +176,7 @@ def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
     reasoning_effort: str | None = None
     if thinking and supports_reasoning_effort(transport):
         effort_default = "high"
-        effort = questionary.rawselect(
+        effort = questionary.autocomplete(
             "Reasoning effort:",
             choices=list(reasoning_effort_levels_for_transport(transport)),
             default=effort_default,
