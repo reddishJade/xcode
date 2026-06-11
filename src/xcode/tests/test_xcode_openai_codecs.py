@@ -4,7 +4,7 @@ import unittest
 from collections.abc import Sequence
 from typing import Any, cast
 
-from xcode.agent.messages import convert_to_llm
+from xcode.agent.message_converter import convert_to_llm
 from xcode.agent.messages import (
     AssistantMessage,
     BranchSummaryMessage,

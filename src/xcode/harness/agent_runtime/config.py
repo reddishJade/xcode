@@ -14,12 +14,12 @@ from ...agent.compaction import (
 )
 from ...agent.config import AgentLoopConfig, AgentLoopTurnUpdate
 from ...agent.history import apply_request_hygiene
+from ...agent.message_converter import convert_to_llm
 from ...agent.messages import (
     AgentMessage,
     AssistantMessage,
     SystemMessage,
     UserMessage,
-    convert_to_llm,
 )
 from ...agent.protocols import AgentTool
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig

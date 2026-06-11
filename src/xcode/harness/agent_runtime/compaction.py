@@ -9,7 +9,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from xcode.agent.messages import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
+from xcode.agent.message_converter import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
 from xcode.agent.config import CompactInstructions
 from ..skills import ToolSpec
 

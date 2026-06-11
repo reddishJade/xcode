@@ -4,7 +4,7 @@ from typing import Any
 import unittest
 
 from xcode.agent.agent_loop import run_agent_loop
-from xcode.agent.messages import convert_to_llm
+from xcode.agent.message_converter import convert_to_llm
 from xcode.agent.config import AgentContext, AgentLoopConfig, AgentLoopResult
 from xcode.agent.events import AgentEvent
 from xcode.agent.messages import AssistantMessage, ToolResultMessage, UserMessage

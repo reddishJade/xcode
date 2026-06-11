@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Coroutine, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from ...agent.messages import convert_to_llm
+from ...agent.message_converter import convert_to_llm
 from ...agent.messages import AgentMessage, ToolResultMessage
 from ...agent.types import ShellCallOutputContent, TextContent
 from .cancellation import CancellationToken
