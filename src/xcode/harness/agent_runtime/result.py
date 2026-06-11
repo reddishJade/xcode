@@ -11,7 +11,7 @@ from xcode.ai.events import ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
 from ..config import ExecutionMode
 from .agent_helpers import text_from_blocks, to_dict
-from .event_translation import StructuredAgentEvent
+from .event_translation import FinalStructuredEvent
 from .execution_modes import parse_execution_mode
 
 
@@ -140,5 +140,5 @@ def _tool_result_text(ctx: AfterToolCallContext) -> str:
     return "".join(c.text for c in ctx.result.content if isinstance(c, TextContent))
 
 
-def _final_event(step: int, result: StructuredAgentResult) -> StructuredAgentEvent:
-    return StructuredAgentEvent("final", step, result)
+def _final_event(step: int, result: StructuredAgentResult) -> FinalStructuredEvent:
+    return FinalStructuredEvent("final", step, result)

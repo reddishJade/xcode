@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
 import json
 import sys
 from typing import Any
@@ -18,6 +17,24 @@ from .repl_rendering import (
     single_line_preview,
 )
 from .tool_catalog import build_tool_catalog
+from xcode.harness.agent_runtime.event_translation import (
+    AssistantEventBlock,
+    AssistantStructuredEvent,
+    AssistantTextBlock,
+    AssistantToolUseBlock,
+    CompactionStructuredEvent,
+    FinalStructuredEvent,
+    MessageStartStructuredEvent,
+    ReasoningDeltaStructuredEvent,
+    StructuredAgentEvent,
+    TextDeltaStructuredEvent,
+    ToolResultBlock,
+    ToolResultStructuredEvent,
+    ToolUpdateStructuredEvent,
+    ToolUseStructuredEvent,
+    TurnEndStructuredEvent,
+)
+from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.skills import ToolInput, ToolSpec, run_tool_result
 
 
@@ -184,15 +201,80 @@ def summarize_intents(intents: list[str]) -> str:
     return single_line_preview(f"{first} and {len(intents) - 1} more")
 
 
-def event_to_dict(event: Any) -> dict[str, Any]:
-    data = event.data
-    if is_dataclass(data) and not isinstance(data, type):
-        payload = asdict(data)
-        if event.type == "final" and "messages" in payload:
-            payload = {k: v for k, v in payload.items() if k != "messages"}
-    else:
-        payload = data
-    return {"type": event.type, "step": event.step, "data": payload}
+def event_to_dict(event: StructuredAgentEvent) -> dict[str, Any]:
+    return {"type": event.type, "step": event.step, "data": _event_payload(event)}
+
+
+def _event_payload(event: StructuredAgentEvent) -> object:
+    if isinstance(event, (TextDeltaStructuredEvent, ReasoningDeltaStructuredEvent)):
+        return event.data
+    if isinstance(event, MessageStartStructuredEvent):
+        return event.data
+    if isinstance(event, TurnEndStructuredEvent):
+        return {
+            "tool_results": [
+                {"tool_call_id": r.tool_call_id, "content": r.content}
+                for r in event.data.tool_results
+            ]
+        }
+    if isinstance(event, AssistantStructuredEvent):
+        return [
+            _assistant_block_payload(block) for block in event.data
+        ]
+    if isinstance(event, ToolUseStructuredEvent):
+        return {"id": event.data.id, "name": event.data.name, "input": event.data.input}
+    if isinstance(event, ToolUpdateStructuredEvent):
+        return {
+            "tool_call_id": event.data.tool_call_id,
+            "tool_name": event.data.tool_name,
+            "partial_result": event.data.partial_result,
+        }
+    if isinstance(event, ToolResultStructuredEvent):
+        return {
+            "tool_use_id": event.data.tool_use_id,
+            "content": event.data.content,
+            "status": event.data.status,
+            "type": "tool_result",
+        }
+    if isinstance(event, CompactionStructuredEvent):
+        return {
+            "messages_removed": event.data.messages_removed,
+            "messages_after": event.data.messages_after,
+            "summary_token_estimate": event.data.summary_token_estimate,
+            "trigger": event.data.trigger,
+        }
+    if isinstance(event, FinalStructuredEvent):
+        return {
+            "answer": event.data.answer,
+            "steps": event.data.steps,
+            "tool_calls": [
+                {"id": c.id, "name": c.name, "input": c.input}
+                for c in event.data.tool_calls
+            ],
+            "stopped_by_limit": event.data.stopped_by_limit,
+            "metrics": event.data.metrics,
+            "stopped_by_watchdog": event.data.stopped_by_watchdog,
+            "watchdog_reason": event.data.watchdog_reason,
+            "needs_follow_up": event.data.needs_follow_up,
+            "last_agent": event.data.last_agent,
+            "run_state": event.data.run_state.to_dict()
+            if event.data.run_state is not None
+            else None,
+        }
+    raise TypeError(f"unsupported event: {type(event).__name__}")
+
+
+def _assistant_block_payload(block: object) -> dict[str, object]:
+    if isinstance(block, AssistantTextBlock):
+        return {"type": "text", "text": block.text}
+    if isinstance(block, AssistantToolUseBlock):
+        return {
+            "type": "tool_use",
+            "id": block.id,
+            "name": block.name,
+            "input": block.input,
+        }
+    raise TypeError(f"unsupported assistant block: {type(block).__name__}")
 
 
 def print_tool_call_rich(label: str, console: Console | None = None) -> None:
