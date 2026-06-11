@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import asdict
 from typing import Any
 
 from rich.console import Console
@@ -209,7 +210,7 @@ def _event_payload(event: StructuredAgentEvent) -> object:
     if isinstance(event, (TextDeltaStructuredEvent, ReasoningDeltaStructuredEvent)):
         return event.data
     if isinstance(event, MessageStartStructuredEvent):
-        return event.data
+        return asdict(event.data) if event.data is not None else None
     if isinstance(event, TurnEndStructuredEvent):
         return {
             "tool_results": [
