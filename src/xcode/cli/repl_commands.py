@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from .app_contract import ReplApp
 from .commands import (
     COMMAND_GROUP_EXIT,
     COMMAND_GROUP_INFO,
@@ -509,7 +508,7 @@ COMMAND_REGISTRY_EXPORT = COMMAND_REGISTRY
 def handle_command(
     command: str,
     store: SessionStore,
-    app: ReplApp,
+    app: object,
     renderer,
     state,
     prompt_session,

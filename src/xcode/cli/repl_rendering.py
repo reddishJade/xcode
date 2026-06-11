@@ -14,7 +14,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .app_contract import ModelControlApp
 from .commands import CommandEntry, PromptLike, PromptText
 from .completion import CommandArgsSuggester, ReplCompleter
 from xcode.harness.skills import ToolSpec
@@ -152,9 +151,11 @@ class LiveReasoningPreview:
         self.live = None
 
 
-def print_startup_banner(app: ModelControlApp, root: Path) -> None:
+def print_startup_banner(app: object, root: Path) -> None:
     console = Console(file=sys.stdout)
-    info = app.get_model_info() if hasattr(app, "get_model_info") else {}
+    get_model_info = getattr(app, "get_model_info", None)
+    raw_info = get_model_info() if callable(get_model_info) else None
+    info: dict[object, object] = raw_info if isinstance(raw_info, dict) else {}
     model = str(info.get("model", "unknown")) if info else "unknown"
     thinking = format_thinking(info.get("thinking") if info else None)
     effort = str(info.get("reasoning_effort") or "not set") if info else "not set"

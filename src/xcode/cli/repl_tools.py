@@ -34,7 +34,6 @@ from xcode.harness.agent_runtime.event_translation import (
     ToolUseStructuredEvent,
     TurnEndStructuredEvent,
 )
-from xcode.harness.app import XcodeApp
 from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.skills import ToolInput, ToolSpec, run_tool_result
 
@@ -42,12 +41,12 @@ from xcode.harness.skills import ToolInput, ToolSpec, run_tool_result
 _console = Console(file=sys.stdout)
 
 
-def run_tool_command(command: str, app: XcodeApp) -> str:
+def run_tool_command(command: str, app: object) -> str:
     parts = command.split(maxsplit=2)
     if len(parts) < 2:
         return "usage: /tool NAME INPUT\n/tool list - show enabled tools by group"
     tool_name = parts[1]
-    registry: tuple[ToolSpec, ...] = app.registry or ()
+    registry: tuple[ToolSpec, ...] = tuple(getattr(app, "registry", ()) or ())
     if tool_name == "list":
         catalog = build_tool_catalog()
         enabled_names = {t.name for t in registry}
@@ -105,7 +104,7 @@ def run_tool_command(command: str, app: XcodeApp) -> str:
     return result.content
 
 
-def run_shell_shortcut(command: str, app: XcodeApp) -> str:
+def run_shell_shortcut(command: str, app: object) -> str:
     shell_command = command[1:].strip()
     if not shell_command:
         return "usage: !COMMAND"

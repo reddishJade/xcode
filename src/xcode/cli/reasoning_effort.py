@@ -14,7 +14,7 @@ EFFORT_COMMAND_LEVELS: tuple[str, ...] = (
 )
 
 OPENAI_CHAT_EFFORT_LEVELS: tuple[str, ...] = EFFORT_COMMAND_LEVELS
-DEEPSEEK_CHAT_EFFORT_LEVELS: tuple[str, ...] = ("high", "max")
+DEEPSEEK_CHAT_EFFORT_LEVELS: tuple[str, ...] = ("off", "high", "max")
 
 SUPPORTED_EFFORT_TRANSPORTS: frozenset[str] = frozenset(
     {"openai_chat", "deepseek_chat"}

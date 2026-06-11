@@ -1,3 +1,5 @@
+"""首次启动配置向导。"""
+
 from __future__ import annotations
 
 import json
@@ -8,13 +10,12 @@ from typing import Any
 
 from dotenv import dotenv_values
 
-JsonObject = dict[str, object]
-
 from .reasoning_effort import (
     reasoning_effort_levels_for_transport,
     supports_reasoning_effort,
 )
 
+JsonObject = dict[str, object]
 CONFIG_FILENAME = "xcode.config.json"
 
 PROVIDER_PRESETS: dict[str, Any] = {

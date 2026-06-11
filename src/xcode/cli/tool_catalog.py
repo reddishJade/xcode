@@ -11,21 +11,21 @@
 
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
-import tempfile
 
 from xcode.harness.skills import ToolSpec
 
-type ToolCatalogBuilder = Callable[[], tuple[ToolSpec, ...]]
 from xcode.coding_agent.tools import (
     build_bash_tool,
     build_code_tools,
     build_file_tools,
 )
-
 from xcode.coding_agent.tools.worktree import WorktreeTaskRunner, build_worktree_tools
 from xcode.harness.task_store import TaskStore, build_task_tools
+
+type ToolCatalogBuilder = Callable[[], tuple[ToolSpec, ...]]
 
 
 def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:

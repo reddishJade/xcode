@@ -7,7 +7,6 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.text import Text
 
-from .app_contract import ReplApp
 from .commands import PromptLike
 from .repl_rendering import CLI_COLOR_ASSISTANT, CLI_COLOR_INFO, CLI_COLOR_USER
 from xcode.agent.protocols import ContentBlock
@@ -69,7 +68,7 @@ def resume_latest(store: SessionStore) -> SessionMetadataView | None:
     return sessions[0]
 
 
-def sync_agent_history(app: ReplApp, store: SessionStore) -> None:
+def sync_agent_history(app: object, store: SessionStore) -> None:
     """把当前 transcript 的文本历史同步到支持该接口的 agent。"""
     agent = getattr(app, "agent", None)
     load_history = getattr(agent, "load_history", None)
@@ -87,7 +86,7 @@ def sync_agent_history(app: ReplApp, store: SessionStore) -> None:
         )
 
 
-def _restore_contextual_state(app: ReplApp, records: list[SessionRecord]) -> None:
+def _restore_contextual_state(app: object, records: list[SessionRecord]) -> None:
     """从 transcript 记录中恢复 ContextualRetrievalState 的活跃上下文。"""
     contextual_state = getattr(app, "contextual_state", None)
     if contextual_state is None:
@@ -188,7 +187,9 @@ def _tool_use_event_from_data(event_data: object) -> _ToolUseTranscriptEvent | N
     return _ToolUseTranscriptEvent(tool_call)
 
 
-def _tool_result_event_from_data(event_data: object) -> _ToolResultTranscriptEvent | None:
+def _tool_result_event_from_data(
+    event_data: object,
+) -> _ToolResultTranscriptEvent | None:
     if not isinstance(event_data, dict):
         return None
     tool_use_id = str(event_data.get("tool_use_id", "")).strip()

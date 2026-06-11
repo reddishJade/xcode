@@ -4,7 +4,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from .app_contract import ReplApp
 from .markdown import MarkdownRenderer
 from xcode.harness.config import ExecutionMode
 from xcode.harness.session import SessionStore
@@ -35,7 +34,7 @@ class ReplState:
 @dataclass
 class CommandContext:
     store: SessionStore
-    app: ReplApp
+    app: object
     renderer: MarkdownRenderer
     state: ReplState
     prompt_session: PromptLike

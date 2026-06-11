@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import queue
+from collections.abc import Callable, Iterator
 from pathlib import Path
 import sys
 import threading
 import time
-from typing import Any
+from typing import Any, cast
 
 from rich.console import Console
 from rich.text import Text
@@ -68,27 +69,26 @@ from xcode.harness.observability import (
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
-from xcode.harness.app import XcodeApp
 from xcode.harness.session import SessionStore
 from xcode.agent.messages import UserMessage
 
 
-def current_effort_options(app: XcodeApp) -> tuple[str, ...]:
+def current_effort_options(app: object) -> tuple[str, ...]:
     """返回当前 active provider 支持的 reasoning effort 选项。"""
-    agent = app.agent
-    provider = agent.provider if agent else None
+    agent = getattr(app, "agent", None)
+    provider = getattr(agent, "provider", None) if agent else None
     provider = getattr(provider, "active_provider", provider)
     transport = getattr(provider, "transport", "") if provider else ""
     return reasoning_effort_levels_for_transport(transport)
 
 
-def current_model_options(app: XcodeApp) -> tuple[str, ...]:
+def current_model_options(app: object) -> tuple[str, ...]:
     """返回所有注册的模型 ID 列表（含当前模型，即便非预设）。"""
     all_models: list[str] = []
     for provider_name in get_providers():
         all_models.extend(m.id for m in get_models(provider_name))
-    agent = app.agent
-    provider = agent.provider if agent else None
+    agent = getattr(app, "agent", None)
+    provider = getattr(agent, "provider", None) if agent else None
     provider = getattr(provider, "active_provider", provider)
     current_model = getattr(provider, "model", "") if provider else ""
     if current_model and current_model not in all_models:
@@ -97,7 +97,7 @@ def current_model_options(app: XcodeApp) -> tuple[str, ...]:
 
 
 def run_repl(
-    app: XcodeApp,
+    app: object,
     sessions_dir: Path,
     prompt_session: PromptLike | None = None,
     resume_latest: bool = False,
@@ -191,7 +191,7 @@ def run_repl(
 
 
 def _run_agent_turn(
-    app: XcodeApp,
+    app: object,
     store: SessionStore,
     markdown_renderer: MarkdownRenderer,
     state: ReplState,
@@ -230,7 +230,13 @@ def _run_agent_turn(
                 )
 
     try:
-        for event in app.ask_stream(agent_text, mode=state.mode):
+        ask_stream = getattr(app, "ask_stream", None)
+        if not callable(ask_stream):
+            raise TypeError("app does not support ask_stream")
+        typed_ask_stream = cast(
+            Callable[..., Iterator[StructuredAgentEvent]], ask_stream
+        )
+        for event in typed_ask_stream(agent_text, mode=state.mode):
             store.append("event", event_to_dict(event))
             turn.handle_event(event)
     except KeyboardInterrupt:

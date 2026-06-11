@@ -21,10 +21,16 @@ from xcode.cli.repl_tools import brief_input
 from xcode.harness.session import SessionStore
 from xcode.harness.agent_runtime import (
     CancellationToken,
-    StructuredAgentEvent,
     StructuredAgentResult,
 )
-from xcode.harness.agent_runtime.event_translation import ToolResultBlock
+from xcode.harness.agent_runtime.event_translation import (
+    FinalStructuredEvent,
+    ReasoningDeltaStructuredEvent,
+    TextDeltaStructuredEvent,
+    ToolResultBlock,
+    ToolResultStructuredEvent,
+    ToolUseStructuredEvent,
+)
 from xcode.ai.events import ToolCall
 from xcode.harness.skills import ToolSpec
 
@@ -908,7 +914,7 @@ class XcodeReplForkTests(unittest.TestCase):
                 self.agent = FakeAgent()
 
             def ask_stream(self, _text: str, mode: str | None = None):
-                yield StructuredAgentEvent(
+                yield FinalStructuredEvent(
                     "final",
                     1,
                     StructuredAgentResult(
@@ -956,12 +962,19 @@ class XcodeReplForkTests(unittest.TestCase):
             )
             records = store.load_records()
             tool_results = [
-                r
-                for r in records
-                if r.type == "event" and r.content.get("type") == "tool_result"
+                record.content
+                for record in records
+                if record.type == "event"
+                and isinstance(record.content, dict)
+                and record.content.get("type") == "tool_result"
             ]
             self.assertEqual(len(tool_results), 1)
-            content = tool_results[0].content["data"]["content"]
+            event_data = tool_results[0].get("data")
+            self.assertIsInstance(event_data, dict)
+            assert isinstance(event_data, dict)
+            content = event_data.get("content")
+            self.assertIsInstance(content, str)
+            assert isinstance(content, str)
             self.assertIn("compacted", content)
             self.assertIn("300 chars removed", content)
 
@@ -1024,9 +1037,9 @@ class InterruptingPrompt:
 
 class FakeApp:
     def ask_stream(self, text: str, mode: str | None = None):
-        yield StructuredAgentEvent("text_delta", 1, text)
-        yield StructuredAgentEvent("text_delta", 1, "!")
-        yield StructuredAgentEvent(
+        yield TextDeltaStructuredEvent("text_delta", 1, text)
+        yield TextDeltaStructuredEvent("text_delta", 1, "!")
+        yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
@@ -1069,9 +1082,9 @@ class QueueModeApp:
         self.agent = QueueModeAgent()
 
     def ask_stream(self, text: str, mode: str | None = None):
-        yield StructuredAgentEvent("text_delta", 1, text)
+        yield TextDeltaStructuredEvent("text_delta", 1, text)
         time.sleep(0.05)
-        yield StructuredAgentEvent(
+        yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
@@ -1085,9 +1098,9 @@ class QueueModeApp:
 
 class FakeMarkdownApp:
     def ask_stream(self, _text: str, mode: str | None = None):
-        yield StructuredAgentEvent("text_delta", 1, "# Title\n\n")
-        yield StructuredAgentEvent("text_delta", 1, "- item")
-        yield StructuredAgentEvent(
+        yield TextDeltaStructuredEvent("text_delta", 1, "# Title\n\n")
+        yield TextDeltaStructuredEvent("text_delta", 1, "- item")
+        yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
@@ -1101,10 +1114,10 @@ class FakeMarkdownApp:
 
 class MultiDeltaApp:
     def ask_stream(self, _text: str, mode: str | None = None):
-        yield StructuredAgentEvent("text_delta", 1, "he")
-        yield StructuredAgentEvent("text_delta", 1, "ll")
-        yield StructuredAgentEvent("text_delta", 1, "o")
-        yield StructuredAgentEvent(
+        yield TextDeltaStructuredEvent("text_delta", 1, "he")
+        yield TextDeltaStructuredEvent("text_delta", 1, "ll")
+        yield TextDeltaStructuredEvent("text_delta", 1, "o")
+        yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
@@ -1118,12 +1131,12 @@ class MultiDeltaApp:
 
 class ReasoningApp:
     def ask_stream(self, _text: str, mode: str | None = None):
-        yield StructuredAgentEvent("reasoning_delta", 1, "one\n")
-        yield StructuredAgentEvent(
+        yield ReasoningDeltaStructuredEvent("reasoning_delta", 1, "one\n")
+        yield ReasoningDeltaStructuredEvent(
             "reasoning_delta", 1, "two\nthree\nfour\nfive six seven eight"
         )
-        yield StructuredAgentEvent("text_delta", 1, "done")
-        yield StructuredAgentEvent(
+        yield TextDeltaStructuredEvent("text_delta", 1, "done")
+        yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
@@ -1137,9 +1150,9 @@ class ReasoningApp:
 
 class TinyReasoningApp:
     def ask_stream(self, _text: str, mode: str | None = None):
-        yield StructuredAgentEvent("reasoning_delta", 1, "ok")
-        yield StructuredAgentEvent("text_delta", 1, "done")
-        yield StructuredAgentEvent(
+        yield ReasoningDeltaStructuredEvent("reasoning_delta", 1, "ok")
+        yield TextDeltaStructuredEvent("text_delta", 1, "done")
+        yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
@@ -1153,7 +1166,7 @@ class TinyReasoningApp:
 
 class ToolEventApp:
     def ask_stream(self, _text: str, mode: str | None = None):
-        yield StructuredAgentEvent(
+        yield ToolUseStructuredEvent(
             "tool_use",
             1,
             ToolCall(
@@ -1162,12 +1175,12 @@ class ToolEventApp:
                 input={"pattern": "mcp", "path": "src/xcode"},
             ),
         )
-        yield StructuredAgentEvent(
+        yield ToolResultStructuredEvent(
             "tool_result",
             1,
             ToolResultBlock("call_1", "ok", "ok"),
         )
-        yield StructuredAgentEvent(
+        yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
@@ -1189,7 +1202,7 @@ class CapturingApp:
     def ask_stream(self, text: str, mode: str | None = None):
         self.seen.append(text)
         self.modes.append(mode)
-        yield StructuredAgentEvent(
+        yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
@@ -1211,7 +1224,7 @@ class ToolApp:
         self.registry = registry
 
     def ask_stream(self, _text: str, mode: str | None = None):
-        yield StructuredAgentEvent(
+        yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
@@ -1259,7 +1272,7 @@ class InterruptingToolApp:
         self.agent = self.Agent()
 
     def ask_stream(self, _text: str, mode: str | None = None):
-        yield StructuredAgentEvent(
+        yield ToolUseStructuredEvent(
             "tool_use",
             1,
             ToolCall(
