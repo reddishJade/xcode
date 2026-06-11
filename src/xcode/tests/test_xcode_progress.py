@@ -5,7 +5,15 @@ import unittest
 from pathlib import Path
 
 from xcode.harness.task_store import TaskStore
-from xcode.harness.task_progress import TaskProgress, build_progress_tools
+from xcode.harness.task_progress import (
+    build_progress_tools,
+    expire_stale_runs,
+    resume_run,
+    resume_task,
+    retry_run,
+    save_progress,
+    start_run,
+)
 
 
 class TestTaskProgress(unittest.TestCase):
@@ -30,7 +38,7 @@ class TestTaskProgress(unittest.TestCase):
         ]
 
         # 3. Save progress
-        TaskProgress.save_progress(self.store, task.id, checklist)
+        save_progress(self.store, task.id, checklist)
 
         # 4. Assert SoT (payload in TaskStore) has been updated under lock protection
         updated_task = self.store.get(task.id)
@@ -49,17 +57,17 @@ class TestTaskProgress(unittest.TestCase):
         self.assertIn("Current Active Step:\n- Implement API", content)
 
         # 6. Assert resume_task fetches SoT checklist perfectly
-        resumed_checklist = TaskProgress.resume_task(self.store, task.id)
+        resumed_checklist = resume_task(self.store, task.id)
         self.assertEqual(resumed_checklist, checklist)
 
     def test_resume_missing_or_unknown_task(self) -> None:
         # Resuming a non-existent task ID should return an empty list and not crash
-        resumed = TaskProgress.resume_task(self.store, 999)
+        resumed = resume_task(self.store, 999)
         self.assertEqual(resumed, [])
 
         # Resuming a task that exists but has no feature_list should return an empty list
         task = self.store.create("Some other task")
-        resumed_empty = TaskProgress.resume_task(self.store, task.id)
+        resumed_empty = resume_task(self.store, task.id)
         self.assertEqual(resumed_empty, [])
 
     def test_progress_tools_basic_flow(self) -> None:
@@ -84,14 +92,14 @@ class TestTaskProgress(unittest.TestCase):
     def test_start_run_dispatches_subtasks_and_can_resume(self) -> None:
         task = self.store.create("Implement orchestration")
 
-        state = TaskProgress.start_run(
+        state = start_run(
             self.store,
             task.id,
             timeout_seconds=60,
             retry_limit=1,
             subtasks=["Write tests", "Update docs"],
         )
-        resumed = TaskProgress.resume_run(self.store, task.id)
+        resumed = resume_run(self.store, task.id)
         child_titles = [self.store.get(task_id).title for task_id in state.subtask_ids]
 
         self.assertEqual(state.status, "running")
@@ -102,7 +110,7 @@ class TestTaskProgress(unittest.TestCase):
 
     def test_expire_stale_runs_releases_claimed_task(self) -> None:
         task = self.store.create("Long task")
-        TaskProgress.start_run(self.store, task.id, timeout_seconds=1, retry_limit=1)
+        start_run(self.store, task.id, timeout_seconds=1, retry_limit=1)
         current = self.store.get(task.id)
         payload = dict(current.payload)
         orchestration = dict(payload["orchestration"])
@@ -110,7 +118,7 @@ class TestTaskProgress(unittest.TestCase):
         payload["orchestration"] = orchestration
         self.store.update(task.id, payload=payload)
 
-        expired = TaskProgress.expire_stale_runs(self.store)
+        expired = expire_stale_runs(self.store)
 
         self.assertEqual(len(expired), 1)
         self.assertEqual(expired[0].status, "timed_out")
@@ -118,13 +126,13 @@ class TestTaskProgress(unittest.TestCase):
 
     def test_retry_run_respects_retry_limit(self) -> None:
         task = self.store.create("Retry task")
-        TaskProgress.start_run(self.store, task.id, timeout_seconds=60, retry_limit=1)
+        start_run(self.store, task.id, timeout_seconds=60, retry_limit=1)
 
-        retried = TaskProgress.retry_run(self.store, task.id)
+        retried = retry_run(self.store, task.id)
 
         self.assertEqual(retried.attempt, 2)
         with self.assertRaises(ValueError):
-            TaskProgress.retry_run(self.store, task.id)
+            retry_run(self.store, task.id)
 
     def test_progress_tools_expose_orchestration_flow(self) -> None:
         task = self.store.create("Tool orchestration")

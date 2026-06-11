@@ -55,7 +55,6 @@ from xcode.ai.providers.factory import (
 if TYPE_CHECKING:
     from xcode.harness.daemon import HeartbeatDaemon
     from xcode.harness.mailbox import AgentMailbox
-    from xcode.harness.task_progress import TaskProgress
 
 EXPERIMENTAL_FEATURE_GROUPS = frozenset(
     {
@@ -70,7 +69,7 @@ EXPERIMENTAL_FEATURE_GROUPS = frozenset(
 class OptInServices:
     daemon: HeartbeatDaemon | None = None
     mailbox: AgentMailbox | None = None
-    progress: type[TaskProgress] | None = None
+    progress: bool = False
 
 
 @dataclass(frozen=True)
@@ -413,11 +412,9 @@ def load_opt_in_services(
         from xcode.harness.mailbox import AgentMailbox
 
         mailbox = AgentMailbox(project_root)
-    progress = None
+    progress = False
     if "progress" in enabled:
-        from xcode.harness.task_progress import TaskProgress
-
-        progress = TaskProgress
+        progress = True
     return OptInServices(daemon=daemon, mailbox=mailbox, progress=progress)
 
 

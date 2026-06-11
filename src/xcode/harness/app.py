@@ -26,7 +26,6 @@ from .assembly import (
 if TYPE_CHECKING:
     from xcode.harness.daemon import HeartbeatDaemon
     from xcode.harness.mailbox import AgentMailbox
-    from xcode.harness.task_progress import TaskProgress
 
 
 @dataclass
@@ -38,7 +37,7 @@ class XcodeApp:
     contextual_state: ContextualRetrievalState | None = None
     daemon: HeartbeatDaemon | None = None
     mailbox: AgentMailbox | None = None
-    progress: type[TaskProgress] | None = None
+    progress: bool = False
     _model_profiles: dict[str, Any] | None = None
     _env_files: tuple[Path, ...] = ()
     _closers: tuple[Callable[[], None], ...] = ()
