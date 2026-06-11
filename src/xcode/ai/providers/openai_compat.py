@@ -78,10 +78,14 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         tools: tuple[ToolDefinition, ...],
         **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
+        self._warn_builtin_tools(tools)
         clean = self._clean_reasoning_content(messages)
         api_messages = to_chat_messages(clean)
         params = self._build_chat_params(api_messages, tools, **kwargs)
         yield from self._call_chat_api(params, len(api_messages))
+
+    def _warn_builtin_tools(self, tools: tuple[ToolDefinition, ...]) -> None:
+        """子类可覆写以对不支持的 builtin 工具发出警告。"""
 
     def _build_chat_params(
         self,
@@ -98,6 +102,7 @@ class OpenAICompatProvider(ProviderMetricsMixin):
             "messages": api_messages,
             "tools": [to_chat_tool(t.name, t.description, t.parameters) for t in tools],
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         self._build_thinking_params(params)
         return params

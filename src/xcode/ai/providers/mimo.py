@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import Any
 
-from xcode.ai.types import ToolDefinition
-
-from .codec import to_chat_messages, to_chat_tool
 from .openai_compat import OpenAICompatProvider
 
 """Xiaomi MiMo provider（兼容 OpenAI Chat API，带 reasoning_content 支持）。
@@ -42,25 +38,6 @@ class MiMoProvider(OpenAICompatProvider):
             transport="mimo_chat",
             client=client,
         )
-
-    def _stream_sync(
-        self,
-        messages: list[dict[str, Any]],
-        tools: tuple[ToolDefinition, ...],
-        **_kwargs: Any,
-    ) -> Iterator[Any]:
-        openai_messages = to_chat_messages(messages)
-
-        params: dict[str, object] = {
-            "model": self.model,
-            "messages": openai_messages,
-            "tools": [to_chat_tool(t.name, t.description, t.parameters) for t in tools],
-            "stream": True,
-        }
-
-        self._build_thinking_params(params)
-
-        yield from self._call_chat_api(params, len(openai_messages))
 
     def _record_usage(self, response, sent_messages: int) -> None:
         """记录 MiMo usage，提取缓存和 reasoning 统计。"""

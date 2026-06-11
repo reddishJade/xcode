@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
 from typing import Any
 
-from xcode.ai.events import ProviderEvent
 from xcode.ai.types import ToolDefinition
 
-from .codec import to_chat_messages, to_chat_tool
 from .openai_compat import OpenAICompatProvider
 from .runtime import ProviderRuntime
 
@@ -47,35 +44,21 @@ class OpenAIChatProvider(OpenAICompatProvider):
         )
         self.response_format = response_format
 
-    def _stream_sync(
+    def _build_chat_params(
         self,
-        messages: list[dict[str, Any]],
+        api_messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
-        response_format: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Iterator[ProviderEvent]:
-        chat_messages = to_chat_messages(messages)
-        _warn_chat_builtin_tools(tools)
-        params: dict[str, object] = {
-            "model": self.model,
-            "messages": chat_messages,
-            "tools": [
-                to_chat_tool(
-                    t.name,
-                    t.description,
-                    t.parameters,
-                )
-                for t in tools
-            ],
-            "stream": True,
-            "stream_options": {"include_usage": True},
-        }
-        effective_format = response_format or self.response_format
+    ) -> dict[str, Any]:
+        params = super()._build_chat_params(api_messages, tools)
+        effective_format = kwargs.get("response_format") or self.response_format
         if effective_format:
             params["response_format"] = effective_format
         self._build_openai_reasoning_params(params)
+        return params
 
-        yield from self._call_chat_api(params, len(chat_messages))
+    def _warn_builtin_tools(self, tools: tuple[ToolDefinition, ...]) -> None:
+        _warn_chat_builtin_tools(tools)
 
     def _build_openai_reasoning_params(self, params: dict[str, object]) -> None:
         """写入官方 OpenAI Chat Completions reasoning 参数。"""
