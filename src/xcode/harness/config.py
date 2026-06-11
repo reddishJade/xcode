@@ -199,9 +199,14 @@ def _config_from_dict(data: dict[str, Any]) -> XcodeRuntimeConfig:
         origin = get_origin(ftype)
         args = getattr(ftype, "__args__", ())
 
-        # 处理 Union 类型 (如 Path | None, PathsRuntimeConfig | None)
+        # 处理 Union 类型 (如 Path | None, str | int, PathsRuntimeConfig | None)
         if origin is types.UnionType or origin is Union:
             non_none_args = [a for a in args if a is not type(None)]
+            for candidate in non_none_args:
+                try:
+                    return _resolve_value(candidate, val)
+                except (TypeError, ValueError):
+                    continue
             if non_none_args:
                 return _resolve_value(non_none_args[0], val)
             return val
