@@ -165,9 +165,12 @@ def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
     elif provider_key == "chatglm":
         transport = "chatglm_chat"
 
-    thinking = questionary.confirm("Enable thinking?", default=True).ask()
-    if thinking is None:
+    thinking_choice = questionary.select(
+        "Thinking:", choices=["enabled", "disabled"], default="enabled"
+    ).ask()
+    if thinking_choice is None:
         return ("cancelled", None)
+    thinking = thinking_choice == "enabled"
     reasoning_effort: str | None = None
     if thinking and supports_reasoning_effort(transport):
         effort_default = "high"
