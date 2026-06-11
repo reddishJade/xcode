@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import logging
-from typing import Any, Literal
+from typing import Literal
 
 from blinker import Signal
+
+from ..session import JsonValue
 
 """类型安全的执行框架事件钩子系统。"""
 
@@ -21,6 +23,7 @@ HookEvent = Literal[
 ]
 HookCallback = Callable[["HookRecord"], None]
 HarnessCallback = Callable[["HarnessEvent"], None]
+type HookMetadata = dict[str, JsonValue]
 
 _HOOK_EVENTS: tuple[HookEvent, ...] = (
     "pre_tool",
@@ -39,7 +42,7 @@ class HookRecord:
     input: str = ""
     output: str = ""
     error: str = ""
-    metadata: dict[str, Any] | None = None
+    metadata: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -76,7 +79,7 @@ class CompactEvent:
     """上下文压缩事件。"""
 
     type: Literal["on_compact"] = "on_compact"
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: HookMetadata = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -86,7 +89,7 @@ class BeforeAgentStartEvent:
     type: Literal["before_agent_start"] = "before_agent_start"
     question: str = ""
     mode: str = "act"
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: HookMetadata = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -94,9 +97,9 @@ class BeforeProviderRequestEvent:
     """Provider 请求前事件。"""
 
     type: Literal["before_provider_request"] = "before_provider_request"
-    messages: list[dict[str, Any]] = field(default_factory=list)
-    tools: list[dict[str, Any]] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    messages: list[HookMetadata] = field(default_factory=list)
+    tools: list[HookMetadata] = field(default_factory=list)
+    metadata: HookMetadata = field(default_factory=dict)
 
 
 type HarnessEvent = (
@@ -130,19 +133,14 @@ class HookManager:
     def unsubscribe(self, event: HookEvent, callback: HarnessCallback) -> None:
         self._subscribed[event].disconnect(callback)
 
-    def emit(self, record: HookRecord) -> list[Any]:
-        results: list[Any] = [
-            rv for _receiver, rv in self._registered[record.event].send(record)
-        ]
+    def emit(self, record: HookRecord) -> None:
+        self._registered[record.event].send(record)
         converted = _harness_event_from_hook(record)
-        results.extend(
-            rv for _receiver, rv in self._subscribed[record.event].send(converted)
-        )
-        return results
+        self._subscribed[record.event].send(converted)
 
 
 def _harness_event_from_hook(record: HookRecord) -> HarnessEvent:
-    metadata = record.metadata or {}
+    metadata = _hook_metadata(record.metadata)
     if record.event == "pre_tool":
         return PreToolEvent(tool=record.tool, input=record.input)
     if record.event == "post_tool":
@@ -163,14 +161,30 @@ def _harness_event_from_hook(record: HookRecord) -> HarnessEvent:
         )
     if record.event == "before_provider_request":
         return BeforeProviderRequestEvent(
-            messages=_dict_list(metadata.get("messages")),
-            tools=_dict_list(metadata.get("tools")),
+            messages=_hook_metadata_list(metadata.get("messages")),
+            tools=_hook_metadata_list(metadata.get("tools")),
             metadata=metadata,
         )
     return CompactEvent(metadata=metadata)
 
 
-def _dict_list(value: object) -> list[dict[str, Any]]:
+def _hook_metadata(value: object) -> HookMetadata:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): _json_value(item) for key, item in value.items()}
+
+
+def _hook_metadata_list(value: object) -> list[HookMetadata]:
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, dict)]
+    return [_hook_metadata(item) for item in value if isinstance(item, Mapping)]
+
+
+def _json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    return str(value)
