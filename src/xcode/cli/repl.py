@@ -31,6 +31,7 @@ from .repl_rendering import (
     single_line_preview,
 )
 from .reasoning_effort import reasoning_effort_levels_for_transport
+from xcode.ai.registry import get_models, get_providers
 from .repl_sessions import (
     print_saved_conversation,
     resume_interactively,
@@ -63,6 +64,19 @@ def current_effort_options(app: Any) -> tuple[str, ...]:
     return reasoning_effort_levels_for_transport(transport)
 
 
+def current_model_options(app: Any) -> tuple[str, ...]:
+    """返回所有注册的模型 ID 列表（含当前模型，即便非预设）。"""
+    all_models: list[str] = []
+    for provider_name in get_providers():
+        all_models.extend(m.id for m in get_models(provider_name))
+    provider = getattr(getattr(app, "agent", None), "provider", None)
+    provider = getattr(provider, "active_provider", provider)
+    current_model = getattr(provider, "model", "") if provider else ""
+    if current_model and current_model not in all_models:
+        all_models.append(current_model)
+    return tuple(all_models)
+
+
 def run_repl(
     app: Any,
     sessions_dir: Path,
@@ -81,6 +95,7 @@ def run_repl(
         registry,
         COMMAND_NAMES,
         lambda: current_effort_options(app),
+        lambda: current_model_options(app),
     )
     state = ReplState()
     session_policy = SessionPermissionPolicy()
