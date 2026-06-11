@@ -23,12 +23,6 @@ from .observability import (
 )
 from .session import JsonValue
 
-"""工具注册表与 HITL 执行门禁。
-
-`ToolSpec` 描述工具能力，dispatch map 根据工具名找到 handler。HITL 在执行
-handler 前根据 risk 字段和 permission policy 决定是否需要 approval callback。
-"""
-
 ToolInput = dict[str, Any]
 type ToolMetadataValue = JsonValue | list[ShellCallOutputContent]
 type ToolMetadata = dict[str, ToolMetadataValue]
