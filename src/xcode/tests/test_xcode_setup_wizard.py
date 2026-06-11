@@ -51,6 +51,13 @@ class XcodeSetupWizardTests(unittest.TestCase):
 
                         run_setup_wizard(Path(temp_dir))
 
+                    model_select_kwargs = mock_select.call_args_list[1].kwargs
+                    self.assertNotIn("default", model_select_kwargs)
+                    self.assertEqual(
+                        model_select_kwargs["choices"][0],
+                        preset["default_model"],
+                    )
+
                     data = json.loads(path.read_text(encoding="utf-8"))
                     profile = data["provider"]["model_profiles"]["main"]
                     transport = profile["transport"]

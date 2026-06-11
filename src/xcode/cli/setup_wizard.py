@@ -101,7 +101,7 @@ def has_valid_config(project_root: Path) -> bool:
 
 
 def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
-    """首次启动配置向导。返回 True 表示已保存配置，False 表示取消。"""
+    """首次启动配置向导。返回状态和临时配置路径。"""
     import questionary
 
     print()
@@ -145,9 +145,7 @@ def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
 
     model_default = preset["default_model"]
     model_choices = [*preset["models"], "Custom (enter name)"]
-    model = questionary.select(
-        "Model:", choices=model_choices, default=model_default
-    ).ask()
+    model = questionary.select("Model:", choices=model_choices).ask()
     if model is None:
         return ("cancelled", None)
     if model == "Custom (enter name)":
