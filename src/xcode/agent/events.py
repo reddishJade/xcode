@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal
 
 from .messages import AgentMessage, ToolResultMessage
+from .protocols import AgentToolResult
+from .types import ToolArguments
 
 """Agent 事件类型。"""
 
@@ -70,7 +72,7 @@ class ToolExecutionStartEvent:
     type: str = "tool_execution_start"
     tool_call_id: str = ""
     tool_name: str = ""
-    args: Any = None
+    args: ToolArguments = field(default_factory=dict)
 
 
 @dataclass
@@ -80,8 +82,8 @@ class ToolExecutionUpdateEvent:
     type: str = "tool_execution_update"
     tool_call_id: str = ""
     tool_name: str = ""
-    args: Any = None
-    partial_result: Any = None
+    args: ToolArguments = field(default_factory=dict)
+    partial_result: AgentToolResult | None = None
 
 
 @dataclass

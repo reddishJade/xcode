@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
 from xcode.agent.types import (
     FileContent,
@@ -9,6 +9,7 @@ from xcode.agent.types import (
     ShellCallOutputContent,
     TextContent,
     ThinkingContent,
+    ToolArguments,
     ToolCallContent,
 )
 
@@ -16,6 +17,7 @@ from xcode.agent.types import (
 
 type QueueMode = Literal["all", "one-at-a-time"]
 type ToolExecutionMode = Literal["sequential", "parallel"]
+type ToolResultDetails = object
 
 type ContentBlock = (
     TextContent | ImageContent | FileContent | ToolCallContent | ThinkingContent
@@ -27,14 +29,14 @@ type ToolResultContentBlock = (
 
 class AgentToolResult:
     content: list[ToolResultContentBlock]
-    details: Any | None = None
+    details: ToolResultDetails | None = None
     is_error: bool = False
     terminate: bool = False
 
     def __init__(
         self,
         content: list[ToolResultContentBlock] | None = None,
-        details: Any | None = None,
+        details: ToolResultDetails | None = None,
         is_error: bool = False,
         terminate: bool = False,
     ) -> None:
@@ -55,17 +57,28 @@ class CancellationSignal(Protocol):
 
 
 class AgentTool(Protocol):
-    name: str
-    label: str
-    description: str
-    parameters: dict[str, Any]
-    execution_mode: ToolExecutionMode | None = None
-    examples: list[dict[str, Any]] = []
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def label(self) -> str: ...
+
+    @property
+    def description(self) -> str: ...
+
+    @property
+    def parameters(self) -> dict[str, object]: ...
+
+    @property
+    def execution_mode(self) -> ToolExecutionMode | None: ...
+
+    @property
+    def examples(self) -> list[dict[str, object]]: ...
 
     async def execute(
         self,
         tool_call_id: str,
-        params: dict[str, Any],
+        params: ToolArguments,
         signal: CancellationSignal | None = None,
         on_update: ToolUpdateCallback | None = None,
     ) -> AgentToolResult: ...
