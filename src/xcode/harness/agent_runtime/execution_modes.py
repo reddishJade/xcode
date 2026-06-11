@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Protocol
 
 from xcode.ai.events import ToolCall
 from ..config import ExecutionMode
@@ -39,6 +40,24 @@ REVIEW_BASH_PREFIXES = (
 )
 
 
+@dataclass(frozen=True)
+class ReviewCommand:
+    text: str
+
+    @classmethod
+    def from_tool_input(cls, action_input: dict[str, object]) -> "ReviewCommand":
+        command = action_input.get("command")
+        if command is None:
+            return cls(text="")
+        return cls(text=str(command).lower().strip())
+
+    def is_read_only_inspection(self) -> bool:
+        return any(
+            self.text == prefix or self.text.startswith(prefix + " ")
+            for prefix in REVIEW_BASH_PREFIXES
+        )
+
+
 class PlanPolicy:
     def filter_tools(self, tools: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]:
         return tuple(tool for tool in tools if tool.name in PLAN_TOOL_NAMES)
@@ -66,6 +85,20 @@ class ActPolicy:
 
     def check_call(self, call: ToolCall) -> PermissionDecision:
         return "allow"
+
+
+def parse_execution_mode(value: object) -> ExecutionMode | None:
+    if not isinstance(value, str):
+        return None
+    match value:
+        case "plan":
+            return "plan"
+        case "review":
+            return "review"
+        case "act":
+            return "act"
+        case _:
+            return None
 
 
 def policy_for_mode(mode: ExecutionMode) -> ExecutionPolicy:
@@ -101,18 +134,5 @@ def mode_notice(mode: ExecutionMode) -> str:
     return ""
 
 
-def _is_review_bash_allowed(action_input: Any) -> bool:
-    command = _command_from_tool_input(action_input).lower().strip()
-    return any(
-        command == prefix or command.startswith(prefix + " ")
-        for prefix in REVIEW_BASH_PREFIXES
-    )
-
-
-def _command_from_tool_input(action_input: Any) -> str:
-    if isinstance(action_input, dict):
-        command = action_input.get("command")
-        return "" if command is None else str(command)
-    if action_input is None:
-        return ""
-    return str(action_input)
+def _is_review_bash_allowed(action_input: dict[str, object]) -> bool:
+    return ReviewCommand.from_tool_input(action_input).is_read_only_inspection()
