@@ -75,6 +75,3 @@ def should_clear_read_history(
     设计原因：避免"编辑后复读"被误判为重复调用。
     """
     return any(is_file_mutation_tool(c.name) for c in new_calls)
-
-
-

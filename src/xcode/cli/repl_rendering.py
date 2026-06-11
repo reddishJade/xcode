@@ -175,6 +175,7 @@ def create_prompt_session(
     registry: tuple[ToolSpec, ...] = (),
     command_names: tuple[str, ...] = (),
     effort_options: Iterable[str] | Callable[[], Iterable[str]] = (),
+    model_options: Iterable[str] | Callable[[], Iterable[str]] = (),
 ) -> PromptLike:
     try:
         from prompt_toolkit import PromptSession
@@ -213,6 +214,7 @@ def create_prompt_session(
         registry,
         command_names,
         effort_options,
+        model_options,
     )
 
     history = None

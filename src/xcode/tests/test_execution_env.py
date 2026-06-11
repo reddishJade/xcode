@@ -125,6 +125,5 @@ class TestBashWithMockEnv(unittest.TestCase):
             self.assertIn("exit code: 42", output)
 
 
-
 if __name__ == "__main__":
     unittest.main()

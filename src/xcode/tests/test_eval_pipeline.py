@@ -405,7 +405,9 @@ class EvalPipelineTests(unittest.TestCase):
 def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
     responses: list[list[ProviderEvent]] = [
         [
-            ToolCallEvent(calls=[ToolCall(id="a", name="echo", input={"input": "hello"})]),
+            ToolCallEvent(
+                calls=[ToolCall(id="a", name="echo", input={"input": "hello"})]
+            ),
             FinalMessage(content="", stop_reason="end_turn"),
         ],
         [TextDelta(chunk="finished"), FinalMessage(content="", stop_reason="end_turn")],
@@ -446,7 +448,13 @@ def _editing_app(project_root: Path) -> XcodeApp:
     tool = ToolSpec("edit_file", "Edit file.", "text", edit_file)
     responses: list[list[ProviderEvent]] = [
         [
-            ToolCallEvent(calls=[ToolCall(id="edit", name="edit_file", input={"path": "math_utils.py"})]),
+            ToolCallEvent(
+                calls=[
+                    ToolCall(
+                        id="edit", name="edit_file", input={"path": "math_utils.py"}
+                    )
+                ]
+            ),
             FinalMessage(content="", stop_reason="end_turn"),
         ],
         [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
@@ -470,7 +478,11 @@ def _validation_app(project_root: Path) -> XcodeApp:
     tool = ToolSpec("write_file", "Write validation file.", "text", write_ok)
     responses: list[list[ProviderEvent]] = [
         [
-            ToolCallEvent(calls=[ToolCall(id="write", name="write_file", input={"path": "ok.txt"})]),
+            ToolCallEvent(
+                calls=[
+                    ToolCall(id="write", name="write_file", input={"path": "ok.txt"})
+                ]
+            ),
             FinalMessage(content="", stop_reason="end_turn"),
         ],
         [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],

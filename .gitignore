@@ -1,6 +1,7 @@
 .antigravitycli/
 .claude/
 .crush/
+.codex/
 .env
 .local/
 .pytest_cache/

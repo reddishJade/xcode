@@ -313,7 +313,14 @@ def _collect_model_patch(project_root: Path | None) -> str:
     return completed.stdout
 
 
-_NUMERIC_FIELDS = ("llm_calls", "estimated_prompt_tokens", "model_total_ms", "tool_calls", "tool_errors", "steps")
+_NUMERIC_FIELDS = (
+    "llm_calls",
+    "estimated_prompt_tokens",
+    "model_total_ms",
+    "tool_calls",
+    "tool_errors",
+    "steps",
+)
 
 
 def _extract_agent_metrics(events: list[StructuredAgentEvent]) -> dict[str, Any]:
@@ -360,6 +367,7 @@ def _build_run_metrics(
         "passed_trials": passed,
     }
     from collections import defaultdict
+
     task_trials: dict[str, list[bool]] = defaultdict(list)
     for t in trials:
         task_trials[t.task_id].append(t.success)
@@ -378,7 +386,9 @@ def _build_run_metrics(
         if pass_at_k_rates
         else 0.0
     )
-    metrics["pass^k_rate"] = round(pass_pow_k_count / len(task_trials), 4) if task_trials else 0.0
+    metrics["pass^k_rate"] = (
+        round(pass_pow_k_count / len(task_trials), 4) if task_trials else 0.0
+    )
     total_llm = 0
     total_tokens = 0
     total_model_ms = 0.0
@@ -427,8 +437,7 @@ def _build_run_metrics(
             for g in t.graders:
                 task_graders[t.task_id].append(g.passed)
         metrics["per_task_grader_rate"] = {
-            tid: round(sum(v) / len(v), 4)
-            for tid, v in sorted(task_graders.items())
+            tid: round(sum(v) / len(v), 4) for tid, v in sorted(task_graders.items())
         }
     return metrics
 
@@ -441,6 +450,4 @@ def _unbiased_pass_at_k(sample_count: int, correct_count: int, k: int) -> float:
         return 0.0
     if sample_count - correct_count < k:
         return 1.0
-    return 1.0 - math.comb(sample_count - correct_count, k) / math.comb(
-        sample_count, k
-    )
+    return 1.0 - math.comb(sample_count - correct_count, k) / math.comb(sample_count, k)

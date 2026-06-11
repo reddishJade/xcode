@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # 输出限制：平衡 LLM 上下文窗口利用率与响应速度
-DEFAULT_MAX_LINES = 2000           # 默认行数限制：约 100K tokens
-DEFAULT_MAX_BYTES = 50 * 1024      # 默认字节限制：50KB
-GREP_MAX_LINE_LENGTH = 500         # grep 单行限制：避免二进制文件污染输出
+DEFAULT_MAX_LINES = 2000  # 默认行数限制：约 100K tokens
+DEFAULT_MAX_BYTES = 50 * 1024  # 默认字节限制：50KB
+GREP_MAX_LINE_LENGTH = 500  # grep 单行限制：避免二进制文件污染输出
 
 
 @dataclass

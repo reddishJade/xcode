@@ -102,7 +102,10 @@ def apply_request_hygiene(
             # 清理已完成工具调用的超长参数
             cleaned_content = []
             for block in msg.content:
-                if isinstance(block, ToolCallContent) and block.id in completed_tool_ids:
+                if (
+                    isinstance(block, ToolCallContent)
+                    and block.id in completed_tool_ids
+                ):
                     # 压缩超长参数
                     cleaned_args = _truncate_tool_args(
                         block.arguments or {}, max_tool_arg_length
@@ -147,8 +150,10 @@ def apply_request_hygiene(
                         cleaned_blocks.append(
                             TextContent(
                                 text=_truncate_tool_result(
-                                    block.text, max_tool_result_bytes,
-                                    keep_head_lines, keep_tail_lines,
+                                    block.text,
+                                    max_tool_result_bytes,
+                                    keep_head_lines,
+                                    keep_tail_lines,
                                 )
                             )
                         )
@@ -178,7 +183,9 @@ def _truncate_tool_args(args: dict[str, Any], max_length: int) -> dict[str, Any]
             cleaned[key] = _truncate_tool_args(value, max_length)
         elif isinstance(value, list):
             cleaned[key] = [
-                _truncate_tool_args(item, max_length) if isinstance(item, dict) else item
+                _truncate_tool_args(item, max_length)
+                if isinstance(item, dict)
+                else item
                 for item in value
             ]
         else:
@@ -210,7 +217,9 @@ def _truncate_tool_result(
     # 需要压缩
     if len(lines) <= keep_head_lines + keep_tail_lines:
         # 行数少但字节多，直接截断
-        return content[:max_bytes] + f"\n... (truncated, {len(content)} bytes total) ..."
+        return (
+            content[:max_bytes] + f"\n... (truncated, {len(content)} bytes total) ..."
+        )
 
     # 提取 signal lines（错误/警告）
     signal_lines = []
@@ -224,16 +233,21 @@ def _truncate_tool_result(
 
     # 添加 signal lines（避免重复）
     middle_signals = [
-        line for i, line in signal_lines
+        line
+        for i, line in signal_lines
         if i >= keep_head_lines and i < len(lines) - keep_tail_lines
     ]
 
     parts = head
     if middle_signals:
-        parts.append(f"\n... ({len(lines) - keep_head_lines - keep_tail_lines} lines omitted) ...\n")
+        parts.append(
+            f"\n... ({len(lines) - keep_head_lines - keep_tail_lines} lines omitted) ...\n"
+        )
         parts.extend(middle_signals)
     else:
-        parts.append(f"\n... ({len(lines) - keep_head_lines - keep_tail_lines} lines omitted) ...\n")
+        parts.append(
+            f"\n... ({len(lines) - keep_head_lines - keep_tail_lines} lines omitted) ...\n"
+        )
     parts.extend(tail)
 
     return "\n".join(parts)

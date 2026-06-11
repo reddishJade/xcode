@@ -55,9 +55,7 @@ class ModeManager:
         from xcode.ai.events import ToolCall
 
         policy = policy_for_mode("plan")
-        decision = policy.check_call(
-            ToolCall(id="", name=tool_name, input=tool_args)
-        )
+        decision = policy.check_call(ToolCall(id="", name=tool_name, input=tool_args))
         return decision != "allow"
 
     def confirm_plan(self) -> None:

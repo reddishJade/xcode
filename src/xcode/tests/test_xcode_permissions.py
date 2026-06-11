@@ -74,7 +74,9 @@ class XcodePermissionsTests(unittest.TestCase):
 
         responses: list[list[ProviderEvent]] = [
             [
-                ToolCallEvent(calls=[ToolCall(id="x", name="echo", input={"input": "hello"})]),
+                ToolCallEvent(
+                    calls=[ToolCall(id="x", name="echo", input={"input": "hello"})]
+                ),
                 FinalMessage(content="", stop_reason="end_turn"),
             ],
             [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],

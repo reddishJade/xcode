@@ -50,7 +50,9 @@ class XcodeHookTests(unittest.TestCase):
         )
         responses: list[list[ProviderEvent]] = [
             [
-                ToolCallEvent(calls=[ToolCall(id="x", name="echo", input={"input": "hi"})]),
+                ToolCallEvent(
+                    calls=[ToolCall(id="x", name="echo", input={"input": "hi"})]
+                ),
                 FinalMessage(content="", stop_reason="end_turn"),
             ],
             [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],

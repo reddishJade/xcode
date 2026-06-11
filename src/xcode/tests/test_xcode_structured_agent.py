@@ -32,7 +32,10 @@ class ResettableFakeProvider(FakeProvider):
     """记录会话状态重置次数的测试 provider。"""
 
     def __init__(self) -> None:
-        events: list[ProviderEvent] = [TextDelta(chunk="ok"), FinalMessage(content="", stop_reason="end_turn")]
+        events: list[ProviderEvent] = [
+            TextDelta(chunk="ok"),
+            FinalMessage(content="", stop_reason="end_turn"),
+        ]
         super().__init__(events)
         self.reset_count = 0
 
@@ -49,7 +52,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             seen_tools.append([tool.name for tool in tools])
             self.assertEqual(messages[0]["role"], "system")
             self.assertIn("<git-preflight>", messages[0]["content"])
-            return [TextDelta(chunk="你好，我是 Xcode。"), FinalMessage(content="", stop_reason="end_turn")]
+            return [
+                TextDelta(chunk="你好，我是 Xcode。"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ]
 
         tool = ToolSpec("read_file", "Read file.", "path", lambda _input: "content")
         agent = StructuredAgent(
@@ -67,7 +73,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         self.assertEqual(result.tool_calls, [])
 
     def test_no_tool_call_returns_text(self) -> None:
-        events: list[ProviderEvent] = [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")]
+        events: list[ProviderEvent] = [
+            TextDelta(chunk="done"),
+            FinalMessage(content="", stop_reason="end_turn"),
+        ]
         agent = StructuredAgent(
             provider=FakeProvider(events),
             registry=(),
@@ -90,7 +99,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                     TextDelta(chunk="AGENTS.md is 10000 bytes."),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="是，正好 10000 字节。"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="是，正好 10000 字节。"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
         seen_messages: list[list[dict[str, Any]]] = []
@@ -127,7 +139,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             _tools: list[Any],
         ) -> list[ProviderEvent]:
             seen_messages.append(messages)
-            return [TextDelta(chunk="restored"), FinalMessage(content="", stop_reason="end_turn")]
+            return [
+                TextDelta(chunk="restored"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ]
 
         run_state = RunState(
             messages=[
@@ -161,7 +176,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         self.assertEqual(provider.reset_count, 3)
 
     def test_provider_events_drive_main_loop(self) -> None:
-        events: list[ProviderEvent] = [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")]
+        events: list[ProviderEvent] = [
+            TextDelta(chunk="done"),
+            FinalMessage(content="", stop_reason="end_turn"),
+        ]
         agent = StructuredAgent(
             provider=FakeProvider(events),
             registry=(),
@@ -175,14 +193,18 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallEvent(calls=[
+                    ToolCallEvent(
+                        calls=[
                             ToolCall(id="a", name="echo", input={"text": "one"}),
                             ToolCall(id="b", name="echo", input={"text": "two"}),
                         ]
                     ),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="finished"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="finished"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
         tool = ToolSpec(
@@ -214,7 +236,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                     ToolCallEvent(calls=[ToolCall(id="x", name="missing", input={})]),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="saw error"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="saw error"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
         agent = StructuredAgent(
@@ -254,7 +279,11 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 lambda _m, _t: cast(
                     list[ProviderEvent],
                     [
-                        ToolCallEvent(calls=[ToolCall(id="x", name="echo", input={"input": "same"})]),
+                        ToolCallEvent(
+                            calls=[
+                                ToolCall(id="x", name="echo", input={"input": "same"})
+                            ]
+                        ),
                         FinalMessage(content="", stop_reason="end_turn"),
                     ],
                 )
@@ -274,14 +303,21 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallEvent(calls=[ToolCall(id="x", name="echo", input={"a": 1, "b": 2})]),
+                    ToolCallEvent(
+                        calls=[ToolCall(id="x", name="echo", input={"a": 1, "b": 2})]
+                    ),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
                 [
-                    ToolCallEvent(calls=[ToolCall(id="y", name="echo", input={"b": 2, "a": 1})]),
+                    ToolCallEvent(
+                        calls=[ToolCall(id="y", name="echo", input={"b": 2, "a": 1})]
+                    ),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="done"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
         agent = StructuredAgent(
@@ -298,7 +334,14 @@ class XcodeStructuredAgentTests(unittest.TestCase):
     def test_idle_watchdog_allows_successful_read_only_steps(self) -> None:
         mock_response_list: list[list[ProviderEvent]] = [
             [
-                ToolCallEvent(calls=[ToolCall(id=f"r{index}", name="read_file", input={"path": f"notes-{index}.md"})]
+                ToolCallEvent(
+                    calls=[
+                        ToolCall(
+                            id=f"r{index}",
+                            name="read_file",
+                            input={"path": f"notes-{index}.md"},
+                        )
+                    ]
                 ),
                 FinalMessage(content="", stop_reason="end_turn"),
             ]
@@ -332,7 +375,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         def factory(messages, _tools) -> list[ProviderEvent]:
             seen.append(messages[0])
-            return [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")]
+            return [
+                TextDelta(chunk="done"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ]
 
         agent = StructuredAgent(
             provider=FakeProvider(factory),
@@ -355,7 +401,9 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         def factory(_messages, tools) -> list[ProviderEvent]:
             seen_tools.append([tool.name for tool in tools])
             return [
-                ToolCallEvent(calls=[ToolCall(id="x", name="edit_file", input={"input": "hello"})]),
+                ToolCallEvent(
+                    calls=[ToolCall(id="x", name="edit_file", input={"input": "hello"})]
+                ),
                 FinalMessage(content="", stop_reason="end_turn"),
             ]
 
@@ -403,16 +451,33 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallEvent(calls=[ToolCall(id="a", name="bash", input={"command": "git diff --stat"})]
+                    ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="a",
+                                name="bash",
+                                input={"command": "git diff --stat"},
+                            )
+                        ]
                     ),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
                 [
-                    ToolCallEvent(calls=[ToolCall(id="b", name="bash", input={"command": "python script.py"})]
+                    ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="b",
+                                name="bash",
+                                input={"command": "python script.py"},
+                            )
+                        ]
                     ),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="done"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
         agent = StructuredAgent(
@@ -450,10 +515,15 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallEvent(calls=[ToolCall(id="a", name="echo", input={"input": "hello"})]),
+                    ToolCallEvent(
+                        calls=[ToolCall(id="a", name="echo", input={"input": "hello"})]
+                    ),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="done"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
         tool = ToolSpec(
@@ -652,14 +722,18 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
-                    ToolCallEvent(calls=[
+                    ToolCallEvent(
+                        calls=[
                             ToolCall(id="a", name="first", input={}),
                             ToolCall(id="b", name="second", input={}),
                         ]
                     ),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="done"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
         tools = (
@@ -693,7 +767,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                     ToolCallEvent(calls=[ToolCall(id="x", name="boom", input={})]),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="recovered"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="recovered"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
 
@@ -741,9 +818,15 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         def factory(messages, tools) -> list[ProviderEvent]:
             calls.append(list(messages))
             if len(calls) == 1:
-                return [TextDelta(chunk="part1"), FinalMessage(content="", stop_reason="max_tokens")]
+                return [
+                    TextDelta(chunk="part1"),
+                    FinalMessage(content="", stop_reason="max_tokens"),
+                ]
             else:
-                return [TextDelta(chunk=" part2"), FinalMessage(content="", stop_reason="end_turn")]
+                return [
+                    TextDelta(chunk=" part2"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ]
 
         agent = StructuredAgent(
             provider=FakeProvider(factory),
@@ -757,7 +840,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
     def test_low_token_continuation_circuit_breaker(self) -> None:
         def factory(messages, tools) -> list[ProviderEvent]:
-            return [TextDelta(chunk="x"), FinalMessage(content="", stop_reason="max_tokens")]
+            return [
+                TextDelta(chunk="x"),
+                FinalMessage(content="", stop_reason="max_tokens"),
+            ]
 
         agent = StructuredAgent(
             provider=FakeProvider(factory),
@@ -777,7 +863,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             calls.append(messages)
             if len(calls) < 3:
                 raise RuntimeError("529 overloaded")
-            return [TextDelta(chunk="success"), FinalMessage(content="", stop_reason="end_turn")]
+            return [
+                TextDelta(chunk="success"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ]
 
         agent = StructuredAgent(
             provider=FakeProvider(factory),

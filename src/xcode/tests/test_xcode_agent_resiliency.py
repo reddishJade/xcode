@@ -24,10 +24,22 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         # Mock provider returning max_tokens with small response blocks
         responses = iter(
             [
-                [TextDelta(chunk="a"), FinalMessage(content="", stop_reason="max_tokens")],
-                [TextDelta(chunk="b"), FinalMessage(content="", stop_reason="max_tokens")],
-                [TextDelta(chunk="c"), FinalMessage(content="", stop_reason="max_tokens")],
-                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="a"),
+                    FinalMessage(content="", stop_reason="max_tokens"),
+                ],
+                [
+                    TextDelta(chunk="b"),
+                    FinalMessage(content="", stop_reason="max_tokens"),
+                ],
+                [
+                    TextDelta(chunk="c"),
+                    FinalMessage(content="", stop_reason="max_tokens"),
+                ],
+                [
+                    TextDelta(chunk="done"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
 
@@ -60,22 +72,49 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallEvent(calls=[ToolCall(id="call_1", name="read_file", input={"path": "a.txt"})]),
+                    ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="call_1", name="read_file", input={"path": "a.txt"}
+                            )
+                        ]
+                    ),
                     FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent(calls=[ToolCall(id="call_2", name="read_file", input={"path": "b.txt"})]),
+                    ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="call_2", name="read_file", input={"path": "b.txt"}
+                            )
+                        ]
+                    ),
                     FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent(calls=[ToolCall(id="call_3", name="read_file", input={"path": "c.txt"})]),
+                    ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="call_3", name="read_file", input={"path": "c.txt"}
+                            )
+                        ]
+                    ),
                     FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent(calls=[ToolCall(id="call_4", name="read_file", input={"path": "d.txt"})]),
+                    ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="call_4", name="read_file", input={"path": "d.txt"}
+                            )
+                        ]
+                    ),
                     FinalMessage(content="", stop_reason="tool_use"),
                 ],
-                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="done"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
 
@@ -108,22 +147,49 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         responses = iter(
             [
                 [
-                    ToolCallEvent(calls=[ToolCall(id="call_1", name="read_file", input={"path": "a.txt"})]),
+                    ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="call_1", name="read_file", input={"path": "a.txt"}
+                            )
+                        ]
+                    ),
                     FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent(calls=[ToolCall(id="call_2", name="read_file", input={"path": "b.txt"})]),
+                    ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="call_2", name="read_file", input={"path": "b.txt"}
+                            )
+                        ]
+                    ),
                     FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent(calls=[ToolCall(id="call_3", name="read_file", input={"path": "c.txt"})]),
+                    ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="call_3", name="read_file", input={"path": "c.txt"}
+                            )
+                        ]
+                    ),
                     FinalMessage(content="", stop_reason="tool_use"),
                 ],
                 [
-                    ToolCallEvent(calls=[ToolCall(id="call_4", name="read_file", input={"path": "d.txt"})]),
+                    ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="call_4", name="read_file", input={"path": "d.txt"}
+                            )
+                        ]
+                    ),
                     FinalMessage(content="", stop_reason="tool_use"),
                 ],
-                [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="done"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
 

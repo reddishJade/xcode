@@ -189,12 +189,20 @@ class TestToolCatalogFingerprint(unittest.TestCase):
     def test_fingerprint_stable_same_tools(self):
         """测试相同工具生成相同指纹。"""
         tools1 = [
-            ToolDefinition(name="tool_a", description="A", parameters={"type": "object"}),
-            ToolDefinition(name="tool_b", description="B", parameters={"type": "string"}),
+            ToolDefinition(
+                name="tool_a", description="A", parameters={"type": "object"}
+            ),
+            ToolDefinition(
+                name="tool_b", description="B", parameters={"type": "string"}
+            ),
         ]
         tools2 = [
-            ToolDefinition(name="tool_a", description="A", parameters={"type": "object"}),
-            ToolDefinition(name="tool_b", description="B", parameters={"type": "string"}),
+            ToolDefinition(
+                name="tool_a", description="A", parameters={"type": "object"}
+            ),
+            ToolDefinition(
+                name="tool_b", description="B", parameters={"type": "string"}
+            ),
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
@@ -204,12 +212,20 @@ class TestToolCatalogFingerprint(unittest.TestCase):
     def test_fingerprint_stable_different_order(self):
         """测试不同顺序生成相同指纹（排序后稳定）。"""
         tools1 = [
-            ToolDefinition(name="tool_b", description="B", parameters={"type": "string"}),
-            ToolDefinition(name="tool_a", description="A", parameters={"type": "object"}),
+            ToolDefinition(
+                name="tool_b", description="B", parameters={"type": "string"}
+            ),
+            ToolDefinition(
+                name="tool_a", description="A", parameters={"type": "object"}
+            ),
         ]
         tools2 = [
-            ToolDefinition(name="tool_a", description="A", parameters={"type": "object"}),
-            ToolDefinition(name="tool_b", description="B", parameters={"type": "string"}),
+            ToolDefinition(
+                name="tool_a", description="A", parameters={"type": "object"}
+            ),
+            ToolDefinition(
+                name="tool_b", description="B", parameters={"type": "string"}
+            ),
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
@@ -218,10 +234,14 @@ class TestToolCatalogFingerprint(unittest.TestCase):
     def test_fingerprint_different_tools(self):
         """测试不同工具生成不同指纹。"""
         tools1 = [
-            ToolDefinition(name="tool_a", description="A", parameters={"type": "object"}),
+            ToolDefinition(
+                name="tool_a", description="A", parameters={"type": "object"}
+            ),
         ]
         tools2 = [
-            ToolDefinition(name="tool_b", description="B", parameters={"type": "string"}),
+            ToolDefinition(
+                name="tool_b", description="B", parameters={"type": "string"}
+            ),
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)

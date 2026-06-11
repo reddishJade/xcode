@@ -165,7 +165,10 @@ class TestApplyRequestHygiene(unittest.TestCase):
 
     def test_hygiene_detects_base64(self):
         """测试检测 base64 payload。"""
-        base64_content = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" * 10
+        base64_content = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+            * 10
+        )
         messages = [
             AssistantMessage(
                 content=[

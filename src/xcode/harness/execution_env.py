@@ -15,8 +15,8 @@ from typing import Any, Protocol, runtime_checkable
 logger = logging.getLogger(__name__)
 
 # 进程管理常量
-POLL_INTERVAL = 0.1              # 轮询间隔：平衡响应性与 CPU 占用
-TERMINATE_GRACE_SECONDS = 3      # 优雅终止宽限期：允许进程清理资源
+POLL_INTERVAL = 0.1  # 轮询间隔：平衡响应性与 CPU 占用
+TERMINATE_GRACE_SECONDS = 3  # 优雅终止宽限期：允许进程清理资源
 
 
 @dataclass(frozen=True)

@@ -463,7 +463,10 @@ def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
                     ),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
-                [TextDelta(chunk="finished"), FinalMessage(content="", stop_reason="end_turn")],
+                [
+                    TextDelta(chunk="finished"),
+                    FinalMessage(content="", stop_reason="end_turn"),
+                ],
             ]
         )
         tools = (
@@ -478,7 +481,12 @@ def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
         )
     else:
         provider = _StaticProvider(
-            [[TextDelta(chunk="offline ok"), FinalMessage(content="offline ok", stop_reason="end_turn")]]
+            [
+                [
+                    TextDelta(chunk="offline ok"),
+                    FinalMessage(content="offline ok", stop_reason="end_turn"),
+                ]
+            ]
         )
         tools = ()
     return XcodeApp(

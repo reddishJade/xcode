@@ -40,11 +40,13 @@ class ReplCompleter(Completer):
         registry: Iterable[ToolSpec] = (),
         command_names: Iterable[str] = (),
         effort_options: Iterable[str] | Callable[[], Iterable[str]] = (),
+        model_options: Iterable[str] | Callable[[], Iterable[str]] = (),
     ) -> None:
         self.project_root = project_root.resolve()
         self.tool_names = tuple(sorted(tool.name for tool in registry))
         self.command_names = tuple(command_names)
         self._effort_options = effort_options
+        self._model_options = model_options
         self._directory_cache: dict[Path, tuple[str, ...]] = {}
 
     def get_completions(self, document, complete_event):
@@ -70,6 +72,12 @@ class ReplCompleter(Completer):
             and text_before_cursor[len("/effort")].isspace()
         ):
             return self._complete_effort(text_before_cursor)
+        if (
+            text_before_cursor.startswith("/model")
+            and len(text_before_cursor) > len("/model")
+            and text_before_cursor[len("/model")].isspace()
+        ):
+            return self._complete_model(text_before_cursor)
         if text_before_cursor.startswith("/tool "):
             return self._complete_tool_name(text_before_cursor)
         if text_before_cursor.startswith("/"):
@@ -121,6 +129,30 @@ class ReplCompleter(Completer):
             for option in options
             if option.startswith(partial)
         ]
+
+    def _complete_model(self, text: str) -> list[CompletionItem]:
+        parts = text.split(maxsplit=2)
+        if len(parts) > 2:
+            return []
+        partial = parts[1] if len(parts) == 2 else ""
+        options = self._current_model_options()
+        if not partial:
+            return [
+                CompletionItem(option, -len(partial), "model") for option in options
+            ]
+        return [
+            CompletionItem(option, -len(partial), "model")
+            for option in options
+            if option.startswith(partial)
+        ]
+
+    def _current_model_options(self) -> tuple[str, ...]:
+        options = (
+            self._model_options()
+            if callable(self._model_options)
+            else self._model_options
+        )
+        return tuple(options)
 
     def _current_effort_options(self) -> tuple[str, ...]:
         options = (

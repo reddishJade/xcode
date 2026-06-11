@@ -9,7 +9,14 @@ from typing import Any
 
 from .schema import EvalReport
 
-_NUMERIC_FIELDS = ("llm_calls", "estimated_prompt_tokens", "model_total_ms", "tool_calls", "tool_errors", "steps")
+_NUMERIC_FIELDS = (
+    "llm_calls",
+    "estimated_prompt_tokens",
+    "model_total_ms",
+    "tool_calls",
+    "tool_errors",
+    "steps",
+)
 
 
 def write_report_files(report: EvalReport) -> tuple[Path, Path, Path]:
@@ -29,24 +36,37 @@ def write_report_files(report: EvalReport) -> tuple[Path, Path, Path]:
 def write_csv_report(report: EvalReport) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow([
-        "task_id", "trial_id", "success",
-        "graders_pass", "graders_total",
-        "tool_calls", "tool_errors",
-        "llm_calls", "tokens", "model_ms",
-    ])
+    writer.writerow(
+        [
+            "task_id",
+            "trial_id",
+            "success",
+            "graders_pass",
+            "graders_total",
+            "tool_calls",
+            "tool_errors",
+            "llm_calls",
+            "tokens",
+            "model_ms",
+        ]
+    )
     for trial in report.trials:
         g_pass = sum(1 for g in trial.graders if g.passed)
         g_total = len(trial.graders)
-        writer.writerow([
-            trial.task_id, trial.trial_id, trial.success,
-            g_pass, g_total,
-            trial.metrics.get("tool_calls", ""),
-            trial.metrics.get("tool_errors", ""),
-            trial.metrics.get("llm_calls", ""),
-            trial.metrics.get("estimated_prompt_tokens", ""),
-            trial.metrics.get("model_total_ms", ""),
-        ])
+        writer.writerow(
+            [
+                trial.task_id,
+                trial.trial_id,
+                trial.success,
+                g_pass,
+                g_total,
+                trial.metrics.get("tool_calls", ""),
+                trial.metrics.get("tool_errors", ""),
+                trial.metrics.get("llm_calls", ""),
+                trial.metrics.get("estimated_prompt_tokens", ""),
+                trial.metrics.get("model_total_ms", ""),
+            ]
+        )
     writer.writerow([])
     writer.writerow(["run_id", report.run_id, "success", report.success])
     for k, v in report.metrics.items():
