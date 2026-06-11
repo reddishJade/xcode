@@ -25,16 +25,12 @@ class XcodeSetupWizardTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as temp_dir:
                     path = Path(temp_dir) / "xcode.config.json"
                     preset = PROVIDER_PRESETS[provider_key]
-                    select_responses = [
-                        preset["label"],
-                        preset["default_model"],
-                        "enabled",
-                    ]
+                    select_responses = [preset["label"], preset["default_model"]]
                     if expected_effort is not None:
                         select_responses.append(expected_effort)
 
                     with (
-                        patch("questionary.rawselect") as mock_select,
+                        patch("questionary.select") as mock_select,
                         patch("questionary.text") as mock_text,
                         patch("questionary.confirm") as mock_confirm,
                         patch("builtins.print"),
