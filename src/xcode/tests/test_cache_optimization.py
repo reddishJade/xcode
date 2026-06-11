@@ -7,11 +7,10 @@ import unittest
 from dataclasses import dataclass
 from typing import Any
 
-from xcode.ai.cache import (
-    CacheUsage,
+from xcode.ai.cache import CacheUsage, extract_cache_usage
+from xcode.ai.providers.codec import (
     canonical_tool_schema,
     canonical_tools,
-    extract_cache_usage,
     tool_catalog_fingerprint,
 )
 from xcode.ai.types import ToolDefinition

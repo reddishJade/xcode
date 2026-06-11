@@ -1,16 +1,12 @@
-"""缓存统计与工具稳定化工具。
+"""缓存统计。
 
-统一的缓存统计口径和工具 schema 规范化，确保跨 provider 一致性。
+统一的缓存统计口径，确保跨 provider 一致性。
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from typing import Any
-
-from xcode.ai.types import ToolDefinition
 
 
 @dataclass(frozen=True)
@@ -78,46 +74,3 @@ def extract_cache_usage(response: Any) -> CacheUsage:
             )
 
     return CacheUsage()
-
-
-def canonical_tool_schema(tool: ToolDefinition) -> dict[str, Any]:
-    """规范化工具 schema（字典键排序）。
-
-    确保同一工具的 schema 在不同调用间字节稳定。
-    """
-    result: dict[str, Any] = {
-        "name": tool.name,
-        "description": tool.description,
-        "schema": tool.parameters,
-    }
-    if tool.builtin is not None:
-        result["builtin"] = tool.builtin
-    return _sort_dict_recursive(result)
-
-
-def _sort_dict_recursive(obj: Any) -> Any:
-    """递归排序字典键。"""
-    if isinstance(obj, dict):
-        return {k: _sort_dict_recursive(v) for k, v in sorted(obj.items())}
-    elif isinstance(obj, list):
-        return [_sort_dict_recursive(item) for item in obj]
-    return obj
-
-
-def canonical_tools(tools: list[ToolDefinition]) -> list[dict[str, Any]]:
-    """按 name 排序并规范化工具列表。
-
-    确保工具列表在不同调用间顺序稳定。
-    """
-    sorted_tools = sorted(tools, key=lambda t: t.name)
-    return [canonical_tool_schema(t) for t in sorted_tools]
-
-
-def tool_catalog_fingerprint(tools: list[ToolDefinition]) -> str:
-    """计算工具集合指纹（SHA256）。
-
-    用于检测工具 catalog 漂移。
-    """
-    canonical = canonical_tools(tools)
-    serialized = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(serialized.encode()).hexdigest()[:16]
