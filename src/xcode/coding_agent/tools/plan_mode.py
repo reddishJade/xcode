@@ -45,7 +45,7 @@ def build_plan_mode_tools(project_root: Path) -> tuple[ToolSpec, ...]:
             f"Plan content:\n{plan}"
         )
 
-    def _plan_mode_risk_evaluator(tool_input: dict) -> PermissionDecision:
+    def _plan_mode_risk_evaluator(tool_input: dict[str, object]) -> PermissionDecision:
         """request_plan_mode 必须经过用户确认。"""
         return "ask"
 

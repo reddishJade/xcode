@@ -47,7 +47,6 @@ from xcode.harness.skill_loader import SkillLoader, build_skill_loader_tool
 from xcode.coding_agent.registry import build_project_scoped_registry
 from xcode.coding_agent.tools import ShellSpec
 from xcode.ai.providers.factory import (
-    ModelProfileProto,
     ProviderSettings,
     build_provider_bundle,
 )
@@ -171,11 +170,11 @@ def build_shared_infra(
 
 
 def build_providers(runtime_config: XcodeRuntimeConfig, env_files: tuple[Path, ...]):
-    model_profiles = cast(
-        "dict[str, ModelProfileProto]", runtime_config.provider.model_profiles
-    )
     return build_provider_bundle(
-        ProviderSettings(env_files=env_files, model_profiles=model_profiles)
+        ProviderSettings(
+            env_files=env_files,
+            model_profiles=runtime_config.provider.model_profiles,
+        )
     )
 
 
