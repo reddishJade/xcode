@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from dataclasses import dataclass
-from typing import Any
+from typing import BinaryIO, cast
 
 from .truncate import DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncate_tail
 
@@ -17,6 +17,31 @@ class SnapshotResult:
     total_bytes: int
     truncated: bool
     full_output_path: str | None
+
+
+class PersistedOutputFile:
+    def __init__(self, temp_prefix: str) -> None:
+        self._file = cast(
+            BinaryIO,
+            tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".log",
+                prefix=temp_prefix,
+            ),
+        )
+        self.path = str(self._file.name)
+
+    def write_existing(self, chunks: list[bytes]) -> None:
+        for chunk in chunks:
+            self._file.write(chunk)
+        self._file.flush()
+
+    def append(self, chunk: bytes) -> None:
+        self._file.write(chunk)
+
+    def close(self) -> None:
+        self._file.flush()
+        self._file.close()
 
 
 class OutputAccumulator:
@@ -34,7 +59,7 @@ class OutputAccumulator:
         self._total_bytes = 0
         self._truncated = False
         self._full_path: str | None = None
-        self._file: Any = None
+        self._persisted_output: PersistedOutputFile | None = None
         self._current_line_bytes = 0
         self._finished = False
 
@@ -65,22 +90,19 @@ class OutputAccumulator:
         else:
             last_newline = chunk.rfind(b"\n")
             self._current_line_bytes = len(chunk) - last_newline - 1
-        if self._file is not None:
-            self._file.write(chunk)
+        if self._persisted_output is not None:
+            self._persisted_output.append(chunk)
             self._trim_tail()
             return
         if self._total_lines > self._max_lines or self._total_bytes > self._max_bytes:
             self._persist_full()
 
     def _persist_full(self) -> None:
-        if self._file is None:
-            self._file = tempfile.NamedTemporaryFile(
-                delete=False, suffix=".log", prefix=self._temp_prefix
-            )
-            self._full_path = self._file.name
-            for chunk in self._chunks:
-                self._file.write(chunk)
-            self._file.flush()
+        if self._persisted_output is None:
+            persisted = PersistedOutputFile(self._temp_prefix)
+            persisted.write_existing(self._chunks)
+            self._persisted_output = persisted
+            self._full_path = persisted.path
         self._truncated = True
         self._trim_tail()
 
@@ -127,7 +149,7 @@ class OutputAccumulator:
                 full_output_path=self._full_path,
             )
 
-        if persist_if_truncated and self._truncated and self._file is None:
+        if persist_if_truncated and self._truncated and self._persisted_output is None:
             self._persist_full()
 
         tr = truncate_tail(text, max_lines=self._max_lines, max_bytes=self._max_bytes)
@@ -159,10 +181,9 @@ class OutputAccumulator:
 
     def close(self) -> None:
         self._finished = True
-        if self._file is not None:
+        if self._persisted_output is not None:
             try:
-                self._file.flush()
-                self._file.close()
+                self._persisted_output.close()
             except Exception:
                 logger.debug(
                     "failed to close temp file %s", self._full_path, exc_info=True
