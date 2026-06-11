@@ -15,6 +15,7 @@ from ...agent.config import (
     BeforeToolCallResult,
     IsToolProductiveHook,
 )
+from ...agent.protocols import CancellationSignal
 from ...agent.types import ToolCallContent
 from .execution_modes import policy_for_mode
 from .mode_manager import ModeManager
@@ -81,9 +82,12 @@ class ToolGate:
 
     def build_before_tool_hook(
         self, snapshot: ToolGateSnapshot
-    ) -> Callable[[BeforeToolCallContext, Any], BeforeToolCallResult | None]:
+    ) -> Callable[
+        [BeforeToolCallContext, CancellationSignal | None],
+        BeforeToolCallResult | None,
+    ]:
         def before_tool(
-            ctx: BeforeToolCallContext, _signal: Any
+            ctx: BeforeToolCallContext, _signal: CancellationSignal | None
         ) -> BeforeToolCallResult | None:
             tool_call = ctx.tool_call
             args = ctx.args
@@ -123,9 +127,12 @@ class ToolGate:
 
     def build_after_tool_hook(
         self, snapshot: ToolGateSnapshot
-    ) -> Callable[[AfterToolCallContext, Any], AfterToolCallResult | None]:
+    ) -> Callable[
+        [AfterToolCallContext, CancellationSignal | None],
+        AfterToolCallResult | None,
+    ]:
         def after_tool(
-            ctx: AfterToolCallContext, _signal: Any
+            ctx: AfterToolCallContext, _signal: CancellationSignal | None
         ) -> AfterToolCallResult | None:
             if ctx.tool_call.name in self.PROGRESS_TOOL_NAMES:
                 self._progress_steps_without_update = 0

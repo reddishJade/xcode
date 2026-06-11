@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from ...agent.messages import (
     AgentMessage,
@@ -18,6 +17,8 @@ from ...agent.messages import (
 from ...agent.protocols import ContentBlock
 from ...agent.types import TextContent, ToolCallContent
 from .result import RunState
+
+type SerializedMessage = dict[str, object]
 
 
 class HistoryManager:
@@ -76,7 +77,7 @@ def _messages_from_run_state(run_state: RunState) -> list[AgentMessage]:
     return messages
 
 
-def _message_from_dict(item: dict[str, Any]) -> AgentMessage | None:
+def _message_from_dict(item: SerializedMessage) -> AgentMessage | None:
     role = str(item.get("role", ""))
     if role == "system":
         return SystemMessage(content=str(item.get("content", "")))
@@ -92,7 +93,7 @@ def _message_from_dict(item: dict[str, Any]) -> AgentMessage | None:
     return None
 
 
-def _assistant_from_dict(item: dict[str, Any]) -> AssistantMessage:
+def _assistant_from_dict(item: SerializedMessage) -> AssistantMessage:
     content: list[ContentBlock] = []
     text = item.get("content")
     if isinstance(text, str) and text:
