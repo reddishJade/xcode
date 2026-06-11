@@ -7,7 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 import platform
 from pathlib import Path
-from typing import Any
+
+type PromptCacheKey = tuple[object, ...]
 
 from .git_preflight import build_git_preflight
 from .contextual import ContextualRetrievalState
@@ -258,7 +259,7 @@ class StableRegionBuilder:
 
     def __init__(self) -> None:
         self._stable_cache: str | None = None
-        self._stable_key: tuple[Any, ...] | None = None
+        self._stable_key: PromptCacheKey | None = None
         self._tool_prompt_cache: str | None = None
         self._tool_prompt_key: tuple[Any, ...] | None = None
 
@@ -323,7 +324,7 @@ class DynamicRegionBuilder:
 
     def __init__(self) -> None:
         self._dynamic_cache: str | None = None
-        self._dynamic_key: tuple[Any, ...] | None = None
+        self._dynamic_key: PromptCacheKey | None = None
 
     def build(self, context: PromptContext, enabled: set[str]) -> str:
         dynamic_enabled = enabled.intersection(DYNAMIC_PROMPT_MODULE_ORDER)
