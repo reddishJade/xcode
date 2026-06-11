@@ -13,7 +13,7 @@ from rich.text import Text
 from .commands import PromptLike, PromptText, ReplState
 from .file_refs import expand_file_references
 from .markdown import MarkdownRenderer, TerminalMarkdownRenderer
-from .repl_commands import COMMAND_NAMES, handle_command
+from .repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
 from .repl_hitl import ReplHITLHandler
 from .repl_rendering import (
     CLI_COLOR_ERROR,
@@ -94,6 +94,7 @@ def run_repl(
         root,
         registry,
         COMMAND_NAMES,
+        COMMAND_REGISTRY_EXPORT,
         lambda: current_effort_options(app),
         lambda: current_model_options(app),
     )

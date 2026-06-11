@@ -411,6 +411,7 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
 
 COMMAND_NAMES = command_names(COMMAND_REGISTRY)
 HELP_TEXT = generate_help_text(COMMAND_REGISTRY)
+COMMAND_REGISTRY_EXPORT = COMMAND_REGISTRY
 
 
 def handle_command(

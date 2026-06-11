@@ -14,7 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .commands import PromptLike, PromptText
+from .commands import CommandEntry, PromptLike, PromptText
 from .completion import ReplCompleter
 from xcode.harness.skills import ToolSpec
 
@@ -174,6 +174,7 @@ def create_prompt_session(
     project_root: Path | None = None,
     registry: tuple[ToolSpec, ...] = (),
     command_names: tuple[str, ...] = (),
+    command_registry: dict[str, CommandEntry] | None = None,
     effort_options: Iterable[str] | Callable[[], Iterable[str]] = (),
     model_options: Iterable[str] | Callable[[], Iterable[str]] = (),
 ) -> PromptLike:
@@ -213,6 +214,7 @@ def create_prompt_session(
         project_root or Path.cwd(),
         registry,
         command_names,
+        command_registry,
         effort_options,
         model_options,
     )
