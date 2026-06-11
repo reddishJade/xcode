@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from xcode.ai.providers.protocol import ModelProvider
-from xcode.ai.types import StreamOptions, ThinkingLevel
+from xcode.ai.types import StreamOptions, ThinkingLevel, ToolDefinition
 from xcode.agent.types import ToolCallContent
 
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage
@@ -127,6 +127,9 @@ type CompactHook = Callable[[list[AgentMessage]], list[AgentMessage]]
 type IsToolProductiveHook = Callable[
     [list[ToolCallContent], list[ToolResultMessage]], bool
 ]
+type BeforeProviderRequestHook = Callable[
+    [list[dict[str, Any]], list[ToolDefinition]], None
+]
 
 
 # ── 指标 ──
@@ -198,5 +201,6 @@ class AgentLoopConfig:
     archive_writer: ArchiveWriter | None = None
 
     is_tool_productive: IsToolProductiveHook | None = None
+    before_provider_request: BeforeProviderRequestHook | None = None
 
     options: StreamOptions | None = None

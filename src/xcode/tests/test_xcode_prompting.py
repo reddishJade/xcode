@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from xcode.harness.agent_runtime import (
     ContextualRetrievalState,
@@ -13,6 +14,7 @@ from xcode.harness.agent_runtime import (
 )
 from xcode.harness.agent_runtime.git_preflight import build_git_preflight
 from xcode.harness.agent_runtime.prompting import SYSTEM_PROMPT_DYNAMIC_BOUNDARY
+from xcode.harness.agent_runtime.prompting import MAX_INSTRUCTION_BYTES
 from xcode.harness.skill_loader import SkillLoader
 from xcode.harness.skills import ToolSpec
 
@@ -41,9 +43,26 @@ class XcodePromptingTests(unittest.TestCase):
 
             boundary_index = prompt.index(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
             self.assertTrue(prompt.startswith("# Identity\n\nYou are Xcode"))
-            self.assertLess(prompt.index("You are Xcode"), prompt.index("<AGENTS.md>"))
+            self.assertIn("preserve user-owned changes", prompt)
+            self.assertIn("validate changed behavior", prompt)
+            self.assertIn("## Operating Principles", prompt)
+            self.assertIn("## Communication Contract", prompt)
+            self.assertIn("## Coding Contract", prompt)
+            self.assertIn("## Tool And Evidence Discipline", prompt)
+            self.assertIn("## Editing Safety", prompt)
+            self.assertIn("## Validation Contract", prompt)
+            self.assertIn("## Review Mode", prompt)
+            self.assertIn("## Prompt Boundary Discipline", prompt)
+            self.assertIn("Do not invent command output", prompt)
+            self.assertIn("Do not edit generated files directly", prompt)
+            self.assertIn("Lead with findings ordered by severity", prompt)
             self.assertLess(
-                prompt.index("<AGENTS.md>"), prompt.index("<tool-discipline>")
+                prompt.index("You are Xcode"),
+                prompt.index('<instruction-source name="AGENTS.md"'),
+            )
+            self.assertLess(
+                prompt.index('<instruction-source name="AGENTS.md"'),
+                prompt.index("<tool-discipline>"),
             )
             self.assertLess(
                 prompt.index("<tool-discipline>"), prompt.index("Available tools")
@@ -70,6 +89,63 @@ class XcodePromptingTests(unittest.TestCase):
             self.assertLess(
                 prompt.index("<cwd-info>"),
                 prompt.index("<git-preflight>", boundary_index),
+            )
+
+    def test_large_project_instruction_warns_without_condensing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            instruction = "A" * (24 * 1024 + 1)
+            (root / "AGENTS.md").write_text(instruction, encoding="utf-8")
+
+            prompt = SystemPromptBuilder().build(
+                PromptContext(project_root=root, registry=(), question="hello")
+            )
+
+            self.assertIn("<instruction-warning>", prompt)
+            self.assertIn("above the 24576 byte warning threshold", prompt)
+            self.assertIn(instruction, prompt)
+
+    def test_oversized_project_instruction_preserves_key_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            long_example = "\n".join(f"print({index})" for index in range(5000))
+            instruction = (
+                "# Xcode Agent Guide\n\n"
+                "Opening context must stay.\n\n"
+                "| Document | Purpose | When to read |\n"
+                "| --- | --- | --- |\n"
+                "| [docs/git-workflow.md](docs/git-workflow.md) | Git | Before commit |\n\n"
+                "## Background\n\n"
+                + ("background " * 4000)
+                + "\n\n## Python Coding Principles\n\n"
+                "Every function must have type annotations.\n\n"
+                "```python\n" + long_example + "\n```\n\n"
+                "## Git Safety\n\n"
+                "Never rewrite history without confirmation.\n\n"
+                "## Validation\n\n"
+                "Run targeted validation for modified files.\n"
+            )
+            (root / "AGENTS.md").write_text(instruction, encoding="utf-8")
+
+            prompt = SystemPromptBuilder().build(
+                PromptContext(project_root=root, registry=(), question="hello")
+            )
+
+            start = prompt.index('<instruction-source name="AGENTS.md"')
+            end = prompt.index("</instruction-source>", start)
+            source_prompt = prompt[start:end]
+
+            self.assertIn("above the 32768 byte hard limit", prompt)
+            self.assertIn("Opening context must stay.", source_prompt)
+            self.assertIn("docs/git-workflow.md", source_prompt)
+            self.assertIn("Every function must have type annotations.", source_prompt)
+            self.assertIn("Never rewrite history without confirmation.", source_prompt)
+            self.assertIn("Run targeted validation for modified files.", source_prompt)
+            self.assertIn("<instruction-omissions>", source_prompt)
+            self.assertNotIn("print(4999)", source_prompt)
+            self.assertLessEqual(
+                len(source_prompt.encode("utf-8")),
+                MAX_INSTRUCTION_BYTES + 800,
             )
 
     def test_volatile_context_changes_do_not_rewrite_stable_prefix(self) -> None:
@@ -196,6 +272,41 @@ class XcodePromptingTests(unittest.TestCase):
             self.assertIn("write_file", context)
             self.assertIn("approval=once", context)
 
+    def test_contextual_retrieval_render_reuses_cache_until_dirty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state = ContextualRetrievalState(Path(tmp))
+            state.record_file("a.py")
+
+            first = state.render()
+            second = state.render()
+            state.record_file("b.py")
+            third = state.render()
+
+            self.assertIs(first, second)
+            self.assertIn("a.py", first)
+            self.assertNotEqual(first, third)
+            self.assertIn("b.py", third)
+
+    def test_cwd_info_cache_invalidates_when_visible_entries_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("a", encoding="utf-8")
+            builder = SystemPromptBuilder()
+            context = PromptContext(
+                project_root=root,
+                registry=(),
+                question="hello",
+                modules=("identity", "cwd"),
+            )
+
+            first = builder.build(context)
+            (root / "b.txt").write_text("b", encoding="utf-8")
+            second = builder.build(context)
+
+            self.assertIn("a.txt", first)
+            self.assertNotIn("b.txt", first)
+            self.assertIn("b.txt", second)
+
     def test_git_preflight_reports_non_git_without_blocking(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             text = build_git_preflight(Path(tmp))
@@ -221,6 +332,40 @@ class XcodePromptingTests(unittest.TestCase):
             self.assertIn("last_commit:", text)
             self.assertIn("dirty_diff_stat:", text)
             self.assertIn("pre-existing changes", text)
+
+    def test_git_preflight_reuses_snapshot_cache_after_ttl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git(root, "init")
+            _git(root, "config", "user.email", "test@example.com")
+            _git(root, "config", "user.name", "Test User")
+            (root / "a.txt").write_text("one\n", encoding="utf-8")
+            _git(root, "add", "a.txt")
+            _git(root, "commit", "-m", "initial")
+
+            from xcode.harness.agent_runtime import git_preflight
+
+            git_preflight._ttl_cache.clear()
+            git_preflight._snapshot_cache.clear()
+            calls: list[tuple[str, ...]] = []
+            original = git_preflight._run_git
+
+            def counting_run(project_root: Path, *args: str) -> str | None:
+                calls.append(args)
+                return original(project_root, *args)
+
+            with mock.patch.object(
+                git_preflight,
+                "_run_git",
+                side_effect=counting_run,
+            ):
+                first = git_preflight.build_git_preflight(root)
+                git_preflight._ttl_cache.clear()
+                second = git_preflight.build_git_preflight(root)
+
+            self.assertEqual(first, second)
+            self.assertEqual(calls.count(("status", "--short")), 2)
+            self.assertEqual(calls.count(("show", "--stat", "--oneline", "-1")), 1)
 
 
 def _git(root: Path, *args: str) -> None:

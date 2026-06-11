@@ -283,9 +283,19 @@ MCP server 不写入 `xcode.config.json` 的 `tools` 段，而是放在 `.local/
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `modules` | array | `["identity", "tool_discipline", "tools", "environment", "git_preflight", "cwd", "instructions", "notices"]` | 参与拼接的 prompt 模块。 |
+| `modules` | array | `["identity", "instructions", "tool_discipline", "tools", "search_strategy", "environment", "cwd", "git_preflight", "contextual_retrieval", "skills", "notices"]` | 参与拼接的 prompt 模块。 |
 
-可选模块包括 `search_strategy`、`contextual_retrieval`、`skills`。默认不把 Skill 内容塞进 prompt；`contextual_retrieval` 只会注入当前任务已经访问过的最近文件和工具结果摘要。
+`identity` 是稳定区的核心 contract，定义 agent 的默认工程行为：工作流、沟通格式、代码编辑原则、工具证据纪律、Git/文件安全、验证要求、review 模式和 prompt 边界。项目指令文件会在其后注入，用于细化当前仓库的规则。
+
+默认不把 Skill 全文塞进 prompt；`skills` 只注入 skill catalog，模型必须调用 `load_skill` 后才能读取完整 skill。`contextual_retrieval` 只会注入当前任务已经访问过的最近文件和工具结果摘要。
+
+项目指令文件（`AGENTS.md`、`CLAUDE.md`）按 UTF-8 字节计入 prompt 预算：
+
+- ≤ 24KB：完整注入。
+- > 24KB 且 ≤ 32KB：完整注入，并在 prompt 中显式警告。
+- > 32KB：不静默截断；prompt 中显式说明已压缩，并保留开头、文档目录和关键规则章节，丢弃冗长示例和背景内容。需要依赖被省略细节时，agent 应先读取原文件。
+
+Provider 请求前会触发 `before_provider_request` hook，metadata 包含 `prompt_version`、`prompt_sha256`、`system_prompt_bytes`、messages 和 tools，用于复盘某次 LLM 调用实际使用的 prompt。
 
 ---
 

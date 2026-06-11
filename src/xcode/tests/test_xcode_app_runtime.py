@@ -436,6 +436,66 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertNotIn("submit_subagent", seen_child_tools[0])
         self.assertNotIn("create_worktree_task", seen_child_tools[0])
 
+    def test_subagent_receives_runtime_prompt_context(self) -> None:
+        seen_messages: list[list[Message]] = []
+
+        class CapturingProvider(ModelProvider):
+            async def stream(
+                self,
+                messages: list[Message],
+                tools: list[ToolDefinition],
+                options: StreamOptions | None = None,
+                **kwargs: Any,
+            ) -> AsyncIterator[ProviderEvent]:
+                seen_messages.append(messages)
+                yield TextDelta(chunk="child done")
+                yield FinalMessage(content="", stop_reason="end_turn")
+
+            def complete(self, prompt: str) -> str:
+                return "done"
+
+            def judge(self, prompt: str) -> str:
+                return "ok"
+
+        provider = CapturingProvider()
+        bundle = SimpleNamespace(
+            llm=provider,
+            llms={"main": provider, "subagent": provider},
+            embedding=object(),
+        )
+        runtime_config = XcodeRuntimeConfig(
+            tools=ToolsRuntimeConfig(enabled_groups=("core", "subagent")),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text(
+                "Subagent must follow project rules.",
+                encoding="utf-8",
+            )
+            with patch("xcode.harness.assembly.build_providers", return_value=bundle):
+                app = build_app(project_root=root, runtime_config=runtime_config)
+
+            tools = {tool.name: tool for tool in app.registry}
+            submitted = tools["submit_subagent"].handler({"prompt": "inspect"})
+            job_id = submitted.split()[2]
+            for _ in range(100):
+                checked = tools["check_subagent"].handler({"job_id": job_id})
+                if "status=done" in checked:
+                    break
+                import time
+
+                time.sleep(0.01)
+            else:
+                self.fail("subagent did not finish")
+
+        self.assertTrue(seen_messages)
+        self.assertEqual(seen_messages[0][0]["role"], "system")
+        system_prompt = str(seen_messages[0][0]["content"])
+        self.assertIn("Subagent must follow project rules.", system_prompt)
+        self.assertIn("<git-preflight>", system_prompt)
+        self.assertIn("<cwd-info>", system_prompt)
+
     def test_subagent_tools_are_not_created_when_group_disabled(self) -> None:
         runtime_config = XcodeRuntimeConfig(
             tools=ToolsRuntimeConfig(enabled_groups=("core",)),

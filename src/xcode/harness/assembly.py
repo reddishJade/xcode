@@ -297,12 +297,16 @@ def build_tool_registry(
         child_llms.setdefault(PROFILE_SUBAGENT, child_llms[PROFILE_MAIN])
 
         async def run_child(prompt, model_profile=PROFILE_SUBAGENT, cwd_override=None):
+            child_root = project_root.resolve()
+            child_contextual_state = contextual_state
             effective_registry = child_registry
             if cwd_override is not None:
+                child_root = Path(cwd_override).resolve()
+                child_contextual_state = ContextualRetrievalState(child_root)
                 effective_registry = build_project_scoped_registry(
-                    project_root=Path(cwd_override),
+                    project_root=child_root,
                     enabled=enabled,
-                    contextual_state=contextual_state,
+                    contextual_state=child_contextual_state,
                     shell_spec=shell_spec,
                     cancel_event=cancel_event,
                     env=env,
@@ -311,6 +315,14 @@ def build_tool_registry(
                 provider=child_llms[model_profile],
                 registry=effective_registry,
                 config=config,
+                runtime_context_provider=build_runtime_context_provider(
+                    child_root,
+                    effective_registry,
+                    skill_loader,
+                    shell_spec=shell_spec,
+                    contextual_state=child_contextual_state,
+                    modules=runtime_config.prompt.modules,
+                ),
             ).run_async(prompt)
             return result.answer
 

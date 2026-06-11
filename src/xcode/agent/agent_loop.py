@@ -595,6 +595,8 @@ async def _call_provider(
     convert_fn = config.convert_to_llm or (lambda msgs: [])
     llm_messages = convert_fn(messages)
     tool_definitions = _tools_to_definitions(context.tools)
+    if config.before_provider_request:
+        config.before_provider_request(llm_messages, tool_definitions)
 
     started = perf_counter()
     events = await _collect_provider_events(

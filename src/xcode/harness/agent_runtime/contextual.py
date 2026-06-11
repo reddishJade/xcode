@@ -44,6 +44,8 @@ class ContextualRetrievalState:
         self._active_file: str | None = None
         self._tool_results: deque[RecentToolResult] = deque(maxlen=max_results)
         self._tool_calls: deque[RecentToolCall] = deque(maxlen=max_tool_calls)
+        self._render_cache: str | None = None
+        self._dirty = True
 
     def record_file(self, path: Path | str) -> None:
         """记录文件为当前上下文相关，去重并维护 LRU 队列。"""
@@ -61,6 +63,7 @@ class ContextualRetrievalState:
             self._file_set.discard(removed)
             if self._active_file == removed:
                 self._active_file = self._files[-1] if self._files else None
+        self._dirty = True
 
     def record_tool_result(self, tool: str, content: str) -> None:
         """记录工具结果摘要，用于下一轮 system prompt。"""
@@ -70,6 +73,7 @@ class ContextualRetrievalState:
         if len(clean) > 240:
             clean = clean[:237] + "..."
         self._tool_results.append(RecentToolResult(tool=tool, summary=clean))
+        self._dirty = True
 
     def record_tool_call(
         self,
@@ -96,9 +100,12 @@ class ContextualRetrievalState:
                 timestamp=datetime.now().isoformat(timespec="seconds"),
             )
         )
+        self._dirty = True
 
     def render(self) -> str:
         """渲染为 system prompt 的 contextual-retrieval 块。"""
+        if not self._dirty and self._render_cache is not None:
+            return self._render_cache
         lines = [
             "<contextual-retrieval>",
             "This block contains only context already made relevant by the current task.",
@@ -126,7 +133,10 @@ class ContextualRetrievalState:
                     f"- {call.tool} status={call.status} risk={call.risk}{approval}{target}: {call.input_brief}"
                 )
         lines.append("</contextual-retrieval>")
-        return "\n".join(lines)
+        rendered = "\n".join(lines)
+        self._render_cache = rendered
+        self._dirty = False
+        return rendered
 
     def _display(self, path: Path | str) -> str:
         candidate = Path(path)
