@@ -7,9 +7,10 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 logger = logging.getLogger(__name__)
@@ -47,26 +48,16 @@ class SubprocessExecutionEnv:
         timeout: int = 30,
         cancel_event: threading.Event | None = None,
     ) -> ExecutionResult:
-        popen_kwargs: dict[str, Any] = {}
-        if sys.platform == "win32":
-            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        else:
-            popen_kwargs["start_new_session"] = True
-        proc = subprocess.Popen(
-            argv,
-            shell=False,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            **popen_kwargs,
-        )
+        proc = _start_process(argv, cwd)
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
         lock = threading.Lock()
         cancelled = False
         timed_out = False
 
-        def _drain(src: Any, dest: list[bytes]) -> None:
+        def _drain(src: Iterable[bytes] | None, dest: list[bytes]) -> None:
+            if src is None:
+                return
             try:
                 for raw in src:
                     with lock:
@@ -114,6 +105,26 @@ class SubprocessExecutionEnv:
             timed_out=timed_out,
             cancelled=cancelled,
         )
+
+
+def _start_process(argv: list[str], cwd: Path) -> subprocess.Popen[bytes]:
+    if sys.platform == "win32":
+        return subprocess.Popen(
+            argv,
+            shell=False,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    return subprocess.Popen(
+        argv,
+        shell=False,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
 
 
 class MockExecutionEnv:
