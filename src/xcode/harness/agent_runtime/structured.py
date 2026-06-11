@@ -130,6 +130,7 @@ class StructuredAgent:
         self._last_prompt_tokens: int | None = None
 
         # 组件
+        self._hook_manager = hook_manager
         self._mode = ExecutionModeState()
         self._gate = ToolGate(
             mode_state=self._mode,
@@ -229,11 +230,14 @@ class StructuredAgent:
 
         loop_config = self._build_loop_config(effective_mode, snapshot)
 
-        self._gate._emit_hook(
+        from .tool_hooks import emit_hook as _emit_hook
+
+        _emit_hook(
+            self._hook_manager,
             HookRecord(
                 "before_agent_start",
                 metadata={"question": question, "mode": effective_mode},
-            )
+            ),
         )
 
         translation_state = _StreamTranslationState()
@@ -326,8 +330,11 @@ class StructuredAgent:
         return should_compact
 
     def _loop_compact(self, messages: list[AgentMessage]) -> list[AgentMessage]:
-        self._gate._emit_hook(
-            HookRecord("on_compact", metadata={"messages": len(messages)})
+        from .tool_hooks import emit_hook as _emit_hook
+
+        _emit_hook(
+            self._hook_manager,
+            HookRecord("on_compact", metadata={"messages": len(messages)}),
         )
         if self.compactor is None:
             return messages
@@ -365,7 +372,10 @@ class StructuredAgent:
         )
         prompt_bytes = len(system_prompt.encode("utf-8"))
         prompt_sha = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
-        self._gate._emit_hook(
+        from .tool_hooks import emit_hook as _emit_hook
+
+        _emit_hook(
+            self._hook_manager,
             HookRecord(
                 "before_provider_request",
                 metadata={
@@ -375,7 +385,7 @@ class StructuredAgent:
                     "prompt_sha256": prompt_sha,
                     "system_prompt_bytes": prompt_bytes,
                 },
-            )
+            ),
         )
 
     def _loop_prepare_next_turn(

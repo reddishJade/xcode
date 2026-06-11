@@ -1,4 +1,4 @@
-"""工具执行门控：审批、权限、钩子、审计。"""
+"""工具执行门控：审批、权限、准入决策。"""
 
 from __future__ import annotations
 
@@ -15,18 +15,13 @@ from ...agent.config import (
     BeforeToolCallResult,
     IsToolProductiveHook,
 )
-from ...agent.protocols import CancellationSignal
-from ...agent.protocols import AgentTool
+from ...agent.protocols import AgentTool, CancellationSignal
 from ...agent.types import ToolCallContent
 from .execution_modes import ExecutionModeState, policy_for_mode
 from .tool_adapter import adapt_tool_specs
-from ..observability import (
-    AuditRecord,
-    HookManager,
-    HookRecord,
-    PermissionPolicy,
-    redact_text,
-)
+from .tool_audit import emit_audit
+from .tool_hooks import emit_hook, emit_tool_hook, tool_result_text
+from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 
@@ -41,7 +36,7 @@ class ToolGateSnapshot:
 
 
 class ToolGate:
-    """工具执行门控：HITL 审批、权限检查、钩子发射、审计记录。"""
+    """工具执行门控：HITL 审批、权限检查、准入决策。"""
 
     PROGRESS_TOOL_NAMES = frozenset(
         {
@@ -127,10 +122,13 @@ class ToolGate:
                 if approval is not None:
                     return approval
 
-            self._emit_hook(
+            emit_hook(
+                self._hook_manager,
                 HookRecord(
-                    "pre_tool", tool=tool_call.name, input=stringify_tool_input(args)
-                )
+                    "pre_tool",
+                    tool=tool_call.name,
+                    input=stringify_tool_input(args),
+                ),
             )
             return None
 
@@ -148,9 +146,16 @@ class ToolGate:
             if ctx.tool_call.name in self.PROGRESS_TOOL_NAMES:
                 self._progress_steps_without_update = 0
             action_input = stringify_tool_input(ctx.args)
-            result_text = _tool_result_text(ctx)
-            self._emit_tool_hook(ctx, action_input, result_text)
-            self._emit_audit(ctx, action_input, result_text, snapshot)
+            result_text = tool_result_text(ctx)
+            emit_tool_hook(self._hook_manager, ctx, action_input, result_text)
+            emit_audit(
+                self._audit_logger,
+                self._session_id,
+                ctx,
+                action_input,
+                result_text,
+                snapshot.tool_map,
+            )
             return None
 
         return after_tool
@@ -188,7 +193,10 @@ class ToolGate:
     # ── 内部方法 ──
 
     def _request_approval(
-        self, tool_name: str, args: dict[str, Any], snapshot: ToolGateSnapshot
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        snapshot: ToolGateSnapshot,
     ) -> BeforeToolCallResult | None:
         if snapshot.approval_callback is None or tool_name not in snapshot.tool_map:
             return BeforeToolCallResult(
@@ -201,69 +209,8 @@ class ToolGate:
             )
         return None
 
-    def _emit_tool_hook(
-        self,
-        ctx: AfterToolCallContext,
-        action_input: str,
-        result_text: str,
-    ) -> None:
-        tool_call = ctx.tool_call
-        if ctx.is_error:
-            self._emit_hook(
-                HookRecord(
-                    "on_error",
-                    tool=tool_call.name,
-                    input=action_input,
-                    error=result_text,
-                )
-            )
-            return
-        self._emit_hook(
-            HookRecord(
-                "post_tool", tool=tool_call.name, input=action_input, output=result_text
-            )
-        )
-
-    def _emit_audit(
-        self,
-        ctx: AfterToolCallContext,
-        action_input: str,
-        result_text: str,
-        snapshot: ToolGateSnapshot,
-    ) -> None:
-        if self._audit_logger is None:
-            return
-        tool_call = ctx.tool_call
-        spec = snapshot.tool_map.get(tool_call.name)
-        self._audit_logger(
-            AuditRecord(
-                session_id=self._session_id,
-                tool=tool_call.name,
-                static_risk=(spec.risk if spec else None) or "low",
-                dynamic_decision="allow",
-                policy_decision=None,
-                final_status="error" if ctx.is_error else "ok",
-                approved=True,
-                redacted_input=redact_text(action_input),
-                redacted_output=redact_text(result_text),
-            )
-        )
-
-    def _emit_hook(self, record: HookRecord) -> None:
-        if self._hook_manager is not None:
-            self._hook_manager.emit(record)
-
 
 # ── 模块级辅助 ──
-
-
-def _tool_result_text(ctx: AfterToolCallContext) -> str:
-    """从 AfterToolCallContext 提取结果文本。"""
-    from ...agent.types import TextContent
-
-    if not ctx.result or not ctx.result.content:
-        return ""
-    return "".join(c.text for c in ctx.result.content if isinstance(c, TextContent))
 
 
 def _tool_results_count_as_progress(
