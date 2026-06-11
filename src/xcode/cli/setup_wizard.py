@@ -23,14 +23,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "env_key": "OPENAI_API_KEY",
         "env_base_url": "OPENAI_BASE_URL",
     },
-    "anthropic": {
-        "label": "Anthropic",
-        "base_url": "",
-        "models": ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"],
-        "default_model": "claude-sonnet-4-6",
-        "env_key": "ANTHROPIC_API_KEY",
-        "env_base_url": "ANTHROPIC_BASE_URL",
-    },
     "deepseek": {
         "label": "DeepSeek",
         "base_url": "https://api.deepseek.com",
@@ -165,9 +157,7 @@ def run_setup_wizard(project_root: Path) -> bool:
             model = model_default
 
     transport = "openai_chat"
-    if provider_key == "anthropic":
-        transport = "anthropic_messages"
-    elif provider_key == "deepseek":
+    if provider_key == "deepseek":
         transport = "deepseek_chat"
     elif provider_key == "mimo":
         transport = "mimo_chat"
