@@ -13,7 +13,7 @@ from .contextual import ContextualRetrievalState
 from ...harness.skill_loader import SkillLoader
 from xcode.harness.config import DEFAULT_PROMPT_MODULES
 from xcode.harness.skills import ToolSpec, build_tool_guidelines, build_tool_prompt
-from xcode.coding_agent.tools import ShellSpec
+from xcode.coding_agent.tools.shell_adapter import ShellSpec
 
 type PromptCacheKey = tuple[object, ...]
 

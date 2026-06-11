@@ -477,6 +477,12 @@ def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
                 handler=lambda value: str(value.get("input", "")),
                 read_only=True,
                 concurrency_safe=True,
+                schema={
+                    "type": "object",
+                    "properties": {"input": {"type": "string"}},
+                    "required": ["input"],
+                    "additionalProperties": False,
+                },
             ),
         )
     else:

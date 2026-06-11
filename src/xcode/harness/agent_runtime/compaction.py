@@ -564,6 +564,11 @@ def build_compact_tool(controller: CompactController) -> ToolSpec:
         input_hint="empty",
         handler=lambda _input: controller.request(),
         risk="low",
+        schema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
     )
 
 

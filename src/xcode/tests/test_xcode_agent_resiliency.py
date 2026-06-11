@@ -19,6 +19,14 @@ from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
 
 
+PATH_SCHEMA = {
+    "type": "object",
+    "properties": {"path": {"type": "string"}},
+    "required": ["path"],
+    "additionalProperties": False,
+}
+
+
 class XcodeAgentResiliencyTests(unittest.TestCase):
     def test_diminishing_returns_continuation_circuit_breaker(self) -> None:
         # Mock provider returning max_tokens with small response blocks
@@ -66,6 +74,7 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
             input_hint="path",
             handler=lambda _data: "file content",
             risk="low",
+            schema=PATH_SCHEMA,
         )
 
         # Provider calls read_file consecutively with different paths to bypass repeated tool watchdog
@@ -142,6 +151,7 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
             input_hint="path",
             handler=lambda _data: "file content",
             risk="low",
+            schema=PATH_SCHEMA,
         )
 
         responses = iter(

@@ -74,9 +74,11 @@ def parse_tool_arguments(raw_arguments: str) -> ToolArguments:
     """解析工具调用参数 JSON。"""
     try:
         result = orjson.loads((raw_arguments or "{}").encode())
-        return _tool_arguments(result) or {"input": str(result)}
+        return _tool_arguments(result) or {
+            "__invalid_tool_arguments__": str(result),
+        }
     except orjson.JSONDecodeError:
-        return {"input": raw_arguments}
+        return {"__invalid_tool_arguments__": raw_arguments}
 
 
 def _tool_arguments(value: object) -> ToolArguments | None:

@@ -145,6 +145,12 @@ def build_worktree_tools(runner: WorktreeTaskRunner) -> tuple[ToolSpec, ...]:
             create_worktree_task,
             risk="high",
             group="worktree",
+            schema={
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+                "additionalProperties": False,
+            },
         ),
         ToolSpec(
             "remove_worktree_task",
@@ -153,6 +159,15 @@ def build_worktree_tools(runner: WorktreeTaskRunner) -> tuple[ToolSpec, ...]:
             remove_worktree_task,
             risk="high",
             group="worktree",
+            schema={
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "force": {"type": "boolean"},
+                },
+                "required": ["id"],
+                "additionalProperties": False,
+            },
         ),
     )
 

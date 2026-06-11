@@ -149,7 +149,6 @@ class StructuredAgent:
                 high_risk_requires_approval=high_risk_requires_approval,
             ),
         )
-        adapted.extend(self._build_mode_switch_agent_tools())
         self._agent = Agent(adapted)
 
     # ── 公共 API ──
@@ -165,7 +164,10 @@ class StructuredAgent:
             self._compact_controller.request()
 
     def confirm_plan(self) -> None:
-        self._mode.confirm_plan()
+        """确认计划。
+
+        Plan 模式现在由外层显式控制，不再通过模型工具提交待确认计划。
+        """
 
     def clear_history(self) -> None:
         self._history.clear()
@@ -282,13 +284,10 @@ class StructuredAgent:
         final = _build_structured_result(
             visible_result, snapshot.config.max_steps, self._mode.current_mode
         )
+
         yield _final_event(result.steps, final)
 
     # ── 模式切换 ──
-
-    def _build_mode_switch_agent_tools(self) -> list[AgentTool]:
-        plan_spec, act_spec = self._mode.build_mode_switch_tools()
-        return cast(list[AgentTool], adapt_tool_specs((plan_spec, act_spec)))
 
     def _tools_for_mode(
         self, registry: tuple[ToolSpec, ...], mode: ExecutionMode
@@ -306,7 +305,6 @@ class StructuredAgent:
                 high_risk_requires_approval=self._gate._high_risk_requires_approval,
             ),
         )
-        adapted.extend(self._build_mode_switch_agent_tools())
         return adapted
 
     # ── 配置构建 ──

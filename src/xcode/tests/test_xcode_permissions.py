@@ -25,6 +25,14 @@ from xcode.ai.events import (
 )
 
 
+INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"input": {"type": "string"}},
+    "required": ["input"],
+    "additionalProperties": False,
+}
+
+
 class XcodePermissionsTests(unittest.TestCase):
     def test_permission_policy_denies_tool(self) -> None:
         tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
@@ -84,7 +92,15 @@ class XcodePermissionsTests(unittest.TestCase):
         provider = FakeProvider(responses)
         agent = StructuredAgent(
             provider=provider,
-            registry=(ToolSpec("echo", "Echo.", "text", lambda value: value["input"]),),
+            registry=(
+                ToolSpec(
+                    "echo",
+                    "Echo.",
+                    "text",
+                    lambda value: value["input"],
+                    schema=INPUT_SCHEMA,
+                ),
+            ),
             permission_policy=PermissionPolicy((PermissionRule("echo", "deny"),)),
         )
 

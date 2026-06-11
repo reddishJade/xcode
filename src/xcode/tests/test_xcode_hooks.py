@@ -20,6 +20,19 @@ from xcode.ai.events import (
 )
 
 
+EMPTY_SCHEMA = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"input": {"type": "string"}},
+    "required": ["input"],
+    "additionalProperties": False,
+}
+
+
 class XcodeHookTests(unittest.TestCase):
     def test_typed_subscribers_receive_harness_events(self) -> None:
         seen: list[tuple[str, str]] = []
@@ -62,7 +75,15 @@ class XcodeHookTests(unittest.TestCase):
         provider = FakeProvider(responses)
         agent = StructuredAgent(
             provider=provider,
-            registry=(ToolSpec("echo", "Echo.", "text", lambda value: value["input"]),),
+            registry=(
+                ToolSpec(
+                    "echo",
+                    "Echo.",
+                    "text",
+                    lambda value: value["input"],
+                    schema=INPUT_SCHEMA,
+                ),
+            ),
             hook_manager=hooks,
         )
 
@@ -88,7 +109,7 @@ class XcodeHookTests(unittest.TestCase):
 
         agent = StructuredAgent(
             provider=provider,
-            registry=(ToolSpec("boom", "Boom.", "empty", fail),),
+            registry=(ToolSpec("boom", "Boom.", "empty", fail, schema=EMPTY_SCHEMA),),
             hook_manager=hooks,
         )
 
@@ -111,7 +132,15 @@ class XcodeHookTests(unittest.TestCase):
         )
         agent = StructuredAgent(
             provider=provider,
-            registry=(ToolSpec("echo", "Echo.", "text", lambda value: value["input"]),),
+            registry=(
+                ToolSpec(
+                    "echo",
+                    "Echo.",
+                    "text",
+                    lambda value: value["input"],
+                    schema=INPUT_SCHEMA,
+                ),
+            ),
             hook_manager=hooks,
             runtime_context_provider=lambda _question: ["<runtime>context</runtime>"],
         )

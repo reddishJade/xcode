@@ -27,6 +27,13 @@ from xcode.harness.skills import (
 )
 
 
+EMPTY_SCHEMA = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+
 class AgentToolExecutionTests(unittest.TestCase):
     def test_toolspec_adapter_derives_execution_mode_from_metadata(self) -> None:
         read_tool, write_tool, explicit_parallel = adapt_tool_specs(
@@ -38,14 +45,23 @@ class AgentToolExecutionTests(unittest.TestCase):
                     lambda _data: "",
                     read_only=True,
                     concurrency_safe=True,
+                    schema=EMPTY_SCHEMA,
                 ),
-                ToolSpec("write", "Write.", "text", lambda _data: "", risk="high"),
+                ToolSpec(
+                    "write",
+                    "Write.",
+                    "text",
+                    lambda _data: "",
+                    risk="high",
+                    schema=EMPTY_SCHEMA,
+                ),
                 ToolSpec(
                     "explicit",
                     "Explicit.",
                     "text",
                     lambda _data: "",
                     execution_mode="parallel",
+                    schema=EMPTY_SCHEMA,
                 ),
             )
         )
@@ -65,6 +81,7 @@ class AgentToolExecutionTests(unittest.TestCase):
                     "{}",
                     lambda _data: "",
                     builtin=builtin,
+                    schema=EMPTY_SCHEMA,
                 ),
             )
         )
@@ -90,7 +107,15 @@ class AgentToolExecutionTests(unittest.TestCase):
             },
         )
         (tool,) = adapt_tool_specs(
-            (ToolSpec("shell", "Run shell.", "{}", lambda _data: output),)
+            (
+                ToolSpec(
+                    "shell",
+                    "Run shell.",
+                    "{}",
+                    lambda _data: output,
+                    schema=EMPTY_SCHEMA,
+                ),
+            )
         )
 
         result = asyncio.run(tool.execute("call-1", {}))
@@ -110,7 +135,16 @@ class AgentToolExecutionTests(unittest.TestCase):
             return "changed"
 
         (tool,) = adapt_tool_specs(
-            (ToolSpec("write", "Write.", "text", handler, risk="high"),)
+            (
+                ToolSpec(
+                    "write",
+                    "Write.",
+                    "text",
+                    handler,
+                    risk="high",
+                    schema=EMPTY_SCHEMA,
+                ),
+            )
         )
 
         result = asyncio.run(tool.execute("call-1", {}))
@@ -126,7 +160,12 @@ class AgentToolExecutionTests(unittest.TestCase):
         (tool,) = adapt_tool_specs(
             (
                 ToolSpec(
-                    "write", "Write.", "text", lambda _data: "changed", risk="high"
+                    "write",
+                    "Write.",
+                    "text",
+                    lambda _data: "changed",
+                    risk="high",
+                    schema=EMPTY_SCHEMA,
                 ),
             ),
             approval_callback=lambda _tool, _input: HITLResult("allow", "once"),
@@ -150,8 +189,16 @@ class AgentToolExecutionTests(unittest.TestCase):
                     lambda _data: "",
                     read_only=True,
                     concurrency_safe=True,
+                    schema=EMPTY_SCHEMA,
                 ),
-                ToolSpec("write", "Write.", "text", lambda _data: "", risk="high"),
+                ToolSpec(
+                    "write",
+                    "Write.",
+                    "text",
+                    lambda _data: "",
+                    risk="high",
+                    schema=EMPTY_SCHEMA,
+                ),
                 ToolSpec(
                     "unsafe_read",
                     "Unsafe read.",
@@ -159,6 +206,7 @@ class AgentToolExecutionTests(unittest.TestCase):
                     lambda _data: "",
                     read_only=True,
                     concurrency_safe=False,
+                    schema=EMPTY_SCHEMA,
                 ),
             )
         )
@@ -206,7 +254,15 @@ class AgentToolExecutionTests(unittest.TestCase):
     def test_before_tool_block_emits_end_event(self) -> None:
         events: list[AgentEvent] = []
         (tool,) = adapt_tool_specs(
-            (ToolSpec("echo", "Echo.", "text", lambda _data: "ok"),)
+            (
+                ToolSpec(
+                    "echo",
+                    "Echo.",
+                    "text",
+                    lambda _data: "ok",
+                    schema=EMPTY_SCHEMA,
+                ),
+            )
         )
         tool_call = ToolCallContent(id="echo-1", name="echo")
 

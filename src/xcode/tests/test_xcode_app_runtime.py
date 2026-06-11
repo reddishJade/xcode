@@ -85,8 +85,6 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 "ls",
                 "bash",
                 "search_tools",
-                "request_plan_mode",
-                "exit_plan_mode",
             },
         )
 
@@ -97,7 +95,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             plugins_dir.mkdir(parents=True)
             (plugins_dir / "demo.py").write_text(
                 "from xcode.harness.skills import ToolSpec\n"
-                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _data: 'ok')]\n",
+                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _data: 'ok', schema={'type':'object','properties':{},'additionalProperties':False})]\n",
                 encoding="utf-8",
             )
 
@@ -125,7 +123,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             plugins_dir.mkdir(parents=True)
             (plugins_dir / "demo.py").write_text(
                 "from xcode.harness.skills import ToolSpec\n"
-                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _data: 'ok')]\n",
+                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _data: 'ok', schema={'type':'object','properties':{},'additionalProperties':False})]\n",
                 encoding="utf-8",
             )
 
@@ -207,7 +205,18 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         def fake_bash_tool(*_args, **kwargs):
             captured["cancel_event"] = kwargs.get("cancel_event")
-            return ToolSpec("bash", "Run shell.", "command", lambda _data: "ok")
+            return ToolSpec(
+                "bash",
+                "Run shell.",
+                "command",
+                lambda _data: "ok",
+                schema={
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                    "additionalProperties": False,
+                },
+            )
 
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             with patch(

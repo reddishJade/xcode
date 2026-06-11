@@ -282,6 +282,7 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
             'JSON: {"prompt":"...", "model_profile":"subagent", "isolation":"context|worktree"}',
             submit_subagent,
             group="subagent",
+            schema=_submit_subagent_schema(),
         ),
         ToolSpec(
             "check_subagent",
@@ -289,6 +290,7 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
             'JSON: {"job_id":"..."}',
             check_subagent,
             group="subagent",
+            schema=_job_id_schema(),
         ),
         ToolSpec(
             "cancel_subagent",
@@ -296,8 +298,36 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
             'JSON: {"job_id":"..."}',
             cancel_subagent,
             group="subagent",
+            schema=_job_id_schema(),
         ),
     )
+
+
+def _submit_subagent_schema() -> dict[str, object]:
+    """返回 submit_subagent 的参数 schema。"""
+    return {
+        "type": "object",
+        "properties": {
+            "prompt": {"type": "string"},
+            "model_profile": {"type": "string"},
+            "isolation": {
+                "type": "string",
+                "enum": ["context", "worktree"],
+            },
+        },
+        "required": ["prompt"],
+        "additionalProperties": False,
+    }
+
+
+def _job_id_schema() -> dict[str, object]:
+    """返回只接受 job_id 的子 Agent 工具参数 schema。"""
+    return {
+        "type": "object",
+        "properties": {"job_id": {"type": "string"}},
+        "required": ["job_id"],
+        "additionalProperties": False,
+    }
 
 
 def _unknown_profile(model_profile: str, profiles) -> str:

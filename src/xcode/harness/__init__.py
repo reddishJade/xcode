@@ -1,6 +1,5 @@
 from .agent_runtime import StructuredAgent, StructuredAgentEvent
 from .agent_runtime.cancellation import CancellationToken
-from .app import XcodeApp
 from .config import AgentConfig, ExecutionMode
 from .execution_env import ExecutionEnv, ExecutionResult, SubprocessExecutionEnv
 from .observability import HookManager, PermissionPolicy
@@ -19,5 +18,4 @@ __all__ = [
     "SubprocessExecutionEnv",
     "ToolOutput",
     "ToolSpec",
-    "XcodeApp",
 ]

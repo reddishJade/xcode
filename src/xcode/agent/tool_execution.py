@@ -16,6 +16,8 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import jsonschema
+
 from xcode.agent.types import (
     ShellCallOutputContent,
     TextContent,
@@ -210,6 +212,9 @@ async def _execute_one_impl(
         return _error_result(tool_call, f"unknown tool: {tool_call.name}")
 
     args: ToolArguments = tool_call.arguments or {}
+    validation_error = _validate_tool_arguments(tool, tool_call, args)
+    if validation_error is not None:
+        return _error_result(tool_call, validation_error)
 
     if is_cancelled(signal):
         return _error_result(tool_call, cancel_reason(signal))
@@ -257,6 +262,28 @@ def _find_tool(
     for candidate_tool in current_context.tools or []:
         if candidate_tool.name == tool_call.name:
             return candidate_tool
+    return None
+
+
+def _validate_tool_arguments(
+    tool: AgentTool,
+    tool_call: ToolCallContent,
+    args: ToolArguments,
+) -> str | None:
+    """按工具 JSON schema 校验模型生成的参数。"""
+    try:
+        schema = dict(tool.parameters)
+    except Exception as exc:
+        return f"tool schema error for {tool_call.name}: {exc}"
+    try:
+        jsonschema.validate(instance=args, schema=schema)
+    except jsonschema.ValidationError as exc:
+        path = (
+            ".".join(str(part) for part in exc.absolute_path)
+            if exc.absolute_path
+            else tool_call.name
+        )
+        return f"tool argument schema error: {path}: {exc.message}"
     return None
 
 

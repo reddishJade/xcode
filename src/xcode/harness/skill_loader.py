@@ -197,6 +197,17 @@ def build_skill_loader_tool(loader: SkillLoader) -> ToolSpec:
         group="skills",
         read_only=True,
         concurrency_safe=True,
+        schema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Skill name from the skill catalog.",
+                }
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
     )
 
 

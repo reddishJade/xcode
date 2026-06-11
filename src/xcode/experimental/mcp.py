@@ -106,7 +106,11 @@ def build_fetch_tools_tool(
         input_hint="{}",
         handler=handler,
         risk="low",
-        schema={"type": "object"},
+        schema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
         read_only=True,
         group="mcp",
     )

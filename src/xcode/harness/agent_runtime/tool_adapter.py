@@ -67,7 +67,9 @@ class ToolSpecAdapter:
 
     @property
     def parameters(self) -> dict[str, object]:
-        return self._spec.schema or {"type": "object"}
+        if self._spec.schema is None:
+            raise ValueError(f"tool {self._spec.name} must define a JSON schema")
+        return self._spec.schema
 
     @property
     def examples(self) -> list[dict[str, object]]:
@@ -125,6 +127,10 @@ def adapt_tool_specs(
     high_risk_requires_approval: bool = True,
 ) -> list[ToolSpecAdapter]:
     """批量将 ToolSpec 适配为 AgentTool。"""
+    missing_schema = [spec.name for spec in specs if spec.schema is None]
+    if missing_schema:
+        names = ", ".join(sorted(missing_schema))
+        raise ValueError(f"tools must define JSON schemas: {names}")
     return [
         ToolSpecAdapter(
             spec,

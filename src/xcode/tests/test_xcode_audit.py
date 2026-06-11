@@ -20,6 +20,14 @@ from xcode.ai.events import (
 )
 
 
+INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"input": {"type": "string"}},
+    "required": ["input"],
+    "additionalProperties": False,
+}
+
+
 class XcodeAuditTests(unittest.TestCase):
     def test_redact_text_masks_common_secret_shapes(self) -> None:
         text = "api_key=abcd1234secret and sk-1234567890abcdef"
@@ -62,7 +70,13 @@ class XcodeAuditTests(unittest.TestCase):
             agent = StructuredAgent(
                 provider=provider,
                 registry=(
-                    ToolSpec("echo", "Echo.", "text", lambda data: data["input"]),
+                    ToolSpec(
+                        "echo",
+                        "Echo.",
+                        "text",
+                        lambda data: data["input"],
+                        schema=INPUT_SCHEMA,
+                    ),
                 ),
                 audit_logger=JsonlAuditLogger(path).write,
                 session_id="s1",
@@ -136,6 +150,7 @@ class XcodeAuditTests(unittest.TestCase):
                         "text",
                         danger,
                         risk="high",
+                        schema=INPUT_SCHEMA,
                     ),
                 ),
                 audit_logger=JsonlAuditLogger(path).write,

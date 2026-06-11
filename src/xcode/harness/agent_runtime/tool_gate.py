@@ -92,16 +92,6 @@ class ToolGate:
             tool_call = ctx.tool_call
             args = ctx.args
 
-            if self._mode.is_plan_confirmation_required(tool_call.name, args):
-                self._mode.confirm_plan()
-                return BeforeToolCallResult(
-                    block=True,
-                    reason=(
-                        f"tool {tool_call.name} requires plan confirmation. "
-                        "Present the plan to the user for approval before executing write tools."
-                    ),
-                )
-
             effective_policy = policy_for_mode(self._mode.current_mode)
             decision = effective_policy.check_call(
                 ToolCall(id=tool_call.id, name=tool_call.name, input=args)

@@ -29,6 +29,35 @@ from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
 
 
+EMPTY_SCHEMA = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"input": {"type": "string"}},
+    "required": ["input"],
+    "additionalProperties": False,
+}
+TEXT_SCHEMA = {
+    "type": "object",
+    "properties": {"text": {"type": "string"}},
+    "required": ["text"],
+    "additionalProperties": False,
+}
+PATH_SCHEMA = {
+    "type": "object",
+    "properties": {"path": {"type": "string"}},
+    "required": ["path"],
+    "additionalProperties": False,
+}
+ANY_OBJECT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": True,
+}
+
+
 class ResettableFakeProvider(FakeProvider):
     """记录会话状态重置次数的测试 provider。"""
 
@@ -64,7 +93,13 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 FinalMessage(content="", stop_reason="end_turn"),
             ]
 
-        tool = ToolSpec("read_file", "Read file.", "path", lambda _input: "content")
+        tool = ToolSpec(
+            "read_file",
+            "Read file.",
+            "path",
+            lambda _input: "content",
+            schema=PATH_SCHEMA,
+        )
         agent = StructuredAgent(
             provider=FakeProvider(factory),
             registry=(tool,),
@@ -221,6 +256,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             handler=lambda data: json.dumps(data, ensure_ascii=False, sort_keys=True),
             read_only=True,
             concurrency_safe=True,
+            schema=TEXT_SCHEMA,
         )
         agent = StructuredAgent(
             provider=FakeProvider(lambda _m, _t: next(responses)),
@@ -280,7 +316,13 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         self.assertEqual(result.answer, "step limit reached")
 
     def test_watchdog_stops_repeated_tool_call(self) -> None:
-        tool = ToolSpec("echo", "Echo.", "text", lambda data: data["input"])
+        tool = ToolSpec(
+            "echo",
+            "Echo.",
+            "text",
+            lambda data: data["input"],
+            schema=INPUT_SCHEMA,
+        )
         agent = StructuredAgent(
             provider=FakeProvider(
                 lambda _m, _t: cast(
@@ -306,7 +348,13 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         self.assertIn("watchdog stopped", result.answer)
 
     def test_watchdog_signature_stable_for_dict_input(self) -> None:
-        tool = ToolSpec("echo", "Echo.", "text", lambda data: data["input"])
+        tool = ToolSpec(
+            "echo",
+            "Echo.",
+            "text",
+            lambda data: data["input"],
+            schema=ANY_OBJECT_SCHEMA,
+        )
         responses: Iterator[list[ProviderEvent]] = iter(
             [
                 [
@@ -366,6 +414,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             "path",
             lambda _data: "content",
             read_only=True,
+            schema=PATH_SCHEMA,
         )
         agent = StructuredAgent(
             provider=FakeProvider(lambda _m, _t: next(responses)),
@@ -427,6 +476,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                     "path",
                     lambda data: data["input"],
                     read_only=True,
+                    schema=PATH_SCHEMA,
                 ),
                 ToolSpec(
                     "edit_file",
@@ -434,6 +484,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                     "json",
                     edit_handler,
                     risk="high",
+                    schema=INPUT_SCHEMA,
                 ),
             ),
             config=AgentConfig(execution_mode="plan", max_steps=1),
@@ -496,6 +547,12 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                     "json",
                     bash,
                     risk_evaluator=lambda _value: "allow",
+                    schema={
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                        "required": ["command"],
+                        "additionalProperties": False,
+                    },
                 ),
             ),
             config=AgentConfig(execution_mode="review", max_steps=3),
@@ -538,6 +595,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             description="Echo input.",
             input_hint="text",
             handler=lambda data: data["input"],
+            schema=INPUT_SCHEMA,
         )
         agent = StructuredAgent(
             provider=FakeProvider(lambda _m, _t: next(responses)),
@@ -745,7 +803,13 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         )
         tools = (
             ToolSpec(
-                "first", "First.", "empty", first, read_only=True, concurrency_safe=True
+                "first",
+                "First.",
+                "empty",
+                first,
+                read_only=True,
+                concurrency_safe=True,
+                schema=EMPTY_SCHEMA,
             ),
             ToolSpec(
                 "second",
@@ -754,6 +818,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 second,
                 read_only=True,
                 concurrency_safe=True,
+                schema=EMPTY_SCHEMA,
             ),
         )
         agent = StructuredAgent(
@@ -786,7 +851,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         agent = StructuredAgent(
             provider=FakeProvider(lambda _m, _t: next(responses)),
-            registry=(ToolSpec("boom", "Boom.", "empty", boom),),
+            registry=(ToolSpec("boom", "Boom.", "empty", boom, schema=EMPTY_SCHEMA),),
             config=AgentConfig(max_steps=2),
         )
 
@@ -806,7 +871,13 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 FinalMessage(content="", stop_reason="end_turn"),
             ]
 
-        tool = ToolSpec("echo", "Echo.", "empty", lambda _data: "should not run")
+        tool = ToolSpec(
+            "echo",
+            "Echo.",
+            "empty",
+            lambda _data: "should not run",
+            schema=EMPTY_SCHEMA,
+        )
         agent = StructuredAgent(
             provider=FakeProvider(factory),
             registry=(tool,),

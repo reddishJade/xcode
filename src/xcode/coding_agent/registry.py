@@ -17,7 +17,6 @@ from xcode.coding_agent.tools import (
     build_bash_tool,
     build_code_tools,
     build_file_tools,
-    build_plan_mode_tools,
 )
 
 if TYPE_CHECKING:
@@ -46,5 +45,4 @@ def build_project_scoped_registry(
             env=env,
         ),
     )
-    registry += build_plan_mode_tools(project_root)
     return tuple(t for t in registry if t.group in enabled)

@@ -35,6 +35,20 @@ from xcode.tests.fixtures import FakeProvider
 from xcode.evals.schema import TrialResult
 
 
+INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"input": {"type": "string"}},
+    "required": ["input"],
+    "additionalProperties": False,
+}
+PATH_SCHEMA = {
+    "type": "object",
+    "properties": {"path": {"type": "string"}},
+    "required": ["path"],
+    "additionalProperties": False,
+}
+
+
 class EvalPipelineTests(unittest.TestCase):
     def test_eval_runner_records_trace_and_passes_graders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -412,7 +426,13 @@ def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
         ],
         [TextDelta(chunk="finished"), FinalMessage(content="", stop_reason="end_turn")],
     ]
-    tool = ToolSpec("echo", "Echo input.", "text", lambda value: value["input"])
+    tool = ToolSpec(
+        "echo",
+        "Echo input.",
+        "text",
+        lambda value: value["input"],
+        schema=INPUT_SCHEMA,
+    )
     return XcodeApp(
         agent=StructuredAgent(
             provider=FakeProvider(responses),
@@ -445,7 +465,7 @@ def _editing_app(project_root: Path) -> XcodeApp:
         )
         return "edited"
 
-    tool = ToolSpec("edit_file", "Edit file.", "text", edit_file)
+    tool = ToolSpec("edit_file", "Edit file.", "text", edit_file, schema=PATH_SCHEMA)
     responses: list[list[ProviderEvent]] = [
         [
             ToolCallEvent(
@@ -475,7 +495,13 @@ def _validation_app(project_root: Path) -> XcodeApp:
         (project_root / "ok.txt").write_text("ok", encoding="utf-8")
         return "created"
 
-    tool = ToolSpec("write_file", "Write validation file.", "text", write_ok)
+    tool = ToolSpec(
+        "write_file",
+        "Write validation file.",
+        "text",
+        write_ok,
+        schema=PATH_SCHEMA,
+    )
     responses: list[list[ProviderEvent]] = [
         [
             ToolCallEvent(
