@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 import tempfile
@@ -16,14 +17,17 @@ from xcode.coding_agent.tools import build_bash_tool
 class TestSubprocessExecutionEnv(unittest.TestCase):
     def test_runs_command_and_returns_output(self) -> None:
         env = SubprocessExecutionEnv()
-        result = env.run(["echo", "hello"], cwd=Path("/"))
+        result = env.run(
+            [sys.executable, "-c", 'import sys; sys.stdout.write("hello\\n")'],
+            cwd=Path("/"),
+        )
         self.assertEqual(result.stdout.strip(), "hello")
         self.assertEqual(result.returncode, 0)
 
     def test_returns_stderr(self) -> None:
         env = SubprocessExecutionEnv()
         result = env.run(
-            ["python", "-c", "import sys; sys.stderr.write('err')"],
+            [sys.executable, "-c", 'import sys; sys.stderr.write("err")'],
             cwd=Path("/"),
         )
         self.assertEqual(result.stderr.strip(), "err")
@@ -31,7 +35,7 @@ class TestSubprocessExecutionEnv(unittest.TestCase):
     def test_timeout_kills_process(self) -> None:
         env = SubprocessExecutionEnv()
         result = env.run(
-            ["python", "-c", "import time; time.sleep(5)"],
+            [sys.executable, "-c", "import time; time.sleep(5)"],
             cwd=Path("/"),
             timeout=1,
         )
@@ -48,7 +52,7 @@ class TestSubprocessExecutionEnv(unittest.TestCase):
         timer.start()
         try:
             result = env.run(
-                ["python", "-c", "import time; time.sleep(5)"],
+                [sys.executable, "-c", "import time; time.sleep(5)"],
                 cwd=Path("/"),
                 timeout=10,
                 cancel_event=evt,
