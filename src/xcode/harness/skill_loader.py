@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
-from ..harness.skills import ToolInput, ToolSpec
+from .skills import ToolInput, ToolSpec
 
 """按需加载 skill 的轻量目录。"""
 
@@ -226,17 +226,11 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
 
 def _read_frontmatter(path: Path) -> dict[str, str]:
-    meta: dict[str, str] = {}
-    with path.open("r", encoding="utf-8") as handle:
-        first = handle.readline()
-        if first.strip() != "---":
-            return meta
-        for line in handle:
-            if line.strip() == "---":
-                break
-            if ":" in line:
-                key, value = line.split(":", 1)
-                meta[key.strip()] = value.strip().strip("\"'")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    meta, _ = _parse_frontmatter(text)
     return meta
 
 
