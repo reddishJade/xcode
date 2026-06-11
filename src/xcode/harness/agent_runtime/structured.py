@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, replace
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -51,6 +52,7 @@ from .result import (
 )
 from .tool_adapter import adapt_tool_specs
 from .tool_gate import ToolGate, ToolGateSnapshot
+from .prompting import PROMPT_VERSION
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import HookManager, HookRecord, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec
@@ -117,6 +119,7 @@ class StructuredAgent:
         self.runtime_context_provider = runtime_context_provider
         self.cancellation_token = cancellation_token or CancellationToken()
         self.request_hygiene = request_hygiene or RequestHygieneConfig()
+        self.approval_callback: ApprovalCallback | None = approval_callback
         self._last_prompt_tokens: int | None = None
 
         # 组件
@@ -333,6 +336,7 @@ class StructuredAgent:
             is_tool_productive=self._gate.build_is_tool_productive_hook(gate_snapshot),
             before_tool_call=self._gate.build_before_tool_hook(gate_snapshot),
             after_tool_call=self._gate.build_after_tool_hook(gate_snapshot),
+            before_provider_request=self._loop_before_provider_request,
             prepare_next_turn=self._loop_prepare_next_turn(snapshot),
         )
 
@@ -371,6 +375,32 @@ class StructuredAgent:
             max_tool_arg_length=hygiene.max_tool_arg_length,
             keep_head_lines=hygiene.keep_head_lines,
             keep_tail_lines=hygiene.keep_tail_lines,
+        )
+
+    def _loop_before_provider_request(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[Any],
+    ) -> None:
+        """记录 provider 请求边界的 prompt 审计信息。"""
+        system_prompt = "\n\n".join(
+            str(message.get("content", ""))
+            for message in messages
+            if message.get("role") == "system"
+        )
+        prompt_bytes = len(system_prompt.encode("utf-8"))
+        prompt_sha = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+        self._gate._emit_hook(
+            HookRecord(
+                "before_provider_request",
+                metadata={
+                    "messages": messages,
+                    "tools": [_tool_definition_to_dict(tool) for tool in tools],
+                    "prompt_version": PROMPT_VERSION,
+                    "prompt_sha256": prompt_sha,
+                    "system_prompt_bytes": prompt_bytes,
+                },
+            )
         )
 
     def _loop_prepare_next_turn(
@@ -493,6 +523,15 @@ def _resolve_permission_policy(
 
     sandbox = SettingsSandboxPermissionPolicy(settings_path)
     return CompositePermissionPolicy(sandbox, base)
+
+
+def _tool_definition_to_dict(tool: Any) -> dict[str, Any]:
+    """将 provider 工具定义转为审计用字典。"""
+    return {
+        "name": str(getattr(tool, "name", "")),
+        "description": str(getattr(tool, "description", "")),
+        "parameters": getattr(tool, "parameters", {}),
+    }
 
 
 def _messages_from_compacted_dicts(

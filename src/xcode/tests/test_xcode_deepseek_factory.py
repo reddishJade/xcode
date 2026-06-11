@@ -39,7 +39,7 @@ class XcodeDeepSeekFactoryTests(unittest.TestCase):
             runtime=runtime,
         )
 
-        self.assertIsInstance(provider, DeepSeekProvider)
+        assert isinstance(provider, DeepSeekProvider)
         self.assertEqual(provider.response_format, {"type": "json_object"})
 
     def test_factory_passes_reasoning_effort_to_deepseek(self) -> None:
@@ -54,7 +54,7 @@ class XcodeDeepSeekFactoryTests(unittest.TestCase):
             runtime=runtime,
         )
 
-        self.assertIsInstance(provider, DeepSeekProvider)
+        assert isinstance(provider, DeepSeekProvider)
         self.assertEqual(provider.reasoning_effort, "medium")
 
 

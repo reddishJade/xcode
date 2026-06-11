@@ -98,7 +98,7 @@ class TestRepairToolPairing(unittest.TestCase):
         repaired = repair_tool_pairing(messages)
         self.assertEqual(len(repaired), 2)
         assistant = repaired[0]
-        self.assertIsInstance(assistant, AssistantMessage)
+        assert isinstance(assistant, AssistantMessage)
         self.assertEqual(len(assistant.content), 2)
         self.assertIsInstance(assistant.content[0], TextContent)
         self.assertIsInstance(assistant.content[1], ToolCallContent)
@@ -132,8 +132,9 @@ class TestApplyRequestHygiene(unittest.TestCase):
             keep_tail_lines=10,
         )
         result_msg = cleaned[1]
-        self.assertIsInstance(result_msg, ToolResultMessage)
+        assert isinstance(result_msg, ToolResultMessage)
         result_text = result_msg.content
+        assert isinstance(result_text, str)
         self.assertIn("omitted", result_text)
         self.assertLess(len(result_text.splitlines()), 200)
 
@@ -158,9 +159,10 @@ class TestApplyRequestHygiene(unittest.TestCase):
         ]
         cleaned = apply_request_hygiene(messages, max_tool_arg_length=100)
         assistant = cleaned[0]
-        self.assertIsInstance(assistant, AssistantMessage)
+        assert isinstance(assistant, AssistantMessage)
         call = assistant.content[0]
-        self.assertIsInstance(call, ToolCallContent)
+        assert isinstance(call, ToolCallContent)
+        assert call.arguments is not None
         self.assertIn("truncated", str(call.arguments.get("content")))
 
     def test_hygiene_detects_base64(self):
@@ -187,7 +189,9 @@ class TestApplyRequestHygiene(unittest.TestCase):
         ]
         cleaned = apply_request_hygiene(messages)
         result_msg = cleaned[1]
+        assert isinstance(result_msg, ToolResultMessage)
         result_text = result_msg.content
+        assert isinstance(result_text, str)
         self.assertIn("base64", result_text)
         self.assertIn("bytes", result_text)
 
@@ -221,7 +225,9 @@ class TestApplyRequestHygiene(unittest.TestCase):
             keep_tail_lines=10,
         )
         result_msg = cleaned[1]
+        assert isinstance(result_msg, ToolResultMessage)
         result_text = result_msg.content
+        assert isinstance(result_text, str)
         self.assertIn("ERROR: something went wrong", result_text)
 
     def test_hygiene_no_truncate_small_content(self):
@@ -244,9 +250,17 @@ class TestApplyRequestHygiene(unittest.TestCase):
             ),
         ]
         cleaned = apply_request_hygiene(messages)
-        self.assertEqual(cleaned[1].content, small_content)
+        second = cleaned[1]
+        assert isinstance(second, ToolResultMessage)
+        assert isinstance(second.content, str)
+        self.assertEqual(second.content, small_content)
+        first = cleaned[0]
+        assert isinstance(first, AssistantMessage)
+        call = first.content[0]
+        assert isinstance(call, ToolCallContent)
+        assert call.arguments is not None
         self.assertEqual(
-            cleaned[0].content[0].arguments.get("param"),
+            call.arguments.get("param"),
             "short",
         )
 

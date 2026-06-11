@@ -5,9 +5,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
-from xcode.agent.messages import AgentMessage, AssistantMessage
+from xcode.agent.messages import (
+    AgentMessage,
+    AssistantMessage,
+    SystemMessage,
+    ToolResultMessage,
+    UserMessage,
+)
 
 
 def estimate_tokens_simple(text: str) -> int:
@@ -18,7 +25,7 @@ def estimate_tokens_simple(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def estimate_message_tokens(messages: list[AgentMessage]) -> int:
+def estimate_message_tokens(messages: Sequence[AgentMessage]) -> int:
     """估算消息列表的 token 总数（简单版本）。"""
     import json
 
@@ -36,21 +43,19 @@ def estimate_message_tokens(messages: list[AgentMessage]) -> int:
                     total += estimate_tokens_simple(
                         json.dumps(block.arguments or {}, default=str)
                     )
-        elif hasattr(msg, "content"):
+        elif isinstance(msg, (SystemMessage, UserMessage, ToolResultMessage)):
             content = msg.content
             if isinstance(content, str):
                 total += estimate_tokens_simple(content)
             elif isinstance(content, list):
                 for block in content:
-                    if hasattr(block, "text"):
+                    if isinstance(block, TextContent):
                         total += estimate_tokens_simple(block.text)
-                    elif hasattr(block, "content"):
-                        total += estimate_tokens_simple(block.content)
     return total
 
 
 def should_compact_token_aware(
-    messages: list[AgentMessage],
+    messages: Sequence[AgentMessage],
     *,
     last_prompt_tokens: int | None = None,
     model_soft_threshold: int = 32000,
