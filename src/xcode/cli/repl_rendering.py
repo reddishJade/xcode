@@ -33,6 +33,20 @@ CLI_COLOR_ERROR = "red"
 CLI_COLOR_WARNING = "yellow"
 CLI_COLOR_INFO = "blue"
 CLI_PROMPT_MARKER_STYLE = "ansigreen bold"
+REPL_PROMPT_STYLE = {
+    "prompt-marker": CLI_PROMPT_MARKER_STYLE,
+    "suggestion": "fg:ansibrightblack",
+    "completion-menu": "bg:default fg:default",
+    "completion-menu.completion": "bg:default fg:default",
+    "completion-menu.completion.current": "bg:default fg:default bold underline",
+    "completion-menu.meta.completion": "bg:default fg:ansibrightblack",
+    "completion-menu.meta.completion.current": (
+        "bg:default fg:ansibrightblack bold underline"
+    ),
+    "completion-menu.multi-column-meta": "bg:default fg:ansibrightblack",
+    "scrollbar.background": "bg:default",
+    "scrollbar.button": "bg:default",
+}
 
 
 class PromptSessionAdapter:
@@ -230,12 +244,7 @@ def create_prompt_session(
         history = FileHistory(str(history_dir / "repl_history"))
     except OSError:
         pass
-    style = Style.from_dict(
-        {
-            "prompt-marker": CLI_PROMPT_MARKER_STYLE,
-            "suggestion": "fg:ansibrightblack",
-        }
-    )
+    style = Style.from_dict(REPL_PROMPT_STYLE)
 
     return PromptSessionAdapter(
         PromptSession(

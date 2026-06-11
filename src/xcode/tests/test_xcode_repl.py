@@ -16,6 +16,7 @@ from xcode.cli.commands import PromptText, ReplState
 from xcode.cli.repl import current_effort_options, run_repl
 from xcode.cli.repl_commands import COMMAND_NAMES, handle_command
 from xcode.cli.repl_rendering import reasoning_preview_lines
+from xcode.cli.repl_rendering import REPL_PROMPT_STYLE
 from xcode.cli.repl_tools import brief_input
 from xcode.harness.session import SessionStore
 from xcode.harness.agent_runtime import (
@@ -735,6 +736,18 @@ class XcodeReplTests(unittest.TestCase):
             ]
 
         self.assertEqual(asyncio.run(collect()), ["/plan"])
+
+    def test_repl_completion_menu_style_uses_default_background(self) -> None:
+        completion_styles = {
+            name: style
+            for name, style in REPL_PROMPT_STYLE.items()
+            if name.startswith("completion-menu") or name.startswith("scrollbar.")
+        }
+
+        self.assertTrue(completion_styles)
+        self.assertTrue(
+            all("bg:default" in style for style in completion_styles.values())
+        )
 
 
 class XcodeReplForkTests(unittest.TestCase):
