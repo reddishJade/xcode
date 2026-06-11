@@ -8,6 +8,8 @@ from typing import Any
 
 from dotenv import dotenv_values
 
+JsonObject = dict[str, object]
+
 from .reasoning_effort import (
     reasoning_effort_levels_for_transport,
     supports_reasoning_effort,
@@ -15,7 +17,7 @@ from .reasoning_effort import (
 
 CONFIG_FILENAME = "xcode.config.json"
 
-PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
+PROVIDER_PRESETS: dict[str, Any] = {
     "openai": {
         "label": "OpenAI",
         "base_url": "",
