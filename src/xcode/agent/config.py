@@ -15,7 +15,6 @@ from .protocols import (
     AgentTool,
     AgentToolResult,
     CancellationSignal,
-    QueueMode,
     ToolExecutionMode,
     ToolResultContentBlock,
     ToolResultDetails,
@@ -27,7 +26,6 @@ from .hooks import (
     ContextTransformer,
     IsToolProductiveHook,
     MessageConverter,
-    MessageQueueGetter,
     ShouldCompactHook,
 )
 
@@ -159,11 +157,6 @@ class AgentLoopConfig:
     after_tool_call: AfterToolCallHook | None = None
     prepare_next_turn: PrepareNextTurnHook | None = None
     should_stop_after_turn: ShouldStopAfterTurnHook | None = None
-
-    get_steering_messages: MessageQueueGetter | None = None
-    get_follow_up_messages: MessageQueueGetter | None = None
-    steering_mode: QueueMode = "all"
-    follow_up_mode: QueueMode = "all"
 
     max_steps: int = 50
 

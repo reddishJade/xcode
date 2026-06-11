@@ -99,6 +99,8 @@ async def run_agent_loop(
     config: AgentLoopConfig,
     emit: Callable[[AgentEvent], None],
     signal: CancellationSignal | None = None,
+    steer_queue: list[AgentMessage] | None = None,
+    follow_up_queue: list[AgentMessage] | None = None,
 ) -> AgentLoopResult:
     """运行 agent 核心循环。
 
@@ -116,7 +118,15 @@ async def run_agent_loop(
     for prompt in prompts:
         emit(_message_start_event(prompt))
         emit(_message_end_event(prompt))
-    return await _run_loop(current_context, new_messages, config, emit, signal)
+    return await _run_loop(
+        current_context,
+        new_messages,
+        config,
+        emit,
+        signal,
+        steer_queue=steer_queue,
+        follow_up_queue=follow_up_queue,
+    )
 
 
 # ── 外层循环 ──
@@ -128,6 +138,8 @@ async def _run_loop(
     config: AgentLoopConfig,
     emit: Callable[[AgentEvent], None],
     signal: CancellationSignal | None = None,
+    steer_queue: list[AgentMessage] | None = None,
+    follow_up_queue: list[AgentMessage] | None = None,
 ) -> AgentLoopResult:
     """核心 agent 循环。
 
@@ -152,7 +164,7 @@ async def _run_loop(
             )
 
         # ── 处理 steer 队列 ──
-        _append_steering_messages(current_context, new_messages, config)
+        _append_steering_messages(current_context, new_messages, steer_queue)
 
         # ── 发出 turn 事件 ──
         if not state.first_turn:
@@ -237,7 +249,7 @@ async def _run_loop(
             emit(_turn_end_event(message, []))
 
             # 检查 follow-up 队列
-            if _queue_follow_up(state, config):
+            if _queue_follow_up(state, follow_up_queue):
                 continue
             return _finish_loop(
                 new_messages,
@@ -310,7 +322,7 @@ async def _run_loop(
                 )
 
         # ── 处理 follow-up 队列 ──
-        if _queue_follow_up(state, config):
+        if _queue_follow_up(state, follow_up_queue):
             continue
 
         # 工具已执行但没有 follow-up，继续内层循环（下一轮工具调用）
@@ -358,14 +370,15 @@ def _finish_loop(
 def _append_steering_messages(
     current_context: AgentContext,
     new_messages: list[AgentMessage],
-    config: AgentLoopConfig,
+    steer_queue: list[AgentMessage] | None,
 ) -> None:
-    if not config.get_steering_messages:
+    if not steer_queue:
         return
-    steer_msgs = config.get_steering_messages()
-    if not steer_msgs:
+    msgs = list(steer_queue)
+    steer_queue.clear()
+    if not msgs:
         return
-    for msg in steer_msgs:
+    for msg in msgs:
         current_context.messages.append(msg)
         new_messages.append(msg)
 
@@ -386,13 +399,17 @@ def _drain_pending_messages(
     state.pending_messages = []
 
 
-def _queue_follow_up(state: _LoopRunState, config: AgentLoopConfig) -> bool:
-    if not config.get_follow_up_messages:
+def _queue_follow_up(
+    state: _LoopRunState,
+    follow_up_queue: list[AgentMessage] | None,
+) -> bool:
+    if not follow_up_queue:
         return False
-    follow_up = config.get_follow_up_messages()
-    if not follow_up:
+    msgs = list(follow_up_queue)
+    if not msgs:
         return False
-    state.pending_messages = follow_up
+    follow_up_queue.clear()
+    state.pending_messages = msgs
     return True
 
 

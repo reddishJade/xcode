@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 from collections.abc import AsyncIterator, Callable
 
 from .agent_loop import run_agent_loop
@@ -79,15 +78,22 @@ class Agent:
     ) -> AgentLoopResult:
         """执行 agent 循环，返回结果。
 
-        config 每次调用传入，不缓存。队列 drain 逻辑自动注入。
+        config 和队列引用每次调用传入，不缓存。
         """
-        effective = self._inject_queues(config)
         context = AgentContext(
             messages=list(history or []),
             tools=list(self._tools),
         )
         sink = emit or (lambda _e: None)
-        result = await run_agent_loop(messages, context, effective, sink, signal)
+        result = await run_agent_loop(
+            messages,
+            context,
+            config,
+            sink,
+            signal,
+            steer_queue=self._steer_queue,
+            follow_up_queue=self._followup_queue,
+        )
         self._last_result = result
         return result
 
@@ -104,7 +110,6 @@ class Agent:
         事件在 run_agent_loop 执行过程中通过 asyncio.Queue 实时传递，
         消费方可边跑边 yield。run_agent_loop 抛出的异常会传播给消费方。
         """
-        effective = self._inject_queues(config)
         context = AgentContext(
             messages=list(history or []),
             tools=list(self._tools),
@@ -119,7 +124,13 @@ class Agent:
             nonlocal error_slot
             try:
                 result = await run_agent_loop(
-                    messages, context, effective, _emit, signal
+                    messages,
+                    context,
+                    config,
+                    _emit,
+                    signal,
+                    steer_queue=self._steer_queue,
+                    follow_up_queue=self._followup_queue,
                 )
                 self._last_result = result
             except BaseException as exc:
@@ -143,43 +154,3 @@ class Agent:
                     await task
                 except asyncio.CancelledError:
                     pass
-
-    # ── 内部 ──
-
-    def _drain_steer_all(self) -> list[AgentMessage]:
-        msgs = list(self._steer_queue)
-        self._steer_queue.clear()
-        return msgs
-
-    def _drain_followup_all(self) -> list[AgentMessage]:
-        msgs = list(self._followup_queue)
-        self._followup_queue.clear()
-        return msgs
-
-    def _pop_steer_one(self) -> list[AgentMessage]:
-        if self._steer_queue:
-            return [self._steer_queue.pop(0)]
-        return []
-
-    def _pop_followup_one(self) -> list[AgentMessage]:
-        if self._followup_queue:
-            return [self._followup_queue.pop(0)]
-        return []
-
-    def _inject_queues(self, config: AgentLoopConfig) -> AgentLoopConfig:
-        """将队列 drain 逻辑注入 config，返回新实例。"""
-        steer_fn = (
-            self._pop_steer_one
-            if config.steering_mode == "one-at-a-time"
-            else self._drain_steer_all
-        )
-        followup_fn = (
-            self._pop_followup_one
-            if config.follow_up_mode == "one-at-a-time"
-            else self._drain_followup_all
-        )
-        return dataclasses.replace(
-            config,
-            get_steering_messages=steer_fn,
-            get_follow_up_messages=followup_fn,
-        )
