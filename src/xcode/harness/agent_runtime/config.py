@@ -107,6 +107,56 @@ def build_turn_context_messages(
     return typed
 
 
+def _compact_and_emit(
+    loop_messages: list[AgentMessage],
+    compactor: StructuredCompactor | None,
+    emit_hook: Callable[[HookRecord], None],
+) -> list[AgentMessage]:
+    """执行消息压缩并发射 Hook。"""
+    emit_hook(HookRecord("on_compact", metadata={"messages": len(loop_messages)}))
+    if compactor is None:
+        return loop_messages
+    dict_messages = [_to_dict_safe(m) for m in loop_messages]
+    compacted = compactor(dict_messages)
+    return messages_from_compacted_dicts(compacted)
+
+
+def _to_dict_safe(message: AgentMessage) -> dict[str, Any]:
+    from .agent_helpers import to_dict
+
+    return to_dict(message)
+
+
+def _build_before_provider_request_closure(
+    emit_hook: Callable[[HookRecord], None],
+    get_prompt_version: Callable[[], str],
+) -> Callable[[list[dict[str, Any]], list[Any]], None]:
+    """构建 provider 请求前的 hook 发射回调。"""
+
+    def closure(msgs: list[dict[str, Any]], tools: list[Any]) -> None:
+        system_prompt = "\n\n".join(
+            str(message.get("content", ""))
+            for message in msgs
+            if message.get("role") == "system"
+        )
+        prompt_bytes = len(system_prompt.encode("utf-8"))
+        prompt_sha = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+        emit_hook(
+            HookRecord(
+                "before_provider_request",
+                metadata={
+                    "messages": msgs,
+                    "tools": [tool_definition_to_dict(tool) for tool in tools],
+                    "prompt_version": get_prompt_version(),
+                    "prompt_sha256": prompt_sha,
+                    "system_prompt_bytes": prompt_bytes,
+                },
+            )
+        )
+
+    return closure
+
+
 def build_loop_config(
     mode: ExecutionMode,
     snapshot: TurnSnapshot,
@@ -125,7 +175,7 @@ def build_loop_config(
 ) -> AgentLoopConfig:
     gate_snapshot = gate.snapshot_for(registry)
 
-    def should_compact_closure(loop_messages: list[AgentMessage]) -> bool:
+    def should_compact_fn(loop_messages: list[AgentMessage]) -> bool:
         return _should_compact(
             loop_messages,
             compactor,
@@ -134,17 +184,10 @@ def build_loop_config(
             snapshot,
         )
 
-    def compact_closure(loop_messages: list[AgentMessage]) -> list[AgentMessage]:
-        emit_hook(HookRecord("on_compact", metadata={"messages": len(loop_messages)}))
-        if compactor is None:
-            return loop_messages
-        from .agent_helpers import to_dict
+    def compact_fn(loop_messages: list[AgentMessage]) -> list[AgentMessage]:
+        return _compact_and_emit(loop_messages, compactor, emit_hook)
 
-        dict_messages = [to_dict(m) for m in loop_messages]
-        compacted = compactor(dict_messages)
-        return messages_from_compacted_dicts(compacted)
-
-    def transform_closure(
+    def transform_fn(
         messages: list[AgentMessage],
         _signal: object,
     ) -> list[AgentMessage]:
@@ -158,32 +201,7 @@ def build_loop_config(
             keep_tail_lines=request_hygiene.keep_tail_lines,
         )
 
-    def before_provider_request_closure(
-        msgs: list[dict[str, Any]],
-        tools: list[Any],
-    ) -> None:
-        system_prompt = "\n\n".join(
-            str(message.get("content", ""))
-            for message in msgs
-            if message.get("role") == "system"
-        )
-        prompt_bytes = len(system_prompt.encode("utf-8"))
-        prompt_sha = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
-
-        emit_hook(
-            HookRecord(
-                "before_provider_request",
-                metadata={
-                    "messages": msgs,
-                    "tools": [tool_definition_to_dict(tool) for tool in tools],
-                    "prompt_version": get_prompt_version(),
-                    "prompt_sha256": prompt_sha,
-                    "system_prompt_bytes": prompt_bytes,
-                },
-            )
-        )
-
-    def prepare_next_turn_closure() -> AgentLoopTurnUpdate | None:
+    def prepare_next_turn_fn() -> AgentLoopTurnUpdate | None:
         if gate.check_progress_reminder():
             steer(
                 UserMessage(
@@ -194,7 +212,6 @@ def build_loop_config(
                     )
                 )
             )
-
         if mode_state.check_plan_timeout():
             steer(
                 SystemMessage(
@@ -219,14 +236,16 @@ def build_loop_config(
         min_continuation_tokens=500,
         watchdog_repeated_tool_limit=snapshot.config.watchdog_repeated_tool_limit,
         max_consecutive_idle_steps=4,
-        should_compact=should_compact_closure,
-        compact=compact_closure,
-        transform_context=transform_closure,
+        should_compact=should_compact_fn,
+        compact=compact_fn,
+        transform_context=transform_fn,
         is_tool_productive=gate.build_is_tool_productive_hook(gate_snapshot),
         before_tool_call=gate.build_before_tool_hook(gate_snapshot),
         after_tool_call=gate.build_after_tool_hook(gate_snapshot),
-        before_provider_request=before_provider_request_closure,
-        prepare_next_turn=prepare_next_turn_closure,
+        before_provider_request=_build_before_provider_request_closure(
+            emit_hook, get_prompt_version
+        ),
+        prepare_next_turn=prepare_next_turn_fn,
     )
 
 
