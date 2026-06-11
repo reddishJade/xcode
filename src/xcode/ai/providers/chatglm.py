@@ -51,7 +51,6 @@ class ChatGLMProvider(OpenAICompatProvider):
         self.clear_thinking = clear_thinking
         self.tool_stream = tool_stream
         self.response_format = response_format
-        self.base_url = base_url or CHATGLM_BASE_URL
         self.metrics["prompt_tokens"] = 0
         self.metrics["completion_tokens"] = 0
         self.metrics["total_tokens"] = 0
