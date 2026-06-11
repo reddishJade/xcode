@@ -16,8 +16,6 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-import jsonschema
-
 from xcode.agent.types import (
     ShellCallOutputContent,
     TextContent,
@@ -43,6 +41,8 @@ from .protocols import (
     CancellationSignal,
     ToolResultContentBlock,
 )
+from ._tool_scheduling import partition_tool_calls_for_execution, _tool_execution_mode
+from ._tool_validation import validate_tool_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +212,7 @@ async def _execute_one_impl(
         return _error_result(tool_call, f"unknown tool: {tool_call.name}")
 
     args: ToolArguments = tool_call.arguments or {}
-    validation_error = _validate_tool_arguments(tool, tool_call, args)
+    validation_error = validate_tool_arguments(tool, tool_call, args)
     if validation_error is not None:
         return _error_result(tool_call, validation_error)
 
@@ -262,28 +262,6 @@ def _find_tool(
     for candidate_tool in current_context.tools or []:
         if candidate_tool.name == tool_call.name:
             return candidate_tool
-    return None
-
-
-def _validate_tool_arguments(
-    tool: AgentTool,
-    tool_call: ToolCallContent,
-    args: ToolArguments,
-) -> str | None:
-    """按工具 JSON schema 校验模型生成的参数。"""
-    try:
-        schema = dict(tool.parameters)
-    except Exception as exc:
-        return f"tool schema error for {tool_call.name}: {exc}"
-    try:
-        jsonschema.validate(instance=args, schema=schema)
-    except jsonschema.ValidationError as exc:
-        path = (
-            ".".join(str(part) for part in exc.absolute_path)
-            if exc.absolute_path
-            else tool_call.name
-        )
-        return f"tool argument schema error: {path}: {exc.message}"
     return None
 
 
@@ -429,42 +407,3 @@ def cancel_reason(signal: CancellationSignal | None) -> str:
     if signal is None:
         return "interrupted by user"
     return signal.reason
-
-
-def partition_tool_calls_for_execution(
-    current_context: AgentContext,
-    tool_calls: list[ToolCallContent],
-) -> list[list[ToolCallContent]]:
-    """按工具执行模式将连续并发调用分批。"""
-    batches: list[list[ToolCallContent]] = []
-    parallel_batch: list[ToolCallContent] = []
-    for tool_call in tool_calls:
-        if not isinstance(tool_call, ToolCallContent):
-            continue
-        if _tool_execution_mode(current_context, tool_call) == "parallel":
-            parallel_batch.append(tool_call)
-            continue
-        if parallel_batch:
-            batches.append(parallel_batch)
-            parallel_batch = []
-        batches.append([tool_call])
-    if parallel_batch:
-        batches.append(parallel_batch)
-    return batches
-
-
-def _tool_execution_mode(
-    current_context: AgentContext,
-    tool_call: ToolCallContent,
-) -> str:
-    """返回工具的执行模式（parallel 或 sequential）。
-
-    默认 sequential 的设计原因：
-    - 保守策略：避免副作用工具并发执行导致状态不一致
-    - 例如：先 write_file 再 read_file，若并行则 read 可能读到旧内容
-    - 工具可通过 metadata 显式声明 execution_mode="parallel" 允许并发
-    """
-    for tool in current_context.tools or []:
-        if tool.name == tool_call.name:
-            return tool.execution_mode or "sequential"
-    return "sequential"
