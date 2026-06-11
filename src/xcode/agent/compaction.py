@@ -5,8 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Mapping, Sequence
 
 from xcode.agent.messages import (
     AgentMessage,
@@ -87,14 +86,13 @@ def should_compact_token_aware(
     return False
 
 
-def extract_prompt_tokens_from_usage(usage: dict[str, Any] | None) -> int | None:
-    """从 usage 字典提取 prompt_tokens。
-
-    支持 OpenAI/DeepSeek/ChatGLM 格式。
-    """
+def extract_prompt_tokens_from_usage(usage: Mapping[str, object] | None) -> int | None:
     if not usage:
         return None
-    return usage.get("prompt_tokens")
+    prompt_tokens = usage.get("prompt_tokens")
+    if isinstance(prompt_tokens, int) and not isinstance(prompt_tokens, bool):
+        return prompt_tokens
+    return None
 
 
 def get_model_soft_threshold(model: str | None) -> int:

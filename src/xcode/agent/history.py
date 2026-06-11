@@ -6,10 +6,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from xcode.agent.messages import AgentMessage, AssistantMessage, ToolResultMessage
-from xcode.agent.types import ToolCallContent
+from xcode.agent.types import ToolArguments, ToolCallContent
 
 
 def repair_tool_pairing(messages: list[AgentMessage]) -> list[AgentMessage]:
@@ -173,9 +172,9 @@ def apply_request_hygiene(
     return cleaned
 
 
-def _truncate_tool_args(args: dict[str, Any], max_length: int) -> dict[str, Any]:
+def _truncate_tool_args(args: ToolArguments, max_length: int) -> ToolArguments:
     """压缩工具参数中的超长字符串。"""
-    cleaned = {}
+    cleaned: ToolArguments = {}
     for key, value in args.items():
         if isinstance(value, str) and len(value) > max_length:
             cleaned[key] = f"<truncated, {len(value)} chars>"
