@@ -15,7 +15,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .commands import CommandEntry, PromptLike, PromptText
-from .completion import ReplCompleter
+from .completion import CommandArgsSuggester, ReplCompleter
 from xcode.harness.skills import ToolSpec
 
 
@@ -219,6 +219,8 @@ def create_prompt_session(
         model_options,
     )
 
+    suggester = CommandArgsSuggester(completer.command_args)
+
     history = None
     try:
         from prompt_toolkit.history import FileHistory
@@ -231,6 +233,7 @@ def create_prompt_session(
     style = Style.from_dict(
         {
             "prompt-marker": CLI_PROMPT_MARKER_STYLE,
+            "suggestion": "fg:ansibrightblack",
         }
     )
 
@@ -242,5 +245,6 @@ def create_prompt_session(
             complete_while_typing=True,
             history=history,
             style=style,
+            auto_suggest=suggester,
         )
     )

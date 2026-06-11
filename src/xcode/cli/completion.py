@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from xcode.harness.skills import ToolSpec
 
@@ -13,8 +13,21 @@ from .reasoning_effort import normalize_reasoning_effort_options
 """REPL 命令、工具名和 @file 引用补全。"""
 
 if TYPE_CHECKING:
+    from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
     from prompt_toolkit.completion import Completer
 else:
+    try:
+        from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
+    except ImportError:
+
+        class AutoSuggest:
+            def get_suggestion(self, buffer: object, document: object) -> object:
+                return None
+
+        class Suggestion:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
     try:
         from prompt_toolkit.completion import Completer
     except ImportError:
@@ -25,6 +38,22 @@ else:
 
 MAX_FILE_COMPLETIONS = 100
 BLOCKED_PARTS = {".git", ".venv", "__pycache__"}
+
+
+class CommandArgsSuggester(AutoSuggest):
+    """当输入栏恰好是已注册的命令时，以暗色提示显示参数用法。"""
+
+    def __init__(self, command_args: dict[str, str]) -> None:
+        self._command_args = command_args
+
+    def get_suggestion(  # pyright: ignore[override]
+        self, buffer: object, document: object
+    ) -> Suggestion | None:
+        text: str = getattr(document, "text", "")
+        stripped = text.strip()
+        if stripped in self._command_args:
+            return Suggestion(f" {self._command_args[stripped]}")
+        return None
 
 
 @dataclass(frozen=True)
@@ -48,29 +77,37 @@ class ReplCompleter(Completer):
         self.tool_names = tuple(sorted(tool.name for tool in registry))
         self.command_names = tuple(command_names)
         self._command_meta: dict[str, str] = {}
+        self._command_args: dict[str, str] = {}
         self._command_group: dict[str, str] = {}
         if command_registry:
             for name, entry in command_registry.items():
                 if entry.visible:
-                    meta = entry.desc
-                    if entry.args_desc:
-                        meta = f"{meta} ({entry.args_desc})"
-                    self._command_meta[name] = meta
+                    self._command_meta[name] = entry.desc
                     self._command_group[name] = entry.group
+                    if entry.args_desc:
+                        self._command_args[name] = entry.args_desc
         self._effort_options = effort_options
         self._model_options = model_options
         self._directory_cache: dict[Path, tuple[str, ...]] = {}
 
+    @property
+    def command_args(self) -> dict[str, str]:
+        return self._command_args
+
     def get_completions(self, document, complete_event):
         try:
             from prompt_toolkit.completion import Completion
+            from prompt_toolkit.formatted_text import FormattedText
         except ImportError:
             return
         for item in self.complete(document.text_before_cursor):
+            display_meta: Any = item.display_meta
+            if display_meta:
+                display_meta = FormattedText([("fg:ansibrightblack", display_meta)])
             yield Completion(
                 item.text,
                 start_position=item.start_position,
-                display_meta=item.display_meta,
+                display_meta=display_meta,
             )
 
     async def get_completions_async(self, document, complete_event):
