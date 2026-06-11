@@ -17,8 +17,7 @@ from ...agent.config import (
 )
 from ...agent.protocols import CancellationSignal
 from ...agent.types import ToolCallContent
-from .execution_modes import policy_for_mode
-from .mode_manager import ModeManager
+from .execution_modes import ExecutionModeState, policy_for_mode
 from ..observability import (
     AuditRecord,
     HookManager,
@@ -53,7 +52,7 @@ class ToolGate:
 
     def __init__(
         self,
-        mode_manager: ModeManager,
+        mode_state: ExecutionModeState,
         approval_callback: ApprovalCallback | None,
         permission_policy: PermissionPolicy | None,
         high_risk_requires_approval: bool,
@@ -61,7 +60,7 @@ class ToolGate:
         audit_logger: Callable[[AuditRecord], None] | None,
         session_id: str,
     ) -> None:
-        self._mode = mode_manager
+        self._mode = mode_state
         self._approval_callback = approval_callback
         self._permission_policy = permission_policy
         self._high_risk_requires_approval = high_risk_requires_approval

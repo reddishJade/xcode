@@ -43,7 +43,7 @@ from .event_translation import (
 )
 from .fallback import _FallbackSwitchingProvider, _FallbackWithRetryPrimary
 from .history_manager import HistoryManager
-from .mode_manager import ModeManager
+from .execution_modes import ExecutionModeState
 from .result import (
     _build_structured_result,
     _final_event,
@@ -123,9 +123,9 @@ class StructuredAgent:
         self._last_prompt_tokens: int | None = None
 
         # 组件
-        self._mode = ModeManager()
+        self._mode = ExecutionModeState()
         self._gate = ToolGate(
-            mode_manager=self._mode,
+            mode_state=self._mode,
             approval_callback=approval_callback,
             permission_policy=_resolve_permission_policy(
                 project_root, permission_policy
@@ -186,7 +186,7 @@ class StructuredAgent:
         self._reset_provider_conversation_state()
         restored = self._history.restore_mode(run_state)
         if restored is not None:
-            self._mode._current_mode = cast(ExecutionMode, restored)
+            self._mode.set_mode(cast(ExecutionMode, restored))
 
     def history_messages(self) -> list[AgentMessage]:
         return self._history.messages()
@@ -223,8 +223,8 @@ class StructuredAgent:
     ) -> AsyncIterator[StructuredAgentEvent]:
         snapshot = self._turn_snapshot()
         effective_mode = mode or snapshot.config.execution_mode
-        self._mode._current_mode = effective_mode
-        active_registry = self._mode.filter_tools_for_mode(snapshot.registry)
+        self._mode.set_mode(effective_mode)
+        active_registry = self._mode.filter_tools(snapshot.registry)
         self.cancellation_token.reset()
 
         context_messages = self._turn_context_messages(

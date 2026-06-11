@@ -17,6 +17,40 @@ class ExecutionPolicy(Protocol):
     def check_call(self, call: ToolCall) -> PermissionDecision: ...
 
 
+class ExecutionModeState:
+    """管理当前执行模式和 plan 模式超时状态。"""
+
+    def __init__(self, max_plan_turns: int = 8) -> None:
+        self._current_mode: ExecutionMode = "act"
+        self._plan_enter_step = 0
+        self._max_plan_turns = max_plan_turns
+
+    @property
+    def current_mode(self) -> ExecutionMode:
+        return self._current_mode
+
+    def set_mode(self, mode: ExecutionMode) -> None:
+        """设置当前执行模式。"""
+        self._current_mode = mode
+        if mode == "plan":
+            self._plan_enter_step = 0
+
+    def check_plan_timeout(self) -> bool:
+        """检查 plan 模式是否超时，超时则自动切回 act。"""
+        if self._current_mode != "plan":
+            return False
+        self._plan_enter_step += 1
+        if self._plan_enter_step < self._max_plan_turns:
+            return False
+        self._plan_enter_step = 0
+        self._current_mode = "act"
+        return True
+
+    def filter_tools(self, registry: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]:
+        """根据当前模式过滤工具集。"""
+        return registry_for_mode(registry, self._current_mode)
+
+
 PLAN_TOOL_NAMES = {
     "read_file",
     "glob_files",
