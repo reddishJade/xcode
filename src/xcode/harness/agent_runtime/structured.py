@@ -49,11 +49,21 @@ from .result import (
 )
 from .message_codec import messages_from_compacted_dicts
 from .tool_gate import ToolGate
-from .prompting import PROMPT_VERSION
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec
 from ...agent.history import apply_request_hygiene
+
+_PROMPT_VERSION_CACHE: str | None = None
+
+
+def _get_prompt_version() -> str:
+    global _PROMPT_VERSION_CACHE
+    if _PROMPT_VERSION_CACHE is None:
+        from .prompting.identity import PROMPT_VERSION as _v  # pyright: ignore
+
+        _PROMPT_VERSION_CACHE = _v
+    return _PROMPT_VERSION_CACHE or "unknown"
 
 
 __all__ = ["StructuredAgent"]
@@ -361,7 +371,7 @@ class StructuredAgent:
                 metadata={
                     "messages": messages,
                     "tools": [_tool_definition_to_dict(tool) for tool in tools],
-                    "prompt_version": PROMPT_VERSION,
+                    "prompt_version": _get_prompt_version(),
                     "prompt_sha256": prompt_sha,
                     "system_prompt_bytes": prompt_bytes,
                 },

@@ -6,15 +6,17 @@ import tempfile
 import unittest
 from unittest import mock
 
-from xcode.harness.agent_runtime import (
-    ContextualRetrievalState,
+from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
+from xcode.harness.agent_runtime.prompting import (
     PromptContext,
     SystemPromptBuilder,
     build_runtime_context_provider,
 )
 from xcode.harness.agent_runtime.git_preflight import build_git_preflight
-from xcode.harness.agent_runtime.prompting import SYSTEM_PROMPT_DYNAMIC_BOUNDARY
-from xcode.harness.agent_runtime.prompting import MAX_INSTRUCTION_BYTES
+from xcode.harness.agent_runtime.prompting.identity import (
+    SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+)
+from xcode.harness.agent_runtime.prompting.token_budget import MAX_INSTRUCTION_BYTES
 from xcode.harness.skill_loader import SkillLoader
 from xcode.harness.skills import ToolSpec
 

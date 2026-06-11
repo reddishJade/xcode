@@ -45,7 +45,7 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
         # 再次构建（完全相同的 context，应命中静态和动态缓存）
         # 我们用 patch build_tool_prompt 来验证是否走缓存逻辑
         with patch(
-            "xcode.harness.agent_runtime.prompting.build_tool_prompt"
+            "xcode.harness.agent_runtime.prompting.builder.build_tool_prompt"
         ) as mock_build_tool:
             second_prompt = self.builder.build(context)
             mock_build_tool.assert_not_called()  # 没有重新生成工具提示词，说明命中了静态缓存！
@@ -122,7 +122,7 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
         os.utime(agents_file, (stat.st_atime + 10, stat.st_mtime + 10))
 
         with patch(
-            "xcode.harness.agent_runtime.prompting.build_tool_prompt"
+            "xcode.harness.agent_runtime.prompting.builder.build_tool_prompt"
         ) as mock_build_tool:
             second_prompt = self.builder.build(context)
             mock_build_tool.assert_not_called()
