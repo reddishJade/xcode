@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
@@ -11,9 +11,11 @@ from ..agent.protocols import ToolExecutionMode
 from .observability import (
     HITLResult,
     PermissionPolicy,
+    PermissionRiskEvaluator,
     check_tool_permission,
     redact_text,
 )
+from .session import JsonValue
 
 """工具注册表与 HITL 执行门禁。
 
@@ -22,8 +24,8 @@ handler 前根据 risk 字段和 permission policy 决定是否需要 approval c
 """
 
 ToolInput = dict[str, Any]
+type ToolMetadata = dict[str, JsonValue]
 ActionHandler = Callable[[ToolInput], str]
-RiskEvaluator = Callable[[ToolInput], str]
 ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
 AGENT_CONTENT_BLOCKS_METADATA_KEY = "agent_content_blocks"
 
@@ -31,15 +33,15 @@ AGENT_CONTENT_BLOCKS_METADATA_KEY = "agent_content_blocks"
 class ToolOutput(str):
     """带结构化元数据的工具输出文本。"""
 
-    metadata: dict[str, Any]
+    metadata: ToolMetadata
 
     def __new__(
         cls,
         content: str,
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, object] | None = None,
     ) -> "ToolOutput":
         output = str.__new__(cls, content)
-        output.metadata = metadata or {}
+        output.metadata = _tool_metadata(metadata)
         return output
 
 
@@ -59,7 +61,7 @@ class ToolSpec:
     schema: dict[str, Any] | None = None
     read_only: bool = False
     concurrency_safe: bool = False
-    risk_evaluator: RiskEvaluator | None = None
+    risk_evaluator: PermissionRiskEvaluator | None = None
     group: str = "core"
     execution_mode: ToolExecutionMode | None = None
     counts_as_progress: bool | None = None
@@ -84,7 +86,7 @@ _RISK_HIGH = "high"
 class ToolExecutionResult:
     status: ToolExecutionStatus
     content: str
-    metadata: dict[str, Any] | None = None
+    metadata: ToolMetadata | None = None
 
 
 def resolve_project_path(project_root: Path, raw_path: str) -> Path:
@@ -190,27 +192,40 @@ def run_tool_result(
         )
         return ToolExecutionResult(_STATUS_OK, content, metadata=metadata)
     except Exception as exc:
-        meta = {"error": str(exc)}
-        if perm_result.metadata:
-            meta.update(perm_result.metadata)
+        meta = _merge_metadata({"error": str(exc)}, perm_result.metadata)
         return ToolExecutionResult(_STATUS_ERROR, f"tool error: {exc}", meta)
 
 
-def _tool_output_metadata(output: str) -> dict[str, Any] | None:
-    metadata = getattr(output, "metadata", None)
-    if isinstance(metadata, dict) and metadata:
-        return metadata
+def _tool_output_metadata(output: str) -> ToolMetadata | None:
+    if isinstance(output, ToolOutput) and output.metadata:
+        return output.metadata
     return None
 
 
 def _merge_metadata(
-    *items: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    merged: dict[str, Any] = {}
+    *items: ToolMetadata | None,
+) -> ToolMetadata | None:
+    merged: ToolMetadata = {}
     for item in items:
         if item:
             merged.update(item)
     return merged or None
+
+
+def _tool_metadata(value: object) -> ToolMetadata:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): _json_value(item) for key, item in value.items()}
+
+
+def _json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    return str(value)
 
 
 def stringify_tool_input(action_input: ToolInput) -> str:
