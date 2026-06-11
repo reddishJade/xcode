@@ -289,18 +289,74 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
 
 def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     agent = getattr(ctx.app, "agent", None)
-    if agent is not None and hasattr(agent, "request_compaction"):
+    should_request_active = _should_request_active_compaction(ctx)
+    if (
+        should_request_active
+        and agent is not None
+        and hasattr(agent, "request_compaction")
+    ):
         agent.request_compaction()
-        print("Active context compaction requested for the next agent run.")
-    else:
-        print(
-            "Context compaction is not supported or not configured in the current agent."
-        )
+        message_count, recent_window = _active_context_compaction_size(ctx)
+        if message_count > recent_window + 1:
+            print(
+                "Active context compaction requested for the next agent run "
+                f"({message_count} messages exceed recent window {recent_window})."
+            )
+        else:
+            print(
+                "Active context compaction requested for the next agent run "
+                "(large tool results present)."
+            )
     compacted = ctx.store.compact_current_session(max_tool_result_chars=200)
     if compacted > 0:
         print(f"Compacted {compacted} large tool results in the session log.")
-    else:
+    elif should_request_active:
         print("No large tool results to compact in the session log.")
+    else:
+        print(
+            "No context compaction needed: active context is within the recent-message "
+            "window and the session log has no large tool results."
+        )
+    return False
+
+
+def _should_request_active_compaction(ctx: CommandContext) -> bool:
+    """判断当前活跃上下文是否超过摘要保留窗口。"""
+    agent = getattr(ctx.app, "agent", None)
+    if agent is None or not hasattr(agent, "request_compaction"):
+        return False
+    message_count, recent_window = _active_context_compaction_size(ctx)
+    return message_count > recent_window + 1 or _has_large_tool_result(ctx)
+
+
+def _active_context_compaction_size(ctx: CommandContext) -> tuple[int, int]:
+    """返回可见会话消息数量和活跃上下文最近消息窗口。"""
+    records = ctx.store.load_records()
+    message_count = sum(
+        1 for record in records if record.type in {"system", "user", "assistant"}
+    )
+    agent = getattr(ctx.app, "agent", None)
+    compactor = getattr(agent, "compactor", None) if agent is not None else None
+    recent_window = getattr(compactor, "max_recent_messages", 8)
+    if not isinstance(recent_window, int):
+        recent_window = 8
+    return message_count, recent_window
+
+
+def _has_large_tool_result(
+    ctx: CommandContext, max_tool_result_chars: int = 200
+) -> bool:
+    """判断会话日志中是否存在需要裁剪的大工具结果。"""
+    for record in ctx.store.load_records():
+        if record.type != "event" or not isinstance(record.content, dict):
+            continue
+        if record.content.get("type") != "tool_result":
+            continue
+        data = record.content.get("data")
+        if not isinstance(data, dict) or "content" not in data:
+            continue
+        if len(str(data["content"])) > max_tool_result_chars:
+            return True
     return False
 
 

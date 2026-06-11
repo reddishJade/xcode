@@ -878,9 +878,14 @@ class XcodeReplForkTests(unittest.TestCase):
             self.assertEqual(store.current_metadata(), branch)
 
     def test_run_repl_compact_command(self) -> None:
+        class FakeCompactor:
+            def __init__(self) -> None:
+                self.max_recent_messages = 1
+
         class FakeAgent:
             def __init__(self) -> None:
                 self.compact_requested = False
+                self.compactor = FakeCompactor()
 
             def request_compaction(self) -> None:
                 self.compact_requested = True
@@ -904,6 +909,9 @@ class XcodeReplForkTests(unittest.TestCase):
             renderer = FakeRenderer()
             state = ReplState()
             store = SessionStore(Path(temp_dir))
+            store.append("user", "first")
+            store.append("assistant", "second")
+            store.append("user", "third")
             store.append(
                 "event",
                 {
@@ -917,7 +925,7 @@ class XcodeReplForkTests(unittest.TestCase):
                     },
                 },
             )
-            with redirect_stdout(StringIO()):
+            with redirect_stdout(StringIO()) as output:
                 handled = handle_command(
                     "/compact",
                     store,
@@ -929,6 +937,10 @@ class XcodeReplForkTests(unittest.TestCase):
 
             self.assertFalse(handled)
             self.assertTrue(app.agent.compact_requested)
+            self.assertIn(
+                "Active context compaction requested for the next agent run",
+                output.getvalue(),
+            )
             records = store.load_records()
             tool_results = [
                 r
@@ -939,6 +951,41 @@ class XcodeReplForkTests(unittest.TestCase):
             content = tool_results[0].content["data"]["content"]
             self.assertIn("compacted", content)
             self.assertIn("300 chars removed", content)
+
+    def test_run_repl_compact_command_skips_short_clean_session(self) -> None:
+        class FakeAgent:
+            def __init__(self) -> None:
+                self.compact_requested = False
+
+            def request_compaction(self) -> None:
+                self.compact_requested = True
+
+        class CompactFakeApp:
+            def __init__(self) -> None:
+                self.agent = FakeAgent()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = CompactFakeApp()
+            prompt = FakePrompt([])
+            renderer = FakeRenderer()
+            state = ReplState()
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "hello")
+            store.append("assistant", "Hi.")
+
+            with redirect_stdout(StringIO()) as output:
+                handled = handle_command(
+                    "/compact",
+                    store,
+                    app,
+                    renderer,
+                    state,
+                    prompt,
+                )
+
+            self.assertFalse(handled)
+            self.assertFalse(app.agent.compact_requested)
+            self.assertIn("No context compaction needed", output.getvalue())
 
 
 class FakePrompt:
