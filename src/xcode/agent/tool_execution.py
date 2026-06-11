@@ -15,9 +15,13 @@ import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
-from xcode.agent.types import ShellCallOutputContent, TextContent, ToolCallContent
+from xcode.agent.types import (
+    ShellCallOutputContent,
+    TextContent,
+    ToolArguments,
+    ToolCallContent,
+)
 from .config import (
     AfterToolCallContext,
     AgentContext,
@@ -31,7 +35,7 @@ from .events import (
     ToolExecutionUpdateEvent,
 )
 from .messages import AssistantMessage, ToolResultMessage
-from .protocols import AgentToolResult, CancellationSignal, ToolResultContentBlock
+from .protocols import AgentTool, AgentToolResult, CancellationSignal, ToolResultContentBlock
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +110,7 @@ async def _execute_sequential(
             ToolExecutionStartEvent(
                 tool_call_id=tool_call.id,
                 tool_name=tool_call.name,
-                args=tool_call.arguments,
+                args=tool_call.arguments or {},
             )
         )
         result, terminate = await _execute_one(
@@ -136,7 +140,7 @@ async def _execute_parallel(
             ToolExecutionStartEvent(
                 tool_call_id=tool_call.id,
                 tool_name=tool_call.name,
-                args=tool_call.arguments,
+                args=tool_call.arguments or {},
             )
         )
         tasks.append(
@@ -242,7 +246,7 @@ async def _execute_one_impl(
     return result_msg, terminate
 
 
-def _find_tool(current_context: AgentContext, tool_call: ToolCallContent) -> Any:
+def _find_tool(current_context: AgentContext, tool_call: ToolCallContent) -> AgentTool | None:
     for candidate_tool in current_context.tools or []:
         if candidate_tool.name == tool_call.name:
             return candidate_tool
