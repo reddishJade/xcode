@@ -24,7 +24,7 @@ from .async_worker import IsolatedAsyncWorker
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .structured import StructuredAgentEvent
+    from .events import StructuredAgentEvent
 
 T = TypeVar("T")
 

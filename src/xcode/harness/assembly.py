@@ -31,8 +31,8 @@ from xcode.harness.agent_runtime import (
     ManagedSubagentRunner,
     StructuredAgent,
     build_managed_subagent_tools,
-    build_runtime_context_provider,
 )
+from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.harness.observability import (

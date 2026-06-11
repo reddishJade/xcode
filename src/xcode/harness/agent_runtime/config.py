@@ -1,0 +1,265 @@
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from xcode.ai.providers.protocol import StreamProvider
+
+from ...agent.compaction import (
+    extract_prompt_tokens_from_usage,
+    get_model_soft_threshold,
+)
+from ...agent.config import AgentLoopConfig, AgentLoopTurnUpdate
+from ...agent.history import apply_request_hygiene
+from ...agent.messages import (
+    AgentMessage,
+    AssistantMessage,
+    SystemMessage,
+    UserMessage,
+    convert_to_llm,
+)
+from ...agent.protocols import AgentTool
+from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
+from ..observability import HookRecord, PermissionPolicy
+from ..observability.permissions import (
+    CompositePermissionPolicy,
+    SettingsSandboxPermissionPolicy,
+)
+from ..skills import ToolSpec
+from .compaction import CompactController, estimate_message_tokens
+from .execution_modes import ExecutionModeState, mode_notice
+from .message_codec import messages_from_compacted_dicts
+from .tool_gate import ToolGate
+
+StructuredCompactor = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
+RuntimeContextProvider = Callable[[str], list[str]]
+
+
+@dataclass(frozen=True)
+class TurnSnapshot:
+    config: AgentConfig
+    registry: tuple[ToolSpec, ...]
+    provider: StreamProvider
+    runtime_context_provider: RuntimeContextProvider | None
+
+
+def build_turn_snapshot(
+    config: AgentConfig,
+    registry: tuple[ToolSpec, ...],
+    provider: StreamProvider,
+    runtime_context_provider: RuntimeContextProvider | None,
+) -> TurnSnapshot:
+    return TurnSnapshot(
+        config=config,
+        registry=registry,
+        provider=provider,
+        runtime_context_provider=runtime_context_provider,
+    )
+
+
+def build_turn_context_messages(
+    question: str,
+    mode: ExecutionMode,
+    snapshot: TurnSnapshot,
+    resumed_notice: str | None,
+) -> list[AgentMessage]:
+    typed: list[AgentMessage] = []
+    notice = mode_notice(mode)
+    parts: list[str] = []
+    if snapshot.runtime_context_provider is not None:
+        parts = list(snapshot.runtime_context_provider(question))
+    if resumed_notice is not None:
+        parts.append(f"<session-notices>\n{resumed_notice}\n</session-notices>")
+    if notice:
+        parts.append(notice)
+    if parts:
+        typed.append(SystemMessage(content="\n\n".join(p for p in parts if p)))
+    return typed
+
+
+def build_loop_config(
+    mode: ExecutionMode,
+    snapshot: TurnSnapshot,
+    gate: ToolGate,
+    registry: tuple[ToolSpec, ...],
+    compactor: StructuredCompactor | None,
+    manual_compact_requested: Callable[[], bool] | None,
+    request_hygiene: RequestHygieneConfig,
+    compact_controller: CompactController | None,
+    last_prompt_tokens: int | None,
+    tools_for_mode: Callable[[tuple[ToolSpec, ...], ExecutionMode], list[AgentTool]],
+    steer: Callable[[AgentMessage], None],
+    emit_hook: Callable[[HookRecord], None],
+    mode_state: ExecutionModeState,
+    get_prompt_version: Callable[[], str],
+) -> AgentLoopConfig:
+    gate_snapshot = gate.snapshot_for(registry)
+
+    def should_compact_closure(loop_messages: list[AgentMessage]) -> bool:
+        return _should_compact(
+            loop_messages,
+            compactor,
+            manual_compact_requested,
+            last_prompt_tokens,
+            snapshot,
+        )
+
+    def compact_closure(loop_messages: list[AgentMessage]) -> list[AgentMessage]:
+        emit_hook(HookRecord("on_compact", metadata={"messages": len(loop_messages)}))
+        if compactor is None:
+            return loop_messages
+        from .agent_helpers import to_dict
+
+        dict_messages = [to_dict(m) for m in loop_messages]
+        compacted = compactor(dict_messages)
+        return messages_from_compacted_dicts(compacted)
+
+    def transform_closure(
+        messages: list[AgentMessage],
+        _signal: object,
+    ) -> list[AgentMessage]:
+        if not request_hygiene.enabled:
+            return messages
+        return apply_request_hygiene(
+            messages,
+            max_tool_result_bytes=request_hygiene.max_tool_result_bytes,
+            max_tool_arg_length=request_hygiene.max_tool_arg_length,
+            keep_head_lines=request_hygiene.keep_head_lines,
+            keep_tail_lines=request_hygiene.keep_tail_lines,
+        )
+
+    def before_provider_request_closure(
+        msgs: list[dict[str, Any]],
+        tools: list[Any],
+    ) -> None:
+        system_prompt = "\n\n".join(
+            str(message.get("content", ""))
+            for message in msgs
+            if message.get("role") == "system"
+        )
+        prompt_bytes = len(system_prompt.encode("utf-8"))
+        prompt_sha = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+
+        emit_hook(
+            HookRecord(
+                "before_provider_request",
+                metadata={
+                    "messages": msgs,
+                    "tools": [tool_definition_to_dict(tool) for tool in tools],
+                    "prompt_version": get_prompt_version(),
+                    "prompt_sha256": prompt_sha,
+                    "system_prompt_bytes": prompt_bytes,
+                },
+            )
+        )
+
+    def prepare_next_turn_closure() -> AgentLoopTurnUpdate | None:
+        if gate.check_progress_reminder():
+            steer(
+                UserMessage(
+                    content=(
+                        "<reminder>You have gone several turns without updating "
+                        "task progress. Use update_task or save_task_progress to "
+                        "record progress before continuing.</reminder>"
+                    )
+                )
+            )
+
+        if mode_state.check_plan_timeout():
+            steer(
+                SystemMessage(
+                    content=(
+                        "<plan-timeout>\n"
+                        "Plan Mode timed out after reaching the maximum number "
+                        "of investigation turns. Returning to Act Mode.\n"
+                        "</plan-timeout>"
+                    )
+                )
+            )
+        return None
+
+    return AgentLoopConfig(
+        provider=snapshot.provider,
+        convert_to_llm=convert_to_llm,
+        max_steps=snapshot.config.max_steps,
+        max_step_retries=3,
+        retry_backoff_base=0.5,
+        max_tokens_continuation=True,
+        max_consecutive_continuations=3,
+        min_continuation_tokens=500,
+        watchdog_repeated_tool_limit=snapshot.config.watchdog_repeated_tool_limit,
+        max_consecutive_idle_steps=4,
+        should_compact=should_compact_closure,
+        compact=compact_closure,
+        transform_context=transform_closure,
+        is_tool_productive=gate.build_is_tool_productive_hook(gate_snapshot),
+        before_tool_call=gate.build_before_tool_hook(gate_snapshot),
+        after_tool_call=gate.build_after_tool_hook(gate_snapshot),
+        before_provider_request=before_provider_request_closure,
+        prepare_next_turn=prepare_next_turn_closure,
+    )
+
+
+def _should_compact(
+    messages: list[AgentMessage],
+    compactor: StructuredCompactor | None,
+    manual_compact_requested: Callable[[], bool] | None,
+    last_prompt_tokens: int | None,
+    snapshot: TurnSnapshot,
+) -> bool:
+    if compactor is None:
+        return False
+    if manual_compact_requested and manual_compact_requested():
+        return True
+    if last_prompt_tokens is not None:
+        model_name = getattr(snapshot.provider, "model", None)
+        return last_prompt_tokens >= get_model_soft_threshold(
+            str(model_name) if model_name is not None else None
+        )
+    from .agent_helpers import to_dict
+
+    msg_dicts = [to_dict(m) for m in messages]
+    return (
+        snapshot.config.compact_threshold > 0
+        and len(messages) > snapshot.config.compact_threshold
+    ) or (
+        snapshot.config.compact_token_threshold > 0
+        and estimate_message_tokens(msg_dicts) > snapshot.config.compact_token_threshold
+    )
+
+
+def tool_definition_to_dict(tool: Any) -> dict[str, Any]:
+    return {
+        "name": str(getattr(tool, "name", "")),
+        "description": str(getattr(tool, "description", "")),
+        "parameters": getattr(tool, "parameters", {}),
+    }
+
+
+def resolve_permission_policy(
+    project_root: Path | None, base: PermissionPolicy | None
+) -> PermissionPolicy | None:
+    if project_root is None:
+        return base
+    local = project_root / ".local" / "settings.json"
+    root = project_root / "settings.json"
+    settings_path = local if local.exists() else (root if root.exists() else None)
+    if settings_path is None:
+        return base
+    sandbox = SettingsSandboxPermissionPolicy(settings_path)
+    return CompositePermissionPolicy(sandbox, base)
+
+
+def record_last_prompt_tokens(
+    messages: list[AgentMessage],
+) -> int | None:
+    for message in reversed(messages):
+        if not isinstance(message, AssistantMessage):
+            continue
+        prompt_tokens = extract_prompt_tokens_from_usage(message.usage)
+        if prompt_tokens is not None:
+            return prompt_tokens
+    return None

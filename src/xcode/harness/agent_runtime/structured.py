@@ -1,58 +1,45 @@
-"""StructuredAgent — harness 层对 agent/Agent 的适配。
-
-将 Xcode 特定的 ToolSpec、权限、审计、压缩等配置映射为 AgentLoopConfig，
-委托给 agent/Agent.run() 执行。
-"""
+"""StructuredAgent — harness 层对 agent/Agent 的适配。"""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
-from dataclasses import dataclass, replace
-import hashlib
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+
+from xcode.ai.providers.protocol import StreamProvider
 
 from ...agent.agent import Agent
-from ...agent.messages import convert_to_llm
-from ...agent.config import (
-    AgentLoopConfig,
-    AgentLoopTurnUpdate,
-)
-from ...agent.compaction import (
-    extract_prompt_tokens_from_usage,
-    get_model_soft_threshold,
-)
-from ...agent.messages import (
-    AgentMessage,
-    AssistantMessage,
-    SystemMessage,
-    UserMessage,
-)
+from ...agent.messages import AgentMessage, UserMessage
 from ...agent.protocols import AgentTool
-from xcode.ai.providers.protocol import StreamProvider
-from .agent_helpers import run_coro_sync, aiter_to_sync_iter, to_dict
+from .agent_helpers import aiter_to_sync_iter, run_coro_sync
 from .cancellation import CancellationToken
-from .compaction import CompactController, estimate_message_tokens
+from .compaction import CompactController
+from .config import (
+    build_loop_config,
+    build_turn_context_messages,
+    build_turn_snapshot,
+    record_last_prompt_tokens,
+    resolve_permission_policy,
+    StructuredCompactor,
+)
 from .events import (
     _StreamTranslationState,
     _translate_event,
     StructuredAgentEvent,
 )
+from .execution_modes import ExecutionModeState, policy_for_mode
 from .fallback import _FallbackSwitchingProvider, _FallbackWithRetryPrimary
 from .history_manager import HistoryManager
-from .execution_modes import ExecutionModeState
 from .result import (
     _build_structured_result,
     _final_event,
     RunState,
     StructuredAgentResult,
 )
-from .message_codec import messages_from_compacted_dicts
 from .tool_gate import ToolGate
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
 from ..skills import ApprovalCallback, ToolSpec
-from ...agent.history import apply_request_hygiene
 
 _PROMPT_VERSION_CACHE: str | None = None
 
@@ -68,28 +55,8 @@ def _get_prompt_version() -> str:
 
 __all__ = ["StructuredAgent"]
 
-StructuredCompactor = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
-RuntimeContextProvider = Callable[[str], list[str]]
-
-
-@dataclass(frozen=True)
-class TurnSnapshot:
-    """单个 turn 使用的运行期快照。"""
-
-    config: AgentConfig
-    registry: tuple[ToolSpec, ...]
-    provider: StreamProvider
-    runtime_context_provider: RuntimeContextProvider | None
-
 
 class StructuredAgent:
-    """与 provider 解耦的结构化工具调用循环。
-
-    harness 层适配器：将 Xcode 特定配置映射为 AgentLoopConfig，
-    委托 agent 核心循环执行，通过事件翻译保持 StructuredAgentEvent
-    接口不变。
-    """
-
     def __init__(
         self,
         provider: StreamProvider,
@@ -104,16 +71,16 @@ class StructuredAgent:
         permission_policy: PermissionPolicy | None = None,
         high_risk_requires_approval: bool = True,
         hook_manager: HookManager | None = None,
-        runtime_context_provider: RuntimeContextProvider | None = None,
+        runtime_context_provider: Callable[[str], list[str]] | None = None,
         cancellation_token: CancellationToken | None = None,
         fallback_provider: StreamProvider | None = None,
         project_root: Path | None = None,
         request_hygiene: RequestHygieneConfig | None = None,
     ) -> None:
+        self._original_provider: StreamProvider = provider
         self.provider: StreamProvider = provider
         if fallback_provider is not None:
             self.provider = _FallbackWithRetryPrimary(provider, fallback_provider)
-        self._original_provider = provider
         self.project_root = project_root
         self.registry = registry
         self.tool_map = {t.name: t for t in registry}
@@ -126,16 +93,14 @@ class StructuredAgent:
         self.runtime_context_provider = runtime_context_provider
         self.cancellation_token = cancellation_token or CancellationToken()
         self.request_hygiene = request_hygiene or RequestHygieneConfig()
-        self.approval_callback: ApprovalCallback | None = approval_callback
         self._last_prompt_tokens: int | None = None
 
-        # 组件
         self._hook_manager = hook_manager
         self._mode = ExecutionModeState()
         self._gate = ToolGate(
             mode_state=self._mode,
             approval_callback=approval_callback,
-            permission_policy=_resolve_permission_policy(
+            permission_policy=resolve_permission_policy(
                 project_root, permission_policy
             ),
             high_risk_requires_approval=high_risk_requires_approval,
@@ -147,7 +112,6 @@ class StructuredAgent:
         self._history = HistoryManager()
         self._resumed_notice: str | None = None
 
-        # 适配 ToolSpec → AgentTool，创建 Agent 实例
         self._agent = Agent(self._gate.adapt_tools(registry))
 
     # ── 公共 API ──
@@ -171,7 +135,6 @@ class StructuredAgent:
         self._reset_provider_conversation_state()
 
     def set_resumed_notice(self, notice: str) -> None:
-        """设置会话恢复通知，将在下一轮 system prompt 中注入一次。"""
         self._resumed_notice = notice
 
     def load_run_state(self, run_state: RunState) -> None:
@@ -214,23 +177,50 @@ class StructuredAgent:
     async def arun_stream(
         self, question: str, mode: ExecutionMode | None = None
     ) -> AsyncIterator[StructuredAgentEvent]:
-        snapshot = self._turn_snapshot()
+        from .tool_hooks import emit_hook as _emit_hook
+
+        snapshot = build_turn_snapshot(
+            self.config,
+            tuple(self.registry),
+            self.provider,
+            self.runtime_context_provider,
+        )
         effective_mode = mode or snapshot.config.execution_mode
         self._mode.set_mode(effective_mode)
         active_registry = self._mode.filter_tools(snapshot.registry)
         self.cancellation_token.reset()
 
-        context_messages = self._turn_context_messages(
-            question, effective_mode, snapshot
+        context_messages = build_turn_context_messages(
+            question, effective_mode, snapshot, self._resumed_notice
         )
+        self._resumed_notice = None
         history_messages = context_messages + self.history_messages()
         turn_messages: list[AgentMessage] = [UserMessage(content=question)]
 
         self._agent = Agent(self._gate.adapt_tools(active_registry))
 
-        loop_config = self._build_loop_config(effective_mode, snapshot)
+        def tools_for_mode_fn(
+            reg: tuple[ToolSpec, ...], m: ExecutionMode
+        ) -> list[AgentTool]:
+            filtered = policy_for_mode(m).filter_tools(reg)
+            return self._gate.adapt_tools(filtered)
 
-        from .tool_hooks import emit_hook as _emit_hook
+        loop_config = build_loop_config(
+            mode=effective_mode,
+            snapshot=snapshot,
+            gate=self._gate,
+            registry=active_registry,
+            compactor=self.compactor,
+            manual_compact_requested=self.manual_compact_requested,
+            request_hygiene=self.request_hygiene,
+            compact_controller=self._compact_controller,
+            last_prompt_tokens=self._last_prompt_tokens,
+            tools_for_mode=tools_for_mode_fn,
+            steer=self.steer,
+            emit_hook=lambda rec: _emit_hook(self._hook_manager, rec),
+            mode_state=self._mode,
+            get_prompt_version=_get_prompt_version,
+        )
 
         _emit_hook(
             self._hook_manager,
@@ -264,7 +254,7 @@ class StructuredAgent:
                 self._original_provider = wrapper._primary
 
         self._history.save_turn(result.messages)
-        self._record_last_prompt_tokens(result.messages)
+        self._last_prompt_tokens = record_last_prompt_tokens(result.messages)
 
         visible_result = (
             replace(result, messages=context_messages + result.messages)
@@ -277,243 +267,9 @@ class StructuredAgent:
 
         yield _final_event(result.steps, final)
 
-    # ── 模式切换 ──
-
-    def _tools_for_mode(
-        self, registry: tuple[ToolSpec, ...], mode: ExecutionMode
-    ) -> list[AgentTool]:
-        from .execution_modes import policy_for_mode
-
-        policy = policy_for_mode(mode)
-        filtered = policy.filter_tools(registry)
-        return self._gate.adapt_tools(filtered)
-
-    # ── 配置构建 ──
-
-    def _build_loop_config(
-        self, mode: ExecutionMode, snapshot: TurnSnapshot
-    ) -> AgentLoopConfig:
-        gate_snapshot = self._gate.snapshot_for(snapshot.registry)
-
-        should_compact = self._loop_should_compact(snapshot) if self.compactor else None
-        compact = self._loop_compact if self.compactor else None
-
-        return AgentLoopConfig(
-            provider=snapshot.provider,
-            convert_to_llm=convert_to_llm,
-            max_steps=snapshot.config.max_steps,
-            max_step_retries=3,
-            retry_backoff_base=0.5,
-            max_tokens_continuation=True,
-            max_consecutive_continuations=3,
-            min_continuation_tokens=500,
-            watchdog_repeated_tool_limit=snapshot.config.watchdog_repeated_tool_limit,
-            max_consecutive_idle_steps=4,
-            should_compact=should_compact,
-            compact=compact,
-            transform_context=self._loop_transform_context,
-            is_tool_productive=self._gate.build_is_tool_productive_hook(gate_snapshot),
-            before_tool_call=self._gate.build_before_tool_hook(gate_snapshot),
-            after_tool_call=self._gate.build_after_tool_hook(gate_snapshot),
-            before_provider_request=self._loop_before_provider_request,
-            prepare_next_turn=self._loop_prepare_next_turn(snapshot),
-        )
-
-    # ── 辅助方法 ──
-
-    def _loop_should_compact(
-        self, snapshot: TurnSnapshot
-    ) -> Callable[[list[AgentMessage]], bool]:
-        def should_compact(messages: list[AgentMessage]) -> bool:
-            return self._should_compact([to_dict(m) for m in messages], snapshot)
-
-        return should_compact
-
-    def _loop_compact(self, messages: list[AgentMessage]) -> list[AgentMessage]:
-        from .tool_hooks import emit_hook as _emit_hook
-
-        _emit_hook(
-            self._hook_manager,
-            HookRecord("on_compact", metadata={"messages": len(messages)}),
-        )
-        if self.compactor is None:
-            return messages
-        dict_messages = [to_dict(m) for m in messages]
-        compacted = self.compactor(dict_messages)
-        return messages_from_compacted_dicts(compacted)
-
-    def _loop_transform_context(
-        self,
-        messages: list[AgentMessage],
-        _signal: object,
-    ) -> list[AgentMessage]:
-        """在请求边界裁剪上下文副本，不污染持久历史。"""
-        hygiene = self.request_hygiene
-        if not hygiene.enabled:
-            return messages
-        return apply_request_hygiene(
-            messages,
-            max_tool_result_bytes=hygiene.max_tool_result_bytes,
-            max_tool_arg_length=hygiene.max_tool_arg_length,
-            keep_head_lines=hygiene.keep_head_lines,
-            keep_tail_lines=hygiene.keep_tail_lines,
-        )
-
-    def _loop_before_provider_request(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[Any],
-    ) -> None:
-        """记录 provider 请求边界的 prompt 审计信息。"""
-        system_prompt = "\n\n".join(
-            str(message.get("content", ""))
-            for message in messages
-            if message.get("role") == "system"
-        )
-        prompt_bytes = len(system_prompt.encode("utf-8"))
-        prompt_sha = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
-        from .tool_hooks import emit_hook as _emit_hook
-
-        _emit_hook(
-            self._hook_manager,
-            HookRecord(
-                "before_provider_request",
-                metadata={
-                    "messages": messages,
-                    "tools": [_tool_definition_to_dict(tool) for tool in tools],
-                    "prompt_version": _get_prompt_version(),
-                    "prompt_sha256": prompt_sha,
-                    "system_prompt_bytes": prompt_bytes,
-                },
-            ),
-        )
-
-    def _loop_prepare_next_turn(
-        self, snapshot: TurnSnapshot
-    ) -> Callable[[], AgentLoopTurnUpdate | None]:
-        def prepare_next_turn() -> AgentLoopTurnUpdate | None:
-            if self._gate.check_progress_reminder():
-                self.steer(
-                    UserMessage(
-                        content=(
-                            "<reminder>You have gone several turns without updating task progress. "
-                            "Use update_task or save_task_progress to record progress before continuing.</reminder>"
-                        )
-                    )
-                )
-
-            if self._mode.check_plan_timeout():
-                self._agent.update_tools(self._tools_for_mode(snapshot.registry, "act"))
-                self.steer(
-                    SystemMessage(
-                        content=(
-                            "<plan-timeout>\n"
-                            "Plan Mode timed out after reaching the maximum number "
-                            "of investigation turns. Returning to Act Mode.\n"
-                            "</plan-timeout>"
-                        )
-                    )
-                )
-            return None
-
-        return prepare_next_turn
-
-    def _should_compact(
-        self, messages: list[dict[str, Any]], snapshot: TurnSnapshot
-    ) -> bool:
-        if self.compactor is None:
-            return False
-        if self.manual_compact_requested and self.manual_compact_requested():
-            return True
-        if self._last_prompt_tokens is not None:
-            model_name = getattr(snapshot.provider, "model", None)
-            return self._last_prompt_tokens >= get_model_soft_threshold(
-                str(model_name) if model_name is not None else None
-            )
-        return (
-            snapshot.config.compact_threshold > 0
-            and len(messages) > snapshot.config.compact_threshold
-        ) or (
-            snapshot.config.compact_token_threshold > 0
-            and estimate_message_tokens(messages)
-            > snapshot.config.compact_token_threshold
-        )
-
-    def _turn_context_messages(
-        self,
-        question: str,
-        mode: ExecutionMode,
-        snapshot: TurnSnapshot,
-    ) -> list[AgentMessage]:
-        from .execution_modes import mode_notice
-
-        typed: list[AgentMessage] = []
-        notice = mode_notice(mode)
-        parts: list[str] = []
-        if snapshot.runtime_context_provider is not None:
-            parts = list(snapshot.runtime_context_provider(question))
-        if self._resumed_notice is not None:
-            parts.append(
-                f"<session-notices>\n{self._resumed_notice}\n</session-notices>"
-            )
-            self._resumed_notice = None
-        if notice:
-            parts.append(notice)
-        if parts:
-            typed.append(SystemMessage(content="\n\n".join(p for p in parts if p)))
-        return typed
-
-    def _turn_snapshot(self) -> TurnSnapshot:
-        return TurnSnapshot(
-            config=self.config,
-            registry=tuple(self.registry),
-            provider=self.provider,
-            runtime_context_provider=self.runtime_context_provider,
-        )
+    # ── 内部 ──
 
     def _reset_provider_conversation_state(self) -> None:
         reset = getattr(self.provider, "reset_conversation_state", None)
         if callable(reset):
             reset()
-
-    def _record_last_prompt_tokens(self, messages: list[AgentMessage]) -> None:
-        """记录最近一次 provider 返回的 prompt token。"""
-        self._last_prompt_tokens = None
-        for message in reversed(messages):
-            if not isinstance(message, AssistantMessage):
-                continue
-            prompt_tokens = extract_prompt_tokens_from_usage(message.usage)
-            if prompt_tokens is not None:
-                self._last_prompt_tokens = prompt_tokens
-                return
-
-
-# ── 模块级辅助 ──
-
-
-def _resolve_permission_policy(
-    project_root: Path | None, base: PermissionPolicy | None
-) -> PermissionPolicy | None:
-    if project_root is None:
-        return base
-    local = project_root / ".local" / "settings.json"
-    root = project_root / "settings.json"
-    settings_path = local if local.exists() else (root if root.exists() else None)
-    if settings_path is None:
-        return base
-    from ..observability.permissions import (
-        SettingsSandboxPermissionPolicy,
-        CompositePermissionPolicy,
-    )
-
-    sandbox = SettingsSandboxPermissionPolicy(settings_path)
-    return CompositePermissionPolicy(sandbox, base)
-
-
-def _tool_definition_to_dict(tool: Any) -> dict[str, Any]:
-    """将 provider 工具定义转为审计用字典。"""
-    return {
-        "name": str(getattr(tool, "name", "")),
-        "description": str(getattr(tool, "description", "")),
-        "parameters": getattr(tool, "parameters", {}),
-    }
