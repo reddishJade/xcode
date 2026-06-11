@@ -111,15 +111,12 @@ class ChatGLMProvider(OpenAICompatProvider):
     def _clean_reasoning_content(
         self, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        if not messages:
+        if not messages or not self.clear_thinking:
             return messages
-        if not self.clear_thinking:
-            return copy.deepcopy(messages)
 
         cleaned = copy.deepcopy(messages)
         for msg in cleaned:
             msg.pop("reasoning_content", None)
-
         return cleaned
 
     def _record_usage(self, response, sent_messages: int) -> None:
