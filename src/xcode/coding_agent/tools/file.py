@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 
+from dataclasses import dataclass
 from difflib import unified_diff
 import json
 import threading
@@ -34,6 +35,39 @@ from .truncate import truncate_head, format_size
 # 文件读写限制（防止内存耗尽和输出截断）
 MAX_READ_BYTES = 1_000_000  # 单文件读取限制：1MB
 MAX_WRITE_BYTES = 1_000_000  # 单文件写入限制：1MB
+
+
+@dataclass(frozen=True)
+class ReadRange:
+    offset: int = 1
+    limit: int | None = None
+
+
+@dataclass(frozen=True)
+class ReadFileRequest:
+    path: Path
+    display_path: str
+    read_range: ReadRange | None
+    image_mime: str | None
+
+
+@dataclass(frozen=True)
+class FileEdit:
+    old_text: str
+    new_text: str
+
+
+@dataclass(frozen=True)
+class EditFileRequest:
+    path: Path
+    edits: list[FileEdit]
+    replace_all: bool
+
+
+@dataclass(frozen=True)
+class WriteFileRequest:
+    path: Path
+    content: str
 
 
 class FileOperations(Protocol):
@@ -257,6 +291,34 @@ def _read_file(
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
+    request = _parse_read_file_request(root, operations, data)
+    if request.image_mime:
+        return _read_image(
+            request.path,
+            request.display_path,
+            request.image_mime,
+            operations,
+        )
+
+    if context_state is not None:
+        context_state.record_file(request.path)
+    text, _encoding = _read_text(request.path, operations)
+
+    if request.read_range is not None:
+        return _read_with_offset_limit(
+            text,
+            request.display_path,
+            request.read_range,
+        )
+
+    return _read_full(text, request.display_path)
+
+
+def _parse_read_file_request(
+    root: Path,
+    operations: FileOperations,
+    data: ToolInput,
+) -> ReadFileRequest:
     path_str = str(data.get("path", "")).strip()
     if not path_str:
         raise ValueError("path is required")
@@ -271,20 +333,12 @@ def _read_file(
 
     display = _display(root, path)
     mime = _detect_image(path, operations)
-
-    if mime:
-        return _read_image(path, display, mime, operations)
-
-    if context_state is not None:
-        context_state.record_file(path)
-    text, _encoding = _read_text(path, operations)
-    offset = data.get("offset")
-    limit = data.get("limit")
-
-    if offset is not None or limit is not None:
-        return _read_with_offset_limit(text, display, offset, limit)
-
-    return _read_full(text, display)
+    return ReadFileRequest(
+        path=path,
+        display_path=display,
+        read_range=_read_range(data),
+        image_mime=mime,
+    )
 
 
 def _read_image(
@@ -360,26 +414,21 @@ def _read_full(text: str, display_path: str) -> str:
 def _read_with_offset_limit(
     text: str,
     display_path: str,
-    offset: Any,
-    limit: Any,
+    read_range: ReadRange,
 ) -> str:
-    offset_value = 1 if offset is None else _parse_optional_int(offset, "offset")
-    if offset_value < 1:
-        raise ValueError("offset must be positive")
-
-    limit_value = None if limit is None else _parse_optional_int(limit, "limit")
-    if limit_value is not None and limit_value < 0:
-        raise ValueError("limit must be non-negative")
-
     lines = text.splitlines()
     if not lines:
         return ""
-    start = offset_value - 1
+    start = read_range.offset - 1
     if start >= len(lines):
         raise ValueError(
-            f"offset {offset_value} is beyond end of file ({len(lines)} lines total)"
+            f"offset {read_range.offset} is beyond end of file ({len(lines)} lines total)"
         )
-    end = len(lines) if limit_value is None else min(start + limit_value, len(lines))
+    end = (
+        len(lines)
+        if read_range.limit is None
+        else min(start + read_range.limit, len(lines))
+    )
     selected = "\n".join(lines[start:end])
     selected_truncated = _truncate(selected)
 
@@ -388,10 +437,10 @@ def _read_with_offset_limit(
             "path": display_path,
             "offset": end + 1,
         }
-        if limit_value is not None:
-            continuation["limit"] = limit_value
+        if read_range.limit is not None:
+            continuation["limit"] = read_range.limit
         selected_truncated += (
-            f"\n\n[Showing lines {offset_value}-{end} of {len(lines)}. "
+            f"\n\n[Showing lines {read_range.offset}-{end} of {len(lines)}. "
             f"Use read_file with {json.dumps(continuation, ensure_ascii=False)} "
             "to continue.]"
         )
@@ -404,6 +453,18 @@ def _write_file(
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
+    request = _parse_write_file_request(root, operations, data)
+    return with_file_mutation(
+        request.path,
+        lambda: _write_file_impl(root, request, operations, context_state),
+    )
+
+
+def _parse_write_file_request(
+    root: Path,
+    operations: FileOperations,
+    data: ToolInput,
+) -> WriteFileRequest:
     path_str = str(data.get("path", "")).strip()
     if not path_str:
         raise ValueError("path is required")
@@ -414,23 +475,20 @@ def _write_file(
         raise ValueError("content is required")
     content = str(data.get("content", ""))
     _ensure_write_size(content)
-    return with_file_mutation(
-        path, lambda: _write_file_impl(root, path, content, operations, context_state)
-    )
+    return WriteFileRequest(path=path, content=content)
 
 
 def _write_file_impl(
     root: Path,
-    path: Path,
-    content: str,
+    request: WriteFileRequest,
     operations: FileOperations,
     context_state: ContextualRetrievalState | None,
 ) -> str:
-    operations.mkdir(path.parent)
-    _write_text(path, content, "utf-8", operations)
+    operations.mkdir(request.path.parent)
+    _write_text(request.path, request.content, "utf-8", operations)
     if context_state is not None:
-        context_state.record_file(path)
-    return f"wrote file: {_display(root, path)}"
+        context_state.record_file(request.path)
+    return f"wrote file: {_display(root, request.path)}"
 
 
 def _edit_file(
@@ -439,8 +497,20 @@ def _edit_file(
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
-    data = _prepare_edit_arguments(data)
-    path_str = str(data.get("path", "")).strip()
+    request = _parse_edit_file_request(root, operations, data)
+    return with_file_mutation(
+        request.path,
+        lambda: _edit_file_impl(root, request, operations, context_state),
+    )
+
+
+def _parse_edit_file_request(
+    root: Path,
+    operations: FileOperations,
+    data: ToolInput,
+) -> EditFileRequest:
+    prepared = _prepare_edit_arguments(data)
+    path_str = str(prepared.get("path", "")).strip()
     if not path_str:
         raise ValueError("path is required")
     path = _safe_path(root, path_str)
@@ -449,38 +519,40 @@ def _edit_file(
     if not operations.is_file(path):
         raise ValueError(f"not a file: {_display(root, path)}")
 
-    edits = _prepare_edits(data)
+    edits = _prepare_edits(prepared)
     if not edits:
         raise ValueError("no edits provided")
 
-    return with_file_mutation(
-        path,
-        lambda: _edit_file_impl(root, path, edits, data, operations, context_state),
+    return EditFileRequest(
+        path=path,
+        edits=edits,
+        replace_all=bool(prepared.get("replace_all", False)),
     )
 
 
 def _edit_file_impl(
     root: Path,
-    path: Path,
-    edits: list[dict[str, str]],
-    data: ToolInput,
+    request: EditFileRequest,
     operations: FileOperations,
     context_state: ContextualRetrievalState | None,
 ) -> str:
+    path = request.path
     content, encoding = _read_text(path, operations)
     bom, clean_content = strip_bom(content)
     ending = detect_line_ending(clean_content)
     normalized = normalize_to_lf(clean_content)
 
-    replace_all = bool(data.get("replace_all", False))
-    if replace_all and len(edits) == 1:
-        count = normalized.count(edits[0]["old_text"])
+    if request.replace_all and len(request.edits) == 1:
+        edit = request.edits[0]
+        count = normalized.count(edit.old_text)
         if count == 0:
             raise ValueError("old_text not found")
-        updated = normalized.replace(edits[0]["old_text"], edits[0]["new_text"])
+        updated = normalized.replace(edit.old_text, edit.new_text)
         edit_count = count
     else:
-        updated, edit_count = apply_edits_fuzzy(normalized, edits, _display(root, path))
+        updated, edit_count = apply_edits_fuzzy(
+            normalized, _edit_payloads(request.edits), _display(root, path)
+        )
 
     restored = restore_line_endings(updated, ending)
     final = bom + restored
@@ -530,6 +602,23 @@ def _prepare_edit_arguments(data: dict[str, Any]) -> dict[str, Any]:
         result.pop("new_text", None)
 
     return result
+
+
+def _read_range(data: ToolInput) -> ReadRange | None:
+    offset = data.get("offset")
+    limit = data.get("limit")
+    if offset is None and limit is None:
+        return None
+
+    offset_value = 1 if offset is None else _parse_optional_int(offset, "offset")
+    if offset_value < 1:
+        raise ValueError("offset must be positive")
+
+    limit_value = None if limit is None else _parse_optional_int(limit, "limit")
+    if limit_value is not None and limit_value < 0:
+        raise ValueError("limit must be non-negative")
+
+    return ReadRange(offset=offset_value, limit=limit_value)
 
 
 def _parse_optional_int(value: Any, name: str) -> int:
@@ -615,9 +704,9 @@ def _display(root: Path, path: Path) -> str:
     return display_path(root, path)
 
 
-def _prepare_edits(data: dict[str, Any]) -> list[dict[str, str]]:
+def _prepare_edits(data: ToolInput) -> list[FileEdit]:
     """将输入归一化为 edits 列表。"""
-    edits: list[dict[str, str]] = []
+    edits: list[FileEdit] = []
 
     raw_edits = data.get("edits")
     if isinstance(raw_edits, list):
@@ -628,12 +717,24 @@ def _prepare_edits(data: dict[str, Any]) -> list[dict[str, str]]:
             new = str(edit.get("new_text", ""))
             if not old:
                 raise ValueError(f"edits[{i}].old_text must not be empty")
-            edits.append({"old_text": old, "new_text": new})
+            edits.append(FileEdit(old_text=old, new_text=new))
 
     old_text = str(data.get("old_text", "")).strip()
     if old_text:
         if "new_text" not in data:
             raise ValueError("new_text is required")
-        edits.append({"old_text": old_text, "new_text": str(data.get("new_text", ""))})
+        edits.append(
+            FileEdit(old_text=old_text, new_text=str(data.get("new_text", "")))
+        )
 
     return edits
+
+
+def _edit_payloads(edits: list[FileEdit]) -> list[dict[str, str]]:
+    return [
+        {
+            "old_text": edit.old_text,
+            "new_text": edit.new_text,
+        }
+        for edit in edits
+    ]
