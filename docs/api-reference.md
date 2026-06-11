@@ -1019,8 +1019,7 @@ def build_project_scoped_registry(
 | `find_files` | 查找文件 |
 | `grep_search` | 内容搜索 |
 | `ls` | 目录列表 |
-| `evaluate_python` | 执行 Python 表达式 |
-| `reset_namespace` | 重置 Python 命名空间 |
+
 
 **工具集 `build_file_tools` 返回的工具**:
 

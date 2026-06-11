@@ -24,7 +24,6 @@ PLAN_TOOL_NAMES = {
 
 REVIEW_EXTRA_TOOL_NAMES = {
     "bash",
-    "run_validation",
 }
 
 REVIEW_BASH_PREFIXES = (
@@ -56,8 +55,6 @@ class ReviewPolicy:
     def check_call(self, call: ToolCall) -> PermissionDecision:
         if call.name in PLAN_TOOL_NAMES:
             return "allow"
-        if call.name == "run_validation":
-            return "ask"
         if call.name == "bash":
             return "allow" if _is_review_bash_allowed(call.input) else "ask"
         return "deny"
@@ -68,8 +65,6 @@ class ActPolicy:
         return tools
 
     def check_call(self, call: ToolCall) -> PermissionDecision:
-        if call.name == "run_validation":
-            return "ask"
         return "allow"
 
 

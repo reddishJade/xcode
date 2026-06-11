@@ -626,19 +626,14 @@ class XcodeReplTests(unittest.TestCase):
     def test_repl_completer_suggests_tool_names(self) -> None:
         completer = ReplCompleter(
             Path.cwd(),
-            (
-                ToolSpec("read_file", "Read.", "path", lambda value: value["input"]),
-                ToolSpec(
-                    "run_validation", "Validate.", "name", lambda value: value["input"]
-                ),
-            ),
+            (ToolSpec("read_file", "Read.", "path", lambda value: value["input"]),),
         )
 
         items = completer.complete("/tool r")
 
         self.assertEqual(
             [item.text for item in items],
-            ["read_file", "run_validation"],
+            ["read_file"],
         )
 
     def test_repl_completer_does_not_suggest_shell_commands(self) -> None:

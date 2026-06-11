@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import ast
 import re
 import subprocess
 import threading
-import traceback
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from xcode.harness.skills import ToolInput, ToolSpec, resolve_project_path
 from .path_utils import is_path_blocked, truncate_output, display_path
@@ -63,89 +61,11 @@ class LocalFindOperations:
         return path.is_dir()
 
 
-_EVAL_NS: dict[str, Any] = {}
-
 # 输出限制：平衡 LLM 上下文窗口利用率与响应速度
 MAX_GREP_RESULTS = 100  # grep 最多返回 100 行匹配
 MAX_GLOB_RESULTS = 200  # glob 最多返回 200 个文件
 MAX_LS_ENTRIES = 500  # ls 最多列出 500 个条目
 _RG_MISSING_HINT_EMITTED = False
-
-_BLOCKED_CALL_NAMES = frozenset(
-    {
-        # 代码执行（防止任意代码执行）
-        "exec",
-        "eval",
-        "compile",
-        # I/O 操作（防止文件系统访问）
-        "open",
-        "input",
-        # 动态导入（防止加载未审查的模块）
-        "__import__",
-        # 动态属性操作（防止访问私有属性和绕过限制）
-        "getattr",
-        "setattr",
-        "delattr",
-        "vars",
-        "locals",
-        "globals",
-        # 调试工具（防止交互式中断）
-        "breakpoint",
-    }
-)
-
-_SAFE_BUILTINS: dict[str, Any] = {
-    "abs": abs,
-    "all": all,
-    "any": any,
-    "ascii": ascii,
-    "bin": bin,
-    "bool": bool,
-    "bytearray": bytearray,
-    "bytes": bytes,
-    "chr": chr,
-    "complex": complex,
-    "dict": dict,
-    "divmod": divmod,
-    "enumerate": enumerate,
-    "filter": filter,
-    "float": float,
-    "format": format,
-    "frozenset": frozenset,
-    "hash": hash,
-    "hex": hex,
-    "id": id,
-    "int": int,
-    "isinstance": isinstance,
-    "issubclass": issubclass,
-    "iter": iter,
-    "len": len,
-    "list": list,
-    "map": map,
-    "max": max,
-    "min": min,
-    "next": next,
-    "object": object,
-    "oct": oct,
-    "ord": ord,
-    "pow": pow,
-    "print": print,
-    "range": range,
-    "repr": repr,
-    "reversed": reversed,
-    "round": round,
-    "set": set,
-    "slice": slice,
-    "sorted": sorted,
-    "str": str,
-    "sum": sum,
-    "tuple": tuple,
-    "type": type,
-    "zip": zip,
-    "True": True,
-    "False": False,
-    "None": None,
-}
 
 
 def build_code_tools(
@@ -210,48 +130,6 @@ def build_code_tools(
         base = _safe_path(root, raw_path)
         limit = int(data.get("limit", MAX_LS_ENTRIES))
         return _ls(root, base, limit, local_ls)
-
-    def evaluate_python(data: ToolInput) -> str:
-        _cancel_check()
-        global _EVAL_NS
-        code = str(data.get("code", "")).strip()
-        if not code:
-            raise ValueError("code is required")
-        try:
-            tree = ast.parse(code, mode="exec")
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Call):
-                    fn = node.func
-                    name = (
-                        fn.attr
-                        if isinstance(fn, ast.Attribute)
-                        else fn.id
-                        if isinstance(fn, ast.Name)
-                        else ""
-                    )
-                    if name in _BLOCKED_CALL_NAMES:
-                        return f"Error: {name}() is not allowed"
-            safe_globals: dict[str, Any] = {
-                "__builtins__": _SAFE_BUILTINS,
-            }
-            safe_globals.update(_EVAL_NS)
-            code_object = compile(tree, "<programmatic>", "exec")
-            exec(code_object, safe_globals)
-            _EVAL_NS.clear()
-            _EVAL_NS.update(
-                {k: v for k, v in safe_globals.items() if k not in ("__builtins__",)}
-            )
-            result = _EVAL_NS.get("result") or _EVAL_NS.get("output", "")
-            if not result:
-                return "ok (no result)"
-            return str(result)[:5000]
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}\n{traceback.format_exc()[:500]}"
-
-    def reset_namespace(data: ToolInput) -> str:
-        global _EVAL_NS
-        _EVAL_NS.clear()
-        return "namespace cleared"
 
     return (
         ToolSpec(
@@ -363,42 +241,6 @@ def build_code_tools(
                         "description": "Maximum entries (default: 500)",
                     },
                 },
-                "additionalProperties": False,
-            },
-        ),
-        ToolSpec(
-            name="evaluate_python",
-            description="Execute Python code in a persistent namespace. Intermediate results stay in the namespace, not in LLM context. "
-            "Store the final output in a variable named 'result' or 'output' to return it.",
-            input_hint='JSON: {"code": "result = 2 + 2"}',
-            handler=evaluate_python,
-            risk="low",
-            read_only=True,
-            concurrency_safe=False,
-            execution_mode="sequential",
-            schema={
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "Python code to execute. Use 'result' variable for return value.",
-                    }
-                },
-                "required": ["code"],
-                "additionalProperties": False,
-            },
-        ),
-        ToolSpec(
-            name="reset_namespace",
-            description="Reset the persistent Python namespace used by evaluate_python. Call this between unrelated tasks.",
-            input_hint="{}",
-            handler=reset_namespace,
-            risk="low",
-            read_only=True,
-            execution_mode="sequential",
-            schema={
-                "type": "object",
-                "properties": {},
                 "additionalProperties": False,
             },
         ),
