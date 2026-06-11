@@ -11,7 +11,6 @@ from .commands import (
 from .repl_sessions import (
     current_view,
     print_loaded_history,
-    print_sessions,
     resume_interactively,
     resume_latest,
     resumed_message,
@@ -128,7 +127,31 @@ def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
-    print_sessions(ctx.store.list_session_infos())
+    import questionary
+
+    sessions = ctx.store.list_session_infos()
+    if not sessions:
+        print("No conversations found.")
+        return False
+
+    id_to_index = {session.id: str(i) for i, session in enumerate(sessions, 1)}
+    choices = []
+    for i, item in enumerate(sessions, 1):
+        title = f"{i}. {item.title}"
+        if item.parent_id and item.parent_id in id_to_index:
+            title += f" (forked from #{id_to_index[item.parent_id]})"
+        if item.summary:
+            title += f" — {item.summary}"
+        choices.append(questionary.Choice(title=title[:120], value=item))
+
+    selected = questionary.select("Select session to resume:", choices=choices).ask()
+    if selected is None:
+        return False
+
+    ctx.store.resume(selected.id)
+    sync_agent_history(ctx.app, ctx.store)
+    print(resumed_message(selected))
+    print_loaded_history(ctx.store)
     return False
 
 
