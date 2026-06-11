@@ -11,7 +11,8 @@ import dataclasses
 from collections.abc import AsyncIterator, Callable
 
 from .agent_loop import run_agent_loop
-from .config import AgentContext, AgentLoopConfig, AgentLoopResult
+from .config import AgentContext, AgentLoopConfig
+from .results import AgentLoopResult
 from .events import AgentEvent
 from .messages import AgentMessage
 from .protocols import AgentTool, CancellationSignal

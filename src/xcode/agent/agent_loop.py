@@ -26,11 +26,10 @@ from xcode.agent.types import TextContent, ToolCallContent
 from .config import (
     AgentContext,
     AgentLoopConfig,
-    AgentLoopMetrics,
-    AgentLoopResult,
     ShouldStopAfterTurnContext,
     _LoopRunState,
 )
+from .results import AgentLoopMetrics, AgentLoopResult
 from .events import (
     AgentEndEvent,
     AgentEvent,

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal
 
 from xcode.ai.providers.protocol import StreamProvider
-from xcode.ai.types import StreamOptions, ThinkingLevel, ToolDefinition
+from xcode.ai.types import StreamOptions, ThinkingLevel
 from xcode.agent.types import ToolArguments, ToolCallContent
 
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage
@@ -19,6 +19,16 @@ from .protocols import (
     ToolExecutionMode,
     ToolResultContentBlock,
     ToolResultDetails,
+)
+from .hooks import (
+    ArchiveWriter,
+    BeforeProviderRequestHook,
+    CompactHook,
+    ContextTransformer,
+    IsToolProductiveHook,
+    MessageConverter,
+    MessageQueueGetter,
+    ShouldCompactHook,
 )
 
 
@@ -121,13 +131,9 @@ class CompactInstructions:
     frozen_identifiers: list[str] = field(default_factory=list)
 
 
-# ── Callable type aliases ──
+# ── Callable type aliases（引用本模块上下文类型）──
 
 
-type MessageConverter = Callable[[list[AgentMessage]], list[dict[str, Any]]]
-type ContextTransformer = Callable[
-    [list[AgentMessage], CancellationSignal | None], list[AgentMessage]
-]
 type BeforeToolCallHook = Callable[
     [BeforeToolCallContext, CancellationSignal | None], BeforeToolCallResult | None
 ]
@@ -136,45 +142,6 @@ type AfterToolCallHook = Callable[
 ]
 type PrepareNextTurnHook = Callable[[], AgentLoopTurnUpdate | None]
 type ShouldStopAfterTurnHook = Callable[[ShouldStopAfterTurnContext], bool]
-type MessageQueueGetter = Callable[[], list[AgentMessage]]
-type ArchiveWriter = Callable[[list[AgentMessage]], str | None]
-type ShouldCompactHook = Callable[[list[AgentMessage]], bool]
-type CompactHook = Callable[[list[AgentMessage]], list[AgentMessage]]
-type IsToolProductiveHook = Callable[
-    [list[ToolCallContent], list[ToolResultMessage]], bool
-]
-type BeforeProviderRequestHook = Callable[
-    [list[dict[str, Any]], list[ToolDefinition]], None
-]
-
-
-# ── 指标 ──
-
-
-@dataclass
-class AgentLoopMetrics:
-    llm_calls: int = 0
-    tool_calls: int = 0
-    steps: int = 0
-    model_latencies_ms: list[float] = field(default_factory=list)
-    tool_latencies_ms: list[float] = field(default_factory=list)
-    input_tokens: int = 0
-    output_tokens: int = 0
-
-
-# ── 结果 ──
-
-
-@dataclass
-class AgentLoopResult:
-    messages: list[AgentMessage] = field(default_factory=list)
-    steps: int = 0
-    stopped_by_limit: bool = False
-    stopped_by_watchdog: bool = False
-    stopped_by_error: bool = False
-    watchdog_reason: str | None = None
-    metrics: AgentLoopMetrics | None = None
-    active_provider: StreamProvider | None = None
 
 
 # ── 循环配置 ──

@@ -27,7 +27,8 @@ from xcode.ai.events import (
 from xcode.ai.providers.protocol import StreamProvider
 from xcode.ai.types import ToolDefinition
 from xcode.agent.types import TextContent, ToolCallContent
-from xcode.agent.config import AgentContext, AgentLoopConfig, AgentLoopMetrics
+from xcode.agent.config import AgentContext, AgentLoopConfig
+from xcode.agent.results import AgentLoopMetrics
 from xcode.agent.events import (
     AgentEvent,
     MessageUpdateEvent,

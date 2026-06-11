@@ -6,7 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ...agent.config import AfterToolCallContext, AgentLoopResult
+from ...agent.config import AfterToolCallContext
+from ...agent.results import AgentLoopResult
 from ...agent.messages import AssistantMessage
 from xcode.ai.events import ToolCall
 from xcode.agent.types import TextContent, ToolCallContent

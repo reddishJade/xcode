@@ -5,7 +5,8 @@ import unittest
 
 from xcode.agent.agent_loop import run_agent_loop
 from xcode.agent.message_converter import convert_to_llm
-from xcode.agent.config import AgentContext, AgentLoopConfig, AgentLoopResult
+from xcode.agent.config import AgentContext, AgentLoopConfig
+from xcode.agent.results import AgentLoopResult
 from xcode.agent.events import AgentEvent
 from xcode.agent.messages import AssistantMessage, ToolResultMessage, UserMessage
 from xcode.agent.protocols import AgentToolResult, ToolExecutionMode
