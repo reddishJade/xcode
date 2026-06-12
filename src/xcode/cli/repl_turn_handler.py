@@ -1,3 +1,5 @@
+"""Turn-渲染专用的处理器：ToolCallHandler 和 ReasoningHandler。"""
+
 from __future__ import annotations
 
 import sys
