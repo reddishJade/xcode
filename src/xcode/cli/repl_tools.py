@@ -147,7 +147,7 @@ def cli_shorthand_key(tool: ToolSpec) -> str:
     return "input"
 
 
-def brief_input(name: str, raw_input: Any) -> str:
+def brief_input(name: str, raw_input: ToolInput | str) -> str:
     """从工具输入中提取简短的人类可读摘要。"""
     if isinstance(raw_input, dict):
         if name == "bash":
@@ -169,7 +169,7 @@ def brief_input(name: str, raw_input: Any) -> str:
     return name
 
 
-def tool_intent(name: str, raw_input: Any) -> str:
+def tool_intent(name: str, raw_input: ToolInput | str) -> str:
     if not isinstance(raw_input, dict):
         return single_line_preview(f"Run {name}")
     if name == "grep_search":

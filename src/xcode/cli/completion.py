@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Callable
 
 from xcode.harness.skills import ToolSpec
 
@@ -101,13 +101,15 @@ class ReplCompleter(Completer):
         except ImportError:
             return
         for item in self.complete(document.text_before_cursor):
-            display_meta: Any = item.display_meta
-            if display_meta:
-                display_meta = FormattedText([("fg:ansibrightblack", display_meta)])
+            item_display_meta: str = item.display_meta
+            meta: object = (
+                FormattedText([("fg:ansibrightblack", item_display_meta)])
+                if item_display_meta else None
+            )
             yield Completion(
                 item.text,
                 start_position=item.start_position,
-                display_meta=display_meta,
+                display_meta=meta,
             )
 
     async def get_completions_async(self, document, complete_event):

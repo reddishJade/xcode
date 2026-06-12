@@ -5,7 +5,7 @@ import shutil
 import sys
 import textwrap
 from collections.abc import Callable, Iterable
-from typing import Any
+
 
 from rich.console import Console
 from rich.live import Live
@@ -54,7 +54,7 @@ REPL_PROMPT_STYLE = {
 
 
 class PromptSessionAdapter:
-    def __init__(self, session: Any) -> None:
+    def __init__(self, session: PromptLike) -> None:
         self.session = session
 
     def prompt(self, prompt_text: PromptText) -> str:
@@ -256,8 +256,8 @@ def create_prompt_session(
         pass
     style = Style.from_dict(REPL_PROMPT_STYLE)
 
-    return PromptSessionAdapter(
-        PromptSession(
+    return PromptSessionAdapter(  # type: ignore[arg-type]
+        PromptSession(  # type: ignore[arg-type]  # 与 prompt_toolkit PromptSession 参数名不对齐，运行时无影响
             multiline=True,
             key_bindings=bindings,
             completer=completer,
