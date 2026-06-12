@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import questionary
+
 from .app_contract import ReplApp
 from .commands import (
     COMMAND_GROUP_EXIT,
@@ -136,8 +138,6 @@ def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
-    import questionary
-
     sessions = ctx.store.list_session_infos()
     if not sessions:
         print("No conversations found.")
