@@ -38,7 +38,7 @@ from .result import (
 from .tool_gate import ToolGate
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import HookRecord
-from ..skills import ToolSpec
+from ..skills import ApprovalCallback, ToolSpec
 
 _PROMPT_VERSION_CACHE: str | None = None
 
@@ -118,6 +118,16 @@ class StructuredAgent:
     def clear_history(self) -> None:
         self._history.clear()
         self._reset_provider_conversation_state()
+
+    @property
+    def approval_callback(self) -> ApprovalCallback | None:
+        """返回当前 HITL 审批回调。"""
+        return self._gate.approval_callback
+
+    @approval_callback.setter
+    def approval_callback(self, value: ApprovalCallback | None) -> None:
+        """更新后续工具执行使用的 HITL 审批回调。"""
+        self._gate.set_approval_callback(value)
 
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history.load(messages)

@@ -106,6 +106,15 @@ class ToolGate:
             )
         )
 
+    @property
+    def approval_callback(self) -> ApprovalCallback | None:
+        """返回当前 HITL 审批回调。"""
+        return self._approval_callback
+
+    def set_approval_callback(self, approval_callback: ApprovalCallback | None) -> None:
+        """更新后续工具适配与前置检查使用的 HITL 回调。"""
+        self._approval_callback = approval_callback
+
     # ── 钩子构建 ──
 
     def build_before_tool_hook(

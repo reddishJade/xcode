@@ -210,6 +210,38 @@ class XcodePermissionsTests(unittest.TestCase):
 
         self.assertIn("permission denied", result.messages[2]["content"][0]["content"])
 
+    def test_structured_agent_approval_callback_setter_updates_gate(self) -> None:
+        from xcode.ai.events import ProviderEvent
+
+        responses: list[list[ProviderEvent]] = [
+            [
+                ToolCallEvent(
+                    calls=[ToolCall(id="x", name="danger", input={"input": "go"})]
+                ),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ],
+            [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")],
+        ]
+        provider = FakeProvider(responses)
+        agent = StructuredAgent(
+            provider=provider,
+            registry=(
+                ToolSpec(
+                    "danger",
+                    "Danger.",
+                    "text",
+                    lambda value: value["input"],
+                    risk="high",
+                    schema=INPUT_SCHEMA,
+                ),
+            ),
+        )
+        agent.approval_callback = lambda _tool, _input: HITLResult("allow", "once")
+
+        result = agent.run("go")
+
+        self.assertEqual(result.messages[2]["content"][0]["content"], "go")
+
 
 class HITLPermissionModelTests(unittest.TestCase):
     def test_hitl_result_dataclass(self) -> None:
