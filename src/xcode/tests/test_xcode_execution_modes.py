@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from xcode.ai.events import ToolCall
 from xcode.cli.repl_hitl import ReplHITLHandler
 from xcode.harness.agent_runtime.execution_modes import ActPolicy
 from xcode.harness.observability import (
+    HITLResult,
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
@@ -85,6 +88,20 @@ class ReplHITLHandlerTests(unittest.TestCase):
             result = handler(self.tool, {"command": "git push origin main"})
             self.assertEqual(result.decision, "allow")
             self.assertEqual(result.scope, "permanent")
+
+    def test_interactive_prompt_works_inside_running_event_loop(self) -> None:
+        async def run_prompt() -> HITLResult:
+            return self.handler._interactive_prompt(
+                self.tool, {"command": "rm -rf /tmp/xcode-demo"}
+            )
+
+        with patch(
+            "xcode.cli.repl_hitl._run_hitl_dialog", return_value="允许（仅本次）"
+        ):
+            result = asyncio.run(run_prompt())
+
+        self.assertEqual(result.decision, "allow")
+        self.assertEqual(result.scope, "once")
 
 
 if __name__ == "__main__":

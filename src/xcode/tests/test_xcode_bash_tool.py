@@ -7,6 +7,7 @@ import unittest
 from xcode.cli.repl_tools import parse_tool_input
 from xcode.coding_agent.tools import build_bash_tool
 from xcode.coding_agent.tools.bash import OutputAccumulator
+from xcode.coding_agent.tools._constants import evaluate_command_risk
 from xcode.tests.fixtures import run_tool
 
 
@@ -109,6 +110,41 @@ class XcodeBashToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tool = build_bash_tool(Path(tmp))
             self.assertEqual(tool.risk, "high")
+
+    def test_rm_allowed_paths_require_hitl_instead_of_hard_deny(self) -> None:
+        commands = [
+            "rm -rf ./tmp",
+            "rm -rf ~/xcode/tmp",
+            "rm -rf /home/dwei/xcode/tmp",
+            "rm -rf /tmp/xcode-demo",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(evaluate_command_risk(command), "ask")
+
+    def test_rm_root_path_is_denied(self) -> None:
+        self.assertEqual(evaluate_command_risk("rm -rf /"), "deny")
+        self.assertEqual(evaluate_command_risk("rm -fr /*"), "deny")
+
+    def test_recursive_system_path_mutation_is_denied(self) -> None:
+        commands = [
+            "rm -rf /etc",
+            "chmod -R 777 /usr",
+            "chown -R root /var",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(evaluate_command_risk(command), "deny")
+
+    def test_recursive_permission_change_on_allowed_paths_requires_hitl(self) -> None:
+        commands = [
+            "chmod -R 777 ./tmp",
+            "chown -R root ~/xcode/tmp",
+            "chmod -R 777 /tmp/xcode-demo",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(evaluate_command_risk(command), "ask")
 
 
 if __name__ == "__main__":
