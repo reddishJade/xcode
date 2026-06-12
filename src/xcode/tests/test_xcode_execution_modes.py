@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from xcode.ai.events import ToolCall
 from xcode.cli.repl_hitl import ReplHITLHandler
@@ -90,18 +90,20 @@ class ReplHITLHandlerTests(unittest.TestCase):
             self.assertEqual(result.scope, "permanent")
 
     def test_interactive_prompt_works_inside_running_event_loop(self) -> None:
+        question = Mock()
+        question.ask.return_value = "允许（仅本次）"
+
         async def run_prompt() -> HITLResult:
             return self.handler._interactive_prompt(
                 self.tool, {"command": "rm -rf /tmp/xcode-demo"}
             )
 
-        with patch(
-            "xcode.cli.repl_hitl._run_hitl_dialog", return_value="允许（仅本次）"
-        ):
+        with patch("questionary.select", return_value=question):
             result = asyncio.run(run_prompt())
 
         self.assertEqual(result.decision, "allow")
         self.assertEqual(result.scope, "once")
+        question.ask.assert_called_once()
 
 
 if __name__ == "__main__":

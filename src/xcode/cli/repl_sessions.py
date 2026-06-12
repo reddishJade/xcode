@@ -324,41 +324,13 @@ def _run_session_picker(
     title: str,
     choices: list[tuple[SessionMetadataView, str]],
 ) -> SessionMetadataView | None:
-    """运行会话选择对话框。"""
-    from prompt_toolkit.application.current import get_app
-    from prompt_toolkit.layout.containers import HSplit
-    from prompt_toolkit.shortcuts.dialogs import _create_app
-    from prompt_toolkit.widgets import Button, Dialog, Label, RadioList
+    """显示会话选择器。"""
+    import questionary
 
-    session_list = RadioList(
-        values=choices,
-        default=choices[0][0],
-        show_numbers=True,
-        select_on_focus=True,
-    )
-
-    def ok_handler() -> None:
-        get_app().exit(result=session_list.current_value)
-
-    def cancel_handler() -> None:
-        get_app().exit(result=None)
-
-    dialog = Dialog(
-        title=title,
-        body=HSplit(
-            [
-                Label(text="Choose a conversation:", dont_extend_height=True),
-                session_list,
-            ],
-            padding=1,
-        ),
-        buttons=[
-            Button(text="Resume", handler=ok_handler),
-            Button(text="Cancel", handler=cancel_handler),
-        ],
-        with_background=True,
-    )
-    return _create_app(dialog, None).run()
+    questionary_choices = [
+        questionary.Choice(title=label, value=session) for session, label in choices
+    ]
+    return questionary.select(title, choices=questionary_choices).ask()
 
 
 def current_view(store: SessionStore) -> SessionMetadataView:

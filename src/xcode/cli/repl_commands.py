@@ -262,47 +262,25 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
 
 
 def _select_act_transition() -> str | None:
-    """显示支持方向键、鼠标和数字键选择的 Act 模式切换菜单。"""
-    from prompt_toolkit.application.current import get_app
-    from prompt_toolkit.layout.containers import HSplit
-    from prompt_toolkit.shortcuts.dialogs import _create_app
-    from prompt_toolkit.widgets import Button, Dialog, Label, RadioList
+    """显示 Act 模式切换菜单。"""
+    import questionary
 
-    actions = [
-        ("1", "Clear and Act (Clear context, keep plan, and act)"),
-        ("2", "Keep and Act (Keep current context and act directly)"),
-        ("3", "Review Mode"),
-        ("4", "Continue in Plan Mode"),
-    ]
-    action_list = RadioList(
-        values=actions,
-        default="2",
-        show_numbers=True,
-        select_on_focus=True,
-    )
-
-    def ok_handler() -> None:
-        get_app().exit(result=action_list.current_value)
-
-    def cancel_handler() -> None:
-        get_app().exit(result=None)
-
-    dialog = Dialog(
-        title="Select action",
-        body=HSplit(
-            [
-                Label(text="Choose how to leave Plan Mode:", dont_extend_height=True),
-                action_list,
-            ],
-            padding=1,
-        ),
-        buttons=[
-            Button(text="Confirm", handler=ok_handler),
-            Button(text="Cancel", handler=cancel_handler),
+    return questionary.select(
+        "Select action:",
+        choices=[
+            questionary.Choice(
+                title="Clear and Act (Clear context, keep plan, and act)",
+                value="1",
+            ),
+            questionary.Choice(
+                title="Keep and Act (Keep current context and act directly)",
+                value="2",
+            ),
+            questionary.Choice(title="Review Mode", value="3"),
+            questionary.Choice(title="Continue in Plan Mode", value="4"),
         ],
-        with_background=True,
-    )
-    return _create_app(dialog, None).run()
+        default="2",
+    ).ask()
 
 
 def cmd_verbose(cmd: str, ctx: CommandContext) -> bool:

@@ -65,12 +65,18 @@ def _ask_hitl_choice(tool: ToolSpec, action_input: ToolInput) -> str | None:
 
 def _ask_hitl_choice_directly(tool: ToolSpec, action_input: ToolInput) -> str | None:
     """直接显示授权选择，适用于当前线程没有事件循环的场景。"""
+    import questionary
+
     brief = brief_input(tool.name, action_input)
-    return _run_hitl_dialog(
-        title=f"需要授权：{tool.name}  风险：{tool.risk}",
-        text=f"指令：{brief}",
-        choices=_hitl_choices(),
-    )
+    return questionary.select(
+        f"需要授权：{tool.name}  风险：{tool.risk}\n指令：{brief}",
+        choices=[
+            "允许（仅本次）",
+            "此次对话中允许",
+            "始终允许",
+            "拒绝",
+        ],
+    ).ask()
 
 
 def _ask_hitl_choice_in_thread(tool: ToolSpec, action_input: ToolInput) -> str | None:
@@ -99,53 +105,3 @@ def _has_running_event_loop() -> bool:
     except RuntimeError:
         return False
     return True
-
-
-def _hitl_choices() -> list[tuple[str, str]]:
-    """返回 HITL 选择项。"""
-    return [
-        ("允许（仅本次）", "允许（仅本次）"),
-        ("此次对话中允许", "此次对话中允许"),
-        ("始终允许", "始终允许"),
-        ("拒绝", "拒绝"),
-    ]
-
-
-def _run_hitl_dialog(
-    *,
-    title: str,
-    text: str,
-    choices: list[tuple[str, str]],
-) -> str | None:
-    """显示支持方向键、鼠标和数字键选择的授权对话框。"""
-    from prompt_toolkit.application.current import get_app
-    from prompt_toolkit.layout.containers import HSplit
-    from prompt_toolkit.shortcuts.dialogs import _create_app
-    from prompt_toolkit.widgets import Button, Dialog, Label, RadioList
-
-    radio_list = RadioList(
-        values=choices,
-        default="拒绝",
-        show_numbers=True,
-        select_on_focus=True,
-    )
-
-    def ok_handler() -> None:
-        get_app().exit(result=radio_list.current_value)
-
-    def cancel_handler() -> None:
-        get_app().exit(result=None)
-
-    dialog = Dialog(
-        title=title,
-        body=HSplit(
-            [Label(text=text, dont_extend_height=True), radio_list],
-            padding=1,
-        ),
-        buttons=[
-            Button(text="确认", handler=ok_handler),
-            Button(text="拒绝", handler=cancel_handler),
-        ],
-        with_background=True,
-    )
-    return _create_app(dialog, None).run()
