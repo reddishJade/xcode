@@ -345,7 +345,9 @@ class _ReplTurnRenderer:
         self.answer_stream = LiveMarkdownStream(self.live_console)
         self.streamed_text = False
         self.tool_handler = ToolCallHandler(state, self.live_console)
-        self.reasoning_handler = ReasoningHandler(self.live_console)
+        self.reasoning_handler = ReasoningHandler(
+            self.live_console, self.state.verbosity
+        )
 
     def handle_event(self, event: StructuredAgentEvent) -> None:
         if isinstance(event, ReasoningDeltaStructuredEvent):

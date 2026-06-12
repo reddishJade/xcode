@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from .app_contract import ReplApp
 from .markdown import MarkdownRenderer
@@ -15,6 +15,7 @@ from xcode.harness.observability import (
 )
 
 
+VerbosityLevel = Literal["normal", "verbose", "debug"]
 PromptText = str | list[tuple[str, str]]
 
 
@@ -25,7 +26,7 @@ class PromptLike(Protocol):
 @dataclass
 class ReplState:
     mode: ExecutionMode = "act"
-    verbose: bool = False
+    verbosity: VerbosityLevel = "normal"
     approved_plan: str | None = None
     exit_pending: float = 0.0
     pending_partial: tuple[str, str] | None = None

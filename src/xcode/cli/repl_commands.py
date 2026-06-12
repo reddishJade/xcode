@@ -279,16 +279,42 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_verbose(cmd: str, ctx: CommandContext) -> bool:
-    """显示或隐藏工具调用详情。"""
+    """设置输出详细程度: normal, verbose, debug。"""
+    parts = cmd.split(maxsplit=1)
+    if len(parts) == 2:
+        val = parts[1].strip().lower()
+        if val in ("normal", "verbose", "debug"):
+            ctx.state.verbosity = val
+            print(f"Verbosity set to {val}.")
+        elif val == "on":
+            ctx.state.verbosity = "verbose"
+            print("Verbose mode on.")
+        elif val == "off":
+            ctx.state.verbosity = "normal"
+            print("Verbose mode off.")
+        else:
+            print(f"Unknown level: {val}. Use normal, verbose, debug, on, or off.")
+    else:
+        print(f"Current verbosity: {ctx.state.verbosity}")
+        print("Usage: /verbose normal|verbose|debug|on|off")
+    return False
+
+
+def cmd_debug(cmd: str, ctx: CommandContext) -> bool:
+    """切换 debug 模式（显示推理预览和展开工具结果）。"""
     parts = cmd.split(maxsplit=1)
     if len(parts) == 2 and parts[1] == "on":
-        ctx.state.verbose = True
-        print("Verbose mode on: tool call ids and result details will be shown.")
+        ctx.state.verbosity = "debug"
+        print("Debug mode on: reasoning preview and expanded tool results shown.")
     elif len(parts) == 2 and parts[1] == "off":
-        ctx.state.verbose = False
-        print("Verbose mode off.")
+        ctx.state.verbosity = "normal"
+        print("Debug mode off.")
+    elif ctx.state.verbosity == "debug":
+        ctx.state.verbosity = "normal"
+        print("Debug mode off.")
     else:
-        print("Usage: /verbose on|off")
+        ctx.state.verbosity = "debug"
+        print("Debug mode on: reasoning preview and expanded tool results shown.")
     return False
 
 
@@ -494,7 +520,14 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     ),
     "/verbose": CommandEntry(
         handler=cmd_verbose,
-        desc="Show or hide tool call ids and result details.",
+        desc="Set output verbosity level: normal, verbose, or debug.",
+        args_desc="normal|verbose|debug",
+        accepts_args=True,
+        group=COMMAND_GROUP_MODE,
+    ),
+    "/debug": CommandEntry(
+        handler=cmd_debug,
+        desc="Toggle debug mode (reasoning preview + expanded tool results).",
         args_desc="on|off",
         accepts_args=True,
         group=COMMAND_GROUP_MODE,

@@ -9,7 +9,7 @@ from typing import Any
 from rich.console import Console
 from rich.text import Text
 
-from .commands import ReplState
+from .commands import ReplState, VerbosityLevel
 from .repl_rendering import (
     CLI_COLOR_ERROR,
     CLI_COLOR_SUCCESS,
@@ -59,7 +59,7 @@ class ToolCallHandler:
         label = brief_input(event_data.name, event_data.input)
         intent = tool_intent(event_data.name, event_data.input)
         self.tool_call_labels[event_data.id] = label
-        if self.state.verbose:
+        if self.state.verbosity != "normal":
             print_tool_call_rich(label, self.live_console)
             return
         if self.tool_group is None:
@@ -74,8 +74,8 @@ class ToolCallHandler:
             self.tool_group["intents"].append(intent)
 
     def record_tool_result(self, event_data: ToolResultBlock) -> None:
-        if self.state.verbose:
-            print_tool_result_rich(event_data, self.state.verbose, self.live_console)
+        if self.state.verbosity != "normal":
+            print_tool_result_rich(event_data, self.state.verbosity, self.live_console)
             return
         if self.tool_group is None:
             return
@@ -142,8 +142,11 @@ class ToolCallHandler:
 class ReasoningHandler:
     """处理推理过程的 delta 流式事件，管理实时预览和摘要输出。"""
 
-    def __init__(self, live_console: Console) -> None:
+    def __init__(
+        self, live_console: Console, verbosity: VerbosityLevel = "normal"
+    ) -> None:
         self.live_console = live_console
+        self.verbosity = verbosity
         self.reasoning_started_at: float | None = None
         self.reasoning_text = ""
         self.reasoning_preview = LiveReasoningPreview(live_console)
@@ -152,9 +155,10 @@ class ReasoningHandler:
         if self.reasoning_started_at is None:
             self.reasoning_started_at = time.perf_counter()
         self.reasoning_text += event_data
-        lines = reasoning_preview_lines(self.reasoning_text)
-        if lines:
-            self.reasoning_preview.update(lines)
+        if self.verbosity == "debug":
+            lines = reasoning_preview_lines(self.reasoning_text)
+            if lines:
+                self.reasoning_preview.update(lines)
 
     def finish(self) -> None:
         if self.reasoning_started_at is None:
@@ -165,15 +169,18 @@ class ReasoningHandler:
             self.reasoning_started_at = None
             self.reasoning_text = ""
             return
-        preview = single_line_preview(self.reasoning_text)
         self.live_console.print(
             Text(
-                f"  • thinked for {format_elapsed(elapsed)}",
+                f"  • reasoning {format_elapsed(elapsed)}",
                 style=CLI_COLOR_THINKING,
             )
         )
-        if preview:
-            self.live_console.print(Text(f"    {preview}", style=CLI_COLOR_THINKING))
+        if self.verbosity == "debug":
+            preview = single_line_preview(self.reasoning_text)
+            if preview:
+                self.live_console.print(
+                    Text(f"    {preview}", style=CLI_COLOR_THINKING)
+                )
         self.reasoning_started_at = None
         self.reasoning_text = ""
 

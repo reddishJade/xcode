@@ -14,6 +14,9 @@ from .repl_rendering import (
     CLI_COLOR_SUCCESS,
     CLI_COLOR_TOOL,
     CLI_COLOR_WARNING,
+    DEBUG_TOOL_RESULT_PREVIEW_LIMIT,
+    NORMAL_TOOL_RESULT_PREVIEW_LIMIT,
+    VERBOSE_TOOL_RESULT_PREVIEW_LIMIT,
     single_line_preview,
 )
 from .tool_catalog import build_tool_catalog
@@ -287,10 +290,10 @@ def print_tool_call_rich(label: str, console: Console) -> None:
 
 def print_tool_result_rich(
     data: ToolResultBlock,
-    verbose: bool,
+    verbosity: str,
     console: Console,
 ) -> None:
-    if data.status == "ok" and not verbose:
+    if data.status == "ok" and verbosity == "normal":
         return
     border = {
         "error": CLI_COLOR_ERROR,
@@ -300,7 +303,10 @@ def print_tool_result_rich(
     mark = {"error": "✘", "denied": "⊘", "approval_required": "?"}.get(
         data.status, data.status
     )
-    limit = 600 if verbose else 200
+    limit = {
+        "debug": DEBUG_TOOL_RESULT_PREVIEW_LIMIT,
+        "verbose": VERBOSE_TOOL_RESULT_PREVIEW_LIMIT,
+    }.get(verbosity, NORMAL_TOOL_RESULT_PREVIEW_LIMIT)
     summary = single_line_preview(str(data.content), width=limit)
     console.print(Text(f"  ← {mark} {summary}", style=border))
 
