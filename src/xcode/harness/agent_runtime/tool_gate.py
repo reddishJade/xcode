@@ -21,7 +21,15 @@ from .execution_modes import ExecutionModeState, policy_for_mode
 from .tool_adapter import adapt_tool_specs
 from .tool_audit import emit_audit
 from .tool_hooks import emit_hook, emit_tool_hook, tool_result_text
-from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
+from ..observability import (
+    AuditRecord,
+    HookManager,
+    HookRecord,
+    PermissionEngine,
+    PermissionEngineConfig,
+    PermissionDecision,
+    PermissionPolicy,
+)
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 
@@ -133,15 +141,11 @@ class ToolGate:
             decision = effective_policy.check_call(
                 ToolCall(id=tool_call.id, name=tool_call.name, input=args)
             )
-            if decision == "deny":
-                return BeforeToolCallResult(
-                    block=True,
-                    reason=f"tool not allowed in {self._mode.current_mode} mode: {tool_call.name}",
-                )
-            if decision == "ask":
-                approval = self._request_approval(tool_call.name, args, snapshot)
-                if approval is not None:
-                    return approval
+            permission_result = self._precheck_permission(
+                tool_call.name, args, decision, snapshot
+            )
+            if permission_result is not None:
+                return permission_result
 
             emit_hook(
                 self._hook_manager,
@@ -213,21 +217,31 @@ class ToolGate:
 
     # ── 内部方法 ──
 
-    def _request_approval(
+    def _precheck_permission(
         self,
         tool_name: str,
         args: dict[str, Any],
+        execution_decision: PermissionDecision,
         snapshot: ToolGateSnapshot,
     ) -> BeforeToolCallResult | None:
-        if snapshot.approval_callback is None or tool_name not in snapshot.tool_map:
-            return BeforeToolCallResult(
-                block=True, reason=f"tool requires approval: {tool_name}"
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=snapshot.permission_policy,
+                restricted_dirs=snapshot.restricted_dirs,
+                high_risk_requires_approval=False,
+                defer_static_ask=True,
             )
-        hitl = snapshot.approval_callback(snapshot.tool_map[tool_name], args)
-        if hitl.decision == "deny":
-            return BeforeToolCallResult(
-                block=True, reason=f"tool {tool_name} denied by user"
-            )
+        )
+        result = engine.decide(
+            tool_name,
+            stringify_tool_input(args),
+            execution_decision=execution_decision,
+            tool_spec=snapshot.tool_map.get(tool_name),
+            tool_input=args,
+            approval_callback=snapshot.approval_callback,
+        )
+        if result.blocked:
+            return BeforeToolCallResult(block=True, reason=result.reason)
         return None
 
 

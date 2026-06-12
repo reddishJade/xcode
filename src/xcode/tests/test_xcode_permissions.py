@@ -18,6 +18,11 @@ from xcode.harness.skills import ToolSpec, run_tool_result
 from xcode.tests.fixtures import run_tool
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.config import GateConfig
+from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
+from xcode.harness.agent_runtime.tool_gate import ToolGate
+from xcode.agent.config import AgentContext, BeforeToolCallContext
+from xcode.agent.messages import AssistantMessage
+from xcode.agent.types import ToolCallContent
 
 
 from xcode.tests.fixtures import FakeProvider
@@ -176,6 +181,47 @@ class XcodePermissionsTests(unittest.TestCase):
         result = engine.decide("bash", "rm -rf /", execution_decision="deny")
         self.assertTrue(result.blocked)
         self.assertEqual(result.matched_rule, "execution_mode")
+
+    def test_tool_gate_static_deny_preempts_execution_mode_ask(self) -> None:
+        called = False
+
+        def approve(_tool: ToolSpec, _input: dict[str, object]) -> HITLResult:
+            nonlocal called
+            called = True
+            return HITLResult("allow", "once")
+
+        mode = ExecutionModeState()
+        mode.set_mode("review")
+        tool = ToolSpec("bash", "Bash.", "command", lambda _value: "")
+        gate = ToolGate(
+            mode_state=mode,
+            approval_callback=approve,
+            permission_policy=PermissionPolicy((PermissionRule("bash", "deny"),)),
+            high_risk_requires_approval=False,
+            hook_manager=None,
+            audit_logger=None,
+            session_id="test",
+        )
+        hook = gate.build_before_tool_hook(gate.snapshot_for((tool,)))
+        result = hook(
+            BeforeToolCallContext(
+                assistant_message=AssistantMessage(content=[]),
+                tool_call=ToolCallContent(
+                    id="x",
+                    name="bash",
+                    arguments={"command": "git add ."},
+                ),
+                args={"command": "git add ."},
+                context=AgentContext(),
+            ),
+            None,
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.block)
+        self.assertIn("permission denied", result.reason)
+        self.assertFalse(called)
 
     def test_structured_agent_uses_permission_policy(self) -> None:
         from xcode.ai.events import ProviderEvent

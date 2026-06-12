@@ -266,6 +266,7 @@ class PermissionEngineConfig:
     restricted_dirs: tuple[str, ...] = ()
     allowlist_mode: bool = False
     high_risk_requires_approval: bool = False
+    defer_static_ask: bool = False
 
 
 class PermissionEngine:
@@ -337,7 +338,7 @@ class PermissionEngine:
             )
 
         # Tier 3: 静态 ask（先检查 HITL）
-        if "ask" in static_decisions:
+        if "ask" in static_decisions and not self._config.defer_static_ask:
             hitl_result = self._check_hitl_grants(tool_name, action_input)
             if hitl_result is not None:
                 return hitl_result
