@@ -300,10 +300,15 @@ class XcodeReplTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = CapturingApp()
             prompt = FakePrompt(
-                ["/plan", "first", "/review", "second", "/act", "2", "third", "/exit"]
+                ["/plan", "first", "/review", "second", "/act", "third", "/exit"]
             )
 
-            with redirect_stdout(StringIO()):
+            with (
+                patch(
+                    "xcode.cli.repl_commands._select_act_transition", return_value="2"
+                ),
+                redirect_stdout(StringIO()),
+            ):
                 code = run_repl(app, Path(temp_dir), prompt)
 
             self.assertEqual(code, 0)
@@ -505,15 +510,20 @@ class XcodeReplTests(unittest.TestCase):
             seed.append("assistant", "old answer")
             seed.update_summary()
             app = FakeApp()
-            prompt = FakePrompt(["/resume", "1", "/exit"])
+            prompt = FakePrompt(["/resume", "/exit"])
             output = StringIO()
 
-            with redirect_stdout(output):
+            with (
+                patch(
+                    "xcode.cli.repl_sessions._run_session_picker",
+                    return_value=seed.list_session_infos()[0],
+                ),
+                redirect_stdout(output),
+            ):
                 code = run_repl(app, sessions_dir, prompt)
 
             self.assertEqual(code, 0)
             text = output.getvalue()
-            self.assertIn("1. first conversation", text)
             self.assertIn("Resumed conversation: first conversation", text)
 
     def test_resume_command_loads_agent_history(self) -> None:

@@ -46,14 +46,9 @@ def resume_interactively(store: SessionStore, prompt_session: PromptLike) -> Non
     if not sessions:
         print("No conversations found.")
         return
-    print_sessions(sessions)
-    choice = prompt_session.prompt("resume> ").strip()
-    if not choice:
-        print("Resume cancelled.")
-        return
-    selected = select_session(sessions, choice)
+    selected = select_session_interactively(sessions, "Select session to resume:")
     if selected is None:
-        print(f"No conversation matched: {choice}")
+        print("Resume cancelled.")
         return
     store.resume(selected.id)
     print(resumed_message(selected))
@@ -296,6 +291,74 @@ def print_sessions(sessions: list[SessionMetadataView]) -> None:
         print(f"{index}. {item.title}{suffix}")
         if item.summary:
             print(f"   {item.summary}")
+
+
+def select_session_interactively(
+    sessions: list[SessionMetadataView],
+    title: str,
+) -> SessionMetadataView | None:
+    """显示支持方向键、鼠标和数字键选择的会话列表。"""
+    choices = _session_choices(sessions)
+    if not choices:
+        return None
+    return _run_session_picker(title, choices)
+
+
+def _session_choices(
+    sessions: list[SessionMetadataView],
+) -> list[tuple[SessionMetadataView, str]]:
+    """构建会话选择项。"""
+    id_to_index = {session.id: str(index) for index, session in enumerate(sessions, 1)}
+    choices: list[tuple[SessionMetadataView, str]] = []
+    for index, item in enumerate(sessions, start=1):
+        title = item.title
+        if item.parent_id and item.parent_id in id_to_index:
+            title += f" (forked from #{id_to_index[item.parent_id]})"
+        if item.summary:
+            title += f" - {item.summary}"
+        choices.append((item, title[:120]))
+    return choices
+
+
+def _run_session_picker(
+    title: str,
+    choices: list[tuple[SessionMetadataView, str]],
+) -> SessionMetadataView | None:
+    """运行会话选择对话框。"""
+    from prompt_toolkit.application.current import get_app
+    from prompt_toolkit.layout.containers import HSplit
+    from prompt_toolkit.shortcuts.dialogs import _create_app
+    from prompt_toolkit.widgets import Button, Dialog, Label, RadioList
+
+    session_list = RadioList(
+        values=choices,
+        default=choices[0][0],
+        show_numbers=True,
+        select_on_focus=True,
+    )
+
+    def ok_handler() -> None:
+        get_app().exit(result=session_list.current_value)
+
+    def cancel_handler() -> None:
+        get_app().exit(result=None)
+
+    dialog = Dialog(
+        title=title,
+        body=HSplit(
+            [
+                Label(text="Choose a conversation:", dont_extend_height=True),
+                session_list,
+            ],
+            padding=1,
+        ),
+        buttons=[
+            Button(text="Resume", handler=ok_handler),
+            Button(text="Cancel", handler=cancel_handler),
+        ],
+        with_background=True,
+    )
+    return _create_app(dialog, None).run()
 
 
 def current_view(store: SessionStore) -> SessionMetadataView:

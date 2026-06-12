@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import questionary
-
 from .app_contract import ReplApp
 from .commands import (
     COMMAND_GROUP_EXIT,
@@ -25,6 +23,7 @@ from .repl_sessions import (
     resume_interactively,
     resume_latest,
     resumed_message,
+    select_session_interactively,
     sync_agent_history,
 )
 from .repl_settings import (
@@ -152,17 +151,7 @@ def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
         print("No conversations found.")
         return False
 
-    id_to_index = {session.id: str(i) for i, session in enumerate(sessions, 1)}
-    choices = []
-    for i, item in enumerate(sessions, 1):
-        title = f"{i}. {item.title}"
-        if item.parent_id and item.parent_id in id_to_index:
-            title += f" (forked from #{id_to_index[item.parent_id]})"
-        if item.summary:
-            title += f" — {item.summary}"
-        choices.append(questionary.Choice(title=title[:120], value=item))
-
-    selected = questionary.select("Select session to resume:", choices=choices).ask()
+    selected = select_session_interactively(sessions, "Select session to resume:")
     if selected is None:
         return False
 
@@ -216,15 +205,9 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
 
     choice = "1" if is_clear else None
     if choice is None:
-        print("\nSelect action:")
-        print("  1) Clear and Act (Clear context, keep plan, and act)")
-        print("  2) Keep and Act (Keep current context and act directly)")
-        print("  3) Review Mode")
-        print("  4) Continue in Plan Mode")
-        try:
-            choice = ctx.prompt_session.prompt("Choice (1-4): ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nCancelled.")
+        choice = _select_act_transition()
+        if choice is None:
+            print("Cancelled.")
             return False
 
     if choice == "1":
@@ -276,6 +259,50 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
     else:
         print(f"Invalid choice: {choice}")
     return False
+
+
+def _select_act_transition() -> str | None:
+    """显示支持方向键、鼠标和数字键选择的 Act 模式切换菜单。"""
+    from prompt_toolkit.application.current import get_app
+    from prompt_toolkit.layout.containers import HSplit
+    from prompt_toolkit.shortcuts.dialogs import _create_app
+    from prompt_toolkit.widgets import Button, Dialog, Label, RadioList
+
+    actions = [
+        ("1", "Clear and Act (Clear context, keep plan, and act)"),
+        ("2", "Keep and Act (Keep current context and act directly)"),
+        ("3", "Review Mode"),
+        ("4", "Continue in Plan Mode"),
+    ]
+    action_list = RadioList(
+        values=actions,
+        default="2",
+        show_numbers=True,
+        select_on_focus=True,
+    )
+
+    def ok_handler() -> None:
+        get_app().exit(result=action_list.current_value)
+
+    def cancel_handler() -> None:
+        get_app().exit(result=None)
+
+    dialog = Dialog(
+        title="Select action",
+        body=HSplit(
+            [
+                Label(text="Choose how to leave Plan Mode:", dont_extend_height=True),
+                action_list,
+            ],
+            padding=1,
+        ),
+        buttons=[
+            Button(text="Confirm", handler=ok_handler),
+            Button(text="Cancel", handler=cancel_handler),
+        ],
+        with_background=True,
+    )
+    return _create_app(dialog, None).run()
 
 
 def cmd_verbose(cmd: str, ctx: CommandContext) -> bool:
