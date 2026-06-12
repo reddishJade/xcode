@@ -7,6 +7,8 @@ from pathlib import Path
 
 from xcode.harness.observability import (
     HITLResult,
+    PermissionEngine,
+    PermissionEngineConfig,
     PermissionPolicy,
     PermissionRule,
     PersistentPermissionStore,
@@ -78,6 +80,100 @@ class XcodePermissionsTests(unittest.TestCase):
         )
 
         self.assertEqual(output, "go")
+
+    def test_permission_policy_deny_overrides_allow_regardless_of_order(self) -> None:
+        rules = (
+            PermissionRule("bash", "allow"),
+            PermissionRule("*", "deny"),
+        )
+        policy = PermissionPolicy(rules)
+        self.assertEqual(policy.decide("bash", "anything"), "deny")
+
+    def test_permission_engine_static_deny_is_final(self) -> None:
+        session = SessionPermissionPolicy()
+        session.grant("echo", "allow")
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((PermissionRule("echo", "deny"),)),
+                session_policy=session,
+            )
+        )
+        result = engine.decide("echo", "hello")
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.matched_rule, "static_deny")
+
+    def test_permission_engine_restricted_dirs_deny(self) -> None:
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                restricted_dirs=("secrets",),
+            )
+        )
+        result = engine.decide("read_file", '{"path": "secrets/key.txt"}')
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.matched_rule, "restricted_dirs")
+
+    def test_permission_engine_restricted_dirs_override_static_allow(self) -> None:
+        session = SessionPermissionPolicy()
+        session.grant("read_file", "allow", "secrets/key.txt")
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((PermissionRule("read_file", "allow"),)),
+                restricted_dirs=("secrets",),
+                session_policy=session,
+            )
+        )
+        result = engine.decide("read_file", '{"path": "secrets/key.txt"}')
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.matched_rule, "restricted_dirs")
+
+    def test_permission_engine_session_grant_satisfies_ask(self) -> None:
+        session = SessionPermissionPolicy()
+        session.grant("bash", "allow", "git status")
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+                session_policy=session,
+            )
+        )
+        result = engine.decide("bash", "git status --short")
+        self.assertFalse(result.blocked)
+        self.assertEqual(result.matched_rule, "session_grant")
+
+    def test_permission_engine_allowlist_mode(self) -> None:
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((PermissionRule("read_file", "allow"),)),
+                allowlist_mode=True,
+            )
+        )
+        allowed = engine.decide("read_file", '{"path": "a.txt"}')
+        self.assertFalse(allowed.blocked)
+        unknown = engine.decide("write_file", '{"path": "b.txt"}')
+        self.assertTrue(unknown.blocked)
+        self.assertEqual(unknown.decision, "ask")
+
+    def test_permission_engine_default_allow(self) -> None:
+        engine = PermissionEngine(PermissionEngineConfig())
+        result = engine.decide("any_tool", "anything")
+        self.assertFalse(result.blocked)
+        self.assertEqual(result.matched_rule, "default")
+
+    def test_permission_engine_high_risk_approval(self) -> None:
+        tool = ToolSpec("danger", "Danger.", "text", lambda v: v["input"], risk="high")
+        engine = PermissionEngine(
+            PermissionEngineConfig(high_risk_requires_approval=True)
+        )
+        result = engine.decide(
+            "danger", "hello", tool_spec=tool,
+            approval_callback=lambda _t, _i: HITLResult("allow", "once"),
+        )
+        self.assertFalse(result.blocked)
+
+    def test_permission_engine_execution_mode_deny(self) -> None:
+        engine = PermissionEngine(PermissionEngineConfig())
+        result = engine.decide("bash", "rm -rf /", execution_decision="deny")
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.matched_rule, "execution_mode")
 
     def test_structured_agent_uses_permission_policy(self) -> None:
         from xcode.ai.events import ProviderEvent

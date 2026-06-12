@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 
 from xcode.harness.observability.permissions import (
-    SettingsSandboxPermissionPolicy,
+    PermissionEngine,
+    PermissionEngineConfig,
+    PermissionPolicy,
+    PermissionRule,
 )
 from xcode.experimental.plugins import PluginManager
 from xcode.experimental.mcp import build_mcp_tools
@@ -78,60 +81,50 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
             self.assertEqual(high_tool.risk, "low")
             self.assertEqual(low_tool.risk, "high")
 
-    def test_settings_sandbox_permissions_policy(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project_root = Path(tmp)
-
-            # Setup settings.json permissions
-            settings = {
-                "allowedTools": ["read_file"],
-                "deniedTools": ["bash"],
-                "restrictedDirs": ["/private/secrets", "C:/Windows"],
-            }
-            settings_path = project_root / ".local" / "settings.json"
-            settings_path.parent.mkdir(parents=True, exist_ok=True)
-            settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-
-            policy = SettingsSandboxPermissionPolicy(settings_path)
-
-            # 1. Whitelisted tools should be allowed
-            self.assertEqual(policy.decide("read_file", '{"path": "a.txt"}'), "allow")
-
-            # 2. Blacklisted tools should be denied
-            self.assertEqual(policy.decide("bash", "echo hello"), "deny")
-
-            # 3. Restricted directory arguments should be denied
-            self.assertEqual(
-                policy.decide("read_file", '{"path": "/private/secrets/key.txt"}'),
-                "deny",
+    def test_permission_engine_sandbox_equivalent(self) -> None:
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((
+                    PermissionRule("read_file", "allow"),
+                    PermissionRule("bash", "deny"),
+                )),
+                restricted_dirs=("/private/secrets", "C:/Windows"),
+                allowlist_mode=True,
             )
+        )
 
-            # 4. Any other non-whitelisted tool should ask
-            self.assertEqual(policy.decide("write_file", '{"path": "a.txt"}'), "ask")
+        # 1. Whitelisted tools should be allowed
+        result = engine.decide("read_file", '{"path": "a.txt"}')
+        self.assertFalse(result.blocked)
+        self.assertEqual(result.decision, "allow")
 
-    def test_settings_sandbox_restricted_dirs_override_allowed_tools(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project_root = Path(tmp)
-            settings_path = project_root / ".local" / "settings.json"
-            settings_path.parent.mkdir(parents=True, exist_ok=True)
-            settings_path.write_text(
-                json.dumps(
-                    {
-                        "security": {
-                            "allow_tools": ["read_file"],
-                            "restricted_dirs": ["secrets"],
-                        }
-                    }
-                ),
-                encoding="utf-8",
+        # 2. Blacklisted tools should be denied
+        result = engine.decide("bash", "echo hello")
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.decision, "deny")
+
+        # 3. Restricted directory arguments should be denied
+        result = engine.decide("read_file", '{"path": "/private/secrets/key.txt"}')
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.decision, "deny")
+
+        # 4. Any other non-whitelisted tool should ask
+        result = engine.decide("write_file", '{"path": "a.txt"}')
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.decision, "ask")
+
+    def test_permission_engine_restricted_dirs_override_allowed(self) -> None:
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((
+                    PermissionRule("read_file", "allow"),
+                )),
+                restricted_dirs=("secrets",),
             )
-
-            policy = SettingsSandboxPermissionPolicy(settings_path)
-
-            self.assertEqual(
-                policy.decide("read_file", '{"path": "secrets/key.txt"}'),
-                "deny",
-            )
+        )
+        result = engine.decide("read_file", '{"path": "secrets/key.txt"}')
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.decision, "deny")
 
     def test_dynamic_plugin_loader(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
