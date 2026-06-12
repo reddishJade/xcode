@@ -147,9 +147,9 @@ StructuredAgent
 
 ### Permission policy
 
-`PermissionDecision` 统一了 execution mode 和 permission policy 的三态决策：`allow`、`deny`、`ask`。`check_tool_permission()` 合并 `PermissionPolicy.decide()` 和 `risk_evaluator` 两层检查，返回 `PermissionCheckResult(blocked, reason)`。
+`PermissionDecision` 统一了 execution mode 和 permission policy 的三态决策：`allow`、`deny`、`ask`。`PermissionEngine` 以合并后的 `SecurityRuntimeConfig` 派生静态策略，并统一处理 restricted dirs、静态 deny/ask/allow、执行模式、HITL 授权、risk evaluator 和 high-risk 审批。
 
-`SettingsSandboxPermissionPolicy` 可从 `.local/settings.json` 或 `settings.json` 读取规则，与调用方传入 policy 组合。
+`check_tool_permission()` 是兼容包装，内部委托 `PermissionEngine`。`.local/settings.json` 和项目配置的合并发生在 runtime config discovery 阶段，权限层不再二次读取 settings 文件。
 
 ### HITL
 

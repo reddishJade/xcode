@@ -530,8 +530,18 @@ class PermissionRule:
     tool: str; decision: PermissionDecision; input_contains: str | None
 
 @dataclass
-class PermissionCheckResult:
-    blocked: bool; reason: str; decision: PermissionDecision | None; metadata: dict | None
+class PermissionEngineResult:
+    decision: PermissionDecision; blocked: bool; reason: str
+    matched_rule: str | None; source: str | None; metadata: dict | None
+
+@dataclass
+class PermissionEngineConfig:
+    static_policy: PermissionPolicy | None
+    session_policy: SessionPermissionPolicy | None
+    persistent_store: PersistentPermissionStore | None
+    restricted_dirs: tuple[str, ...]
+    allowlist_mode: bool
+    high_risk_requires_approval: bool
 
 class PermissionPolicy:
     def decide(self, tool_name, action_input) -> PermissionDecision | None
@@ -541,14 +551,15 @@ class PermissionPolicy:
 
 class SessionPermissionPolicy(PermissionPolicy):  # 会话级权限覆盖
 class PersistentPermissionStore(PermissionPolicy):  # 文件持久化权限
-class SettingsSandboxPermissionPolicy(PermissionPolicy):  # settings.json 沙箱策略
-class CompositePermissionPolicy(PermissionPolicy):  # 组合策略
+
+class PermissionEngine:
+    def decide(..., execution_decision=None, tool_spec=None, tool_input=None, approval_callback=None) -> PermissionEngineResult
 
 def check_tool_permission(
     tool_name: str, action_input: str, *, permission_policy=None,
     approval_callback=None, tool_spec=None, tool_input=None,
     high_risk_requires_approval=True,
-) -> PermissionCheckResult
+) -> PermissionEngineResult
 ```
 
 ---
