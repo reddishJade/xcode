@@ -1,258 +1,230 @@
 # Xcode 代码组织说明
 
-本文描述独立 checkout `xcode` 的代码布局和模块边界。当前项目使用 `src/` 包布局，Python 包、测试和 eval 代码位于 `src/xcode/`。
+本文描述独立 checkout 的代码布局和模块边界。使用 `src/` 包布局。
 
 ---
 
-## 分层概览
+## 四层模型
 
-**四层模型的设计原因**：
-- **职责分离**：每层只关注自己的契约边界，降低耦合
-- **可替换性**：Provider 层可换模型，Product 层可换产品形态（从 coding 换到其他领域）
-- **测试隔离**：Loop Core 可独立测试，不依赖具体 provider 或产品工具
-- **演进稳定**：修改 UI 层不影响 agent 循环核心逻辑
-
-Xcode 按四层模型组织，依赖方向从左到右：
-
-```text
+```
 cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
-                                    └────────────────────→ ai/ (layer skip)
 ```
 
 | 层 | 目录 | 职责 |
-|---|------|------|
+|---|---|---|
 | Provider | `ai/` | 统一多 provider LLM API |
-| Loop Core | `agent/` | 通用 agent 循环合约，中性消息/事件类型 |
+| Loop Core | `agent/` | 通用 agent 循环合约、消息/事件类型 |
 | Runtime Infra | `harness/` | 应用装配、config、session、安全、观测、ToolSpec 协议 |
-| Coding Product | `coding_agent/` | coding 产品工具（file/search/bash/edit）及产品层逻辑 |
+| Coding Product | `coding_agent/` | coding 产品工具（file/search/bash/shell）及 registry |
+
+---
 
 ## 顶层结构
 
-```text
+```
 .
 ├── pyproject.toml
-├── AGENTS.md
-├── CONFIG.md
-├── README.md
-├── TODO.md
-├── docs/
-├── examples/
-├── skills/
+├── AGENTS.md / CONFIG.md / README.md / TODO.md
+├── docs/ examples/ skills/
 └── src/xcode/
-    ├── main.py
+    ├── main.py → 入口：解析参数 → 配置发现 → build_app() → REPL/--prompt
     ├── cli/
     ├── coding_agent/
     ├── harness/
+    ├── agent/
     ├── ai/
     ├── evals/
     ├── experimental/
-    ├── tests/
-    └── agent/
+    └── tests/
 ```
-
-`pyproject.toml` 使用 `where = ["src"]` 和 `include = ["xcode*"]`，因此包内引用应指向 `src/xcode/...`。
 
 ---
 
-## 运行入口
+## 模块详细职责
 
-```text
-src/xcode/main.py
-  -> parse_args()
-  -> discover_runtime_config()
-  -> src/xcode/harness/app.py::build_app()
-       -> provider bundle
-       -> tool registry
-       -> StructuredAgent
-  -> src/xcode/cli/repl.py::run_repl() 或单次 --prompt
-```
-
-`build_app()` 是应用装配入口。装配逻辑委托给 `assembly.py`，后者通过 `coding_agent/registry.py` 构造工具注册表：
-
----
-
-## 主要目录职责
-
-各层按依赖方向排序：Provider → Loop Core → Runtime Infra → Coding Product → UI。
-
-### `src/xcode/ai/`
-
-**Provider 层**：统一多 provider LLM API，提供 OpenAI、Anthropic、Google 等模型接入。
+### `src/xcode/ai/` — Provider 层
 
 | 模块 | 职责 |
-| --- | --- |
-| `types.py` | LLM 可见的共享接口类型，例如 `ToolDefinition` |
-| `events.py` | provider stream 输出事件协议 |
-| `providers/factory.py` | 根据 profile 构造 provider bundle |
+|---|---|
+| `types.py` | LLM 共享类型：`Model`、`Usage`、`StreamOptions`、`ToolDefinition`、`ThinkingBudgets` |
+| `events.py` | provider stream 事件：`TextDelta`、`ReasoningDelta`、`ToolCallEvent`、`FinalMessage` |
+| `registry.py` | 模型注册中心：`get_model`、`get_models`、`get_providers`、`resolve_model` |
+| `cache.py` | 缓存统计与工具稳定化（规范化、排序、指纹） |
+| `validation.py` | 工具参数校验：`validate_tool_call` |
+| `model_modes.py` | 模型模式支持 |
+| `providers/` | Provider 适配器 |
 | `providers/protocol.py` | `ModelProvider` 协议 |
-| `providers/codec.py` | OpenAI-compatible schema 和 delta 编解码 |
-| `providers/openai_compat.py` | OpenAI Chat Completions 适配基类 |
-| `providers/openai.py` | OpenAI Chat Completions 和 stateful Responses |
-| `providers/anthropic.py` | Anthropic Messages 适配 |
-| `providers/deepseek.py` | DeepSeek thinking mode 适配 |
-| `providers/chatglm.py` | ChatGLM 适配 |
-| `providers/mimo.py` | MiMo 适配 |
-| `providers/faux.py` | 测试用 provider |
-| `providers/runtime.py` | retry/rate limit 运行期控制 |
-| `providers/metrics.py` | provider metrics 追踪 |
-| `providers/stream_codec.py` | provider stream delta 到 event 的编解码 |
+| `providers/factory.py` | `build_provider_bundle`、`ProviderSettings` |
+| `providers/_registry.py` | `PROVIDER_REGISTRY` |
+| `providers/router.py` | `RouterProvider` |
+| `providers/runtime.py` | 重试+限流：`ProviderRuntime` |
+| `providers/metrics.py` | `ProviderMetricsMixin` |
+| `providers/codec.py` | schema/delta 编解码、跨 provider 消息归一化 |
+| `providers/stream_codec.py` | stream delta → event 编解码 |
+| `providers/openai_compat.py` | OpenAI Chat 基类 |
+| `providers/openai.py` | `OpenAIChatProvider` |
+| `providers/deepseek.py` | `DeepSeekProvider` |
+| `providers/chatglm.py` | `ChatGLMProvider` |
+| `providers/mimo.py` | `MiMoProvider` |
+| `providers/faux.py` | 测试用 `FauxProvider` |
 
-### `src/xcode/agent/`
-
-**Loop Core 层**：通用 agent 循环合约。定义中性消息类型、事件协议和可注入的 agent 循环。依赖 `ai/` provider 协议。
-
-| 文件 | 职责 |
-| --- | --- |
-| `protocols.py` | `AgentTool`、`CancellationSignal` 协议；`ContentBlock`、`ToolExecutionMode` 等基础类型 |
-| `messages.py` | 消息类型（`SystemMessage`、`AssistantMessage` 等）、`AgentMessage` union、LLM 格式转换 |
-| `events.py` | Agent 事件类型（`TurnStartEvent`、`MessageUpdateEvent`、`ToolExecutionEndEvent` 等）和 `AgentEvent` union |
-| `config.py` | `AgentLoopConfig`、`AgentLoopResult`、hook 上下文类型、压缩指令、指标 |
-| `agent.py` | `Agent` 薄封装，包装 `run_agent_loop` 并管理 steer/followup 队列 |
-| `agent_loop.py` | 无状态 Agent loop，provider、工具执行、turn hooks 均通过合约注入 |
-| `tool_execution.py` | 工具执行逻辑（串行/并行调度、before/after hook），从 `agent_loop.py` 提取 |
-
-### `src/xcode/harness/`
-
-**Runtime Infra 层**：跨产品应用基础设施。负责配置解析、会话管理、安全策略、观测和 agent 适配器。
+### `src/xcode/agent/` — Loop Core 层
 
 | 模块 | 职责 |
-| --- | --- |
-| `app.py` | 应用装配入口，委托 `assembly.py` |
-| `assembly.py` | 装配核心：config 解析、shared infra、provider bundle、opt-in services |
-| `config.py` | runtime config dataclass、配置读取、相对路径解析 |
-| `session.py` | JSONL 会话存储、索引、resume、fork、plan artifact |
-| `skills.py` | `ToolSpec`、工具输入解析、HITL 执行和脱敏入口 |
-| `execution_env.py` | `ExecutionEnv` protocol、`SubprocessExecutionEnv`（本地子进程）、`SandboxExecutionEnv`（测试 mock） |
-| `skill_loader.py` | `SKILL.md` catalog 扫描和 `load_skill` 工具 |
-| `agent_runtime/` | `StructuredAgent`（harness 对 agent loop 的适配器）、subagent、prompt、compaction、cancellation |
-| `observability/` | audit、permission policy、hook manager |
+|---|---|
+| `protocols.py` | `AgentTool`、`CancellationSignal`、`ContentBlock`、`ToolExecutionMode` |
+| `messages.py` | 消息类型 union：`SystemMessage`、`UserMessage`、`AssistantMessage`、`ToolResultMessage` |
+| `events.py` | `AgentEvent` union（TurnStart/MessageUpdate/ToolExecutionEnd 等） |
+| `config.py` | `AgentContext`、`AgentLoopConfig`、`AgentLoopResult`、hook 类型 |
+| `types.py` | 基础类型：`ShellCallOutputContent` |
+| `agent.py` | `Agent` 封装，包装 `run_agent_loop`，管理 steer/followup 队列 |
+| `agent_loop.py` | 无状态 Agent loop |
+| `tool_execution.py` | 工具执行调度（串行/并行分区） |
+| `compaction.py` | Agent 层上下文压缩 |
+| `history.py` | 历史记录管理、request hygiene |
+| `hooks.py` | Agent 层 hook 点 |
+| `message_converter.py` | 消息格式转换 |
+| `watchdog.py` | 重复工具调用检测 |
+| `_provider.py` | 内部 provider 适配器 |
+| `_tool_scheduling.py` | 内部工具调度 |
+| `_tool_validation.py` | 内部工具验证 |
 
-### `src/xcode/coding_agent/`
-
-**Coding Product 层**：coding 产品工具（file/search/bash/edit）和产品级 registry 构造。
+### `src/xcode/harness/` — Runtime Infra 层
 
 | 模块 | 职责 |
-| --- | --- |
-| `tools/` | coding 内置工具实现（`read_file`、`write_file`、`edit_file`、`bash`、`grep`、`glob`、`ls`） |
-| `registry.py` | coding 产品工具注册表构造 |
-| `__init__.py` | 对外门面，re-export 工具 builder（`build_file_tools`、`build_code_tools`、`build_bash_tool`） |
+|---|---|
+| `app.py` | `XcodeApp` dataclass、`build_app()` 入口 |
+| `assembly.py` | 装配：config 解析、shared infra、provider bundle、tool registry、agent 构建、opt-in services |
+| `config.py` | 9 个 dataclass、配置发现/序列化/合并/环境变量覆盖 |
+| `skills.py` | `ToolSpec` dataclass、`ToolOutput`、`run_tool_result` HITL 引擎 |
+| `session.py` | JSONL 会话存储、索引、resume、fork、rewind |
+| `skill_loader.py` | `SkillLoader`、`SkillMetadata`、`build_skill_loader_tool` |
+| `execution_env.py` | `ExecutionEnv` protocol、`SubprocessExecutionEnv`、`SandboxExecutionEnv` |
+| `daemon.py` | `HeartbeatDaemon` |
+| `task_store.py` | `tasks` group：任务存储、依赖排序、Kanban |
+| `task_progress.py` | `progress` group：长任务 checklist |
+| `mailbox.py` | `mailbox` group：append-only JSONL mailbox |
+| `agent_runtime/` | StructuredAgent 运行时 |
+| `agent_runtime/structured.py` | `StructuredAgent`（harness 对 agent loop 的适配器） |
+| `agent_runtime/subagent.py` | `ManagedSubagentRunner`、subagent 工具 |
+| `agent_runtime/compaction.py` | `CompactController`、`LayeredCompactor` |
+| `agent_runtime/prompting/` | 系统提示词构造 |
+| `agent_runtime/prompting/builder.py` | `SystemPromptBuilder`、`build_runtime_context_provider` |
+| `agent_runtime/prompting/identity.py` | `PROMPT_VERSION`、缓存区域定义 |
+| `agent_runtime/prompting/instructions.py` | 运行时指令 |
+| `agent_runtime/prompting/token_budget.py` | token 预算管理 |
+| `agent_runtime/config.py` | `AgentRuntimeConfig`、`GateConfig` |
+| `agent_runtime/events.py` | Agent Runtime 事件类型 |
+| `agent_runtime/result.py` | `RunState`、`StructuredAgentResult` |
+| `agent_runtime/cancellation.py` | `CancellationToken` |
+| `agent_runtime/contextual.py` | `ContextualRetrievalState` |
+| `agent_runtime/git_preflight.py` | Git 状态预检 |
+| `agent_runtime/history_manager.py` | 历史管理器 |
+| `agent_runtime/message_codec.py` | 消息编解码 |
+| `agent_runtime/tool_adapter.py` | 工具适配器 |
+| `agent_runtime/tool_audit.py` | 工具审计 |
+| `agent_runtime/tool_gate.py` | 工具门禁 |
+| `agent_runtime/tool_hooks.py` | 工具 hook 集成 |
+| `agent_runtime/agent_helpers.py` | Agent 辅助函数 |
+| `agent_runtime/async_worker.py` | 异步工作线程 |
+| `agent_runtime/fallback.py` | 模型 fallback |
+| `agent_runtime/execution_modes.py` | 执行模式（plan/review/act） |
+| `observability/` | 可观测性 |
+| `observability/audit.py` | `AuditRecord`、`JsonlAuditLogger`、`redact_text` |
+| `observability/hooks.py` | `HookManager`、5 个事件类型 |
+| `observability/permissions.py` | `PermissionEngine`、`PermissionPolicy`、`HITLResult` |
 
-### `src/xcode/cli/`
+### `src/xcode/coding_agent/` — Coding Product 层
 
-**UI 层**：终端入口和交互体验。负责 REPL、命令、渲染和会话命令。通过 `harness/` 和 `coding_agent/` 访问下层能力。
+| 模块 | 职责 |
+|---|---|
+| `__init__.py` | 导出 `build_project_scoped_registry` |
+| `registry.py` | `build_project_scoped_registry()` — 按 enabled groups 构建 registry |
+| `tools/` | 内置工具实现 |
+| `tools/file.py` | `build_file_tools` → `read_file`、`write_file`、`edit_file` |
+| `tools/code_search.py` | `build_code_tools` → `glob_files`、`find_files`、`grep_search`、`ls` |
+| `tools/bash.py` | `build_bash_tool` → `bash` |
+| `tools/native_shell.py` | `build_native_shell_tool` → `shell`（Responses builtin shell 本地桥） |
+| `tools/worktree.py` | `build_worktree_tools` → `create_worktree_task`、`remove_worktree_task` |
+| `tools/shell_adapter.py` | `ShellSpec`、`detect_shell`、`build_shell_argv` |
+| `tools/path_utils.py` | 路径解析、`is_path_blocked` |
+| `tools/truncate.py` | 输出截断 |
+| `tools/output_accumulator.py` | 命令输出累积 |
+| `tools/tools_manager.py` | 外部工具检测（fd、ripgrep 等） |
+| `tools/file_handlers.py` | 文件操作处理 |
+| `tools/file_image.py` | 图片文件处理 |
+| `tools/file_mutation_queue.py` | 文件变更队列 |
+| `tools/edit_diff.py` | diff 编辑 |
+| `tools/_constants.py` | 工具常量、风险评估 |
 
-| 文件 | 职责 |
-| --- | --- |
+### `src/xcode/cli/` — UI 层
+
+| 模块 | 职责 |
+|---|---|
 | `repl.py` | REPL 主循环和事件流展示编排 |
-| `repl_commands.py` | slash command 注册表和命令处理 |
-| `repl_hitl.py` | REPL 人工授权提示 |
-| `repl_rendering.py` | 终端渲染、prompt session、推理预览 |
-| `repl_sessions.py` | REPL 会话恢复和历史展示 |
-| `repl_settings.py` | 模型、thinking、effort、权限命令处理 |
-| `repl_tools.py` | `/tool` 输入解析、`!COMMAND` shell 快捷入口、工具意图摘要、事件序列化 |
-| `completion.py` | 命令、工具名、`@file` 和 `!COMMAND` 路径补全 |
+| `repl_commands.py` | 20 个 slash command（/help、/clear、/fork、/rewind、/resume、/sessions、/tree、/branch、/model、/effort、/thinking、/plan、/review、/act、/verbose、/debug、/queue、/compact、/permissions、/tool、/exit、/quit） |
+| `repl_hitl.py` | HITL 审批（once/session/permanent） |
+| `repl_rendering.py` | 终端渲染、`LiveMarkdownStream`、`LiveReasoningPreview` |
+| `repl_sessions.py` | 会话恢复、历史记录转换 |
+| `repl_settings.py` | `/model`、`/effort`、`/thinking`、`/permissions` 命令处理 |
+| `repl_tools.py` | `/tool` 解析、`!COMMAND` 快捷入口、事件序列化 |
+| `repl_turn_handler.py` | 单轮处理 |
+| `commands.py` | `CommandRegistry`、`ReplState`、`CommandContext` |
+| `completion.py` | `ReplCompleter` 自动补全（命令/工具/@file/!shell） |
 | `file_refs.py` | `@relative/path` 解析和文件内容注入 |
-| `markdown.py` | 终端 markdown/diff 渲染 |
-| `tool_catalog.py` | 构造 REPL 可见工具目录 |
+| `markdown.py` | `TerminalMarkdownRenderer` |
+| `tool_catalog.py` | 工具目录自省 |
 | `setup_wizard.py` | 配置向导 |
+| `reasoning_effort.py` | reasoning effort 处理 |
+| `app_contract.py` | CLI-应用合约类型 |
 
-### `src/xcode/evals/`
+### `src/xcode/evals/` — 评估框架
 
-评估框架。
-
-| 文件 | 职责 |
-| --- | --- |
-| `schema.py` | `EvalTask` 和配置 schema |
-| `runner.py` | 事件流 eval runner |
-| `sandbox.py` | 真实 provider eval 的 sandbox 项目根选择 |
-| `validation.py` | validation command grader |
-| `tracing.py` | JSONL trace 记录 |
+| 模块 | 职责 |
+|---|---|
+| `schema.py` | `EvalTask`、`EvalReport`、`GraderResult`、`TrialResult` |
+| `runner.py` | `EvalRunner` — 事件流 eval runner |
+| `tasks.py` | 预定义套件：`pipeline`、`tool-policy`、`coding-fixture`、`smoke`、`tool`、`context`、`multi`、`plan`、`all` |
+| `cli.py` | CLI 入口 |
 | `graders.py` | 确定性 grader |
 | `reporting.py` | JSON/HTML 报告 |
-| `cli.py` | `xcode-eval` / `python -m xcode.evals.cli` |
-| `adapters/` | 外部 benchmark adapter registry 与 SWE-bench predictions helper |
+| `tracing.py` | JSONL trace 记录 |
+| `validation.py` | Validation command grader |
+| `benchmarks.py` | 外部 benchmark loader（HumanEval、EvalPlus、MBPP） |
+| `sandbox.py` | Sandbox 项目根选择 |
+| `adapters/registry.py` | 外部 benchmark adapter registry |
+| `adapters/swebench.py` | SWE-bench predictions helper |
 
-### Opt-in 扩展能力
+### `src/xcode/experimental/` — 实验性扩展
 
-正式扩展能力默认不加载。每项能力都有独立启用 group。`mcp`、`memory` 和 `plugins` 仍保留在 `experimental/`，`experimental` group 只展开这些实验性能力。
-
-| 文件 | group | 职责 |
-| --- | --- | --- |
-| `coding_agent/tools/worktree.py` | `worktree` | Git worktree 任务隔离；工具：`create_worktree_task`、`remove_worktree_task` |
-| `experimental/mcp.py` | `mcp` | stdio MCP client、schema cache、动态 MCP tool proxy |
-| `experimental/mcp_client.py` | internal | MCP stdio JSON-RPC 客户端，被 `mcp.py` 引用 |
-| `harness/task_store.py` | `tasks` | JSON/filelock 任务存储、依赖排序、Kanban 视图；工具：`create_task`、`update_task`、`list_tasks`、`get_task` |
-| `harness/mailbox.py` | `mailbox` | append-only JSONL mailbox；工具：`send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
-| `harness/task_progress.py` | `progress` | 长任务 checklist 保存/恢复；工具：`save_task_progress`、`resume_task_progress` |
-| `experimental/memory.py` | `memory` | `MEMORY.md` 记忆块校验、BM25 召回、压缩摘要 consolidation |
-| `experimental/memory_parsing.py` | internal | 记忆块解析数据类型，被 `memory.py` 引用 |
-| `experimental/plugins.py` | `plugins` | `.local/plugins/*.py` 动态加载，收集 tools/hooks/skills |
-| `harness/daemon.py` | `daemon` | `HeartbeatDaemon`，轮询 mailbox/git/tasks；`DaemonHealth` 健康快照、`ensure_healthy()` 自愈重启 |
+| 模块 | group | 职责 |
+|---|---|---|
+| `mcp.py` | `mcp` | stdio MCP client、schema cache、动态 MCP tool proxy |
+| `mcp_client.py` | internal | MCP stdio JSON-RPC 客户端 |
+| `memory.py` | `memory` | `MEMORY.md` 记忆块、BM25 召回、压缩摘要 |
+| `memory_parsing.py` | internal | 记忆块解析 |
+| `plugins.py` | `plugins` | `.local/plugins/*.py` 动态加载 |
 
 ---
 
 ## 工具组与默认可见工具
 
-**Core 是默认启用的设计原因**：
-- 零配置可用：用户无需编写配置文件即可开始使用基础 coding 能力
-- 最小安全集合：file/search/bash 是本地只读或可审计的操作，风险可控
-- 渐进增强：用户根据需要逐步启用 skills/subagent/扩展功能
+Core tools（默认）：
+`read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`shell`、`search_tools`
 
-工具实现归 `coding_agent/` 层所有。默认 `enabled_groups=("core",)`，可见工具为：
+扩展组：
+`skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `mcp`（动态工具）→ `memory`（仅 hook）→ `plugins`（动态加载）→ `daemon`（仅服务）
 
-- `read_file`
-- `write_file`
-- `edit_file`
-- `glob_files`
-- `grep_search`
-- `ls`
-- `bash`
-
-可选 group：
-
-- `skills`：`load_skill`
-- `subagent`：`submit_subagent`、`check_subagent`、`cancel_subagent`
-
-**扩展能力必须 opt-in 的设计原因**：
-- **稳定性边界**：扩展能力会扩大副作用面，默认路径应保持小而稳定
-- **依赖隔离**：避免默认加载重型依赖（如 MCP stdio 管理、BM25 索引）
-- **权限最小化**：worktree/tasks/mailbox 等涉及文件系统副作用，需要用户显式授权
-- **成本可控**：daemon/memory 等持久化功能会增加存储和计算开销
-
-扩展 group：
-
-- `worktree`
-- `mcp`
-- `tasks`
-- `mailbox`
-- `progress`
-- `memory`
-- `plugins`
-- `daemon`
-- `experimental`：展开为 `mcp`、`memory` 和 `plugins`
+`experimental` 展开为 `mcp`、`memory`、`plugins`。
 
 ---
 
 ## 本地状态路径
 
-- `.local/sessions/`：REPL transcript JSONL
-- `.local/session_index.json`：会话索引
-- `.local/session_artifacts/`：Plan artifact
-- `.local/mcp_cache.json`：MCP schema cache
-- `.local/mcp_config.json`：本地 MCP server 配置
-- `.local/tasks.json.d/`：task store
-- `.team/inbox/`：mailbox
-- `.local/plugins/`：实验性插件目录
-
-这些路径由不同模块按需创建；默认 core 路径不会创建扩展状态。
+`.local/sessions/`、`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`、`.local/plugins/`、`.team/inbox/`（mailbox）。
 
 ---
 
 ## 测试目录
 
-`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和扩展组件。常用命令：
-
-```powershell
-uv run python -m unittest discover src\xcode\tests
-uv run python -m compileall src
-```
+`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和扩展组件（51 个测试文件 + fixtures.py）。
