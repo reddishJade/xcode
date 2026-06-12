@@ -11,6 +11,7 @@ from typing import cast
 
 from rich.console import Console
 
+from .app_contract import ReplApp
 from .commands import PromptLike, PromptText, ReplState
 from .file_refs import expand_file_references
 from .markdown import MarkdownRenderer, TerminalMarkdownRenderer
@@ -81,7 +82,7 @@ def current_model_options(app: object) -> tuple[str, ...]:
 
 
 def run_repl(
-    app: object,
+    app: ReplApp,
     sessions_dir: Path,
     prompt_session: PromptLike | None = None,
     resume_latest: bool = False,
@@ -184,7 +185,7 @@ def run_repl(
 
 @dataclass
 class _AgentTurnContext:
-    app: object
+    app: ReplApp
     store: SessionStore
     renderer: MarkdownRenderer
     state: ReplState

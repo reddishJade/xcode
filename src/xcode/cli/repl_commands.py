@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from .app_contract import ReplApp
 from .commands import (
     COMMAND_GROUP_EXIT,
     COMMAND_GROUP_INFO,
@@ -10,9 +11,12 @@ from .commands import (
     COMMAND_GROUP_SESSION,
     CommandContext,
     CommandEntry,
+    PromptLike,
+    ReplState,
     command_names,
     generate_help_text,
 )
+from .markdown import MarkdownRenderer
 from .repl_sessions import (
     current_view,
     print_loaded_history,
@@ -508,10 +512,10 @@ COMMAND_REGISTRY_EXPORT = COMMAND_REGISTRY
 def handle_command(
     command: str,
     store: SessionStore,
-    app: object,
-    renderer,
-    state,
-    prompt_session,
+    app: ReplApp,
+    renderer: MarkdownRenderer,
+    state: ReplState,
+    prompt_session: PromptLike,
     session_policy: SessionPermissionPolicy | None = None,
     persistent_store: PersistentPermissionStore | None = None,
 ) -> bool:
