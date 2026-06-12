@@ -7,8 +7,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from xcode.ai.types import ToolArguments
+
 type ContentSource = dict[str, object]
-type ToolArguments = dict[str, object]
 
 
 @dataclass(frozen=True)

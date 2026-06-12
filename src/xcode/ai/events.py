@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from xcode.agent.types import ToolArguments
+from xcode.ai.types import ToolArguments
 
 type Message = dict[str, object]
 type StopReason = Literal[

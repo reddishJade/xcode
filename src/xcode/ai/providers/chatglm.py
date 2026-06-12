@@ -7,7 +7,7 @@ from typing import Any, cast
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import ToolDefinition
 
-from .codec import to_chat_messages, to_chat_tool
+from .codec import to_chat_messages, to_chat_tools
 from .openai_compat import OpenAICompatProvider
 
 """智谱 AI ChatGLM provider（兼容 OpenAI Chat API）。
@@ -88,7 +88,7 @@ class ChatGLMProvider(OpenAICompatProvider):
         kwargs: dict[str, object] = {
             "model": self.model,
             "messages": openai_messages,
-            "tools": [to_chat_tool(t.name, t.description, t.parameters) for t in tools],
+            "tools": to_chat_tools(tools),
             "stream": stream,
         }
         effective_response_format = response_format or self.response_format

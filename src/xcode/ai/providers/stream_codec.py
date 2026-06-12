@@ -11,8 +11,6 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Protocol
 
-from xcode.agent.types import ToolArguments
-
 from xcode.ai.events import (
     ReasoningDelta,
     TextDelta,
@@ -20,6 +18,7 @@ from xcode.ai.events import (
     ToolCallEvent,
     UsageUpdate,
 )
+from xcode.ai.types import ToolArguments
 
 
 # ── OpenAI 对象 Protocol ──

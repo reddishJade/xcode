@@ -6,7 +6,7 @@ from typing import Any
 
 from xcode.ai.types import ToolDefinition
 
-from .codec import to_chat_messages, to_chat_tool
+from .codec import to_chat_messages, to_chat_tools
 from .openai_compat import OpenAICompatProvider
 
 """DeepSeek provider（兼容 OpenAI Chat API，带 reasoning_content 支持）。"""
@@ -73,15 +73,7 @@ class DeepSeekProvider(OpenAICompatProvider):
         params: dict[str, Any] = {
             "model": self.model,
             "messages": api_messages,
-            "tools": [
-                to_chat_tool(
-                    getattr(t, "name", ""),
-                    getattr(t, "description", ""),
-                    getattr(t, "schema", None),
-                    strict=strict_tools,
-                )
-                for t in tools
-            ],
+            "tools": to_chat_tools(tools, strict=strict_tools),
             "stream": True,
             "stream_options": {"include_usage": True},
         }

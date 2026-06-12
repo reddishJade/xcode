@@ -155,6 +155,23 @@ def to_chat_tool(
     }
 
 
+def to_chat_tools(
+    tools: tuple[ToolDefinition, ...],
+    *,
+    strict: bool = False,
+) -> list[dict[str, Any]]:
+    """将 ToolDefinition 列表转换为 Chat Completions 工具参数。"""
+    return [
+        to_chat_tool(
+            tool.name,
+            tool.description,
+            tool.parameters,
+            strict=strict,
+        )
+        for tool in tools
+    ]
+
+
 # Provider 之间无需转换的目标列表（共享 reasoning_content 协议）
 _REASONING_CONTENT_TRANSPORTS = {"deepseek_chat", "chatglm_chat", "mimo_chat"}
 

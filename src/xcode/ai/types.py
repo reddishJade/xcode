@@ -37,6 +37,7 @@ PromptCacheRetention = Literal["in_memory", "24h"]
 ServiceTier = Literal["auto", "default", "flex", "scale", "priority"]
 TextVerbosity = Literal["low", "medium", "high"]
 Truncation = Literal["auto", "disabled"]
+type ToolArguments = dict[str, object]
 
 
 @dataclass(frozen=True)

@@ -14,7 +14,7 @@ from typing import Any
 from xcode.ai.events import ProviderEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
 
-from .codec import normalize_cross_provider_messages, to_chat_messages, to_chat_tool
+from .codec import normalize_cross_provider_messages, to_chat_messages, to_chat_tools
 from .metrics import ProviderMetricsMixin
 from .runtime import ProviderRuntime
 from .stream_codec import chat_stream_to_events
@@ -99,7 +99,7 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         params: dict[str, Any] = {
             "model": self.model,
             "messages": api_messages,
-            "tools": [to_chat_tool(t.name, t.description, t.parameters) for t in tools],
+            "tools": to_chat_tools(tools),
             "stream": True,
             "stream_options": {"include_usage": True},
         }

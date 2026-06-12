@@ -16,7 +16,7 @@ from xcode.ai.events import (
     UsageUpdate,
     ToolCallEvent,
 )
-from xcode.ai.types import StreamOptions
+from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.harness.skills import ToolSpec
 
 
@@ -152,6 +152,36 @@ class XcodeDeepSeekEnhancementsTests(unittest.TestCase):
         ready_call = cast(ToolCallEvent, events[-1])
         self.assertEqual(ready_call.calls[0].name, "echo")
         self.assertEqual(ready_call.calls[0].input, {"text": "hi"})
+
+    def test_stream_sends_tool_definition_parameters(self) -> None:
+        """验证 DeepSeek 请求使用 ToolDefinition.parameters 作为工具参数。"""
+        client = _make_mock_client([FakeStreamChunk(content="ok")])
+        provider = DeepSeekProvider(
+            api_key="ds-key",
+            base_url="https://api.deepseek.com",
+            model="deepseek-chat",
+            thinking=False,
+            client=client,
+        )
+        tool = ToolDefinition(
+            name="read_file",
+            description="Read a file.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        )
+
+        list(provider._stream_sync([{"role": "user", "content": "Read"}], (tool,)))
+
+        sent_tool = client.chat.completions.create.call_args.kwargs["tools"][0]
+        self.assertEqual(sent_tool["function"]["parameters"], tool.parameters)
+        self.assertNotIn("input", sent_tool["function"]["parameters"]["properties"])
 
     def test_stream_options_injection_via_public_entry(self) -> None:
         """验证 StreamOptions 通过 provider.stream() 注入到请求。"""
