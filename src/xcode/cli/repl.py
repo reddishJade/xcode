@@ -19,6 +19,7 @@ from .repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_comman
 from .repl_hitl import ReplHITLHandler
 from .repl_rendering import (
     LiveMarkdownStream,
+    clear_terminal_display,
     create_prompt_session,
     input_prompt,
     print_startup_banner,
@@ -109,6 +110,7 @@ def run_repl(
     agent = getattr(app, "agent", None)
     if agent is not None:
         agent.approval_callback = hitl_handler
+    clear_terminal_display()
     print_startup_banner(app, root)
     if resume_latest:
         resume_interactively(store, session)

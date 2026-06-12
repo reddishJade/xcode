@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, Protocol
 
 from .app_contract import ReplApp
@@ -41,6 +42,7 @@ class CommandContext:
     renderer: MarkdownRenderer
     state: ReplState
     prompt_session: PromptLike
+    project_root: Path
     session_policy: SessionPermissionPolicy | None = None
     persistent_store: PersistentPermissionStore | None = None
     static_policy: PermissionPolicy | None = None

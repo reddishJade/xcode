@@ -159,6 +159,7 @@ class XcodeReplTests(unittest.TestCase):
 
             text = output.getvalue()
             self.assertEqual(code, 0)
+            self.assertTrue(text.startswith("\033[2J\033[3J\033[H"))
             self.assertIn("XCode", text)
             self.assertIn("model:", text)
             self.assertIn("unknown", text)
@@ -626,6 +627,13 @@ class XcodeReplTests(unittest.TestCase):
 
         self.assertEqual([item.text for item in items], ["/plan"])
 
+    def test_repl_completer_suggests_new_command(self) -> None:
+        completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
+
+        items = completer.complete("/ne")
+
+        self.assertEqual([item.text for item in items], ["/new"])
+
     def test_repl_completer_hides_quit_alias(self) -> None:
         completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
@@ -688,6 +696,31 @@ class XcodeReplTests(unittest.TestCase):
             self.assertFalse(handled)
             self.assertIn("Unknown command: /clear now", output.getvalue())
             self.assertEqual(len(store.load_records()), 1)
+
+    def test_handle_new_command_starts_new_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "keep me")
+            app = HistoryLoadingApp()
+            output = StringIO()
+
+            with redirect_stdout(output):
+                handled = handle_command(
+                    "/new",
+                    store,
+                    app,
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+            self.assertFalse(handled)
+            self.assertEqual(store.load_records(), [])
+            self.assertEqual(app.agent.loaded, [])
+            text = output.getvalue()
+            self.assertIn("\033[2J\033[3J\033[H", text)
+            self.assertIn("XCode", text)
+            self.assertIn("Type /help for commands.", text)
 
     def test_repl_completer_suggests_tool_names(self) -> None:
         completer = ReplCompleter(

@@ -17,6 +17,7 @@ from .commands import (
     generate_help_text,
 )
 from .markdown import MarkdownRenderer
+from .repl_rendering import clear_terminal_display, print_startup_banner
 from .repl_sessions import (
     current_view,
     print_loaded_history,
@@ -53,7 +54,8 @@ def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
     if ctx.session_policy is not None:
         ctx.session_policy.clear()
     sync_agent_history(ctx.app, ctx.store)
-    print("New session started.")
+    clear_terminal_display()
+    print_startup_banner(ctx.app, ctx.project_root)
     return False
 
 
@@ -449,6 +451,11 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         desc="Start a new session transcript.",
         group=COMMAND_GROUP_SESSION,
     ),
+    "/new": CommandEntry(
+        handler=cmd_clear,
+        desc="Start a new session transcript.",
+        group=COMMAND_GROUP_SESSION,
+    ),
     "/fork": CommandEntry(
         handler=cmd_fork,
         desc="Fork current session into an independent branch.",
@@ -594,6 +601,7 @@ def handle_command(
         renderer=renderer,
         state=state,
         prompt_session=prompt_session,
+        project_root=store.project_root,
         session_policy=session_policy,
         persistent_store=persistent_store,
         static_policy=static_policy,

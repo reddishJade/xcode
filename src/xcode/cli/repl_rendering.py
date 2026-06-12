@@ -179,6 +179,11 @@ def print_startup_banner(app: object, root: Path) -> None:
     console.print(Text("Type /help for commands.", style=CLI_COLOR_DIM))
 
 
+def clear_terminal_display() -> None:
+    """清空终端可见内容和滚动缓冲。"""
+    print("\033[2J\033[3J\033[H", end="")
+
+
 def input_prompt() -> PromptText:
     return [("class:prompt-marker", "❯ "), ("", "")]
 
