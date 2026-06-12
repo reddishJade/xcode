@@ -27,6 +27,8 @@ from ..skills import (
 )
 from ..observability import (
     PermissionCheckResult,
+    PermissionEngine,
+    PermissionEngineConfig,
     PermissionPolicy,
     check_tool_permission,
     redact_text,
@@ -47,11 +49,21 @@ class ToolSpecAdapter:
         approval_callback: ApprovalCallback | None = None,
         permission_policy: PermissionPolicy | None = None,
         high_risk_requires_approval: bool = True,
+        restricted_dirs: tuple[str, ...] = (),
+        allowlist_mode: bool = False,
     ) -> None:
         self._spec = spec
         self._approval_callback = approval_callback
-        self._permission_policy = permission_policy
-        self._high_risk_requires_approval = high_risk_requires_approval
+        self._engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=permission_policy,
+                session_policy=None,
+                persistent_store=None,
+                restricted_dirs=restricted_dirs,
+                allowlist_mode=allowlist_mode,
+                high_risk_requires_approval=high_risk_requires_approval,
+            )
+        )
 
     @property
     def name(self) -> str:
@@ -100,14 +112,12 @@ class ToolSpecAdapter:
     ) -> AgentToolResult:
         tool_input = _tool_input_from_arguments(params)
         action_input = stringify_tool_input(tool_input)
-        result: PermissionCheckResult = check_tool_permission(
+        result: PermissionCheckResult = self._engine.decide(
             self._spec.name,
             action_input,
-            permission_policy=self._permission_policy,
-            approval_callback=self._approval_callback,
             tool_spec=self._spec,
             tool_input=tool_input,
-            high_risk_requires_approval=self._high_risk_requires_approval,
+            approval_callback=self._approval_callback,
         )
         if result.blocked:
             return AgentToolResult(
@@ -125,6 +135,8 @@ def adapt_tool_specs(
     approval_callback: ApprovalCallback | None = None,
     permission_policy: PermissionPolicy | None = None,
     high_risk_requires_approval: bool = True,
+    restricted_dirs: tuple[str, ...] = (),
+    allowlist_mode: bool = False,
 ) -> list[ToolSpecAdapter]:
     """批量将 ToolSpec 适配为 AgentTool。"""
     missing_schema = [spec.name for spec in specs if spec.schema is None]
@@ -137,6 +149,8 @@ def adapt_tool_specs(
             approval_callback=approval_callback,
             permission_policy=permission_policy,
             high_risk_requires_approval=high_risk_requires_approval,
+            restricted_dirs=restricted_dirs,
+            allowlist_mode=allowlist_mode,
         )
         for spec in specs
     ]
