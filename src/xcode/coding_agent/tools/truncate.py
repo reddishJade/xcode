@@ -45,6 +45,23 @@ def truncate_head(
     max_lines: int = DEFAULT_MAX_LINES,
     max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> TruncationResult:
+    return _truncate(content, "head", max_lines, max_bytes)
+
+
+def truncate_tail(
+    content: str,
+    max_lines: int = DEFAULT_MAX_LINES,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+) -> TruncationResult:
+    return _truncate(content, "tail", max_lines, max_bytes)
+
+
+def _truncate(
+    content: str,
+    direction: str,
+    max_lines: int,
+    max_bytes: int,
+) -> TruncationResult:
     total_bytes = len(content.encode("utf-8"))
     lines = _split_lines(content)
     total_lines = len(lines)
@@ -79,6 +96,21 @@ def truncate_head(
             max_bytes=max_bytes,
         )
 
+    if direction == "head":
+        return _truncate_head_impl(
+            lines, total_lines, total_bytes, max_lines, max_bytes
+        )
+
+    return _truncate_tail_impl(lines, total_lines, total_bytes, max_lines, max_bytes)
+
+
+def _truncate_head_impl(
+    lines: list[str],
+    total_lines: int,
+    total_bytes: int,
+    max_lines: int,
+    max_bytes: int,
+) -> TruncationResult:
     first_line_bytes = len(lines[0].encode("utf-8"))
     if first_line_bytes > max_bytes:
         return TruncationResult(
@@ -112,7 +144,6 @@ def truncate_head(
     if truncated_by is None:
         truncated_by = "lines" if len(output) < total_lines else None
     result = "\n".join(output)
-    result_bytes = len(result.encode("utf-8"))
     result_lines = len(output)
     return TruncationResult(
         content=result,
@@ -121,7 +152,7 @@ def truncate_head(
         total_lines=total_lines,
         total_bytes=total_bytes,
         output_lines=result_lines,
-        output_bytes=result_bytes,
+        output_bytes=len(result.encode("utf-8")),
         last_line_partial=False,
         first_line_exceeds_limit=False,
         max_lines=max_lines,
@@ -129,30 +160,13 @@ def truncate_head(
     )
 
 
-def truncate_tail(
-    content: str,
-    max_lines: int = DEFAULT_MAX_LINES,
-    max_bytes: int = DEFAULT_MAX_BYTES,
+def _truncate_tail_impl(
+    lines: list[str],
+    total_lines: int,
+    total_bytes: int,
+    max_lines: int,
+    max_bytes: int,
 ) -> TruncationResult:
-    total_bytes = len(content.encode("utf-8"))
-    lines = _split_lines(content)
-    total_lines = len(lines)
-
-    if total_lines <= max_lines and total_bytes <= max_bytes:
-        return TruncationResult(
-            content=content,
-            truncated=False,
-            truncated_by=None,
-            total_lines=total_lines,
-            total_bytes=total_bytes,
-            output_lines=total_lines,
-            output_bytes=total_bytes,
-            last_line_partial=False,
-            first_line_exceeds_limit=False,
-            max_lines=max_lines,
-            max_bytes=max_bytes,
-        )
-
     output: list[str] = []
     output_bytes = 0
     last_line_partial = False
@@ -181,7 +195,6 @@ def truncate_tail(
     if truncated_by is None:
         truncated_by = "lines" if len(output) < total_lines else None
     result = "\n".join(output)
-    result_bytes = len(result.encode("utf-8"))
     result_lines = len(output)
     return TruncationResult(
         content=result,
@@ -190,7 +203,7 @@ def truncate_tail(
         total_lines=total_lines,
         total_bytes=total_bytes,
         output_lines=result_lines,
-        output_bytes=result_bytes,
+        output_bytes=len(result.encode("utf-8")),
         last_line_partial=last_line_partial,
         first_line_exceeds_limit=False,
         max_lines=max_lines,
