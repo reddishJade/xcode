@@ -329,6 +329,8 @@ def _start_queue_input_reader(
 
 
 class _ReplTurnRenderer:
+    """协调 agent 回合的事件流式渲染，委托给专门的处理器处理推理、工具和答案输出。"""
+
     def __init__(self, markdown_renderer: MarkdownRenderer, state: ReplState) -> None:
         self.markdown_renderer = markdown_renderer
         self.state = state

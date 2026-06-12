@@ -42,11 +42,13 @@ from xcode.harness.session import FORK_TYPES, SessionStore
 
 
 def cmd_help(cmd: str, ctx: CommandContext) -> bool:
+    """打印帮助信息。"""
     print(HELP_TEXT)
     return False
 
 
 def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
+    """清空当前会话记录并开始新会话。"""
     ctx.store.clear()
     if ctx.session_policy is not None:
         ctx.session_policy.clear()
@@ -56,6 +58,7 @@ def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
+    """从当前会话创建独立分支。"""
     parts = cmd.split(maxsplit=1)
     fork_type = parts[1].strip() if len(parts) == 2 else None
     if fork_type is not None and fork_type not in FORK_TYPES:
@@ -71,6 +74,7 @@ def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_rewind(cmd: str, ctx: CommandContext) -> bool:
+    """回退最近的 N 轮用户交互。"""
     parts = cmd.split()
     turns = int(parts[1]) if len(parts) > 1 else 1
     removed = ctx.store.rewind_turns(turns)
@@ -80,6 +84,7 @@ def cmd_rewind(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_resume(cmd: str, ctx: CommandContext) -> bool:
+    """从最近的或指定的会话恢复。"""
     parts = cmd.split(maxsplit=1)
     if len(parts) == 2:
         target = parts[1].strip()
@@ -103,6 +108,7 @@ def cmd_resume(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_tree(cmd: str, ctx: CommandContext) -> bool:
+    """显示会话分支树。"""
     nodes = ctx.store.get_tree()
     if not nodes:
         print("No session tree available (no metadata).")
@@ -119,6 +125,7 @@ def cmd_tree(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
+    """列出或切换到指定分支。"""
     parts = cmd.split(maxsplit=1)
     if len(parts) == 1 or parts[1].strip() in {"list", "tree"}:
         return cmd_tree("/tree", ctx)
@@ -138,6 +145,7 @@ def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
+    """交互式选择并恢复历史会话。"""
     sessions = ctx.store.list_session_infos()
     if not sessions:
         print("No conversations found.")
@@ -165,21 +173,25 @@ def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_model(cmd: str, ctx: CommandContext) -> bool:
+    """显示或切换当前模型。"""
     handle_model_command(cmd, ctx.app)
     return False
 
 
 def cmd_effort(cmd: str, ctx: CommandContext) -> bool:
+    """显示或设置 reasoning effort 级别。"""
     handle_effort_command(cmd, ctx.app)
     return False
 
 
 def cmd_thinking(cmd: str, ctx: CommandContext) -> bool:
+    """显示或切换 thinking 开/关。"""
     handle_thinking_command(cmd, ctx.app)
     return False
 
 
 def cmd_plan(cmd: str, ctx: CommandContext) -> bool:
+    """进入 Plan Mode（只读检查，禁止编辑和 shell）。"""
     ctx.state.mode = "plan"
     print(
         "Plan Mode enabled. Read-only inspection tools are available; edits and shell are blocked."
@@ -188,12 +200,14 @@ def cmd_plan(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_review(cmd: str, ctx: CommandContext) -> bool:
+    """进入 Review Mode（只读审查，修改需审批）。"""
     ctx.state.mode = "review"
     print("Review Mode enabled. Edits are blocked; validation requires approval.")
     return False
 
 
 def cmd_act(cmd: str, ctx: CommandContext) -> bool:
+    """进入 Act Mode 恢复工具使用权限，支持 --clear 选项。"""
     is_clear = False
     parts = cmd.split(maxsplit=1)
     if len(parts) == 2 and parts[1].strip() == "--clear":
@@ -264,6 +278,7 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_verbose(cmd: str, ctx: CommandContext) -> bool:
+    """显示或隐藏工具调用详情。"""
     parts = cmd.split(maxsplit=1)
     if len(parts) == 2 and parts[1] == "on":
         ctx.state.verbose = True
@@ -277,6 +292,7 @@ def cmd_verbose(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
+    """启用或禁用 agent 回合期间的输入队列。"""
     parts = cmd.split(maxsplit=1)
     if len(parts) == 1:
         state = "on" if ctx.state.queue_mode else "off"
@@ -292,6 +308,7 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
+    """手动触发上下文压缩和会话日志裁剪。"""
     agent = getattr(ctx.app, "agent", None)
     should_request_active = _should_request_active_compaction(ctx)
     if (
@@ -365,11 +382,13 @@ def _has_large_tool_result(
 
 
 def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
+    """列出、撤销或清除权限规则。"""
     handle_permissions(cmd, ctx.session_policy, ctx.persistent_store)
     return False
 
 
 def cmd_tool(cmd: str, ctx: CommandContext) -> bool:
+    """直接执行一个已注册的工具。"""
     output = run_tool_command(cmd, ctx.app)
     ctx.store.append("event", {"type": "tool_command", "data": cmd})
     ctx.store.append("event", {"type": "tool_result", "data": output})
@@ -378,6 +397,7 @@ def cmd_tool(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_exit(cmd: str, ctx: CommandContext) -> bool:
+    """退出 REPL。"""
     return True
 
 

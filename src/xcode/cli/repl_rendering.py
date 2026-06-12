@@ -102,6 +102,8 @@ def answer_renderable(text: str) -> Table:
 
 
 class LiveMarkdownStream:
+    """流式渲染 agent 的 markdown 答案，支持增量更新和停止。"""
+
     def __init__(self, console: Console) -> None:
         self.console = console
         self.live: Live | None = None
@@ -127,6 +129,8 @@ class LiveMarkdownStream:
 
 
 class LiveReasoningPreview:
+    """流式渲染推理过程的预览行（瞬态，完成后自动清除）。"""
+
     def __init__(self, console: Console) -> None:
         self.console = console
         self.live: Live | None = None
