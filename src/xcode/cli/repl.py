@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 import sys
 import threading
@@ -170,25 +171,37 @@ def run_repl(
                 f"{expanded_text}"
             )
             state.approved_plan = None
-        _run_agent_turn(app, store, markdown_renderer, state, session, agent_text)
+        ctx = _AgentTurnContext(
+            app=app,
+            store=store,
+            renderer=markdown_renderer,
+            state=state,
+            session=session,
+            text=agent_text,
+        )
+        _run_agent_turn(ctx)
 
 
-def _run_agent_turn(
-    app: object,
-    store: SessionStore,
-    markdown_renderer: MarkdownRenderer,
-    state: ReplState,
-    session: PromptLike,
-    agent_text: str,
-) -> None:
-    turn = _ReplTurnRenderer(markdown_renderer, state)
-    queued_input = _start_queue_input_reader(state, session)
+@dataclass
+class _AgentTurnContext:
+    app: object
+    store: SessionStore
+    renderer: MarkdownRenderer
+    state: ReplState
+    session: PromptLike
+    text: str
 
-    if state.pending_partial is not None:
-        _, partial_text = state.pending_partial
-        state.pending_partial = None
+
+def _run_agent_turn(ctx: _AgentTurnContext) -> None:
+    turn = _ReplTurnRenderer(ctx.renderer, ctx.state)
+    queued_input = _start_queue_input_reader(ctx.state, ctx.session)
+
+    text = ctx.text
+    if ctx.state.pending_partial is not None:
+        _, partial_text = ctx.state.pending_partial
+        ctx.state.pending_partial = None
         if partial_text:
-            agent = getattr(app, "agent", None)
+            agent = getattr(ctx.app, "agent", None)
             steer = getattr(agent, "steer", None)
             if callable(steer):
                 from xcode.agent.messages import AssistantMessage
@@ -205,46 +218,48 @@ def _run_agent_turn(
                     )
                 )
             else:
-                agent_text = (
+                text = (
                     f"[Context: assistant was interrupted mid-response]\n"
                     f"{partial_text}\n"
                     f"[end of partial response]\n"
-                    f"{agent_text}"
+                    f"{text}"
                 )
 
     try:
-        ask_stream = getattr(app, "ask_stream", None)
+        ask_stream = getattr(ctx.app, "ask_stream", None)
         if not callable(ask_stream):
             raise TypeError("app does not support ask_stream")
         typed_ask_stream = cast(
             Callable[..., Iterator[StructuredAgentEvent]], ask_stream
         )
-        for event in typed_ask_stream(agent_text, mode=state.mode):
-            store.append("event", event_to_dict(event))
+        for event in typed_ask_stream(text, mode=ctx.state.mode):
+            ctx.store.append("event", event_to_dict(event))
             turn.handle_event(event)
     except KeyboardInterrupt:
         turn.interrupted = True
-        token = getattr(getattr(app, "agent", None), "cancellation_token", None)
+        token = getattr(getattr(ctx.app, "agent", None), "cancellation_token", None)
         if token is not None:
             token.cancel("interrupted by user")
         turn.clear_line()
-        store.append("event", {"type": "interrupted", "data": "interrupted by user"})
+        ctx.store.append(
+            "event", {"type": "interrupted", "data": "interrupted by user"}
+        )
         reasoning_text, partial_answer = turn.partial_state()
         has_partial = bool(reasoning_text or partial_answer)
         if has_partial:
-            state.pending_partial = (reasoning_text, partial_answer)
+            ctx.state.pending_partial = (reasoning_text, partial_answer)
             print("[interrupted] type your message below to inject into context")
             try:
-                inject_text = session.prompt(
+                inject_text = ctx.session.prompt(
                     [("class:prompt-marker", "interrupt> "), ("", "")]
                 ).strip()
             except (EOFError, KeyboardInterrupt):
                 inject_text = ""
             if inject_text:
-                state.pending_inject = inject_text
-                store.append("user", inject_text)
+                ctx.state.pending_inject = inject_text
+                ctx.store.append("user", inject_text)
             else:
-                state.pending_partial = None
+                ctx.state.pending_partial = None
                 print("[interrupt cancelled]")
         else:
             print("[interrupted] current run cancelled; session is still active.")
@@ -252,9 +267,9 @@ def _run_agent_turn(
     finally:
         queued_lines = queued_input.drain() if queued_input is not None else []
         if queued_lines:
-            agent = getattr(app, "agent", None)
+            agent = getattr(ctx.app, "agent", None)
             for queued_line in queued_lines:
-                store.append("user", queued_line)
+                ctx.store.append("user", queued_line)
                 if agent is not None and hasattr(agent, "follow_up"):
                     agent.follow_up(UserMessage(content=queued_line))
             print(f"[queued] {len(queued_lines)} follow-up message(s)")
@@ -264,8 +279,8 @@ def _run_agent_turn(
         print(turn.stopped_reason)
     if turn.step_answers:
         answer = "\n\n".join(turn.step_answers)
-        store.append("assistant", answer)
-        store.update_summary()
+        ctx.store.append("assistant", answer)
+        ctx.store.update_summary()
 
 
 class _QueuedInput:
