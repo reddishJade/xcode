@@ -17,7 +17,7 @@ from xcode.cli.repl import current_effort_options, run_repl
 from xcode.cli.repl_commands import COMMAND_NAMES, handle_command
 from xcode.cli.repl_rendering import reasoning_preview_lines
 from xcode.cli.repl_rendering import REPL_PROMPT_STYLE
-from xcode.cli.repl_tools import brief_input
+from xcode.cli.repl_tools import brief_input, run_tool_command
 from xcode.harness.session import SessionStore
 from xcode.harness.agent_runtime import (
     CancellationToken,
@@ -361,6 +361,14 @@ class XcodeReplTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertIn("requires approval", renderer.rendered[0])
+
+    def test_tool_command_uses_static_permission_policy(self) -> None:
+        app = DeniedToolApp()
+
+        output = run_tool_command("/tool bash git status", app)
+
+        self.assertEqual(output, "permission denied for tool: bash")
+        self.assertEqual(app.commands, [])
 
     def test_run_repl_permissions_show_static_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1279,6 +1287,43 @@ class ToolApp:
                 steps=1,
                 tool_calls=[],
             ),
+        )
+
+
+class DeniedToolAgent:
+    """提供 /tool 直连执行读取的静态权限策略。"""
+
+    def __init__(self) -> None:
+        self.permission_policy = PermissionPolicy((PermissionRule("bash", "deny"),))
+        self.restricted_dirs: tuple[str, ...] = ()
+        self.allowlist_mode = False
+        self.approval_callback = None
+
+
+class DeniedToolApp(ToolApp):
+    def __init__(self) -> None:
+        self.commands: list[str] = []
+        self.agent = DeniedToolAgent()
+
+        def bash(value: dict[str, Any]) -> str:
+            command = str(value["command"])
+            self.commands.append(command)
+            return f"ran: {command}"
+
+        super().__init__(
+            registry=(
+                ToolSpec(
+                    "bash",
+                    "Run shell.",
+                    "command",
+                    bash,
+                    schema={
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                        "required": ["command"],
+                    },
+                ),
+            )
         )
 
 

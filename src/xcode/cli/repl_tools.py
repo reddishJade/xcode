@@ -97,7 +97,16 @@ def run_tool_command(command: str, app: object) -> str:
         action_input = parse_tool_input(selected_tool, raw_input)
     except ValueError as exc:
         return str(exc)
-    result = run_tool_result(tool_map, tool_name, action_input)
+    agent = getattr(app, "agent", None)
+    result = run_tool_result(
+        tool_map,
+        tool_name,
+        action_input,
+        approval_callback=getattr(agent, "approval_callback", None),
+        permission_policy=getattr(agent, "permission_policy", None),
+        restricted_dirs=getattr(agent, "restricted_dirs", ()),
+        allowlist_mode=bool(getattr(agent, "allowlist_mode", False)),
+    )
     return result.content
 
 

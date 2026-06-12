@@ -16,9 +16,10 @@ from ..agent.protocols import ToolExecutionMode
 from ..agent.types import ShellCallOutputContent
 from .observability import (
     HITLResult,
+    PermissionEngine,
+    PermissionEngineConfig,
     PermissionPolicy,
     PermissionRiskEvaluator,
-    check_tool_permission,
     redact_text,
 )
 from .session import JsonValue
@@ -131,6 +132,8 @@ def run_tool_result(
     action_input: ToolInput,
     approval_callback: ApprovalCallback | None = None,
     permission_policy: PermissionPolicy | None = None,
+    restricted_dirs: tuple[str, ...] = (),
+    allowlist_mode: bool = False,
 ) -> ToolExecutionResult:
     """执行一个工具，并在高风险工具前触发 HITL。
 
@@ -145,14 +148,20 @@ def run_tool_result(
             f"unknown tool: {action}. available tools: {', '.join(sorted(registry))}",
         )
     action_input_text = stringify_tool_input(action_input)
-    perm_result = check_tool_permission(
+    engine = PermissionEngine(
+        PermissionEngineConfig(
+            static_policy=permission_policy,
+            restricted_dirs=restricted_dirs,
+            allowlist_mode=allowlist_mode,
+            high_risk_requires_approval=True,
+        )
+    )
+    perm_result = engine.decide(
         action,
         action_input_text,
-        permission_policy=permission_policy,
-        approval_callback=approval_callback,
         tool_spec=tool,
         tool_input=action_input,
-        high_risk_requires_approval=True,
+        approval_callback=approval_callback,
     )
     if perm_result.blocked:
         status = (
