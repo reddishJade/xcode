@@ -1,3 +1,4 @@
+.agent/
 .antigravitycli/
 .claude/
 .crush/
@@ -19,6 +20,7 @@ docs/llm.md
 docs/rag.md
 opencode.json*
 packages/
+pi/
 tmp/
 uv.lock
 xcode.config.json
