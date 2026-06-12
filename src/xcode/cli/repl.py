@@ -299,7 +299,7 @@ class _QueuedInput:
         self.lines = lines
 
     def drain(self) -> list[str]:
-        self.thread.join(timeout=0.1)
+        self.thread.join()
         drained: list[str] = []
         while True:
             try:

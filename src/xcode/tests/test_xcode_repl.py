@@ -697,6 +697,34 @@ class XcodeReplTests(unittest.TestCase):
             self.assertIn("Unknown command: /clear now", output.getvalue())
             self.assertEqual(len(store.load_records()), 1)
 
+    def test_rewind_command_reports_user_turns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            store.append("user", "first")
+            store.append("assistant", "one")
+            store.append("user", "second")
+            store.append("assistant", "two")
+            output = StringIO()
+
+            with redirect_stdout(output):
+                handled = handle_command(
+                    "/rewind 1",
+                    store,
+                    FakeApp(),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+            self.assertFalse(handled)
+            self.assertEqual(
+                [record.content for record in store.load_records()], ["first", "one"]
+            )
+            self.assertIn(
+                "Rewound 1 user turn (2 transcript records removed).",
+                output.getvalue(),
+            )
+
     def test_handle_new_command_starts_new_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))

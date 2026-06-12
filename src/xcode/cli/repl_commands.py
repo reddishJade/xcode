@@ -81,7 +81,8 @@ def cmd_rewind(cmd: str, ctx: CommandContext) -> bool:
     turns = int(parts[1]) if len(parts) > 1 else 1
     removed = ctx.store.rewind_turns(turns)
     sync_agent_history(ctx.app, ctx.store)
-    print(f"Rewound {removed} transcript records.")
+    turn_label = "turn" if turns == 1 else "turns"
+    print(f"Rewound {turns} user {turn_label} ({removed} transcript records removed).")
     return False
 
 
