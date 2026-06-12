@@ -16,12 +16,14 @@ from xcode.harness.skills import ToolInput, ToolSpec
 from xcode.harness.observability.permissions import PermissionDecision
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
+from ._constants import (
+    DANGEROUS_PATTERNS,
+    DEFAULT_TIMEOUT_SECONDS,
+    HIGH_RISK_WRITE_COMMANDS,
+    MAX_TIMEOUT_SECONDS,
+)
 
 logger = logging.getLogger("xcode.coding_agent.tools.bash")
-
-# 命令执行超时配置
-DEFAULT_TIMEOUT_SECONDS = 30  # 默认超时：适配常规命令（ls/git/npm 等）
-MAX_TIMEOUT_SECONDS = 120  # 最大超时：防止长时间挂起阻塞 Agent 循环
 
 
 SpawnHook = Callable[[str, Path], tuple[str, Path]]
@@ -39,30 +41,6 @@ class BashExecutionPlan:
     command: str
     cwd: Path
     timeout: int
-
-
-# 危险命令模式（拒绝执行）
-DANGEROUS_PATTERNS = [
-    "rm -rf /",
-    "rm -rf /*",
-    "mkfs.",
-    "> /dev/sda",
-    "dd if=",
-    "chmod -R 777",
-    "chown -R root",
-]
-
-# 高风险写操作命令前缀（需要用户确认）
-HIGH_RISK_WRITE_COMMANDS = [
-    "rm ",
-    "rm\t",
-    "mv ",
-    "mv\t",
-    "git reset --hard",
-    "git clean -f",
-    "git push --force",
-    "git push -f",
-]
 
 
 def _bash_risk_evaluator(tool_input: dict[str, Any]) -> PermissionDecision:

@@ -16,7 +16,7 @@ from xcode.harness.skills import (
     ToolSpec,
 )
 
-from .bash import (
+from ._constants import (
     DANGEROUS_PATTERNS,
     DEFAULT_TIMEOUT_SECONDS,
     HIGH_RISK_WRITE_COMMANDS,
