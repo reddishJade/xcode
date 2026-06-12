@@ -23,6 +23,7 @@ from xcode.harness.agent_runtime import (
     CancellationToken,
     StructuredAgentResult,
 )
+from xcode.harness.observability import PermissionPolicy, PermissionRule
 from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
     ReasoningDeltaStructuredEvent,
@@ -360,6 +361,20 @@ class XcodeReplTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertIn("requires approval", renderer.rendered[0])
+
+    def test_run_repl_permissions_show_static_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = StaticPermissionApp()
+            prompt = FakePrompt(["/permissions", "/exit"])
+
+            with redirect_stdout(StringIO()) as output:
+                code = run_repl(cast(Any, app), Path(temp_dir), prompt)
+
+            self.assertEqual(code, 0)
+            rendered = output.getvalue()
+            self.assertIn("static:", rendered)
+            self.assertIn("bash = deny", rendered)
+            self.assertNotIn("(none)", rendered)
 
     def test_run_repl_tool_list_shows_visible_and_hidden_groups(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1044,6 +1059,37 @@ class FakeApp:
             1,
             StructuredAgentResult(
                 answer=f"{text}!",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class StaticPermissionAgent:
+    """提供 REPL 权限命令读取的静态策略字段。"""
+
+    def __init__(self) -> None:
+        self.permission_policy = PermissionPolicy((PermissionRule("bash", "deny"),))
+        self.restricted_dirs: tuple[str, ...] = ()
+        self.allowlist_mode = False
+        self.approval_callback = None
+
+
+class StaticPermissionApp:
+    """最小 REPL app，仅用于 /permissions 静态策略展示测试。"""
+
+    def __init__(self) -> None:
+        self.agent = StaticPermissionAgent()
+        self.registry: tuple[ToolSpec, ...] = ()
+
+    def ask_stream(self, text: str, mode: str | None = None):
+        yield TextDeltaStructuredEvent("text_delta", 1, text)
+        yield FinalStructuredEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer=text,
                 messages=[],
                 steps=1,
                 tool_calls=[],

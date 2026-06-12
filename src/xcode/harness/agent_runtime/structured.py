@@ -86,12 +86,16 @@ class StructuredAgent:
 
         self._hook_manager = gate.hook_manager
         self._mode = ExecutionModeState()
+        resolved_permission_policy = resolve_permission_policy(
+            runtime.project_root, gate.permission_policy
+        )
+        self.permission_policy = resolved_permission_policy
+        self.restricted_dirs = gate.restricted_dirs
+        self.allowlist_mode = gate.allowlist_mode
         self._gate = ToolGate(
             mode_state=self._mode,
             approval_callback=gate.approval_callback,
-            permission_policy=resolve_permission_policy(
-                runtime.project_root, gate.permission_policy
-            ),
+            permission_policy=resolved_permission_policy,
             high_risk_requires_approval=gate.high_risk_requires_approval,
             hook_manager=gate.hook_manager,
             audit_logger=gate.audit_logger,

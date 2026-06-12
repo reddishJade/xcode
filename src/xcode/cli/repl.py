@@ -150,6 +150,9 @@ def run_repl(
                 session,
                 session_policy,
                 persistent_store,
+                static_policy=getattr(agent, "permission_policy", None),
+                restricted_dirs=getattr(agent, "restricted_dirs", ()),
+                allowlist_mode=bool(getattr(agent, "allowlist_mode", False)),
             ):
                 print_saved_conversation(store)
                 return 0
