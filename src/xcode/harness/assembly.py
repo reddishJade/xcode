@@ -458,15 +458,18 @@ def build_agent(
                 for cb in callbacks:
                     hook_manager.register(cast("HookEvent", event), cb)
 
+    sec = runtime_config.security
     return StructuredAgent(
         provider=llm,
         registry=registry,
         config=config,
         gate=GateConfig(
-            permission_policy=_permission_policy_from_security(runtime_config.security),
+            permission_policy=_permission_policy_from_security(sec),
             high_risk_requires_approval=_high_risk_requires_approval(
-                runtime_config.security.resolve_approval_policy()
+                sec.resolve_approval_policy()
             ),
+            restricted_dirs=sec.restricted_dirs,
+            allowlist_mode=bool(sec.allow_tools),
             hook_manager=hook_manager,
             audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
         ),

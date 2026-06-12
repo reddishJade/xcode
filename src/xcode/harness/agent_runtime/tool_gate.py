@@ -33,6 +33,8 @@ class ToolGateSnapshot:
     permission_policy: PermissionPolicy | None
     high_risk_requires_approval: bool
     tool_map: dict[str, ToolSpec]
+    restricted_dirs: tuple[str, ...] = ()
+    allowlist_mode: bool = False
 
 
 class ToolGate:
@@ -56,11 +58,15 @@ class ToolGate:
         hook_manager: HookManager | None,
         audit_logger: Callable[[AuditRecord], None] | None,
         session_id: str,
+        restricted_dirs: tuple[str, ...] = (),
+        allowlist_mode: bool = False,
     ) -> None:
         self._mode = mode_state
         self._approval_callback = approval_callback
         self._permission_policy = permission_policy
         self._high_risk_requires_approval = high_risk_requires_approval
+        self._restricted_dirs = restricted_dirs
+        self._allowlist_mode = allowlist_mode
         self._hook_manager = hook_manager
         self._audit_logger = audit_logger
         self._session_id = session_id
@@ -72,6 +78,8 @@ class ToolGate:
             permission_policy=self._permission_policy,
             high_risk_requires_approval=self._high_risk_requires_approval,
             tool_map={},
+            restricted_dirs=self._restricted_dirs,
+            allowlist_mode=self._allowlist_mode,
         )
 
     def snapshot_for(self, registry: tuple[ToolSpec, ...]) -> ToolGateSnapshot:
@@ -81,6 +89,8 @@ class ToolGate:
             permission_policy=self._permission_policy,
             high_risk_requires_approval=self._high_risk_requires_approval,
             tool_map={tool.name: tool for tool in registry},
+            restricted_dirs=self._restricted_dirs,
+            allowlist_mode=self._allowlist_mode,
         )
 
     def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
@@ -91,6 +101,8 @@ class ToolGate:
                 approval_callback=self._approval_callback,
                 permission_policy=self._permission_policy,
                 high_risk_requires_approval=self._high_risk_requires_approval,
+                restricted_dirs=self._restricted_dirs,
+                allowlist_mode=self._allowlist_mode,
             )
         )
 
