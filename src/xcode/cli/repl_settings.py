@@ -1,30 +1,16 @@
 from __future__ import annotations
 
-from typing import Protocol, TypeGuard
+from typing import TypeGuard
 
 from xcode.ai.model_modes import parse_model_mode
 from xcode.harness.observability import (
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
+from .app_contract import ModelControlApp
 from .reasoning_effort import (
     reasoning_effort_levels_for_transport,
 )
-
-
-class ModelControlApp(Protocol):
-    def get_model_info(self) -> dict[str, str]: ...
-
-    def set_model(
-        self,
-        *,
-        model: str,
-        profile: str = "main",
-        base_url: str | None = None,
-        api_key: str | None = None,
-        thinking: bool | None = None,
-        reasoning_effort: str | None = None,
-    ) -> str: ...
 
 
 def _is_model_control_app(app: object) -> TypeGuard[ModelControlApp]:
