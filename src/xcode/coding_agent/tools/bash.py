@@ -17,10 +17,9 @@ from xcode.harness.observability.permissions import PermissionDecision
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 from ._constants import (
-    DANGEROUS_PATTERNS,
     DEFAULT_TIMEOUT_SECONDS,
-    HIGH_RISK_WRITE_COMMANDS,
     MAX_TIMEOUT_SECONDS,
+    evaluate_command_risk,
 )
 
 logger = logging.getLogger("xcode.coding_agent.tools.bash")
@@ -44,27 +43,7 @@ class BashExecutionPlan:
 
 
 def _bash_risk_evaluator(tool_input: dict[str, Any]) -> PermissionDecision:
-    """评估 bash 命令的风险级别。
-
-    返回：
-    - "deny"  — 危险命令，直接拒绝
-    - "ask"   — 高风险写操作，需要用户确认
-    - "allow" — 普通命令，放行
-    """
-    command = str(tool_input.get("command", "")).strip().lower()
-
-    # 1. 检查危险命令模式
-    for pattern in DANGEROUS_PATTERNS:
-        if pattern in command:
-            return "deny"
-
-    # 2. 检查高风险写操作
-    for prefix in HIGH_RISK_WRITE_COMMANDS:
-        if command.startswith(prefix):
-            return "ask"
-
-    # 3. 普通命令放行
-    return "allow"
+    return evaluate_command_risk(str(tool_input.get("command", "")))
 
 
 def build_bash_tool(

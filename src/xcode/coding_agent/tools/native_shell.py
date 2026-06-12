@@ -17,10 +17,9 @@ from xcode.harness.skills import (
 )
 
 from ._constants import (
-    DANGEROUS_PATTERNS,
     DEFAULT_TIMEOUT_SECONDS,
-    HIGH_RISK_WRITE_COMMANDS,
     MAX_TIMEOUT_SECONDS,
+    evaluate_command_risk,
 )
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 
@@ -224,17 +223,9 @@ def _builtin_shell_definition(
 
 
 def _native_shell_risk_evaluator(tool_input: dict[str, Any]) -> PermissionDecision:
-    """复用 bash 风险规则评估 Responses shell 命令。"""
     raw_commands = tool_input.get("commands")
     if isinstance(raw_commands, list):
-        command = "\n".join(str(item) for item in raw_commands).strip().lower()
+        command = "\n".join(str(item) for item in raw_commands)
     else:
-        command = str(raw_commands or tool_input.get("command") or "").strip().lower()
-
-    for pattern in DANGEROUS_PATTERNS:
-        if pattern in command:
-            return "deny"
-    for prefix in HIGH_RISK_WRITE_COMMANDS:
-        if command.startswith(prefix):
-            return "ask"
-    return "allow"
+        command = str(raw_commands or tool_input.get("command") or "")
+    return evaluate_command_risk(command)
