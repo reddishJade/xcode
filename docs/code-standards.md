@@ -17,6 +17,17 @@ This document contains detailed implementation rules for coding agents. `AGENTS.
 
 ---
 
+## Debugging Approach
+
+When investigating a bug or unexpected behavior, follow these steps in order:
+
+1. **Understand the architecture** — read relevant module boundaries and data flow before touching any code.
+2. **Analyze the root cause** — identify the actual mechanism of failure, not just the symptom.
+3. **Design the interface** — decide what the fix should look like at the boundary before writing implementation.
+4. **Consider edge cases** — what else could break, what assumptions changed, what input could bypass the fix.
+
+---
+
 ## Syntax And Compatibility
 
 - Use modern Python syntax supported by the project runtime.
@@ -36,6 +47,7 @@ This document contains detailed implementation rules for coding agents. `AGENTS.
 - Avoid teaching-demo wording, marketing claims, or assertions of production quality.
 - Add comments only where they clarify non-obvious constraints or logic.
 - Do not add unnecessary comments. Let the code speak for itself.
+- Documentation explains architectural decisions, trade-offs, and constraints — why the system is shaped the way it is.
 
 ---
 
