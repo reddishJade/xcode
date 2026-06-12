@@ -301,6 +301,18 @@ class HITLPermissionModelTests(unittest.TestCase):
         self.assertEqual(policy.decide("bash", "git status --short"), "allow")
         self.assertIsNone(policy.decide("bash", "git add ."))
 
+    def test_session_policy_prefix_grant_decide(self) -> None:
+        policy = SessionPermissionPolicy()
+        policy.grant("bash", "allow", input_prefix='{"command": "uv run pyright')
+
+        self.assertEqual(
+            policy.decide("bash", '{"command": "uv run pyright src/a.py"}'),
+            "allow",
+        )
+        self.assertIsNone(
+            policy.decide("bash", '{"command": "uv run ruff check src/a.py"}')
+        )
+
     def test_session_policy_lifo_order(self) -> None:
         policy = SessionPermissionPolicy()
         policy.grant("bash", "deny", "git status")
@@ -321,6 +333,22 @@ class HITLPermissionModelTests(unittest.TestCase):
             self.assertEqual(policy.decide("bash", "git status"), "allow")
             reloaded = store.load()
             self.assertEqual(reloaded.decide("bash", "git status"), "allow")
+
+    def test_persistent_store_grant_and_load_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = PersistentPermissionStore(Path(tmp) / "hitl_policy.json")
+            store.grant(
+                "bash",
+                "allow",
+                input_prefix='{"command": "uv run pyright',
+            )
+            raw = json.loads((Path(tmp) / "hitl_policy.json").read_text())
+            self.assertEqual(raw[0]["input_prefix"], '{"command": "uv run pyright')
+            reloaded = store.load()
+            self.assertEqual(
+                reloaded.decide("bash", '{"command": "uv run pyright src/b.py"}'),
+                "allow",
+            )
 
     def test_persistent_store_revoke(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

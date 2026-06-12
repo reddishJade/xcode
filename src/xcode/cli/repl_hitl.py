@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from queue import Queue
+import shlex
 from threading import Thread
 
 from .repl_tools import brief_input
@@ -45,13 +46,24 @@ class ReplHITLHandler:
         self, choice: str | None, tool: ToolSpec, action_input: ToolInput
     ) -> HITLResult:
         action_input_text = stringify_tool_input(action_input)
+        input_prefix = _permission_input_prefix(tool.name, action_input)
         if choice == "允许（仅本次）":
             return HITLResult("allow", "once")
         if choice == "此次对话中允许":
-            self.session_policy.grant(tool.name, "allow", action_input_text)
+            self.session_policy.grant(
+                tool.name,
+                "allow",
+                None if input_prefix else action_input_text,
+                input_prefix=input_prefix,
+            )
             return HITLResult("allow", "session")
         if choice == "始终允许":
-            self.persistent_store.grant(tool.name, "allow", action_input_text)
+            self.persistent_store.grant(
+                tool.name,
+                "allow",
+                None if input_prefix else action_input_text,
+                input_prefix=input_prefix,
+            )
             return HITLResult("allow", "permanent")
         return HITLResult("deny", "once")
 
@@ -105,3 +117,33 @@ def _has_running_event_loop() -> bool:
     except RuntimeError:
         return False
     return True
+
+
+def _permission_input_prefix(tool_name: str, action_input: ToolInput) -> str | None:
+    """为可泛化的工具输入生成权限前缀。"""
+    if tool_name != "bash":
+        return None
+    command = action_input.get("command") or action_input.get("input")
+    if not isinstance(command, str):
+        return None
+    command_prefix = _bash_command_family(command)
+    if command_prefix is None:
+        return None
+    return stringify_tool_input({"command": command_prefix})[:-2]
+
+
+def _bash_command_family(command: str) -> str | None:
+    """把常见验证命令归一到可复用的命令族。"""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    if tokens[:3] == ["uv", "run", "pyright"]:
+        return "uv run pyright"
+    if tokens[:4] == ["uv", "run", "ruff", "check"]:
+        return "uv run ruff check"
+    if tokens[:4] == ["uv", "run", "ruff", "format"]:
+        return "uv run ruff format"
+    if tokens[:5] == ["uv", "run", "python", "-m", "unittest"]:
+        return "uv run python -m unittest"
+    return None

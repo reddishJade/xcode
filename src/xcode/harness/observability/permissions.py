@@ -46,6 +46,7 @@ class PermissionRule:
     tool: str
     decision: PermissionDecision
     input_contains: str | None = None
+    input_prefix: str | None = None
 
 
 class PermissionToolSpec(Protocol):
@@ -78,6 +79,10 @@ class PermissionPolicy:
                 and rule.input_contains not in action_input
             ):
                 continue
+            if rule.input_prefix is not None and not action_input.startswith(
+                rule.input_prefix
+            ):
+                continue
             matching.append(rule.decision)
         if "deny" in matching:
             return "deny"
@@ -99,12 +104,17 @@ class SessionPermissionPolicy:
         tool_name: str,
         decision: PermissionDecision,
         input_contains: str | None = None,
+        input_prefix: str | None = None,
     ) -> None:
-        matching_key = (tool_name, input_contains)
+        matching_key = (tool_name, input_contains, input_prefix)
         self._rules = [
-            r for r in self._rules if (r.tool, r.input_contains) != matching_key
+            r
+            for r in self._rules
+            if (r.tool, r.input_contains, r.input_prefix) != matching_key
         ]
-        self._rules.append(PermissionRule(tool_name, decision, input_contains))
+        self._rules.append(
+            PermissionRule(tool_name, decision, input_contains, input_prefix)
+        )
 
     def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
         result: PermissionDecision | None = None
@@ -114,6 +124,10 @@ class SessionPermissionPolicy:
             if (
                 rule.input_contains is not None
                 and rule.input_contains not in action_input
+            ):
+                continue
+            if rule.input_prefix is not None and not action_input.startswith(
+                rule.input_prefix
             ):
                 continue
             result = rule.decision
@@ -154,13 +168,18 @@ class PersistentPermissionStore:
         tool_name: str,
         decision: PermissionDecision,
         input_contains: str | None = None,
+        input_prefix: str | None = None,
     ) -> PermissionPolicy:
         current = self.load()
-        new_rule = PermissionRule(tool_name, decision, input_contains)
+        new_rule = PermissionRule(tool_name, decision, input_contains, input_prefix)
         filtered = tuple(
             r
             for r in current.rules
-            if not (r.tool == tool_name and r.input_contains == input_contains)
+            if not (
+                r.tool == tool_name
+                and r.input_contains == input_contains
+                and r.input_prefix == input_prefix
+            )
         )
         updated = filtered + (new_rule,)
         self._write(updated)
@@ -185,6 +204,8 @@ class PersistentPermissionStore:
             entry: PermissionRuleData = {"tool": r.tool, "decision": r.decision}
             if r.input_contains is not None:
                 entry["input_contains"] = r.input_contains
+            if r.input_prefix is not None:
+                entry["input_prefix"] = r.input_prefix
             data.append(entry)
         self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
@@ -202,10 +223,12 @@ def _permission_rule_from_data(value: object) -> PermissionRule | None:
     if decision not in ("allow", "deny", "ask"):
         return None
     input_contains = value.get("input_contains")
+    input_prefix = value.get("input_prefix")
     return PermissionRule(
         tool=tool,
         decision=decision,
         input_contains=input_contains if isinstance(input_contains, str) else None,
+        input_prefix=input_prefix if isinstance(input_prefix, str) else None,
     )
 
 

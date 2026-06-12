@@ -49,6 +49,21 @@ class ReplHITLHandlerTests(unittest.TestCase):
             self.session_policy.decide("bash", '{"command": "echo hello"}')
         )
 
+    def test_handler_session_scope_uses_validation_command_prefix(self) -> None:
+        result = self.handler._apply_choice(
+            "此次对话中允许",
+            self.tool,
+            {"command": "uv run pyright src/xcode/a.py"},
+        )
+
+        self.assertEqual(result.decision, "allow")
+        self.assertEqual(
+            self.session_policy.decide(
+                "bash", '{"command": "uv run pyright src/xcode/b.py"}'
+            ),
+            "allow",
+        )
+
     def test_handler_permanent_scope(self) -> None:
         import tempfile
 
@@ -62,6 +77,26 @@ class ReplHITLHandlerTests(unittest.TestCase):
             self.assertEqual(result.scope, "permanent")
             loaded = store.load()
             self.assertIsNotNone(loaded.decide("bash", '{"command": "git push"}'))
+
+    def test_handler_permanent_scope_uses_validation_command_prefix(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = PersistentPermissionStore(Path(tmp) / "hitl.json")
+            handler = ReplHITLHandler(SessionPermissionPolicy(), store)
+            result = handler._apply_choice(
+                "始终允许",
+                self.tool,
+                {"command": "uv run pyright src/xcode/a.py"},
+            )
+
+            self.assertEqual(result.decision, "allow")
+            self.assertEqual(result.scope, "permanent")
+            loaded = store.load()
+            self.assertEqual(
+                loaded.decide("bash", '{"command": "uv run pyright src/xcode/b.py"}'),
+                "allow",
+            )
 
     def test_handler_deny(self) -> None:
         result = self.handler._apply_choice("拒绝", self.tool, {"command": "git add ."})

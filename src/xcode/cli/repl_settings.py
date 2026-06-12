@@ -63,9 +63,20 @@ def handle_permissions(
 def _format_rules(rules: tuple) -> list[str]:
     lines = []
     for rule in rules:
-        input_part = f" (input: {rule.input_contains})" if rule.input_contains else ""
+        input_part = _format_rule_input(rule)
         lines.append(f"    {rule.tool} = {rule.decision}{input_part}")
     return lines
+
+
+def _format_rule_input(rule: object) -> str:
+    """格式化权限规则的输入匹配条件。"""
+    input_contains = getattr(rule, "input_contains", None)
+    input_prefix = getattr(rule, "input_prefix", None)
+    if input_prefix:
+        return f" (prefix: {input_prefix})"
+    if input_contains:
+        return f" (input: {input_contains})"
+    return ""
 
 
 def list_permissions(
@@ -100,9 +111,7 @@ def list_permissions(
             has_any = True
             lines.append("  session:")
             for rule in rules:
-                input_part = (
-                    f" (input: {rule.input_contains})" if rule.input_contains else ""
-                )
+                input_part = _format_rule_input(rule)
                 lines.append(f"    {rule.tool} = {rule.decision}{input_part}")
 
     if persistent_store is not None:
@@ -111,9 +120,7 @@ def list_permissions(
             has_any = True
             lines.append("  persistent:")
             for rule in policy.rules:
-                input_part = (
-                    f" (input: {rule.input_contains})" if rule.input_contains else ""
-                )
+                input_part = _format_rule_input(rule)
                 lines.append(f"    {rule.tool} = {rule.decision}{input_part}")
 
     if not has_any:
