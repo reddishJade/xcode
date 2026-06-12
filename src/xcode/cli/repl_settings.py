@@ -1,16 +1,31 @@
 from __future__ import annotations
 
-from typing import TypeGuard
+from typing import Protocol, TypeGuard
 
 from xcode.ai.model_modes import parse_model_mode
 from xcode.harness.observability import (
+    PermissionPolicy,
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
-from .app_contract import ModelControlApp
 from .reasoning_effort import (
     reasoning_effort_levels_for_transport,
 )
+
+
+class ModelControlApp(Protocol):
+    def get_model_info(self) -> dict[str, str]: ...
+
+    def set_model(
+        self,
+        *,
+        model: str,
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str: ...
 
 
 def _is_model_control_app(app: object) -> TypeGuard[ModelControlApp]:
@@ -25,6 +40,9 @@ def handle_permissions(
     command: str,
     session_policy: SessionPermissionPolicy | None,
     persistent_store: PersistentPermissionStore | None,
+    static_policy: PermissionPolicy | None = None,
+    restricted_dirs: tuple[str, ...] = (),
+    allowlist_mode: bool = False,
 ) -> None:
     parts = command.split(maxsplit=2)
     sub = parts[1] if len(parts) >= 2 else ""
@@ -32,37 +50,72 @@ def handle_permissions(
         tool_name = parts[2]
         persistent_store.revoke(tool_name)
         print(f"Revoked persistent permission for: {tool_name}")
-    elif sub == "clear" and session_policy is not None:
+        return
+    if sub == "clear" and session_policy is not None:
         session_policy.clear()
         print("Session permissions cleared.")
-    else:
-        list_permissions(session_policy, persistent_store)
+        return
+    list_permissions(
+        session_policy, persistent_store, static_policy, restricted_dirs, allowlist_mode
+    )
+
+
+def _format_rules(rules: tuple) -> list[str]:
+    lines = []
+    for rule in rules:
+        input_part = f" (input: {rule.input_contains})" if rule.input_contains else ""
+        lines.append(f"    {rule.tool} = {rule.decision}{input_part}")
+    return lines
 
 
 def list_permissions(
     session_policy: SessionPermissionPolicy | None,
     persistent_store: PersistentPermissionStore | None,
+    static_policy: PermissionPolicy | None = None,
+    restricted_dirs: tuple[str, ...] = (),
+    allowlist_mode: bool = False,
 ) -> None:
     lines = ["<permissions>"]
+    has_any = False
+
+    if static_policy is not None and static_policy.rules:
+        has_any = True
+        lines.append("  static:")
+        lines.extend("    " + l for l in _format_rules(static_policy.rules))
+
+    if restricted_dirs:
+        has_any = True
+        lines.append("  restricted_dirs:")
+        for d in restricted_dirs:
+            lines.append(f"    {d}")
+
+    if allowlist_mode:
+        has_any = True
+        lines.append("  mode: allowlist (non-allowed tools ask)")
+
     if session_policy is not None:
         rules = session_policy.rules
         if rules:
+            has_any = True
             lines.append("  session:")
             for rule in rules:
-                input_contains = (
+                input_part = (
                     f" (input: {rule.input_contains})" if rule.input_contains else ""
                 )
-                lines.append(f"    {rule.tool} = {rule.decision}{input_contains}")
+                lines.append(f"    {rule.tool} = {rule.decision}{input_part}")
+
     if persistent_store is not None:
         policy = persistent_store.load()
         if policy.rules:
+            has_any = True
             lines.append("  persistent:")
             for rule in policy.rules:
-                input_contains = (
+                input_part = (
                     f" (input: {rule.input_contains})" if rule.input_contains else ""
                 )
-                lines.append(f"    {rule.tool} = {rule.decision}{input_contains}")
-    if len(lines) == 1:
+                lines.append(f"    {rule.tool} = {rule.decision}{input_part}")
+
+    if not has_any:
         lines.append("  (none)")
     lines.append("</permissions>")
     print("\n".join(lines))

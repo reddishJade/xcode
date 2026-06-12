@@ -35,6 +35,7 @@ from .repl_settings import (
 )
 from .repl_tools import run_tool_command
 from xcode.harness.observability import (
+    PermissionPolicy,
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
@@ -383,7 +384,12 @@ def _has_large_tool_result(
 
 def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
     """列出、撤销或清除权限规则。"""
-    handle_permissions(cmd, ctx.session_policy, ctx.persistent_store)
+    handle_permissions(
+        cmd, ctx.session_policy, ctx.persistent_store,
+        static_policy=ctx.static_policy,
+        restricted_dirs=ctx.restricted_dirs,
+        allowlist_mode=ctx.allowlist_mode,
+    )
     return False
 
 
@@ -538,6 +544,9 @@ def handle_command(
     prompt_session: PromptLike,
     session_policy: SessionPermissionPolicy | None = None,
     persistent_store: PersistentPermissionStore | None = None,
+    static_policy: PermissionPolicy | None = None,
+    restricted_dirs: tuple[str, ...] = (),
+    allowlist_mode: bool = False,
 ) -> bool:
     ctx = CommandContext(
         store=store,
@@ -547,6 +556,9 @@ def handle_command(
         prompt_session=prompt_session,
         session_policy=session_policy,
         persistent_store=persistent_store,
+        static_policy=static_policy,
+        restricted_dirs=restricted_dirs,
+        allowlist_mode=allowlist_mode,
     )
     for prefix in sorted(COMMAND_REGISTRY, key=len, reverse=True):
         entry = COMMAND_REGISTRY[prefix]

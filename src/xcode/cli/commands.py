@@ -9,6 +9,7 @@ from .markdown import MarkdownRenderer
 from xcode.harness.config import ExecutionMode
 from xcode.harness.session import SessionStore
 from xcode.harness.observability import (
+    PermissionPolicy,
     PersistentPermissionStore,
     SessionPermissionPolicy,
 )
@@ -41,6 +42,9 @@ class CommandContext:
     prompt_session: PromptLike
     session_policy: SessionPermissionPolicy | None = None
     persistent_store: PersistentPermissionStore | None = None
+    static_policy: PermissionPolicy | None = None
+    restricted_dirs: tuple[str, ...] = ()
+    allowlist_mode: bool = False
 
 
 CommandHandler = Callable[[str, CommandContext], bool]
