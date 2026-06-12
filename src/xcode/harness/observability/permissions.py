@@ -1,9 +1,17 @@
 """工具执行的 allow/deny/ask 权限策略与 HITL 授权模型。
 
-三层权限架构：
-Layer 1: permission_mode (strict/normal/permissive) - 用户入口
-Layer 2: sandbox_mode, approval_policy, network_access, writable_roots, restricted_dirs
-Layer 3: deny_tools, ask_tools, allow_tools (deny > ask > allow)
+权限架构：静态策略（配置） + 动态策略（执行模式）+ HITL 授权（会话/持久）
+
+决策优先级（从高到低）：
+0. restricted_dirs — 目录限制，硬阻断
+1. 静态 deny — SecurityRuntimeConfig.deny_tools
+2. 执行模式 deny — Plan/Review 模式禁用
+3. 静态 ask — SecurityRuntimeConfig.ask_tools
+4. HITL 授权 — session/persistent 满足前面的 ask
+5. 静态 allow — SecurityRuntimeConfig.allow_tools
+6. risk_evaluator deny/ask/allow — 工具运行时风险决策
+7. 高风险审批 — tool.risk=="high" 且 approval_policy 要求审批
+8. 默认放行
 """
 
 from __future__ import annotations
@@ -12,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypeVar
+from typing import Any, Literal, Protocol
 
 from ..session import JsonValue
 
@@ -40,14 +48,6 @@ class PermissionRule:
     input_contains: str | None = None
 
 
-@dataclass(frozen=True)
-class SandboxSecuritySettings:
-    deny_tools: tuple[str, ...] = ()
-    ask_tools: tuple[str, ...] = ()
-    allow_tools: tuple[str, ...] = ()
-    restricted_dirs: tuple[str, ...] = ()
-
-
 class PermissionToolSpec(Protocol):
     @property
     def risk(self) -> str: ...
@@ -56,17 +56,22 @@ class PermissionToolSpec(Protocol):
     def risk_evaluator(self) -> PermissionRiskEvaluator | None: ...
 
 
-_PermissionToolSpecT = TypeVar("_PermissionToolSpecT", bound=PermissionToolSpec)
 PermissionApprovalCallback = Callable[
-    [_PermissionToolSpecT, dict[str, Any]], HITLResult
+    [PermissionToolSpec, dict[str, Any]], HITLResult
 ]
 
 
 class PermissionPolicy:
+    """不可变的静态权限规则集，来自配置。
+
+    decide() 按 deny > ask > allow 优先级返回，不依赖规则插入顺序。
+    """
+
     def __init__(self, rules: tuple[PermissionRule, ...] = ()) -> None:
         self.rules = rules
 
     def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
+        matching: list[PermissionDecision] = []
         for rule in self.rules:
             if rule.tool != tool_name and rule.tool != "*":
                 continue
@@ -75,12 +80,18 @@ class PermissionPolicy:
                 and rule.input_contains not in action_input
             ):
                 continue
-            return rule.decision
+            matching.append(rule.decision)
+        if "deny" in matching:
+            return "deny"
+        if "ask" in matching:
+            return "ask"
+        if "allow" in matching:
+            return "allow"
         return None
 
 
 class SessionPermissionPolicy:
-    """运行时会话级权限覆写。/clear 或新 fork 时清空。"""
+    """运行时会话级权限覆写。grant() 替换同 key 的旧规则，最后添加的规则优先。"""
 
     def __init__(self) -> None:
         self._rules: list[PermissionRule] = []
@@ -91,10 +102,16 @@ class SessionPermissionPolicy:
         decision: PermissionDecision,
         input_contains: str | None = None,
     ) -> None:
+        matching_key = (tool_name, input_contains)
+        self._rules = [
+            r for r in self._rules
+            if (r.tool, r.input_contains) != matching_key
+        ]
         self._rules.append(PermissionRule(tool_name, decision, input_contains))
 
     def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
-        for rule in reversed(self._rules):
+        result: PermissionDecision | None = None
+        for rule in self._rules:
             if rule.tool != tool_name and rule.tool != "*":
                 continue
             if (
@@ -102,8 +119,8 @@ class SessionPermissionPolicy:
                 and rule.input_contains not in action_input
             ):
                 continue
-            return rule.decision
-        return None
+            result = rule.decision
+        return result
 
     @property
     def rules(self) -> list[PermissionRule]:
@@ -175,83 +192,7 @@ class PersistentPermissionStore:
         self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
 
-class SettingsSandboxPermissionPolicy:
-    """基于 settings.json 配置的三层权限策略。
-
-    Layer 3 优先级：deny_tools > ask_tools > allow_tools
-    Layer 2 边界：sandbox_mode, restricted_dirs, writable_roots
-    """
-
-    def __init__(self, settings_path: Path) -> None:
-        self.settings_path = settings_path
-        self.security = self._load()
-
-    def _load(self) -> SandboxSecuritySettings:
-        if not self.settings_path.exists():
-            return SandboxSecuritySettings()
-        try:
-            raw = json.loads(self.settings_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return SandboxSecuritySettings()
-        return _sandbox_security_settings(raw)
-
-    def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
-        input_lower = action_input.lower()
-        for restricted_dir in self.security.restricted_dirs:
-            if restricted_dir.lower() in input_lower:
-                return "deny"
-
-        if tool_name in self.security.deny_tools:
-            return "deny"
-        if tool_name in self.security.ask_tools:
-            return "ask"
-        if tool_name in self.security.allow_tools:
-            return "allow"
-        if self.security.allow_tools:
-            return "ask"
-        return None
-
-
-class CompositePermissionPolicy(PermissionPolicy):
-    """组合权限策略，优先校验 settings.json 安全沙箱，然后回退到内层策略。"""
-
-    def __init__(
-        self, sandbox: SettingsSandboxPermissionPolicy, inner: PermissionPolicy | None
-    ) -> None:
-        super().__init__()
-        self.sandbox = sandbox
-        self.inner = inner
-
-    def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
-        sandbox_decision = self.sandbox.decide(tool_name, action_input)
-        if sandbox_decision is not None:
-            return sandbox_decision
-        if self.inner is not None:
-            return self.inner.decide(tool_name, action_input)
-        return None
-
-
-def _sandbox_security_settings(raw: object) -> SandboxSecuritySettings:
-    if not isinstance(raw, dict):
-        return SandboxSecuritySettings()
-    security = raw.get("security")
-    source = security if isinstance(security, dict) else raw
-    return SandboxSecuritySettings(
-        deny_tools=_string_tuple(source.get("deny_tools", source.get("deniedTools"))),
-        ask_tools=_string_tuple(source.get("ask_tools", source.get("askTools"))),
-        allow_tools=_string_tuple(
-            source.get("allow_tools", source.get("allowedTools"))
-        ),
-        restricted_dirs=_string_tuple(
-            source.get("restricted_dirs", source.get("restrictedDirs"))
-        ),
-    )
-
-
-def _string_tuple(value: object) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        return ()
-    return tuple(item for item in value if isinstance(item, str))
+# ── 辅助函数 ──
 
 
 def _permission_rule_from_data(value: object) -> PermissionRule | None:
@@ -280,54 +221,269 @@ def _approval_metadata(
     }
 
 
-# ── 统一权限决策 ──
+# ── PermissionEngine — 统一决策引擎 ──
 
 DENIED_BY_USER_GUIDANCE = (
     "; use read-only checks (e.g. git status/git diff) or request manual execution"
 )
 
+# 匹配规则来源标识
+MATCHED_RESTRICTED_DIRS = "restricted_dirs"
+MATCHED_STATIC_DENY = "static_deny"
+MATCHED_EXECUTION_MODE = "execution_mode"
+MATCHED_STATIC_ASK = "static_ask"
+MATCHED_SESSION_GRANT = "session_grant"
+MATCHED_PERSISTENT_GRANT = "persistent_grant"
+MATCHED_STATIC_ALLOW = "static_allow"
+MATCHED_RISK_EVALUATOR = "risk_evaluator"
+MATCHED_HIGH_RISK = "high_risk"
+MATCHED_DEFAULT = "default"
+
+SOURCE_CONFIG = "config"
+SOURCE_SESSION = "session"
+SOURCE_PERSISTENT = "persistent"
+SOURCE_RISK = "risk_evaluator"
+SOURCE_EXECUTION_MODE = "execution_mode"
+SOURCE_DEFAULT = "default"
+
 
 @dataclass(frozen=True)
-class PermissionCheckResult:
-    """权限决策结果。
+class PermissionEngineResult:
+    """统一权限决策结果。"""
 
-    decision 取值：
-    - "allow"  — 放行
-    - "deny"   — 硬性拒绝（策略或 risk_evaluator 返回 deny）
-    - "ask"    — 需要人工审批但无 approval_callback 可用
-    """
-
+    decision: PermissionDecision
     blocked: bool
     reason: str = ""
-    decision: Literal["allow", "deny", "ask"] = "allow"
+    matched_rule: str | None = None
+    source: str | None = None
     metadata: PermissionMetadata | None = None
 
 
-def _ask_or_deny(
-    approval_callback: PermissionApprovalCallback[_PermissionToolSpecT] | None,
-    tool_spec: _PermissionToolSpecT | None,
-    tool_input: dict[str, Any] | None,
-    tool_name: str,
-) -> PermissionCheckResult:
-    if approval_callback is not None and tool_spec is not None:
-        hitl = approval_callback(tool_spec, tool_input or {})
-        if hitl.decision == "deny":
-            return PermissionCheckResult(
-                blocked=True,
-                reason=f"tool {tool_name} denied by user{DENIED_BY_USER_GUIDANCE}",
-                decision="deny",
-                metadata=_approval_metadata("deny", hitl.scope),
+@dataclass(frozen=True)
+class PermissionEngineConfig:
+    """PermissionEngine 的静态配置。"""
+
+    static_policy: PermissionPolicy | None = None
+    session_policy: SessionPermissionPolicy | None = None
+    persistent_store: PersistentPermissionStore | None = None
+    restricted_dirs: tuple[str, ...] = ()
+    allowlist_mode: bool = False
+    high_risk_requires_approval: bool = False
+
+
+class PermissionEngine:
+    """统一权限决策引擎。
+
+    决策优先级（从高到低）：
+    0. restricted_dirs 硬阻断
+    1. 静态 deny > 执行模式 deny
+    2. 静态 ask
+    3. HITL 授权（session/persistent 满足前面的 ask）
+    4. 静态 allow
+    5. risk_evaluator（deny/ask/allow）
+    6. 高风险审批
+    7. 默认放行
+    """
+
+    def __init__(self, config: PermissionEngineConfig) -> None:
+        self._config = config
+
+    def decide(
+        self,
+        tool_name: str,
+        action_input: str,
+        *,
+        execution_decision: PermissionDecision | None = None,
+        tool_spec: PermissionToolSpec | None = None,
+        tool_input: dict[str, Any] | None = None,
+        approval_callback: PermissionApprovalCallback | None = None,
+    ) -> PermissionEngineResult:
+        # Tier 0: restricted_dirs 硬阻断
+        dir_result = self._check_restricted_dirs(action_input, tool_name)
+        if dir_result is not None:
+            return dir_result
+
+        static = self._config.static_policy
+        static_decisions: list[PermissionDecision] = []
+        static_matched: list[str] = []
+        if static is not None:
+            sd = static.decide(tool_name, action_input)
+            if sd is not None:
+                static_decisions = [sd]
+                static_matched = [MATCHED_STATIC_DENY if sd == "deny" else MATCHED_STATIC_ASK if sd == "ask" else MATCHED_STATIC_ALLOW]
+
+        # Tier 1a: 静态 deny
+        if "deny" in static_decisions:
+            return PermissionEngineResult(
+                decision="deny", blocked=True,
+                reason=f"permission denied for tool: {tool_name}",
+                matched_rule=MATCHED_STATIC_DENY, source=SOURCE_CONFIG,
             )
-        return PermissionCheckResult(
-            blocked=False,
-            decision="allow",
-            metadata=_approval_metadata("allow", hitl.scope),
+
+        # Tier 1b: 执行模式 deny
+        if execution_decision == "deny":
+            return PermissionEngineResult(
+                decision="deny", blocked=True,
+                reason=f"tool not allowed in current execution mode: {tool_name}",
+                matched_rule=MATCHED_EXECUTION_MODE, source=SOURCE_EXECUTION_MODE,
+            )
+
+        # Tier 2: 执行模式 ask（先检查 HITL）
+        if execution_decision == "ask":
+            hitl_result = self._check_hitl_grants(tool_name, action_input)
+            if hitl_result is not None:
+                return hitl_result
+            return self._ask_approval(tool_name, approval_callback, tool_spec, tool_input)
+
+        # Tier 3: 静态 ask（先检查 HITL）
+        if "ask" in static_decisions:
+            hitl_result = self._check_hitl_grants(tool_name, action_input)
+            if hitl_result is not None:
+                return hitl_result
+            return self._ask_approval(tool_name, approval_callback, tool_spec, tool_input)
+
+        # Tier 4: 静态 allow
+        if "allow" in static_decisions:
+            return PermissionEngineResult(
+                decision="allow", blocked=False,
+                matched_rule=MATCHED_STATIC_ALLOW, source=SOURCE_CONFIG,
+            )
+
+        # Tier 5a: 允许列表模式 — 非白名单工具 ask
+        if self._config.allowlist_mode:
+            hitl_result = self._check_hitl_grants(tool_name, action_input)
+            if hitl_result is not None:
+                return hitl_result
+            return self._ask_approval(tool_name, approval_callback, tool_spec, tool_input)
+
+        # Tier 5b: risk_evaluator 动态决策
+        risk_result = self._evaluate_risk(
+            tool_name, action_input, tool_spec, tool_input,
+            approval_callback,
         )
-    return PermissionCheckResult(
-        blocked=True,
-        reason=f"tool requires approval: {tool_name}",
-        decision="ask",
-    )
+        if risk_result is not None:
+            return risk_result
+
+        # Tier 6: 高风险工具默认审批
+        if self._should_check_high_risk(tool_spec):
+            hitl_result = self._check_hitl_grants(tool_name, action_input)
+            if hitl_result is not None:
+                return hitl_result
+            return self._ask_approval(tool_name, approval_callback, tool_spec, tool_input)
+
+        # Tier 7: 默认放行
+        return PermissionEngineResult(
+            decision="allow", blocked=False,
+            matched_rule=MATCHED_DEFAULT, source=SOURCE_DEFAULT,
+        )
+
+    # ── 内部检查方法 ──
+
+    def _check_restricted_dirs(
+        self, action_input: str, tool_name: str,
+    ) -> PermissionEngineResult | None:
+        input_lower = action_input.lower()
+        for restricted_dir in self._config.restricted_dirs:
+            if restricted_dir.lower() in input_lower:
+                return PermissionEngineResult(
+                    decision="deny", blocked=True,
+                    reason=f"restricted directory matched for tool: {tool_name}",
+                    matched_rule=MATCHED_RESTRICTED_DIRS, source=SOURCE_CONFIG,
+                )
+        return None
+
+    def _check_hitl_grants(
+        self, tool_name: str, action_input: str,
+    ) -> PermissionEngineResult | None:
+        session = self._config.session_policy
+        if session is not None:
+            sd = session.decide(tool_name, action_input)
+            if sd is not None and sd != "ask":
+                return PermissionEngineResult(
+                    decision=sd, blocked=sd == "deny",
+                    matched_rule=MATCHED_SESSION_GRANT, source=SOURCE_SESSION,
+                    metadata=_approval_metadata(sd, "session") if sd != "deny" else None,
+                )
+
+        persistent = self._config.persistent_store
+        if persistent is not None:
+            pp = persistent.load()
+            pd = pp.decide(tool_name, action_input)
+            if pd is not None and pd != "ask":
+                return PermissionEngineResult(
+                    decision=pd, blocked=pd == "deny",
+                    matched_rule=MATCHED_PERSISTENT_GRANT, source=SOURCE_PERSISTENT,
+                    metadata=_approval_metadata(pd, "permanent") if pd != "deny" else None,
+                )
+        return None
+
+    def _evaluate_risk(
+        self,
+        tool_name: str,
+        action_input: str,
+        tool_spec: PermissionToolSpec | None,
+        tool_input: dict[str, Any] | None,
+        approval_callback: PermissionApprovalCallback | None,
+    ) -> PermissionEngineResult | None:
+        if tool_spec is None or not tool_spec.risk_evaluator:
+            return None
+        risk_decision = tool_spec.risk_evaluator(tool_input or {})
+        if risk_decision == "deny":
+            return PermissionEngineResult(
+                decision="deny", blocked=True,
+                reason=f"permission denied for tool: {tool_name}",
+                matched_rule=MATCHED_RISK_EVALUATOR, source=SOURCE_RISK,
+            )
+        if risk_decision == "ask":
+            hitl_result = self._check_hitl_grants(tool_name, action_input)
+            if hitl_result is not None:
+                return hitl_result
+            return self._ask_approval(tool_name, approval_callback, tool_spec, tool_input)
+        if risk_decision == "allow":
+            return PermissionEngineResult(
+                decision="allow", blocked=False,
+                matched_rule=MATCHED_RISK_EVALUATOR, source=SOURCE_RISK,
+            )
+        return None
+
+    def _should_check_high_risk(self, tool_spec: PermissionToolSpec | None) -> bool:
+        return (
+            self._config.high_risk_requires_approval
+            and tool_spec is not None
+            and tool_spec.risk == "high"
+        )
+
+    def _ask_approval(
+        self,
+        tool_name: str,
+        approval_callback: PermissionApprovalCallback | None,
+        tool_spec: PermissionToolSpec | None,
+        tool_input: dict[str, Any] | None,
+    ) -> PermissionEngineResult:
+        if approval_callback is not None and tool_spec is not None:
+            hitl = approval_callback(tool_spec, tool_input or {})
+            if hitl.decision == "deny":
+                return PermissionEngineResult(
+                    decision="deny", blocked=True,
+                    reason=f"tool {tool_name} denied by user{DENIED_BY_USER_GUIDANCE}",
+                    matched_rule=MATCHED_STATIC_ASK, source=SOURCE_SESSION,
+                    metadata=_approval_metadata("deny", hitl.scope),
+                )
+            return PermissionEngineResult(
+                decision="allow", blocked=False,
+                matched_rule=MATCHED_STATIC_ASK, source=SOURCE_SESSION,
+                metadata=_approval_metadata("allow", hitl.scope),
+            )
+        return PermissionEngineResult(
+            decision="ask", blocked=True,
+            reason=f"tool requires approval: {tool_name}",
+            matched_rule=MATCHED_STATIC_ASK,
+        )
+
+
+# ── 向后兼容包装 ──
+
+PermissionCheckResult = PermissionEngineResult
 
 
 def check_tool_permission(
@@ -335,65 +491,23 @@ def check_tool_permission(
     action_input: str,
     *,
     permission_policy: PermissionPolicy | None = None,
-    approval_callback: PermissionApprovalCallback[_PermissionToolSpecT] | None = None,
-    tool_spec: _PermissionToolSpecT | None = None,
+    approval_callback: PermissionApprovalCallback | None = None,
+    tool_spec: PermissionToolSpec | None = None,
     tool_input: dict[str, Any] | None = None,
     high_risk_requires_approval: bool = False,
-) -> PermissionCheckResult:
-    """统一权限决策入口。
+) -> PermissionEngineResult:
+    """统一权限决策入口（向后兼容包装）。
 
-    决策优先级（从高到低）：
-    1. PermissionPolicy 返回 "deny" → 阻断
-    2. PermissionPolicy 返回 "ask" → 需要 approval
-    3. PermissionPolicy 返回 "allow" → 放行
-    4. risk_evaluator 返回 "deny" → 阻断
-    5. risk_evaluator 返回 "ask" → 需要 approval
-    6. risk_evaluator 返回 "allow" → 放行
-    7. high_risk_requires_approval=True 且 tool.risk=="high" → 需要 approval
-    8. 否则放行
-
-    三层权限架构：
-    - Layer 3 (工具规则): deny_tools > ask_tools > allow_tools
-    - Layer 2 (底层安全): sandbox_mode, restricted_dirs
-    - Layer 1 (permission_mode): 由 PermissionPolicy 实现的简化入口
-
-    当需要 approval 但无 approval_callback 时返回 decision="ask"。
-    当 approval_callback 授权通过时 metadata 包含 user_decision 和 approval_scope。
+    将参数转换为 PermissionEngine 配置并委托决策。
     """
-    # Layer 3 + Layer 2: PermissionPolicy 决策（包含 deny > ask > allow 优先级）
-    if permission_policy is not None:
-        policy_decision = permission_policy.decide(tool_name, action_input)
-        if policy_decision == "deny":
-            return PermissionCheckResult(
-                blocked=True,
-                reason=f"permission denied for tool: {tool_name}",
-                decision="deny",
-            )
-        if policy_decision == "ask":
-            return _ask_or_deny(approval_callback, tool_spec, tool_input, tool_name)
-        if policy_decision == "allow":
-            return PermissionCheckResult(blocked=False, decision="allow")
-
-    # 运行时 risk_evaluator 动态决策
-    if tool_spec is not None and tool_spec.risk_evaluator:
-        risk_decision = tool_spec.risk_evaluator(tool_input or {})
-        if risk_decision == "deny":
-            return PermissionCheckResult(
-                blocked=True,
-                reason=f"permission denied for tool: {tool_name}",
-                decision="deny",
-            )
-        if risk_decision == "ask":
-            return _ask_or_deny(approval_callback, tool_spec, tool_input, tool_name)
-        if risk_decision == "allow":
-            return PermissionCheckResult(blocked=False, decision="allow")
-
-    # 静态高风险工具默认需审批
-    if (
-        high_risk_requires_approval
-        and tool_spec is not None
-        and tool_spec.risk == "high"
-    ):
-        return _ask_or_deny(approval_callback, tool_spec, tool_input, tool_name)
-
-    return PermissionCheckResult(blocked=False, decision="allow")
+    config = PermissionEngineConfig(
+        static_policy=permission_policy,
+        high_risk_requires_approval=high_risk_requires_approval,
+    )
+    engine = PermissionEngine(config)
+    return engine.decide(
+        tool_name, action_input,
+        tool_spec=tool_spec,
+        tool_input=tool_input,
+        approval_callback=approval_callback,
+    )
