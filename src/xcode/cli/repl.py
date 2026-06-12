@@ -6,10 +6,9 @@ from pathlib import Path
 import sys
 import threading
 import time
-from typing import Any, cast
+from typing import cast
 
 from rich.console import Console
-from rich.text import Text
 
 from .commands import PromptLike, PromptText, ReplState
 from .file_refs import expand_file_references
@@ -17,20 +16,12 @@ from .markdown import MarkdownRenderer, TerminalMarkdownRenderer
 from .repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
 from .repl_hitl import ReplHITLHandler
 from .repl_rendering import (
-    CLI_COLOR_ERROR,
-    CLI_COLOR_SUCCESS,
-    CLI_COLOR_THINKING,
-    CLI_COLOR_TOOL,
     LiveMarkdownStream,
-    LiveReasoningPreview,
     create_prompt_session,
-    format_elapsed,
     input_prompt,
     print_startup_banner,
-    reasoning_preview_lines,
-    should_print_reasoning_summary,
-    single_line_preview,
 )
+from .repl_turn_handler import ReasoningHandler, ToolCallHandler
 from .reasoning_effort import reasoning_effort_levels_for_transport
 from xcode.ai.registry import get_models, get_providers
 from .repl_sessions import (
@@ -39,15 +30,10 @@ from .repl_sessions import (
     sync_agent_history,
 )
 from .repl_tools import (
-    brief_input,
     event_to_dict,
     file_reference_event,
     final_stop_reason,
-    print_tool_call_rich,
-    print_tool_result_rich,
     run_shell_shortcut,
-    summarize_intents,
-    tool_intent,
 )
 from xcode.harness.agent_runtime.events import (
     AssistantEventBlock,
@@ -57,13 +43,10 @@ from xcode.harness.agent_runtime.events import (
     ReasoningDeltaStructuredEvent,
     StructuredAgentEvent,
     TextDeltaStructuredEvent,
-    ToolResultBlock,
     ToolResultStructuredEvent,
-    ToolUpdateData,
     ToolUpdateStructuredEvent,
     ToolUseStructuredEvent,
 )
-from xcode.ai.events import ToolCall
 from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.observability import (
     PersistentPermissionStore,
@@ -338,32 +321,29 @@ class _ReplTurnRenderer:
         self.stopped_reason: str | None = None
         self.interrupted = False
         self.live_console = Console(file=sys.stdout)
-        self.reasoning_started_at: float | None = None
-        self.reasoning_text = ""
-        self.reasoning_preview = LiveReasoningPreview(self.live_console)
         self.answer_stream = LiveMarkdownStream(self.live_console)
         self.streamed_text = False
-        self.tool_group: dict[str, Any] | None = None
-        self.tool_call_labels: dict[str, str] = {}
-        self._progress_tool_id: str | None = None
+        self.tool_handler = ToolCallHandler(state, self.live_console)
+        self.reasoning_handler = ReasoningHandler(self.live_console)
 
     def handle_event(self, event: StructuredAgentEvent) -> None:
         if isinstance(event, ReasoningDeltaStructuredEvent):
-            self._handle_reasoning_delta(event.data)
+            self.tool_handler.flush_group()
+            self.reasoning_handler.handle_delta(event.data)
             return
 
-        self._finish_reasoning_preview()
+        self.reasoning_handler.finish()
         if isinstance(event, TextDeltaStructuredEvent):
             self._handle_text_delta(event.data)
         elif isinstance(event, AssistantStructuredEvent):
             self._handle_assistant_event(event.data)
         elif isinstance(event, ToolUseStructuredEvent):
-            self._record_tool_call(event.data)
+            self.tool_handler.record_tool_call(event.data)
         elif isinstance(event, ToolUpdateStructuredEvent):
-            self._handle_tool_update(event.data)
+            self.tool_handler.handle_tool_update(event.data)
         elif isinstance(event, ToolResultStructuredEvent):
-            self._record_tool_result(event.data)
-            self._clear_progress()
+            self.tool_handler.record_tool_result(event.data)
+            self.tool_handler.clear_progress()
         elif isinstance(event, FinalStructuredEvent):
             self._handle_final_event(event.data)
 
@@ -371,30 +351,21 @@ class _ReplTurnRenderer:
         partial_answer = "".join(self.current_step_thoughts) or (
             "".join(self.step_answers) if self.step_answers else ""
         )
-        return self.reasoning_text, partial_answer
+        return self.reasoning_handler.text, partial_answer
 
     def close(self) -> None:
-        self._finish_reasoning_preview()
+        self.reasoning_handler.finish()
         self.answer_stream.stop()
         if not self.interrupted:
-            self._flush_tool_group()
+            self.tool_handler.flush_group()
         else:
-            self.tool_group = None
+            self.tool_handler.discard_group()
 
     def clear_line(self) -> None:
-        self._safe_write("\r\033[K")
-
-    def _handle_reasoning_delta(self, event_data: str) -> None:
-        self._flush_tool_group()
-        if self.reasoning_started_at is None:
-            self.reasoning_started_at = time.perf_counter()
-        self.reasoning_text += event_data
-        lines = reasoning_preview_lines(self.reasoning_text)
-        if lines:
-            self.reasoning_preview.update(lines)
+        self.tool_handler.clear_line()
 
     def _handle_text_delta(self, event_data: str) -> None:
-        self._flush_tool_group()
+        self.tool_handler.flush_group()
         self.current_step_thoughts.append(event_data)
         self.streamed_text = True
         self.answer_stream.update("".join(self.current_step_thoughts))
@@ -414,7 +385,7 @@ class _ReplTurnRenderer:
         self.streamed_text = False
 
     def _handle_final_event(self, event_data: StructuredAgentResult) -> None:
-        self._flush_tool_group()
+        self.tool_handler.flush_group()
         final_answer = "".join(self.current_step_thoughts).strip()
         if not final_answer and event_data.answer:
             final_answer = event_data.answer.strip()
@@ -429,115 +400,6 @@ class _ReplTurnRenderer:
                 self.markdown_renderer.render(final_answer)
             self.streamed_text = False
         self.stopped_reason = final_stop_reason(event_data)
-
-    def _record_tool_call(self, event_data: ToolCall) -> None:
-        label = brief_input(event_data.name, event_data.input)
-        intent = tool_intent(event_data.name, event_data.input)
-        self.tool_call_labels[event_data.id] = label
-        if self.state.verbose:
-            print_tool_call_rich(label, self.live_console)
-            return
-        if self.tool_group is None:
-            self.tool_group = {
-                "intents": [],
-                "calls": 0,
-                "ok": 0,
-                "errors": [],
-            }
-        self.tool_group["calls"] += 1
-        if intent not in self.tool_group["intents"]:
-            self.tool_group["intents"].append(intent)
-
-    def _record_tool_result(self, event_data: ToolResultBlock) -> None:
-        if self.state.verbose:
-            print_tool_result_rich(event_data, self.state.verbose, self.live_console)
-            return
-        if self.tool_group is None:
-            return
-        if event_data.status == "ok":
-            self.tool_group["ok"] += 1
-            return
-        label = self.tool_call_labels.get(
-            event_data.tool_use_id, event_data.tool_use_id
-        )
-        self.tool_group["errors"].append((label, event_data))
-
-    def _clear_progress(self) -> None:
-        if self._progress_tool_id is not None:
-            self.clear_line()
-            self._progress_tool_id = None
-
-    def _handle_tool_update(self, event_data: ToolUpdateData) -> None:
-        tool_id = event_data.tool_call_id
-        partial = event_data.partial_result
-        if not tool_id or not partial:
-            return
-        if self._progress_tool_id != tool_id:
-            self._clear_progress()
-            self._progress_tool_id = tool_id
-        lines = [line for line in partial.splitlines() if line.strip()]
-        last_line = lines[-1] if lines else ""
-        if len(last_line) > 100:
-            last_line = last_line[:97] + "..."
-        if last_line:
-            self._safe_write(f"\r\033[K\x1b[90m  {last_line}\x1b[0m")
-
-    def _flush_tool_group(self) -> None:
-        if self.tool_group is None:
-            return
-        self._clear_progress()
-        calls = int(self.tool_group["calls"])
-        errors = list(self.tool_group["errors"])
-        intents = list(self.tool_group["intents"])
-        title = summarize_intents(intents)
-        status = "failed" if errors else "done"
-        style = CLI_COLOR_ERROR if errors else CLI_COLOR_SUCCESS
-        self.live_console.print(Text(f"  • Explore: {title}", style=CLI_COLOR_TOOL))
-        self.live_console.print(Text(f"    {status}: {calls} tools", style=style))
-        for label, result in errors:
-            summary = single_line_preview(str(result.content), width=120)
-            self.live_console.print(
-                Text(f"    error: {label}: {summary}", style=CLI_COLOR_ERROR)
-            )
-        self.tool_group = None
-
-    def _finish_reasoning_preview(self) -> None:
-        if self.reasoning_started_at is None:
-            return
-        elapsed = time.perf_counter() - self.reasoning_started_at
-        self.reasoning_preview.stop()
-        if not should_print_reasoning_summary(self.reasoning_text, elapsed):
-            self.reasoning_started_at = None
-            self.reasoning_text = ""
-            return
-        preview = single_line_preview(self.reasoning_text)
-        self.live_console.print(
-            Text(
-                f"  • thinked for {format_elapsed(elapsed)}",
-                style=CLI_COLOR_THINKING,
-            )
-        )
-        if preview:
-            self.live_console.print(Text(f"    {preview}", style=CLI_COLOR_THINKING))
-        self.reasoning_started_at = None
-        self.reasoning_text = ""
-
-    def _safe_write(self, text: str) -> None:
-        try:
-            sys.stdout.write(text)
-            sys.stdout.flush()
-        except UnicodeEncodeError:
-            safe_text = (
-                text.replace("•", "*")
-                .replace("×", "x")
-                .replace("✘", "x")
-                .replace("⊘", "o")
-            )
-            encoding = sys.stdout.encoding or "utf-8"
-            sys.stdout.write(
-                safe_text.encode(encoding, errors="replace").decode(encoding)
-            )
-            sys.stdout.flush()
 
 
 def _assistant_has_tool_calls(
