@@ -44,6 +44,8 @@ def _safe_write(text: str) -> None:
 
 
 class ToolCallHandler:
+    """追踪工具调用、结果和更新，管理工具组聚合渲染和进度显示。"""
+
     def __init__(self, state: ReplState, live_console: Console) -> None:
         self.state = state
         self.live_console = live_console
@@ -136,6 +138,8 @@ class ToolCallHandler:
 
 
 class ReasoningHandler:
+    """处理推理过程的 delta 流式事件，管理实时预览和摘要输出。"""
+
     def __init__(self, live_console: Console) -> None:
         self.live_console = live_console
         self.reasoning_started_at: float | None = None
