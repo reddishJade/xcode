@@ -55,62 +55,12 @@ class WorktreeTaskRunner:
             return f"unknown worktree task: {task_id}"
 
         if not force:
-            # Check dirty status: modified, staged, or untracked files
-            try:
-                status_out = self.command_runner(
-                    ["git", "status", "--porcelain"], task.path
-                )
-                if status_out.strip():
-                    return f"cannot remove worktree task {task_id}: worktree is dirty (has uncommitted changes)"
-            except Exception:
-                logging.warning(
-                    "git status check failed in worktree removal", exc_info=True
-                )
-            try:
-                has_upstream = True
-                try:
-                    self.command_runner(
-                        ["git", "rev-parse", "--abbrev-ref", "@{u}"], task.path
-                    )
-                except Exception:
-                    has_upstream = False
-
-                if has_upstream:
-                    cherry_out = self.command_runner(
-                        ["git", "cherry", "@{u}"], task.path
-                    )
-                else:
-                    base_branch: str | None = "main"
-                    try:
-                        self.command_runner(
-                            ["git", "rev-parse", "--verify", "main"], task.path
-                        )
-                    except Exception:
-                        try:
-                            self.command_runner(
-                                ["git", "rev-parse", "--verify", "master"], task.path
-                            )
-                            base_branch = "master"
-                        except Exception:
-                            base_branch = None
-
-                    if base_branch:
-                        cherry_out = self.command_runner(
-                            ["git", "cherry", base_branch], task.path
-                        )
-                    else:
-                        cherry_out = ""
-
-                unmerged_commits = [
-                    line for line in cherry_out.splitlines() if line.startswith("+")
-                ]
-                if unmerged_commits:
-                    return f"cannot remove worktree task {task_id}: branch '{task.branch}' has unmerged/unpushed commits"
-            except Exception:
-                logging.warning(
-                    "git cherry/unmerged check failed in worktree removal",
-                    exc_info=True,
-                )
+            dirty_check = self._check_dirty(task)
+            if dirty_check:
+                return dirty_check
+            unpushed_check = self._check_unpushed_commits(task)
+            if unpushed_check:
+                return unpushed_check
 
         cmd = ["git", "worktree", "remove"]
         if force:
@@ -120,6 +70,54 @@ class WorktreeTaskRunner:
         self.command_runner(cmd, self.repo_root)
         del self.tasks[task_id]
         return f"removed worktree task {task_id}"
+
+    def _check_dirty(self, task: WorktreeTask) -> str | None:
+        try:
+            status_out = self.command_runner(
+                ["git", "status", "--porcelain"], task.path
+            )
+            if status_out.strip():
+                return f"cannot remove worktree task {task.id}: worktree is dirty (has uncommitted changes)"
+        except Exception:
+            logging.warning(
+                "git status check failed in worktree removal", exc_info=True
+            )
+        return None
+
+    def _check_unpushed_commits(self, task: WorktreeTask) -> str | None:
+        try:
+            cherry_out = self._get_cherry_output(task)
+            unmerged_commits = [
+                line for line in cherry_out.splitlines() if line.startswith("+")
+            ]
+            if unmerged_commits:
+                return f"cannot remove worktree task {task.id}: branch '{task.branch}' has unmerged/unpushed commits"
+        except Exception:
+            logging.warning(
+                "git cherry/unmerged check failed in worktree removal",
+                exc_info=True,
+            )
+        return None
+
+    def _get_cherry_output(self, task: WorktreeTask) -> str:
+        has_upstream = True
+        try:
+            self.command_runner(["git", "rev-parse", "--abbrev-ref", "@{u}"], task.path)
+        except Exception:
+            has_upstream = False
+
+        if has_upstream:
+            return self.command_runner(["git", "cherry", "@{u}"], task.path)
+
+        for candidate in ("main", "master"):
+            try:
+                self.command_runner(
+                    ["git", "rev-parse", "--verify", candidate], task.path
+                )
+                return self.command_runner(["git", "cherry", candidate], task.path)
+            except Exception:
+                continue
+        return ""
 
 
 def build_worktree_tools(runner: WorktreeTaskRunner) -> tuple[ToolSpec, ...]:
