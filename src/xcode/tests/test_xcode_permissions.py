@@ -164,7 +164,9 @@ class XcodePermissionsTests(unittest.TestCase):
             PermissionEngineConfig(high_risk_requires_approval=True)
         )
         result = engine.decide(
-            "danger", "hello", tool_spec=tool,
+            "danger",
+            "hello",
+            tool_spec=tool,
             approval_callback=lambda _t, _i: HITLResult("allow", "once"),
         )
         self.assertFalse(result.blocked)

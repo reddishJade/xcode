@@ -30,7 +30,6 @@ from ..observability import (
     PermissionEngine,
     PermissionEngineConfig,
     PermissionPolicy,
-    check_tool_permission,
     redact_text,
 )
 

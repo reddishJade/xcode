@@ -84,10 +84,12 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
     def test_permission_engine_sandbox_equivalent(self) -> None:
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((
-                    PermissionRule("read_file", "allow"),
-                    PermissionRule("bash", "deny"),
-                )),
+                static_policy=PermissionPolicy(
+                    (
+                        PermissionRule("read_file", "allow"),
+                        PermissionRule("bash", "deny"),
+                    )
+                ),
                 restricted_dirs=("/private/secrets", "C:/Windows"),
                 allowlist_mode=True,
             )
@@ -116,9 +118,7 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
     def test_permission_engine_restricted_dirs_override_allowed(self) -> None:
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((
-                    PermissionRule("read_file", "allow"),
-                )),
+                static_policy=PermissionPolicy((PermissionRule("read_file", "allow"),)),
                 restricted_dirs=("secrets",),
             )
         )

@@ -385,7 +385,9 @@ def _has_large_tool_result(
 def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
     """列出、撤销或清除权限规则。"""
     handle_permissions(
-        cmd, ctx.session_policy, ctx.persistent_store,
+        cmd,
+        ctx.session_policy,
+        ctx.persistent_store,
         static_policy=ctx.static_policy,
         restricted_dirs=ctx.restricted_dirs,
         allowlist_mode=ctx.allowlist_mode,

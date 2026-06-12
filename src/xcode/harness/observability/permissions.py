@@ -56,9 +56,7 @@ class PermissionToolSpec(Protocol):
     def risk_evaluator(self) -> PermissionRiskEvaluator | None: ...
 
 
-PermissionApprovalCallback = Callable[
-    [PermissionToolSpec, dict[str, Any]], HITLResult
-]
+PermissionApprovalCallback = Callable[[Any, dict[str, Any]], HITLResult]
 
 
 class PermissionPolicy:
@@ -104,8 +102,7 @@ class SessionPermissionPolicy:
     ) -> None:
         matching_key = (tool_name, input_contains)
         self._rules = [
-            r for r in self._rules
-            if (r.tool, r.input_contains) != matching_key
+            r for r in self._rules if (r.tool, r.input_contains) != matching_key
         ]
         self._rules.append(PermissionRule(tool_name, decision, input_contains))
 
@@ -305,27 +302,29 @@ class PermissionEngine:
 
         static = self._config.static_policy
         static_decisions: list[PermissionDecision] = []
-        static_matched: list[str] = []
         if static is not None:
             sd = static.decide(tool_name, action_input)
             if sd is not None:
                 static_decisions = [sd]
-                static_matched = [MATCHED_STATIC_DENY if sd == "deny" else MATCHED_STATIC_ASK if sd == "ask" else MATCHED_STATIC_ALLOW]
 
         # Tier 1a: 静态 deny
         if "deny" in static_decisions:
             return PermissionEngineResult(
-                decision="deny", blocked=True,
+                decision="deny",
+                blocked=True,
                 reason=f"permission denied for tool: {tool_name}",
-                matched_rule=MATCHED_STATIC_DENY, source=SOURCE_CONFIG,
+                matched_rule=MATCHED_STATIC_DENY,
+                source=SOURCE_CONFIG,
             )
 
         # Tier 1b: 执行模式 deny
         if execution_decision == "deny":
             return PermissionEngineResult(
-                decision="deny", blocked=True,
+                decision="deny",
+                blocked=True,
                 reason=f"tool not allowed in current execution mode: {tool_name}",
-                matched_rule=MATCHED_EXECUTION_MODE, source=SOURCE_EXECUTION_MODE,
+                matched_rule=MATCHED_EXECUTION_MODE,
+                source=SOURCE_EXECUTION_MODE,
             )
 
         # Tier 2: 执行模式 ask（先检查 HITL）
@@ -333,20 +332,26 @@ class PermissionEngine:
             hitl_result = self._check_hitl_grants(tool_name, action_input)
             if hitl_result is not None:
                 return hitl_result
-            return self._ask_approval(tool_name, approval_callback, tool_spec, tool_input)
+            return self._ask_approval(
+                tool_name, approval_callback, tool_spec, tool_input
+            )
 
         # Tier 3: 静态 ask（先检查 HITL）
         if "ask" in static_decisions:
             hitl_result = self._check_hitl_grants(tool_name, action_input)
             if hitl_result is not None:
                 return hitl_result
-            return self._ask_approval(tool_name, approval_callback, tool_spec, tool_input)
+            return self._ask_approval(
+                tool_name, approval_callback, tool_spec, tool_input
+            )
 
         # Tier 4: 静态 allow
         if "allow" in static_decisions:
             return PermissionEngineResult(
-                decision="allow", blocked=False,
-                matched_rule=MATCHED_STATIC_ALLOW, source=SOURCE_CONFIG,
+                decision="allow",
+                blocked=False,
+                matched_rule=MATCHED_STATIC_ALLOW,
+                source=SOURCE_CONFIG,
             )
 
         # Tier 5a: 允许列表模式 — 非白名单工具 ask
@@ -354,11 +359,16 @@ class PermissionEngine:
             hitl_result = self._check_hitl_grants(tool_name, action_input)
             if hitl_result is not None:
                 return hitl_result
-            return self._ask_approval(tool_name, approval_callback, tool_spec, tool_input)
+            return self._ask_approval(
+                tool_name, approval_callback, tool_spec, tool_input
+            )
 
         # Tier 5b: risk_evaluator 动态决策
         risk_result = self._evaluate_risk(
-            tool_name, action_input, tool_spec, tool_input,
+            tool_name,
+            action_input,
+            tool_spec,
+            tool_input,
             approval_callback,
         )
         if risk_result is not None:
@@ -369,40 +379,54 @@ class PermissionEngine:
             hitl_result = self._check_hitl_grants(tool_name, action_input)
             if hitl_result is not None:
                 return hitl_result
-            return self._ask_approval(tool_name, approval_callback, tool_spec, tool_input)
+            return self._ask_approval(
+                tool_name, approval_callback, tool_spec, tool_input
+            )
 
         # Tier 7: 默认放行
         return PermissionEngineResult(
-            decision="allow", blocked=False,
-            matched_rule=MATCHED_DEFAULT, source=SOURCE_DEFAULT,
+            decision="allow",
+            blocked=False,
+            matched_rule=MATCHED_DEFAULT,
+            source=SOURCE_DEFAULT,
         )
 
     # ── 内部检查方法 ──
 
     def _check_restricted_dirs(
-        self, action_input: str, tool_name: str,
+        self,
+        action_input: str,
+        tool_name: str,
     ) -> PermissionEngineResult | None:
         input_lower = action_input.lower()
         for restricted_dir in self._config.restricted_dirs:
             if restricted_dir.lower() in input_lower:
                 return PermissionEngineResult(
-                    decision="deny", blocked=True,
+                    decision="deny",
+                    blocked=True,
                     reason=f"restricted directory matched for tool: {tool_name}",
-                    matched_rule=MATCHED_RESTRICTED_DIRS, source=SOURCE_CONFIG,
+                    matched_rule=MATCHED_RESTRICTED_DIRS,
+                    source=SOURCE_CONFIG,
                 )
         return None
 
     def _check_hitl_grants(
-        self, tool_name: str, action_input: str,
+        self,
+        tool_name: str,
+        action_input: str,
     ) -> PermissionEngineResult | None:
         session = self._config.session_policy
         if session is not None:
             sd = session.decide(tool_name, action_input)
             if sd is not None and sd != "ask":
                 return PermissionEngineResult(
-                    decision=sd, blocked=sd == "deny",
-                    matched_rule=MATCHED_SESSION_GRANT, source=SOURCE_SESSION,
-                    metadata=_approval_metadata(sd, "session") if sd != "deny" else None,
+                    decision=sd,
+                    blocked=sd == "deny",
+                    matched_rule=MATCHED_SESSION_GRANT,
+                    source=SOURCE_SESSION,
+                    metadata=_approval_metadata(sd, "session")
+                    if sd != "deny"
+                    else None,
                 )
 
         persistent = self._config.persistent_store
@@ -411,9 +435,13 @@ class PermissionEngine:
             pd = pp.decide(tool_name, action_input)
             if pd is not None and pd != "ask":
                 return PermissionEngineResult(
-                    decision=pd, blocked=pd == "deny",
-                    matched_rule=MATCHED_PERSISTENT_GRANT, source=SOURCE_PERSISTENT,
-                    metadata=_approval_metadata(pd, "permanent") if pd != "deny" else None,
+                    decision=pd,
+                    blocked=pd == "deny",
+                    matched_rule=MATCHED_PERSISTENT_GRANT,
+                    source=SOURCE_PERSISTENT,
+                    metadata=_approval_metadata(pd, "permanent")
+                    if pd != "deny"
+                    else None,
                 )
         return None
 
@@ -430,19 +458,25 @@ class PermissionEngine:
         risk_decision = tool_spec.risk_evaluator(tool_input or {})
         if risk_decision == "deny":
             return PermissionEngineResult(
-                decision="deny", blocked=True,
+                decision="deny",
+                blocked=True,
                 reason=f"permission denied for tool: {tool_name}",
-                matched_rule=MATCHED_RISK_EVALUATOR, source=SOURCE_RISK,
+                matched_rule=MATCHED_RISK_EVALUATOR,
+                source=SOURCE_RISK,
             )
         if risk_decision == "ask":
             hitl_result = self._check_hitl_grants(tool_name, action_input)
             if hitl_result is not None:
                 return hitl_result
-            return self._ask_approval(tool_name, approval_callback, tool_spec, tool_input)
+            return self._ask_approval(
+                tool_name, approval_callback, tool_spec, tool_input
+            )
         if risk_decision == "allow":
             return PermissionEngineResult(
-                decision="allow", blocked=False,
-                matched_rule=MATCHED_RISK_EVALUATOR, source=SOURCE_RISK,
+                decision="allow",
+                blocked=False,
+                matched_rule=MATCHED_RISK_EVALUATOR,
+                source=SOURCE_RISK,
             )
         return None
 
@@ -464,18 +498,23 @@ class PermissionEngine:
             hitl = approval_callback(tool_spec, tool_input or {})
             if hitl.decision == "deny":
                 return PermissionEngineResult(
-                    decision="deny", blocked=True,
+                    decision="deny",
+                    blocked=True,
                     reason=f"tool {tool_name} denied by user{DENIED_BY_USER_GUIDANCE}",
-                    matched_rule=MATCHED_STATIC_ASK, source=SOURCE_SESSION,
+                    matched_rule=MATCHED_STATIC_ASK,
+                    source=SOURCE_SESSION,
                     metadata=_approval_metadata("deny", hitl.scope),
                 )
             return PermissionEngineResult(
-                decision="allow", blocked=False,
-                matched_rule=MATCHED_STATIC_ASK, source=SOURCE_SESSION,
+                decision="allow",
+                blocked=False,
+                matched_rule=MATCHED_STATIC_ASK,
+                source=SOURCE_SESSION,
                 metadata=_approval_metadata("allow", hitl.scope),
             )
         return PermissionEngineResult(
-            decision="ask", blocked=True,
+            decision="ask",
+            blocked=True,
             reason=f"tool requires approval: {tool_name}",
             matched_rule=MATCHED_STATIC_ASK,
         )
@@ -506,7 +545,8 @@ def check_tool_permission(
     )
     engine = PermissionEngine(config)
     return engine.decide(
-        tool_name, action_input,
+        tool_name,
+        action_input,
         tool_spec=tool_spec,
         tool_input=tool_input,
         approval_callback=approval_callback,

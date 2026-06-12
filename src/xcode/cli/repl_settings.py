@@ -81,7 +81,8 @@ def list_permissions(
     if static_policy is not None and static_policy.rules:
         has_any = True
         lines.append("  static:")
-        lines.extend("    " + l for l in _format_rules(static_policy.rules))
+        for line in _format_rules(static_policy.rules):
+            lines.append("    " + line)
 
     if restricted_dirs:
         has_any = True
