@@ -24,10 +24,6 @@ from ...agent.messages import (
 from ...agent.protocols import AgentTool
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
-from ..observability.permissions import (
-    CompositePermissionPolicy,
-    SettingsSandboxPermissionPolicy,
-)
 from ..skills import ApprovalCallback, ToolSpec
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
@@ -288,15 +284,12 @@ def tool_definition_to_dict(tool: Any) -> dict[str, Any]:
 def resolve_permission_policy(
     project_root: Path | None, base: PermissionPolicy | None
 ) -> PermissionPolicy | None:
-    if project_root is None:
-        return base
-    local = project_root / ".local" / "settings.json"
-    root = project_root / "settings.json"
-    settings_path = local if local.exists() else (root if root.exists() else None)
-    if settings_path is None:
-        return base
-    sandbox = SettingsSandboxPermissionPolicy(settings_path)
-    return CompositePermissionPolicy(sandbox, base)
+    """返回静态权限策略，直接使用已通过 discover_runtime_config 合并的结果。
+
+    各配置源的合并已在 config.discover_runtime_config() 中完成，
+    无需在此处再次加载 .local/settings.json。
+    """
+    return base
 
 
 def record_last_prompt_tokens(
