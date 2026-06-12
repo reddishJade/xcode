@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from dataclasses import asdict
 from typing import Any
 
@@ -37,9 +36,6 @@ from xcode.harness.agent_runtime.events import (
 )
 from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.skills import ToolInput, ToolSpec, run_tool_result
-
-
-_console = Console(file=sys.stdout)
 
 
 def run_tool_command(command: str, app: object) -> str:
@@ -276,19 +272,17 @@ def _assistant_block_payload(block: AssistantEventBlock) -> dict[str, object]:
     raise TypeError(f"unsupported assistant block: {type(block).__name__}")
 
 
-def print_tool_call_rich(label: str, console: Console | None = None) -> None:
-    target = console or _console
-    target.print(Text(f"  • {label}", style=CLI_COLOR_TOOL))
+def print_tool_call_rich(label: str, console: Console) -> None:
+    console.print(Text(f"  • {label}", style=CLI_COLOR_TOOL))
 
 
 def print_tool_result_rich(
     data: ToolResultBlock,
     verbose: bool,
-    console: Console | None = None,
+    console: Console,
 ) -> None:
     if data.status == "ok" and not verbose:
         return
-    target = console or _console
     border = {
         "error": CLI_COLOR_ERROR,
         "denied": CLI_COLOR_ERROR,
@@ -299,7 +293,7 @@ def print_tool_result_rich(
     )
     limit = 600 if verbose else 200
     summary = single_line_preview(str(data.content), width=limit)
-    target.print(Text(f"  ← {mark} {summary}", style=border))
+    console.print(Text(f"  ← {mark} {summary}", style=border))
 
 
 def final_stop_reason(data: StructuredAgentResult) -> str | None:
