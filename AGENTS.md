@@ -268,7 +268,7 @@ Do not run end-to-end suites that require specific external environment variable
 
 ```powershell
 # 安装可编辑包
-.\.venv\Scripts\python.exe -m pip install -e .
+uv pip install -e .
 
 # 针对性测试
 uv run python -m unittest src.xcode.tests.test_xcode_app_runtime

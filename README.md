@@ -49,11 +49,11 @@ Xcode 是一个轻量级 Python coding agent harness。围绕结构化事件流�
 ## 快速开始
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -e .
+uv pip install -e .
 uv run python -m unittest discover src\xcode\tests
-.\.venv\Scripts\python.exe -m xcode.main
-.\.venv\Scripts\python.exe -m xcode.main --prompt "说明项目的核心工具。"
-.\.venv\Scripts\python.exe -m xcode.main --resume
+uv run xcode
+uv run xcode --prompt "说明项目的核心工具。"
+uv run xcode --resume
 ```
 
 ---
