@@ -342,6 +342,15 @@ def _edit_file_impl(
 
 
 def _prepare_edit_arguments(data: dict[str, Any]) -> dict[str, Any]:
+    """归一化 LLM 可能输出的不规范 JSON 结构。
+
+    LLM 有时会生成不符合 JSON schema 的 edit_file 输入，此函数处理已知偏差：
+
+    1. edits 字段被序列化为字符串 → 尝试 JSON 解析并还原为数组
+    2. old_text/new_text 被放在顶层而非 edits 数组中 → 自动合并到 edits 内
+
+    移除条件：升级到足够可靠的模型版本后，可移除此归一化层，改用严格 schema 校验。
+    """
     result = dict(data)
 
     raw_edits = result.get("edits")
