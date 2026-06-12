@@ -32,12 +32,11 @@ def handle_permissions(
         tool_name = parts[2]
         persistent_store.revoke(tool_name)
         print(f"Revoked persistent permission for: {tool_name}")
-        return
-    if sub == "clear" and session_policy is not None:
+    elif sub == "clear" and session_policy is not None:
         session_policy.clear()
         print("Session permissions cleared.")
-        return
-    list_permissions(session_policy, persistent_store)
+    else:
+        list_permissions(session_policy, persistent_store)
 
 
 def list_permissions(
