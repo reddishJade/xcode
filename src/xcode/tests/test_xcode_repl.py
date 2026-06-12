@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
+from xcode.cli.app_contract import ReplApp
 from xcode.cli.completion import ReplCompleter
 from xcode.cli.commands import PromptText, ReplState
 from xcode.cli.repl import current_effort_options, run_repl
@@ -33,7 +34,8 @@ from xcode.harness.agent_runtime.events import (
     ToolUseStructuredEvent,
 )
 from xcode.ai.events import ToolCall
-from xcode.harness.skills import ToolSpec
+from xcode.agent.messages import AgentMessage
+from xcode.harness.skills import ApprovalCallback, ToolSpec
 
 
 class XcodeReplTests(unittest.TestCase):
@@ -314,7 +316,9 @@ class XcodeReplTests(unittest.TestCase):
             renderer = FakeRenderer()
 
             with redirect_stdout(StringIO()):
-                code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+                code = run_repl(
+                    cast(ReplApp, app), Path(temp_dir), prompt, renderer=renderer
+                )
 
             self.assertEqual(code, 0)
             self.assertEqual(renderer.rendered, ["hello"])
@@ -327,7 +331,9 @@ class XcodeReplTests(unittest.TestCase):
             output = StringIO()
 
             with redirect_stdout(output):
-                code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+                code = run_repl(
+                    cast(ReplApp, app), Path(temp_dir), prompt, renderer=renderer
+                )
 
             self.assertEqual(code, 0)
             self.assertEqual(app.commands, ["echo hello"])
@@ -347,7 +353,9 @@ class XcodeReplTests(unittest.TestCase):
             output = StringIO()
 
             with redirect_stdout(output):
-                code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+                code = run_repl(
+                    cast(ReplApp, app), Path(temp_dir), prompt, renderer=renderer
+                )
 
             self.assertEqual(code, 0)
             self.assertEqual(app.commands, [])
@@ -371,7 +379,9 @@ class XcodeReplTests(unittest.TestCase):
             renderer = FakeRenderer()
 
             with redirect_stdout(StringIO()):
-                code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+                code = run_repl(
+                    cast(ReplApp, app), Path(temp_dir), prompt, renderer=renderer
+                )
 
             self.assertEqual(code, 0)
             self.assertIn("requires approval", renderer.rendered[0])
@@ -422,7 +432,9 @@ class XcodeReplTests(unittest.TestCase):
                 },
             ):
                 with redirect_stdout(StringIO()):
-                    code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
+                    code = run_repl(
+                        cast(ReplApp, app), Path(temp_dir), prompt, renderer=renderer
+                    )
 
             self.assertEqual(code, 0)
             self.assertIn("<visible tools>", renderer.rendered[0])
@@ -942,15 +954,37 @@ class XcodeReplForkTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.compact_requested = False
                 self.compactor = FakeCompactor()
+                self.approval_callback: ApprovalCallback | None = None
+                self.cancellation_token = CancellationToken()
 
             def request_compaction(self) -> None:
                 self.compact_requested = True
 
+            def follow_up(self, msg: AgentMessage) -> None: ...
+
+            def load_history(self, messages: list[AgentMessage]) -> None: ...
+
         class CompactFakeApp:
             def __init__(self) -> None:
                 self.agent = FakeAgent()
+                self.registry: tuple[ToolSpec, ...] = ()
 
-            def ask_stream(self, _text: str, mode: str | None = None):
+            def get_model_info(self) -> dict[str, str]:
+                return {}
+
+            def set_model(
+                self,
+                *,
+                model: str = "",
+                profile: str = "main",
+                base_url: str | None = None,
+                api_key: str | None = None,
+                thinking: bool | None = None,
+                reasoning_effort: str | None = None,
+            ) -> str:
+                return "unknown"
+
+            def ask_stream(self, question: str, mode: str | None = None):
                 yield FinalStructuredEvent(
                     "final",
                     1,
@@ -1019,13 +1053,44 @@ class XcodeReplForkTests(unittest.TestCase):
         class FakeAgent:
             def __init__(self) -> None:
                 self.compact_requested = False
+                self.approval_callback: ApprovalCallback | None = None
+                self.cancellation_token = CancellationToken()
 
             def request_compaction(self) -> None:
                 self.compact_requested = True
 
+            def follow_up(self, msg: AgentMessage) -> None: ...
+
+            def load_history(self, messages: list[AgentMessage]) -> None: ...
+
         class CompactFakeApp:
             def __init__(self) -> None:
                 self.agent = FakeAgent()
+                self.registry: tuple[ToolSpec, ...] = ()
+
+            def get_model_info(self) -> dict[str, str]:
+                return {}
+
+            def set_model(
+                self,
+                *,
+                model: str = "",
+                profile: str = "main",
+                base_url: str | None = None,
+                api_key: str | None = None,
+                thinking: bool | None = None,
+                reasoning_effort: str | None = None,
+            ) -> str:
+                return "unknown"
+
+            def ask_stream(self, question: str, mode: str | None = None):
+                yield FinalStructuredEvent(
+                    "final",
+                    1,
+                    StructuredAgentResult(
+                        answer="unused", messages=[], steps=1, tool_calls=[]
+                    ),
+                )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             app = CompactFakeApp()
@@ -1072,15 +1137,44 @@ class InterruptingPrompt:
         return value
 
 
+class _StubAgent:
+    approval_callback: ApprovalCallback | None = None
+    cancellation_token: CancellationToken = CancellationToken()
+
+    def follow_up(self, msg: AgentMessage) -> None: ...
+
+    def load_history(self, messages: list[AgentMessage]) -> None: ...
+
+    def request_compaction(self) -> None: ...
+
+
 class FakeApp:
-    def ask_stream(self, text: str, mode: str | None = None):
-        yield TextDeltaStructuredEvent("text_delta", 1, text)
+    agent = _StubAgent()
+    registry: tuple[ToolSpec, ...] = ()
+
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
+        yield TextDeltaStructuredEvent("text_delta", 1, question)
         yield TextDeltaStructuredEvent("text_delta", 1, "!")
         yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
-                answer=f"{text}!",
+                answer=f"{question}!",
                 messages=[],
                 steps=1,
                 tool_calls=[],
@@ -1095,7 +1189,14 @@ class StaticPermissionAgent:
         self.permission_policy = PermissionPolicy((PermissionRule("bash", "deny"),))
         self.restricted_dirs: tuple[str, ...] = ()
         self.allowlist_mode = False
-        self.approval_callback = None
+        self.approval_callback: ApprovalCallback | None = None
+        self.cancellation_token = CancellationToken()
+
+    def follow_up(self, msg: AgentMessage) -> None: ...
+
+    def load_history(self, messages: list[AgentMessage]) -> None: ...
+
+    def request_compaction(self) -> None: ...
 
 
 class StaticPermissionApp:
@@ -1105,13 +1206,28 @@ class StaticPermissionApp:
         self.agent = StaticPermissionAgent()
         self.registry: tuple[ToolSpec, ...] = ()
 
-    def ask_stream(self, text: str, mode: str | None = None):
-        yield TextDeltaStructuredEvent("text_delta", 1, text)
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
+        yield TextDeltaStructuredEvent("text_delta", 1, question)
         yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
-                answer=text,
+                answer=question,
                 messages=[],
                 steps=1,
                 tool_calls=[],
@@ -1124,10 +1240,16 @@ class HistoryLoadingAgent:
 
     def __init__(self) -> None:
         self.loaded: list[Any] = []
+        self.approval_callback: ApprovalCallback | None = None
+        self.cancellation_token = CancellationToken()
+
+    def follow_up(self, msg: AgentMessage) -> None: ...
 
     def load_history(self, messages: list[Any]) -> None:
         """保存测试传入的历史消息。"""
         self.loaded = messages
+
+    def request_compaction(self) -> None: ...
 
 
 class HistoryLoadingApp:
@@ -1135,28 +1257,78 @@ class HistoryLoadingApp:
 
     def __init__(self) -> None:
         self.agent = HistoryLoadingAgent()
+        self.registry: tuple[ToolSpec, ...] = ()
+
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
+        yield FinalStructuredEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer="ok",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
 
 
 class QueueModeAgent:
     def __init__(self) -> None:
         self.followups: list[str] = []
+        self.approval_callback: ApprovalCallback | None = None
+        self.cancellation_token = CancellationToken()
 
-    def follow_up(self, message) -> None:
-        self.followups.append(str(message.content))
+    def follow_up(self, msg: Any) -> None:
+        self.followups.append(str(msg.content))
+
+    def load_history(self, messages: list[AgentMessage]) -> None: ...
+
+    def request_compaction(self) -> None: ...
 
 
 class QueueModeApp:
     def __init__(self) -> None:
         self.agent = QueueModeAgent()
+        self.registry: tuple[ToolSpec, ...] = ()
 
-    def ask_stream(self, text: str, mode: str | None = None):
-        yield TextDeltaStructuredEvent("text_delta", 1, text)
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
+        yield TextDeltaStructuredEvent("text_delta", 1, question)
         time.sleep(0.05)
         yield FinalStructuredEvent(
             "final",
             1,
             StructuredAgentResult(
-                answer=text,
+                answer=question,
                 messages=[],
                 steps=1,
                 tool_calls=[],
@@ -1165,7 +1337,25 @@ class QueueModeApp:
 
 
 class FakeMarkdownApp:
-    def ask_stream(self, _text: str, mode: str | None = None):
+    agent = _StubAgent()
+    registry: tuple[ToolSpec, ...] = ()
+
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
         yield TextDeltaStructuredEvent("text_delta", 1, "# Title\n\n")
         yield TextDeltaStructuredEvent("text_delta", 1, "- item")
         yield FinalStructuredEvent(
@@ -1181,7 +1371,25 @@ class FakeMarkdownApp:
 
 
 class MultiDeltaApp:
-    def ask_stream(self, _text: str, mode: str | None = None):
+    agent = _StubAgent()
+    registry: tuple[ToolSpec, ...] = ()
+
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
         yield TextDeltaStructuredEvent("text_delta", 1, "he")
         yield TextDeltaStructuredEvent("text_delta", 1, "ll")
         yield TextDeltaStructuredEvent("text_delta", 1, "o")
@@ -1198,7 +1406,25 @@ class MultiDeltaApp:
 
 
 class ReasoningApp:
-    def ask_stream(self, _text: str, mode: str | None = None):
+    agent = _StubAgent()
+    registry: tuple[ToolSpec, ...] = ()
+
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
         yield ReasoningDeltaStructuredEvent("reasoning_delta", 1, "one\n")
         yield ReasoningDeltaStructuredEvent(
             "reasoning_delta", 1, "two\nthree\nfour\nfive six seven eight"
@@ -1217,7 +1443,25 @@ class ReasoningApp:
 
 
 class TinyReasoningApp:
-    def ask_stream(self, _text: str, mode: str | None = None):
+    agent = _StubAgent()
+    registry: tuple[ToolSpec, ...] = ()
+
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
         yield ReasoningDeltaStructuredEvent("reasoning_delta", 1, "ok")
         yield TextDeltaStructuredEvent("text_delta", 1, "done")
         yield FinalStructuredEvent(
@@ -1233,7 +1477,25 @@ class TinyReasoningApp:
 
 
 class ToolEventApp:
-    def ask_stream(self, _text: str, mode: str | None = None):
+    agent = _StubAgent()
+    registry: tuple[ToolSpec, ...] = ()
+
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
         yield ToolUseStructuredEvent(
             "tool_use",
             1,
@@ -1262,13 +1524,29 @@ class ToolEventApp:
 
 class CapturingApp:
     registry: tuple[ToolSpec, ...] = ()
+    agent = _StubAgent()
 
     def __init__(self) -> None:
         self.seen: list[str] = []
         self.modes: list[str | None] = []
 
-    def ask_stream(self, text: str, mode: str | None = None):
-        self.seen.append(text)
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
+        self.seen.append(question)
         self.modes.append(mode)
         yield FinalStructuredEvent(
             "final",
@@ -1291,7 +1569,22 @@ class ToolApp:
     ) -> None:
         self.registry = registry
 
-    def ask_stream(self, _text: str, mode: str | None = None):
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
         yield FinalStructuredEvent(
             "final",
             1,
@@ -1372,11 +1665,34 @@ class InterruptingToolApp:
     class Agent:
         def __init__(self) -> None:
             self.cancellation_token = CancellationToken()
+            self.approval_callback: ApprovalCallback | None = None
+
+        def follow_up(self, msg: AgentMessage) -> None: ...
+
+        def load_history(self, messages: list[AgentMessage]) -> None: ...
+
+        def request_compaction(self) -> None: ...
 
     def __init__(self) -> None:
         self.agent = self.Agent()
+        self.registry: tuple[ToolSpec, ...] = ()
 
-    def ask_stream(self, _text: str, mode: str | None = None):
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
         yield ToolUseStructuredEvent(
             "tool_use",
             1,

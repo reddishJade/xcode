@@ -69,7 +69,7 @@ EXPERIMENTAL_FEATURE_GROUPS = frozenset(
 class OptInServices:
     daemon: HeartbeatDaemon | None = None
     mailbox: AgentMailbox | None = None
-    progress: bool = False
+    progress: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -412,7 +412,7 @@ def load_opt_in_services(
         from xcode.harness.mailbox import AgentMailbox
 
         mailbox = AgentMailbox(project_root)
-    progress = False
+    progress: bool | None = None
     if "progress" in enabled:
         progress = True
     return OptInServices(daemon=daemon, mailbox=mailbox, progress=progress)

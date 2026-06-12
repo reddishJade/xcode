@@ -37,7 +37,7 @@ class XcodeApp:
     contextual_state: ContextualRetrievalState | None = None
     daemon: HeartbeatDaemon | None = None
     mailbox: AgentMailbox | None = None
-    progress: bool = False
+    progress: bool | None = None
     _model_profiles: dict[str, Any] | None = None
     _env_files: tuple[Path, ...] = ()
     _closers: tuple[Callable[[], None], ...] = ()

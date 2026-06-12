@@ -266,9 +266,9 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
                 runner.result(job_id)
             except Exception as exc:
                 return f"status=failed\n{type(exc).__name__}: {exc}"
+        prompt = runner.job_prompt(job_id)
         try:
             raw_result = runner.result(job_id)
-            prompt = runner.job_prompt(job_id)
             return f"status=done\n{build_branch_summary(job_id, prompt, raw_result).summary}"
         except KeyError as exc:
             return str(exc)
