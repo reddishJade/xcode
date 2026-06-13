@@ -212,7 +212,8 @@ class XcodeReplTests(unittest.TestCase):
                 code = run_repl(app, Path(temp_dir), prompt)
 
             self.assertEqual(code, 0)
-            self.assertIn("thought for", output.getvalue())
+            self.assertIn("Thought for", output.getvalue())
+            self.assertIn("Thinking...", output.getvalue())
             self.assertNotIn("three four five six seven eight", output.getvalue())
             self.assertIn("done", output.getvalue())
 

@@ -154,6 +154,7 @@ class ReasoningHandler:
     def handle_delta(self, event_data: str) -> None:
         if self.reasoning_started_at is None:
             self.reasoning_started_at = time.perf_counter()
+            self.live_console.print(Text("  Thinking...", style=CLI_COLOR_THINKING))
         self.reasoning_text += event_data
         lines = reasoning_preview_lines(self.reasoning_text)
         if lines:
@@ -170,7 +171,7 @@ class ReasoningHandler:
             return
         self.live_console.print(
             Text(
-                f"  thought for {format_elapsed(elapsed)}",
+                f"  Thought for {format_elapsed(elapsed)}",
                 style=CLI_COLOR_THINKING,
             )
         )
