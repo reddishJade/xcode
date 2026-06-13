@@ -155,10 +155,9 @@ class ReasoningHandler:
         if self.reasoning_started_at is None:
             self.reasoning_started_at = time.perf_counter()
         self.reasoning_text += event_data
-        if self.verbosity == "debug":
-            lines = reasoning_preview_lines(self.reasoning_text)
-            if lines:
-                self.reasoning_preview.update(lines)
+        lines = reasoning_preview_lines(self.reasoning_text)
+        if lines:
+            self.reasoning_preview.update(lines)
 
     def finish(self) -> None:
         if self.reasoning_started_at is None:
@@ -171,16 +170,10 @@ class ReasoningHandler:
             return
         self.live_console.print(
             Text(
-                f"  • reasoning {format_elapsed(elapsed)}",
+                f"  thought for {format_elapsed(elapsed)}",
                 style=CLI_COLOR_THINKING,
             )
         )
-        if self.verbosity == "debug":
-            preview = single_line_preview(self.reasoning_text)
-            if preview:
-                self.live_console.print(
-                    Text(f"    {preview}", style=CLI_COLOR_THINKING)
-                )
         self.reasoning_started_at = None
         self.reasoning_text = ""
 

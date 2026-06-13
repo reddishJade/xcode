@@ -202,21 +202,7 @@ class XcodeReplTests(unittest.TestCase):
             self.assertIn("hello", output.getvalue())
             self.assertNotIn("thinking...", output.getvalue())
 
-    def test_run_repl_debug_shows_reasoning_preview_before_answer(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = ReasoningApp()
-            prompt = FakePrompt(["/debug on", "hello", "/exit"])
-            output = StringIO()
-
-            with redirect_stdout(output):
-                code = run_repl(app, Path(temp_dir), prompt)
-
-            self.assertEqual(code, 0)
-            self.assertIn("reasoning", output.getvalue())
-            self.assertIn("three four five six seven eight", output.getvalue())
-            self.assertIn("done", output.getvalue())
-
-    def test_run_repl_normal_hides_raw_reasoning(self) -> None:
+    def test_run_repl_shows_reasoning_preview_before_answer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = ReasoningApp()
             prompt = FakePrompt(["hello", "/exit"])
@@ -226,7 +212,7 @@ class XcodeReplTests(unittest.TestCase):
                 code = run_repl(app, Path(temp_dir), prompt)
 
             self.assertEqual(code, 0)
-            self.assertIn("reasoning", output.getvalue())
+            self.assertIn("thought for", output.getvalue())
             self.assertNotIn("three four five six seven eight", output.getvalue())
             self.assertIn("done", output.getvalue())
 
@@ -240,7 +226,7 @@ class XcodeReplTests(unittest.TestCase):
                 code = run_repl(app, Path(temp_dir), prompt)
 
             self.assertEqual(code, 0)
-            self.assertNotIn("reasoning", output.getvalue())
+            self.assertNotIn("thought for", output.getvalue())
             self.assertIn("done", output.getvalue())
 
     def test_run_repl_summarizes_tools_without_success_result(self) -> None:
