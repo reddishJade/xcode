@@ -677,6 +677,34 @@ class XcodeReplTests(unittest.TestCase):
 
             self.assertTrue(handled)
 
+    def test_queue_command_toggles_without_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            state = ReplState()
+            output = StringIO()
+
+            with redirect_stdout(output):
+                handle_command(
+                    "/queue",
+                    store,
+                    FakeApp(),
+                    FakeRenderer(),
+                    state,
+                    FakePrompt([]),
+                )
+                handle_command(
+                    "/queue",
+                    store,
+                    FakeApp(),
+                    FakeRenderer(),
+                    state,
+                    FakePrompt([]),
+                )
+
+            self.assertFalse(state.queue_mode)
+            self.assertIn("Queue mode enabled.", output.getvalue())
+            self.assertIn("Queue mode disabled.", output.getvalue())
+
     def test_handle_command_rejects_unexpected_args(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))

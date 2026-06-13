@@ -330,8 +330,8 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
     """启用或禁用 agent 回合期间的输入队列。"""
     parts = cmd.split(maxsplit=1)
     if len(parts) == 1:
-        state = "on" if ctx.state.queue_mode else "off"
-        print(f"Queue mode: {state}")
+        ctx.state.queue_mode = not ctx.state.queue_mode
+        print(f"Queue mode {'enabled' if ctx.state.queue_mode else 'disabled'}.")
         return False
     value = parts[1].strip().lower()
     if value not in {"on", "off"}:

@@ -407,7 +407,7 @@ def partition_tool_calls_for_execution(current_context, tool_calls) -> list[list
 | `/act [--clear]` | 执行模式 |
 | `/verbose [normal\|verbose\|debug]` | 详细级别 |
 | `/debug on/off` | 调试模式 |
-| `/queue on/off` | 排队输入 |
+| `/queue [on/off]` | 排队输入 |
 | `/compact` | 手动压缩 |
 | `/permissions [revoke\|clear]` | 权限管理 |
 | `/tool NAME INPUT\|list` | 手动工具 |
