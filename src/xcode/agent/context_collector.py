@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
-from xcode.agent.context_assembly import ContextBlock
+from xcode.agent.context_assembly import ContextBlock, ContextBlockSource, ContextBlockTarget, ContextPriority
 from xcode.agent.messages import AgentMessage
 from xcode.agent.protocols import AgentTool
 
@@ -39,6 +40,7 @@ class ContextCollectionInput:
     tools: list[AgentTool] = field(default_factory=list)
     current_turn: int = 0
     current_step: int = 0
+    project_root: Path | None = None
     state: dict[str, object] = field(default_factory=dict)
 
 
@@ -103,3 +105,69 @@ class ContextCollectorRegistry:
 
     def __bool__(self) -> bool:
         return len(self._collectors) > 0
+
+
+# ── 项目指令收集器 ──
+
+
+class ProjectManifestCollector:
+    """从 AGENTS.md / CLAUDE.md 收集项目指令的 collector。
+
+    读取配置路径下的 AGENTS.md 和 CLAUDE.md 文件，产出 SYSTEM 目标的
+    ContextBlock。CLAUDE.md 仅包含 @AGENTS.md 引用时不重复发出块。
+
+    优先级为 CRITICAL（最高优先等级）：项目指令定义 agent 在仓库中的
+    行为规则。优先级仅影响裁剪顺序——高优先级的块最后被丢弃。若 base
+    messages 已耗尽预算，CRITICAL 块也可能被丢弃。
+    """
+
+    def __init__(self, project_root: Path | None = None) -> None:
+        self._project_root = project_root
+
+    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
+        root = input.project_root or self._project_root
+        if root is None:
+            return []
+
+        blocks: list[ContextBlock] = []
+
+        agents_path = root / "AGENTS.md"
+        if agents_path.is_file():
+            content = agents_path.read_text(encoding="utf-8", errors="replace").strip()
+            if content:
+                blocks.append(
+                    ContextBlock(
+                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        target=ContextBlockTarget.SYSTEM,
+                        priority=ContextPriority.CRITICAL,
+                        content=content,
+                    )
+                )
+
+        claude_path = root / "CLAUDE.md"
+        if claude_path.is_file():
+            content = claude_path.read_text(encoding="utf-8", errors="replace").strip()
+            if content and not _is_agents_reference(content):
+                blocks.append(
+                    ContextBlock(
+                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        target=ContextBlockTarget.SYSTEM,
+                        priority=ContextPriority.CRITICAL,
+                        content=content,
+                    )
+                )
+
+        return blocks
+
+
+_AGENTS_REF_PATTERNS = frozenset({"@AGENTS.md"})
+
+
+def _is_agents_reference(content: str) -> bool:
+    """判断 CLAUDE.md 内容是否仅引用 AGENTS.md。
+
+    Claude Desktop 约定：CLAUDE.md 中单独一行 @AGENTS.md 表示
+    该文件内容与 AGENTS.md 相同。此时不重复发出块。
+    """
+    stripped = content.strip()
+    return stripped in _AGENTS_REF_PATTERNS

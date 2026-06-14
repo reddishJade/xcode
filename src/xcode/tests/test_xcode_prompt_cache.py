@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -93,41 +92,6 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
         self.assertNotEqual(first_prompt, second_prompt)
         self.assertIn("snippet changed", second_prompt)
         self.assertIn("Use tool_a for cache tests.", second_prompt)
-
-    def test_stable_cache_invalidates_when_instructions_change(self) -> None:
-        """测试当 AGENTS.md 或 CLAUDE.md 等配置文件内容变化时，静态缓存正确失效。"""
-        agents_file = self.root / "AGENTS.md"
-        agents_file.write_text("Instruction version 1", encoding="utf-8")
-
-        context = PromptContext(self.root, (), "test")
-
-        first_prompt = self.builder.build(context)
-        self.assertIn("Instruction version 1", first_prompt)
-
-        agents_file.write_text("Instruction version 2", encoding="utf-8")
-
-        second_prompt = self.builder.build(context)
-        self.assertNotEqual(first_prompt, second_prompt)
-        self.assertIn("Instruction version 2", second_prompt)
-
-    def test_stable_cache_ignores_instruction_mtime_when_content_matches(self) -> None:
-        """测试项目指令内容不变时，单独修改 mtime 不会重建静态缓存。"""
-        agents_file = self.root / "AGENTS.md"
-        agents_file.write_text("Instruction version", encoding="utf-8")
-        registry = (ToolSpec("tool_a", "desc a", "hint a", lambda x: "a"),)
-        context = PromptContext(self.root, registry, "test")
-
-        first_prompt = self.builder.build(context)
-        stat = agents_file.stat()
-        os.utime(agents_file, (stat.st_atime + 10, stat.st_mtime + 10))
-
-        with patch(
-            "xcode.harness.agent_runtime.prompting.builder.build_tool_prompt"
-        ) as mock_build_tool:
-            second_prompt = self.builder.build(context)
-            mock_build_tool.assert_not_called()
-
-        self.assertEqual(first_prompt, second_prompt)
 
     def test_dynamic_cache_invalidates_when_project_root_changes(self) -> None:
         """测试当工作目录或项目路径变更时，动态环境缓存失效。"""

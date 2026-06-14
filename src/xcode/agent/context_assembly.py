@@ -20,6 +20,7 @@ from xcode.agent.messages import (
     AgentMessage,
     BranchSummaryMessage,
     CompactionSummaryMessage,
+    SystemMessage,
     UserMessage,
 )
 from xcode.agent.protocols import AgentTool
@@ -41,6 +42,20 @@ class ContextBlockSource(StrEnum):
     NOTES = "notes"
     HISTORY = "history"
     CUSTOM = "custom"
+
+
+# ── 注入目标枚举 ──
+
+
+class ContextBlockTarget(StrEnum):
+    """上下文块的注入目标。
+
+    SYSTEM:       块作为 SystemMessage 注入（用于项目指令等系统级上下文）。
+    USER_CONTEXT: 块作为 UserMessage 注入（用于技能、计划、提示等辅助上下文）。
+    """
+
+    SYSTEM = "system"
+    USER_CONTEXT = "user_context"
 
 
 # ── 优先级枚举 ──
@@ -107,6 +122,7 @@ class ContextBlock:
     source: ContextBlockSource
     priority: ContextPriority
     content: str
+    target: ContextBlockTarget = ContextBlockTarget.USER_CONTEXT
     token_count: int | None = None
     expiry: ContextExpiry | None = None
     created_turn: int = 0
@@ -263,13 +279,14 @@ class DefaultContextAssembler:
         dropped.extend(budget_dropped)
 
         # 注入上下文块到消息列表
-        # 使用 UserMessage 是阶段 1 的简化设计。每条块消息带有 [source] 前缀，
-        # 区分于真实用户消息。未来可考虑使用专用角色或 system prompt 扩展。
+        # 核心系统提示词保持第一；
+        # SYSTEM 目标块 -> SystemMessage（在已有系统消息之后注入）
+        # USER_CONTEXT 目标块 -> UserMessage（在所有 SystemMessage 之后注入）
         if used_blocks:
-            block_messages = [
-                UserMessage(content=_block_to_text(b)) for b in used_blocks
-            ]
-            # 插入到系统消息之后、第一条非系统消息之前
+            system_blocks = [b for b in used_blocks if b.target == ContextBlockTarget.SYSTEM]
+            user_blocks = [b for b in used_blocks if b.target != ContextBlockTarget.SYSTEM]
+
+            # 找最后一个连续 SystemMessage 之后的位置
             insert_idx = 0
             for i, m in enumerate(messages):
                 role = getattr(m, "role", "")
@@ -277,7 +294,19 @@ class DefaultContextAssembler:
                     insert_idx = i + 1
                 else:
                     break
-            messages[insert_idx:insert_idx] = block_messages
+
+            if system_blocks:
+                system_messages = [
+                    SystemMessage(content=b.content) for b in system_blocks
+                ]
+                messages[insert_idx:insert_idx] = system_messages
+                insert_idx += len(system_messages)
+
+            if user_blocks:
+                user_messages = [
+                    UserMessage(content=_block_to_text(b)) for b in user_blocks
+                ]
+                messages[insert_idx:insert_idx] = user_messages
 
         # 重新计算总 token
         final_total = _estimate_messages_tokens(messages)

@@ -504,11 +504,16 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 self.fail("subagent did not finish")
 
         self.assertTrue(seen_messages)
-        self.assertEqual(seen_messages[0][0]["role"], "system")
-        system_prompt = str(seen_messages[0][0]["content"])
-        self.assertIn("Subagent must follow project rules.", system_prompt)
-        self.assertIn("<git-preflight>", system_prompt)
-        self.assertIn("<cwd-info>", system_prompt)
+        first_msg = seen_messages[0][0]
+        self.assertEqual(first_msg["role"], "system")
+        combined_system = " ".join(
+            str(m.get("content", "") or "")
+            for m in seen_messages[0]
+            if m.get("role") == "system"
+        )
+        self.assertIn("Subagent must follow project rules.", combined_system)
+        self.assertIn("<git-preflight>", combined_system)
+        self.assertIn("<cwd-info>", combined_system)
 
     def test_subagent_tools_are_not_created_when_group_disabled(self) -> None:
         runtime_config = XcodeRuntimeConfig(

@@ -13,6 +13,11 @@ from ...agent.compaction import (
     get_model_soft_threshold,
 )
 from ...agent.config import AgentLoopConfig, AgentLoopTurnUpdate
+from ...agent.context_assembly import DefaultContextAssembler
+from ...agent.context_collector import (
+    ContextCollectorRegistry,
+    ProjectManifestCollector,
+)
 from ...agent.history import apply_request_hygiene
 from ...agent.message_converter import convert_to_llm
 from ...agent.messages import (
@@ -171,6 +176,7 @@ def build_loop_config(
     emit_hook: Callable[[HookRecord], None],
     mode_state: ExecutionModeState,
     get_prompt_version: Callable[[], str],
+    project_root: Path | None = None,
 ) -> AgentLoopConfig:
     gate_snapshot = gate.snapshot_for(registry)
 
@@ -224,9 +230,19 @@ def build_loop_config(
             )
         return None
 
+    # 构建上下文收集器 + 组装器（项目指令从旧 pipeline 迁移到此处）
+    registry_: ContextCollectorRegistry | None = None
+    assembler: DefaultContextAssembler | None = None
+    if project_root is not None:
+        registry_ = ContextCollectorRegistry()
+        registry_.register(ProjectManifestCollector(project_root))
+        assembler = DefaultContextAssembler()
+
     return AgentLoopConfig(
         provider=snapshot.provider,
         convert_to_llm=convert_to_llm,
+        context_collectors=registry_,
+        context_assembler=assembler,
         max_steps=snapshot.config.max_steps,
         max_step_retries=3,
         retry_backoff_base=0.5,

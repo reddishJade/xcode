@@ -4,14 +4,6 @@ import hashlib
 
 from xcode.harness.config import DEFAULT_PROMPT_MODULES
 
-from .token_budget import (
-    INSTRUCTION_OPENING_BYTES,
-    INSTRUCTION_WARNING_BYTES,
-    KEY_INSTRUCTION_SECTIONS,
-    MAX_INSTRUCTION_BYTES,
-    SECTION_BUDGET_BYTES,
-)
-
 CORE_IDENTITY = """# Identity
 
 You are Xcode, a lightweight coding agent running in a local terminal. You share
@@ -153,7 +145,6 @@ yourself, make the smallest targeted change, and verify the changed behavior.
 SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "<system-prompt-dynamic-boundary />"
 STABLE_PROMPT_MODULE_ORDER: tuple[str, ...] = (
     "identity",
-    "instructions",
     "tool_discipline",
     "tools",
     "search_strategy",
@@ -178,11 +169,6 @@ def _build_prompt_version() -> str:
             DYNAMIC_PROMPT_MODULE_ORDER,
             VOLATILE_PROMPT_MODULE_ORDER,
             DEFAULT_PROMPT_MODULES,
-            INSTRUCTION_WARNING_BYTES,
-            MAX_INSTRUCTION_BYTES,
-            INSTRUCTION_OPENING_BYTES,
-            SECTION_BUDGET_BYTES,
-            tuple(sorted(KEY_INSTRUCTION_SECTIONS)),
         )
     )
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]

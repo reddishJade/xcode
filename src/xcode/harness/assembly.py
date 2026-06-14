@@ -371,6 +371,7 @@ def _build_subagent_integration(
                     contextual_state=child_contextual_state,
                     modules=runtime_config.prompt.modules,
                 ),
+                project_root=child_root,
             ),
         ).run_async(prompt)
         return result.answer

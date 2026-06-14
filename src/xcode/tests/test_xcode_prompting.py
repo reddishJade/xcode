@@ -16,7 +16,6 @@ from xcode.harness.agent_runtime.git_preflight import build_git_preflight
 from xcode.harness.agent_runtime.prompting.identity import (
     SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
 )
-from xcode.harness.agent_runtime.prompting.token_budget import MAX_INSTRUCTION_BYTES
 from xcode.harness.skill_loader import SkillLoader
 from xcode.harness.skills import ToolSpec
 
@@ -29,7 +28,6 @@ class XcodePromptingTests(unittest.TestCase):
     def test_builder_includes_stable_modules_in_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "AGENTS.md").write_text("Use tests.", encoding="utf-8")
             tool = ToolSpec(
                 "echo",
                 "Echo input.",
@@ -59,14 +57,6 @@ class XcodePromptingTests(unittest.TestCase):
             self.assertIn("Do not edit generated files directly", prompt)
             self.assertIn("Lead with findings ordered by severity", prompt)
             self.assertLess(
-                prompt.index("You are Xcode"),
-                prompt.index('<instruction-source name="AGENTS.md"'),
-            )
-            self.assertLess(
-                prompt.index('<instruction-source name="AGENTS.md"'),
-                prompt.index("<tool-discipline>"),
-            )
-            self.assertLess(
                 prompt.index("<tool-discipline>"), prompt.index("Available tools")
             )
             self.assertLess(
@@ -81,7 +71,6 @@ class XcodePromptingTests(unittest.TestCase):
             self.assertIn("<search-strategy>", prompt)
             self.assertIn("smallest targeted change", prompt)
             self.assertIn("<cwd-info>", prompt)
-            self.assertIn("Use tests.", prompt)
             self.assertLess(
                 prompt.index("<search-strategy>"),
                 boundary_index,
@@ -91,63 +80,6 @@ class XcodePromptingTests(unittest.TestCase):
             self.assertLess(
                 prompt.index("<cwd-info>"),
                 prompt.index("<git-preflight>", boundary_index),
-            )
-
-    def test_large_project_instruction_warns_without_condensing(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            instruction = "A" * (24 * 1024 + 1)
-            (root / "AGENTS.md").write_text(instruction, encoding="utf-8")
-
-            prompt = SystemPromptBuilder().build(
-                PromptContext(project_root=root, registry=(), question="hello")
-            )
-
-            self.assertIn("<instruction-warning>", prompt)
-            self.assertIn("above the 24576 byte warning threshold", prompt)
-            self.assertIn(instruction, prompt)
-
-    def test_oversized_project_instruction_preserves_key_rules(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            long_example = "\n".join(f"print({index})" for index in range(5000))
-            instruction = (
-                "# Xcode Agent Guide\n\n"
-                "Opening context must stay.\n\n"
-                "| Document | Purpose | When to read |\n"
-                "| --- | --- | --- |\n"
-                "| [docs/git-workflow.md](docs/git-workflow.md) | Git | Before commit |\n\n"
-                "## Background\n\n"
-                + ("background " * 4000)
-                + "\n\n## Python Coding Principles\n\n"
-                "Every function must have type annotations.\n\n"
-                "```python\n" + long_example + "\n```\n\n"
-                "## Git Safety\n\n"
-                "Never rewrite history without confirmation.\n\n"
-                "## Validation\n\n"
-                "Run targeted validation for modified files.\n"
-            )
-            (root / "AGENTS.md").write_text(instruction, encoding="utf-8")
-
-            prompt = SystemPromptBuilder().build(
-                PromptContext(project_root=root, registry=(), question="hello")
-            )
-
-            start = prompt.index('<instruction-source name="AGENTS.md"')
-            end = prompt.index("</instruction-source>", start)
-            source_prompt = prompt[start:end]
-
-            self.assertIn("above the 32768 byte hard limit", prompt)
-            self.assertIn("Opening context must stay.", source_prompt)
-            self.assertIn("docs/git-workflow.md", source_prompt)
-            self.assertIn("Every function must have type annotations.", source_prompt)
-            self.assertIn("Never rewrite history without confirmation.", source_prompt)
-            self.assertIn("Run targeted validation for modified files.", source_prompt)
-            self.assertIn("<instruction-omissions>", source_prompt)
-            self.assertNotIn("print(4999)", source_prompt)
-            self.assertLessEqual(
-                len(source_prompt.encode("utf-8")),
-                MAX_INSTRUCTION_BYTES + 800,
             )
 
     def test_volatile_context_changes_do_not_rewrite_stable_prefix(self) -> None:

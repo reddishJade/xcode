@@ -23,10 +23,6 @@ from .identity import (
     TOOL_DISCIPLINE,
     VOLATILE_PROMPT_MODULE_ORDER,
 )
-from .instructions import (
-    _project_instruction_sources,
-    _render_project_instructions,
-)
 from .token_budget import MAX_CWD_ENTRIES
 
 type PromptCacheKey = tuple[object, ...]
@@ -79,15 +75,9 @@ class StableRegionBuilder:
 
     def build(self, context: PromptContext, enabled: set[str]) -> str:
         stable_enabled = enabled.intersection(STABLE_PROMPT_MODULE_ORDER)
-        instruction_sources = (
-            _project_instruction_sources(context.project_root)
-            if "instructions" in stable_enabled
-            else ()
-        )
         registry_key = _registry_prompt_key(context.registry)
         stable_key = (
             registry_key,
-            tuple((source.name, source.content_hash) for source in instruction_sources),
             frozenset(stable_enabled),
         )
 
@@ -101,10 +91,6 @@ class StableRegionBuilder:
             match module:
                 case "identity":
                     stable_parts.append(CORE_IDENTITY)
-                case "instructions":
-                    instructions = _render_project_instructions(instruction_sources)
-                    if instructions:
-                        stable_parts.append(instructions)
                 case "tool_discipline":
                     stable_parts.append(TOOL_DISCIPLINE)
                 case "tools":

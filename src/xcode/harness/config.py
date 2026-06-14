@@ -22,7 +22,6 @@ PROFILE_SUBAGENT = "subagent"
 PROFILE_FALLBACK = "fallback"
 DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
     "identity",
-    "instructions",
     "tool_discipline",
     "tools",
     "search_strategy",

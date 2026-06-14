@@ -226,6 +226,7 @@ class StructuredAgent:
             emit_hook=lambda rec: _emit_hook(self._hook_manager, rec),
             mode_state=self._mode,
             get_prompt_version=_get_prompt_version,
+            project_root=self.project_root,
         )
 
         _emit_hook(

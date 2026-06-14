@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any
 import unittest
 
@@ -16,6 +18,7 @@ from xcode.agent.context_assembly import (
     ContextAssemblyResult,
     ContextBlock,
     ContextBlockSource,
+    ContextBlockTarget,
     ContextExpiry,
     ContextPriority,
     DefaultContextAssembler,
@@ -24,6 +27,7 @@ from xcode.agent.context_assembly import (
 from xcode.agent.context_collector import (
     ContextCollectionInput,
     ContextCollectorRegistry,
+    ProjectManifestCollector,
 )
 from xcode.agent.messages import (
     SystemMessage,
@@ -1205,3 +1209,224 @@ class TestContextCollectorWithAssembler(unittest.TestCase):
             )
         )
         self.assertEqual(len(transform_log), 1)
+
+
+# ── ContextBlockTarget 测试 ──
+
+
+class TestContextBlockTarget(unittest.TestCase):
+    """测试 ContextBlockTarget 枚举。"""
+
+    def test_default_target_is_user_context(self) -> None:
+        """ContextBlock 默认 target 为 USER_CONTEXT。"""
+        block = ContextBlock(
+            source=ContextBlockSource.CUSTOM,
+            priority=ContextPriority.HIGH,
+            content="test",
+        )
+        self.assertEqual(block.target, ContextBlockTarget.USER_CONTEXT)
+
+    def test_system_target_explicit(self) -> None:
+        """SYSTEM target 可显式设置。"""
+        block = ContextBlock(
+            source=ContextBlockSource.PROJECT_MANIFEST,
+            target=ContextBlockTarget.SYSTEM,
+            priority=ContextPriority.CRITICAL,
+            content="system instructions",
+        )
+        self.assertEqual(block.target, ContextBlockTarget.SYSTEM)
+
+    def test_target_enum_values(self) -> None:
+        """枚举值正确。"""
+        self.assertEqual(ContextBlockTarget.SYSTEM.value, "system")
+        self.assertEqual(ContextBlockTarget.USER_CONTEXT.value, "user_context")
+
+
+# ── SYSTEM 块组装测试 ──
+
+
+class TestDefaultContextAssemblerSystemBlocks(unittest.TestCase):
+    """测试 SYSTEM 目标块的组装行为。"""
+
+    def setUp(self) -> None:
+        self.assembler = DefaultContextAssembler()
+
+    def test_system_block_becomes_system_message(self) -> None:
+        """SYSTEM 块被注入为 SystemMessage。"""
+        result = self.assembler.assemble(
+            ContextAssemblyInput(
+                messages=[UserMessage(content="hello")],
+                context_blocks=[
+                    ContextBlock(
+                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        target=ContextBlockTarget.SYSTEM,
+                        priority=ContextPriority.CRITICAL,
+                        content="project rules",
+                    ),
+                ],
+            )
+        )
+        self.assertEqual(len(result.messages), 2)
+        self.assertEqual(getattr(result.messages[0], "role", ""), "system")
+        self.assertEqual(result.messages[0].content, "project rules")
+        self.assertEqual(result.blocks_used[0].content, "project rules")
+
+    def test_system_block_injected_after_existing_system(self) -> None:
+        """SYSTEM 块在已有 SystemMessage 之后注入。"""
+        result = self.assembler.assemble(
+            ContextAssemblyInput(
+                messages=[
+                    SystemMessage(content="identity prompt"),
+                    UserMessage(content="question"),
+                ],
+                context_blocks=[
+                    ContextBlock(
+                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        target=ContextBlockTarget.SYSTEM,
+                        priority=ContextPriority.CRITICAL,
+                        content="project rules",
+                    ),
+                ],
+            )
+        )
+        self.assertEqual(len(result.messages), 3)
+        roles = [getattr(m, "role", "") for m in result.messages]
+        self.assertEqual(roles, ["system", "system", "user"])
+        self.assertEqual(result.messages[0].content, "identity prompt")
+        self.assertEqual(result.messages[1].content, "project rules")
+
+    def test_mixed_targets_separate_injection(self) -> None:
+        """SYSTEM 和 USER_CONTEXT 块分别注入。"""
+        result = self.assembler.assemble(
+            ContextAssemblyInput(
+                messages=[UserMessage(content="question")],
+                context_blocks=[
+                    ContextBlock(
+                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        target=ContextBlockTarget.SYSTEM,
+                        priority=ContextPriority.CRITICAL,
+                        content="project rules",
+                    ),
+                    ContextBlock(
+                        source=ContextBlockSource.PLAN,
+                        target=ContextBlockTarget.USER_CONTEXT,
+                        priority=ContextPriority.HIGH,
+                        content="plan step",
+                    ),
+                ],
+            )
+        )
+        self.assertEqual(len(result.messages), 3)
+        roles = [getattr(m, "role", "") for m in result.messages]
+        self.assertEqual(roles, ["system", "user", "user"])
+        self.assertEqual(result.messages[0].content, "project rules")
+        self.assertIn("plan step", str(result.messages[1].content))
+        self.assertIn("[plan]", str(result.messages[1].content))
+
+    def test_multiple_system_blocks_all_as_system_messages(self) -> None:
+        """多个 SYSTEM 块全部作为 SystemMessage 注入。"""
+        result = self.assembler.assemble(
+            ContextAssemblyInput(
+                messages=[UserMessage(content="question")],
+                context_blocks=[
+                    ContextBlock(
+                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        target=ContextBlockTarget.SYSTEM,
+                        priority=ContextPriority.CRITICAL,
+                        content="rules part 1",
+                    ),
+                    ContextBlock(
+                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        target=ContextBlockTarget.SYSTEM,
+                        priority=ContextPriority.CRITICAL,
+                        content="rules part 2",
+                    ),
+                ],
+            )
+        )
+        self.assertEqual(len(result.messages), 3)
+        roles = [getattr(m, "role", "") for m in result.messages]
+        self.assertEqual(roles, ["system", "system", "user"])
+
+
+# ── ProjectManifestCollector 测试 ──
+
+
+class TestProjectManifestCollector(unittest.TestCase):
+    """测试 ProjectManifestCollector。"""
+
+    def test_no_files_returns_empty(self) -> None:
+        """项目根目录无 AGENTS.md / CLAUDE.md 时返回空列表。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 0)
+
+    def test_agents_md_content_collected(self) -> None:
+        """AGENTS.md 内容被收集为 PROJECT_MANIFEST + SYSTEM + CRITICAL。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("Use tests.", encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].source, ContextBlockSource.PROJECT_MANIFEST)
+            self.assertEqual(blocks[0].target, ContextBlockTarget.SYSTEM)
+            self.assertEqual(blocks[0].priority, ContextPriority.CRITICAL)
+            self.assertEqual(blocks[0].content, "Use tests.")
+
+    def test_agents_md_via_input_project_root(self) -> None:
+        """project_root 可通过 ContextCollectionInput 传入。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("Project rules.", encoding="utf-8")
+            collector = ProjectManifestCollector()
+            inp = ContextCollectionInput(project_root=root)
+            blocks = collector.collect(inp)
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("Project rules.", blocks[0].content)
+
+    def test_claude_md_agents_reference_skipped(self) -> None:
+        """CLAUDE.md 仅包含 @AGENTS.md 引用时不重复发出块。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("Real content.", encoding="utf-8")
+            (root / "CLAUDE.md").write_text("@AGENTS.md", encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].content, "Real content.")
+
+    def test_claude_md_own_content_not_skipped(self) -> None:
+        """CLAUDE.md 有自有内容时作为独立块发出。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("AGENTS content.", encoding="utf-8")
+            (root / "CLAUDE.md").write_text("CLAUDE specific rules.", encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 2)
+            contents = [b.content for b in blocks]
+            self.assertIn("AGENTS content.", contents)
+            self.assertIn("CLAUDE specific rules.", contents)
+
+    def test_claude_md_reference_with_whitespace(self) -> None:
+        """带空格的 @AGENTS.md 引用也被识别。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("Content.", encoding="utf-8")
+            (root / "CLAUDE.md").write_text("  @AGENTS.md  ", encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+
+    def test_only_claude_md_without_agents(self) -> None:
+        """仅有 CLAUDE.md 且其内容有效时作为独立块发出。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "CLAUDE.md").write_text("CLAUDE rules.", encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].content, "CLAUDE rules.")
