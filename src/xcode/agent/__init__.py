@@ -5,6 +5,17 @@ from __future__ import annotations
 from .agent import Agent
 from .agent_loop import run_agent_loop
 from .config import AgentContext, AgentLoopConfig
+from .context_assembly import (
+    ContextAssembler,
+    ContextAssemblyInput,
+    ContextAssemblyResult,
+    ContextBlock,
+    ContextBlockSource,
+    ContextExpiry,
+    ContextPriority,
+    DefaultContextAssembler,
+    trim_to_budget,
+)
 from .events import AgentEvent
 from .messages import (
     AgentMessage,
@@ -27,8 +38,17 @@ __all__ = [
     "AgentTool",
     "AssistantMessage",
     "CancellationSignal",
+    "ContextAssembler",
+    "ContextAssemblyInput",
+    "ContextAssemblyResult",
+    "ContextBlock",
+    "ContextBlockSource",
+    "ContextExpiry",
+    "ContextPriority",
+    "DefaultContextAssembler",
     "run_agent_loop",
     "SystemMessage",
     "ToolResultMessage",
+    "trim_to_budget",
     "UserMessage",
 ]

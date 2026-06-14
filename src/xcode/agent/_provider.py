@@ -26,6 +26,7 @@ from xcode.ai.events import (
 )
 from xcode.ai.providers.protocol import StreamProvider
 from xcode.ai.types import ToolDefinition
+from xcode.agent.context_assembly import ContextAssemblyInput
 from xcode.agent.types import TextContent, ToolCallContent
 from xcode.agent.config import AgentContext, AgentLoopConfig
 from xcode.agent.results import AgentLoopMetrics
@@ -51,8 +52,21 @@ async def call_provider(
     signal: CancellationSignal | None,
     metrics: AgentLoopMetrics,
     provider: StreamProvider,
+    current_step: int = 0,
 ) -> _ProviderResponse:
     messages = context.messages
+
+    # context_assembler 在 transform_context 之前执行
+    if config.context_assembler:
+        assembly_input = ContextAssemblyInput(
+            system_prompt=context.system_prompt,
+            messages=messages,
+            tools=list(context.tools or []),
+            current_step=current_step,
+        )
+        assembly_result = config.context_assembler.assemble(assembly_input)
+        messages = assembly_result.messages
+
     if config.transform_context:
         messages = config.transform_context(messages, signal)
 

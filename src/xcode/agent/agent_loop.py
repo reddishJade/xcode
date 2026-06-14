@@ -464,6 +464,7 @@ async def _run_inner_loop(
             signal,
             metrics,
             provider,
+            current_step=step,
         )
         message = response.message
         stop_reason = response.stop_reason

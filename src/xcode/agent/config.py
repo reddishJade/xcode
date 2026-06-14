@@ -19,6 +19,8 @@ from .protocols import (
     ToolResultContentBlock,
     ToolResultDetails,
 )
+from xcode.agent.context_assembly import ContextAssembler
+
 from .hooks import (
     ArchiveWriter,
     BeforeProviderRequestHook,
@@ -178,5 +180,13 @@ class AgentLoopConfig:
 
     is_tool_productive: IsToolProductiveHook | None = None
     before_provider_request: BeforeProviderRequestHook | None = None
+
+    context_assembler: ContextAssembler | None = None
+    """结构化上下文组装器。配置后替代/增强 transform_context 的功能。
+
+    未配置时消息流完全不变。配置后每轮 provider 调用前执行，
+    按优先级注入 context_blocks，支持 budget 裁剪和过期过滤。
+    与 transform_context 兼容：先执行 context_assembler，再执行 transform_context。
+    """
 
     options: StreamOptions | None = None
