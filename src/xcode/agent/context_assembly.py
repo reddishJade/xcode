@@ -40,6 +40,8 @@ class ContextBlockSource(StrEnum):
     ACTIVE_DIFF = "active_diff"
     TOOL_OUTPUT = "tool_output"
     NOTES = "notes"
+    RECENT_VALIDATION = "recent_validation"
+    TASK_STATE = "task_state"
     HISTORY = "history"
     CUSTOM = "custom"
 
@@ -283,8 +285,12 @@ class DefaultContextAssembler:
         # SYSTEM 目标块 -> SystemMessage（在已有系统消息之后注入）
         # USER_CONTEXT 目标块 -> UserMessage（在所有 SystemMessage 之后注入）
         if used_blocks:
-            system_blocks = [b for b in used_blocks if b.target == ContextBlockTarget.SYSTEM]
-            user_blocks = [b for b in used_blocks if b.target != ContextBlockTarget.SYSTEM]
+            system_blocks = [
+                b for b in used_blocks if b.target == ContextBlockTarget.SYSTEM
+            ]
+            user_blocks = [
+                b for b in used_blocks if b.target != ContextBlockTarget.SYSTEM
+            ]
 
             # 找最后一个连续 SystemMessage 之后的位置
             insert_idx = 0

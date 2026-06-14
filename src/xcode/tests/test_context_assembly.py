@@ -29,10 +29,14 @@ from xcode.agent.context_collector import (
     ActiveDiffCollector,
     ContextCollectionInput,
     ContextCollectorRegistry,
+    NotesCollector,
     ProjectManifestCollector,
+    RecentValidationCollector,
+    TaskStateCollector,
 )
 from xcode.agent.messages import (
     SystemMessage,
+    ToolResultMessage,
     UserMessage,
 )
 from xcode.agent.message_converter import convert_to_llm
@@ -1241,9 +1245,11 @@ class TestContextCollectorWithAssembler(unittest.TestCase):
         asyncio.run(
             run_agent_loop(
                 prompts=[UserMessage(content="hello")],
-                context=AgentContext(messages=[
-                    SystemMessage(content="identity prompt"),
-                ]),
+                context=AgentContext(
+                    messages=[
+                        SystemMessage(content="identity prompt"),
+                    ]
+                ),
                 config=config,
                 emit=lambda _e: None,
             )
@@ -1539,8 +1545,9 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             root = Path(tmp)
             body = "#" * 40000
             content = (
-                "# Guide\n\n" + body +
-                "\n\n## Validation\n\nRun targeted validation for modified files.\n"
+                "# Guide\n\n"
+                + body
+                + "\n\n## Validation\n\nRun targeted validation for modified files.\n"
             )
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
             collector = ProjectManifestCollector(root)
@@ -1564,10 +1571,7 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             body = "#" * 40000
-            content = (
-                "# Guide\n\n" + body +
-                "\n\n## Random Notes\n\nNot important.\n"
-            )
+            content = "# Guide\n\n" + body + "\n\n## Random Notes\n\nNot important.\n"
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
             collector = ProjectManifestCollector(root)
             blocks = collector.collect(ContextCollectionInput())
@@ -1599,9 +1603,7 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             self.assertIn("<manifest-truncated>", blocks[0].content)
             self.assertIn("</manifest-truncated>", blocks[0].content)
             # 标记两端都不应被截断
-            self.assertTrue(
-                blocks[0].content.strip().endswith("</manifest-truncated>")
-            )
+            self.assertTrue(blocks[0].content.strip().endswith("</manifest-truncated>"))
 
     def test_output_strictly_bounded(self) -> None:
         """压缩后输出严格 ≤ MANIFEST_MAX_BYTES。"""
@@ -1609,8 +1611,7 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             root = Path(tmp)
             body = "#" * 100000
             content = (
-                "# Guide\n\n" + body +
-                "\n\n## Validation\n\nRun tests.\n"
+                "# Guide\n\n" + body + "\n\n## Validation\n\nRun tests.\n"
                 "\n\n## Priority\n\nFirst.\n"
                 "\n\n## Git Safety\n\nNever.\n"
             )
@@ -1790,15 +1791,260 @@ class TestActiveDiffCollector(unittest.TestCase):
         self.assertEqual(len(blocks), 0)
 
 
+# ── RecentValidationCollector 测试 ──
+
+
+class TestRecentValidationCollector(unittest.TestCase):
+    """测试 RecentValidationCollector。"""
+
+    def test_no_messages_returns_empty(self) -> None:
+        """无消息时返回空列表。"""
+        collector = RecentValidationCollector()
+        blocks = collector.collect(ContextCollectionInput(messages=[]))
+        self.assertEqual(len(blocks), 0)
+
+    def test_no_error_messages_returns_empty(self) -> None:
+        """无错误消息时返回空列表。"""
+        msg = ToolResultMessage(tool_name="bash", content="success", is_error=False)
+        collector = RecentValidationCollector()
+        blocks = collector.collect(ContextCollectionInput(messages=[msg]))
+        self.assertEqual(len(blocks), 0)
+
+    def test_non_validation_error_ignored(self) -> None:
+        """非 bash/shell 工具的错误被忽略。"""
+        msg = ToolResultMessage(
+            tool_name="read_file", content="not found", is_error=True
+        )
+        collector = RecentValidationCollector()
+        blocks = collector.collect(ContextCollectionInput(messages=[msg]))
+        self.assertEqual(len(blocks), 0)
+
+    def test_bash_error_emits_block(self) -> None:
+        """bash 工具错误发出验证失败块。"""
+        msg = ToolResultMessage(
+            tool_name="bash",
+            content="Error: command not found",
+            is_error=True,
+        )
+        collector = RecentValidationCollector()
+        blocks = collector.collect(ContextCollectionInput(messages=[msg]))
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0].source, ContextBlockSource.RECENT_VALIDATION)
+        self.assertEqual(blocks[0].target, ContextBlockTarget.USER_CONTEXT)
+        self.assertEqual(blocks[0].priority, ContextPriority.HIGH)
+        self.assertIn("Command: bash", blocks[0].content)
+        self.assertIn("Error: command not found", blocks[0].content)
+
+    def test_last_error_is_used(self) -> None:
+        """只使用最近的错误。"""
+        msgs = [
+            ToolResultMessage(tool_name="bash", content="old error", is_error=True),
+            ToolResultMessage(tool_name="bash", content="", is_error=False),
+            ToolResultMessage(tool_name="bash", content="latest error", is_error=True),
+        ]
+        collector = RecentValidationCollector()
+        blocks = collector.collect(ContextCollectionInput(messages=msgs))
+        self.assertEqual(len(blocks), 1)
+        self.assertIn("latest error", blocks[0].content)
+
+    def test_successful_validation_returns_empty(self) -> None:
+        """成功执行且无错误的验证不产生块。"""
+        msgs = [
+            ToolResultMessage(
+                tool_name="bash", content="All tests passed", is_error=False
+            ),
+            ToolResultMessage(
+                tool_name="bash", content="ruff check passed", is_error=False
+            ),
+        ]
+        collector = RecentValidationCollector()
+        blocks = collector.collect(ContextCollectionInput(messages=msgs))
+        self.assertEqual(len(blocks), 0)
+
+    def test_oversized_output_bounded(self) -> None:
+        """超大输出被截断并包含完整标记。"""
+        from xcode.agent.context_collector import RECENT_VALIDATION_MAX_BYTES
+
+        large_content = "error line\n" * 10000
+        msg = ToolResultMessage(tool_name="bash", content=large_content, is_error=True)
+        collector = RecentValidationCollector()
+        blocks = collector.collect(ContextCollectionInput(messages=[msg]))
+        self.assertEqual(len(blocks), 1)
+        self.assertIn("<validation-truncated>", blocks[0].content)
+        self.assertIn("</validation-truncated>", blocks[0].content)
+        self.assertLessEqual(
+            len(blocks[0].content.encode("utf-8")),
+            RECENT_VALIDATION_MAX_BYTES + 200,  # +200 for "Command: bash\n" prefix
+        )
+
+
+# ── TaskStateCollector 测试 ──
+
+
+class TestTaskStateCollector(unittest.TestCase):
+    """测试 TaskStateCollector。"""
+
+    def test_no_provider_returns_empty(self) -> None:
+        """无 provider 时返回空列表。"""
+        collector = TaskStateCollector(provider=None)
+        blocks = collector.collect(ContextCollectionInput())
+        self.assertEqual(len(blocks), 0)
+
+    def test_empty_state_returns_empty(self) -> None:
+        """provider 返回空字符串时返回空列表。"""
+        collector = TaskStateCollector(provider=lambda: "")
+        blocks = collector.collect(ContextCollectionInput())
+        self.assertEqual(len(blocks), 0)
+
+    def test_task_state_emits_block(self) -> None:
+        """任务状态发出 USER_CONTEXT 块。"""
+        collector = TaskStateCollector(provider=lambda: "- #1 [pending] Implement X")
+        blocks = collector.collect(ContextCollectionInput())
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0].source, ContextBlockSource.TASK_STATE)
+        self.assertEqual(blocks[0].target, ContextBlockTarget.USER_CONTEXT)
+        self.assertEqual(blocks[0].priority, ContextPriority.HIGH)
+        self.assertIn("Implement X", blocks[0].content)
+
+    def test_oversized_state_bounded(self) -> None:
+        """超大状态被截断并包含完整标记。"""
+        large_state = "- #1 [pending] " + "x" * 10000
+        collector = TaskStateCollector(provider=lambda: large_state)
+        blocks = collector.collect(ContextCollectionInput())
+        self.assertEqual(len(blocks), 1)
+        content = blocks[0].content
+        self.assertIn("<task-state-truncated>", content)
+        self.assertIn("</task-state-truncated>", content)
+        from xcode.agent.context_collector import TASK_STATE_MAX_BYTES
+
+        self.assertLessEqual(len(content.encode("utf-8")), TASK_STATE_MAX_BYTES)
+
+
+# ── NotesCollector 测试 ──
+
+
+class TestNotesCollector(unittest.TestCase):
+    """测试 NotesCollector。"""
+
+    def test_missing_notes_dir_returns_empty(self) -> None:
+        """缺少 .local/notes/ 目录时返回空列表。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            collector = NotesCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 0)
+
+    def test_notes_files_emit_block(self) -> None:
+        """笔记文件发出 NOTES 块。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            notes_dir = root / ".local" / "notes"
+            notes_dir.mkdir(parents=True)
+            (notes_dir / "a.md").write_text("Note A content", encoding="utf-8")
+            collector = NotesCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].source, ContextBlockSource.NOTES)
+            self.assertEqual(blocks[0].target, ContextBlockTarget.USER_CONTEXT)
+            self.assertEqual(blocks[0].priority, ContextPriority.MEDIUM)
+            self.assertIn("Note A content", blocks[0].content)
+
+    def test_deterministic_ordering(self) -> None:
+        """笔记文件按路径名字母序排列。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            notes_dir = root / ".local" / "notes"
+            notes_dir.mkdir(parents=True)
+            (notes_dir / "z.md").write_text("Z content", encoding="utf-8")
+            (notes_dir / "a.md").write_text("A content", encoding="utf-8")
+            (notes_dir / "m.md").write_text("M content", encoding="utf-8")
+            collector = NotesCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            a_pos = blocks[0].content.index("A content")
+            m_pos = blocks[0].content.index("M content")
+            z_pos = blocks[0].content.index("Z content")
+            self.assertLess(a_pos, m_pos)
+            self.assertLess(m_pos, z_pos)
+
+    def test_ignores_non_text_files(self) -> None:
+        """忽略非 .md/.txt 后缀的文件。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            notes_dir = root / ".local" / "notes"
+            notes_dir.mkdir(parents=True)
+            (notes_dir / "note.md").write_text("valid", encoding="utf-8")
+            (notes_dir / "data.bin").write_text("binary", encoding="utf-8")
+            (notes_dir / "notes.py").write_text("print('hi')", encoding="utf-8")
+            collector = NotesCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("valid", blocks[0].content)
+            self.assertNotIn("binary", blocks[0].content)
+
+    def test_bounded_output(self) -> None:
+        """总输出受 NOTES_MAX_BYTES 限制。"""
+        from xcode.agent.context_collector import NOTES_MAX_BYTES
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            notes_dir = root / ".local" / "notes"
+            notes_dir.mkdir(parents=True)
+            for name in ("big1.md", "big2.md", "big3.md"):
+                (notes_dir / name).write_text("line\n" * 5000, encoding="utf-8")
+            collector = NotesCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertLessEqual(
+                len(blocks[0].content.encode("utf-8")),
+                NOTES_MAX_BYTES,
+            )
+
+    def test_bounded_output_has_full_marker(self) -> None:
+        """超出预算时包含完整截断标记。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            notes_dir = root / ".local" / "notes"
+            notes_dir.mkdir(parents=True)
+            (notes_dir / "large.md").write_text("big\n" * 10000, encoding="utf-8")
+            collector = NotesCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("<notes-truncated>", blocks[0].content)
+            self.assertIn("</notes-truncated>", blocks[0].content)
+
+    def test_oversized_file_skipped(self) -> None:
+        """超大文件被跳过。"""
+        from xcode.agent.context_collector import NOTES_MAX_FILE_BYTES
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            notes_dir = root / ".local" / "notes"
+            notes_dir.mkdir(parents=True)
+            (notes_dir / "small.md").write_text("small note", encoding="utf-8")
+            (notes_dir / "huge.md").write_text(
+                "x" * (NOTES_MAX_FILE_BYTES + 1), encoding="utf-8"
+            )
+            collector = NotesCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("small note", blocks[0].content)
+            self.assertNotIn("huge", blocks[0].content)
+
+
 def _git_init(root: Path) -> None:
     subprocess.run(["git", "init"], cwd=root, capture_output=True, check=True)
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
-        cwd=root, capture_output=True, check=True,
+        cwd=root,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "Test User"],
-        cwd=root, capture_output=True, check=True,
+        cwd=root,
+        capture_output=True,
+        check=True,
     )
 
 

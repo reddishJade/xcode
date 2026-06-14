@@ -17,7 +17,10 @@ from ...agent.context_assembly import DefaultContextAssembler
 from ...agent.context_collector import (
     ActiveDiffCollector,
     ContextCollectorRegistry,
+    NotesCollector,
     ProjectManifestCollector,
+    RecentValidationCollector,
+    TaskStateCollector,
 )
 from ...agent.history import apply_request_hygiene
 from ...agent.message_converter import convert_to_llm
@@ -162,6 +165,33 @@ def _build_before_provider_request_closure(
     return closure
 
 
+def _build_task_state_provider(project_root: Path) -> Callable[[], str] | None:
+    """返回一个可调用对象，每次调用时从 TaskStore 读取当前任务状态。"""
+    try:
+        from xcode.harness.task_store import TaskStore
+
+        store = TaskStore(project_root)
+        tasks = store.list()
+        if not tasks:
+            return None
+
+        def provider() -> str:
+            try:
+                current = store.list()
+            except Exception:
+                return ""
+            lines: list[str] = []
+            for t in current:
+                blocked_by = t.payload.get("blocked_by")
+                block_info = f" [Blocked by: {blocked_by}]" if blocked_by else ""
+                lines.append(f"  - #{t.id} [{t.status}]: {t.title}{block_info}")
+            return "\n".join(lines)
+
+        return provider
+    except Exception:
+        return None
+
+
 def build_loop_config(
     mode: ExecutionMode,
     snapshot: TurnSnapshot,
@@ -238,6 +268,11 @@ def build_loop_config(
         registry_ = ContextCollectorRegistry()
         registry_.register(ProjectManifestCollector(project_root))
         registry_.register(ActiveDiffCollector(project_root))
+        registry_.register(RecentValidationCollector())
+        task_provider = _build_task_state_provider(project_root)
+        if task_provider is not None:
+            registry_.register(TaskStateCollector(task_provider))
+        registry_.register(NotesCollector(project_root))
         assembler = DefaultContextAssembler()
 
     return AgentLoopConfig(

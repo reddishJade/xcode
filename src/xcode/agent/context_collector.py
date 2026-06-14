@@ -14,12 +14,18 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from xcode.agent.context_assembly import ContextBlock, ContextBlockSource, ContextBlockTarget, ContextPriority
-from xcode.agent.messages import AgentMessage
+from xcode.agent.context_assembly import (
+    ContextBlock,
+    ContextBlockSource,
+    ContextBlockTarget,
+    ContextPriority,
+)
+from xcode.agent.messages import AgentMessage, ToolResultMessage
 from xcode.agent.protocols import AgentTool
 
 logger = logging.getLogger(__name__)
@@ -114,19 +120,21 @@ class ContextCollectorRegistry:
 MANIFEST_MAX_BYTES: int = 32 * 1024  # 32KB —— 超此阈值时压缩
 MANIFEST_OPENING_BYTES: int = 6 * 1024  # 6KB —— 压缩时保留开头部分
 
-MANIFEST_KEY_SECTIONS: frozenset[str] = frozenset({
-    "priority",
-    "conversation style",
-    "python coding principles",
-    "checklist",
-    "project rules",
-    "comments and docstrings",
-    "git safety",
-    "commit rules",
-    "validation",
-    "working rules",
-    "debugging approach",
-})
+MANIFEST_KEY_SECTIONS: frozenset[str] = frozenset(
+    {
+        "priority",
+        "conversation style",
+        "python coding principles",
+        "checklist",
+        "project rules",
+        "comments and docstrings",
+        "git safety",
+        "commit rules",
+        "validation",
+        "working rules",
+        "debugging approach",
+    }
+)
 
 _MANIFEST_TRUNCATED_MARKER = (
     "<manifest-truncated>Content was truncated because it exceeded the "
@@ -428,7 +436,9 @@ class ActiveDiffCollector:
         ]
 
 
-def _build_diff_excerpt_block(root: Path, has_staged: bool, has_unstaged: bool) -> str | None:
+def _build_diff_excerpt_block(
+    root: Path, has_staged: bool, has_unstaged: bool
+) -> str | None:
     """构建 diff 摘录块（含 <diff-excerpt> 包装）。
 
     优先收集 unstaged diff，若为空则收集 staged diff。
@@ -454,3 +464,242 @@ def _build_diff_excerpt_block(root: Path, has_staged: bool, has_unstaged: bool) 
             f"\n[... {len(lines) - 30} diff lines omitted ...]"
         )
     return "<diff-excerpt>\n" + excerpt + "\n</diff-excerpt>"
+
+
+# ── 共享大小预算辅助函数 ──
+
+
+def _apply_size_budget(content: str, max_bytes: int, marker: str) -> str:
+    """将内容限制在 max_bytes 字节内，超出时截断并追加完整标记。
+
+    返回空字符串表示内容或标记完全无法放入预算。
+    """
+    if not content:
+        return ""
+    if _utf8_size(content) <= max_bytes:
+        return content
+    marker_bytes = _utf8_size(marker)
+    budget = max_bytes - marker_bytes
+    if budget <= 0:
+        return ""
+    return _utf8_prefix(content, budget) + marker
+
+
+# ── 最近验证/测试失败收集器 ──
+
+
+RECENT_VALIDATION_MAX_BYTES: int = 4 * 1024
+_RECENT_VALIDATION_TRUNCATED_MARKER = (
+    "<validation-truncated>Failure excerpt truncated. "
+    "Use the original command to see full output."
+    "</validation-truncated>"
+)
+
+_VALIDATION_TOOL_NAMES: frozenset[str] = frozenset({"bash", "shell"})
+
+
+def _extract_tool_result_text(content: object) -> str:
+    """从工具结果内容块中提取纯文本。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            text = getattr(item, "text", None) or getattr(item, "content", None)
+            if isinstance(text, str):
+                parts.append(text)
+        return "\n".join(parts)
+    return str(content)
+
+
+class RecentValidationCollector:
+    """收集最近失败的验证/测试命令。
+
+    扫描 input.messages 中最近的 ToolResultMessage，
+    查找 is_error=True 且 tool_name 为 bash/shell 类型的执行错误。
+    无失败时返回 []。
+    成功执行的验证命令不产生块。
+
+    优先级 HIGH：验证失败是当前回合的关键上下文。
+    大小限制 RECENT_VALIDATION_MAX_BYTES（4KB），超出时截断。
+    失败时记录日志并返回 []。
+    """
+
+    def __init__(
+        self,
+        max_bytes: int = RECENT_VALIDATION_MAX_BYTES,
+    ) -> None:
+        self._max_bytes = max_bytes
+
+    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
+        for msg in reversed(input.messages):
+            if not isinstance(msg, ToolResultMessage):
+                continue
+            if not msg.is_error:
+                continue
+            if msg.tool_name not in _VALIDATION_TOOL_NAMES:
+                continue
+            return [self._build_block(msg)]
+        return []
+
+    def _build_block(self, msg: ToolResultMessage) -> ContextBlock:
+        command = msg.tool_name
+        raw = _extract_tool_result_text(msg.content)
+        excerpt = _apply_size_budget(
+            raw,
+            self._max_bytes,
+            _RECENT_VALIDATION_TRUNCATED_MARKER,
+        )
+        if not excerpt:
+            excerpt = "(error output empty)"
+        body = f"Command: {command}\n{excerpt}"
+        return ContextBlock(
+            source=ContextBlockSource.RECENT_VALIDATION,
+            target=ContextBlockTarget.USER_CONTEXT,
+            priority=ContextPriority.HIGH,
+            content=body,
+        )
+
+
+# ── 任务状态收集器 ──
+
+
+TASK_STATE_MAX_BYTES: int = 4 * 1024
+_TASK_STATE_TRUNCATED_MARKER = (
+    "<task-state-truncated>Task state truncated. "
+    "Use list_tasks for complete state.</task-state-truncated>"
+)
+
+
+class TaskStateCollector:
+    """收集当前任务/计划状态。
+
+    通过一个可调用 provider 获取状态文本。provider 返回空字符串时返回 []。
+    无 provider 配置时返回 []。
+
+    优先级 HIGH：任务状态是当前回合的关键上下文。
+    大小限制 TASK_STATE_MAX_BYTES（4KB），超出时截断。
+    provider 抛出异常时记录日志并返回 []。
+    """
+
+    def __init__(
+        self,
+        provider: Callable[[], str] | None = None,
+        max_bytes: int = TASK_STATE_MAX_BYTES,
+    ) -> None:
+        self._provider = provider
+        self._max_bytes = max_bytes
+
+    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
+        if self._provider is None:
+            return []
+        try:
+            state_text = self._provider()
+        except Exception:
+            logger.exception("TaskStateCollector provider raised")
+            return []
+        if not state_text.strip():
+            return []
+        body = _apply_size_budget(
+            state_text,
+            self._max_bytes,
+            _TASK_STATE_TRUNCATED_MARKER,
+        )
+        if not body:
+            return []
+        return [
+            ContextBlock(
+                source=ContextBlockSource.TASK_STATE,
+                target=ContextBlockTarget.USER_CONTEXT,
+                priority=ContextPriority.HIGH,
+                content=body,
+            )
+        ]
+
+
+# ── 笔记收集器 ──
+
+
+NOTES_MAX_BYTES: int = 4 * 1024
+NOTES_MAX_FILE_BYTES: int = 64 * 1024  # 单文件跳过阈值
+_NOTES_TRUNCATED_MARKER = (
+    "<notes-truncated>Notes truncated. "
+    "Read individual files for full content.</notes-truncated>"
+)
+
+_NOTES_ALLOWED_SUFFIXES: frozenset[str] = frozenset({".md", ".txt"})
+
+
+class NotesCollector:
+    """从 .local/notes/ 收集笔记文件。
+
+    读取 .local/notes/ 目录下的小型文本/标记文件。
+    按路径名确定顺序排序，限制总输出大小。
+    忽略缺失目录、超大文件和禁止的后缀。
+
+    优先级 MEDIUM：笔记是辅助参考，非即时关键上下文。
+    大小限制 NOTES_MAX_BYTES（4KB），超出时截断。
+    失败时记录日志并返回 []。
+    """
+
+    def __init__(
+        self,
+        project_root: Path | None = None,
+        max_bytes: int = NOTES_MAX_BYTES,
+    ) -> None:
+        self._project_root = project_root
+        self._max_bytes = max_bytes
+
+    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
+        root = input.project_root or self._project_root
+        if root is None:
+            return []
+        notes_dir = root / ".local" / "notes"
+        if not notes_dir.is_dir():
+            return []
+        try:
+            files = sorted(
+                p
+                for p in notes_dir.iterdir()
+                if p.is_file()
+                and p.suffix.lower() in _NOTES_ALLOWED_SUFFIXES
+                and p.stat().st_size <= NOTES_MAX_FILE_BYTES
+            )
+        except Exception:
+            logger.exception("NotesCollector: failed to list notes dir")
+            return []
+
+        parts: list[str] = []
+        total_bytes = 0
+        marker = _NOTES_TRUNCATED_MARKER
+
+        for f in files:
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace").strip()
+            except Exception:
+                continue
+            if not text:
+                continue
+            header = f"--- {f.name} ---"
+            item = f"{header}\n{text}"
+            item_bytes = _utf8_size(item) + 1  # +1 for separator newline
+            if total_bytes + item_bytes > self._max_bytes:
+                remaining = self._max_bytes - total_bytes
+                if _utf8_size(marker) <= remaining:
+                    parts.append(marker)
+                break
+            parts.append(item)
+            total_bytes += item_bytes
+
+        if not parts:
+            return []
+        body = "\n".join(parts)
+
+        return [
+            ContextBlock(
+                source=ContextBlockSource.NOTES,
+                target=ContextBlockTarget.USER_CONTEXT,
+                priority=ContextPriority.MEDIUM,
+                content=body,
+            )
+        ]

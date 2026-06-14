@@ -17,9 +17,14 @@ from .context_assembly import (
     trim_to_budget,
 )
 from .context_collector import (
+    ActiveDiffCollector,
     ContextCollectionInput,
     ContextCollector,
     ContextCollectorRegistry,
+    NotesCollector,
+    ProjectManifestCollector,
+    RecentValidationCollector,
+    TaskStateCollector,
 )
 from .events import AgentEvent
 from .messages import (
@@ -33,6 +38,7 @@ from .protocols import AgentTool, CancellationSignal
 from .results import AgentLoopMetrics, AgentLoopResult
 
 __all__ = [
+    "ActiveDiffCollector",
     "Agent",
     "AgentContext",
     "AgentEvent",
@@ -54,8 +60,12 @@ __all__ = [
     "ContextExpiry",
     "ContextPriority",
     "DefaultContextAssembler",
+    "NotesCollector",
+    "ProjectManifestCollector",
+    "RecentValidationCollector",
     "run_agent_loop",
     "SystemMessage",
+    "TaskStateCollector",
     "ToolResultMessage",
     "trim_to_budget",
     "UserMessage",
