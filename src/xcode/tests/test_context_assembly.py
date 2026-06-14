@@ -1430,3 +1430,160 @@ class TestProjectManifestCollector(unittest.TestCase):
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 1)
             self.assertEqual(blocks[0].content, "CLAUDE rules.")
+
+
+class TestProjectManifestSizeGovernance(unittest.TestCase):
+    """测试项目指令大小治理。"""
+
+    def test_small_content_passes_unchanged(self) -> None:
+        """小内容（≤24KB）保持原样。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            content = "Small instruction file."
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].content, content)
+
+    def test_medium_content_passes_unchanged(self) -> None:
+        """中等内容（size ≤ 32KB）保持原样。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # 接近 32KB 但不超阈值
+            content = "# Medium\n\n" + ("x" * (28 * 1024))
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].content, content)
+
+    def test_oversized_content_is_condensed(self) -> None:
+        """超大内容（>32KB）被压缩到 32KB 以内。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "background\n" * 5000
+            content = "# Opening\n\n" + body + "\n\n## Validation\n\nRun tests.\n"
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertLessEqual(
+                len(blocks[0].content.encode("utf-8")),
+                32 * 1024,
+            )
+
+    def test_condensed_output_has_truncation_marker(self) -> None:
+        """压缩后的输出包含 <manifest-truncated> 标记。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "background\n" * 5000
+            content = "# Opening\n\n" + body
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertIn("<manifest-truncated>", blocks[0].content)
+
+    def test_condensed_keeps_key_section(self) -> None:
+        """压缩后保留匹配的 ## 关键节段。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "#" * 40000
+            content = (
+                "# Guide\n\n" + body +
+                "\n\n## Validation\n\nRun targeted validation for modified files.\n"
+            )
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertIn("Run targeted validation", blocks[0].content)
+
+    def test_condensing_deterministic(self) -> None:
+        """相同输入产生相同压缩结果。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "#" * 40000
+            content = "# Guide\n\n" + body + "\n\n## Priority\n\nFirst.\n"
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            first = collector.collect(ContextCollectionInput())
+            second = collector.collect(ContextCollectionInput())
+            self.assertEqual(first[0].content, second[0].content)
+
+    def test_non_key_section_dropped_when_oversized(self) -> None:
+        """超大内容时非关键节段被丢弃。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "#" * 40000
+            content = (
+                "# Guide\n\n" + body +
+                "\n\n## Random Notes\n\nNot important.\n"
+            )
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            # "Random Notes" 不在关键节段列表中，应被丢弃
+            self.assertNotIn("Random Notes", blocks[0].content)
+
+    def test_system_message_injection_preserved(self) -> None:
+        """provider 仍通过 SystemMessage 收到项目指令（非 UserMessage）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "#" * 40000
+            content = "# Guide\n\n" + body + "\n\n## Priority\n\nFirst.\n"
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].target, ContextBlockTarget.SYSTEM)
+            self.assertEqual(blocks[0].source, ContextBlockSource.PROJECT_MANIFEST)
+
+    def test_marker_fully_present_not_truncated(self) -> None:
+        """压缩标记始终完整包含在输出中，不被截断。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "#" * 50000
+            content = "# Guide\n\n" + body
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertIn("<manifest-truncated>", blocks[0].content)
+            self.assertIn("</manifest-truncated>", blocks[0].content)
+            # 标记两端都不应被截断
+            self.assertTrue(
+                blocks[0].content.strip().endswith("</manifest-truncated>")
+            )
+
+    def test_output_strictly_bounded(self) -> None:
+        """压缩后输出严格 ≤ MANIFEST_MAX_BYTES。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "#" * 100000
+            content = (
+                "# Guide\n\n" + body +
+                "\n\n## Validation\n\nRun tests.\n"
+                "\n\n## Priority\n\nFirst.\n"
+                "\n\n## Git Safety\n\nNever.\n"
+            )
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertLessEqual(
+                len(blocks[0].content.encode("utf-8")),
+                32 * 1024,
+            )
+
+    def test_marker_survives_when_content_overflows(self) -> None:
+        """超阈值内容中标记仍然完整存在。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "x" * 50000
+            content = body + "\n\n## Validation\n\nRun tests.\n"
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            collector = ProjectManifestCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            output = blocks[0].content
+            self.assertIn("<manifest-truncated>", output)
+            self.assertIn("</manifest-truncated>", output)
+            self.assertTrue(output.strip().endswith("</manifest-truncated>"))
+            self.assertLessEqual(len(output.encode("utf-8")), 32 * 1024)

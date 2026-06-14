@@ -109,12 +109,151 @@ class ContextCollectorRegistry:
 
 # ── 项目指令收集器 ──
 
+# 大小治理常量
+MANIFEST_MAX_BYTES: int = 32 * 1024  # 32KB —— 超此阈值时压缩
+MANIFEST_OPENING_BYTES: int = 6 * 1024  # 6KB —— 压缩时保留开头部分
+
+MANIFEST_KEY_SECTIONS: frozenset[str] = frozenset({
+    "priority",
+    "conversation style",
+    "python coding principles",
+    "checklist",
+    "project rules",
+    "comments and docstrings",
+    "git safety",
+    "commit rules",
+    "validation",
+    "working rules",
+    "debugging approach",
+})
+
+_MANIFEST_TRUNCATED_MARKER = (
+    "<manifest-truncated>Content was truncated because it exceeded the "
+    "maximum allowed size. Opening context and key sections are preserved. "
+    "Use read_file to see the full file before acting on omitted details."
+    "</manifest-truncated>"
+)
+
+
+def _utf8_size(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def _utf8_prefix(text: str, max_bytes: int) -> str:
+    data = text.encode("utf-8")
+    if len(data) <= max_bytes:
+        return text
+    return data[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _condense_manifest(text: str) -> str:
+    """压缩超出预算的项目指令文本。
+
+    先为压缩标记预留字节，再依次添加开头内容和关键节段，
+    确保标记始终完整存在于输出中。
+    """
+    marker = _MANIFEST_TRUNCATED_MARKER
+    marker_bytes = _utf8_size(marker)
+
+    # 预留标记字节 + 最大段落分隔符开销（3段 × 2 分隔符 = 4 字节）
+    max_separator_bytes = _utf8_size("\n\n") * 2
+    reserved = marker_bytes + max_separator_bytes
+    content_budget = MANIFEST_MAX_BYTES - reserved
+
+    if content_budget <= 0:
+        return _utf8_prefix(marker, MANIFEST_MAX_BYTES)
+
+    parts: list[str] = []
+
+    # 开头内容（压缩到自身预算或剩余预算中较小者）
+    opening_budget = min(MANIFEST_OPENING_BYTES, content_budget)
+    opening = _utf8_prefix(text, opening_budget).strip()
+    if opening:
+        parts.append(opening)
+        content_budget -= _utf8_size(opening)
+
+    # 关键节段（逐段检查是否适合剩余预算）
+    sections = _extract_key_sections(text)
+    if sections and content_budget > 0:
+        section_header = "## Preserved Key Sections\n\n"
+        header_bytes = _utf8_size(section_header)
+        if content_budget > header_bytes:
+            chosen: list[str] = []
+            used = 0
+            for i, section in enumerate(sections):
+                prefix = "\n\n" if i > 0 else ""
+                item = prefix + section
+                item_bytes = _utf8_size(item)
+                if used + item_bytes + header_bytes <= content_budget:
+                    chosen.append(section)
+                    used += item_bytes
+            if chosen:
+                section_text = section_header + "\n\n".join(chosen)
+                parts.append(section_text)
+                content_budget -= _utf8_size(section_text)
+
+    # 压缩标记始终在末尾
+    parts.append(marker)
+
+    return "\n\n".join(parts)
+
+
+def _extract_key_sections(text: str) -> list[str]:
+    """提取 Markdown 中匹配 MANIFEST_KEY_SECTIONS 的 ## 节。
+
+    每个节段用 _utf8_prefix 裁剪到 SECTION_BUDGET_BYTES 以避免单节
+    占用过多预算。该裁剪由 ProjectManifestCollector 调用方自行决定
+    是否使用，本函数只做初筛。
+    """
+    sections: list[str] = []
+    current_heading = ""
+    current_lines: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_heading, current_lines
+        if not current_heading or not current_lines:
+            return
+        heading_key = current_heading.strip("# ").strip().lower()
+        if heading_key not in MANIFEST_KEY_SECTIONS:
+            return
+        section = "\n".join(_drop_fenced_blocks(current_lines)).strip()
+        if section:
+            sections.append(section)
+
+    for line in text.splitlines():
+        if line.startswith("## ") or line.startswith("### "):
+            flush()
+            current_heading = line
+            current_lines = [line]
+        elif current_heading:
+            current_lines.append(line)
+    flush()
+    return sections
+
+
+def _drop_fenced_blocks(lines: list[str]) -> list[str]:
+    result: list[str] = []
+    in_fence = False
+    for line in lines:
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        result.append(line)
+    return result
+
 
 class ProjectManifestCollector:
     """从 AGENTS.md / CLAUDE.md 收集项目指令的 collector。
 
     读取配置路径下的 AGENTS.md 和 CLAUDE.md 文件，产出 SYSTEM 目标的
     ContextBlock。CLAUDE.md 仅包含 @AGENTS.md 引用时不重复发出块。
+
+    大小治理（两级策略）：
+    - ≤ MANIFEST_MAX_BYTES（32KB）：内容原样保留
+    - > MANIFEST_MAX_BYTES：自动压缩，保留开头和关键节段，末尾始终
+      包含 <manifest-truncated> 标记
 
     优先级为 CRITICAL（最高优先等级）：项目指令定义 agent 在仓库中的
     行为规则。优先级仅影响裁剪顺序——高优先级的块最后被丢弃。若 base
@@ -140,7 +279,7 @@ class ProjectManifestCollector:
                         source=ContextBlockSource.PROJECT_MANIFEST,
                         target=ContextBlockTarget.SYSTEM,
                         priority=ContextPriority.CRITICAL,
-                        content=content,
+                        content=_prepare_manifest(content),
                     )
                 )
 
@@ -153,11 +292,23 @@ class ProjectManifestCollector:
                         source=ContextBlockSource.PROJECT_MANIFEST,
                         target=ContextBlockTarget.SYSTEM,
                         priority=ContextPriority.CRITICAL,
-                        content=content,
+                        content=_prepare_manifest(content),
                     )
                 )
 
         return blocks
+
+
+def _prepare_manifest(text: str) -> str:
+    """根据两级大小策略准备清单文本。
+
+    ≤ MANIFEST_MAX_BYTES：原样返回
+    > MANIFEST_MAX_BYTES：压缩后返回
+    """
+    source_bytes = _utf8_size(text)
+    if source_bytes <= MANIFEST_MAX_BYTES:
+        return text
+    return _condense_manifest(text)
 
 
 _AGENTS_REF_PATTERNS = frozenset({"@AGENTS.md"})
