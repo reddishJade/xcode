@@ -32,18 +32,12 @@ from xcode.agent.protocols import AgentTool
 class ContextBlockSource(StrEnum):
     """上下文块的来源类别。"""
 
-    SYSTEM_PROMPT = "system_prompt"
     PROJECT_MANIFEST = "project_manifest"
     SKILL = "skill"
-    TASK_INSTRUCTION = "task_instruction"
-    PLAN = "plan"
     ACTIVE_DIFF = "active_diff"
-    TOOL_OUTPUT = "tool_output"
     NOTES = "notes"
     RECENT_VALIDATION = "recent_validation"
     TASK_STATE = "task_state"
-    HISTORY = "history"
-    CUSTOM = "custom"
 
 
 # ── 注入目标枚举 ──

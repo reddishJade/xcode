@@ -8,7 +8,6 @@ import platform
 from pathlib import Path
 
 from xcode.harness.config import DEFAULT_PROMPT_MODULES
-from xcode.harness.skill_loader import SkillLoader
 from xcode.harness.skills import ToolSpec, build_tool_guidelines, build_tool_prompt
 from xcode.coding_agent.tools.shell_adapter import ShellSpec
 
@@ -33,7 +32,6 @@ class PromptContext:
     project_root: Path
     registry: tuple[ToolSpec, ...]
     question: str
-    skill_loader: SkillLoader | None = None
     resumed_notice: str | None = None
     interrupted_notice: str | None = None
     contextual_state: ContextualRetrievalState | None = None
@@ -172,11 +170,6 @@ class VolatileRegionBuilder:
                     rendered = context.contextual_state.render()
                     if rendered.strip():
                         volatile_parts.append(rendered)
-                case "skills":
-                    if context.skill_loader is not None:
-                        volatile_parts.append(
-                            context.skill_loader.get_catalog(question=context.question)
-                        )
                 case "notices":
                     notices = [
                         context.resumed_notice,
@@ -254,7 +247,6 @@ def _build_post_compact_metadata(project_root: Path) -> list[str]:
 def build_runtime_context_provider(
     project_root: Path,
     registry: tuple[ToolSpec, ...],
-    skill_loader: SkillLoader | None = None,
     prompt_builder: SystemPromptBuilder | None = None,
     resumed_notice: Callable[[], str | None] | None = None,
     interrupted_notice: Callable[[], str | None] | None = None,
@@ -272,7 +264,6 @@ def build_runtime_context_provider(
                     project_root=root,
                     registry=registry,
                     question=question,
-                    skill_loader=skill_loader,
                     resumed_notice=resumed_notice() if resumed_notice else None,
                     interrupted_notice=interrupted_notice()
                     if interrupted_notice

@@ -3,8 +3,6 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any, cast
-
 from xcode.harness.agent_runtime.compaction import (
     LayeredCompactor,
     context_collapse_clean,
@@ -97,21 +95,10 @@ class XcodeContextRestorationTests(unittest.TestCase):
                 },
             )
 
-            class FakeLoader:
-                def get_catalog(self, question: str | None = None) -> str:
-                    return (
-                        "<skill-catalog>\n"
-                        "description: Compile helper skill\n"
-                        'load: load_skill({"name": "compile_skill"})\n'
-                        "</skill>\n"
-                        "</skill-catalog>"
-                    )
-
             context = PromptContext(
                 project_root=project_root,
                 registry=(),
                 question="How to build?",
-                skill_loader=cast(Any, FakeLoader()),
             )
 
             builder = SystemPromptBuilder()
@@ -123,10 +110,6 @@ class XcodeContextRestorationTests(unittest.TestCase):
                 "- [PENDING] Task #1: Implement features (1/2 subtasks completed) [Blocked by: Task #99]",
                 prompt,
             )
-
-            # Verify skill catalog block
-            self.assertIn("<skill-catalog>", prompt)
-            self.assertIn("Compile helper skill", prompt)
 
             # Verify that all metadata is injected strictly into the Volatile Region (below dynamic boundary)
             boundary_marker = "<system-prompt-dynamic-boundary />"

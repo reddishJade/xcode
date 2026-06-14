@@ -24,6 +24,7 @@ from .context_collector import (
     NotesCollector,
     ProjectManifestCollector,
     RecentValidationCollector,
+    SkillCollector,
     TaskStateCollector,
 )
 from .events import AgentEvent
@@ -64,6 +65,7 @@ __all__ = [
     "ProjectManifestCollector",
     "RecentValidationCollector",
     "run_agent_loop",
+    "SkillCollector",
     "SystemMessage",
     "TaskStateCollector",
     "ToolResultMessage",

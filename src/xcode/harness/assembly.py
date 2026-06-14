@@ -44,7 +44,6 @@ from xcode.harness.observability import (
 from xcode.harness.observability.permission_model import PolicyEvaluator
 from xcode.harness.observability.hooks import HookEvent
 from xcode.harness.skills import ToolInput, ToolSpec
-from xcode.harness.skill_loader import SkillLoader, build_skill_loader_tool
 from xcode.coding_agent.registry import build_project_scoped_registry
 from xcode.coding_agent.tools import ShellSpec
 from xcode.ai.providers.factory import (
@@ -232,23 +231,17 @@ def build_tool_registry(
     llm_profiles: Mapping[str, ModelProvider] | None,
     config: AgentConfig,
     runtime_config: XcodeRuntimeConfig,
-    skills_dir: Path | None,
     contextual_state: ContextualRetrievalState | None = None,
     compact_controller: CompactController | None = None,
     cancel_event: threading.Event | None = None,
     env: ExecutionEnv | None = None,
-) -> tuple[
-    tuple[ToolSpec, ...], SkillLoader | None, ShellSpec, tuple[Callable[[], None], ...]
-]:
+    skills_dir: Path | None = None,
+) -> tuple[tuple[ToolSpec, ...], ShellSpec, tuple[Callable[[], None], ...]]:
     from xcode.coding_agent.tools import detect_shell
 
     enabled = effective_enabled_groups(runtime_config.tools.enabled_groups)
     closers: list[Callable[[], None]] = []
     shell_spec = detect_shell(runtime_config.tools.shell)
-    skills_dir = skills_dir or project_root / ".agents" / "skills"
-    skill_loader = None
-    if "skills" in enabled and skills_dir.exists():
-        skill_loader = SkillLoader(skills_dir)
 
     registry = build_project_scoped_registry(
         project_root=project_root,
@@ -258,9 +251,7 @@ def build_tool_registry(
         cancel_event=cancel_event,
         env=env,
     )
-    registry = _extend_registry_with_features(
-        registry, project_root, enabled, skill_loader
-    )
+    registry = _extend_registry_with_features(registry, project_root, enabled)
 
     child_registry = registry
     registry += (build_search_tools_tool(registry),)
@@ -274,21 +265,19 @@ def build_tool_registry(
         enabled=enabled,
         child_registry=child_registry,
         contextual_state=contextual_state,
-        skill_loader=skill_loader,
         shell_spec=shell_spec,
         cancel_event=cancel_event,
         env=env,
     )
     closers.extend(subagent_closers)
     registry += subagent_tools
-    return registry, skill_loader, shell_spec, tuple(closers)
+    return registry, shell_spec, tuple(closers)
 
 
 def _extend_registry_with_features(
     registry: tuple[ToolSpec, ...],
     project_root: Path,
     enabled: set[str],
-    skill_loader: SkillLoader | None,
 ) -> tuple[ToolSpec, ...]:
     """添加可选功能工具到注册表。"""
     if "worktree" in enabled:
@@ -315,8 +304,6 @@ def _extend_registry_with_features(
         from xcode.harness.task_store import TaskStore
 
         registry += build_progress_tools(TaskStore(project_root))
-    if skill_loader is not None:
-        registry += (build_skill_loader_tool(skill_loader),)
     return registry
 
 
@@ -329,7 +316,6 @@ def _build_subagent_integration(
     enabled: set[str],
     child_registry: tuple[ToolSpec, ...],
     contextual_state: ContextualRetrievalState | None,
-    skill_loader: SkillLoader | None,
     shell_spec: ShellSpec,
     cancel_event: threading.Event | None,
     env: ExecutionEnv | None,
@@ -366,7 +352,6 @@ def _build_subagent_integration(
                 runtime_context_provider=build_runtime_context_provider(
                     child_root,
                     effective_registry,
-                    skill_loader,
                     shell_spec=shell_spec,
                     contextual_state=child_contextual_state,
                     modules=runtime_config.prompt.modules,
@@ -428,7 +413,6 @@ def build_agent(
     config: AgentConfig,
     audit_path: Path | None,
     runtime_config: XcodeRuntimeConfig,
-    skill_loader: SkillLoader | None,
     contextual_state: ContextualRetrievalState | None = None,
     shell_spec: ShellSpec | None = None,
     compact_controller: CompactController | None = None,
@@ -479,7 +463,6 @@ def build_agent(
             runtime_context_provider=build_runtime_context_provider(
                 project_root,
                 registry,
-                skill_loader,
                 shell_spec=shell_spec,
                 contextual_state=contextual_state,
                 modules=runtime_config.prompt.modules,

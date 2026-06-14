@@ -29,7 +29,6 @@ DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
     "cwd",
     "git_preflight",
     "contextual_retrieval",
-    "skills",
     "notices",
 )
 

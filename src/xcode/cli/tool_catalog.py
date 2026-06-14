@@ -29,17 +29,10 @@ type ToolCatalogBuilder = Callable[[], tuple[ToolSpec, ...]]
 
 
 def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
-    from xcode.harness.skill_loader import SkillLoader, build_skill_loader_tool
-
     return [
         lambda: build_file_tools(base_tmp),
         lambda: build_code_tools(base_tmp),
         lambda: (build_bash_tool(base_tmp),),
-        lambda: (
-            build_skill_loader_tool(
-                SkillLoader(base_tmp / "skills"),
-            ),
-        ),
         lambda: build_worktree_tools(
             WorktreeTaskRunner(base_tmp),
         ),

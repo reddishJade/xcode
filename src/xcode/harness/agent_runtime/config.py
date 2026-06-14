@@ -20,6 +20,7 @@ from ...agent.context_collector import (
     NotesCollector,
     ProjectManifestCollector,
     RecentValidationCollector,
+    SkillCollector,
     TaskStateCollector,
 )
 from ...agent.history import apply_request_hygiene
@@ -273,6 +274,7 @@ def build_loop_config(
         if task_provider is not None:
             registry_.register(TaskStateCollector(task_provider))
         registry_.register(NotesCollector(project_root))
+        registry_.register(SkillCollector(project_root))
         assembler = DefaultContextAssembler()
 
     return AgentLoopConfig(

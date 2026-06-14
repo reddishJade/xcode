@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
 import unittest
+from unittest import mock
 
 from xcode.agent.agent_loop import run_agent_loop
 from xcode.agent.config import AgentContext, AgentLoopConfig
@@ -32,6 +34,7 @@ from xcode.agent.context_collector import (
     NotesCollector,
     ProjectManifestCollector,
     RecentValidationCollector,
+    SkillCollector,
     TaskStateCollector,
 )
 from xcode.agent.messages import (
@@ -97,7 +100,7 @@ class TestContextBlock(unittest.TestCase):
     def test_token_count_cached(self) -> None:
         """预计算的 token_count 应直接返回。"""
         block = ContextBlock(
-            source=ContextBlockSource.PLAN,
+            source=ContextBlockSource.NOTES,
             priority=ContextPriority.HIGH,
             content="some content",
             token_count=42,
@@ -116,7 +119,7 @@ class TestContextBlock(unittest.TestCase):
     def test_default_created_values(self) -> None:
         """created_turn 和 created_step 默认为 0。"""
         block = ContextBlock(
-            source=ContextBlockSource.CUSTOM,
+            source=ContextBlockSource.NOTES,
             priority=ContextPriority.MEDIUM,
             content="test",
         )
@@ -126,7 +129,7 @@ class TestContextBlock(unittest.TestCase):
     def test_created_values_custom(self) -> None:
         """created_turn 和 created_step 可自定义。"""
         block = ContextBlock(
-            source=ContextBlockSource.CUSTOM,
+            source=ContextBlockSource.NOTES,
             priority=ContextPriority.HIGH,
             content="test",
             created_turn=5,
@@ -181,12 +184,12 @@ class TestTrimToBudget(unittest.TestCase):
         """budget <= 0 时所有块按优先级排序后返回。"""
         blocks = [
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.BACKGROUND,
                 content="bg",
             ),
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.CRITICAL,
                 content="critical",
             ),
@@ -201,13 +204,13 @@ class TestTrimToBudget(unittest.TestCase):
         """超出预算时丢弃扫描到的块，剩余的是高优先级块。"""
         blocks = [
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.HIGH,
                 content="high",
                 token_count=50,
             ),
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.BACKGROUND,
                 content="low",
                 token_count=100,
@@ -223,19 +226,19 @@ class TestTrimToBudget(unittest.TestCase):
         """同优先级顺序稳定。"""
         blocks = [
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.MEDIUM,
                 content="first",
                 token_count=30,
             ),
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.MEDIUM,
                 content="second",
                 token_count=30,
             ),
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.MEDIUM,
                 content="third",
                 token_count=30,
@@ -250,7 +253,7 @@ class TestTrimToBudget(unittest.TestCase):
         """base_tokens 占满预算时即使是 CRITICAL 块也被丢弃。"""
         blocks = [
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.CRITICAL,
                 content="important",
                 token_count=10,
@@ -264,13 +267,13 @@ class TestTrimToBudget(unittest.TestCase):
         """高优先级块太大时跳过，继续尝试低优先级小块的 greedy 策略。"""
         blocks = [
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.HIGH,
                 content="too large",
                 token_count=100,
             ),
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.MEDIUM,
                 content="small fits",
                 token_count=3,
@@ -286,19 +289,19 @@ class TestTrimToBudget(unittest.TestCase):
         """多个块填充到预算上限，剩余丢弃。"""
         blocks = [
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.CRITICAL,
                 content="a",
                 token_count=10,
             ),
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.HIGH,
                 content="b",
                 token_count=10,
             ),
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=ContextPriority.LOW,
                 content="c",
                 token_count=10,
@@ -350,12 +353,12 @@ class TestDefaultContextAssemblerPriority(unittest.TestCase):
                 messages=[UserMessage(content="hello")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.BACKGROUND,
                         content="bg",
                     ),
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.CRITICAL,
                         content="critical",
                     ),
@@ -373,19 +376,19 @@ class TestDefaultContextAssemblerPriority(unittest.TestCase):
                 messages=[UserMessage(content="hello")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.MEDIUM,
                         content="first",
                         block_id="a",
                     ),
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.MEDIUM,
                         content="second",
                         block_id="b",
                     ),
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.MEDIUM,
                         content="third",
                         block_id="c",
@@ -410,13 +413,13 @@ class TestDefaultContextAssemblerBudget(unittest.TestCase):
                 messages=[UserMessage(content="hi")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.CRITICAL,
                         content="critical content",
                         token_count=10,
                     ),
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.BACKGROUND,
                         content="background noise",
                         token_count=100,
@@ -437,7 +440,7 @@ class TestDefaultContextAssemblerBudget(unittest.TestCase):
                 messages=[UserMessage(content="x" * 2000)],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.CRITICAL,
                         content="vital",
                         token_count=10,
@@ -457,13 +460,13 @@ class TestDefaultContextAssemblerBudget(unittest.TestCase):
                 messages=[UserMessage(content="base")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.CRITICAL,
                         content="big critical",
                         token_count=100,
                     ),
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.HIGH,
                         content="small high",
                         token_count=3,
@@ -481,7 +484,7 @@ class TestDefaultContextAssemblerBudget(unittest.TestCase):
         """相同输入产生相同结果。"""
         input_blocks = [
             ContextBlock(
-                source=ContextBlockSource.CUSTOM,
+                source=ContextBlockSource.NOTES,
                 priority=p,
                 content=f"block-{p}",
                 token_count=10,
@@ -521,12 +524,12 @@ class TestDefaultContextAssemblerExpiry(unittest.TestCase):
                 messages=[UserMessage(content="hello")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.HIGH,
                         content="valid",
                     ),
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.CRITICAL,
                         content="expired by step",
                         expiry=ContextExpiry(max_steps=3),
@@ -548,7 +551,7 @@ class TestDefaultContextAssemblerExpiry(unittest.TestCase):
                 messages=[UserMessage(content="hello")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.HIGH,
                         content="still valid",
                         expiry=ContextExpiry(max_steps=3),
@@ -567,12 +570,12 @@ class TestDefaultContextAssemblerExpiry(unittest.TestCase):
                 messages=[UserMessage(content="hello")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.MEDIUM,
                         content="still valid",
                     ),
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.HIGH,
                         content="expired by turn",
                         expiry=ContextExpiry(max_turns=3),
@@ -592,7 +595,7 @@ class TestDefaultContextAssemblerExpiry(unittest.TestCase):
                 messages=[UserMessage(content="hello")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.HIGH,
                         content="not expired yet",
                         expiry=ContextExpiry(max_turns=3),
@@ -611,7 +614,7 @@ class TestDefaultContextAssemblerExpiry(unittest.TestCase):
                 messages=[UserMessage(content="hello")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.HIGH,
                         content="never expires",
                         expiry=ContextExpiry(),
@@ -630,7 +633,7 @@ class TestDefaultContextAssemblerExpiry(unittest.TestCase):
                 messages=[UserMessage(content="hello")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.HIGH,
                         content="no expiry set",
                         expiry=None,
@@ -648,7 +651,7 @@ class TestDefaultContextAssemblerExpiry(unittest.TestCase):
                 messages=[UserMessage(content="hello")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.HIGH,
                         content="expires at step 3 from start",
                         expiry=ContextExpiry(max_steps=3),
@@ -678,7 +681,7 @@ class TestDefaultContextAssemblerMessageInjection(unittest.TestCase):
                 ],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.PLAN,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.HIGH,
                         content="plan info",
                     ),
@@ -689,8 +692,8 @@ class TestDefaultContextAssemblerMessageInjection(unittest.TestCase):
         self.assertEqual(getattr(result.messages[0], "role", ""), "system")
         self.assertEqual(getattr(result.messages[1], "role", ""), "user")
         self.assertIn("plan info", str(result.messages[1].content))
-        # 验证 synthetic 消息包含 [plan] 来源标记
-        self.assertIn("[plan]", str(result.messages[1].content))
+        # 验证 synthetic 消息包含 [notes] 来源标记
+        self.assertIn("[notes]", str(result.messages[1].content))
 
     def test_blocks_injected_at_start_no_system(self) -> None:
         """无系统消息时块在开头注入。"""
@@ -717,7 +720,7 @@ class TestDefaultContextAssemblerMessageInjection(unittest.TestCase):
                 messages=[UserMessage(content="hi")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.LOW,
                         content=f"block-{i}",
                     )
@@ -979,7 +982,7 @@ class TestContextCollectorRegistry(unittest.TestCase):
     def test_single_collector_returns_blocks(self) -> None:
         """单个 collector 返回的块被正确收集。"""
         block = ContextBlock(
-            source=ContextBlockSource.CUSTOM,
+            source=ContextBlockSource.NOTES,
             priority=ContextPriority.HIGH,
             content="from collector",
         )
@@ -992,19 +995,19 @@ class TestContextCollectorRegistry(unittest.TestCase):
     def test_multiple_collectors_preserve_order(self) -> None:
         """多个 collector 按注册顺序合并结果。"""
         block_a = ContextBlock(
-            source=ContextBlockSource.CUSTOM,
+            source=ContextBlockSource.NOTES,
             priority=ContextPriority.HIGH,
             content="first",
             block_id="a",
         )
         block_b = ContextBlock(
-            source=ContextBlockSource.CUSTOM,
+            source=ContextBlockSource.NOTES,
             priority=ContextPriority.MEDIUM,
             content="second",
             block_id="b",
         )
         block_c = ContextBlock(
-            source=ContextBlockSource.CUSTOM,
+            source=ContextBlockSource.NOTES,
             priority=ContextPriority.LOW,
             content="third",
             block_id="c",
@@ -1019,7 +1022,7 @@ class TestContextCollectorRegistry(unittest.TestCase):
     def test_error_collector_skipped_other_still_run(self) -> None:
         """异常 collector 被跳过（log + skip），其他 collector 仍正常执行。"""
         good_block = ContextBlock(
-            source=ContextBlockSource.CUSTOM,
+            source=ContextBlockSource.NOTES,
             priority=ContextPriority.HIGH,
             content="good",
         )
@@ -1058,7 +1061,7 @@ class TestContextCollectorWithAssembler(unittest.TestCase):
             FakeCollector(
                 [
                     ContextBlock(
-                        source=ContextBlockSource.CUSTOM,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.CRITICAL,
                         content="collector-block",
                         block_id="c1",
@@ -1123,7 +1126,7 @@ class TestContextCollectorWithAssembler(unittest.TestCase):
             FakeCollector(
                 [
                     ContextBlock(
-                        source=ContextBlockSource.PLAN,
+                        source=ContextBlockSource.NOTES,
                         priority=ContextPriority.HIGH,
                         content="plan step 1",
                     ),
@@ -1153,7 +1156,7 @@ class TestContextCollectorWithAssembler(unittest.TestCase):
         msgs = provider.captured_messages[0]
         combined = " ".join(str(m.get("content", "") or "") for m in msgs)
         self.assertIn("plan step 1", combined)
-        self.assertIn("[plan]", combined)
+        self.assertIn("[notes]", combined)
 
     def test_collectors_skipped_when_no_assembler(self) -> None:
         """未配置 assembler 时 collector 不执行。"""
@@ -1275,7 +1278,7 @@ class TestContextBlockTarget(unittest.TestCase):
     def test_default_target_is_user_context(self) -> None:
         """ContextBlock 默认 target 为 USER_CONTEXT。"""
         block = ContextBlock(
-            source=ContextBlockSource.CUSTOM,
+            source=ContextBlockSource.NOTES,
             priority=ContextPriority.HIGH,
             content="test",
         )
@@ -1363,7 +1366,7 @@ class TestDefaultContextAssemblerSystemBlocks(unittest.TestCase):
                         content="project rules",
                     ),
                     ContextBlock(
-                        source=ContextBlockSource.PLAN,
+                        source=ContextBlockSource.NOTES,
                         target=ContextBlockTarget.USER_CONTEXT,
                         priority=ContextPriority.HIGH,
                         content="plan step",
@@ -1376,7 +1379,7 @@ class TestDefaultContextAssemblerSystemBlocks(unittest.TestCase):
         self.assertEqual(roles, ["system", "user", "user"])
         self.assertEqual(result.messages[0].content, "project rules")
         self.assertIn("plan step", str(result.messages[1].content))
-        self.assertIn("[plan]", str(result.messages[1].content))
+        self.assertIn("[notes]", str(result.messages[1].content))
 
     def test_multiple_system_blocks_all_as_system_messages(self) -> None:
         """多个 SYSTEM 块全部作为 SystemMessage 注入。"""
@@ -2030,6 +2033,371 @@ class TestNotesCollector(unittest.TestCase):
             self.assertEqual(len(blocks), 1)
             self.assertIn("small note", blocks[0].content)
             self.assertNotIn("huge", blocks[0].content)
+
+
+class TestSkillCollector(unittest.TestCase):
+    """测试 SkillCollector 多路径搜索与去重优先级。"""
+
+    def _create_skill(
+        self,
+        base: Path,
+        subdir: str,
+        rel_path: str,
+        content: str,
+    ) -> Path:
+        """在 base/subdir/skills/ 下创建技能文件。"""
+        full_dir = base / subdir / "skills"
+        full_dir.mkdir(parents=True, exist_ok=True)
+        file_path = full_dir / rel_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, encoding="utf-8")
+        return file_path
+
+    # ── 目录缺失 ──
+
+    def test_missing_all_skill_dirs_returns_empty(self) -> None:
+        """所有技能目录缺失时返回空列表。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 0)
+
+    # ── 各路径独立加载 ──
+
+    def test_project_xcode_skills_load(self) -> None:
+        """项目 .xcode/skills/ 下的技能文件被加载。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".xcode", "review.md", "# Xcode Skill")
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("Xcode Skill", blocks[0].content)
+
+    def test_project_agents_skills_load(self) -> None:
+        """项目 .agents/skills/ 下的技能文件被加载。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".agents", "review.md", "# Agents Skill")
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("Agents Skill", blocks[0].content)
+
+    def test_global_xcode_skills_load(self) -> None:
+        """用户 ~/.xcode/skills/ 下的技能文件被加载。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".xcode", "global.md", "# Global Xcode")
+            with mock.patch.object(Path, "home", return_value=root):
+                collector = SkillCollector(Path(tmp) / "nonexistent")
+                blocks = collector.collect(ContextCollectionInput())
+                self.assertEqual(len(blocks), 1)
+                self.assertIn("Global Xcode", blocks[0].content)
+
+    def test_global_agents_skills_load(self) -> None:
+        """用户 ~/.agents/skills/ 下的技能文件被加载。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".agents", "global.md", "# Global Agents")
+            with mock.patch.object(Path, "home", return_value=root):
+                collector = SkillCollector(Path(tmp) / "nonexistent")
+                blocks = collector.collect(ContextCollectionInput())
+                self.assertEqual(len(blocks), 1)
+                self.assertIn("Global Agents", blocks[0].content)
+
+    # ── 优先级与去重 ──
+
+    def test_path_priority_deterministic(self) -> None:
+        """输出按 (搜索路径优先级, 相对路径) 确定性排序。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # 项目级路径（优先级 0 和 1）
+            self._create_skill(root, ".xcode", "a.md", "# Project Xcode A")
+            self._create_skill(root, ".agents", "b.md", "# Project Agents B")
+            # 全局路径（优先级 2 和 3）
+            home = root / "home"
+            self._create_skill(home, ".xcode", "c.md", "# Home Xcode C")
+            self._create_skill(home, ".agents", "d.md", "# Home Agents D")
+
+            with mock.patch.object(Path, "home", return_value=home):
+                collector = SkillCollector(root)
+                blocks = collector.collect(ContextCollectionInput())
+                self.assertEqual(len(blocks), 1)
+                content = blocks[0].content
+                a_pos = content.index("Project Xcode A")
+                b_pos = content.index("Project Agents B")
+                c_pos = content.index("Home Xcode C")
+                d_pos = content.index("Home Agents D")
+                self.assertLess(a_pos, b_pos)
+                self.assertLess(b_pos, c_pos)
+                self.assertLess(c_pos, d_pos)
+
+    def test_project_overrides_global(self) -> None:
+        """同一相对路径，项目级技能覆盖全局技能。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            self._create_skill(root, ".xcode", "review.md", "PROJECT VERSION")
+            self._create_skill(home, ".xcode", "review.md", "GLOBAL VERSION")
+            with mock.patch.object(Path, "home", return_value=home):
+                collector = SkillCollector(root)
+                blocks = collector.collect(ContextCollectionInput())
+                self.assertEqual(len(blocks), 1)
+                self.assertIn("PROJECT VERSION", blocks[0].content)
+                self.assertNotIn("GLOBAL VERSION", blocks[0].content)
+
+    def test_xcode_overrides_agents(self) -> None:
+        """同一相对路径，.xcode 技能覆盖 .agents 技能。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".xcode", "review.md", "XCODE VERSION")
+            self._create_skill(root, ".agents", "review.md", "AGENTS VERSION")
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("XCODE VERSION", blocks[0].content)
+            self.assertNotIn("AGENTS VERSION", blocks[0].content)
+
+    # ── 嵌套路径 ──
+
+    def test_nested_relative_paths_sorted(self) -> None:
+        """嵌套相对路径按字符串序确定性排列。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".xcode", "a/b/c.md", "# Nested C")
+            self._create_skill(root, ".xcode", "a.md", "# Flat A")
+            self._create_skill(root, ".xcode", "b.md", "# Flat B")
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            content = blocks[0].content
+            a_pos = content.index("Flat A")
+            c_pos = content.index("Nested C")
+            b_pos = content.index("Flat B")
+            self.assertLess(a_pos, c_pos)
+            self.assertLess(c_pos, b_pos)
+
+    # ── 文件过滤 ──
+
+    def test_non_text_files_ignored(self) -> None:
+        """忽略非 .md/.mdx/.txt 后缀的文件。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".xcode", "valid.md", "# Valid Skill")
+            self._create_skill(root, ".xcode", "data.bin", "binary")
+            self._create_skill(root, ".xcode", "script.py", "print('hi')")
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("Valid Skill", blocks[0].content)
+            self.assertNotIn("binary", blocks[0].content)
+            self.assertNotIn("print", blocks[0].content)
+
+    def test_path_traversal_skipped(self) -> None:
+        """符号链接到搜索目录之外的文件被跳过。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / ".xcode" / "skills"
+            skill_dir.mkdir(parents=True)
+            outside = root / "outside.txt"
+            outside.write_text("outside content", encoding="utf-8")
+            link = skill_dir / "bad-link.md"
+            os.symlink(outside, link)
+            (skill_dir / "good.md").write_text("# Good Skill", encoding="utf-8")
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("Good Skill", blocks[0].content)
+            self.assertNotIn("outside", blocks[0].content)
+
+    # ── 大小治理 ──
+
+    def test_oversized_skill_skipped(self) -> None:
+        """超大技能文件被跳过。"""
+        from xcode.agent.context_collector import SKILLS_MAX_FILE_BYTES
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".xcode", "small.md", "# Small Skill")
+            self._create_skill(
+                root, ".xcode", "huge.md", "x" * (SKILLS_MAX_FILE_BYTES + 1)
+            )
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("Small Skill", blocks[0].content)
+            self.assertNotIn("huge", blocks[0].content)
+
+    def test_bounded_output(self) -> None:
+        """总输出受 SKILLS_MAX_BYTES 限制。"""
+        from xcode.agent.context_collector import SKILLS_MAX_BYTES
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("big1.md", "big2.md", "big3.md"):
+                self._create_skill(root, ".xcode", name, "line\n" * 5000)
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertLessEqual(
+                len(blocks[0].content.encode("utf-8")),
+                SKILLS_MAX_BYTES,
+            )
+
+    def test_truncation_marker(self) -> None:
+        """超出预算时包含完整 <skills-truncated> 标记。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".xcode", "large.md", "big\n" * 10000)
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("<skills-truncated>", blocks[0].content)
+            self.assertIn("</skills-truncated>", blocks[0].content)
+
+    # ── 块元数据 ──
+
+    def test_block_metadata(self) -> None:
+        """块元数据: source=SKILL, target=USER_CONTEXT, priority=MEDIUM。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".xcode", "skill.md", "# Skill")
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].source, ContextBlockSource.SKILL)
+            self.assertEqual(blocks[0].target, ContextBlockTarget.USER_CONTEXT)
+            self.assertEqual(blocks[0].priority, ContextPriority.MEDIUM)
+
+    # ── 集成 ──
+
+    def test_skill_as_user_message_after_system(self) -> None:
+        """SKILL 块作为 UserMessage 注入，位于 SystemMessage 之后。"""
+        provider = CaptureProvider()
+        registry = ContextCollectorRegistry()
+        registry.register(
+            FakeCollector(
+                [
+                    ContextBlock(
+                        source=ContextBlockSource.SKILL,
+                        target=ContextBlockTarget.USER_CONTEXT,
+                        priority=ContextPriority.MEDIUM,
+                        content="--- review.md ---\n# Skill\nDo the thing.",
+                    ),
+                ]
+            )
+        )
+
+        config = AgentLoopConfig(
+            provider=provider,
+            convert_to_llm=convert_to_llm,
+            context_collectors=registry,
+            context_assembler=DefaultContextAssembler(),
+            max_steps=1,
+        )
+        import asyncio
+
+        asyncio.run(
+            run_agent_loop(
+                prompts=[UserMessage(content="hello")],
+                context=AgentContext(
+                    messages=[
+                        SystemMessage(content="identity prompt"),
+                    ]
+                ),
+                config=config,
+                emit=lambda _e: None,
+            )
+        )
+        self.assertEqual(len(provider.captured_messages), 1)
+        msgs = provider.captured_messages[0]
+        roles = [m["role"] for m in msgs]
+        self.assertEqual(roles, ["system", "user", "user"])
+        combined = " ".join(str(m.get("content", "") or "") for m in msgs)
+        self.assertIn("[skill]", combined)
+        self.assertIn("Do the thing", combined)
+
+    def test_existing_collectors_still_work(self) -> None:
+        """现有 collector 在 SkillCollector 存在时仍正常工作。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_skill(root, ".xcode", "my-skill.md", "# My Skill")
+            notes_dir = root / ".local" / "notes"
+            notes_dir.mkdir(parents=True)
+            (notes_dir / "my-note.md").write_text("My Note", encoding="utf-8")
+
+            registry = ContextCollectorRegistry()
+            registry.register(SkillCollector(root))
+            registry.register(NotesCollector(root))
+            input_ = ContextCollectionInput(project_root=root)
+            blocks = registry.collect(input_)
+            self.assertEqual(len(blocks), 2)
+            sources = {b.source for b in blocks}
+            self.assertIn(ContextBlockSource.SKILL, sources)
+            self.assertIn(ContextBlockSource.NOTES, sources)
+
+    # ── 目录遍历边界 ──
+
+    def test_traversal_respects_max_depth(self) -> None:
+        """超过最大深度的文件不被遍历。"""
+        from xcode.agent.context_collector import SKILLS_MAX_DEPTH
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / ".xcode" / "skills"
+            deepest_allowed = skill_dir
+            for _ in range(SKILLS_MAX_DEPTH):
+                deepest_allowed = deepest_allowed / "sub"
+            deepest_allowed.mkdir(parents=True)
+            (deepest_allowed / "within.md").write_text(
+                "# Within depth", encoding="utf-8"
+            )
+            too_deep = deepest_allowed / "sub"
+            too_deep.mkdir(parents=True)
+            (too_deep / "beyond.md").write_text("# Beyond depth", encoding="utf-8")
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("Within depth", blocks[0].content)
+            self.assertNotIn("Beyond depth", blocks[0].content)
+
+    def test_traversal_respects_max_files(self) -> None:
+        """超过最大文件数时停止遍历。"""
+        from xcode.agent.context_collector import SKILLS_MAX_FILES
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / ".xcode" / "skills"
+            skill_dir.mkdir(parents=True)
+            for i in range(SKILLS_MAX_FILES + 10):
+                (skill_dir / f"skill_{i:04d}.md").write_text(
+                    f"# Skill {i}", encoding="utf-8"
+                )
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            count = blocks[0].content.count("--- skill_")
+            self.assertLessEqual(count, SKILLS_MAX_FILES)
+
+    def test_symlink_directory_not_traversed(self) -> None:
+        """符号链接目录不被遍历。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / ".xcode" / "skills"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "real.md").write_text("# Real Skill", encoding="utf-8")
+            outside_dir = root / "outside"
+            outside_dir.mkdir()
+            (outside_dir / "escape.md").write_text("# Escape", encoding="utf-8")
+            link_dir = skill_dir / "link"
+            os.symlink(outside_dir, link_dir)
+            collector = SkillCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("Real Skill", blocks[0].content)
+            self.assertNotIn("Escape", blocks[0].content)
 
 
 def _git_init(root: Path) -> None:

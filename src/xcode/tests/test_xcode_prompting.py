@@ -16,7 +16,6 @@ from xcode.harness.agent_runtime.git_preflight import build_git_preflight
 from xcode.harness.agent_runtime.prompting.identity import (
     SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
 )
-from xcode.harness.skill_loader import SkillLoader
 from xcode.harness.skills import ToolSpec
 
 
@@ -127,39 +126,6 @@ class XcodePromptingTests(unittest.TestCase):
             self.assertNotEqual(first_dynamic_suffix, second_dynamic_suffix)
             self.assertIn("src/xcode/main.py", first_dynamic_suffix)
             self.assertIn("src/xcode/core/app.py", second_dynamic_suffix)
-
-    def test_builder_includes_skill_catalog_without_full_body(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            skill_dir = root / "skills" / "review"
-            skill_dir.mkdir(parents=True)
-            (skill_dir / "SKILL.md").write_text(
-                "---\n"
-                "name: review\n"
-                "description: Review code.\n"
-                "use_when: review diffs, review changes\n"
-                "dont_use_when: generate release notes\n"
-                "---\n\n"
-                "Review workflow.",
-                encoding="utf-8",
-            )
-            loader = SkillLoader(root / "skills")
-
-            prompt = SystemPromptBuilder().build(
-                PromptContext(
-                    project_root=root,
-                    registry=(),
-                    question="please do a code review",
-                    skill_loader=loader,
-                )
-            )
-
-            self.assertIn("<skill-catalog>", prompt)
-            self.assertIn('<skill name="review"', prompt)
-            self.assertIn("use_when: review diffs; review changes", prompt)
-            self.assertIn("dont_use_when: generate release notes", prompt)
-            self.assertIn('load_skill({"name": "review"})', prompt)
-            self.assertNotIn("Review workflow.", prompt)
 
     def test_runtime_context_provider_adds_notices(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

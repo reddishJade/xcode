@@ -157,13 +157,12 @@ def build_app(
 
         plugins_data = PluginManager(project_root).scan_and_load()
 
-    registry, skill_loader, shell_spec, closers = _assembly.build_tool_registry(
+    registry, shell_spec, closers = _assembly.build_tool_registry(
         project_root=project_root,
         llm=providers.llm,
         llm_profiles=providers.llms,
         config=cfg.agent_config,
         runtime_config=cfg.runtime_config,
-        skills_dir=cfg.skills_dir,
         contextual_state=infra.contextual_state,
         compact_controller=infra.compact_controller,
         cancel_event=infra.cancellation_token.event,
@@ -180,7 +179,6 @@ def build_app(
         config=cfg.agent_config,
         audit_path=cfg.audit_path,
         runtime_config=cfg.runtime_config,
-        skill_loader=skill_loader,
         contextual_state=infra.contextual_state,
         shell_spec=shell_spec,
         compactor=infra.compactor,
