@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
-import tempfile
 import unittest
-from pathlib import Path
 
 from xcode.harness.observability import (
     HITLResult,
@@ -11,8 +8,6 @@ from xcode.harness.observability import (
     PermissionEngineConfig,
     PermissionPolicy,
     PermissionRule,
-    PersistentPermissionStore,
-    SessionPermissionPolicy,
 )
 from xcode.harness.skills import ToolSpec, run_tool_result
 from xcode.tests.fixtures import run_tool
@@ -95,37 +90,10 @@ class XcodePermissionsTests(unittest.TestCase):
         policy = PermissionPolicy(rules)
         self.assertEqual(policy.decide("bash", "anything"), "deny")
 
-    def test_permission_engine_static_deny_is_final(self) -> None:
-        session = SessionPermissionPolicy()
-        session.grant("echo", "allow")
-        engine = PermissionEngine(
-            PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("echo", "deny"),)),
-                session_policy=session,
-            )
-        )
-        result = engine.decide("echo", "hello")
-        self.assertTrue(result.blocked)
-        self.assertEqual(result.matched_rule, "rule")
-
     def test_permission_engine_restricted_dirs_deny(self) -> None:
         engine = PermissionEngine(
             PermissionEngineConfig(
                 restricted_dirs=("secrets",),
-            )
-        )
-        result = engine.decide("read_file", '{"path": "secrets/key.txt"}')
-        self.assertTrue(result.blocked)
-        self.assertEqual(result.matched_rule, "restricted_dirs")
-
-    def test_permission_engine_restricted_dirs_override_static_allow(self) -> None:
-        session = SessionPermissionPolicy()
-        session.grant("read_file", "allow", "secrets/key.txt")
-        engine = PermissionEngine(
-            PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("read_file", "allow"),)),
-                restricted_dirs=("secrets",),
-                session_policy=session,
             )
         )
         result = engine.decide("read_file", '{"path": "secrets/key.txt"}')
@@ -292,107 +260,6 @@ class XcodePermissionsTests(unittest.TestCase):
         result = agent.run("go")
 
         self.assertEqual(result.messages[2]["content"][0]["content"], "go")
-
-
-class HITLPermissionModelTests(unittest.TestCase):
-    def test_hitl_result_dataclass(self) -> None:
-        r = HITLResult("allow", "once")
-        self.assertEqual(r.decision, "allow")
-        self.assertEqual(r.scope, "once")
-
-    def test_session_policy_grant_decide(self) -> None:
-        policy = SessionPermissionPolicy()
-        policy.grant("bash", "allow", "git status")
-        self.assertEqual(policy.decide("bash", "git status --short"), "allow")
-        self.assertIsNone(policy.decide("bash", "git add ."))
-
-    def test_session_policy_prefix_grant_decide(self) -> None:
-        policy = SessionPermissionPolicy()
-        policy.grant("bash", "allow", input_prefix='{"command": "uv run pyright')
-
-        self.assertEqual(
-            policy.decide("bash", '{"command": "uv run pyright src/a.py"}'),
-            "allow",
-        )
-        self.assertIsNone(
-            policy.decide("bash", '{"command": "uv run ruff check src/a.py"}')
-        )
-
-    def test_session_policy_lifo_order(self) -> None:
-        policy = SessionPermissionPolicy()
-        policy.grant("bash", "deny", "git status")
-        policy.grant("bash", "allow", "git status")
-        self.assertEqual(policy.decide("bash", "git status"), "allow")
-
-    def test_session_policy_clear(self) -> None:
-        policy = SessionPermissionPolicy()
-        policy.grant("bash", "allow")
-        self.assertIsNotNone(policy.decide("bash", "anything"))
-        policy.clear()
-        self.assertIsNone(policy.decide("bash", "anything"))
-
-    def test_persistent_store_grant_and_load(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = PersistentPermissionStore(Path(tmp) / "hitl_policy.json")
-            policy = store.grant("bash", "allow", "git status")
-            self.assertEqual(policy.decide("bash", "git status"), "allow")
-            reloaded = store.load()
-            self.assertEqual(reloaded.decide("bash", "git status"), "allow")
-
-    def test_persistent_store_grant_and_load_prefix(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = PersistentPermissionStore(Path(tmp) / "hitl_policy.json")
-            store.grant(
-                "bash",
-                "allow",
-                input_prefix='{"command": "uv run pyright',
-            )
-            raw = json.loads((Path(tmp) / "hitl_policy.json").read_text())
-            self.assertEqual(raw[0]["input_prefix"], '{"command": "uv run pyright')
-            reloaded = store.load()
-            self.assertEqual(
-                reloaded.decide("bash", '{"command": "uv run pyright src/b.py"}'),
-                "allow",
-            )
-
-    def test_persistent_store_revoke(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = PersistentPermissionStore(Path(tmp) / "hitl_policy.json")
-            store.grant("bash", "allow", "git add")
-            store.revoke("bash", "git add")
-            reloaded = store.load()
-            self.assertIsNone(reloaded.decide("bash", "git add"))
-
-    def test_persistent_store_missing_file_returns_empty(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = PersistentPermissionStore(Path(tmp) / "nope.json")
-            policy = store.load()
-            self.assertEqual(policy.rules, ())
-
-    def test_persistent_store_corrupt_file_returns_empty(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "corrupt.json"
-            path.write_text("not json", encoding="utf-8")
-            store = PersistentPermissionStore(path)
-            policy = store.load()
-            self.assertEqual(policy.rules, ())
-
-    def test_persistent_store_skips_invalid_rules(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "bad.json"
-            path.write_text(
-                json.dumps(
-                    [
-                        {"tool": "bash", "decision": "allow"},
-                        {"tool": "bash", "decision": "invalid"},
-                        {"tool": "write_file", "decision": "deny"},
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            store = PersistentPermissionStore(path)
-            policy = store.load()
-            self.assertEqual(len(policy.rules), 2)
 
     def test_approved_but_failed_handler_sets_approved_true(self) -> None:
         def fail_handler(_value: dict) -> str:

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-import json
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -32,7 +31,6 @@ from .permission_model import (
     PolicyEvaluator,
     PermissionResolver,
     StructuredBoundaryPolicyEvaluator,
-    UnmappableLegacyGrant,
     Verdict,
     compute_shadow_approval_candidate,
     create_grant_record,
@@ -102,145 +100,6 @@ class PermissionPolicy:
         return None
 
 
-class SessionPermissionPolicy:
-    """运行时会话级权限覆写。grant() 替换同 key 的旧规则，最后添加的规则优先。"""
-
-    def __init__(self) -> None:
-        self._rules: list[PermissionRule] = []
-
-    def grant(
-        self,
-        tool_name: str,
-        decision: PermissionDecision,
-        input_contains: str | None = None,
-        input_prefix: str | None = None,
-    ) -> None:
-        matching_key = (tool_name, input_contains, input_prefix)
-        self._rules = [
-            r
-            for r in self._rules
-            if (r.tool, r.input_contains, r.input_prefix) != matching_key
-        ]
-        self._rules.append(
-            PermissionRule(tool_name, decision, input_contains, input_prefix)
-        )
-
-    def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
-        result: PermissionDecision | None = None
-        for rule in self._rules:
-            if rule.tool != tool_name and rule.tool != "*":
-                continue
-            if (
-                rule.input_contains is not None
-                and rule.input_contains not in action_input
-            ):
-                continue
-            if rule.input_prefix is not None and not action_input.startswith(
-                rule.input_prefix
-            ):
-                continue
-            result = rule.decision
-        return result
-
-    @property
-    def rules(self) -> list[PermissionRule]:
-        return list(self._rules)
-
-    def clear(self) -> None:
-        self._rules.clear()
-
-
-class PersistentPermissionStore:
-    """文件持久化的授权规则，写入 .local/hitl_policy.json。"""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-
-    def load(self) -> PermissionPolicy:
-        if not self.path.exists():
-            return PermissionPolicy()
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if not isinstance(raw, list):
-                return PermissionPolicy()
-            rules = [
-                rule
-                for item in raw
-                if (rule := _permission_rule_from_data(item)) is not None
-            ]
-            return PermissionPolicy(tuple(rules))
-        except (OSError, json.JSONDecodeError):
-            return PermissionPolicy()
-
-    def grant(
-        self,
-        tool_name: str,
-        decision: PermissionDecision,
-        input_contains: str | None = None,
-        input_prefix: str | None = None,
-    ) -> PermissionPolicy:
-        current = self.load()
-        new_rule = PermissionRule(tool_name, decision, input_contains, input_prefix)
-        filtered = tuple(
-            r
-            for r in current.rules
-            if not (
-                r.tool == tool_name
-                and r.input_contains == input_contains
-                and r.input_prefix == input_prefix
-            )
-        )
-        updated = filtered + (new_rule,)
-        self._write(updated)
-        return PermissionPolicy(updated)
-
-    def revoke(
-        self, tool_name: str, input_contains: str | None = None
-    ) -> PermissionPolicy:
-        current = self.load()
-        updated = tuple(
-            r
-            for r in current.rules
-            if not (r.tool == tool_name and r.input_contains == input_contains)
-        )
-        self._write(updated)
-        return PermissionPolicy(updated)
-
-    def _write(self, rules: tuple[PermissionRule, ...]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        data: list[PermissionRuleData] = []
-        for r in rules:
-            entry: PermissionRuleData = {"tool": r.tool, "decision": r.decision}
-            if r.input_contains is not None:
-                entry["input_contains"] = r.input_contains
-            if r.input_prefix is not None:
-                entry["input_prefix"] = r.input_prefix
-            data.append(entry)
-        self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
-
-
-# ── 辅助函数 ──
-
-
-def _permission_rule_from_data(value: object) -> PermissionRule | None:
-    if not isinstance(value, dict):
-        return None
-    tool = value.get("tool")
-    decision = value.get("decision")
-    if not isinstance(tool, str) or not tool:
-        return None
-    if decision not in ("allow", "deny", "ask"):
-        return None
-    input_contains = value.get("input_contains")
-    input_prefix = value.get("input_prefix")
-    return PermissionRule(
-        tool=tool,
-        decision=decision,
-        input_contains=input_contains if isinstance(input_contains, str) else None,
-        input_prefix=input_prefix if isinstance(input_prefix, str) else None,
-    )
-
-
 def _approval_metadata(
     user_decision: HITLDecision, approval_scope: HITLScope
 ) -> PermissionMetadata:
@@ -248,25 +107,6 @@ def _approval_metadata(
         "user_decision": user_decision,
         "approval_scope": approval_scope,
     }
-
-
-def _attach_unmappable_legacy_grants(
-    metadata: PermissionMetadata | None,
-    unmappable_grants: tuple[UnmappableLegacyGrant, ...],
-) -> PermissionMetadata:
-    """当存在无法映射的 legacy 授权时将其附加到 metadata。"""
-    if not unmappable_grants:
-        return metadata or {}
-    result = dict(metadata) if metadata is not None else {}
-    result["unmappable_legacy_grants"] = [
-        {
-            "tool": g.tool,
-            "decision": g.decision,
-            "reason": g.reason,
-        }
-        for g in unmappable_grants
-    ]
-    return result
 
 
 # ── PermissionEngine — 统一决策引擎 ──
@@ -284,7 +124,6 @@ MATCHED_SESSION_GRANT = "session_grant"
 MATCHED_PERSISTENT_GRANT = "persistent_grant"
 MATCHED_STATIC_ALLOW = "static_allow"
 
-MATCHED_LEGACY_ADAPTER = "legacy_adapter"
 MATCHED_DEFAULT = "default"
 
 SOURCE_CONFIG = "config"
@@ -292,7 +131,6 @@ SOURCE_SESSION = "session"
 SOURCE_PERSISTENT = "persistent"
 
 SOURCE_EXECUTION_MODE = "execution_mode"
-SOURCE_LEGACY = "legacy"
 SOURCE_DEFAULT = "default"
 
 
@@ -318,8 +156,6 @@ class PermissionEngineConfig:
     """PermissionEngine 的静态配置。"""
 
     static_policy: PermissionPolicy | None = None
-    session_policy: SessionPermissionPolicy | None = None
-    persistent_store: PersistentPermissionStore | None = None
     restricted_dirs: tuple[str, ...] = ()
     allowlist_mode: bool = False
     defer_static_ask: bool = False
@@ -507,19 +343,10 @@ class PermissionEngine:
         if verdict.decision != "ask":
             return None
 
-        legacy_sources: list[object] = []
-        if self._config.static_policy is not None:
-            legacy_sources.append(self._config.static_policy)
-        if self._config.session_policy is not None:
-            legacy_sources.append(self._config.session_policy)
-        if self._config.persistent_store is not None:
-            legacy_sources.append(self._config.persistent_store)
-
         return compute_shadow_approval_candidate(
             action,
             session_grant_store=self._config.session_grant_store,
             permanent_grant_store=self._config.permanent_grant_store,
-            legacy_sources=tuple(legacy_sources),
             boundary_context=self._boundary_context(),
         )
 
@@ -574,34 +401,16 @@ class PermissionEngine:
         """执行 ask 后的授权查找、回调调用和授权写入。"""
         is_multi_target = len(action.targets) > 1
 
-        # 收集 legacy 授权源（与 shadow 路径共用）
-        legacy_sources: list[object] = []
-        if self._config.static_policy is not None:
-            legacy_sources.append(self._config.static_policy)
-        if self._config.session_policy is not None:
-            legacy_sources.append(self._config.session_policy)
-        if self._config.persistent_store is not None:
-            legacy_sources.append(self._config.persistent_store)
-
         candidate = compute_shadow_approval_candidate(
             action,
             session_grant_store=self._config.session_grant_store,
             permanent_grant_store=self._config.permanent_grant_store,
-            legacy_sources=tuple(legacy_sources),
             boundary_context=self._boundary_context(),
         )
 
         # 存在匹配授权 → 直接使用，不回调
         if candidate is not None and candidate.would_resolve != "would_call_approval":
-            return self._cutover_grant_result(
-                action,
-                candidate,
-                unmappable_legacy_grants=candidate.unmappable_legacy_grants,
-            )
-
-        unmappable_grants = (
-            candidate.unmappable_legacy_grants if candidate is not None else ()
-        )
+            return self._cutover_grant_result(action, candidate)
 
         # 无匹配授权 → 调用 approval_callback
         return self._cutover_callback_result(
@@ -611,31 +420,25 @@ class PermissionEngine:
             tool_spec=tool_spec,
             tool_input=tool_input,
             is_multi_target=is_multi_target,
-            unmappable_legacy_grants=unmappable_grants,
         )
 
     def _cutover_grant_result(
         self,
         action: Action,
         candidate: ApprovalCandidate,
-        *,
-        unmappable_legacy_grants: tuple[UnmappableLegacyGrant, ...] = (),
     ) -> PermissionEngineResult:
         """授予命中时直接使用授权结果，不调用回调。"""
         winning_grant: GrantRecord | None = None
-        is_legacy = False
 
         for fp in candidate.fingerprints:
             if fp.grant is not None and fp.grant.decision == "deny":
                 winning_grant = fp.grant
-                is_legacy = fp.source == "legacy_adapter"
                 break
 
         if winning_grant is None:
             for fp in candidate.fingerprints:
                 if fp.grant is not None and fp.grant.decision == "allow":
                     winning_grant = fp.grant
-                    is_legacy = fp.source == "legacy_adapter"
                     break
 
         if winning_grant is None:
@@ -646,20 +449,16 @@ class PermissionEngine:
                 matched_rule=MATCHED_STATIC_ASK,
             )
 
-        if is_legacy:
-            matched_rule = MATCHED_LEGACY_ADAPTER
-            source = SOURCE_LEGACY
-            metadata: PermissionMetadata | None = {"legacy_adapter": True}
-        elif winning_grant.scope == "session":
+        if winning_grant.scope == "session":
             matched_rule = MATCHED_SESSION_GRANT
             source = SOURCE_SESSION
-            metadata = _approval_metadata(winning_grant.decision, winning_grant.scope)
+            metadata: PermissionMetadata | None = _approval_metadata(
+                winning_grant.decision, winning_grant.scope
+            )
         else:
             matched_rule = MATCHED_PERSISTENT_GRANT
             source = SOURCE_PERSISTENT
             metadata = _approval_metadata(winning_grant.decision, winning_grant.scope)
-
-        metadata = _attach_unmappable_legacy_grants(metadata, unmappable_legacy_grants)
 
         if winning_grant.decision == "deny":
             return PermissionEngineResult(
@@ -698,7 +497,6 @@ class PermissionEngine:
         tool_spec: PermissionToolSpec | None = None,
         tool_input: dict[str, Any] | None = None,
         is_multi_target: bool = False,
-        unmappable_legacy_grants: tuple[UnmappableLegacyGrant, ...] = (),
     ) -> PermissionEngineResult:
         """无匹配授权时调用 approval_callback 并写入新授权存储。"""
 
@@ -719,19 +517,13 @@ class PermissionEngine:
                 reason=(f"tool {action.tool} denied by user{DENIED_BY_USER_GUIDANCE}"),
                 matched_rule=MATCHED_STATIC_ASK,
                 source=SOURCE_SESSION,
-                metadata=_attach_unmappable_legacy_grants(
-                    _approval_metadata("deny", hitl.scope),
-                    unmappable_legacy_grants,
-                ),
+                metadata=_approval_metadata("deny", hitl.scope),
                 approval_result=ApprovalResult(decision="deny", scope=hitl.scope),
             )
 
         # 允许 — 根据 scope 写入授权
         effective_scope = hitl.scope
-        metadata: PermissionMetadata = _attach_unmappable_legacy_grants(
-            _approval_metadata("allow", hitl.scope),
-            unmappable_legacy_grants,
-        )
+        metadata: PermissionMetadata = _approval_metadata("allow", hitl.scope)
 
         if is_multi_target and hitl.scope in ("session", "permanent"):
             effective_scope = "once"

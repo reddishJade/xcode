@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import shlex
-from typing import Literal, Protocol, TypeGuard, cast, runtime_checkable
+from typing import Literal, Protocol, cast
 from uuid import uuid4
 
 PermissionAccess = Literal["read", "write", "execute", "network"]
@@ -113,17 +113,8 @@ class FingerprintLookupResult:
     """单个目标指纹的查找结果。"""
 
     fingerprint: TargetFingerprint
-    source: Literal["new_session", "new_permanent", "legacy_adapter", "none"]
+    source: Literal["new_session", "new_permanent", "none"]
     grant: GrantRecord | None
-
-
-@dataclass(frozen=True)
-class UnmappableLegacyGrant:
-    """无法映射到新指纹的旧授权记录。"""
-
-    tool: str
-    decision: str
-    reason: str
 
 
 @dataclass(frozen=True)
@@ -135,7 +126,6 @@ class ApprovalCandidate:
 
     would_resolve: Literal["allow", "deny", "would_call_approval"]
     fingerprints: tuple[FingerprintLookupResult, ...]
-    unmappable_legacy_grants: tuple[UnmappableLegacyGrant, ...] = ()
 
 
 class GrantStore(Protocol):
@@ -322,35 +312,6 @@ class StaticPermissionPolicy(Protocol):
         ...
 
 
-@runtime_checkable
-class LegacyPermissionPolicyView(Protocol):
-    """包含 legacy rules 的只读策略视图。"""
-
-    @property
-    def rules(self) -> Sequence[object]:
-        """返回 legacy 授权规则。"""
-        ...
-
-
-@runtime_checkable
-class LegacyPermissionStoreView(Protocol):
-    """可加载 legacy policy 的只读存储视图。"""
-
-    def load(self) -> object:
-        """加载 legacy 授权策略。"""
-        ...
-
-
-@dataclass(frozen=True)
-class _LegacyRule:
-    """映射前的 legacy 授权规则快照。"""
-
-    tool: str
-    decision: PermissionDecisionV2
-    input_contains: str | None
-    input_prefix: str | None
-
-
 def create_grant_record(
     action: Action,
     target: Target,
@@ -374,165 +335,6 @@ def create_grant_record(
     )
 
 
-def legacy_grant_adapter(
-    legacy_source: object,
-    action: Action,
-) -> GrantRecord | None:
-    """把可安全表达的 legacy grant 只读映射为结构化授权记录。"""
-    if action.tool not in StructuredBoundaryPolicyEvaluator.STRUCTURED_TOOLS:
-        return None
-    if not action.targets or any(target.kind != "path" for target in action.targets):
-        return None
-
-    rules = _legacy_rules(legacy_source)
-    serialized_input = _serialized_action_input(action)
-    mapped: list[GrantRecord] = []
-    for rule in rules:
-        if rule.tool == "*" or rule.tool != action.tool:
-            continue
-        if rule.decision not in ("allow", "deny"):
-            continue
-        if rule.input_prefix is not None:
-            continue
-        if rule.input_contains is None or rule.input_contains not in serialized_input:
-            continue
-        target = _legacy_adapter_target(rule.input_contains, action.targets)
-        if target is None:
-            continue
-        mapped.append(
-            create_grant_record(
-                action,
-                target,
-                decision=rule.decision,
-                scope=_legacy_source_scope(legacy_source),
-                grant_id=(
-                    f"legacy-adapter:{_legacy_source_label(legacy_source)}:"
-                    f"{action.tool}:{target.value}"
-                ),
-                metadata={"legacy_adapter": True},
-            )
-        )
-
-    if not mapped:
-        return None
-    if _is_legacy_store(legacy_source):
-        return _highest_priority_grant(mapped)
-    return mapped[-1]
-
-
-def _legacy_adapter_per_target(
-    legacy_source: object,
-    action: Action,
-) -> dict[str, GrantRecord]:
-    """把 legacy grants 逐 target 映射为 GrantRecord 字典。
-
-    返回 {target_value: GrantRecord}，同一 target 上 deny > allow。
-    不映射有 input_prefix、tool="*"、decision="ask" 或无法唯一确定 target 的规则。
-    """
-    if action.tool not in StructuredBoundaryPolicyEvaluator.STRUCTURED_TOOLS:
-        return {}
-    if not action.targets or any(t.kind != "path" for t in action.targets):
-        return {}
-
-    rules = _legacy_rules(legacy_source)
-    serialized_input = _serialized_action_input(action)
-    result: dict[str, GrantRecord] = {}
-
-    for rule in rules:
-        if rule.tool == "*" or rule.tool != action.tool:
-            continue
-        if rule.decision not in ("allow", "deny"):
-            continue
-        if rule.input_prefix is not None:
-            continue
-        if rule.input_contains is None or rule.input_contains not in serialized_input:
-            continue
-        target = _legacy_adapter_target(rule.input_contains, action.targets)
-        if target is None:
-            continue
-
-        new_record = create_grant_record(
-            action,
-            target,
-            decision=rule.decision,
-            scope=_legacy_source_scope(legacy_source),
-            grant_id=(
-                f"legacy-adapter:{_legacy_source_label(legacy_source)}:"
-                f"{action.tool}:{target.value}"
-            ),
-            metadata={"legacy_adapter": True},
-        )
-        existing = result.get(target.value)
-        if existing is None or (
-            new_record.decision == "deny" and existing.decision != "deny"
-        ):
-            result[target.value] = new_record
-
-    return result
-
-
-def _unmappable_legacy_grants(
-    legacy_source: object,
-    action: Action,
-) -> tuple[UnmappableLegacyGrant, ...]:
-    """收集无法映射到新 fingerprint 的 legacy grants。
-
-    用于 shadow 报告：这些旧授权在 cutover 后不会自动应用。
-    """
-    if action.tool not in StructuredBoundaryPolicyEvaluator.STRUCTURED_TOOLS:
-        return ()
-    rules = _legacy_rules(legacy_source)
-    serialized_input = _serialized_action_input(action)
-    unmappable: list[UnmappableLegacyGrant] = []
-
-    for rule in rules:
-        if rule.tool not in (action.tool, "*"):
-            continue
-        if rule.decision not in ("allow", "deny"):
-            continue
-
-        if rule.tool == "*":
-            unmappable.append(
-                UnmappableLegacyGrant(
-                    tool=rule.tool,
-                    decision=rule.decision,
-                    reason="wildcard tool grant cannot be mapped to capability-specific fingerprint",
-                )
-            )
-            continue
-        if rule.input_prefix is not None:
-            unmappable.append(
-                UnmappableLegacyGrant(
-                    tool=rule.tool,
-                    decision=rule.decision,
-                    reason="input_prefix grant cannot be mapped to path target pattern",
-                )
-            )
-            continue
-        if rule.input_contains is None:
-            unmappable.append(
-                UnmappableLegacyGrant(
-                    tool=rule.tool,
-                    decision=rule.decision,
-                    reason="unfiltered tool grant cannot be mapped to specific path target",
-                )
-            )
-            continue
-        if rule.input_contains not in serialized_input:
-            continue
-        target = _legacy_adapter_target(rule.input_contains, action.targets)
-        if target is None:
-            unmappable.append(
-                UnmappableLegacyGrant(
-                    tool=rule.tool,
-                    decision=rule.decision,
-                    reason=f"input_contains {rule.input_contains!r} does not uniquely identify a single target",
-                )
-            )
-
-    return tuple(unmappable)
-
-
 def _compute_would_resolve(
     results: Sequence[FingerprintLookupResult],
 ) -> Literal["allow", "deny", "would_call_approval"]:
@@ -550,7 +352,6 @@ def compute_shadow_approval_candidate(
     *,
     session_grant_store: GrantStore | None = None,
     permanent_grant_store: GrantStore | None = None,
-    legacy_sources: Iterable[object] = (),
     boundary_context: BoundaryContext | None = None,
 ) -> ApprovalCandidate | None:
     """构造 shadow approval candidate：predict engine-level grant/callback 结果。
@@ -560,18 +361,6 @@ def compute_shadow_approval_candidate(
     """
     if not action.targets:
         return None
-
-    all_legacy_grants: dict[str, GrantRecord] = {}
-    unmappable: list[UnmappableLegacyGrant] = []
-
-    for source in legacy_sources:
-        for target_value, grant in _legacy_adapter_per_target(source, action).items():
-            existing = all_legacy_grants.get(target_value)
-            if existing is None or (
-                grant.decision == "deny" and existing.decision != "deny"
-            ):
-                all_legacy_grants[target_value] = grant
-        unmappable.extend(_unmappable_legacy_grants(source, action))
 
     results: list[FingerprintLookupResult] = []
     for target in action.targets:
@@ -599,105 +388,12 @@ def compute_shadow_approval_candidate(
                 results.append(FingerprintLookupResult(fp, "new_permanent", grant))
                 continue
 
-        legacy = all_legacy_grants.get(target.value)
-        if legacy is not None:
-            results.append(FingerprintLookupResult(fp, "legacy_adapter", legacy))
-            continue
-
         results.append(FingerprintLookupResult(fp, "none", None))
 
     return ApprovalCandidate(
         would_resolve=_compute_would_resolve(results),
         fingerprints=tuple(results),
-        unmappable_legacy_grants=tuple(unmappable),
     )
-
-
-def _legacy_rules(
-    legacy_source: object,
-) -> tuple[_LegacyRule, ...]:
-    if _is_legacy_store(legacy_source):
-        policy = legacy_source.load()
-        if not isinstance(policy, LegacyPermissionPolicyView):
-            return ()
-        return _legacy_rules_from_objects(policy.rules)
-    if not isinstance(legacy_source, LegacyPermissionPolicyView):
-        return ()
-    return _legacy_rules_from_objects(legacy_source.rules)
-
-
-def _is_legacy_store(legacy_source: object) -> TypeGuard[LegacyPermissionStoreView]:
-    return isinstance(legacy_source, LegacyPermissionStoreView)
-
-
-def _legacy_source_scope(legacy_source: object) -> GrantScope:
-    """返回 legacy source 对应的 scope。
-
-    区分 PersistentPermissionStore（permanent）和
-    SessionPermissionPolicy / PermissionPolicy（session）。
-    """
-    if _is_legacy_store(legacy_source):
-        return "permanent"
-    return "session"
-
-
-def _legacy_source_label(legacy_source: object) -> str:
-    """返回 legacy source 的 grant_id 编码标签。"""
-    if _is_legacy_store(legacy_source):
-        return "permanent"
-    return "session"
-
-
-def _legacy_rules_from_objects(values: Sequence[object]) -> tuple[_LegacyRule, ...]:
-    return tuple(
-        rule
-        for value in values
-        if (rule := _legacy_rule_from_object(value)) is not None
-    )
-
-
-def _legacy_rule_from_object(value: object) -> _LegacyRule | None:
-    tool = getattr(value, "tool", None)
-    decision = getattr(value, "decision", None)
-    input_contains = getattr(value, "input_contains", None)
-    input_prefix = getattr(value, "input_prefix", None)
-    if not isinstance(tool, str):
-        return None
-    if decision not in ("allow", "ask", "deny"):
-        return None
-    if input_contains is not None and not isinstance(input_contains, str):
-        return None
-    if input_prefix is not None and not isinstance(input_prefix, str):
-        return None
-    return _LegacyRule(
-        tool=tool,
-        decision=cast(PermissionDecisionV2, decision),
-        input_contains=input_contains,
-        input_prefix=input_prefix,
-    )
-
-
-def _legacy_adapter_target(
-    input_contains: str,
-    targets: tuple[Target, ...],
-) -> Target | None:
-    if len(targets) == 1:
-        return targets[0]
-
-    matching_targets = tuple(
-        target
-        for target in targets
-        if target.value == input_contains
-        or target.value in input_contains
-        or input_contains in target.value
-    )
-    if len(matching_targets) != 1:
-        return None
-    return matching_targets[0]
-
-
-def _serialized_action_input(action: Action) -> str:
-    return json.dumps(action.input, ensure_ascii=False, sort_keys=True)
 
 
 def _lookup_grant_record(

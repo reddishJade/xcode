@@ -30,7 +30,6 @@ from .permission_model import (
     PolicyEvaluator,
     SafetyBackstopPolicyEvaluator,
     TargetFingerprint,
-    UnmappableLegacyGrant,
     PermissionResolver,
     StaticPolicyEvaluator,
     StructuredBoundaryPolicyEvaluator,
@@ -39,7 +38,6 @@ from .permission_model import (
     compute_shadow_approval_candidate,
     create_grant_record,
     evaluate_policy_constraints,
-    legacy_grant_adapter,
 )
 from .permissions import (
     HITLResult,
@@ -51,8 +49,6 @@ from .permissions import (
     PermissionEngineResult,
     PermissionPolicy,
     PermissionRule,
-    PersistentPermissionStore,
-    SessionPermissionPolicy,
 )
 
 __all__ = [
@@ -87,19 +83,15 @@ __all__ = [
     "PermissionResolver",
     "SafetyBackstopPolicyEvaluator",
     "PermissionRule",
-    "PersistentPermissionStore",
-    "SessionPermissionPolicy",
     "PostToolEvent",
     "PreToolEvent",
     "StaticPolicyEvaluator",
     "StructuredBoundaryPolicyEvaluator",
     "Target",
     "TargetFingerprint",
-    "UnmappableLegacyGrant",
     "Verdict",
     "compute_shadow_approval_candidate",
     "create_grant_record",
     "evaluate_policy_constraints",
-    "legacy_grant_adapter",
     "redact_text",
 ]

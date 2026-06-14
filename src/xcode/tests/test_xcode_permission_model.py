@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from pathlib import Path
 import tempfile
 from typing import Literal
@@ -23,9 +22,7 @@ from xcode.harness.observability import (
     PermissionPolicy,
     PermissionResolver,
     PermissionRule,
-    SessionPermissionPolicy,
     evaluate_policy_constraints,
-    legacy_grant_adapter,
 )
 from xcode.harness.observability.permission_model import (
     PermissionAccess,
@@ -522,44 +519,6 @@ class GrantStoreTests(unittest.TestCase):
             self.assertEqual(record.grant_id, "grant-1")
 
 
-class LegacyGrantAdapterTests(unittest.TestCase):
-    def test_maps_single_target_contains_grant(self) -> None:
-        action = ActionExtractor().extract("read_file", {"path": "src/foo.py"})
-        policy = SessionPermissionPolicy()
-        policy.grant("read_file", "allow", input_contains="src/foo.py")
-
-        record = legacy_grant_adapter(policy, action)
-
-        assert record is not None
-        self.assertEqual(record.decision, "allow")
-        self.assertEqual(record.target_pattern, "src/foo.py")
-        self.assertEqual(record.metadata["legacy_adapter"], True)
-
-    def test_does_not_map_wildcard_tool(self) -> None:
-        action = ActionExtractor().extract("read_file", {"path": "src/foo.py"})
-        policy = SessionPermissionPolicy()
-        policy.grant("*", "allow", input_contains="src/foo.py")
-
-        self.assertIsNone(legacy_grant_adapter(policy, action))
-
-    def test_does_not_map_input_prefix(self) -> None:
-        action = ActionExtractor().extract("read_file", {"path": "src/foo.py"})
-        policy = SessionPermissionPolicy()
-        policy.grant("read_file", "allow", input_prefix='{"path": "src/')
-
-        self.assertIsNone(legacy_grant_adapter(policy, action))
-
-    def test_does_not_map_ambiguous_multi_target_contains(self) -> None:
-        action = ActionExtractor().extract(
-            "apply_patch",
-            {"paths": ["src/foo.py", "src/bar.py"]},
-        )
-        policy = SessionPermissionPolicy()
-        policy.grant("apply_patch", "allow", input_contains="src/")
-
-        self.assertIsNone(legacy_grant_adapter(policy, action))
-
-
 class PermissionEngineShadowTests(unittest.TestCase):
     def test_shadow_mode_exposes_action_verdict_and_diff_without_changing_result(
         self,
@@ -684,7 +643,6 @@ class ShadowApprovalCandidateTests(unittest.TestCase):
         self,
         *,
         static_policy: PermissionPolicy | None = None,
-        session_policy: SessionPermissionPolicy | None = None,
         session_grant_store: InMemoryGrantStore | None = None,
         permanent_grant_store: InMemoryGrantStore | None = None,
         allowlist_mode: bool = False,
@@ -692,7 +650,6 @@ class ShadowApprovalCandidateTests(unittest.TestCase):
         return PermissionEngine(
             PermissionEngineConfig(
                 static_policy=static_policy,
-                session_policy=session_policy,
                 allowlist_mode=allowlist_mode,
                 shadow_model_enabled=True,
                 session_grant_store=session_grant_store,
@@ -756,47 +713,6 @@ class ShadowApprovalCandidateTests(unittest.TestCase):
         self.assertEqual(candidate.would_resolve, "deny")
         self.assertEqual(candidate.fingerprints[0].source, "new_permanent")
 
-    # ── positive: no new-format grant, mappable legacy session grant → allow ──
-
-    def test_legacy_adapter_hit_allow(self) -> None:
-        session = SessionPermissionPolicy()
-        session.grant("read_file", "allow", input_contains="src/foo.py")
-        engine = self._engine(
-            static_policy=PermissionPolicy((PermissionRule("read_file", "ask"),)),
-            session_policy=session,
-        )
-        result, candidate = self._decide(engine, "read_file", {"path": "src/foo.py"})
-
-        # New resolver path: legacy adapter maps grant → allow
-        self._assert_legacy_path_untouched(result, "allow", False)
-        self.assertEqual(candidate.would_resolve, "allow")
-        self.assertEqual(candidate.fingerprints[0].source, "legacy_adapter")
-        grant = candidate.fingerprints[0].grant
-        assert grant is not None
-        self.assertEqual(grant.decision, "allow")
-        self.assertEqual(grant.metadata.get("legacy_adapter"), True)
-
-    # ── positive: unmappable legacy wildcard grant → NOT applied ──
-
-    def test_unmappable_wildcard_legacy_grant_not_applied(self) -> None:
-        session = SessionPermissionPolicy()
-        session.grant("*", "allow", input_contains="src/foo.py")
-        engine = self._engine(
-            static_policy=PermissionPolicy((PermissionRule("read_file", "ask"),)),
-            session_policy=session,
-        )
-        result, candidate = self._decide(engine, "read_file", {"path": "src/foo.py"})
-
-        # Resolver: legacy adapter can't map wildcard → ask (no callback)
-        self._assert_legacy_path_untouched(result, "ask", True)
-        self.assertEqual(candidate.would_resolve, "would_call_approval")
-        self.assertEqual(candidate.fingerprints[0].source, "none")
-        self.assertIsNone(candidate.fingerprints[0].grant)
-        self.assertEqual(len(candidate.unmappable_legacy_grants), 1)
-        unmappable = candidate.unmappable_legacy_grants[0]
-        self.assertEqual(unmappable.tool, "*")
-        self.assertEqual(unmappable.decision, "allow")
-
     # ── positive: no grants at all → would_call_approval ──
 
     def test_no_grants_produces_would_call_approval(self) -> None:
@@ -810,7 +726,8 @@ class ShadowApprovalCandidateTests(unittest.TestCase):
         self.assertEqual(candidate.would_resolve, "would_call_approval")
         self.assertEqual(candidate.fingerprints[0].source, "none")
         self.assertIsNone(candidate.fingerprints[0].grant)
-        self.assertEqual(len(candidate.unmappable_legacy_grants), 0)
+
+    # ── positive: no grants at all → would_call_approval ──
 
     # ── multi-target apply_patch: one allow hit, one none → would_call_approval ──
 
@@ -978,38 +895,16 @@ class ShadowApprovalCandidateTests(unittest.TestCase):
         self.assertEqual(fp.target_pattern, "src/foo.py")
         self.assertEqual(fp.access, "read")
 
-    # ── legacy grant with input_prefix is unmappable → not applied ──
+    # ── edge: new session deny works ──
 
-    def test_input_prefix_legacy_grant_is_unmappable(self) -> None:
-        session = SessionPermissionPolicy()
-        session.grant("read_file", "allow", input_prefix='{"path": "src/foo')
-        engine = self._engine(
-            static_policy=PermissionPolicy((PermissionRule("read_file", "ask"),)),
-            session_policy=session,
-        )
-        result, candidate = self._decide(engine, "read_file", {"path": "src/foo.py"})
-
-        # Resolver: input_prefix unmappable, no callback → ask
-        self._assert_legacy_path_untouched(result, "ask", True)
-        self.assertEqual(candidate.would_resolve, "would_call_approval")
-        self.assertEqual(candidate.fingerprints[0].source, "none")
-        self.assertEqual(len(candidate.unmappable_legacy_grants), 1)
-        self.assertIn("input_prefix", candidate.unmappable_legacy_grants[0].reason)
-
-    # ── new-format session deny beats legacy allow for same target ──
-
-    def test_new_session_deny_beats_legacy_adapter_allow(self) -> None:
-        session = SessionPermissionPolicy()
-        session.grant("read_file", "allow", input_contains="src/foo.py")
+    def test_new_session_deny(self) -> None:
         store = InMemoryGrantStore((_grant("src/foo.py", decision="deny"),))
         engine = self._engine(
             static_policy=PermissionPolicy((PermissionRule("read_file", "ask"),)),
-            session_policy=session,
             session_grant_store=store,
         )
         result, candidate = self._decide(engine, "read_file", {"path": "src/foo.py"})
 
-        # Resolver: new session store checked first → deny
         self._assert_legacy_path_untouched(result, "deny", True)
         self.assertEqual(candidate.would_resolve, "deny")
         self.assertEqual(candidate.fingerprints[0].source, "new_session")
@@ -1042,14 +937,12 @@ class ApprovalCutoverEnabledTests(unittest.TestCase):
         self,
         *,
         static_policy: PermissionPolicy | None = None,
-        session_policy: SessionPermissionPolicy | None = None,
         session_grant_store: InMemoryGrantStore | None = None,
         permanent_grant_store: InMemoryGrantStore | None = None,
     ) -> PermissionEngine:
         return PermissionEngine(
             PermissionEngineConfig(
                 static_policy=static_policy,
-                session_policy=session_policy,
                 session_grant_store=session_grant_store,
                 permanent_grant_store=permanent_grant_store,
             )
@@ -1135,33 +1028,6 @@ class ApprovalCutoverEnabledTests(unittest.TestCase):
         self.assertEqual(len(cb.calls), 0)
         assert result.approval_result is not None
         self.assertEqual(result.approval_result.decision, "deny")
-
-    # ── ask + legacy 适配授权命中 ──
-
-    def test_ask_legacy_adapter_grant_hit(self) -> None:
-        """legacy session 授权可映射 → 回调不被调用，legacy_adapter 元数据。"""
-        session = SessionPermissionPolicy()
-        session.grant("read_file", "allow", input_contains="src/foo.py")
-        engine = self._cutover_engine(
-            static_policy=PermissionPolicy((PermissionRule("read_file", "ask"),)),
-            session_policy=session,
-        )
-        cb = self._RecordingCallback()
-        result = engine.decide(
-            "read_file",
-            json.dumps({"path": "src/foo.py"}, ensure_ascii=False, sort_keys=True),
-            tool_spec=self._tool("read_file"),
-            tool_input={"path": "src/foo.py"},
-            approval_callback=cb,
-        )
-        self.assertFalse(result.blocked)
-        self.assertEqual(result.decision, "allow")
-        self.assertEqual(len(cb.calls), 0)
-        assert result.metadata is not None
-        self.assertTrue(result.metadata.get("legacy_adapter"))
-        assert result.approval_result is not None
-        self.assertEqual(result.approval_result.decision, "allow")
-        self.assertIsNotNone(result.approval_result.grant_id)
 
     # ── ask + 无授权 → 回调 ──
 
@@ -1321,138 +1187,6 @@ class ApprovalCutoverEnabledTests(unittest.TestCase):
         self.assertEqual(result.decision, "ask")
         self.assertTrue(result.blocked)
         self.assertIsNone(result.approval_result)
-
-    # ── 与 shadow 预测的 parity ──
-
-    def test_parity_with_shadow_predictions(self) -> None:
-        """cutover 真实结果与 shadow 预测一致。"""
-        session = SessionPermissionPolicy()
-        session.grant("read_file", "allow", input_contains="src/legacy_granted.py")
-
-        store = InMemoryGrantStore(
-            (
-                _grant("src/new_allowed.py"),
-                _grant("src/new_denied.py", decision="deny"),
-            )
-        )
-
-        base_config = PermissionEngineConfig(
-            static_policy=PermissionPolicy((PermissionRule("read_file", "ask"),)),
-            session_policy=session,
-            session_grant_store=store,
-        )
-
-        shadow_engine = PermissionEngine(
-            replace(base_config, shadow_model_enabled=True)
-        )
-        cutover_engine = PermissionEngine(base_config)
-
-        cases: list[tuple[str, str, dict[str, object], str, bool]] = [
-            (
-                "read_file",
-                "src/new_allowed.py",
-                {"path": "src/new_allowed.py"},
-                "allow",
-                False,
-            ),
-            (
-                "read_file",
-                "src/new_denied.py",
-                {"path": "src/new_denied.py"},
-                "deny",
-                False,
-            ),
-            (
-                "read_file",
-                "src/legacy_granted.py",
-                {"path": "src/legacy_granted.py"},
-                "allow",
-                False,
-            ),
-            (
-                "read_file",
-                "src/no_grant.py",
-                {"path": "src/no_grant.py"},
-                "would_call_approval",
-                True,
-            ),
-        ]
-
-        for tool_name, path, tool_input, expected_resolve, expect_callback in cases:
-            with self.subTest(path=path):
-                action_input = json.dumps(
-                    tool_input, ensure_ascii=False, sort_keys=True
-                )
-
-                shadow_result = shadow_engine.decide(
-                    tool_name, action_input, tool_input=tool_input
-                )
-                assert shadow_result.shadow_approval_candidate is not None
-                candidate = shadow_result.shadow_approval_candidate
-                self.assertEqual(candidate.would_resolve, expected_resolve)
-
-                cb = self._RecordingCallback(HITLResult("allow", "once"))
-                cutover_result = cutover_engine.decide(
-                    tool_name,
-                    action_input,
-                    tool_spec=self._tool(tool_name),
-                    tool_input=tool_input,
-                    approval_callback=cb,
-                )
-
-                if expected_resolve == "allow":
-                    self.assertEqual(cutover_result.decision, "allow")
-                    self.assertFalse(cutover_result.blocked)
-                elif expected_resolve == "deny":
-                    self.assertEqual(cutover_result.decision, "deny")
-                    self.assertTrue(cutover_result.blocked)
-
-                if expect_callback:
-                    self.assertEqual(len(cb.calls), 1)
-                else:
-                    self.assertEqual(len(cb.calls), 0)
-
-    # ── unmappable legacy grants metadata ──
-
-    def test_unmappable_legacy_grants_appear_in_metadata_when_callback_called(
-        self,
-    ) -> None:
-        """无法映射的 legacy 授权出现在 cutover 结果 metadata 中，回调仍被调用。"""
-        session = SessionPermissionPolicy()
-        session.grant("*", "allow", input_contains="src/foo.py")
-        session.grant("read_file", "allow", input_prefix='{"path": "src/')
-        engine = self._cutover_engine(
-            static_policy=PermissionPolicy((PermissionRule("read_file", "ask"),)),
-            session_policy=session,
-        )
-        cb = self._RecordingCallback(HITLResult("allow", "once"))
-        result = engine.decide(
-            "read_file",
-            json.dumps({"path": "src/foo.py"}, ensure_ascii=False, sort_keys=True),
-            tool_spec=self._tool("read_file"),
-            tool_input={"path": "src/foo.py"},
-            approval_callback=cb,
-        )
-        # 回调仍被调用（决策不变）
-        self.assertFalse(result.blocked)
-        self.assertEqual(result.decision, "allow")
-        self.assertEqual(len(cb.calls), 1)
-        # metadata 包含 unmappable_legacy_grants
-        assert result.metadata is not None
-        self.assertIn("unmappable_legacy_grants", result.metadata)
-        raw_grants = result.metadata["unmappable_legacy_grants"]
-        assert isinstance(raw_grants, list)
-        self.assertGreaterEqual(len(raw_grants), 2)
-        dict_grants = [g for g in raw_grants if isinstance(g, dict)]
-        reasons = [str(g.get("reason", "")) for g in dict_grants]
-        self.assertTrue(
-            any("wildcard" in r for r in reasons),
-            f"expected wildcard reason in {reasons}",
-        )
-        self.assertTrue(
-            any("input_prefix" in r for r in reasons),
-            f"expected input_prefix reason in {reasons}",
-        )
 
 
 class SafetyBackstopHelperTests(unittest.TestCase):

@@ -57,8 +57,6 @@ class ToolSpecAdapter:
         self._engine = PermissionEngine(
             PermissionEngineConfig(
                 static_policy=permission_policy,
-                session_policy=None,
-                persistent_store=None,
                 restricted_dirs=restricted_dirs,
                 allowlist_mode=allowlist_mode,
                 hook_constraint_providers=hook_constraint_providers,

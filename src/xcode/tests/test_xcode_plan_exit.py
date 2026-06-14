@@ -3,13 +3,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
 import io
 from contextlib import redirect_stdout
 
-from xcode.cli.commands import ReplState
 from xcode.cli.repl import run_repl
-from xcode.cli.repl_commands import handle_command
 from xcode.harness.session import SessionStore
 from xcode.tests.test_xcode_repl import FakePrompt
 
@@ -34,53 +31,6 @@ class XcodePlanExitTests(unittest.TestCase):
             # The records in the new session should be completely empty (since it's a clean fork)
             records = store.load_records()
             self.assertEqual(len(records), 0)
-
-    def test_handle_command_act_clear_creates_plan_and_forks(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            store = SessionStore(Path(temp_dir))
-            store.append("user", "user query")
-            store.append("assistant", "This is the proposed plan.")
-
-            state = ReplState(mode="plan")
-            prompt_session = MagicMock()
-
-            from xcode.harness.observability import (
-                SessionPermissionPolicy,
-                PersistentPermissionStore,
-            )
-
-            session_policy = SessionPermissionPolicy()
-            persistent_store = PersistentPermissionStore(
-                Path(temp_dir) / "hitl_policy.json"
-            )
-
-            parent_id = store.current_path.stem.removeprefix("session-")
-
-            from xcode.cli.markdown import TerminalMarkdownRenderer
-
-            renderer = TerminalMarkdownRenderer()
-
-            retval = handle_command(
-                "/act --clear",
-                store,
-                MagicMock(),
-                renderer,
-                state,
-                prompt_session,
-                session_policy,
-                persistent_store,
-            )
-
-            self.assertFalse(retval)  # Command execution handled
-            self.assertEqual(state.mode, "act")
-            self.assertEqual(state.approved_plan, "This is the proposed plan.")
-
-            # Check that artifact file exists and has correct content
-            plan_file = store.artifacts_dir / f"plan-{parent_id}.md"
-            self.assertTrue(plan_file.exists())
-            plan_content = plan_file.read_text(encoding="utf-8")
-            self.assertIn("This is the proposed plan.", plan_content)
-            self.assertIn(f"Forked from {parent_id}", plan_content)
 
     def test_repl_full_plan_exit_flow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
