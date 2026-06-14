@@ -85,7 +85,6 @@ class _FallbackSwitchingProvider:
             if (
                 not self._using_fallback
                 and self._consecutive_errors >= self._error_threshold
-                and self._fallback is not None
             ):
                 self._using_fallback = True
                 self._fallback_successes = 0
@@ -141,7 +140,6 @@ class _FallbackWithRetryPrimary(_FallbackSwitchingProvider):
             if (
                 not self._using_fallback
                 and self._consecutive_errors >= self._error_threshold
-                and self._fallback is not None
             ):
                 self._using_fallback = True
                 self._fallback_successes = 0

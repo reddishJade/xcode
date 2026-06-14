@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from ..session import JsonValue
 from .permission_model import (
@@ -545,7 +545,7 @@ class PermissionEngine:
             metadata=metadata,
             approval_result=ApprovalResult(
                 decision="allow",
-                scope=cast(Literal["once", "session", "permanent"], effective_scope),
+                scope=effective_scope,
             ),
         )
 

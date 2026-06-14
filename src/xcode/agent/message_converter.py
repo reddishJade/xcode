@@ -13,7 +13,6 @@ from xcode.agent.messages import (
     AgentMessage,
     AssistantMessage,
     BranchSummaryMessage,
-    CompactionSummaryMessage,
     SystemMessage,
     ToolResultMessage,
     UserMessage,
@@ -40,15 +39,10 @@ SUMMARY_SUFFIX = "\n</summary>"
 
 
 def convert_to_llm(messages: list[AgentMessage]) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    for m in messages:
-        converted = _convert_one(m)
-        if converted is not None:
-            result.append(converted)
-    return result
+    return [_convert_one(m) for m in messages]
 
 
-def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
+def _convert_one(m: AgentMessage) -> dict[str, Any]:
     if isinstance(m, SystemMessage):
         return {"role": "system", "content": str(m.content)}
 
@@ -72,18 +66,15 @@ def _convert_one(m: AgentMessage) -> dict[str, Any] | None:
             ],
         }
 
-    if isinstance(m, CompactionSummaryMessage):
-        return {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": COMPACTION_SUMMARY_PREFIX + m.summary + SUMMARY_SUFFIX,
-                }
-            ],
-        }
-
-    return None
+    return {
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": COMPACTION_SUMMARY_PREFIX + m.summary + SUMMARY_SUFFIX,
+            }
+        ],
+    }
 
 
 def _convert_tool_result(m: ToolResultMessage) -> dict[str, Any]:

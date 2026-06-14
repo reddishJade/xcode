@@ -111,8 +111,6 @@ async def _execute_sequential(
     results: list[ToolResultMessage] = []
     terminate_flags: list[bool] = []
     for tool_call in tool_calls:
-        if not isinstance(tool_call, ToolCallContent):
-            continue
         emit(
             ToolExecutionStartEvent(
                 tool_call_id=tool_call.id,
@@ -141,8 +139,6 @@ async def _execute_parallel(
 ) -> ExecutedToolBatch:
     tasks = []
     for tool_call in tool_calls:
-        if not isinstance(tool_call, ToolCallContent):
-            continue
         emit(
             ToolExecutionStartEvent(
                 tool_call_id=tool_call.id,

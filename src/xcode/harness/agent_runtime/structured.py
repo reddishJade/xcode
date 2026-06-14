@@ -46,7 +46,7 @@ _PROMPT_VERSION_CACHE: str | None = None
 def _get_prompt_version() -> str:
     global _PROMPT_VERSION_CACHE
     if _PROMPT_VERSION_CACHE is None:
-        from .prompting.identity import PROMPT_VERSION as _v  # pyright: ignore
+        from .prompting.identity import PROMPT_VERSION as _v
 
         _PROMPT_VERSION_CACHE = _v
     return _PROMPT_VERSION_CACHE or "unknown"

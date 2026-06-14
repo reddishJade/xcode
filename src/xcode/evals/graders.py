@@ -221,9 +221,6 @@ def _parse_judge_response(
         else:
             continue
 
-        if rest is None:
-            continue
-
         parts = rest.split(":", 1)
         criterion_name = parts[0].strip() if parts else "unknown"
         details = parts[1].strip() if len(parts) > 1 else ""

@@ -310,7 +310,7 @@ def _session_choices(
     """构建会话选择项。"""
     id_to_index = {session.id: str(index) for index, session in enumerate(sessions, 1)}
     choices: list[tuple[SessionMetadataView, str]] = []
-    for index, item in enumerate(sessions, start=1):
+    for _, item in enumerate(sessions, start=1):
         title = item.title
         if item.parent_id and item.parent_id in id_to_index:
             title += f" (forked from #{id_to_index[item.parent_id]})"

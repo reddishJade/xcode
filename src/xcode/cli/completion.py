@@ -46,9 +46,7 @@ class CommandArgsSuggester(AutoSuggest):
     def __init__(self, command_args: dict[str, str]) -> None:
         self._command_args = command_args
 
-    def get_suggestion(  # pyright: ignore[override]
-        self, buffer: object, document: object
-    ) -> Suggestion | None:
+    def get_suggestion(self, buffer: object, document: object) -> Suggestion | None:
         text: str = getattr(document, "text", "")
         stripped = text.strip()
         if stripped in self._command_args:

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import shlex
-from typing import Literal, Protocol, cast
+from typing import Literal, Protocol
 from uuid import uuid4
 
 PermissionAccess = Literal["read", "write", "execute", "network"]
@@ -524,11 +524,11 @@ def _grant_record_from_data(value: object) -> GrantRecord | None:
     return GrantRecord(
         capability=capability,
         operation=operation,
-        target_kind=cast(TargetKind, target_kind),
+        target_kind=target_kind,
         target_pattern=target_pattern,
-        access=cast(PermissionAccess, access),
-        decision=cast(GrantDecision, decision),
-        scope=cast(GrantScope, scope),
+        access=access,
+        decision=decision,
+        scope=scope,
         grant_id=grant_id,
         metadata=metadata if isinstance(metadata, Mapping) else {},
     )

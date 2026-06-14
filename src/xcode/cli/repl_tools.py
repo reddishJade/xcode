@@ -24,9 +24,7 @@ from xcode.harness.agent_runtime.events import (
     AssistantEventBlock,
     AssistantStructuredEvent,
     AssistantTextBlock,
-    AssistantToolUseBlock,
     CompactionStructuredEvent,
-    FinalStructuredEvent,
     MessageStartStructuredEvent,
     ReasoningDeltaStructuredEvent,
     StructuredAgentEvent,
@@ -165,7 +163,7 @@ def brief_input(name: str, raw_input: ToolInput | str) -> str:
             key, val = next(iter(raw_input.items()))
             return single_line_preview(f"{name}: {key}={val}")
         return name
-    if isinstance(raw_input, str) and raw_input:
+    if raw_input:
         return single_line_preview(f"{name}: {raw_input}")
     return name
 
@@ -251,38 +249,34 @@ def _event_payload(event: StructuredAgentEvent) -> object:
             "summary_token_estimate": event.data.summary_token_estimate,
             "trigger": event.data.trigger,
         }
-    if isinstance(event, FinalStructuredEvent):
-        return {
-            "answer": event.data.answer,
-            "steps": event.data.steps,
-            "tool_calls": [
-                {"id": c.id, "name": c.name, "input": c.input}
-                for c in event.data.tool_calls
-            ],
-            "stopped_by_limit": event.data.stopped_by_limit,
-            "metrics": event.data.metrics,
-            "stopped_by_watchdog": event.data.stopped_by_watchdog,
-            "watchdog_reason": event.data.watchdog_reason,
-            "needs_follow_up": event.data.needs_follow_up,
-            "last_agent": event.data.last_agent,
-            "run_state": event.data.run_state.to_dict()
-            if event.data.run_state is not None
-            else None,
-        }
-    raise TypeError(f"unsupported event: {type(event).__name__}")
+    return {
+        "answer": event.data.answer,
+        "steps": event.data.steps,
+        "tool_calls": [
+            {"id": c.id, "name": c.name, "input": c.input}
+            for c in event.data.tool_calls
+        ],
+        "stopped_by_limit": event.data.stopped_by_limit,
+        "metrics": event.data.metrics,
+        "stopped_by_watchdog": event.data.stopped_by_watchdog,
+        "watchdog_reason": event.data.watchdog_reason,
+        "needs_follow_up": event.data.needs_follow_up,
+        "last_agent": event.data.last_agent,
+        "run_state": event.data.run_state.to_dict()
+        if event.data.run_state is not None
+        else None,
+    }
 
 
 def _assistant_block_payload(block: AssistantEventBlock) -> dict[str, object]:
     if isinstance(block, AssistantTextBlock):
         return {"type": "text", "text": block.text}
-    if isinstance(block, AssistantToolUseBlock):
-        return {
-            "type": "tool_use",
-            "id": block.id,
-            "name": block.name,
-            "input": block.input,
-        }
-    raise TypeError(f"unsupported assistant block: {type(block).__name__}")
+    return {
+        "type": "tool_use",
+        "id": block.id,
+        "name": block.name,
+        "input": block.input,
+    }
 
 
 def print_tool_call_rich(label: str, console: Console) -> None:

@@ -370,24 +370,6 @@ def _task_from_dict(item: dict[str, Any]) -> EvalTask:
     return EvalTask(**normalized)
 
 
-def _offline_smoke_tasks() -> tuple[EvalTask, ...]:
-    return (
-        EvalTask(
-            id="offline-answer",
-            prompt="Return the offline smoke answer.",
-            expected_answer_contains=("offline ok",),
-            tags=("offline", "smoke"),
-        ),
-        EvalTask(
-            id="offline-tool",
-            prompt="Call echo once, then finish.",
-            expected_answer_contains=("finished",),
-            expected_tool_calls=("echo",),
-            tags=("offline", "tool-use"),
-        ),
-    )
-
-
 def _real_app_factory(
     project_root: Path,
     output_dir: Path,

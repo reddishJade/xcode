@@ -63,7 +63,7 @@ def estimate_message_tokens(messages: Sequence[AgentMessage]) -> int:
             content = msg.content
             if isinstance(content, str):
                 total += estimate_tokens(content)
-            elif isinstance(content, list):
+            else:
                 for block in content:
                     if isinstance(block, TextContent):
                         total += estimate_tokens(block.text)

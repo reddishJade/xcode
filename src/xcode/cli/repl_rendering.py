@@ -261,7 +261,7 @@ def create_prompt_session(
         pass
     style = Style.from_dict(REPL_PROMPT_STYLE)
 
-    return PromptSessionAdapter(  # type: ignore[arg-type]
+    return PromptSessionAdapter(
         PromptSession(  # type: ignore[arg-type]  # 与 prompt_toolkit PromptSession 参数名不对齐，运行时无影响
             multiline=True,
             key_bindings=bindings,

@@ -17,8 +17,6 @@ def partition_tool_calls_for_execution(
     batches: list[list[ToolCallContent]] = []
     parallel_batch: list[ToolCallContent] = []
     for tool_call in tool_calls:
-        if not isinstance(tool_call, ToolCallContent):
-            continue
         if _tool_execution_mode(current_context, tool_call) == "parallel":
             parallel_batch.append(tool_call)
             continue

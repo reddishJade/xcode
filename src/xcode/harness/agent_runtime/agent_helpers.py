@@ -184,7 +184,7 @@ def aiter_to_sync_iter(
                 yield message.event
             elif isinstance(message, _StreamError):
                 raise message.error
-            elif isinstance(message, _StreamDone):
+            else:
                 return
     finally:
         if not future.done():

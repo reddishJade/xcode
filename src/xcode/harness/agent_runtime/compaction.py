@@ -568,10 +568,7 @@ def _content_preview(content: str | list[dict[str, Any]] | None) -> str:
     if isinstance(content, list):
         rendered = []
         for part in content:
-            if isinstance(part, dict):
-                rendered.append(str(part.get("type", "block")))
-            else:
-                rendered.append(str(part))
+            rendered.append(str(part.get("type", "block")))
         text = " ".join(rendered)
     else:
         text = str(content)

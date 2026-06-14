@@ -405,12 +405,6 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
     return _load_json_config(path)
 
 
-def _string_tuple(value: object, default: tuple[str, ...]) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        return default
-    return tuple(str(item) for item in value)
-
-
 def resolve_config_path(project_root: Path, path: Path | None) -> Path | None:
     if path is None:
         return None

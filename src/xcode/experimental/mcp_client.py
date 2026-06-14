@@ -71,7 +71,7 @@ class McpClient:
             msg = _read_jsonrpc_message(cast(BinaryIO, self.process.stdout))
             if msg is None:
                 break
-            if isinstance(msg, dict) and "id" in msg:
+            if "id" in msg:
                 with self._lock:
                     self._pending_responses[msg["id"]] = msg
 
