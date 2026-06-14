@@ -1,7 +1,30 @@
 {
   "extraPaths": ["src"],
-  "typeCheckingMode": "standard",
-  "pythonVersion": "3.12",
   "include": ["src"],
-  "exclude": ["**/node_modules", "**/__pycache__", "**/.egg-info"]
+  "exclude": [
+    "**/.*",
+    "**/.venv",
+    "**/venv",
+    "**/__pycache__",
+    "**/tests",
+    "**/node_modules",
+    "**/dist",
+    "**/build",
+  ],
+
+  "pythonVersion": "3.12",
+
+  "typeCheckingMode": "standard",
+
+  "reportUnusedImport": "warning",
+  "reportDuplicateImport": "warning",
+  "reportUnusedVariable": "warning",
+  "reportUnusedClass": "warning",
+  "reportUnusedFunction": "warning",
+
+  "reportUnreachable": "warning",
+  "reportUnnecessaryCast": "warning",
+  "reportUnnecessaryComparison": "warning",
+  "reportUnnecessaryIsInstance": "warning",
+  "reportUnnecessaryTypeIgnoreComment": "warning"
 }
