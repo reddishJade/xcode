@@ -20,6 +20,7 @@ from .protocols import (
     ToolResultDetails,
 )
 from xcode.agent.context_assembly import ContextAssembler
+from xcode.agent.context_collector import ContextCollectorRegistry
 
 from .hooks import (
     ArchiveWriter,
@@ -180,6 +181,13 @@ class AgentLoopConfig:
 
     is_tool_productive: IsToolProductiveHook | None = None
     before_provider_request: BeforeProviderRequestHook | None = None
+
+    context_collectors: ContextCollectorRegistry | None = None
+    """上下文收集器注册表。配置后在 context_assembler 之前执行。
+
+    所有注册的 collector 按顺序运行，输出合并为 context_blocks
+    传递给 context_assembler。未配置时收集阶段返回空列表。
+    """
 
     context_assembler: ContextAssembler | None = None
     """结构化上下文组装器。配置后替代/增强 transform_context 的功能。

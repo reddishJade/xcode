@@ -26,7 +26,8 @@ from xcode.ai.events import (
 )
 from xcode.ai.providers.protocol import StreamProvider
 from xcode.ai.types import ToolDefinition
-from xcode.agent.context_assembly import ContextAssemblyInput
+from xcode.agent.context_assembly import ContextAssemblyInput, ContextBlock
+from xcode.agent.context_collector import ContextCollectionInput
 from xcode.agent.types import TextContent, ToolCallContent
 from xcode.agent.config import AgentContext, AgentLoopConfig
 from xcode.agent.results import AgentLoopMetrics
@@ -55,18 +56,31 @@ async def call_provider(
     current_step: int = 0,
 ) -> _ProviderResponse:
     messages = context.messages
+    blocks: list[ContextBlock] = []
 
-    # context_assembler 在 transform_context 之前执行
-    if config.context_assembler:
-        assembly_input = ContextAssemblyInput(
+    # 1. 收集阶段：仅当有 assembler 消费时才运行 collector
+    if config.context_collectors and config.context_assembler:
+        collect_input = ContextCollectionInput(
             system_prompt=context.system_prompt,
             messages=messages,
             tools=list(context.tools or []),
             current_step=current_step,
         )
+        blocks = config.context_collectors.collect(collect_input)
+
+    # 2. 组装阶段：将 blocks 注入消息列表
+    if config.context_assembler:
+        assembly_input = ContextAssemblyInput(
+            system_prompt=context.system_prompt,
+            messages=messages,
+            tools=list(context.tools or []),
+            context_blocks=blocks,
+            current_step=current_step,
+        )
         assembly_result = config.context_assembler.assemble(assembly_input)
         messages = assembly_result.messages
 
+    # 3. 旧版 transform_context 仍保留
     if config.transform_context:
         messages = config.transform_context(messages, signal)
 

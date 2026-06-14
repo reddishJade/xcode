@@ -21,6 +21,10 @@ from xcode.agent.context_assembly import (
     DefaultContextAssembler,
     trim_to_budget,
 )
+from xcode.agent.context_collector import (
+    ContextCollectionInput,
+    ContextCollectorRegistry,
+)
 from xcode.agent.messages import (
     SystemMessage,
     UserMessage,
@@ -918,3 +922,286 @@ class TestContextAssemblyInputConstruction(unittest.TestCase):
         """system_prompt 字段传递正确。"""
         inp = ContextAssemblyInput(system_prompt="you are a helpful agent")
         self.assertEqual(inp.system_prompt, "you are a helpful agent")
+
+
+# ── ContextCollector 注册表测试 ──
+
+
+class FakeCollector:
+    """测试用 fake collector，返回预设的块列表。"""
+
+    def __init__(self, blocks: list[ContextBlock], *, name: str = "") -> None:
+        self._blocks = blocks
+        self._name = name
+
+    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
+        return list(self._blocks)
+
+
+class ErrorCollector:
+    """测试用 fake collector，collect 时抛出异常。"""
+
+    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
+        msg = "collector error"
+        raise RuntimeError(msg)
+
+
+class TestContextCollectorRegistry(unittest.TestCase):
+    """测试 ContextCollectorRegistry 基本行为。"""
+
+    def test_empty_registry_returns_empty(self) -> None:
+        """空注册表返回空列表。"""
+        registry = ContextCollectorRegistry()
+        result = registry.collect(ContextCollectionInput())
+        self.assertEqual(len(result), 0)
+
+    def test_empty_registry_is_falsey(self) -> None:
+        """空注册表 __bool__ 为 False。"""
+        registry = ContextCollectorRegistry()
+        self.assertFalse(registry)
+
+    def test_registry_with_collectors_is_truthy(self) -> None:
+        """有 collector 时 __bool__ 为 True。"""
+        registry = ContextCollectorRegistry()
+        registry.register(FakeCollector([]))
+        self.assertTrue(registry)
+
+    def test_single_collector_returns_blocks(self) -> None:
+        """单个 collector 返回的块被正确收集。"""
+        block = ContextBlock(
+            source=ContextBlockSource.CUSTOM,
+            priority=ContextPriority.HIGH,
+            content="from collector",
+        )
+        registry = ContextCollectorRegistry()
+        registry.register(FakeCollector([block]))
+        result = registry.collect(ContextCollectionInput())
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].content, "from collector")
+
+    def test_multiple_collectors_preserve_order(self) -> None:
+        """多个 collector 按注册顺序合并结果。"""
+        block_a = ContextBlock(
+            source=ContextBlockSource.CUSTOM,
+            priority=ContextPriority.HIGH,
+            content="first",
+            block_id="a",
+        )
+        block_b = ContextBlock(
+            source=ContextBlockSource.CUSTOM,
+            priority=ContextPriority.MEDIUM,
+            content="second",
+            block_id="b",
+        )
+        block_c = ContextBlock(
+            source=ContextBlockSource.CUSTOM,
+            priority=ContextPriority.LOW,
+            content="third",
+            block_id="c",
+        )
+        registry = ContextCollectorRegistry()
+        registry.register(FakeCollector([block_a, block_b]))
+        registry.register(FakeCollector([block_c]))
+        result = registry.collect(ContextCollectionInput())
+        self.assertEqual(len(result), 3)
+        self.assertEqual([b.block_id for b in result], ["a", "b", "c"])
+
+    def test_error_collector_skipped_other_still_run(self) -> None:
+        """异常 collector 被跳过（log + skip），其他 collector 仍正常执行。"""
+        good_block = ContextBlock(
+            source=ContextBlockSource.CUSTOM,
+            priority=ContextPriority.HIGH,
+            content="good",
+        )
+        registry = ContextCollectorRegistry()
+        registry.register(ErrorCollector())
+        registry.register(FakeCollector([good_block]))
+        # 异常被吞噬，不会传播到调用方
+        result = registry.collect(ContextCollectionInput())
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].content, "good")
+
+    def test_error_collector_exception_never_propagates(self) -> None:
+        """collector 异常绝不传播到 collect() 的调用方。"""
+        registry = ContextCollectorRegistry()
+        registry.register(ErrorCollector())
+        # 不需要 try/except，因为 collect 内部已捕获
+        result = registry.collect(ContextCollectionInput())
+        self.assertEqual(len(result), 0)
+
+
+class TestContextCollectorWithAssembler(unittest.TestCase):
+    """测试 collector → assembler 集成。"""
+
+    def test_collector_blocks_reach_assembler(self) -> None:
+        """collector 产出的块被传入 assembler 的 context_blocks。"""
+        captured_blocks: list[ContextBlock] = []
+
+        class CaptureAssembler:
+            def assemble(self, input: ContextAssemblyInput) -> ContextAssemblyResult:
+                captured_blocks.extend(input.context_blocks)
+                return ContextAssemblyResult(messages=list(input.messages))
+
+        provider = CaptureProvider()
+        registry = ContextCollectorRegistry()
+        registry.register(
+            FakeCollector(
+                [
+                    ContextBlock(
+                        source=ContextBlockSource.CUSTOM,
+                        priority=ContextPriority.CRITICAL,
+                        content="collector-block",
+                        block_id="c1",
+                    ),
+                ]
+            )
+        )
+
+        config = AgentLoopConfig(
+            provider=provider,
+            convert_to_llm=convert_to_llm,
+            context_collectors=registry,
+            context_assembler=CaptureAssembler(),
+            max_steps=1,
+        )
+        import asyncio
+
+        asyncio.run(
+            run_agent_loop(
+                prompts=[UserMessage(content="hello")],
+                context=AgentContext(messages=[]),
+                config=config,
+                emit=lambda _e: None,
+            )
+        )
+        self.assertEqual(len(captured_blocks), 1)
+        self.assertEqual(captured_blocks[0].block_id, "c1")
+
+    def test_no_collectors_assembler_receives_empty_blocks(self) -> None:
+        """未配置 collector 时 assembler 收到空 blocks。"""
+        captured_blocks: list[ContextBlock] = []
+
+        class CaptureAssembler:
+            def assemble(self, input: ContextAssemblyInput) -> ContextAssemblyResult:
+                captured_blocks.extend(input.context_blocks)
+                return ContextAssemblyResult(messages=list(input.messages))
+
+        provider = CaptureProvider()
+        config = AgentLoopConfig(
+            provider=provider,
+            convert_to_llm=convert_to_llm,
+            context_assembler=CaptureAssembler(),
+            max_steps=1,
+        )
+        import asyncio
+
+        asyncio.run(
+            run_agent_loop(
+                prompts=[UserMessage(content="hello")],
+                context=AgentContext(messages=[]),
+                config=config,
+                emit=lambda _e: None,
+            )
+        )
+        self.assertEqual(len(captured_blocks), 0)
+
+    def test_collector_with_default_assembler_block_injected(self) -> None:
+        """collector 产出的块经 DefaultContextAssembler 注入到消息中。"""
+        provider = CaptureProvider()
+        registry = ContextCollectorRegistry()
+        registry.register(
+            FakeCollector(
+                [
+                    ContextBlock(
+                        source=ContextBlockSource.PLAN,
+                        priority=ContextPriority.HIGH,
+                        content="plan step 1",
+                    ),
+                ]
+            )
+        )
+
+        config = AgentLoopConfig(
+            provider=provider,
+            convert_to_llm=convert_to_llm,
+            context_collectors=registry,
+            context_assembler=DefaultContextAssembler(),
+            max_steps=1,
+        )
+        import asyncio
+
+        asyncio.run(
+            run_agent_loop(
+                prompts=[UserMessage(content="hello")],
+                context=AgentContext(messages=[]),
+                config=config,
+                emit=lambda _e: None,
+            )
+        )
+        # 验证块内容出现在发送给 provider 的消息中
+        self.assertEqual(len(provider.captured_messages), 1)
+        msgs = provider.captured_messages[0]
+        combined = " ".join(str(m.get("content", "") or "") for m in msgs)
+        self.assertIn("plan step 1", combined)
+        self.assertIn("[plan]", combined)
+
+    def test_collectors_skipped_when_no_assembler(self) -> None:
+        """未配置 assembler 时 collector 不执行。"""
+        call_count: list[int] = []
+
+        class CountingCollector:
+            def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
+                call_count.append(1)
+                return []
+
+        provider = CaptureProvider()
+        registry = ContextCollectorRegistry()
+        registry.register(CountingCollector())
+
+        config = AgentLoopConfig(
+            provider=provider,
+            convert_to_llm=convert_to_llm,
+            context_collectors=registry,
+            context_assembler=None,
+            max_steps=1,
+        )
+        import asyncio
+
+        asyncio.run(
+            run_agent_loop(
+                prompts=[UserMessage(content="hello")],
+                context=AgentContext(messages=[]),
+                config=config,
+                emit=lambda _e: None,
+            )
+        )
+        self.assertEqual(len(call_count), 0)
+
+    def test_legacy_transform_context_still_runs_after_collectors(self) -> None:
+        """collector + assembler 配置下 transform_context 仍执行。"""
+        transform_log: list[str] = []
+
+        def _transform(msgs: list, signal: object = None) -> list:
+            transform_log.append("called")
+            return msgs
+
+        provider = CaptureProvider()
+        config = AgentLoopConfig(
+            provider=provider,
+            convert_to_llm=convert_to_llm,
+            context_collectors=ContextCollectorRegistry(),
+            context_assembler=DefaultContextAssembler(),
+            transform_context=_transform,
+            max_steps=1,
+        )
+        import asyncio
+
+        asyncio.run(
+            run_agent_loop(
+                prompts=[UserMessage(content="hello")],
+                context=AgentContext(messages=[]),
+                config=config,
+                emit=lambda _e: None,
+            )
+        )
+        self.assertEqual(len(transform_log), 1)

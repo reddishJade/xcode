@@ -16,6 +16,11 @@ from .context_assembly import (
     DefaultContextAssembler,
     trim_to_budget,
 )
+from .context_collector import (
+    ContextCollectionInput,
+    ContextCollector,
+    ContextCollectorRegistry,
+)
 from .events import AgentEvent
 from .messages import (
     AgentMessage,
@@ -43,6 +48,9 @@ __all__ = [
     "ContextAssemblyResult",
     "ContextBlock",
     "ContextBlockSource",
+    "ContextCollectionInput",
+    "ContextCollector",
+    "ContextCollectorRegistry",
     "ContextExpiry",
     "ContextPriority",
     "DefaultContextAssembler",
