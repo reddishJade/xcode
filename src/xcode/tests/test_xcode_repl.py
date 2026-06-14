@@ -213,7 +213,6 @@ class XcodeReplTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertIn("Thought for", output.getvalue())
-            self.assertIn("Thinking...", output.getvalue())
             self.assertNotIn("three four five six seven eight", output.getvalue())
             self.assertIn("done", output.getvalue())
 

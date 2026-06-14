@@ -154,11 +154,10 @@ class ReasoningHandler:
     def handle_delta(self, event_data: str) -> None:
         if self.reasoning_started_at is None:
             self.reasoning_started_at = time.perf_counter()
-            self.live_console.print(Text("  Thinking...", style=CLI_COLOR_THINKING))
         self.reasoning_text += event_data
-        lines = reasoning_preview_lines(self.reasoning_text)
-        if lines:
-            self.reasoning_preview.update(lines)
+        preview = reasoning_preview_lines(self.reasoning_text)
+        display = ["  Thinking..."] + (preview or [])
+        self.reasoning_preview.update(display)
 
     def finish(self) -> None:
         if self.reasoning_started_at is None:
