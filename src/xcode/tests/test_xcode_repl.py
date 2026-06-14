@@ -364,7 +364,6 @@ class XcodeReplTests(unittest.TestCase):
                         "Danger.",
                         "text",
                         lambda value: value["input"],
-                        risk="high",
                     ),
                 )
             )
@@ -377,14 +376,15 @@ class XcodeReplTests(unittest.TestCase):
                 )
 
             self.assertEqual(code, 0)
-            self.assertIn("requires approval", renderer.rendered[0])
+            # High-risk approval removed; tool runs by default
+            self.assertEqual(renderer.rendered[0], "now")
 
     def test_tool_command_uses_static_permission_policy(self) -> None:
         app = DeniedToolApp()
 
         output = run_tool_command("/tool bash git status", app)
 
-        self.assertEqual(output, "permission denied for tool: bash")
+        self.assertIn("deny for bash", output)
         self.assertEqual(app.commands, [])
 
     def test_run_repl_permissions_show_static_policy(self) -> None:

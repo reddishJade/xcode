@@ -10,9 +10,9 @@ from .markdown import MarkdownRenderer
 from xcode.harness.config import ExecutionMode
 from xcode.harness.session import SessionStore
 from xcode.harness.observability import (
+    FileGrantStore,
+    InMemoryGrantStore,
     PermissionPolicy,
-    PersistentPermissionStore,
-    SessionPermissionPolicy,
 )
 
 
@@ -43,8 +43,8 @@ class CommandContext:
     state: ReplState
     prompt_session: PromptLike
     project_root: Path
-    session_policy: SessionPermissionPolicy | None = None
-    persistent_store: PersistentPermissionStore | None = None
+    session_grant_store: InMemoryGrantStore | None = None
+    permanent_grant_store: FileGrantStore | None = None
     static_policy: PermissionPolicy | None = None
     restricted_dirs: tuple[str, ...] = ()
     allowlist_mode: bool = False

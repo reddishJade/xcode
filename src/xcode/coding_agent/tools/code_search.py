@@ -137,7 +137,6 @@ def build_code_tools(
             description="Find project files by glob pattern. Use **/*.py for recursive search.",
             input_hint='JSON: {"path": ".", "pattern": "**/*.py", "max_results": 100}',
             handler=glob_files,
-            risk="low",
             read_only=True,
             concurrency_safe=True,
             schema={
@@ -154,7 +153,6 @@ def build_code_tools(
             description="Find files by glob pattern using fd (fast) with Python glob fallback. Respects .gitignore.",
             input_hint='JSON: {"path": ".", "pattern": "*.py", "max_results": 100}',
             handler=find_files,
-            risk="low",
             read_only=True,
             concurrency_safe=True,
             schema={
@@ -182,7 +180,6 @@ def build_code_tools(
             description="Search file contents for a pattern. Uses ripgrep when available, then falls back to Python grep.",
             input_hint='JSON: {"pattern": "ToolSpec", "path": "src/xcode", "glob": "*.py"}',
             handler=grep_search,
-            risk="low",
             read_only=True,
             concurrency_safe=True,
             schema={
@@ -226,7 +223,6 @@ def build_code_tools(
             description="List directory contents. Entries sorted alphabetically, '/' suffix for directories. Includes dotfiles.",
             input_hint='JSON: {"path": "src/xcode", "limit": 100}',
             handler=ls_files,
-            risk="low",
             read_only=True,
             concurrency_safe=True,
             schema={

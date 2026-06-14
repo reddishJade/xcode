@@ -72,7 +72,6 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
             description="read",
             input_hint="path",
             handler=lambda _data: "file content",
-            risk="low",
             schema=PATH_SCHEMA,
         )
 
@@ -149,7 +148,6 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
             description="read",
             input_hint="path",
             handler=lambda _data: "file content",
-            risk="low",
             schema=PATH_SCHEMA,
         )
 

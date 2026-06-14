@@ -125,7 +125,11 @@ class XcodeShellAdapterTests(unittest.TestCase):
             tool = build_bash_tool(Path(tmp))
             registry = {tool.name: tool}
 
-            output = run_tool(registry, "bash", {"command": "echo hello"})
+            output = run_tool(
+                registry,
+                "bash",
+                {"command": "echo hello"},
+            )
             self.assertIn("hello", output)
 
     def test_bash_tool_passes_shell_false_and_argv(self) -> None:

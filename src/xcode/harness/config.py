@@ -15,7 +15,7 @@ ProviderTransport = Literal[
 ]
 ExecutionMode = Literal["plan", "review", "act"]
 PermissionMode = Literal["strict", "normal", "permissive"]
-ApprovalPolicy = Literal["always", "high_risk_only", "never"]
+ApprovalPolicy = Literal["always", "never"]
 
 PROFILE_MAIN = "main"
 PROFILE_SUBAGENT = "subagent"
@@ -83,23 +83,20 @@ class ProviderRuntimeConfig:
 class SecurityRuntimeConfig:
     permission_mode: PermissionMode = "normal"
     sandbox_mode: bool = False
-    approval_policy: ApprovalPolicy = "high_risk_only"
+    approval_policy: str = "never"
     network_access: bool = True
     writable_roots: tuple[str, ...] = ()
     restricted_dirs: tuple[str, ...] = ()
     deny_tools: tuple[str, ...] = ()
     ask_tools: tuple[str, ...] = ()
     allow_tools: tuple[str, ...] = ()
+    approval_cutover_enabled: bool = True
+    shell_cutover_enabled: bool = True
 
-    def resolve_approval_policy(self) -> ApprovalPolicy:
-        mode_to_policy: dict[PermissionMode, ApprovalPolicy] = {
-            "strict": "always",
-            "normal": "high_risk_only",
-            "permissive": "never",
-        }
-        if self.approval_policy == "high_risk_only":
-            return mode_to_policy.get(self.permission_mode, "high_risk_only")
-        return self.approval_policy
+    def resolve_approval_policy(self) -> str:
+        if self.approval_policy in ("always", "never"):
+            return self.approval_policy
+        return "never"
 
     def resolve_sandbox_mode(self) -> bool:
         if self.permission_mode == "strict":
@@ -343,6 +340,18 @@ def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
     if parsed_approval_policy is not None:
         security_updates["approval_policy"] = parsed_approval_policy
 
+    approval_cutover = os.getenv("XCODE_APPROVAL_CUTOVER")
+    if approval_cutover in ("1", "true"):
+        security_updates["approval_cutover_enabled"] = True
+    elif approval_cutover in ("0", "false"):
+        security_updates["approval_cutover_enabled"] = False
+
+    shell_cutover = os.getenv("XCODE_SHELL_CUTOVER")
+    if shell_cutover in ("1", "true"):
+        security_updates["shell_cutover_enabled"] = True
+    elif shell_cutover in ("0", "false"):
+        security_updates["shell_cutover_enabled"] = False
+
     if security_updates:
         security = replace(config.security, **security_updates)
         config = replace(config, security=security)
@@ -364,18 +373,12 @@ def _parse_permission_mode(value: object) -> PermissionMode | None:
             return None
 
 
-def _parse_approval_policy(value: object) -> ApprovalPolicy | None:
+def _parse_approval_policy(value: object) -> str | None:
     if not isinstance(value, str):
         return None
-    match value:
-        case "always":
-            return "always"
-        case "high_risk_only":
-            return "high_risk_only"
-        case "never":
-            return "never"
-        case _:
-            return None
+    if value in ("always", "never"):
+        return value
+    return "never"
 
 
 def _load_provider_transport(

@@ -4,9 +4,9 @@ from typing import Protocol, TypeGuard
 
 from xcode.ai.model_modes import parse_model_mode
 from xcode.harness.observability import (
+    FileGrantStore,
+    InMemoryGrantStore,
     PermissionPolicy,
-    PersistentPermissionStore,
-    SessionPermissionPolicy,
 )
 from .reasoning_effort import (
     reasoning_effort_levels_for_transport,
@@ -38,25 +38,24 @@ def _model_info(app: object) -> dict[str, str]:
 
 def handle_permissions(
     command: str,
-    session_policy: SessionPermissionPolicy | None,
-    persistent_store: PersistentPermissionStore | None,
+    session_grant_store: InMemoryGrantStore | None,
+    permanent_grant_store: FileGrantStore | None,
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
     allowlist_mode: bool = False,
 ) -> None:
     parts = command.split(maxsplit=2)
     sub = parts[1] if len(parts) >= 2 else ""
-    if sub == "revoke" and len(parts) >= 3 and persistent_store is not None:
-        tool_name = parts[2]
-        persistent_store.revoke(tool_name)
-        print(f"Revoked persistent permission for: {tool_name}")
-        return
-    if sub == "clear" and session_policy is not None:
-        session_policy.clear()
+    if sub == "clear" and session_grant_store is not None:
+        session_grant_store.clear()
         print("Session permissions cleared.")
         return
     list_permissions(
-        session_policy, persistent_store, static_policy, restricted_dirs, allowlist_mode
+        session_grant_store,
+        permanent_grant_store,
+        static_policy,
+        restricted_dirs,
+        allowlist_mode,
     )
 
 
@@ -69,7 +68,6 @@ def _format_rules(rules: tuple) -> list[str]:
 
 
 def _format_rule_input(rule: object) -> str:
-    """格式化权限规则的输入匹配条件。"""
     input_contains = getattr(rule, "input_contains", None)
     input_prefix = getattr(rule, "input_prefix", None)
     if input_prefix:
@@ -79,9 +77,19 @@ def _format_rule_input(rule: object) -> str:
     return ""
 
 
+def _format_grant(record: object) -> str:
+    """格式化 GrantRecord 为可读行。"""
+    cap = getattr(record, "capability", "?")
+    op = getattr(record, "operation", "?")
+    target = getattr(record, "target_pattern", "?")
+    acc = getattr(record, "access", "?")
+    dec = getattr(record, "decision", "?")
+    return f"    {cap}/{op} on {target} ({acc}) = {dec}"
+
+
 def list_permissions(
-    session_policy: SessionPermissionPolicy | None,
-    persistent_store: PersistentPermissionStore | None,
+    session_grant_store: InMemoryGrantStore | None,
+    permanent_grant_store: FileGrantStore | None,
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
     allowlist_mode: bool = False,
@@ -105,23 +113,21 @@ def list_permissions(
         has_any = True
         lines.append("  mode: allowlist (non-allowed tools ask)")
 
-    if session_policy is not None:
-        rules = session_policy.rules
-        if rules:
+    if session_grant_store is not None:
+        records = session_grant_store.records()
+        if records:
             has_any = True
             lines.append("  session:")
-            for rule in rules:
-                input_part = _format_rule_input(rule)
-                lines.append(f"    {rule.tool} = {rule.decision}{input_part}")
+            for rec in records:
+                lines.append(_format_grant(rec))
 
-    if persistent_store is not None:
-        policy = persistent_store.load()
-        if policy.rules:
+    if permanent_grant_store is not None:
+        records = permanent_grant_store.records()
+        if records:
             has_any = True
             lines.append("  persistent:")
-            for rule in policy.rules:
-                input_part = _format_rule_input(rule)
-                lines.append(f"    {rule.tool} = {rule.decision}{input_part}")
+            for rec in records:
+                lines.append(_format_grant(rec))
 
     if not has_any:
         lines.append("  (none)")

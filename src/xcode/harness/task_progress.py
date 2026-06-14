@@ -59,9 +59,7 @@ def save_progress(
         elif status == "in_progress":
             status_char = "/"
 
-        lines.append(
-            f"- [{status_char}] Step {idx}: {item.get('title', 'Untitled')}"
-        )
+        lines.append(f"- [{status_char}] Step {idx}: {item.get('title', 'Untitled')}")
 
     if in_progress_steps:
         lines.extend(["", "## Current Active Step:", f"- {in_progress_steps[0]}"])
@@ -157,9 +155,7 @@ def expire_stale_runs(task_store: TaskStore) -> list[TaskRunState]:
     now = time.time()
     for task in task_store.list():
         orchestration = dict(task.payload.get("orchestration") or {})
-        expires_at = _parse_timestamp(
-            str(orchestration.get("lease_expires_at", ""))
-        )
+        expires_at = _parse_timestamp(str(orchestration.get("lease_expires_at", "")))
         if task.status != CLAIMED or expires_at <= 0 or expires_at >= now:
             continue
         orchestration["status"] = "timed_out"
@@ -267,7 +263,6 @@ def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
             description="Save a durable task checklist into TaskStore and write the read-only progress summary.",
             input_hint='{"task_id":1,"feature_list":[{"title":"Design","status":"completed"}]}',
             handler=save_task_progress,
-            risk="low",
             schema={
                 "type": "object",
                 "properties": {
@@ -287,7 +282,6 @@ def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
             description="Load the durable task checklist from TaskStore.",
             input_hint='{"task_id":1}',
             handler=resume_task_progress,
-            risk="low",
             schema={
                 "type": "object",
                 "properties": {"task_id": {"type": "integer"}},
@@ -308,7 +302,6 @@ def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
                 '"retry_limit":1,"subtasks":["Write tests"]}'
             ),
             handler=start_task_run,
-            risk="low",
             schema={
                 "type": "object",
                 "properties": {
@@ -327,7 +320,6 @@ def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
             description="Read the current orchestration state for a long-running task.",
             input_hint='{"task_id":1}',
             handler=resume_task_run,
-            risk="low",
             schema={
                 "type": "object",
                 "properties": {"task_id": {"type": "integer"}},
@@ -344,7 +336,6 @@ def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
             ),
             input_hint='{"task_id":1}',
             handler=retry_task_run,
-            risk="low",
             schema={
                 "type": "object",
                 "properties": {"task_id": {"type": "integer"}},
@@ -358,7 +349,6 @@ def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
             description="Release long-running tasks whose orchestration lease expired.",
             input_hint="{}",
             handler=expire_task_runs,
-            risk="low",
             schema={
                 "type": "object",
                 "properties": {},

@@ -47,11 +47,9 @@ class XcodePermissionsTests(unittest.TestCase):
         tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
         policy = PermissionPolicy((PermissionRule("echo", "deny"),))
 
-        output = run_tool(
-            {"echo": tool}, "echo", {"input": "hello"}, permission_policy=policy
-        )
+        output = run_tool({"echo": tool}, "echo", "hello", permission_policy=policy)
 
-        self.assertEqual(output, "permission denied for tool: echo")
+        self.assertIn("deny for echo", output)
 
     def test_run_tool_result_reports_handler_exception(self) -> None:
         def fail(_value: dict) -> str:
@@ -76,7 +74,10 @@ class XcodePermissionsTests(unittest.TestCase):
 
     def test_permission_policy_allow_skips_high_risk_approval(self) -> None:
         tool = ToolSpec(
-            "danger", "Danger.", "text", lambda value: value["input"], risk="high"
+            "danger",
+            "Danger.",
+            "text",
+            lambda value: value["input"],
         )
         policy = PermissionPolicy((PermissionRule("danger", "allow"),))
 
@@ -105,7 +106,7 @@ class XcodePermissionsTests(unittest.TestCase):
         )
         result = engine.decide("echo", "hello")
         self.assertTrue(result.blocked)
-        self.assertEqual(result.matched_rule, "static_deny")
+        self.assertEqual(result.matched_rule, "rule")
 
     def test_permission_engine_restricted_dirs_deny(self) -> None:
         engine = PermissionEngine(
@@ -164,23 +165,16 @@ class XcodePermissionsTests(unittest.TestCase):
         self.assertEqual(result.matched_rule, "default")
 
     def test_permission_engine_high_risk_approval(self) -> None:
-        tool = ToolSpec("danger", "Danger.", "text", lambda v: v["input"], risk="high")
-        engine = PermissionEngine(
-            PermissionEngineConfig(high_risk_requires_approval=True)
-        )
-        result = engine.decide(
-            "danger",
-            "hello",
-            tool_spec=tool,
-            approval_callback=lambda _t, _i: HITLResult("allow", "once"),
-        )
+        # High-risk approval path removed (STEP 5). Default allow.
+        engine = PermissionEngine(PermissionEngineConfig())
+        result = engine.decide("danger", "hello")
         self.assertFalse(result.blocked)
 
     def test_permission_engine_execution_mode_deny(self) -> None:
         engine = PermissionEngine(PermissionEngineConfig())
         result = engine.decide("bash", "rm -rf /", execution_decision="deny")
         self.assertTrue(result.blocked)
-        self.assertEqual(result.matched_rule, "execution_mode")
+        self.assertEqual(result.matched_rule, "mode")
 
     def test_tool_gate_static_deny_preempts_execution_mode_ask(self) -> None:
         called = False
@@ -197,7 +191,6 @@ class XcodePermissionsTests(unittest.TestCase):
             mode_state=mode,
             approval_callback=approve,
             permission_policy=PermissionPolicy((PermissionRule("bash", "deny"),)),
-            high_risk_requires_approval=False,
             hook_manager=None,
             audit_logger=None,
             session_id="test",
@@ -216,11 +209,9 @@ class XcodePermissionsTests(unittest.TestCase):
             ),
             None,
         )
-
         self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
-        self.assertIn("permission denied", result.reason)
+        self.assertIn("deny for bash", result.reason)
         self.assertFalse(called)
 
     def test_structured_agent_uses_permission_policy(self) -> None:
@@ -254,7 +245,7 @@ class XcodePermissionsTests(unittest.TestCase):
 
         result = agent.run("go")
 
-        self.assertIn("permission denied", result.messages[2]["content"][0]["content"])
+        self.assertIn("deny for echo", result.messages[2]["content"][0]["content"])
 
     def test_structured_agent_approval_callback_setter_updates_gate(self) -> None:
         from xcode.ai.events import ProviderEvent
@@ -277,7 +268,6 @@ class XcodePermissionsTests(unittest.TestCase):
                     "Danger.",
                     "text",
                     lambda value: value["input"],
-                    risk="high",
                     schema=INPUT_SCHEMA,
                 ),
             ),
@@ -398,7 +388,6 @@ class HITLPermissionModelTests(unittest.TestCase):
             "Fails.",
             "text",
             fail_handler,
-            risk="high",
         )
         result = run_tool_result(
             {"failing": tool},
@@ -415,16 +404,15 @@ class HITLPermissionModelTests(unittest.TestCase):
             "Bash.",
             "text",
             lambda v: v["command"],
-            risk_evaluator=lambda _: "ask",
         )
         result = run_tool_result(
             {"bash": tool},
             "bash",
             {"command": "git add ."},
+            permission_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
             approval_callback=lambda _t, _i: HITLResult("deny", "once"),
         )
         self.assertEqual(result.status, "denied")
-        self.assertIn("read-only checks", result.content)
 
     def test_hitl_result_metadata_in_denied_result(self) -> None:
         tool = ToolSpec(
@@ -432,17 +420,18 @@ class HITLPermissionModelTests(unittest.TestCase):
             "Bash.",
             "text",
             lambda v: v["command"],
-            risk_evaluator=lambda _: "ask",
         )
         result = run_tool_result(
             {"bash": tool},
             "bash",
             {"command": "git push"},
+            permission_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
             approval_callback=lambda _t, _i: HITLResult("deny", "session"),
         )
         meta = result.metadata or {}
         self.assertEqual(meta.get("user_decision"), "deny")
-        self.assertEqual(meta.get("approval_scope"), "session")
+        # Shell ask 固定为 once scope（section 10.6.2）
+        self.assertEqual(meta.get("approval_scope"), "once")
 
 
 if __name__ == "__main__":

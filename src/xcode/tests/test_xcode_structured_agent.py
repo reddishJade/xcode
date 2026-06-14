@@ -488,7 +488,6 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                     "Edit.",
                     "json",
                     edit_handler,
-                    risk="high",
                     schema=INPUT_SCHEMA,
                 ),
             ),
@@ -551,7 +550,6 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                     "Shell.",
                     "json",
                     bash,
-                    risk_evaluator=lambda _value: "allow",
                     schema={
                         "type": "object",
                         "properties": {"command": {"type": "string"}},

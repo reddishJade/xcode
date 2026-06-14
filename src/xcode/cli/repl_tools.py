@@ -109,6 +109,7 @@ def run_tool_command(command: str, app: object) -> str:
         permission_policy=getattr(agent, "permission_policy", None),
         restricted_dirs=getattr(agent, "restricted_dirs", ()),
         allowlist_mode=bool(getattr(agent, "allowlist_mode", False)),
+        hook_constraint_providers=getattr(agent, "hook_constraint_providers", ()),
     )
     return result.content
 

@@ -10,7 +10,6 @@ import shutil
 from xcode.experimental.mcp import (
     build_mcp_tools,
     compute_config_hash,
-    resolve_mcp_tool_risk,
 )
 
 
@@ -40,20 +39,6 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         }
         self.assertEqual(compute_config_hash(config1), compute_config_hash(config2))
         self.assertNotEqual(compute_config_hash(config1), compute_config_hash(config3))
-
-    def test_resolve_mcp_tool_risk_uses_explicit_override(self) -> None:
-        config = {
-            "overrides": {
-                "read_data": "low",
-                "process_message": {"risk": "medium"},
-                "invalid": "trusted",
-            }
-        }
-
-        self.assertEqual(resolve_mcp_tool_risk(config, "read_data"), "low")
-        self.assertEqual(resolve_mcp_tool_risk(config, "process_message"), "medium")
-        self.assertEqual(resolve_mcp_tool_risk(config, "invalid"), "high")
-        self.assertEqual(resolve_mcp_tool_risk(config, "spreadsheet"), "high")
 
     @patch("xcode.experimental.mcp_client.McpClient")
     def test_build_mcp_tools_cache_hit_and_miss(
@@ -96,8 +81,6 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0].name, "mcp__fetcher__read_data")
         self.assertEqual(tools[0].description, "Read remote data [mcp: fetcher]")
-        self.assertEqual(tools[0].risk, "low")
-        self.assertTrue(tools[0].read_only)
         self.assertEqual(tools[0].group, "mcp")
 
         # Verify client was instantiated, started, queried, and stopped
@@ -177,7 +160,6 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         self.assertEqual(tools[0].name, "mcp__db_editor__edit_record")
         tool = tools[0]
         self.assertEqual(tool.name, "mcp__db_editor__edit_record")
-        self.assertEqual(tool.risk, "high")
         self.assertFalse(tool.read_only)
 
         # Reset mocks to verify lazy loading on execution

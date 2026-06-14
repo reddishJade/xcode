@@ -93,7 +93,6 @@ class XcodeAuditTests(unittest.TestCase):
             self.assertEqual(record["tool"], "echo")
             self.assertEqual(record["redacted_input"], '{"input": "[REDACTED]"}')
             self.assertEqual(record["redacted_output"], "[REDACTED]")
-            self.assertIn("static_risk", record)
             self.assertIn("dynamic_decision", record)
             self.assertIn("final_status", record)
             self.assertIn("approved", record)
@@ -106,7 +105,6 @@ class XcodeAuditTests(unittest.TestCase):
                 AuditRecord(
                     session_id="s1",
                     tool="test_tool",
-                    static_risk="high",
                     dynamic_decision="allow",
                     policy_decision=None,
                     final_status="ok",
@@ -118,7 +116,6 @@ class XcodeAuditTests(unittest.TestCase):
 
             record = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(record["tool"], "test_tool")
-            self.assertEqual(record["static_risk"], "high")
             self.assertEqual(record["final_status"], "ok")
             self.assertTrue(record["approved"])
 
@@ -153,7 +150,6 @@ class XcodeAuditTests(unittest.TestCase):
                         "Danger.",
                         "text",
                         danger,
-                        risk="high",
                         schema=INPUT_SCHEMA,
                     ),
                 ),
@@ -166,9 +162,9 @@ class XcodeAuditTests(unittest.TestCase):
             agent.run("go")
 
             record = json.loads(path.read_text(encoding="utf-8").strip())
-            self.assertFalse(called)
+            self.assertTrue(called)
             self.assertEqual(record["tool"], "danger")
-            self.assertEqual(record["final_status"], "error")
+            self.assertEqual(record["final_status"], "ok")
             self.assertTrue(record["approved"])
 
     def test_run_tool_result_redacts_output(self) -> None:

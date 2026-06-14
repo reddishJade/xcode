@@ -108,7 +108,6 @@ def build_file_tools(
             handler=lambda data: _handler(
                 lambda d: _read_file(root, ops, context_state, d), data
             ),
-            risk="low",
             schema=READ_FILE_SCHEMA,
             read_only=True,
             concurrency_safe=True,
@@ -129,7 +128,6 @@ def build_file_tools(
             handler=lambda data: _handler(
                 lambda d: _write_file(root, ops, context_state, d), data
             ),
-            risk="high",
             schema=WRITE_FILE_SCHEMA,
             group="core",
             counts_as_progress=True,
@@ -155,7 +153,6 @@ def build_file_tools(
             handler=lambda data: _handler(
                 lambda d: _edit_file(root, ops, context_state, d), data
             ),
-            risk="high",
             schema=EDIT_FILE_SCHEMA,
             group="core",
             counts_as_progress=True,

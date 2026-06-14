@@ -8,27 +8,43 @@
 2. 执行模式 deny — Plan/Review 模式禁用
 3. 静态 ask — SecurityRuntimeConfig.ask_tools
 4. HITL 授权 — session/persistent 满足前面的 ask
-5. 静态 allow — SecurityRuntimeConfig.allow_tools
-6. risk_evaluator deny/ask/allow — 工具运行时风险决策
-7. 高风险审批 — tool.risk=="high" 且 approval_policy 要求审批
-8. 默认放行
+    5. 静态 allow — SecurityRuntimeConfig.allow_tools
+    6. 默认放行 (risk_evaluator / high_risk 已移除)
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, cast
 
 from ..session import JsonValue
+from .permission_model import (
+    Action,
+    ActionExtractor,
+    ApprovalCandidate,
+    ApprovalResult,
+    BoundaryContext,
+    GrantRecord,
+    GrantStore,
+    PolicyEvaluator,
+    PermissionResolver,
+    StructuredBoundaryPolicyEvaluator,
+    UnmappableLegacyGrant,
+    Verdict,
+    compute_shadow_approval_candidate,
+    create_grant_record,
+    evaluate_policy_constraints,
+)
+from .permission_model import GrantDecision as _GrantDecision
+from .permission_model import GrantScope as _GrantScope
 
 
 PermissionDecision = Literal["allow", "deny", "ask"]
 HITLDecision = Literal["allow", "deny"]
 HITLScope = Literal["once", "session", "permanent"]
-PermissionRiskEvaluator = Callable[[dict[str, Any]], PermissionDecision]
 type PermissionMetadata = dict[str, JsonValue]
 type PermissionRuleData = dict[str, JsonValue]
 
@@ -49,14 +65,7 @@ class PermissionRule:
     input_prefix: str | None = None
 
 
-class PermissionToolSpec(Protocol):
-    @property
-    def risk(self) -> str: ...
-
-    @property
-    def risk_evaluator(self) -> PermissionRiskEvaluator | None: ...
-
-
+PermissionToolSpec = Any
 PermissionApprovalCallback = Callable[[Any, dict[str, Any]], HITLResult]
 
 
@@ -241,6 +250,25 @@ def _approval_metadata(
     }
 
 
+def _attach_unmappable_legacy_grants(
+    metadata: PermissionMetadata | None,
+    unmappable_grants: tuple[UnmappableLegacyGrant, ...],
+) -> PermissionMetadata:
+    """当存在无法映射的 legacy 授权时将其附加到 metadata。"""
+    if not unmappable_grants:
+        return metadata or {}
+    result = dict(metadata) if metadata is not None else {}
+    result["unmappable_legacy_grants"] = [
+        {
+            "tool": g.tool,
+            "decision": g.decision,
+            "reason": g.reason,
+        }
+        for g in unmappable_grants
+    ]
+    return result
+
+
 # ── PermissionEngine — 统一决策引擎 ──
 
 DENIED_BY_USER_GUIDANCE = (
@@ -255,15 +283,16 @@ MATCHED_STATIC_ASK = "static_ask"
 MATCHED_SESSION_GRANT = "session_grant"
 MATCHED_PERSISTENT_GRANT = "persistent_grant"
 MATCHED_STATIC_ALLOW = "static_allow"
-MATCHED_RISK_EVALUATOR = "risk_evaluator"
-MATCHED_HIGH_RISK = "high_risk"
+
+MATCHED_LEGACY_ADAPTER = "legacy_adapter"
 MATCHED_DEFAULT = "default"
 
 SOURCE_CONFIG = "config"
 SOURCE_SESSION = "session"
 SOURCE_PERSISTENT = "persistent"
-SOURCE_RISK = "risk_evaluator"
+
 SOURCE_EXECUTION_MODE = "execution_mode"
+SOURCE_LEGACY = "legacy"
 SOURCE_DEFAULT = "default"
 
 
@@ -277,6 +306,11 @@ class PermissionEngineResult:
     matched_rule: str | None = None
     source: str | None = None
     metadata: PermissionMetadata | None = None
+    shadow_action: Action | None = None
+    shadow_verdict: Verdict | None = None
+    shadow_diff: str | None = None
+    shadow_approval_candidate: ApprovalCandidate | None = None
+    approval_result: ApprovalResult | None = None
 
 
 @dataclass(frozen=True)
@@ -288,8 +322,12 @@ class PermissionEngineConfig:
     persistent_store: PersistentPermissionStore | None = None
     restricted_dirs: tuple[str, ...] = ()
     allowlist_mode: bool = False
-    high_risk_requires_approval: bool = False
     defer_static_ask: bool = False
+    shadow_model_enabled: bool = False
+    project_root: Path | None = None
+    session_grant_store: GrantStore | None = None
+    permanent_grant_store: GrantStore | None = None
+    hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
 
 
 class PermissionEngine:
@@ -301,7 +339,7 @@ class PermissionEngine:
     2. 静态 ask
     3. HITL 授权（session/persistent 满足前面的 ask）
     4. 静态 allow
-    5. risk_evaluator（deny/ask/allow）
+    5. <removed: risk_evaluator / high_risk 见 section 8>
     6. 高风险审批
     7. 默认放行
     """
@@ -324,95 +362,230 @@ class PermissionEngine:
         if dir_result is not None:
             return dir_result
 
-        static = self._config.static_policy
-        static_decisions: list[PermissionDecision] = []
-        if static is not None:
-            sd = static.decide(tool_name, action_input)
-            if sd is not None:
-                static_decisions = [sd]
+        # 统一 resolver 路径：对所有工具生效
+        result = self._decide_resolver(
+            tool_name,
+            action_input,
+            execution_decision=execution_decision,
+            tool_spec=tool_spec,
+            tool_input=tool_input,
+            approval_callback=approval_callback,
+        )
 
-        # Tier 1a: 静态 deny
-        if "deny" in static_decisions:
+        # Shadow 模式：附加 shadow 信息到结果
+        if not self._config.shadow_model_enabled:
+            return result
+
+        shadow_action = ActionExtractor().extract(tool_name, tool_input or {})
+        shadow_verdict = self._shadow_verdict(
+            shadow_action,
+            action_input=action_input,
+            execution_decision=execution_decision,
+        )
+        shadow_approval_candidate = self._compute_shadow_approval(
+            shadow_action,
+            shadow_verdict,
+        )
+        return replace(
+            result,
+            shadow_action=shadow_action,
+            shadow_verdict=shadow_verdict,
+            shadow_diff=self._shadow_diff(result, shadow_verdict),
+            shadow_approval_candidate=shadow_approval_candidate,
+        )
+
+    def _decide_resolver(
+        self,
+        tool_name: str,
+        action_input: str,
+        *,
+        execution_decision: PermissionDecision | None = None,
+        tool_spec: PermissionToolSpec | None = None,
+        tool_input: dict[str, Any] | None = None,
+        approval_callback: PermissionApprovalCallback | None = None,
+    ) -> PermissionEngineResult:
+        """统一的 resolver 决策路径（替换 _decide_current / _decide_cutover / _decide_shell_cutover）。"""
+        action = ActionExtractor().extract(tool_name, tool_input or {})
+        verdict = self._shadow_verdict(
+            action,
+            action_input=action_input,
+            execution_decision=execution_decision,
+        )
+
+        if verdict.decision == "deny":
+            metadata: PermissionMetadata | None = None
+            winning = verdict.winning_constraint
+            if winning is not None and winning.non_bypassable:
+                metadata = {"non_bypassable": True}
             return PermissionEngineResult(
                 decision="deny",
                 blocked=True,
-                reason=f"permission denied for tool: {tool_name}",
-                matched_rule=MATCHED_STATIC_DENY,
-                source=SOURCE_CONFIG,
+                reason=verdict.reason,
+                matched_rule=verdict.source,
+                source=verdict.source,
+                metadata=metadata,
             )
 
-        # Tier 1b: 执行模式 deny
-        if execution_decision == "deny":
-            return PermissionEngineResult(
-                decision="deny",
-                blocked=True,
-                reason=f"tool not allowed in current execution mode: {tool_name}",
-                matched_rule=MATCHED_EXECUTION_MODE,
-                source=SOURCE_EXECUTION_MODE,
-            )
-
-        # Tier 2: 执行模式 ask（先检查 HITL）
-        if execution_decision == "ask":
-            hitl_result = self._check_hitl_grants(tool_name, action_input)
-            if hitl_result is not None:
-                return hitl_result
-            return self._ask_approval(
-                tool_name, approval_callback, tool_spec, tool_input
-            )
-
-        # Tier 3: 静态 ask（先检查 HITL）
-        if "ask" in static_decisions and not self._config.defer_static_ask:
-            hitl_result = self._check_hitl_grants(tool_name, action_input)
-            if hitl_result is not None:
-                return hitl_result
-            return self._ask_approval(
-                tool_name, approval_callback, tool_spec, tool_input
-            )
-
-        # Tier 4: 静态 allow
-        if "allow" in static_decisions:
+        if verdict.decision == "allow":
+            source = verdict.source
+            if source == "mode":
+                matched_rule = MATCHED_EXECUTION_MODE
+            else:
+                matched_rule = MATCHED_DEFAULT
             return PermissionEngineResult(
                 decision="allow",
                 blocked=False,
-                matched_rule=MATCHED_STATIC_ALLOW,
-                source=SOURCE_CONFIG,
+                matched_rule=matched_rule,
+                source=source,
             )
 
-        # Tier 5a: 允许列表模式 — 非白名单工具 ask
-        if self._config.allowlist_mode:
-            hitl_result = self._check_hitl_grants(tool_name, action_input)
-            if hitl_result is not None:
-                return hitl_result
-            return self._ask_approval(
-                tool_name, approval_callback, tool_spec, tool_input
-            )
-
-        # Tier 5b: risk_evaluator 动态决策
-        risk_result = self._evaluate_risk(
-            tool_name,
-            action_input,
-            tool_spec,
-            tool_input,
-            approval_callback,
+        # ask → 按工具类型执行授权查找 + 回调
+        return self._resolve_ask(
+            action,
+            verdict,
+            action_input=action_input,
+            approval_callback=approval_callback,
+            tool_spec=tool_spec,
+            tool_input=tool_input,
         )
-        if risk_result is not None:
-            return risk_result
 
-        # Tier 6: 高风险工具默认审批
-        if self._should_check_high_risk(tool_spec):
-            hitl_result = self._check_hitl_grants(tool_name, action_input)
-            if hitl_result is not None:
-                return hitl_result
-            return self._ask_approval(
-                tool_name, approval_callback, tool_spec, tool_input
+    def _resolve_ask(
+        self,
+        action: Action,
+        verdict: Verdict,
+        *,
+        action_input: str,
+        approval_callback: PermissionApprovalCallback | None = None,
+        tool_spec: PermissionToolSpec | None = None,
+        tool_input: dict[str, Any] | None = None,
+    ) -> PermissionEngineResult:
+        """统一的 ask 处理：grant 查找 + 回调。"""
+        # 结构化工具（read_file/write_file/edit_file/apply_patch）：完整 grant 查找 + 新格式写入
+        if action.tool in StructuredBoundaryPolicyEvaluator.STRUCTURED_TOOLS:
+            return self._execute_cutover_ask(
+                action,
+                verdict,
+                approval_callback=approval_callback,
+                tool_spec=tool_spec,
+                tool_input=tool_input,
             )
 
-        # Tier 7: 默认放行
+        # Shell 命令：once-only，不写 grant；但读取 legacy grants 回退
+        if action.tool in ("bash", "shell"):
+            hitl_result = self._check_hitl_grants(action.tool, action_input)
+            if hitl_result is not None:
+                return hitl_result
+            return self._shell_ask(
+                action.tool,
+                approval_callback=approval_callback,
+                tool_spec=tool_spec,
+                tool_input=tool_input,
+            )
+
+        # 其他工具：legacy grant 查找 + 回调回退
+        hitl_result = self._check_hitl_grants(action.tool, action_input)
+        if hitl_result is not None:
+            return hitl_result
+        return self._ask_approval(action.tool, approval_callback, tool_spec, tool_input)
+
+    def _shell_ask(
+        self,
+        tool_name: str,
+        *,
+        approval_callback: PermissionApprovalCallback | None = None,
+        tool_spec: PermissionToolSpec | None = None,
+        tool_input: dict[str, Any] | None = None,
+    ) -> PermissionEngineResult:
+        """Shell ask：once scope only，不查 grant，不写 grant。"""
+        if approval_callback is not None and tool_spec is not None:
+            hitl = approval_callback(tool_spec, tool_input or {})
+            if hitl.decision == "deny":
+                return PermissionEngineResult(
+                    decision="deny",
+                    blocked=True,
+                    reason=f"tool {tool_name} denied by user{DENIED_BY_USER_GUIDANCE}",
+                    matched_rule=MATCHED_STATIC_ASK,
+                    source=SOURCE_SESSION,
+                    metadata=_approval_metadata("deny", "once"),
+                )
+            return PermissionEngineResult(
+                decision="allow",
+                blocked=False,
+                matched_rule=MATCHED_STATIC_ASK,
+                source=SOURCE_SESSION,
+                metadata=_approval_metadata("allow", "once"),
+            )
+
         return PermissionEngineResult(
-            decision="allow",
-            blocked=False,
-            matched_rule=MATCHED_DEFAULT,
-            source=SOURCE_DEFAULT,
+            decision="ask",
+            blocked=True,
+            reason=f"tool requires approval: {tool_name}",
+            matched_rule=MATCHED_STATIC_ASK,
+        )
+
+    def _shadow_verdict(
+        self,
+        action: Action,
+        *,
+        action_input: str,
+        execution_decision: PermissionDecision | None,
+    ) -> Verdict:
+        """解析当前已接入的 shadow policy constraints。"""
+        constraints = evaluate_policy_constraints(
+            action,
+            execution_decision=execution_decision,
+            static_policy=self._config.static_policy,
+            allowlist_mode=self._config.allowlist_mode,
+            action_input=action_input,
+            boundary_context=self._boundary_context(),
+            safety_backstop_enabled=True,
+            hook_constraint_providers=self._config.hook_constraint_providers,
+        )
+        return PermissionResolver().resolve(constraints)
+
+    def _compute_shadow_approval(
+        self,
+        action: Action,
+        verdict: Verdict,
+    ) -> ApprovalCandidate | None:
+        """当 shadow verdict 为 ask 时，预测 engine-level grant/callback 结果。"""
+        if action.tool not in StructuredBoundaryPolicyEvaluator.STRUCTURED_TOOLS:
+            return None
+        if verdict.decision != "ask":
+            return None
+
+        legacy_sources: list[object] = []
+        if self._config.static_policy is not None:
+            legacy_sources.append(self._config.static_policy)
+        if self._config.session_policy is not None:
+            legacy_sources.append(self._config.session_policy)
+        if self._config.persistent_store is not None:
+            legacy_sources.append(self._config.persistent_store)
+
+        return compute_shadow_approval_candidate(
+            action,
+            session_grant_store=self._config.session_grant_store,
+            permanent_grant_store=self._config.permanent_grant_store,
+            legacy_sources=tuple(legacy_sources),
+            boundary_context=self._boundary_context(),
+        )
+
+    def _boundary_context(self) -> BoundaryContext | None:
+        if self._config.project_root is None:
+            return None
+        return BoundaryContext(self._config.project_root)
+
+    def _shadow_diff(
+        self,
+        current_result: PermissionEngineResult,
+        shadow_verdict: Verdict,
+    ) -> str | None:
+        if current_result.decision == shadow_verdict.decision:
+            return None
+        return (
+            "current decision "
+            f"{current_result.decision} differs from shadow decision "
+            f"{shadow_verdict.decision}"
         )
 
     # ── 内部检查方法 ──
@@ -469,48 +642,6 @@ class PermissionEngine:
                 )
         return None
 
-    def _evaluate_risk(
-        self,
-        tool_name: str,
-        action_input: str,
-        tool_spec: PermissionToolSpec | None,
-        tool_input: dict[str, Any] | None,
-        approval_callback: PermissionApprovalCallback | None,
-    ) -> PermissionEngineResult | None:
-        if tool_spec is None or not tool_spec.risk_evaluator:
-            return None
-        risk_decision = tool_spec.risk_evaluator(tool_input or {})
-        if risk_decision == "deny":
-            return PermissionEngineResult(
-                decision="deny",
-                blocked=True,
-                reason=f"permission denied for tool: {tool_name}",
-                matched_rule=MATCHED_RISK_EVALUATOR,
-                source=SOURCE_RISK,
-            )
-        if risk_decision == "ask":
-            hitl_result = self._check_hitl_grants(tool_name, action_input)
-            if hitl_result is not None:
-                return hitl_result
-            return self._ask_approval(
-                tool_name, approval_callback, tool_spec, tool_input
-            )
-        if risk_decision == "allow":
-            return PermissionEngineResult(
-                decision="allow",
-                blocked=False,
-                matched_rule=MATCHED_RISK_EVALUATOR,
-                source=SOURCE_RISK,
-            )
-        return None
-
-    def _should_check_high_risk(self, tool_spec: PermissionToolSpec | None) -> bool:
-        return (
-            self._config.high_risk_requires_approval
-            and tool_spec is not None
-            and tool_spec.risk == "high"
-        )
-
     def _ask_approval(
         self,
         tool_name: str,
@@ -543,35 +674,223 @@ class PermissionEngine:
             matched_rule=MATCHED_STATIC_ASK,
         )
 
+    # ── 统一 ask 处理（替换 cutover / shell_cutover 分支）──
 
-# ── 向后兼容包装 ──
+    def _execute_cutover_ask(
+        self,
+        action: Action,
+        verdict: Verdict,
+        *,
+        approval_callback: PermissionApprovalCallback | None = None,
+        tool_spec: PermissionToolSpec | None = None,
+        tool_input: dict[str, Any] | None = None,
+    ) -> PermissionEngineResult:
+        """执行 ask 后的授权查找、回调调用和授权写入。"""
+        is_multi_target = len(action.targets) > 1
+
+        # 收集 legacy 授权源（与 shadow 路径共用）
+        legacy_sources: list[object] = []
+        if self._config.static_policy is not None:
+            legacy_sources.append(self._config.static_policy)
+        if self._config.session_policy is not None:
+            legacy_sources.append(self._config.session_policy)
+        if self._config.persistent_store is not None:
+            legacy_sources.append(self._config.persistent_store)
+
+        candidate = compute_shadow_approval_candidate(
+            action,
+            session_grant_store=self._config.session_grant_store,
+            permanent_grant_store=self._config.permanent_grant_store,
+            legacy_sources=tuple(legacy_sources),
+            boundary_context=self._boundary_context(),
+        )
+
+        # 存在匹配授权 → 直接使用，不回调
+        if candidate is not None and candidate.would_resolve != "would_call_approval":
+            return self._cutover_grant_result(
+                action,
+                candidate,
+                unmappable_legacy_grants=candidate.unmappable_legacy_grants,
+            )
+
+        unmappable_grants = (
+            candidate.unmappable_legacy_grants if candidate is not None else ()
+        )
+
+        # 无匹配授权 → 调用 approval_callback
+        return self._cutover_callback_result(
+            action,
+            verdict,
+            approval_callback=approval_callback,
+            tool_spec=tool_spec,
+            tool_input=tool_input,
+            is_multi_target=is_multi_target,
+            unmappable_legacy_grants=unmappable_grants,
+        )
+
+    def _cutover_grant_result(
+        self,
+        action: Action,
+        candidate: ApprovalCandidate,
+        *,
+        unmappable_legacy_grants: tuple[UnmappableLegacyGrant, ...] = (),
+    ) -> PermissionEngineResult:
+        """授予命中时直接使用授权结果，不调用回调。"""
+        winning_grant: GrantRecord | None = None
+        is_legacy = False
+
+        for fp in candidate.fingerprints:
+            if fp.grant is not None and fp.grant.decision == "deny":
+                winning_grant = fp.grant
+                is_legacy = fp.source == "legacy_adapter"
+                break
+
+        if winning_grant is None:
+            for fp in candidate.fingerprints:
+                if fp.grant is not None and fp.grant.decision == "allow":
+                    winning_grant = fp.grant
+                    is_legacy = fp.source == "legacy_adapter"
+                    break
+
+        if winning_grant is None:
+            return PermissionEngineResult(
+                decision="ask",
+                blocked=True,
+                reason=f"tool requires approval: {action.tool}",
+                matched_rule=MATCHED_STATIC_ASK,
+            )
+
+        if is_legacy:
+            matched_rule = MATCHED_LEGACY_ADAPTER
+            source = SOURCE_LEGACY
+            metadata: PermissionMetadata | None = {"legacy_adapter": True}
+        elif winning_grant.scope == "session":
+            matched_rule = MATCHED_SESSION_GRANT
+            source = SOURCE_SESSION
+            metadata = _approval_metadata(winning_grant.decision, winning_grant.scope)
+        else:
+            matched_rule = MATCHED_PERSISTENT_GRANT
+            source = SOURCE_PERSISTENT
+            metadata = _approval_metadata(winning_grant.decision, winning_grant.scope)
+
+        metadata = _attach_unmappable_legacy_grants(metadata, unmappable_legacy_grants)
+
+        if winning_grant.decision == "deny":
+            return PermissionEngineResult(
+                decision="deny",
+                blocked=True,
+                reason=f"permission denied by grant: {winning_grant.grant_id}",
+                matched_rule=matched_rule,
+                source=source,
+                metadata=metadata,
+                approval_result=ApprovalResult(
+                    decision="deny",
+                    scope=winning_grant.scope,
+                    grant_id=winning_grant.grant_id,
+                ),
+            )
+
+        return PermissionEngineResult(
+            decision="allow",
+            blocked=False,
+            matched_rule=matched_rule,
+            source=source,
+            metadata=metadata,
+            approval_result=ApprovalResult(
+                decision="allow",
+                scope=winning_grant.scope,
+                grant_id=winning_grant.grant_id,
+            ),
+        )
+
+    def _cutover_callback_result(
+        self,
+        action: Action,
+        verdict: Verdict,
+        *,
+        approval_callback: PermissionApprovalCallback | None = None,
+        tool_spec: PermissionToolSpec | None = None,
+        tool_input: dict[str, Any] | None = None,
+        is_multi_target: bool = False,
+        unmappable_legacy_grants: tuple[UnmappableLegacyGrant, ...] = (),
+    ) -> PermissionEngineResult:
+        """无匹配授权时调用 approval_callback 并写入新授权存储。"""
+
+        if approval_callback is None or tool_spec is None:
+            return PermissionEngineResult(
+                decision="ask",
+                blocked=True,
+                reason=f"tool requires approval: {action.tool}",
+                matched_rule=MATCHED_STATIC_ASK,
+            )
+
+        hitl = approval_callback(tool_spec, tool_input or {})
+
+        if hitl.decision == "deny":
+            return PermissionEngineResult(
+                decision="deny",
+                blocked=True,
+                reason=(f"tool {action.tool} denied by user{DENIED_BY_USER_GUIDANCE}"),
+                matched_rule=MATCHED_STATIC_ASK,
+                source=SOURCE_SESSION,
+                metadata=_attach_unmappable_legacy_grants(
+                    _approval_metadata("deny", hitl.scope),
+                    unmappable_legacy_grants,
+                ),
+                approval_result=ApprovalResult(decision="deny", scope=hitl.scope),
+            )
+
+        # 允许 — 根据 scope 写入授权
+        effective_scope = hitl.scope
+        metadata: PermissionMetadata = _attach_unmappable_legacy_grants(
+            _approval_metadata("allow", hitl.scope),
+            unmappable_legacy_grants,
+        )
+
+        if is_multi_target and hitl.scope in ("session", "permanent"):
+            effective_scope = "once"
+            metadata = dict(metadata)
+            metadata["requested_scope"] = hitl.scope
+            metadata["effective_scope"] = "once"
+            metadata["multi_target_restriction"] = True
+
+        if hitl.scope == "session" and not is_multi_target:
+            self._write_grants(action, decision="allow", scope="session")
+        elif hitl.scope == "permanent" and not is_multi_target:
+            self._write_grants(action, decision="allow", scope="permanent")
+
+        return PermissionEngineResult(
+            decision="allow",
+            blocked=False,
+            matched_rule=MATCHED_STATIC_ASK,
+            source=SOURCE_SESSION,
+            metadata=metadata,
+            approval_result=ApprovalResult(
+                decision="allow",
+                scope=cast(Literal["once", "session", "permanent"], effective_scope),
+            ),
+        )
+
+    def _write_grants(
+        self,
+        action: Action,
+        *,
+        decision: _GrantDecision,
+        scope: _GrantScope,
+    ) -> None:
+        """为 action 的每个 target 写入结构化授权记录。"""
+        store: GrantStore | None = None
+        if scope == "session":
+            store = self._config.session_grant_store
+        elif scope == "permanent":
+            store = self._config.permanent_grant_store
+
+        if store is None:
+            return
+
+        for target in action.targets:
+            grant = create_grant_record(action, target, decision=decision, scope=scope)
+            store.add(grant)
+
 
 PermissionCheckResult = PermissionEngineResult
-
-
-def check_tool_permission(
-    tool_name: str,
-    action_input: str,
-    *,
-    permission_policy: PermissionPolicy | None = None,
-    approval_callback: PermissionApprovalCallback | None = None,
-    tool_spec: PermissionToolSpec | None = None,
-    tool_input: dict[str, Any] | None = None,
-    high_risk_requires_approval: bool = False,
-) -> PermissionEngineResult:
-    """统一权限决策入口（向后兼容包装）。
-
-    将参数转换为 PermissionEngine 配置并委托决策。
-    """
-    config = PermissionEngineConfig(
-        static_policy=permission_policy,
-        high_risk_requires_approval=high_risk_requires_approval,
-    )
-    engine = PermissionEngine(config)
-    return engine.decide(
-        tool_name,
-        action_input,
-        tool_spec=tool_spec,
-        tool_input=tool_input,
-        approval_callback=approval_callback,
-    )

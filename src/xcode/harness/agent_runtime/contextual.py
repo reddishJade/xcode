@@ -19,7 +19,6 @@ class RecentToolCall:
     tool: str
     input_brief: str
     status: str
-    risk: str
     approval_scope: str | None
     target_path: str | None
     timestamp: str
@@ -81,11 +80,10 @@ class ContextualRetrievalState:
         tool: str,
         input_brief: str,
         status: str,
-        risk: str,
         approval_scope: str | None = None,
         target_path: str | None = None,
     ) -> None:
-        """记录工具调用历史，包含状态、风险级别和审批范围。"""
+        """记录工具调用历史，包含状态和审批范围。"""
         clean_input = " ".join(input_brief.strip().split())
         if len(clean_input) > 160:
             clean_input = clean_input[:157] + "..."
@@ -94,7 +92,6 @@ class ContextualRetrievalState:
                 tool=tool,
                 input_brief=clean_input,
                 status=status,
-                risk=risk,
                 approval_scope=approval_scope,
                 target_path=target_path,
                 timestamp=datetime.now().isoformat(timespec="seconds"),
@@ -130,7 +127,7 @@ class ContextualRetrievalState:
                 )
                 target = f" target={call.target_path}" if call.target_path else ""
                 lines.append(
-                    f"- {call.tool} status={call.status} risk={call.risk}{approval}{target}: {call.input_brief}"
+                    f"- {call.tool} status={call.status}{approval}{target}: {call.input_brief}"
                 )
         lines.append("</contextual-retrieval>")
         rendered = "\n".join(lines)

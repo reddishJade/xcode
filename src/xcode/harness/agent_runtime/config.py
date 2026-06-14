@@ -24,6 +24,7 @@ from ...agent.messages import (
 from ...agent.protocols import AgentTool
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
+from ..observability.permission_model import PolicyEvaluator
 from ..skills import ApprovalCallback, ToolSpec
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
@@ -41,9 +42,9 @@ class GateConfig:
 
     approval_callback: ApprovalCallback | None = None
     permission_policy: PermissionPolicy | None = None
-    high_risk_requires_approval: bool = True
     restricted_dirs: tuple[str, ...] = ()
     allowlist_mode: bool = False
+    hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
     hook_manager: HookManager | None = None
     audit_logger: Callable[[AuditRecord], None] | None = None
     session_id: str = "local"

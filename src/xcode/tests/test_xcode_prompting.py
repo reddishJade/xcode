@@ -253,7 +253,6 @@ class XcodePromptingTests(unittest.TestCase):
                 tool="write_file",
                 input_brief="write_file: tmp/hello.py",
                 status="ok",
-                risk="high",
                 approval_scope="once",
                 target_path="tmp/hello.py",
             )

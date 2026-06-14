@@ -92,16 +92,17 @@ class StructuredAgent:
         self.permission_policy = resolved_permission_policy
         self.restricted_dirs = gate.restricted_dirs
         self.allowlist_mode = gate.allowlist_mode
+        self.hook_constraint_providers = gate.hook_constraint_providers
         self._gate = ToolGate(
             mode_state=self._mode,
             approval_callback=gate.approval_callback,
             permission_policy=resolved_permission_policy,
-            high_risk_requires_approval=gate.high_risk_requires_approval,
             hook_manager=gate.hook_manager,
             audit_logger=gate.audit_logger,
             session_id=gate.session_id,
             restricted_dirs=gate.restricted_dirs,
             allowlist_mode=gate.allowlist_mode,
+            hook_constraint_providers=gate.hook_constraint_providers,
         )
         self.audit_logger = gate.audit_logger
         self._history = HistoryManager()

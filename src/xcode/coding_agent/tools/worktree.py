@@ -141,7 +141,6 @@ def build_worktree_tools(runner: WorktreeTaskRunner) -> tuple[ToolSpec, ...]:
             "Create an isolated git worktree for a task.",
             'JSON: {"name":"feature-name"}',
             create_worktree_task,
-            risk="high",
             group="worktree",
             schema={
                 "type": "object",
@@ -155,7 +154,6 @@ def build_worktree_tools(runner: WorktreeTaskRunner) -> tuple[ToolSpec, ...]:
             "Remove an isolated git worktree task.",
             'JSON: {"id":"...", "force":false}',
             remove_worktree_task,
-            risk="high",
             group="worktree",
             schema={
                 "type": "object",

@@ -20,12 +20,10 @@ def emit_audit(
     if audit_logger is None:
         return
     tool_call = ctx.tool_call
-    spec = tool_map.get(tool_call.name)
     audit_logger(
         AuditRecord(
             session_id=session_id,
             tool=tool_call.name,
-            static_risk=(spec.risk if spec else None) or "low",
             dynamic_decision="allow",
             policy_decision=None,
             final_status="error" if ctx.is_error else "ok",

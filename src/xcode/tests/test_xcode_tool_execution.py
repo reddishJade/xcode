@@ -52,7 +52,6 @@ class AgentToolExecutionTests(unittest.TestCase):
                     "Write.",
                     "text",
                     lambda _data: "",
-                    risk="high",
                     schema=EMPTY_SCHEMA,
                 ),
                 ToolSpec(
@@ -126,7 +125,8 @@ class AgentToolExecutionTests(unittest.TestCase):
         self.assertEqual(block.call_id, "call-1")
         self.assertEqual(block.output[0]["stdout"], "ok")
 
-    def test_toolspec_adapter_blocks_high_risk_without_approval(self) -> None:
+    def test_toolspec_adapter_default_allow(self) -> None:
+        """无风险审批后，工具默认 allow。"""
         called = False
 
         def handler(_data: dict) -> str:
@@ -141,22 +141,17 @@ class AgentToolExecutionTests(unittest.TestCase):
                     "Write.",
                     "text",
                     handler,
-                    risk="high",
                     schema=EMPTY_SCHEMA,
                 ),
             )
         )
 
         result = asyncio.run(tool.execute("call-1", {}))
+        self.assertTrue(called)
+        self.assertFalse(result.is_error)
 
-        self.assertFalse(called)
-        self.assertTrue(result.is_error)
-        block = result.content[0]
-        self.assertIsInstance(block, TextContent)
-        assert isinstance(block, TextContent)
-        self.assertIn("requires approval", block.text)
-
-    def test_toolspec_adapter_runs_high_risk_after_approval(self) -> None:
+    def test_toolspec_adapter_uses_approval_callback(self) -> None:
+        """approval_callback 在静态 ask 时仍有效。"""
         (tool,) = adapt_tool_specs(
             (
                 ToolSpec(
@@ -164,7 +159,6 @@ class AgentToolExecutionTests(unittest.TestCase):
                     "Write.",
                     "text",
                     lambda _data: "changed",
-                    risk="high",
                     schema=EMPTY_SCHEMA,
                 ),
             ),
@@ -196,7 +190,6 @@ class AgentToolExecutionTests(unittest.TestCase):
                     "Write.",
                     "text",
                     lambda _data: "",
-                    risk="high",
                     schema=EMPTY_SCHEMA,
                 ),
                 ToolSpec(

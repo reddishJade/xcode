@@ -35,9 +35,9 @@ from .repl_settings import (
 )
 from .repl_tools import run_tool_command
 from xcode.harness.observability import (
+    FileGrantStore,
+    InMemoryGrantStore,
     PermissionPolicy,
-    PersistentPermissionStore,
-    SessionPermissionPolicy,
 )
 from xcode.harness.session import FORK_TYPES, SessionStore
 
@@ -51,8 +51,8 @@ def cmd_help(cmd: str, ctx: CommandContext) -> bool:
 def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
     """清空当前会话记录并开始新会话。"""
     ctx.store.clear()
-    if ctx.session_policy is not None:
-        ctx.session_policy.clear()
+    if ctx.session_grant_store is not None:
+        ctx.session_grant_store.clear()
     sync_agent_history(ctx.app, ctx.store)
     clear_terminal_display()
     print_startup_banner(ctx.app, ctx.project_root)
@@ -67,8 +67,8 @@ def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
         print(f"fork_type must be one of {sorted(FORK_TYPES)}, got {fork_type!r}")
         return False
     meta = ctx.store.fork_into(fork_type)
-    if ctx.session_policy is not None:
-        ctx.session_policy.clear()
+    if ctx.session_grant_store is not None:
+        ctx.session_grant_store.clear()
     sync_agent_history(ctx.app, ctx.store)
     label = f" ({fork_type})" if fork_type else ""
     print(f'Forked: "{meta.title}"{label}')
@@ -139,8 +139,8 @@ def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
     except ValueError as exc:
         print(str(exc))
         return False
-    if ctx.session_policy is not None:
-        ctx.session_policy.clear()
+    if ctx.session_grant_store is not None:
+        ctx.session_grant_store.clear()
     sync_agent_history(ctx.app, ctx.store)
     print(resumed_message(view))
     print_loaded_history(ctx.store)
@@ -243,8 +243,8 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
         meta = ctx.store.fork_clean_into(
             "isolate", title=f"Act Continuation of Plan {parent_id}"
         )
-        if ctx.session_policy is not None:
-            ctx.session_policy.clear()
+        if ctx.session_grant_store is not None:
+            ctx.session_grant_store.clear()
         sync_agent_history(ctx.app, ctx.store)
 
         ctx.state.approved_plan = str(last_assistant_content)
@@ -420,8 +420,8 @@ def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
     """列出、撤销或清除权限规则。"""
     handle_permissions(
         cmd,
-        ctx.session_policy,
-        ctx.persistent_store,
+        ctx.session_grant_store,
+        ctx.permanent_grant_store,
         static_policy=ctx.static_policy,
         restricted_dirs=ctx.restricted_dirs,
         allowlist_mode=ctx.allowlist_mode,
@@ -590,8 +590,8 @@ def handle_command(
     renderer: MarkdownRenderer,
     state: ReplState,
     prompt_session: PromptLike,
-    session_policy: SessionPermissionPolicy | None = None,
-    persistent_store: PersistentPermissionStore | None = None,
+    session_grant_store: InMemoryGrantStore | None = None,
+    permanent_grant_store: FileGrantStore | None = None,
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
     allowlist_mode: bool = False,
@@ -603,8 +603,8 @@ def handle_command(
         state=state,
         prompt_session=prompt_session,
         project_root=store.project_root,
-        session_policy=session_policy,
-        persistent_store=persistent_store,
+        session_grant_store=session_grant_store,
+        permanent_grant_store=permanent_grant_store,
         static_policy=static_policy,
         restricted_dirs=restricted_dirs,
         allowlist_mode=allowlist_mode,

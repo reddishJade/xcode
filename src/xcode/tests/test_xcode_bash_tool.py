@@ -7,7 +7,10 @@ import unittest
 from xcode.cli.repl_tools import parse_tool_input
 from xcode.coding_agent.tools import build_bash_tool
 from xcode.coding_agent.tools.bash import OutputAccumulator
-from xcode.coding_agent.tools._constants import evaluate_command_risk
+from xcode.harness.observability.permission_model import (
+    ActionExtractor,
+    SafetyBackstopPolicyEvaluator,
+)
 from xcode.tests.fixtures import run_tool
 
 
@@ -16,7 +19,9 @@ class XcodeBashToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tool = build_bash_tool(Path(tmp))
             output = run_tool(
-                {tool.name: tool}, "bash", {"command": "git status --short"}
+                {tool.name: tool},
+                "bash",
+                {"command": "git status --short"},
             )
             self.assertNotIn("requires approval", output)
 
@@ -106,45 +111,33 @@ class XcodeBashToolTests(unittest.TestCase):
         finally:
             Path(full_path).unlink(missing_ok=True)
 
-    def test_bash_static_risk_is_high(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tool = build_bash_tool(Path(tmp))
-            self.assertEqual(tool.risk, "high")
+    def test_safety_backstop_covers_old_classification(self) -> None:
+        """SafetyBackstopPolicy 覆盖旧的 evaluate_command_risk 分类。"""
+        evaluator = SafetyBackstopPolicyEvaluator()
 
-    def test_rm_allowed_paths_require_hitl_instead_of_hard_deny(self) -> None:
-        commands = [
-            "rm -rf ./tmp",
-            "rm -rf ~/xcode/tmp",
-            "rm -rf /home/dwei/xcode/tmp",
-            "rm -rf /tmp/xcode-demo",
-        ]
-        for command in commands:
-            with self.subTest(command=command):
-                self.assertEqual(evaluate_command_risk(command), "ask")
+        def _action(cmd: str):
+            return ActionExtractor().extract("bash", {"command": cmd})
 
-    def test_rm_root_path_is_denied(self) -> None:
-        self.assertEqual(evaluate_command_risk("rm -rf /"), "deny")
-        self.assertEqual(evaluate_command_risk("rm -fr /*"), "deny")
+        # rm 非根路径 → ask (Bucket B)
+        for cmd in ["rm -rf ./tmp", "rm -rf /tmp/xcode-demo"]:
+            constraints = evaluator.evaluate(_action(cmd))
+            self.assertEqual(constraints[0].decision, "ask", cmd)
 
-    def test_recursive_system_path_mutation_is_denied(self) -> None:
-        commands = [
-            "rm -rf /etc",
-            "chmod -R 777 /usr",
-            "chown -R root /var",
-        ]
-        for command in commands:
-            with self.subTest(command=command):
-                self.assertEqual(evaluate_command_risk(command), "deny")
+        # rm 根路径 → deny non-bypassable (Bucket A)
+        for cmd in ["rm -rf /", "rm -fr /*"]:
+            constraints = evaluator.evaluate(_action(cmd))
+            self.assertEqual(constraints[0].decision, "deny", cmd)
+            self.assertTrue(constraints[0].non_bypassable, cmd)
 
-    def test_recursive_permission_change_on_allowed_paths_requires_hitl(self) -> None:
-        commands = [
-            "chmod -R 777 ./tmp",
-            "chown -R root ~/xcode/tmp",
-            "chmod -R 777 /tmp/xcode-demo",
-        ]
-        for command in commands:
-            with self.subTest(command=command):
-                self.assertEqual(evaluate_command_risk(command), "ask")
+        # 系统路径递归修改 → deny non-bypassable (Bucket A)
+        for cmd in ["rm -rf /etc", "chmod -R 777 /usr", "chown -R root /var"]:
+            constraints = evaluator.evaluate(_action(cmd))
+            self.assertEqual(constraints[0].decision, "deny", cmd)
+
+        # 非系统路径递归权限变更 → ask (Bucket B)
+        for cmd in ["chmod -R 777 ./tmp", "chown -R root ~/xcode/tmp"]:
+            constraints = evaluator.evaluate(_action(cmd))
+            self.assertEqual(constraints[0].decision, "ask", cmd)
 
 
 if __name__ == "__main__":

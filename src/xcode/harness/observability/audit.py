@@ -21,7 +21,6 @@ SECRET_PATTERNS = (
 class AuditRecord:
     session_id: str
     tool: str
-    static_risk: str
     dynamic_decision: str
     policy_decision: str | None
     final_status: str
@@ -37,7 +36,6 @@ class AuditRecord:
         return {
             "session_id": self.session_id,
             "tool": self.tool,
-            "static_risk": self.static_risk,
             "dynamic_decision": self.dynamic_decision,
             "policy_decision": self.policy_decision,
             "final_status": self.final_status,

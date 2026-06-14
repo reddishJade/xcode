@@ -17,7 +17,6 @@ from xcode.harness.execution_env import ExecutionEnv
 
 from xcode.harness.config import (
     AgentConfig,
-    ApprovalPolicy,
     PROFILE_MAIN,
     PROFILE_SUBAGENT,
     SecurityRuntimeConfig,
@@ -42,6 +41,7 @@ from xcode.harness.observability import (
     PermissionPolicy,
     PermissionRule,
 )
+from xcode.harness.observability.permission_model import PolicyEvaluator
 from xcode.harness.observability.hooks import HookEvent
 from xcode.harness.skills import ToolInput, ToolSpec
 from xcode.harness.skill_loader import SkillLoader, build_skill_loader_tool
@@ -211,7 +211,6 @@ def build_search_tools_tool(
         description="Search available tools by keyword. Returns tool descriptions and schemas matching the query.",
         input_hint='JSON: {"query": "file"}',
         handler=search_tools,
-        risk="low",
         group="core",
         read_only=True,
         schema={
@@ -436,6 +435,7 @@ def build_agent(
     compactor: LayeredCompactor | None = None,
     fallback_provider: ModelProvider | None = None,
     plugins_hooks: dict[str, list[Callable]] | None = None,
+    hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
 ) -> StructuredAgent:
     hook_manager = None
     if contextual_state is not None:
@@ -465,11 +465,9 @@ def build_agent(
         config=config,
         gate=GateConfig(
             permission_policy=_permission_policy_from_security(sec),
-            high_risk_requires_approval=_high_risk_requires_approval(
-                sec.resolve_approval_policy()
-            ),
             restricted_dirs=sec.restricted_dirs,
             allowlist_mode=bool(sec.allow_tools),
+            hook_constraint_providers=hook_constraint_providers,
             hook_manager=hook_manager,
             audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
         ),
@@ -505,8 +503,3 @@ def _permission_policy_from_security(
     if not rules:
         return None
     return PermissionPolicy(tuple(rules))
-
-
-def _high_risk_requires_approval(approval_policy: ApprovalPolicy) -> bool:
-    """判断高风险工具是否默认需要人工审批。"""
-    return approval_policy in {"always", "high_risk_only"}

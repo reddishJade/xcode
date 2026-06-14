@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from xcode.coding_agent.tools.worktree import WorktreeTaskRunner, build_worktree_tools
+from xcode.coding_agent.tools.worktree import WorktreeTaskRunner
 
 
 class TestWorktreeTaskRunner(unittest.TestCase):
@@ -146,19 +146,6 @@ class TestWorktreeTaskRunner(unittest.TestCase):
         self.assertIn("remove", cmd)
         self.assertIn("--force", cmd)
         self.assertEqual(cwd, self.repo_root)
-
-
-class XcodeWorktreeToolTests(unittest.TestCase):
-    def test_worktree_tools_are_high_risk(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            tools = build_worktree_tools(
-                WorktreeTaskRunner(
-                    Path(temp_dir), command_runner=lambda _cmd, _cwd: "ok"
-                )
-            )
-
-        self.assertEqual(tools[0].risk, "high")
-        self.assertEqual(tools[1].risk, "high")
 
 
 if __name__ == "__main__":

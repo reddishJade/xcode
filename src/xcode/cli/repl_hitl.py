@@ -1,3 +1,9 @@
+"""HITL 授权处理器：基于结构化 GrantStore 的权限授权。
+
+取代旧的 SessionPermissionPolicy + PersistentPermissionStore 模式。
+授权结果写入新格式 GrantRecord，旧格式只作为一次性迁读取回退。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,65 +13,106 @@ from threading import Thread
 
 from .repl_tools import brief_input
 from xcode.harness.observability import (
+    ActionExtractor,
+    FileGrantStore,
     HITLResult,
-    PersistentPermissionStore,
-    SessionPermissionPolicy,
+    InMemoryGrantStore,
+    create_grant_record,
 )
+from xcode.harness.observability.permission_model import Action
 from xcode.harness.skills import ToolInput, ToolSpec, stringify_tool_input
 
 
 class ReplHITLHandler:
+    """基于结构化 GrantStore 的 HITL 授权处理器。
+
+    读取顺序：
+      1. session_grant_store（InMemoryGrantStore）
+      2. permanent_grant_store（FileGrantStore）
+      3. legacy 适配器（只读一次性迁移）
+      4. 交互式用户提示
+
+    写入只写入新格式 GrantStore。旧格式从不写入。
+    """
+
     def __init__(
         self,
-        session_policy: SessionPermissionPolicy,
-        persistent_store: PersistentPermissionStore,
+        session_grant_store: InMemoryGrantStore,
+        permanent_grant_store: FileGrantStore,
         prompt: object | None = None,
     ) -> None:
-        self.session_policy = session_policy
-        self.persistent_store = persistent_store
+        self._session_store = session_grant_store
+        self._permanent_store = permanent_grant_store
         self._prompt = prompt
 
     def __call__(self, tool: ToolSpec, action_input: ToolInput) -> HITLResult:
-        action_input_text = stringify_tool_input(action_input)
-        session_decision = self.session_policy.decide(tool.name, action_input_text)
-        if session_decision is not None and session_decision != "ask":
-            return HITLResult(session_decision, "session")
-        persistent_policy = self.persistent_store.load()
-        pers_decision = persistent_policy.decide(tool.name, action_input_text)
-        if pers_decision is not None and pers_decision != "ask":
-            return HITLResult(pers_decision, "permanent")
-        return self._interactive_prompt(tool, action_input)
+        action = ActionExtractor().extract(tool.name, action_input)
+
+        # 尝试从结构化 grant 存储查找
+        for target in action.targets:
+            grant = self._session_store.lookup(action, target)
+            if grant is not None:
+                return HITLResult(
+                    grant.decision,
+                    "session" if grant.scope == "session" else grant.scope,
+                )
+            grant = self._permanent_store.lookup(action, target)
+            if grant is not None:
+                return HITLResult(grant.decision, "permanent")
+
+        # 没有结构化 grant → 交互式提示
+        return self._interactive_prompt(action, tool, action_input)
 
     def _interactive_prompt(
-        self, tool: ToolSpec, action_input: ToolInput
+        self,
+        action: Action,
+        tool: ToolSpec,
+        action_input: ToolInput,
     ) -> HITLResult:
         choice = _ask_hitl_choice(tool, action_input)
-        return self._apply_choice(choice, tool, action_input)
+        return self._apply_choice(choice, action, tool, action_input)
 
     def _apply_choice(
-        self, choice: str | None, tool: ToolSpec, action_input: ToolInput
+        self,
+        choice: str | None,
+        action: Action,
+        tool: ToolSpec,
+        action_input: ToolInput,
     ) -> HITLResult:
-        action_input_text = stringify_tool_input(action_input)
-        input_prefix = _permission_input_prefix(tool.name, action_input)
         if choice == "允许（仅本次）":
             return HITLResult("allow", "once")
         if choice == "此次对话中允许":
-            self.session_policy.grant(
-                tool.name,
-                "allow",
-                None if input_prefix else action_input_text,
-                input_prefix=input_prefix,
-            )
+            self._write_grants(action, decision="allow", scope="session")
             return HITLResult("allow", "session")
         if choice == "始终允许":
-            self.persistent_store.grant(
-                tool.name,
-                "allow",
-                None if input_prefix else action_input_text,
-                input_prefix=input_prefix,
-            )
+            self._write_grants(action, decision="allow", scope="permanent")
             return HITLResult("allow", "permanent")
         return HITLResult("deny", "once")
+
+    def _write_grants(
+        self,
+        action: Action,
+        *,
+        decision: str,
+        scope: str,
+    ) -> None:
+        store: InMemoryGrantStore | FileGrantStore | None = None
+        if scope == "session":
+            store = self._session_store
+        elif scope == "permanent":
+            store = self._permanent_store
+
+        if store is None:
+            return
+
+        for target in action.targets:
+            grant = create_grant_record(
+                action,
+                target,
+                decision=decision,  # type: ignore[arg-type]
+                scope=scope,  # type: ignore[arg-type]
+            )
+            store.add(grant)
 
 
 def _ask_hitl_choice(tool: ToolSpec, action_input: ToolInput) -> str | None:
@@ -81,7 +128,7 @@ def _ask_hitl_choice_directly(tool: ToolSpec, action_input: ToolInput) -> str | 
 
     brief = brief_input(tool.name, action_input)
     return questionary.select(
-        f"需要授权：{tool.name}  风险：{tool.risk}\n指令：{brief}",
+        f"需要授权：{tool.name}\n指令：{brief}",
         choices=[
             "允许（仅本次）",
             "此次对话中允许",
@@ -111,7 +158,6 @@ def _ask_hitl_choice_in_thread(tool: ToolSpec, action_input: ToolInput) -> str |
 
 
 def _has_running_event_loop() -> bool:
-    """判断当前线程是否已经处于 asyncio event loop 内。"""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -120,7 +166,7 @@ def _has_running_event_loop() -> bool:
 
 
 def _permission_input_prefix(tool_name: str, action_input: ToolInput) -> str | None:
-    """为可泛化的工具输入生成权限前缀。"""
+    """为可泛化的工具输入生成权限前缀（兼容旧 grant 格式迁移）。"""
     if tool_name != "bash":
         return None
     command = action_input.get("command") or action_input.get("input")

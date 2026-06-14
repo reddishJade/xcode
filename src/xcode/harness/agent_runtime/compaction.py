@@ -556,7 +556,6 @@ def build_compact_tool(controller: CompactController) -> ToolSpec:
         description="Request manual context compaction before the next model call.",
         input_hint="empty",
         handler=lambda _input: controller.request(),
-        risk="low",
         schema={
             "type": "object",
             "properties": {},

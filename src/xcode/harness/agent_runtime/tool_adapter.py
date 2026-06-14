@@ -32,6 +32,7 @@ from ..observability import (
     PermissionPolicy,
     redact_text,
 )
+from ..observability.permission_model import PolicyEvaluator
 
 
 class ToolSpecAdapter:
@@ -47,9 +48,9 @@ class ToolSpecAdapter:
         *,
         approval_callback: ApprovalCallback | None = None,
         permission_policy: PermissionPolicy | None = None,
-        high_risk_requires_approval: bool = True,
         restricted_dirs: tuple[str, ...] = (),
         allowlist_mode: bool = False,
+        hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     ) -> None:
         self._spec = spec
         self._approval_callback = approval_callback
@@ -60,7 +61,7 @@ class ToolSpecAdapter:
                 persistent_store=None,
                 restricted_dirs=restricted_dirs,
                 allowlist_mode=allowlist_mode,
-                high_risk_requires_approval=high_risk_requires_approval,
+                hook_constraint_providers=hook_constraint_providers,
             )
         )
 
@@ -94,11 +95,7 @@ class ToolSpecAdapter:
     def execution_mode(self) -> ToolExecutionMode | None:
         if self._spec.execution_mode is not None:
             return self._spec.execution_mode
-        if (
-            self._spec.read_only
-            and self._spec.concurrency_safe
-            and self._spec.risk != "high"
-        ):
+        if self._spec.read_only and self._spec.concurrency_safe:
             return "parallel"
         return "sequential"
 
@@ -133,9 +130,9 @@ def adapt_tool_specs(
     *,
     approval_callback: ApprovalCallback | None = None,
     permission_policy: PermissionPolicy | None = None,
-    high_risk_requires_approval: bool = True,
     restricted_dirs: tuple[str, ...] = (),
     allowlist_mode: bool = False,
+    hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
 ) -> list[ToolSpecAdapter]:
     """批量将 ToolSpec 适配为 AgentTool。"""
     missing_schema = [spec.name for spec in specs if spec.schema is None]
@@ -147,9 +144,9 @@ def adapt_tool_specs(
             spec,
             approval_callback=approval_callback,
             permission_policy=permission_policy,
-            high_risk_requires_approval=high_risk_requires_approval,
             restricted_dirs=restricted_dirs,
             allowlist_mode=allowlist_mode,
+            hook_constraint_providers=hook_constraint_providers,
         )
         for spec in specs
     ]
@@ -234,7 +231,6 @@ def create_tool_spec_from_agent_tool(tool: AgentTool) -> ToolSpec:
             else "{}"
         ),
         handler=sync_handler,
-        risk="low",
         schema=dict(tool.parameters),
         execution_mode=tool.execution_mode,
         examples=list(tool.examples),

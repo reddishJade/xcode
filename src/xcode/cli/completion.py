@@ -104,7 +104,8 @@ class ReplCompleter(Completer):
             item_display_meta: str = item.display_meta
             meta: object = (
                 FormattedText([("fg:ansibrightblack", item_display_meta)])
-                if item_display_meta else None
+                if item_display_meta
+                else None
             )
             yield Completion(
                 item.text,

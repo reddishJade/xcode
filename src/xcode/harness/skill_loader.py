@@ -25,7 +25,6 @@ class SkillMetadata:
     path: Path
     use_when: tuple[str, ...] = ()
     dont_use_when: tuple[str, ...] = ()
-    risk: str = "low"
     tools: tuple[str, ...] = ()
 
 
@@ -117,9 +116,7 @@ class SkillLoader:
                 )
 
         for name, skill in sorted(self.skills.items()):
-            blocks.append(
-                f'<skill name="{name}" path="{skill.path.as_posix()}" risk="{skill.risk}">'
-            )
+            blocks.append(f'<skill name="{name}" path="{skill.path.as_posix()}">')
             blocks.append(f"description: {skill.description or '(none)'}")
             if skill.use_when:
                 blocks.append("use_when: " + "; ".join(skill.use_when))
@@ -177,7 +174,6 @@ class SkillLoader:
                     or meta.get("negative_triggers", "")
                     or meta.get("negative-triggers", "")
                 ),
-                risk=str(meta.get("risk") or "low"),
                 tools=_parse_list(meta.get("tools", "")),
             )
         return skills
@@ -193,7 +189,6 @@ def build_skill_loader_tool(loader: SkillLoader) -> ToolSpec:
         f"Available skills:\n{loader.get_descriptions()}",
         input_hint='JSON: {"name": "skill-name"}',
         handler=load_skill,
-        risk="low",
         group="skills",
         read_only=True,
         concurrency_safe=True,

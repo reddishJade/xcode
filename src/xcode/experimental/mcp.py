@@ -29,24 +29,6 @@ def compute_config_hash(server_config: dict[str, Any]) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def resolve_mcp_tool_risk(server_config: dict[str, Any], tool_name: str) -> str:
-    """从 server overrides 读取工具风险；未审核工具默认 high。"""
-    overrides = server_config.get("overrides", {})
-    risk = None
-    if isinstance(overrides, dict) and tool_name in overrides:
-        override = overrides[tool_name]
-        risk = (
-            override.get("risk")
-            if isinstance(override, dict)
-            else override
-            if isinstance(override, str)
-            else None
-        )
-    if risk in {"low", "medium", "high"}:
-        return risk
-    return "high"
-
-
 # ── 缓存工具 ──
 
 
@@ -86,9 +68,6 @@ def build_fetch_tools_tool(
             tools_list = client.list_tools()
             client.stop()
 
-            for tool in tools_list:
-                tool["risk"] = resolve_mcp_tool_risk(server_config, tool["name"])
-
             cache_path = project_root / ".local" / "mcp_cache.json"
             cache_data = _load_cache(cache_path)
             cache_data.setdefault("servers", {})[server_name] = {
@@ -105,7 +84,6 @@ def build_fetch_tools_tool(
         description=f"Bootstrap and fetch tool list for deferred server '{server_name}' to populate the cache.",
         input_hint="{}",
         handler=handler,
-        risk="low",
         schema={
             "type": "object",
             "properties": {},
@@ -183,7 +161,6 @@ def build_mcp_tool_search(project_root: Path, deferred_servers: set[str]) -> Too
         description="Search and retrieve full schema, descriptions, and parameters for deferred MCP tools.",
         input_hint='{"query": "keyword_or_all"}',
         handler=handler,
-        risk="low",
         schema={
             "type": "object",
             "properties": {
@@ -369,8 +346,7 @@ def _query_server_tools(
         client.start()
         tools_list = client.list_tools()
         client.stop()
-        for tool in tools_list:
-            tool["risk"] = resolve_mcp_tool_risk(server_config, tool["name"])
+
         cache_data.setdefault("servers", {})[server_name] = {
             "config_hash": config_hash,
             "tools": tools_list,
@@ -392,7 +368,6 @@ def _build_registered_mcp_tool(
     cache_path: Path,
 ) -> ToolSpec:
     name = tool["name"]
-    risk = resolve_mcp_tool_risk(server_config, name)
     tool_schema, tool_description = _mcp_tool_schema_and_description(
         server_name, tool, is_deferred
     )
@@ -401,9 +376,7 @@ def _build_registered_mcp_tool(
         description=tool_description,
         input_hint=_mcp_tool_input_hint(tool.get("inputSchema", {})),
         handler=_make_handler(lazy_ref, name, is_deferred, server_name, cache_path),
-        risk=risk,
         schema=tool_schema,
-        read_only=(risk == "low"),
         group="mcp",
     )
 

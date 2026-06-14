@@ -52,8 +52,8 @@ from xcode.harness.agent_runtime.events import (
 )
 from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.observability import (
-    PersistentPermissionStore,
-    SessionPermissionPolicy,
+    FileGrantStore,
+    InMemoryGrantStore,
 )
 from xcode.harness.session import SessionStore
 from xcode.agent.messages import UserMessage
@@ -104,9 +104,9 @@ def run_repl(
         lambda: current_model_options(app),
     )
     state = ReplState()
-    session_policy = SessionPermissionPolicy()
-    persistent_store = PersistentPermissionStore(root / ".local" / "hitl_policy.json")
-    hitl_handler = ReplHITLHandler(session_policy, persistent_store, session)
+    session_grant_store = InMemoryGrantStore()
+    permanent_grant_store = FileGrantStore.for_project_root(root)
+    hitl_handler = ReplHITLHandler(session_grant_store, permanent_grant_store, session)
     agent = getattr(app, "agent", None)
     if agent is not None:
         agent.approval_callback = hitl_handler
@@ -150,8 +150,8 @@ def run_repl(
                 markdown_renderer,
                 state,
                 session,
-                session_policy,
-                persistent_store,
+                session_grant_store,
+                permanent_grant_store,
                 static_policy=getattr(agent, "permission_policy", None),
                 restricted_dirs=getattr(agent, "restricted_dirs", ()),
                 allowlist_mode=bool(getattr(agent, "allowlist_mode", False)),

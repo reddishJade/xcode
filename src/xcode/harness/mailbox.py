@@ -208,7 +208,6 @@ def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
             description="Send an append-only message event to an agent mailbox.",
             input_hint='{"sender_id":"agent_a","recipient_id":"agent_b","type":"query","payload":{}}',
             handler=send_mailbox_message,
-            risk="low",
             schema={
                 "type": "object",
                 "properties": {
@@ -227,7 +226,6 @@ def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
             description="Read unread message events for a recipient mailbox.",
             input_hint='{"recipient_id":"agent_b"}',
             handler=read_mailbox_messages,
-            risk="low",
             schema={
                 "type": "object",
                 "properties": {"recipient_id": {"type": "string"}},
@@ -242,7 +240,6 @@ def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
             description="Append an ACK event for a mailbox message.",
             input_hint='{"recipient_id":"agent_b","message_id":"..."}',
             handler=acknowledge_mailbox_message,
-            risk="low",
             schema={
                 "type": "object",
                 "properties": {

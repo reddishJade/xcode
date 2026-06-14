@@ -8,7 +8,6 @@ from typing import Any
 from xcode.agent.types import ShellCallOutputContent
 from xcode.harness.execution_env import ExecutionEnv, ExecutionResult
 from xcode.harness.execution_env import SubprocessExecutionEnv
-from xcode.harness.observability.permissions import PermissionDecision
 from xcode.harness.skills import (
     AGENT_CONTENT_BLOCKS_METADATA_KEY,
     ToolInput,
@@ -19,7 +18,6 @@ from xcode.harness.skills import (
 from ._constants import (
     DEFAULT_TIMEOUT_SECONDS,
     MAX_TIMEOUT_SECONDS,
-    evaluate_command_risk,
 )
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 
@@ -69,8 +67,6 @@ def build_native_shell_tool(
         description="Run OpenAI Responses shell commands in the project root.",
         input_hint='JSON: {"commands": ["python --version"], "timeout_ms": 120000}',
         handler=shell,
-        risk="high",
-        risk_evaluator=_native_shell_risk_evaluator,
         group="core",
         schema={
             "type": "object",
@@ -220,12 +216,3 @@ def _builtin_shell_definition(
     if skills:
         environment["skills"] = [dict(skill) for skill in skills]
     return {"type": "shell", "environment": environment}
-
-
-def _native_shell_risk_evaluator(tool_input: dict[str, Any]) -> PermissionDecision:
-    raw_commands = tool_input.get("commands")
-    if isinstance(raw_commands, list):
-        command = "\n".join(str(item) for item in raw_commands)
-    else:
-        command = str(raw_commands or tool_input.get("command") or "")
-    return evaluate_command_risk(command)

@@ -219,7 +219,6 @@ def _registry_prompt_key(registry: tuple[ToolSpec, ...]) -> PromptCacheKey:
             tool.name,
             tool.description,
             tool.input_hint,
-            tool.risk,
             tool.prompt_snippet,
             tool.prompt_guidelines,
         )

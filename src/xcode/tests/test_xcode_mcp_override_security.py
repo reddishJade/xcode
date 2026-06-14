@@ -66,20 +66,9 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
             orig_hash = mcp.compute_config_hash
             try:
                 mcp.compute_config_hash = lambda server_config: "dummy_hash"
-                tools = build_mcp_tools(project_root)
+                build_mcp_tools(project_root)
             finally:
                 mcp.compute_config_hash = orig_hash
-
-            # Filter returned specs
-            high_tool = next(
-                t for t in tools if t.name == "mcp__test-server__high_risk_tool"
-            )
-            low_tool = next(
-                t for t in tools if t.name == "mcp__test-server__default_low_tool"
-            )
-
-            self.assertEqual(high_tool.risk, "low")
-            self.assertEqual(low_tool.risk, "high")
 
     def test_permission_engine_sandbox_equivalent(self) -> None:
         engine = PermissionEngine(
@@ -139,7 +128,6 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
                 "        description='Calculator',\n"
                 "        input_hint='{}',\n"
                 "        handler=lambda _data: '42',\n"
-                "        risk='low'\n"
                 "    )\n"
                 "]\n"
                 "exposed_hooks = {\n"

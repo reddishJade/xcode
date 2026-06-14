@@ -30,6 +30,7 @@ from ..observability import (
     PermissionDecision,
     PermissionPolicy,
 )
+from ..observability.permission_model import PolicyEvaluator
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 
@@ -39,10 +40,10 @@ class ToolGateSnapshot:
 
     approval_callback: ApprovalCallback | None
     permission_policy: PermissionPolicy | None
-    high_risk_requires_approval: bool
     tool_map: dict[str, ToolSpec]
     restricted_dirs: tuple[str, ...] = ()
     allowlist_mode: bool = False
+    hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
 
 
 class ToolGate:
@@ -62,19 +63,19 @@ class ToolGate:
         mode_state: ExecutionModeState,
         approval_callback: ApprovalCallback | None,
         permission_policy: PermissionPolicy | None,
-        high_risk_requires_approval: bool,
         hook_manager: HookManager | None,
         audit_logger: Callable[[AuditRecord], None] | None,
         session_id: str,
         restricted_dirs: tuple[str, ...] = (),
         allowlist_mode: bool = False,
+        hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     ) -> None:
         self._mode = mode_state
         self._approval_callback = approval_callback
         self._permission_policy = permission_policy
-        self._high_risk_requires_approval = high_risk_requires_approval
         self._restricted_dirs = restricted_dirs
         self._allowlist_mode = allowlist_mode
+        self._hook_constraint_providers = hook_constraint_providers
         self._hook_manager = hook_manager
         self._audit_logger = audit_logger
         self._session_id = session_id
@@ -84,10 +85,10 @@ class ToolGate:
         return ToolGateSnapshot(
             approval_callback=self._approval_callback,
             permission_policy=self._permission_policy,
-            high_risk_requires_approval=self._high_risk_requires_approval,
             tool_map={},
             restricted_dirs=self._restricted_dirs,
             allowlist_mode=self._allowlist_mode,
+            hook_constraint_providers=self._hook_constraint_providers,
         )
 
     def snapshot_for(self, registry: tuple[ToolSpec, ...]) -> ToolGateSnapshot:
@@ -95,10 +96,10 @@ class ToolGate:
         return ToolGateSnapshot(
             approval_callback=self._approval_callback,
             permission_policy=self._permission_policy,
-            high_risk_requires_approval=self._high_risk_requires_approval,
             tool_map={tool.name: tool for tool in registry},
             restricted_dirs=self._restricted_dirs,
             allowlist_mode=self._allowlist_mode,
+            hook_constraint_providers=self._hook_constraint_providers,
         )
 
     def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
@@ -108,9 +109,9 @@ class ToolGate:
                 registry,
                 approval_callback=self._approval_callback,
                 permission_policy=self._permission_policy,
-                high_risk_requires_approval=self._high_risk_requires_approval,
                 restricted_dirs=self._restricted_dirs,
                 allowlist_mode=self._allowlist_mode,
+                hook_constraint_providers=self._hook_constraint_providers,
             )
         )
 
@@ -228,7 +229,6 @@ class ToolGate:
             PermissionEngineConfig(
                 static_policy=snapshot.permission_policy,
                 restricted_dirs=snapshot.restricted_dirs,
-                high_risk_requires_approval=False,
                 defer_static_ask=True,
             )
         )

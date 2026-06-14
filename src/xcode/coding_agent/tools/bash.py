@@ -13,13 +13,11 @@ from xcode.harness.execution_env import (
     SubprocessExecutionEnv,
 )
 from xcode.harness.skills import ToolInput, ToolSpec
-from xcode.harness.observability.permissions import PermissionDecision
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 from ._constants import (
     DEFAULT_TIMEOUT_SECONDS,
     MAX_TIMEOUT_SECONDS,
-    evaluate_command_risk,
 )
 
 logger = logging.getLogger("xcode.coding_agent.tools.bash")
@@ -40,10 +38,6 @@ class BashExecutionPlan:
     command: str
     cwd: Path
     timeout: int
-
-
-def _bash_risk_evaluator(tool_input: dict[str, Any]) -> PermissionDecision:
-    return evaluate_command_risk(str(tool_input.get("command", "")))
 
 
 def build_bash_tool(
@@ -83,8 +77,6 @@ def build_bash_tool(
         description="Run a shell command in the project root.",
         input_hint='JSON: {"command": "git status --short", "timeout": 30}',
         handler=bash,
-        risk="high",
-        risk_evaluator=_bash_risk_evaluator,
         prompt_snippet="Run a shell command in the project root",
         prompt_guidelines=(
             "Bash output may be truncated; use the reported full output path when present.",

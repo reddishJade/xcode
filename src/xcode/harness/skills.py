@@ -19,9 +19,9 @@ from .observability import (
     PermissionEngine,
     PermissionEngineConfig,
     PermissionPolicy,
-    PermissionRiskEvaluator,
     redact_text,
 )
+from .observability.permission_model import PolicyEvaluator
 from .session import JsonValue
 
 ToolInput = dict[str, Any]
@@ -59,11 +59,9 @@ class ToolSpec:
     description: str
     input_hint: str
     handler: ActionHandler
-    risk: str = "low"
     schema: dict[str, Any] | None = None
     read_only: bool = False
     concurrency_safe: bool = False
-    risk_evaluator: PermissionRiskEvaluator | None = None
     group: str = "core"
     execution_mode: ToolExecutionMode | None = None
     counts_as_progress: bool | None = None
@@ -79,9 +77,6 @@ _STATUS_OK: ToolExecutionStatus = "ok"
 _STATUS_DENIED: ToolExecutionStatus = "denied"
 _STATUS_ERROR: ToolExecutionStatus = "error"
 _STATUS_APPROVAL_REQUIRED: ToolExecutionStatus = "approval_required"
-
-_RISK_LOW = "low"
-_RISK_HIGH = "high"
 
 
 @dataclass(frozen=True)
@@ -134,12 +129,9 @@ def run_tool_result(
     permission_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
     allowlist_mode: bool = False,
+    hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
 ) -> ToolExecutionResult:
-    """执行一个工具，并在高风险工具前触发 HITL。
-
-    审批逻辑靠近 dispatch，而不是散落在各个工具内部。这样新增高风险工具
-    时，只需设置 `risk="high"`，Harness 行为保持一致。
-    """
+    """执行一个工具，权限决策由 PermissionEngine 统一处理。"""
 
     tool = registry.get(action)
     if tool is None:
@@ -153,7 +145,7 @@ def run_tool_result(
             static_policy=permission_policy,
             restricted_dirs=restricted_dirs,
             allowlist_mode=allowlist_mode,
-            high_risk_requires_approval=True,
+            hook_constraint_providers=hook_constraint_providers,
         )
     )
     perm_result = engine.decide(
