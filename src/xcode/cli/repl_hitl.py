@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from queue import Queue
-import shlex
 from threading import Thread
 
 from .repl_tools import brief_input
@@ -20,7 +19,7 @@ from xcode.harness.observability import (
     create_grant_record,
 )
 from xcode.harness.observability.permission_model import Action
-from xcode.harness.skills import ToolInput, ToolSpec, stringify_tool_input
+from xcode.harness.skills import ToolInput, ToolSpec
 
 
 class ReplHITLHandler:
@@ -29,8 +28,7 @@ class ReplHITLHandler:
     读取顺序：
       1. session_grant_store（InMemoryGrantStore）
       2. permanent_grant_store（FileGrantStore）
-      3. legacy 适配器（只读一次性迁移）
-      4. 交互式用户提示
+      3. 交互式用户提示
 
     写入只写入新格式 GrantStore。旧格式从不写入。
     """
@@ -163,33 +161,3 @@ def _has_running_event_loop() -> bool:
     except RuntimeError:
         return False
     return True
-
-
-def _permission_input_prefix(tool_name: str, action_input: ToolInput) -> str | None:
-    """为可泛化的工具输入生成权限前缀（兼容旧 grant 格式迁移）。"""
-    if tool_name != "bash":
-        return None
-    command = action_input.get("command") or action_input.get("input")
-    if not isinstance(command, str):
-        return None
-    command_prefix = _bash_command_family(command)
-    if command_prefix is None:
-        return None
-    return stringify_tool_input({"command": command_prefix})[:-2]
-
-
-def _bash_command_family(command: str) -> str | None:
-    """把常见验证命令归一到可复用的命令族。"""
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return None
-    if tokens[:3] == ["uv", "run", "pyright"]:
-        return "uv run pyright"
-    if tokens[:4] == ["uv", "run", "ruff", "check"]:
-        return "uv run ruff check"
-    if tokens[:4] == ["uv", "run", "ruff", "format"]:
-        return "uv run ruff format"
-    if tokens[:5] == ["uv", "run", "python", "-m", "unittest"]:
-        return "uv run python -m unittest"
-    return None

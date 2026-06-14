@@ -556,10 +556,8 @@ def compute_shadow_approval_candidate(
     """构造 shadow approval candidate：predict engine-level grant/callback 结果。
 
     只读/observational，不调用 approval_callback，不写入任何 grant store。
-    仅对 StructuredBoundaryPolicyEvaluator.STRUCTURED_TOOLS 生效。
+    对命令类型的 target 同样适用。
     """
-    if action.tool not in StructuredBoundaryPolicyEvaluator.STRUCTURED_TOOLS:
-        return None
     if not action.targets:
         return None
 

@@ -440,6 +440,13 @@ class PermissionEngine:
             )
 
         # ask → 按工具类型执行授权查找 + 回调
+        if self._config.defer_static_ask:
+            return PermissionEngineResult(
+                decision="ask",
+                blocked=True,
+                reason="tool requires approval",
+                matched_rule=MATCHED_STATIC_ASK,
+            )
         return self._resolve_ask(
             action,
             verdict,
@@ -460,67 +467,13 @@ class PermissionEngine:
         tool_input: dict[str, Any] | None = None,
     ) -> PermissionEngineResult:
         """统一的 ask 处理：grant 查找 + 回调。"""
-        # 结构化工具（read_file/write_file/edit_file/apply_patch）：完整 grant 查找 + 新格式写入
-        if action.tool in StructuredBoundaryPolicyEvaluator.STRUCTURED_TOOLS:
-            return self._execute_cutover_ask(
-                action,
-                verdict,
-                approval_callback=approval_callback,
-                tool_spec=tool_spec,
-                tool_input=tool_input,
-            )
-
-        # Shell 命令：once-only，不写 grant；但读取 legacy grants 回退
-        if action.tool in ("bash", "shell"):
-            hitl_result = self._check_hitl_grants(action.tool, action_input)
-            if hitl_result is not None:
-                return hitl_result
-            return self._shell_ask(
-                action.tool,
-                approval_callback=approval_callback,
-                tool_spec=tool_spec,
-                tool_input=tool_input,
-            )
-
-        # 其他工具：legacy grant 查找 + 回调回退
-        hitl_result = self._check_hitl_grants(action.tool, action_input)
-        if hitl_result is not None:
-            return hitl_result
-        return self._ask_approval(action.tool, approval_callback, tool_spec, tool_input)
-
-    def _shell_ask(
-        self,
-        tool_name: str,
-        *,
-        approval_callback: PermissionApprovalCallback | None = None,
-        tool_spec: PermissionToolSpec | None = None,
-        tool_input: dict[str, Any] | None = None,
-    ) -> PermissionEngineResult:
-        """Shell ask：once scope only，不查 grant，不写 grant。"""
-        if approval_callback is not None and tool_spec is not None:
-            hitl = approval_callback(tool_spec, tool_input or {})
-            if hitl.decision == "deny":
-                return PermissionEngineResult(
-                    decision="deny",
-                    blocked=True,
-                    reason=f"tool {tool_name} denied by user{DENIED_BY_USER_GUIDANCE}",
-                    matched_rule=MATCHED_STATIC_ASK,
-                    source=SOURCE_SESSION,
-                    metadata=_approval_metadata("deny", "once"),
-                )
-            return PermissionEngineResult(
-                decision="allow",
-                blocked=False,
-                matched_rule=MATCHED_STATIC_ASK,
-                source=SOURCE_SESSION,
-                metadata=_approval_metadata("allow", "once"),
-            )
-
-        return PermissionEngineResult(
-            decision="ask",
-            blocked=True,
-            reason=f"tool requires approval: {tool_name}",
-            matched_rule=MATCHED_STATIC_ASK,
+        # 统一路径：所有工具通过 _execute_cutover_ask 处理 grant 查找、回调、写入
+        return self._execute_cutover_ask(
+            action,
+            verdict,
+            approval_callback=approval_callback,
+            tool_spec=tool_spec,
+            tool_input=tool_input,
         )
 
     def _shadow_verdict(
@@ -607,74 +560,7 @@ class PermissionEngine:
                 )
         return None
 
-    def _check_hitl_grants(
-        self,
-        tool_name: str,
-        action_input: str,
-    ) -> PermissionEngineResult | None:
-        session = self._config.session_policy
-        if session is not None:
-            sd = session.decide(tool_name, action_input)
-            if sd is not None and sd != "ask":
-                return PermissionEngineResult(
-                    decision=sd,
-                    blocked=sd == "deny",
-                    matched_rule=MATCHED_SESSION_GRANT,
-                    source=SOURCE_SESSION,
-                    metadata=_approval_metadata(sd, "session")
-                    if sd != "deny"
-                    else None,
-                )
-
-        persistent = self._config.persistent_store
-        if persistent is not None:
-            pp = persistent.load()
-            pd = pp.decide(tool_name, action_input)
-            if pd is not None and pd != "ask":
-                return PermissionEngineResult(
-                    decision=pd,
-                    blocked=pd == "deny",
-                    matched_rule=MATCHED_PERSISTENT_GRANT,
-                    source=SOURCE_PERSISTENT,
-                    metadata=_approval_metadata(pd, "permanent")
-                    if pd != "deny"
-                    else None,
-                )
-        return None
-
-    def _ask_approval(
-        self,
-        tool_name: str,
-        approval_callback: PermissionApprovalCallback | None,
-        tool_spec: PermissionToolSpec | None,
-        tool_input: dict[str, Any] | None,
-    ) -> PermissionEngineResult:
-        if approval_callback is not None and tool_spec is not None:
-            hitl = approval_callback(tool_spec, tool_input or {})
-            if hitl.decision == "deny":
-                return PermissionEngineResult(
-                    decision="deny",
-                    blocked=True,
-                    reason=f"tool {tool_name} denied by user{DENIED_BY_USER_GUIDANCE}",
-                    matched_rule=MATCHED_STATIC_ASK,
-                    source=SOURCE_SESSION,
-                    metadata=_approval_metadata("deny", hitl.scope),
-                )
-            return PermissionEngineResult(
-                decision="allow",
-                blocked=False,
-                matched_rule=MATCHED_STATIC_ASK,
-                source=SOURCE_SESSION,
-                metadata=_approval_metadata("allow", hitl.scope),
-            )
-        return PermissionEngineResult(
-            decision="ask",
-            blocked=True,
-            reason=f"tool requires approval: {tool_name}",
-            matched_rule=MATCHED_STATIC_ASK,
-        )
-
-    # ── 统一 ask 处理（替换 cutover / shell_cutover 分支）──
+    # ── 统一 ask 处理 ──
 
     def _execute_cutover_ask(
         self,

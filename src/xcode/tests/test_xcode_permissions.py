@@ -133,15 +133,30 @@ class XcodePermissionsTests(unittest.TestCase):
         self.assertEqual(result.matched_rule, "restricted_dirs")
 
     def test_permission_engine_session_grant_satisfies_ask(self) -> None:
-        session = SessionPermissionPolicy()
-        session.grant("bash", "allow", "git status")
+        from xcode.harness.observability import (
+            InMemoryGrantStore,
+            ActionExtractor,
+            create_grant_record,
+        )
+
+        store = InMemoryGrantStore()
+        action = ActionExtractor().extract("bash", {"command": "git status"})
+        for target in action.targets:
+            grant = create_grant_record(
+                action, target, decision="allow", scope="session"
+            )
+            store.add(grant)
         engine = PermissionEngine(
             PermissionEngineConfig(
                 static_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
-                session_policy=session,
+                session_grant_store=store,
             )
         )
-        result = engine.decide("bash", "git status --short")
+        result = engine.decide(
+            "bash",
+            '{"command": "git status"}',
+            tool_input={"command": "git status"},
+        )
         self.assertFalse(result.blocked)
         self.assertEqual(result.matched_rule, "session_grant")
 
@@ -430,8 +445,8 @@ class HITLPermissionModelTests(unittest.TestCase):
         )
         meta = result.metadata or {}
         self.assertEqual(meta.get("user_decision"), "deny")
-        # Shell ask 固定为 once scope（section 10.6.2）
-        self.assertEqual(meta.get("approval_scope"), "once")
+        # 统一 ask 路径使用回调返回的 scope
+        self.assertEqual(meta.get("approval_scope"), "session")
 
 
 if __name__ == "__main__":
