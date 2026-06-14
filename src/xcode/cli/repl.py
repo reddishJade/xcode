@@ -132,7 +132,10 @@ def run_repl(
                 now = time.time()
                 if state.exit_pending and now - state.exit_pending < 1.5:
                     print()
-                    print_saved_conversation(store)
+                    try:
+                        print_saved_conversation(store)
+                    except KeyboardInterrupt:
+                        pass
                     return 0
                 state.exit_pending = now
                 print()
