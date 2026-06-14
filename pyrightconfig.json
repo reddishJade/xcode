@@ -1,5 +1,7 @@
 {
   "extraPaths": ["src"],
+  "venvPath": ".",
+  "venv": ".venv",
   "include": ["src"],
   "exclude": [
     "**/.*",
