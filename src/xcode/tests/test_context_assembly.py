@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from xcode.agent.context_assembly import (
     trim_to_budget,
 )
 from xcode.agent.context_collector import (
+    ActiveDiffCollector,
     ContextCollectionInput,
     ContextCollectorRegistry,
     ProjectManifestCollector,
@@ -1210,6 +1212,53 @@ class TestContextCollectorWithAssembler(unittest.TestCase):
         )
         self.assertEqual(len(transform_log), 1)
 
+    def test_active_diff_as_user_context_after_system(self) -> None:
+        """ACTIVE_DIFF 块作为 UserMessage 注入，位于 SystemMessage 之后。"""
+        provider = CaptureProvider()
+        registry = ContextCollectorRegistry()
+        registry.register(
+            FakeCollector(
+                [
+                    ContextBlock(
+                        source=ContextBlockSource.ACTIVE_DIFF,
+                        target=ContextBlockTarget.USER_CONTEXT,
+                        priority=ContextPriority.HIGH,
+                        content="[unstaged]\n M src/main.py",
+                    ),
+                ]
+            )
+        )
+
+        config = AgentLoopConfig(
+            provider=provider,
+            convert_to_llm=convert_to_llm,
+            context_collectors=registry,
+            context_assembler=DefaultContextAssembler(),
+            max_steps=1,
+        )
+        import asyncio
+
+        asyncio.run(
+            run_agent_loop(
+                prompts=[UserMessage(content="hello")],
+                context=AgentContext(messages=[
+                    SystemMessage(content="identity prompt"),
+                ]),
+                config=config,
+                emit=lambda _e: None,
+            )
+        )
+        self.assertEqual(len(provider.captured_messages), 1)
+        msgs = provider.captured_messages[0]
+        roles = [m["role"] for m in msgs]
+        # 顺序: system(identity) + system(manifest) + user(diff) + user(question)
+        # 但这里没有 manifest collector，只有 diff collector
+        self.assertEqual(roles, ["system", "user", "user"])
+        # diff 内容中包含 source 标记
+        combined = " ".join(str(m.get("content", "") or "") for m in msgs)
+        self.assertIn("[active_diff]", combined)
+        self.assertIn("M src/main.py", combined)
+
 
 # ── ContextBlockTarget 测试 ──
 
@@ -1587,3 +1636,171 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             self.assertIn("</manifest-truncated>", output)
             self.assertTrue(output.strip().endswith("</manifest-truncated>"))
             self.assertLessEqual(len(output.encode("utf-8")), 32 * 1024)
+
+
+# ── ActiveDiffCollector 测试 ──
+
+
+class TestActiveDiffCollector(unittest.TestCase):
+    """测试 ActiveDiffCollector。"""
+
+    def test_no_git_repo_returns_empty(self) -> None:
+        """非 git 仓库返回空列表。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            collector = ActiveDiffCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 0)
+
+    def test_clean_repo_returns_empty(self) -> None:
+        """干净的 git 仓库返回空列表。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_init(root)
+            (root / "a.txt").write_text("one\n", encoding="utf-8")
+            _git(root, "add", "a.txt")
+            _git(root, "commit", "-m", "initial")
+            collector = ActiveDiffCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 0)
+
+    def test_modified_file_produces_block(self) -> None:
+        """修改过的文件产生一个 ACTIVE_DIFF 块。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_init(root)
+            (root / "a.txt").write_text("one\n", encoding="utf-8")
+            _git(root, "add", "a.txt")
+            _git(root, "commit", "-m", "initial")
+            (root / "a.txt").write_text("one\ntwo\n", encoding="utf-8")
+            collector = ActiveDiffCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].source, ContextBlockSource.ACTIVE_DIFF)
+            self.assertIn("a.txt", blocks[0].content)
+
+    def test_block_target_is_user_context(self) -> None:
+        """块目标为 USER_CONTEXT。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_init(root)
+            (root / "a.txt").write_text("one\n", encoding="utf-8")
+            _git(root, "add", "a.txt")
+            _git(root, "commit", "-m", "initial")
+            (root / "a.txt").write_text("changed\n", encoding="utf-8")
+            collector = ActiveDiffCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].target, ContextBlockTarget.USER_CONTEXT)
+
+    def test_priority_is_high(self) -> None:
+        """优先级为 HIGH。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_init(root)
+            (root / "a.txt").write_text("one\n", encoding="utf-8")
+            _git(root, "add", "a.txt")
+            _git(root, "commit", "-m", "initial")
+            (root / "a.txt").write_text("changed\n", encoding="utf-8")
+            collector = ActiveDiffCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(blocks[0].priority, ContextPriority.HIGH)
+
+    def test_small_diff_has_no_truncation_marker(self) -> None:
+        """小 diff 不包含截断标记。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_init(root)
+            (root / "a.txt").write_text("one\n", encoding="utf-8")
+            _git(root, "add", "a.txt")
+            _git(root, "commit", "-m", "initial")
+            (root / "a.txt").write_text("one\ntwo\n", encoding="utf-8")
+            collector = ActiveDiffCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertNotIn("active-diff-truncated", blocks[0].content)
+
+    def test_oversized_diff_has_full_marker(self) -> None:
+        """超大 diff 包含完整截断标记。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_init(root)
+            # 创建多个文件使统计信息和摘录都足够大
+            for fname in ("a.txt", "b.txt", "c.txt"):
+                (root / fname).write_text("line\n" * 10, encoding="utf-8")
+            _git(root, "add", "-A")
+            _git(root, "commit", "-m", "initial")
+            long_line = "changed" + "X" * 2000 + "\n"
+            for fname in ("a.txt", "b.txt", "c.txt"):
+                (root / fname).write_text(long_line * 5000, encoding="utf-8")
+            collector = ActiveDiffCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("<active-diff-truncated>", blocks[0].content)
+            self.assertIn("</active-diff-truncated>", blocks[0].content)
+            self.assertLessEqual(
+                len(blocks[0].content.encode("utf-8")),
+                8 * 1024,
+            )
+
+    def test_staged_only_change_produces_block(self) -> None:
+        """仅 staged 的修改产生 ACTIVE_DIFF 块。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_init(root)
+            (root / "a.txt").write_text("one\n", encoding="utf-8")
+            _git(root, "add", "a.txt")
+            _git(root, "add", "-A")
+            _git(root, "commit", "-m", "initial")
+            (root / "b.txt").write_text("new\n", encoding="utf-8")
+            _git(root, "add", "b.txt")
+            collector = ActiveDiffCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            # b.txt is staged, a.txt is not modified — diff shows [staged]
+            self.assertIn("[staged]", blocks[0].content)
+            self.assertIn("b.txt", blocks[0].content)
+
+    def test_staged_and_unstaged_includes_both(self) -> None:
+        """staged 和 unstaged 同时存在时都包含。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _git_init(root)
+            (root / "a.txt").write_text("one\n", encoding="utf-8")
+            (root / "b.txt").write_text("base\n", encoding="utf-8")
+            _git(root, "add", "-A")
+            _git(root, "commit", "-m", "initial")
+            # staged change
+            (root / "a.txt").write_text("staged\n", encoding="utf-8")
+            _git(root, "add", "a.txt")
+            # unstaged change
+            (root / "b.txt").write_text("unstaged\n", encoding="utf-8")
+            collector = ActiveDiffCollector(root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("[staged]", blocks[0].content)
+            self.assertIn("[unstaged]", blocks[0].content)
+            self.assertIn("a.txt", blocks[0].content)
+            self.assertIn("b.txt", blocks[0].content)
+
+    def test_git_failure_returns_empty(self) -> None:
+        """git 失败时返回空列表，不抛出异常。"""
+        collector = ActiveDiffCollector(Path("/nonexistent"))
+        blocks = collector.collect(ContextCollectionInput())
+        self.assertEqual(len(blocks), 0)
+
+
+def _git_init(root: Path) -> None:
+    subprocess.run(["git", "init"], cwd=root, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=root, capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=root, capture_output=True, check=True,
+    )
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)

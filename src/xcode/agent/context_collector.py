@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -322,3 +323,134 @@ def _is_agents_reference(content: str) -> bool:
     """
     stripped = content.strip()
     return stripped in _AGENTS_REF_PATTERNS
+
+
+# ── 活动 diff 收集器 ──
+
+ACTIVE_DIFF_MAX_BYTES: int = 8 * 1024  # 8KB —— 活动 diff 摘要上限
+_DIFF_CMD_TIMEOUT: int = 5  # 秒
+
+_ACTIVE_DIFF_TRUNCATED_MARKER = (
+    "<active-diff-truncated>Diff truncated because it exceeded the maximum "
+    "allowed size. Use bash git diff for full details.</active-diff-truncated>"
+)
+
+
+def _run_git(root: Path, *args: str) -> str | None:
+    """运行 git 命令，返回 stdout 字符串或 None（失败时）。"""
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=_DIFF_CMD_TIMEOUT,
+        )
+    except Exception:
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout
+
+
+class ActiveDiffCollector:
+    """从当前 git 工作树收集活动修改摘要的 collector。
+
+    运行 git diff --stat 和 --cached --stat 获取文件级统计，
+    再收集短 diff 摘录。产出 USER_CONTEXT 目标、HIGH 优先级的块。
+
+    优先级为 HIGH：活动 diff 是当前任务的即时上下文，但不应抢占
+    系统指令。大小由 ACTIVE_DIFF_MAX_BYTES（8KB）限制，超出时
+    截断添加 <active-diff-truncated> 标记。
+
+    失败时不抛出异常，记录日志后返回空列表。
+    """
+
+    def __init__(self, project_root: Path | None = None) -> None:
+        self._project_root = project_root
+
+    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
+        root = input.project_root or self._project_root
+        if root is None:
+            return []
+
+        stat_unstaged = _run_git(root, "diff", "--stat")
+        stat_staged = _run_git(root, "diff", "--cached", "--stat")
+        has_staged = bool(stat_staged and stat_staged.strip())
+        has_unstaged = bool(stat_unstaged and stat_unstaged.strip())
+
+        if not has_staged and not has_unstaged:
+            return []
+
+        # 构建统计摘要
+        stat_parts: list[str] = []
+        if has_staged:
+            stat_parts.append("[staged]")
+            stat_parts.append(stat_staged.strip())  # type: ignore[union-attr]
+        if has_unstaged:
+            if stat_parts:
+                stat_parts.append("")
+            stat_parts.append("[unstaged]")
+            stat_parts.append(stat_unstaged.strip())  # type: ignore[union-attr]
+        stat_summary = "\n".join(stat_parts)
+
+        # 构建理想正文（统计 + 摘录）
+        excerpt_block = _build_diff_excerpt_block(root, has_staged, has_unstaged)
+        if excerpt_block is not None:
+            ideal = stat_summary + "\n\n" + excerpt_block
+        else:
+            ideal = stat_summary
+
+        # 判断是否需要截断
+        marker = _ACTIVE_DIFF_TRUNCATED_MARKER
+        marker_bytes = _utf8_size(marker)
+        ideal_bytes = _utf8_size(ideal)
+
+        if ideal_bytes <= ACTIVE_DIFF_MAX_BYTES:
+            body = ideal
+        else:
+            content_budget = ACTIVE_DIFF_MAX_BYTES - marker_bytes
+            if content_budget <= 0:
+                return []
+            body = _utf8_prefix(ideal, content_budget) + marker
+
+        if not body.strip():
+            return []
+
+        return [
+            ContextBlock(
+                source=ContextBlockSource.ACTIVE_DIFF,
+                target=ContextBlockTarget.USER_CONTEXT,
+                priority=ContextPriority.HIGH,
+                content=body,
+            )
+        ]
+
+
+def _build_diff_excerpt_block(root: Path, has_staged: bool, has_unstaged: bool) -> str | None:
+    """构建 diff 摘录块（含 <diff-excerpt> 包装）。
+
+    优先收集 unstaged diff，若为空则收集 staged diff。
+    上下文行数（-U）设为 1 以保持紧凑。
+    摘录内部超过 30 行时截断并添加省略标记。
+    """
+    if has_unstaged:
+        raw = _run_git(root, "diff", "--unified=1", "--no-color")
+    elif has_staged:
+        raw = _run_git(root, "diff", "--cached", "--unified=1", "--no-color")
+    else:
+        return None
+
+    if raw is None or not raw.strip():
+        return None
+
+    lines = raw.splitlines()
+    excerpt: str
+    if len(lines) <= 30:
+        excerpt = raw.strip()
+    else:
+        excerpt = "\n".join(lines[:30]) + (
+            f"\n[... {len(lines) - 30} diff lines omitted ...]"
+        )
+    return "<diff-excerpt>\n" + excerpt + "\n</diff-excerpt>"

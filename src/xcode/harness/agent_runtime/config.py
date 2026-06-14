@@ -15,6 +15,7 @@ from ...agent.compaction import (
 from ...agent.config import AgentLoopConfig, AgentLoopTurnUpdate
 from ...agent.context_assembly import DefaultContextAssembler
 from ...agent.context_collector import (
+    ActiveDiffCollector,
     ContextCollectorRegistry,
     ProjectManifestCollector,
 )
@@ -236,6 +237,7 @@ def build_loop_config(
     if project_root is not None:
         registry_ = ContextCollectorRegistry()
         registry_.register(ProjectManifestCollector(project_root))
+        registry_.register(ActiveDiffCollector(project_root))
         assembler = DefaultContextAssembler()
 
     return AgentLoopConfig(
