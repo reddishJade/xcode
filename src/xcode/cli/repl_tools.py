@@ -36,7 +36,12 @@ from xcode.harness.agent_runtime.events import (
     TurnEndStructuredEvent,
 )
 from xcode.harness.agent_runtime.result import StructuredAgentResult
-from xcode.harness.skills import ToolInput, ToolSpec, run_tool_result
+from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
+from xcode.harness.agent_runtime.tool_gate import ToolGate
+from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.agent.config import AgentContext, BeforeToolCallContext
+from xcode.agent.messages import AssistantMessage
+from xcode.agent.types import TextContent, ToolCallContent
 
 
 def run_tool_command(command: str, app: object) -> str:
@@ -99,17 +104,7 @@ def run_tool_command(command: str, app: object) -> str:
     except ValueError as exc:
         return str(exc)
     agent = getattr(app, "agent", None)
-    result = run_tool_result(
-        tool_map,
-        tool_name,
-        action_input,
-        approval_callback=getattr(agent, "approval_callback", None),
-        permission_policy=getattr(agent, "permission_policy", None),
-        restricted_dirs=getattr(agent, "restricted_dirs", ()),
-        allowlist_mode=bool(getattr(agent, "allowlist_mode", False)),
-        hook_constraint_providers=getattr(agent, "hook_constraint_providers", ()),
-    )
-    return result.content
+    return _execute_tool_via_gate(selected_tool, action_input, agent)
 
 
 def run_shell_shortcut(command: str, app: object) -> str:
@@ -117,6 +112,55 @@ def run_shell_shortcut(command: str, app: object) -> str:
     if not shell_command:
         return "usage: !COMMAND"
     return run_tool_command(f"/tool bash {shell_command}", app)
+
+
+def _execute_tool_via_gate(
+    tool: ToolSpec,
+    tool_input: ToolInput,
+    agent: object,
+) -> str:
+    """通过 ToolGate 门控 + ToolSpecAdapter 执行 REPL 工具命令。
+
+    保持与 canonical agent loop 一致的权限门控路径：
+    ToolGate._precheck_permission → PermissionEngine.decide()（唯一生产调用点）
+    ToolSpecAdapter.execute() → handler（纯适配器，不自检权限）
+
+    build_after_tool_hook 不在此处调用，REPL 手动工具命令不经过 agent 轮次，
+    无 session/audit 上下文，且为用户显式输入而非 LLM 决策，不写入审计日志。
+    """
+    import asyncio
+
+    if agent is None:
+        return str(tool.handler(tool_input))
+
+    mode_state = ExecutionModeState()
+    gate = ToolGate(
+        mode_state=mode_state,
+        approval_callback=getattr(agent, "approval_callback", None),
+        permission_policy=getattr(agent, "permission_policy", None),
+        hook_manager=None,
+        audit_logger=None,
+        session_id="repl",
+        restricted_dirs=getattr(agent, "restricted_dirs", ()),
+        allowlist_mode=bool(getattr(agent, "allowlist_mode", False)),
+        hook_constraint_providers=getattr(agent, "hook_constraint_providers", ()),
+    )
+    snapshot = gate.snapshot_for((tool,))
+    before_hook = gate.build_before_tool_hook(snapshot)
+
+    ctx = BeforeToolCallContext(
+        assistant_message=AssistantMessage(content=[]),
+        tool_call=ToolCallContent(id="repl", name=tool.name, arguments=dict(tool_input)),
+        args=tool_input,
+        context=AgentContext(),
+    )
+    before_result = before_hook(ctx, None)
+    if before_result is not None:
+        return before_result.reason or f"tool {tool.name} was blocked"
+
+    adapted = gate.adapt_tools((tool,))
+    result = asyncio.run(adapted[0].execute("repl", tool_input))
+    return "".join(item.text for item in result.content if isinstance(item, TextContent))
 
 
 def parse_tool_input(tool: ToolSpec, raw_input: str) -> ToolInput:

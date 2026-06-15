@@ -13,7 +13,6 @@ from xcode.coding_agent.tools.shell_adapter import (
     _KNOWN_SHELLS,
 )
 from xcode.coding_agent.tools import build_bash_tool
-from xcode.tests.fixtures import run_tool
 
 
 class XcodeShellAdapterTests(unittest.TestCase):
@@ -123,13 +122,7 @@ class XcodeShellAdapterTests(unittest.TestCase):
         """真实执行只走 auto-detect 路径，不强制显式 shell。"""
         with tempfile.TemporaryDirectory() as tmp:
             tool = build_bash_tool(Path(tmp))
-            registry = {tool.name: tool}
-
-            output = run_tool(
-                registry,
-                "bash",
-                {"command": "echo hello"},
-            )
+            output = tool.handler({"command": "echo hello"})
             self.assertIn("hello", output)
 
     def test_bash_tool_passes_shell_false_and_argv(self) -> None:

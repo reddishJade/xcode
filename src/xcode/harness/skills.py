@@ -10,18 +10,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from ..agent.protocols import ToolExecutionMode
 from ..agent.types import ShellCallOutputContent
-from .observability import (
-    HITLResult,
-    PermissionEngine,
-    PermissionEngineConfig,
-    PermissionPolicy,
-    redact_text,
-)
-from .observability.permission_model import PolicyEvaluator
+from .observability import HITLResult
 from .session import JsonValue
 
 ToolInput = dict[str, Any]
@@ -71,21 +64,6 @@ class ToolSpec:
     builtin: dict[str, Any] | None = None
 
 
-ToolExecutionStatus = Literal["ok", "denied", "error", "approval_required"]
-
-_STATUS_OK: ToolExecutionStatus = "ok"
-_STATUS_DENIED: ToolExecutionStatus = "denied"
-_STATUS_ERROR: ToolExecutionStatus = "error"
-_STATUS_APPROVAL_REQUIRED: ToolExecutionStatus = "approval_required"
-
-
-@dataclass(frozen=True)
-class ToolExecutionResult:
-    status: ToolExecutionStatus
-    content: str
-    metadata: ToolMetadata | None = None
-
-
 def resolve_project_path(project_root: Path, raw_path: str) -> Path:
     relative_path = Path(raw_path.strip().strip("\"'") or ".")
     if relative_path.is_absolute():
@@ -119,78 +97,6 @@ def build_tool_guidelines(registry: tuple[ToolSpec, ...]) -> str:
                 seen.add(normalized)
                 guidelines.append(f"- {normalized}")
     return "\n".join(guidelines)
-
-
-def run_tool_result(
-    registry: dict[str, ToolSpec],
-    action: str,
-    action_input: ToolInput,
-    approval_callback: ApprovalCallback | None = None,
-    permission_policy: PermissionPolicy | None = None,
-    restricted_dirs: tuple[str, ...] = (),
-    allowlist_mode: bool = False,
-    hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
-) -> ToolExecutionResult:
-    """执行一个工具，权限决策由 PermissionEngine 统一处理。"""
-
-    tool = registry.get(action)
-    if tool is None:
-        return ToolExecutionResult(
-            _STATUS_ERROR,
-            f"unknown tool: {action}. available tools: {', '.join(sorted(registry))}",
-        )
-    action_input_text = stringify_tool_input(action_input)
-    engine = PermissionEngine(
-        PermissionEngineConfig(
-            static_policy=permission_policy,
-            restricted_dirs=restricted_dirs,
-            allowlist_mode=allowlist_mode,
-            hook_constraint_providers=hook_constraint_providers,
-        )
-    )
-    perm_result = engine.decide(
-        action,
-        action_input_text,
-        tool_spec=tool,
-        tool_input=action_input,
-        approval_callback=approval_callback,
-    )
-    if perm_result.blocked:
-        status = (
-            _STATUS_APPROVAL_REQUIRED
-            if perm_result.decision == "ask"
-            else _STATUS_DENIED
-        )
-        return ToolExecutionResult(
-            status, perm_result.reason, metadata=_merge_metadata(perm_result.metadata)
-        )
-    try:
-        raw_content = tool.handler(action_input)
-        content = redact_text(str(raw_content))
-        metadata = _merge_metadata(
-            _tool_output_metadata(raw_content),
-            perm_result.metadata,
-        )
-        return ToolExecutionResult(_STATUS_OK, content, metadata=metadata)
-    except Exception as exc:
-        meta = _merge_metadata({"error": str(exc)}, perm_result.metadata)
-        return ToolExecutionResult(_STATUS_ERROR, f"tool error: {exc}", meta)
-
-
-def _tool_output_metadata(output: str) -> ToolMetadata | None:
-    if isinstance(output, ToolOutput) and output.metadata:
-        return output.metadata
-    return None
-
-
-def _merge_metadata(
-    *items: Mapping[str, ToolMetadataValue] | None,
-) -> ToolMetadata | None:
-    merged: ToolMetadata = {}
-    for item in items:
-        if item:
-            merged.update(item)
-    return merged or None
 
 
 def _tool_metadata(value: object) -> ToolMetadata:

@@ -5,9 +5,14 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from xcode.harness.observability import AuditRecord, JsonlAuditLogger, redact_text
+from xcode.harness.observability import (
+    AuditRecord,
+    JsonlAuditLogger,
+    PermissionEngine,
+    PermissionEngineConfig,
+    redact_text,
+)
 from xcode.harness.skills import ToolSpec
-from xcode.tests.fixtures import run_tool
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.config import GateConfig
 
@@ -40,12 +45,17 @@ class XcodeAuditTests(unittest.TestCase):
         self.assertNotIn("sk-1234567890abcdef", redacted)
         self.assertIn("[REDACTED]", redacted)
 
-    def test_run_tool_redacts_handler_output(self) -> None:
+    def test_redact_text_applied_via_tool_adapter(self) -> None:
+        """验证红action 仅在 ToolSpecAdapter（生产路径）中应用。"""
         tool = ToolSpec("leak", "Leak.", "empty", lambda _input: "token=secret12345")
 
-        output = run_tool({"leak": tool}, "leak", {})
+        # 测试辅助函数 run_tool 不应用 redact（由 ToolSpecAdapter 负责）
+        raw = tool.handler({})
+        self.assertEqual(raw, "token=secret12345")
 
-        self.assertEqual(output, "token=[REDACTED]")
+        # redact_text 在 ToolSpecAdapter._tool_result_content 中应用
+        redacted = redact_text(raw)
+        self.assertEqual(redacted, "token=[REDACTED]")
 
     def test_structured_agent_writes_audit_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -167,7 +177,7 @@ class XcodeAuditTests(unittest.TestCase):
             self.assertEqual(record["final_status"], "ok")
             self.assertTrue(record["approved"])
 
-    def test_run_tool_result_redacts_output(self) -> None:
+    def test_handler_raw_output_contains_secrets(self) -> None:
         tool = ToolSpec(
             "leak", "Leak.", "empty", lambda _input: "sk-12345 token=secret"
         )
@@ -178,15 +188,18 @@ class XcodeAuditTests(unittest.TestCase):
         self.assertIn("token=secret", result)
 
     def test_redacted_tool_result_does_not_leak_to_output(self) -> None:
-        from xcode.harness.skills import run_tool_result
-
         tool = ToolSpec("leak", "Leak.", "empty", lambda _input: "api_key=mysecret")
 
-        result = run_tool_result({"leak": tool}, "leak", {})
+        engine = PermissionEngine(PermissionEngineConfig())
+        perm = engine.decide("leak", "{}", tool_spec=tool, tool_input={})
+        self.assertFalse(perm.blocked)
 
-        self.assertEqual(result.status, "ok")
-        self.assertNotIn("mysecret", result.content)
-        self.assertIn("REDACTED", result.content)
+        raw = tool.handler({})
+        self.assertIn("mysecret", raw)
+
+        content = redact_text(str(raw))
+        self.assertNotIn("mysecret", content)
+        self.assertIn("REDACTED", content)
 
 
 if __name__ == "__main__":

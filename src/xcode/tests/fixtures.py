@@ -8,30 +8,6 @@ from typing import Any
 from xcode.ai.events import ProviderEvent
 from xcode.ai.providers.faux import FauxProvider
 from xcode.harness.execution_env import ExecutionResult
-from xcode.harness.skills import (
-    ApprovalCallback,
-    PermissionPolicy,
-    ToolInput,
-    run_tool_result,
-)
-
-
-def run_tool(
-    registry: dict[str, Any],
-    action: str,
-    action_input: ToolInput,
-    approval_callback: ApprovalCallback | None = None,
-    permission_policy: PermissionPolicy | None = None,
-) -> str:
-    """测试辅助函数：执行工具并返回内容字符串。"""
-    return run_tool_result(
-        registry,
-        action,
-        action_input,
-        approval_callback,
-        permission_policy,
-    ).content
-
 
 class MockExecutionEnv:
     """测试桩实现，记录调用并返回预设结果。"""

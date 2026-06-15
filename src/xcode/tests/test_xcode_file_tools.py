@@ -5,9 +5,6 @@ import tempfile
 import unittest
 
 from xcode.cli.repl_tools import parse_tool_input
-from xcode.harness.observability import HITLResult
-from xcode.harness.skills import run_tool_result
-from xcode.tests.fixtures import run_tool
 from xcode.coding_agent.tools import build_file_tools
 from xcode.coding_agent.tools.file_handlers import LocalFileOperations
 
@@ -210,11 +207,8 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             root = Path(tmp)
             tools = self._tools(root)
 
-            output = run_tool(
-                tools,
-                "write_file",
-                {"path": "docs/a.md", "content": "hello"},
-                lambda _tool, _input: HITLResult("allow", "once"),
+            output = tools["write_file"].handler(
+                {"path": "docs/a.md", "content": "hello"}
             )
 
             self.assertIn("wrote file: docs/a.md", output)
@@ -381,20 +375,15 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             path.write_text("one\ntwo\n", encoding="utf-8")
             tools = self._tools(root)
 
-            result = run_tool_result(
-                tools,
-                "edit_file",
-                {"path": "a.txt", "old_text": "two", "new_text": "three"},
-                lambda _tool, _input: HITLResult("allow", "once"),
+            output = tools["edit_file"].handler(
+                {"path": "a.txt", "old_text": "two", "new_text": "three"}
             )
 
-            metadata = result.metadata or {}
-            patch = metadata.get("patch")
-            assert isinstance(patch, str)
-            self.assertEqual(result.status, "ok")
-            self.assertIn("-two", patch)
-            self.assertIn("+three", patch)
-            self.assertEqual(metadata.get("first_changed_line"), 2)
+            self.assertIn("-two", output)
+            self.assertIn("+three", output)
+            self.assertEqual(
+                getattr(output, "metadata", {}).get("first_changed_line"), 2
+            )
             self.assertEqual(path.read_text(encoding="utf-8"), "one\nthree\n")
 
     def test_edit_file_requires_new_text_key_but_allows_empty_replacement(self) -> None:

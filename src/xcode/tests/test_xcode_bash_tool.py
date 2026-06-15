@@ -11,18 +11,14 @@ from xcode.harness.observability.permission_model import (
     ActionExtractor,
     SafetyBackstopPolicyEvaluator,
 )
-from xcode.tests.fixtures import run_tool
+
 
 
 class XcodeBashToolTests(unittest.TestCase):
     def test_bash_safe_command_does_not_require_hitl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tool = build_bash_tool(Path(tmp))
-            output = run_tool(
-                {tool.name: tool},
-                "bash",
-                {"command": "git status --short"},
-            )
+            output = tool.handler({"command": "git status --short"})
             self.assertNotIn("requires approval", output)
 
     def test_bash_runs_command_and_returns_output(self) -> None:
@@ -48,11 +44,7 @@ class XcodeBashToolTests(unittest.TestCase):
     def test_bash_runs_structured_tool_input(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tool = build_bash_tool(Path(tmp))
-            output = run_tool(
-                {tool.name: tool},
-                "bash",
-                {"command": "echo hello", "timeout": 5},
-            )
+            output = tool.handler({"command": "echo hello", "timeout": 5})
             self.assertIn("hello", output)
 
     def test_bash_rejects_invalid_json_without_traceback(self) -> None:

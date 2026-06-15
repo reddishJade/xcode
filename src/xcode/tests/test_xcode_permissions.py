@@ -9,8 +9,7 @@ from xcode.harness.observability import (
     PermissionPolicy,
     PermissionRule,
 )
-from xcode.harness.skills import ToolSpec, run_tool_result
-from xcode.tests.fixtures import run_tool
+from xcode.harness.skills import ToolSpec
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.config import GateConfig
 from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
@@ -40,32 +39,41 @@ INPUT_SCHEMA = {
 class XcodePermissionsTests(unittest.TestCase):
     def test_permission_policy_denies_tool(self) -> None:
         tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
-        policy = PermissionPolicy((PermissionRule("echo", "deny"),))
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((PermissionRule("echo", "deny"),)),
+            )
+        )
+        result = engine.decide(
+            "echo", '{"input": "hello"}', tool_spec=tool, tool_input={"input": "hello"}
+        )
+        self.assertTrue(result.blocked)
+        self.assertIn("deny for echo", result.reason)
 
-        output = run_tool({"echo": tool}, "echo", "hello", permission_policy=policy)
-
-        self.assertIn("deny for echo", output)
-
-    def test_run_tool_result_reports_handler_exception(self) -> None:
+    def test_handler_exception_reports_error(self) -> None:
         def fail(_value: dict) -> str:
             raise RuntimeError("boom")
 
-        result = run_tool_result(
-            {"fail": ToolSpec("fail", "Fail.", "text", fail)}, "fail", {}
+        tool = ToolSpec("fail", "Fail.", "text", fail)
+        result = PermissionEngine(PermissionEngineConfig()).decide(
+            "fail", '{"input": "x"}', tool_spec=tool, tool_input={}
         )
-
-        self.assertEqual(result.status, "error")
-        self.assertIn("boom", result.content)
+        self.assertFalse(result.blocked)
+        with self.assertRaises(RuntimeError):
+            tool.handler({})
 
     def test_permission_policy_ask_for_low_risk_tool(self) -> None:
         tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
-        policy = PermissionPolicy((PermissionRule("echo", "ask"),))
-
-        output = run_tool(
-            {"echo": tool}, "echo", {"input": "hello"}, permission_policy=policy
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((PermissionRule("echo", "ask"),)),
+            )
         )
-
-        self.assertEqual(output, "tool requires approval: echo")
+        result = engine.decide(
+            "echo", '{"input": "hello"}', tool_spec=tool, tool_input={"input": "hello"}
+        )
+        self.assertTrue(result.blocked)
+        self.assertIn("requires approval", result.reason)
 
     def test_permission_policy_allow_skips_high_risk_approval(self) -> None:
         tool = ToolSpec(
@@ -74,13 +82,16 @@ class XcodePermissionsTests(unittest.TestCase):
             "text",
             lambda value: value["input"],
         )
-        policy = PermissionPolicy((PermissionRule("danger", "allow"),))
-
-        output = run_tool(
-            {"danger": tool}, "danger", {"input": "go"}, permission_policy=policy
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((PermissionRule("danger", "allow"),)),
+            )
         )
-
-        self.assertEqual(output, "go")
+        result = engine.decide(
+            "danger", '{"input": "go"}', tool_spec=tool, tool_input={"input": "go"}
+        )
+        self.assertFalse(result.blocked)
+        self.assertEqual(tool.handler({"input": "go"}), "go")
 
     def test_permission_policy_deny_overrides_allow_regardless_of_order(self) -> None:
         rules = (
@@ -261,24 +272,26 @@ class XcodePermissionsTests(unittest.TestCase):
 
         self.assertEqual(result.messages[2]["content"][0]["content"], "go")
 
-    def test_approved_but_failed_handler_sets_approved_true(self) -> None:
+    def test_permission_allows_then_handler_raises(self) -> None:
         def fail_handler(_value: dict) -> str:
             raise RuntimeError("handler failed")
 
-        tool = ToolSpec(
-            "failing",
-            "Fails.",
-            "text",
-            fail_handler,
+        tool = ToolSpec("failing", "Fails.", "text", fail_handler)
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((PermissionRule("failing", "ask"),)),
+            )
         )
-        result = run_tool_result(
-            {"failing": tool},
+        result = engine.decide(
             "failing",
-            {"input": "go"},
+            '{"input": "go"}',
+            tool_spec=tool,
+            tool_input={"input": "go"},
             approval_callback=lambda _t, _i: HITLResult("allow", "once"),
         )
-        self.assertEqual(result.status, "error")
-        self.assertIn("handler failed", result.content)
+        self.assertFalse(result.blocked)
+        with self.assertRaises(RuntimeError):
+            tool.handler({"input": "go"})
 
     def test_denied_callback_returns_guidance_message(self) -> None:
         tool = ToolSpec(
@@ -287,33 +300,42 @@ class XcodePermissionsTests(unittest.TestCase):
             "text",
             lambda v: v["command"],
         )
-        result = run_tool_result(
-            {"bash": tool},
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+            )
+        )
+        result = engine.decide(
             "bash",
-            {"command": "git add ."},
-            permission_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+            '{"command": "git add ."}',
+            tool_spec=tool,
+            tool_input={"command": "git add ."},
             approval_callback=lambda _t, _i: HITLResult("deny", "once"),
         )
-        self.assertEqual(result.status, "denied")
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.decision, "deny")
 
-    def test_hitl_result_metadata_in_denied_result(self) -> None:
+    def test_denied_callback_metadata(self) -> None:
         tool = ToolSpec(
             "bash",
             "Bash.",
             "text",
             lambda v: v["command"],
         )
-        result = run_tool_result(
-            {"bash": tool},
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+            )
+        )
+        result = engine.decide(
             "bash",
-            {"command": "git push"},
-            permission_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+            '{"command": "git push"}',
+            tool_spec=tool,
+            tool_input={"command": "git push"},
             approval_callback=lambda _t, _i: HITLResult("deny", "session"),
         )
-        meta = result.metadata or {}
-        self.assertEqual(meta.get("user_decision"), "deny")
-        # 统一 ask 路径使用回调返回的 scope
-        self.assertEqual(meta.get("approval_scope"), "session")
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.decision, "deny")
 
 
 if __name__ == "__main__":
