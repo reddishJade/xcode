@@ -37,12 +37,14 @@ main.py → discover_runtime_config() → build_app() [harness/app.py]
 
 `prompting/builder.py` + `prompting/identity.py` 负责 system prompt 构造。
 
-默认模块顺序：identity → instructions → tool_discipline → tools → search_strategy → environment → cwd → git_preflight → contextual_retrieval → skills → notices。
+模块顺序（`STABLE_PROMPT_MODULE_ORDER`）：identity → tool_discipline → tools → search_strategy
+动态模块（`DYNAMIC_PROMPT_MODULE_ORDER`）：environment → cwd
+易变模块（`VOLATILE_PROMPT_MODULE_ORDER`）：git_preflight → contextual_retrieval → notices
 
 分三个缓存区域：
-- **STABLE**: identity, instructions, tool_discipline, tools, search_strategy
+- **STABLE**: identity, tool_discipline, tools, search_strategy
 - **DYNAMIC**: environment, cwd（按项目缓存）
-- **VOLATILE**: git_preflight, contextual_retrieval, skills, notices（每轮重建）
+- **VOLATILE**: git_preflight, contextual_retrieval, notices（每轮重建）
 
 `ContextualRetrievalState` 记录最近访问文件和工具结果摘要。
 
@@ -80,12 +82,12 @@ StructuredAgent → Agent → agent/tool_execution.py → ToolSpecAdapter → To
 
 `PermissionDecision`: `allow` / `deny` / `ask`。`PermissionEngine` 以 `SecurityRuntimeConfig` 派生静态策略。
 
-`PermissionEngineConfig` 参数：`static_policy`、`restricted_dirs`、`allowlist_mode`、`high_risk_requires_approval`。
+`PermissionEngineConfig` 参数：`static_policy`、`restricted_dirs`、`allowlist_mode`、`defer_static_ask`、`shadow_model_enabled`、`project_root`、`session_grant_store`、`permanent_grant_store`、`hook_constraint_providers`。
 
 `SecurityRuntimeConfig`（config.py）：
 - `permission_mode`: strict / normal / permissive
 - `sandbox_mode`: bool
-- `approval_policy`: always / high_risk_only / never
+- `approval_policy`: always / never
 - `writable_roots`、`restricted_dirs`、`deny_tools`、`ask_tools`、`allow_tools`
 
 ### HITL
@@ -107,6 +109,8 @@ REPL 支持三种执行模式。`/act --clear` 把 plan artifact 写入 `.local/
 ### Subagent
 
 `ManagedSubagentRunner` 控制并发、超时和递归深度。支持 `worktree` 隔离。子 agent 使用过滤后的 tool registry。
+
+权限边界：子 agent 继承父级的静态策略（deny/ask/allow rules）、restricted_dirs、allowlist_mode、hook_constraint_providers。不继承 `approval_callback`、`session_grant_store`、`permanent_grant_store`，因此 `ask` 决策在子 agent 中退化为硬阻断。`project_root` 正确传递给子 agent 的 `PermissionEngine.boundary_context()`。
 
 ### Worktree
 
@@ -208,7 +212,7 @@ Grader 分四类：确定性（runtime_error/final_event/answer_contains/expecte
 
 内置 HumanEval/EvalPlus/MBPP loader：`evals/benchmarks.py`。
 
-外部 benchmark adapter registry：evalplus-humaneval、evalplus-mbpp、swebench-lite、swebench-verified、terminal-bench、aider-polyglot。
+CLI `--benchmark` 支持：humaneval、swebench-lite、evalplus-humaneval、evalplus-mbpp。
 
 ---
 

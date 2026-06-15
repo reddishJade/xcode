@@ -50,7 +50,6 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `events.py` | provider stream 事件：`TextDelta`、`ReasoningDelta`、`ToolCallEvent`、`FinalMessage` |
 | `registry.py` | 模型注册中心：`get_model`、`get_models`、`get_providers`、`resolve_model` |
 | `cache.py` | 缓存统计与工具稳定化（规范化、排序、指纹） |
-| `validation.py` | 工具参数校验：`validate_tool_call` |
 | `model_modes.py` | 模型模式支持 |
 | `providers/` | Provider 适配器 |
 | `providers/protocol.py` | `ModelProvider` 协议 |
@@ -88,6 +87,9 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `_provider.py` | 内部 provider 适配器 |
 | `_tool_scheduling.py` | 内部工具调度 |
 | `_tool_validation.py` | 内部工具验证 |
+| `context_collector.py` | `ContextCollectorRegistry`、6 个上下文收集器 |
+| `context_assembly.py` | `DefaultContextAssembler`、context block 排序/裁剪 |
+| `results.py` | `AgentToolResult`、`ToolResultMessage` |
 
 ### `src/xcode/harness/` — Runtime Infra 层
 
@@ -96,9 +98,8 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `app.py` | `XcodeApp` dataclass、`build_app()` 入口 |
 | `assembly.py` | 装配：config 解析、shared infra、provider bundle、tool registry、agent 构建、opt-in services |
 | `config.py` | 9 个 dataclass、配置发现/序列化/合并/环境变量覆盖 |
-| `skills.py` | `ToolSpec` dataclass、`ToolOutput`、`run_tool_result` HITL 引擎 |
+| `skills.py` | `ToolSpec`、`ToolOutput` dataclass |
 | `session.py` | JSONL 会话存储、索引、resume、fork、rewind |
-| `skill_loader.py` | `SkillLoader`、`SkillMetadata`、`build_skill_loader_tool` |
 | `execution_env.py` | `ExecutionEnv` protocol、`SubprocessExecutionEnv`、`SandboxExecutionEnv` |
 | `daemon.py` | `HeartbeatDaemon` |
 | `task_store.py` | `tasks` group：任务存储、依赖排序、Kanban |
@@ -111,7 +112,6 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `agent_runtime/prompting/` | 系统提示词构造 |
 | `agent_runtime/prompting/builder.py` | `SystemPromptBuilder`、`build_runtime_context_provider` |
 | `agent_runtime/prompting/identity.py` | `PROMPT_VERSION`、缓存区域定义 |
-| `agent_runtime/prompting/instructions.py` | 运行时指令 |
 | `agent_runtime/prompting/token_budget.py` | token 预算管理 |
 | `agent_runtime/config.py` | `AgentRuntimeConfig`、`GateConfig` |
 | `agent_runtime/events.py` | Agent Runtime 事件类型 |
@@ -132,7 +132,9 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `observability/` | 可观测性 |
 | `observability/audit.py` | `AuditRecord`、`JsonlAuditLogger`、`redact_text` |
 | `observability/hooks.py` | `HookManager`、5 个事件类型 |
-| `observability/permissions.py` | `PermissionEngine`、`PermissionPolicy`、`HITLResult` |
+| `observability/permissions.py` | `PermissionEngine`、`PermissionEngineConfig`、`PermissionPolicy` |
+| `observability/permission_model.py` | `Action`、`PermissionResolver`、`GrantStore`、权限模型轴 |
+| `observability/_safety_backstop.py` | `SafetyBackstopPolicyEvaluator`、shell 命令三桶分类 |
 
 ### `src/xcode/coding_agent/` — Coding Product 层
 
@@ -226,4 +228,4 @@ Core tools（默认）：
 
 ## 测试目录
 
-`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和扩展组件（51 个测试文件 + fixtures.py）。
+`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和扩展组件（56 个测试文件 + fixtures.py）。
