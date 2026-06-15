@@ -79,10 +79,16 @@ class XcodeContextRestorationTests(unittest.TestCase):
             )
 
     def test_active_metadata_restoration_injections(self) -> None:
+        """Task state no longer enters through system prompt (removed dual injection).
+
+        Task state now enters exclusively through TaskStateCollector via the
+        context pipeline, not through _build_post_compact_metadata in the
+        system prompt. Verify that the system prompt does not contain
+        <active-tasks-graph> or <post-compact-metadata>.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp)
 
-            # Setup task store with pending task and checklist
             store = TaskStore(project_root)
             store.create(
                 "Implement features",
@@ -104,22 +110,10 @@ class XcodeContextRestorationTests(unittest.TestCase):
             builder = SystemPromptBuilder()
             prompt = builder.build(context)
 
-            # Verify active tasks metadata block
-            self.assertIn("<active-tasks-graph>", prompt)
-            self.assertIn(
-                "- [PENDING] Task #1: Implement features (1/2 subtasks completed) [Blocked by: Task #99]",
-                prompt,
-            )
-
-            # Verify that all metadata is injected strictly into the Volatile Region (below dynamic boundary)
-            boundary_marker = "<system-prompt-dynamic-boundary />"
-            self.assertIn(boundary_marker, prompt)
-
-            parts = prompt.split(boundary_marker)
-            volatile_region = parts[1]
-
-            self.assertIn("<post-compact-metadata>", volatile_region)
-            self.assertNotIn("<post-compact-metadata>", parts[0])
+            # Task state must NOT appear in system prompt — it enters through
+            # TaskStateCollector (USER_CONTEXT) via the context pipeline only.
+            self.assertNotIn("<active-tasks-graph>", prompt)
+            self.assertNotIn("<post-compact-metadata>", prompt)
 
 
 if __name__ == "__main__":

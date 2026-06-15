@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 from collections.abc import Callable
 from dataclasses import dataclass
 import platform
@@ -181,14 +179,6 @@ class VolatileRegionBuilder:
                             "<session-notices>\n" + notice_text + "\n</session-notices>"
                         )
 
-        metadata_parts = _build_post_compact_metadata(context.project_root)
-        if metadata_parts:
-            volatile_parts.append(
-                "<post-compact-metadata>\n"
-                + "\n\n".join(metadata_parts)
-                + "\n</post-compact-metadata>"
-            )
-
         return volatile_parts
 
 
@@ -211,37 +201,6 @@ def _tool_prompt_section(registry: tuple[ToolSpec, ...]) -> str:
     if guidelines:
         parts.append("Guidelines:\n" + guidelines)
     return "\n\n".join(parts)
-
-
-def _build_post_compact_metadata(project_root: Path) -> list[str]:
-    active_tasks = []
-    try:
-        from xcode.harness.task_store import TaskStore
-
-        store = TaskStore(project_root)
-        for task in store.list():
-            if task.status in ("pending", "claimed"):
-                task_info = f"- [{task.status.upper()}] Task #{task.id}: {task.title}"
-                fl = task.payload.get("feature_list")
-                if isinstance(fl, list) and fl:
-                    completed = sum(
-                        1
-                        for item in fl
-                        if isinstance(item, dict) and item.get("status") == "completed"
-                    )
-                    task_info += f" ({completed}/{len(fl)} subtasks completed)"
-                blocked_by = task.payload.get("blocked_by")
-                if blocked_by:
-                    task_info += f" [Blocked by: {blocked_by}]"
-                active_tasks.append(task_info)
-    except Exception:
-        logging.warning("failed to build active-tasks graph", exc_info=True)
-
-    if not active_tasks:
-        return []
-    return [
-        "<active-tasks-graph>\n" + "\n".join(active_tasks) + "\n</active-tasks-graph>"
-    ]
 
 
 def build_runtime_context_provider(
