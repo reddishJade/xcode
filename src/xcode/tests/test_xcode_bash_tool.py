@@ -11,7 +11,6 @@ from xcode.harness.observability._safety_backstop import SafetyBackstopPolicyEva
 from xcode.harness.observability.permission_model import ActionExtractor
 
 
-
 class XcodeBashToolTests(unittest.TestCase):
     def test_bash_safe_command_does_not_require_hitl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

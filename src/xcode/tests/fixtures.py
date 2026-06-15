@@ -9,6 +9,7 @@ from xcode.ai.events import ProviderEvent
 from xcode.ai.providers.faux import FauxProvider
 from xcode.harness.execution_env import ExecutionResult
 
+
 class MockExecutionEnv:
     """测试桩实现，记录调用并返回预设结果。"""
 

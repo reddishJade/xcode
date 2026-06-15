@@ -63,9 +63,7 @@ def migrate_project(project_root: Path) -> None:
         if decision not in ("allow", "deny"):
             continue
 
-        action = ActionExtractor().extract(
-            tool, {"path": input_contains or ""}
-        )
+        action = ActionExtractor().extract(tool, {"path": input_contains or ""})
         if not action.targets:
             skipped.append({"rule": str(item), "reason": "no extractable target"})
             continue

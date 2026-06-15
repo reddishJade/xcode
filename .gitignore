@@ -5,6 +5,7 @@
 .codex/
 .env
 .local/
+.mypy_cache/
 .pytest_cache/
 .ruff_cache/
 .team/

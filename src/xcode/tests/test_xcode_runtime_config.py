@@ -45,6 +45,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             self.assertEqual(config.agent.max_steps, 20)
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_explicit_default_valued_field_survives_merge(self) -> None:
@@ -53,9 +54,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
         try:
             config_path = root / "xcode.config.json"
             config_path.write_text(
-                '{"provider":{"model_profiles":{'
-                '"main":{"thinking":true}'
-                '}}}',
+                '{"provider":{"model_profiles":{"main":{"thinking":true}}}}',
                 encoding="utf-8",
             )
             local_path = root / ".local" / "settings.json"
@@ -71,6 +70,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             self.assertEqual(config.agent.max_steps, 20)
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_missing_key_does_not_override_lower_layer(self) -> None:
@@ -98,6 +98,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             )
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_env_override_still_wins(self) -> None:
@@ -114,6 +115,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             self.assertTrue(config.security.sandbox_mode)
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_unknown_key_handling_unchanged(self) -> None:
@@ -130,6 +132,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             self.assertIsNotNone(config)
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_nested_profile_merge_preserves_explicit_default(self) -> None:
@@ -140,7 +143,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             config_path.write_text(
                 '{"provider":{"model_profiles":{'
                 '"main":{"transport":"deepseek_chat","reasoning_effort":null}'
-                '}}}',
+                "}}}",
                 encoding="utf-8",
             )
             config = discover_runtime_config(root)
@@ -150,6 +153,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             self.assertIsNone(profile.reasoning_effort)
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
 
