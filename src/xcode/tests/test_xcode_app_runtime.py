@@ -85,6 +85,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 "ls",
                 "bash",
                 "search_tools",
+                "load_skill",
             },
         )
 

@@ -6,13 +6,11 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
 import unittest
-from unittest import mock
 
 from xcode.agent.agent_loop import run_agent_loop
 from xcode.agent.config import AgentContext, AgentLoopConfig
@@ -34,7 +32,6 @@ from xcode.agent.context_collector import (
     NotesCollector,
     ProjectManifestCollector,
     RecentValidationCollector,
-    SkillCollector,
     TaskStateCollector,
 )
 from xcode.agent.messages import (
@@ -48,6 +45,11 @@ from xcode.agent.protocols import AgentToolResult, ToolExecutionMode
 from xcode.agent.types import TextContent
 from xcode.ai.events import Message, TextDelta, ToolCall, ToolCallEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.harness.skills_registry import (
+    SkillIndexCollector,
+    SkillRegistry,
+    build_skill_search_dirs,
+)
 
 
 # ── 辅助 Provider ──
@@ -2064,369 +2066,137 @@ class TestNotesCollector(unittest.TestCase):
             self.assertNotIn("huge", blocks[0].content)
 
 
-class TestSkillCollector(unittest.TestCase):
-    """测试 SkillCollector 多路径搜索与去重优先级。"""
+class TestSkillIndexCollector(unittest.TestCase):
+    """Test SkillIndexCollector summary injection."""
 
-    def _create_skill(
-        self,
-        base: Path,
-        subdir: str,
-        rel_path: str,
-        content: str,
-    ) -> Path:
-        """在 base/subdir/skills/ 下创建技能文件。"""
-        full_dir = base / subdir / "skills"
-        full_dir.mkdir(parents=True, exist_ok=True)
-        file_path = full_dir / rel_path
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8")
-        return file_path
+    def _make_skill(self, base: Path, *parts: str, content: str) -> Path:
+        skill_dir = base.joinpath(*parts)
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        path = skill_dir / "SKILL.md"
+        path.write_text(content, encoding="utf-8")
+        return path
 
-    # ── 目录缺失 ──
+    def _collect_text(self, collector: SkillIndexCollector) -> str:
+        blocks = collector.collect(object())
+        if not blocks:
+            return ""
+        return blocks[0].content
 
     def test_missing_all_skill_dirs_returns_empty(self) -> None:
-        """所有技能目录缺失时返回空列表。"""
+        registry = SkillRegistry()
+        collector = SkillIndexCollector(registry)
+        blocks = collector.collect(object())
+        self.assertEqual(len(blocks), 0)
+
+    def test_summary_block_contains_names_and_descriptions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 0)
-
-    # ── 各路径独立加载 ──
-
-    def test_project_xcode_skills_load(self) -> None:
-        """项目 .xcode/skills/ 下的技能文件被加载。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._create_skill(root, ".xcode", "review.md", "# Xcode Skill")
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            self.assertIn("Xcode Skill", blocks[0].content)
-
-    def test_project_agents_skills_load(self) -> None:
-        """项目 .agents/skills/ 下的技能文件被加载。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._create_skill(root, ".agents", "review.md", "# Agents Skill")
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            self.assertIn("Agents Skill", blocks[0].content)
-
-    def test_global_xcode_skills_load(self) -> None:
-        """用户 ~/.xcode/skills/ 下的技能文件被加载。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._create_skill(root, ".xcode", "global.md", "# Global Xcode")
-            with mock.patch.object(Path, "home", return_value=root):
-                collector = SkillCollector(Path(tmp) / "nonexistent")
-                blocks = collector.collect(ContextCollectionInput())
-                self.assertEqual(len(blocks), 1)
-                self.assertIn("Global Xcode", blocks[0].content)
-
-    def test_global_agents_skills_load(self) -> None:
-        """用户 ~/.agents/skills/ 下的技能文件被加载。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._create_skill(root, ".agents", "global.md", "# Global Agents")
-            with mock.patch.object(Path, "home", return_value=root):
-                collector = SkillCollector(Path(tmp) / "nonexistent")
-                blocks = collector.collect(ContextCollectionInput())
-                self.assertEqual(len(blocks), 1)
-                self.assertIn("Global Agents", blocks[0].content)
-
-    # ── 优先级与去重 ──
-
-    def test_path_priority_deterministic(self) -> None:
-        """输出按 (搜索路径优先级, 相对路径) 确定性排序。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            # 项目级路径（优先级 0 和 1）
-            self._create_skill(root, ".xcode", "a.md", "# Project Xcode A")
-            self._create_skill(root, ".agents", "b.md", "# Project Agents B")
-            # 全局路径（优先级 2 和 3）
-            home = root / "home"
-            self._create_skill(home, ".xcode", "c.md", "# Home Xcode C")
-            self._create_skill(home, ".agents", "d.md", "# Home Agents D")
-
-            with mock.patch.object(Path, "home", return_value=home):
-                collector = SkillCollector(root)
-                blocks = collector.collect(ContextCollectionInput())
-                self.assertEqual(len(blocks), 1)
-                content = blocks[0].content
-                a_pos = content.index("Project Xcode A")
-                b_pos = content.index("Project Agents B")
-                c_pos = content.index("Home Xcode C")
-                d_pos = content.index("Home Agents D")
-                self.assertLess(a_pos, b_pos)
-                self.assertLess(b_pos, c_pos)
-                self.assertLess(c_pos, d_pos)
-
-    def test_project_overrides_global(self) -> None:
-        """同一相对路径，项目级技能覆盖全局技能。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            home = root / "home"
-            self._create_skill(root, ".xcode", "review.md", "PROJECT VERSION")
-            self._create_skill(home, ".xcode", "review.md", "GLOBAL VERSION")
-            with mock.patch.object(Path, "home", return_value=home):
-                collector = SkillCollector(root)
-                blocks = collector.collect(ContextCollectionInput())
-                self.assertEqual(len(blocks), 1)
-                self.assertIn("PROJECT VERSION", blocks[0].content)
-                self.assertNotIn("GLOBAL VERSION", blocks[0].content)
-
-    def test_xcode_overrides_agents(self) -> None:
-        """同一相对路径，.xcode 技能覆盖 .agents 技能。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._create_skill(root, ".xcode", "review.md", "XCODE VERSION")
-            self._create_skill(root, ".agents", "review.md", "AGENTS VERSION")
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            self.assertIn("XCODE VERSION", blocks[0].content)
-            self.assertNotIn("AGENTS VERSION", blocks[0].content)
-
-    # ── 嵌套路径 ──
-
-    def test_nested_relative_paths_sorted(self) -> None:
-        """嵌套相对路径按字符串序确定性排列。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._create_skill(root, ".xcode", "a/b/c.md", "# Nested C")
-            self._create_skill(root, ".xcode", "a.md", "# Flat A")
-            self._create_skill(root, ".xcode", "b.md", "# Flat B")
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            content = blocks[0].content
-            a_pos = content.index("Flat A")
-            c_pos = content.index("Nested C")
-            b_pos = content.index("Flat B")
-            self.assertLess(a_pos, c_pos)
-            self.assertLess(c_pos, b_pos)
-
-    # ── 文件过滤 ──
-
-    def test_non_text_files_ignored(self) -> None:
-        """忽略非 .md/.mdx/.txt 后缀的文件。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._create_skill(root, ".xcode", "valid.md", "# Valid Skill")
-            self._create_skill(root, ".xcode", "data.bin", "binary")
-            self._create_skill(root, ".xcode", "script.py", "print('hi')")
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            self.assertIn("Valid Skill", blocks[0].content)
-            self.assertNotIn("binary", blocks[0].content)
-            self.assertNotIn("print", blocks[0].content)
-
-    def test_path_traversal_skipped(self) -> None:
-        """符号链接到搜索目录之外的文件被跳过。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            skill_dir = root / ".xcode" / "skills"
-            skill_dir.mkdir(parents=True)
-            outside = root / "outside.txt"
-            outside.write_text("outside content", encoding="utf-8")
-            link = skill_dir / "bad-link.md"
-            os.symlink(outside, link)
-            (skill_dir / "good.md").write_text("# Good Skill", encoding="utf-8")
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            self.assertIn("Good Skill", blocks[0].content)
-            self.assertNotIn("outside", blocks[0].content)
-
-    # ── 大小治理 ──
-
-    def test_oversized_skill_skipped(self) -> None:
-        """超大技能文件被跳过。"""
-        from xcode.agent.context_collector import SKILLS_MAX_FILE_BYTES
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._create_skill(root, ".xcode", "small.md", "# Small Skill")
-            self._create_skill(
-                root, ".xcode", "huge.md", "x" * (SKILLS_MAX_FILE_BYTES + 1)
+            self._make_skill(
+                root,
+                ".xcode",
+                "skills",
+                "review",
+                content=(
+                    "---\nname: code-review\ndescription: Review code changes.\n---\n\nFull body."
+                ),
             )
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            self.assertIn("Small Skill", blocks[0].content)
-            self.assertNotIn("huge", blocks[0].content)
+            registry = SkillRegistry()
+            registry.discover(build_skill_search_dirs(root))
+            collector = SkillIndexCollector(registry)
+            text = self._collect_text(collector)
+            self.assertIn("code-review", text)
+            self.assertIn("Review code changes.", text)
+            self.assertNotIn("Full body", text)
 
-    def test_bounded_output(self) -> None:
-        """总输出受 SKILLS_MAX_BYTES 限制。"""
-        from xcode.agent.context_collector import SKILLS_MAX_BYTES
-
+    def test_available_skills_xml_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for name in ("big1.md", "big2.md", "big3.md"):
-                self._create_skill(root, ".xcode", name, "line\n" * 5000)
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            self.assertLessEqual(
-                len(blocks[0].content.encode("utf-8")),
-                SKILLS_MAX_BYTES,
+            self._make_skill(
+                root,
+                ".xcode",
+                "skills",
+                "test",
+                content=("---\nname: test-skill\ndescription: Test.\n---\n\nBody."),
             )
+            registry = SkillRegistry()
+            registry.discover(build_skill_search_dirs(root))
+            collector = SkillIndexCollector(registry)
+            text = self._collect_text(collector)
+            self.assertIn("<available-skills>", text)
+            self.assertIn("</available-skills>", text)
 
-    def test_truncation_marker(self) -> None:
-        """超出预算时包含完整 <skills-truncated> 标记。"""
+    def test_hidden_skills_excluded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self._create_skill(root, ".xcode", "large.md", "big\n" * 10000)
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            self.assertIn("<skills-truncated>", blocks[0].content)
-            self.assertIn("</skills-truncated>", blocks[0].content)
-
-    # ── 块元数据 ──
+            self._make_skill(
+                root,
+                ".xcode",
+                "skills",
+                "visible",
+                content=(
+                    "---\nname: visible-skill\ndescription: Visible.\n---\n\nBody."
+                ),
+            )
+            self._make_skill(
+                root,
+                ".xcode",
+                "skills",
+                "hidden",
+                content=(
+                    "---\nname: hidden-skill\ndescription: Hidden.\nhidden: true\n---\n\nBody."
+                ),
+            )
+            registry = SkillRegistry()
+            registry.discover(build_skill_search_dirs(root))
+            collector = SkillIndexCollector(registry)
+            text = self._collect_text(collector)
+            self.assertIn("visible-skill", text)
+            self.assertNotIn("hidden-skill", text)
 
     def test_block_metadata(self) -> None:
-        """块元数据: source=SKILL, target=USER_CONTEXT, priority=MEDIUM。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self._create_skill(root, ".xcode", "skill.md", "# Skill")
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
+            self._make_skill(
+                root,
+                ".xcode",
+                "skills",
+                "test",
+                content=("---\nname: test-skill\ndescription: Test.\n---\n\nBody."),
+            )
+            registry = SkillRegistry()
+            registry.discover(build_skill_search_dirs(root))
+            collector = SkillIndexCollector(registry)
+            blocks = collector.collect(object())
             self.assertEqual(len(blocks), 1)
             self.assertEqual(blocks[0].source, ContextBlockSource.SKILL)
             self.assertEqual(blocks[0].target, ContextBlockTarget.USER_CONTEXT)
             self.assertEqual(blocks[0].priority, ContextPriority.MEDIUM)
 
-    # ── 集成 ──
-
-    def test_skill_as_user_message_after_system(self) -> None:
-        """SKILL 块作为 UserMessage 注入，位于 SystemMessage 之后。"""
-        provider = CaptureProvider()
-        registry = ContextCollectorRegistry()
-        registry.register(
-            FakeCollector(
-                [
-                    ContextBlock(
-                        source=ContextBlockSource.SKILL,
-                        target=ContextBlockTarget.USER_CONTEXT,
-                        priority=ContextPriority.MEDIUM,
-                        content="--- review.md ---\n# Skill\nDo the thing.",
-                    ),
-                ]
-            )
-        )
-
-        config = AgentLoopConfig(
-            provider=provider,
-            convert_to_llm=convert_to_llm,
-            context_collectors=registry,
-            context_assembler=DefaultContextAssembler(),
-            max_steps=1,
-        )
-        import asyncio
-
-        asyncio.run(
-            run_agent_loop(
-                prompts=[UserMessage(content="hello")],
-                context=AgentContext(
-                    messages=[
-                        SystemMessage(content="identity prompt"),
-                    ]
-                ),
-                config=config,
-                emit=lambda _e: None,
-            )
-        )
-        self.assertEqual(len(provider.captured_messages), 1)
-        msgs = provider.captured_messages[0]
-        roles = [m["role"] for m in msgs]
-        self.assertEqual(roles, ["system", "user", "user"])
-        combined = " ".join(str(m.get("content", "") or "") for m in msgs)
-        self.assertIn("[skill]", combined)
-        self.assertIn("Do the thing", combined)
-
     def test_existing_collectors_still_work(self) -> None:
-        """现有 collector 在 SkillCollector 存在时仍正常工作。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self._create_skill(root, ".xcode", "my-skill.md", "# My Skill")
+            self._make_skill(
+                root,
+                ".xcode",
+                "skills",
+                "my-skill",
+                content=("---\nname: my-skill\ndescription: My skill.\n---\n\nBody."),
+            )
             notes_dir = root / ".local" / "notes"
             notes_dir.mkdir(parents=True)
             (notes_dir / "my-note.md").write_text("My Note", encoding="utf-8")
 
-            registry = ContextCollectorRegistry()
-            registry.register(SkillCollector(root))
-            registry.register(NotesCollector(root))
+            registry = SkillRegistry()
+            registry.discover(build_skill_search_dirs(root))
+            collector_registry = ContextCollectorRegistry()
+            collector_registry.register(SkillIndexCollector(registry))
+            collector_registry.register(NotesCollector(root))
             input_ = ContextCollectionInput(project_root=root)
-            blocks = registry.collect(input_)
+            blocks = collector_registry.collect(input_)
             self.assertEqual(len(blocks), 2)
             sources = {b.source for b in blocks}
             self.assertIn(ContextBlockSource.SKILL, sources)
             self.assertIn(ContextBlockSource.NOTES, sources)
-
-    # ── 目录遍历边界 ──
-
-    def test_traversal_respects_max_depth(self) -> None:
-        """超过最大深度的文件不被遍历。"""
-        from xcode.agent.context_collector import SKILLS_MAX_DEPTH
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            skill_dir = root / ".xcode" / "skills"
-            deepest_allowed = skill_dir
-            for _ in range(SKILLS_MAX_DEPTH):
-                deepest_allowed = deepest_allowed / "sub"
-            deepest_allowed.mkdir(parents=True)
-            (deepest_allowed / "within.md").write_text(
-                "# Within depth", encoding="utf-8"
-            )
-            too_deep = deepest_allowed / "sub"
-            too_deep.mkdir(parents=True)
-            (too_deep / "beyond.md").write_text("# Beyond depth", encoding="utf-8")
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            self.assertIn("Within depth", blocks[0].content)
-            self.assertNotIn("Beyond depth", blocks[0].content)
-
-    def test_traversal_respects_max_files(self) -> None:
-        """超过最大文件数时停止遍历。"""
-        from xcode.agent.context_collector import SKILLS_MAX_FILES
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            skill_dir = root / ".xcode" / "skills"
-            skill_dir.mkdir(parents=True)
-            for i in range(SKILLS_MAX_FILES + 10):
-                (skill_dir / f"skill_{i:04d}.md").write_text(
-                    f"# Skill {i}", encoding="utf-8"
-                )
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            count = blocks[0].content.count("--- skill_")
-            self.assertLessEqual(count, SKILLS_MAX_FILES)
-
-    def test_symlink_directory_not_traversed(self) -> None:
-        """符号链接目录不被遍历。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            skill_dir = root / ".xcode" / "skills"
-            skill_dir.mkdir(parents=True)
-            (skill_dir / "real.md").write_text("# Real Skill", encoding="utf-8")
-            outside_dir = root / "outside"
-            outside_dir.mkdir()
-            (outside_dir / "escape.md").write_text("# Escape", encoding="utf-8")
-            link_dir = skill_dir / "link"
-            os.symlink(outside_dir, link_dir)
-            collector = SkillCollector(root)
-            blocks = collector.collect(ContextCollectionInput())
-            self.assertEqual(len(blocks), 1)
-            self.assertIn("Real Skill", blocks[0].content)
-            self.assertNotIn("Escape", blocks[0].content)
 
 
 def _git_init(root: Path) -> None:

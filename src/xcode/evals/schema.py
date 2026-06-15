@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-EvalMode = Literal["act", "plan", "review"]
+EvalMode = Literal["act", "plan", "build"]
 
 
 @dataclass(frozen=True)

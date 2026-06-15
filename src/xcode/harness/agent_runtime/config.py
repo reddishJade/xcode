@@ -20,7 +20,6 @@ from ...agent.context_collector import (
     NotesCollector,
     ProjectManifestCollector,
     RecentValidationCollector,
-    SkillCollector,
     TaskStateCollector,
 )
 from ...agent.history import apply_request_hygiene
@@ -72,6 +71,7 @@ class AgentRuntimeConfig:
     fallback_provider: StreamProvider | None = None
     project_root: Path | None = None
     request_hygiene: RequestHygieneConfig | None = None
+    skill_registry: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +209,7 @@ def build_loop_config(
     mode_state: ExecutionModeState,
     get_prompt_version: Callable[[], str],
     project_root: Path | None = None,
+    skill_registry: Any | None = None,
 ) -> AgentLoopConfig:
     gate_snapshot = gate.snapshot_for(registry)
 
@@ -262,10 +263,16 @@ def build_loop_config(
             )
         return None
 
-    # 构建上下文收集器 + 组装器（项目指令从旧 pipeline 迁移到此处）
+    # 构建上下文收集器 + 组装器
     registry_: ContextCollectorRegistry | None = None
     assembler: DefaultContextAssembler | None = None
     if project_root is not None:
+        from xcode.harness.skills_registry import (
+            SkillIndexCollector,
+            SkillRegistry,
+            build_skill_search_dirs,
+        )
+
         registry_ = ContextCollectorRegistry()
         registry_.register(ProjectManifestCollector(project_root))
         registry_.register(ActiveDiffCollector(project_root))
@@ -274,7 +281,11 @@ def build_loop_config(
         if task_provider is not None:
             registry_.register(TaskStateCollector(task_provider))
         registry_.register(NotesCollector(project_root))
-        registry_.register(SkillCollector(project_root))
+        sr = skill_registry
+        if sr is None:
+            sr = SkillRegistry()
+            sr.discover(build_skill_search_dirs(project_root))
+        registry_.register(SkillIndexCollector(sr))
         assembler = DefaultContextAssembler()
 
     return AgentLoopConfig(

@@ -104,7 +104,7 @@ class SecurityRuntimeConfig:
 
 @dataclass
 class ToolsRuntimeConfig:
-    enabled_groups: tuple[str, ...] = ("core",)
+    enabled_groups: tuple[str, ...] = ("core", "skills")
     shell: str = "auto"
 
 

@@ -157,7 +157,7 @@ def build_app(
 
         plugins_data = PluginManager(project_root).scan_and_load()
 
-    registry, shell_spec, closers = _assembly.build_tool_registry(
+    registry, shell_spec, closers, skill_registry = _assembly.build_tool_registry(
         project_root=project_root,
         llm=providers.llm,
         llm_profiles=providers.llms,
@@ -186,6 +186,7 @@ def build_app(
         cancellation_token=infra.cancellation_token,
         fallback_provider=fallback_provider,
         plugins_hooks=plugins_data.get("hooks"),
+        skill_registry=skill_registry,
     )
 
     opt_in_services = _assembly.load_opt_in_services(

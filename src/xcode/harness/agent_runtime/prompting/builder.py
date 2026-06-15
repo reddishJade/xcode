@@ -12,7 +12,7 @@
 - 验证失败 → RecentValidationCollector
 - 任务/计划状态 → TaskStateCollector
 - 笔记文件 → NotesCollector
-- 技能文件 → SkillCollector
+- 技能摘要 → SkillIndexCollector
 
 关于 git preflight 与 ActiveDiffCollector 的重叠：
 - 本模块的 git_preflight 提供工作区快照（status、last commit、diff --stat）

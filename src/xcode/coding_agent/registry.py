@@ -21,6 +21,7 @@ from xcode.coding_agent.tools import (
 
 if TYPE_CHECKING:
     from xcode.harness.agent_runtime import ContextualRetrievalState
+    from xcode.harness.skills_registry import SkillRegistry
     from xcode.coding_agent.tools import ShellSpec
 
 
@@ -31,6 +32,7 @@ def build_project_scoped_registry(
     shell_spec: ShellSpec,
     cancel_event: threading.Event | None = None,
     env: ExecutionEnv | None = None,
+    skill_registry: SkillRegistry | None = None,
 ) -> tuple[ToolSpec, ...]:
     registry: tuple[ToolSpec, ...] = ()
     registry += build_file_tools(
@@ -45,4 +47,8 @@ def build_project_scoped_registry(
             env=env,
         ),
     )
+    if "skills" in enabled and skill_registry is not None:
+        from xcode.harness.skills_registry import build_load_skill_tool
+
+        registry += (build_load_skill_tool(skill_registry),)
     return tuple(t for t in registry if t.group in enabled)

@@ -11,7 +11,7 @@ import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from xcode.harness.execution_env import ExecutionEnv
 
@@ -237,12 +237,23 @@ def build_tool_registry(
     env: ExecutionEnv | None = None,
     skills_dir: Path | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
-) -> tuple[tuple[ToolSpec, ...], ShellSpec, tuple[Callable[[], None], ...]]:
+) -> tuple[tuple[ToolSpec, ...], ShellSpec, tuple[Callable[[], None], ...], Any]:
     from xcode.coding_agent.tools import detect_shell
 
     enabled = effective_enabled_groups(runtime_config.tools.enabled_groups)
     closers: list[Callable[[], None]] = []
     shell_spec = detect_shell(runtime_config.tools.shell)
+
+    if "skills" in enabled:
+        from xcode.harness.skills_registry import (
+            SkillRegistry,
+            build_skill_search_dirs,
+        )
+
+        skill_registry: SkillRegistry | None = SkillRegistry()
+        skill_registry.discover(build_skill_search_dirs(project_root))
+    else:
+        skill_registry = None
 
     registry = build_project_scoped_registry(
         project_root=project_root,
@@ -251,6 +262,7 @@ def build_tool_registry(
         shell_spec=shell_spec,
         cancel_event=cancel_event,
         env=env,
+        skill_registry=skill_registry,
     )
     registry = _extend_registry_with_features(registry, project_root, enabled)
 
@@ -273,7 +285,7 @@ def build_tool_registry(
     )
     closers.extend(subagent_closers)
     registry += subagent_tools
-    return registry, shell_spec, tuple(closers)
+    return registry, shell_spec, tuple(closers), skill_registry
 
 
 def _extend_registry_with_features(
@@ -457,6 +469,7 @@ def build_agent(
     fallback_provider: ModelProvider | None = None,
     plugins_hooks: dict[str, list[Callable]] | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
+    skill_registry: Any = None,
 ) -> StructuredAgent:
     hook_manager = None
     if contextual_state is not None:
@@ -506,6 +519,7 @@ def build_agent(
             fallback_provider=fallback_provider,
             project_root=project_root,
             request_hygiene=runtime_config.request_hygiene,
+            skill_registry=skill_registry,
         ),
     )
 

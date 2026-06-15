@@ -74,6 +74,7 @@ class StructuredAgent:
                 provider, runtime.fallback_provider
             )
         self.project_root = runtime.project_root
+        self._runtime = runtime
         self.registry = registry
         self.tool_map = {t.name: t for t in registry}
         self.config = config
@@ -228,6 +229,7 @@ class StructuredAgent:
             mode_state=self._mode,
             get_prompt_version=_get_prompt_version,
             project_root=self.project_root,
+            skill_registry=self._runtime.skill_registry,
         )
 
         _emit_hook(

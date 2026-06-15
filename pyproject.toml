@@ -24,6 +24,7 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "filetype>=1.2.0",
     "pathspec>=0.12.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
