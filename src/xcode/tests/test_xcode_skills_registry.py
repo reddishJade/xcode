@@ -27,7 +27,7 @@ from xcode.harness.observability import (
     PermissionEngine,
     PermissionEngineConfig,
     PermissionPolicy,
-    PermissionRule,
+    StaticPermission,
 )
 
 
@@ -386,7 +386,7 @@ class TestLoadSkillTool(unittest.TestCase):
             registry.discover(build_skill_search_dirs(root))
             tool = build_load_skill_tool(registry)
 
-            policy = PermissionPolicy((PermissionRule("load_skill", "deny"),))
+            policy = PermissionPolicy((StaticPermission("load_skill", "deny"),))
             engine = PermissionEngine(PermissionEngineConfig(static_policy=policy))
             result = engine.decide(
                 "load_skill",

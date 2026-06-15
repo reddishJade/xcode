@@ -8,7 +8,7 @@ from xcode.harness.observability import (
     PermissionEngine,
     PermissionEngineConfig,
     PermissionPolicy,
-    PermissionRule,
+    StaticPermission,
 )
 
 
@@ -36,7 +36,7 @@ class XcodeSkillCoreTests(unittest.TestCase):
 
         engine2 = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("danger", "ask"),)),
+                static_policy=PermissionPolicy((StaticPermission("danger", "ask"),)),
             )
         )
         result2 = engine2.decide(
@@ -52,7 +52,7 @@ class XcodeSkillCoreTests(unittest.TestCase):
         # 静态 ask + allow callback
         engine3 = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("danger", "ask"),)),
+                static_policy=PermissionPolicy((StaticPermission("danger", "ask"),)),
             )
         )
         result3 = engine3.decide(

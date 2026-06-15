@@ -20,8 +20,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import json
+import re
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
 PermissionAccess = Literal["read", "write", "execute", "network"]
@@ -30,6 +31,17 @@ GrantScope = Literal["once", "session", "permanent"]
 PermissionDecisionV2 = Literal["allow", "ask", "deny"]
 TargetKind = Literal["path", "command", "domain", "mcp", "subagent"]
 type GrantRecordData = dict[str, object]
+
+
+@dataclass(frozen=True)
+class StaticPermission:
+    tool: str
+    decision: PermissionDecisionV2
+    target: str | None = None
+    target_type: Literal["path", "command", "mcp", "subagent", None] = None
+    input_contains: str | None = None
+    input_prefix: str | None = None
+    input_regex: str | None = None
 
 
 @dataclass(frozen=True)
@@ -318,14 +330,6 @@ class PolicyEvaluator(Protocol):
     def evaluate(self, action: Action) -> tuple[Constraint, ...]: ...
 
 
-class StaticPermissionPolicy(Protocol):
-    """legacy 静态权限策略的最小接口。"""
-
-    def decide(self, tool_name: str, action_input: str) -> PermissionDecisionV2 | None:
-        """按 legacy 静态规则优先级返回权限决策。"""
-        ...
-
-
 def create_grant_record(
     action: Action,
     target: Target,
@@ -584,44 +588,72 @@ class ModePolicyEvaluator:
 
 
 class StaticPolicyEvaluator:
-    """把 legacy 静态规则和 allowlist 模式转换为约束。"""
+    """把静态权限规则通过 last-match-wins 转换为约束。
+
+    Rules 按声明顺序遍历，最后一个匹配的 rule 的 decision 生效。
+    如果无规则匹配且设置了 global_default，发出一个 global_default 约束。
+    如果无规则匹配且无 global_default，不发出约束。
+    """
 
     def __init__(
         self,
-        policy: StaticPermissionPolicy | None = None,
+        rules: tuple[StaticPermission, ...] = (),
         *,
-        allowlist_mode: bool = False,
+        global_default: PermissionDecisionV2 | None = None,
         action_input: str | None = None,
     ) -> None:
-        self._policy = policy
-        self._allowlist_mode = allowlist_mode
+        self._rules = rules
+        self._global_default = global_default
         self._action_input = action_input
 
     def evaluate(self, action: Action) -> tuple[Constraint, ...]:
         action_input = self._serialized_action_input(action)
-        decision = self._policy_decision(action, action_input)
+        decision = self._match_rules(action, action_input)
         if decision is not None:
             return self._constraints_for_action(
                 action,
                 decision,
                 f"static permission rule returned {decision} for {action.tool}",
             )
-
-        if self._allowlist_mode:
+        gd = self._global_default
+        if gd is not None:
             return self._constraints_for_action(
                 action,
-                "ask",
-                f"allowlist mode has no allow rule for {action.tool}",
+                cast("PermissionDecisionV2", gd),
+                f"no static rule matched; global_default={gd}",
             )
-
         return ()
 
-    def _policy_decision(
+    def _match_rules(
         self, action: Action, action_input: str
     ) -> PermissionDecisionV2 | None:
-        if self._policy is None:
-            return None
-        return self._policy.decide(action.tool, action_input)
+        last: PermissionDecisionV2 | None = None
+        for rule in self._rules:
+            if rule.tool != action.tool and rule.tool != "*":
+                continue
+            if (
+                rule.input_contains is not None
+                and rule.input_contains not in action_input
+            ):
+                continue
+            if rule.input_prefix is not None and not action_input.startswith(
+                rule.input_prefix
+            ):
+                continue
+            if rule.input_regex is not None and not re.search(
+                rule.input_regex, action_input
+            ):
+                continue
+            if rule.target is not None:
+                if not any(target.value == rule.target for target in action.targets):
+                    continue
+            if rule.target_type is not None:
+                if not any(
+                    target.kind == rule.target_type for target in action.targets
+                ):
+                    continue
+            last = rule.decision
+        return last
 
     def _serialized_action_input(self, action: Action) -> str:
         if self._action_input is not None:
@@ -790,7 +822,6 @@ class StructuredBoundaryPolicyEvaluator:
         return candidate.relative_to(resolved_root).as_posix() or "."
 
 
-
 class _BoundaryEscapeError(ValueError):
     """路径解析后离开工作区边界。"""
 
@@ -803,8 +834,7 @@ def evaluate_policy_constraints(
     action: Action,
     *,
     execution_decision: PermissionDecisionV2 | None = None,
-    static_policy: StaticPermissionPolicy | None = None,
-    allowlist_mode: bool = False,
+    static_policy: Any = None,
     action_input: str | None = None,
     boundary_context: BoundaryContext | None = None,
     safety_backstop_enabled: bool = False,
@@ -812,14 +842,24 @@ def evaluate_policy_constraints(
 ) -> tuple[Constraint, ...]:
     """运行已接入的 shadow policy evaluators 和 hook constraint providers。
 
+    static_policy: PermissionPolicy | None — 携带 rules 和 global_default。
+
     Hook constraint providers 在所有内置 evaluator 之后执行，
     产生的 constraint 进入同一池由 resolver 按 standard priority 处理。
     """
-    evaluators: list[PolicyEvaluator] = [
+    rules: tuple[StaticPermission, ...] = ()
+    global_default: PermissionDecisionV2 | None = None
+    if static_policy is not None:
+        rules = static_policy.rules
+        gd = static_policy.global_default
+        if gd is not None:
+            global_default = cast("PermissionDecisionV2", gd)
+
+    evaluators: list[Any] = [
         ModePolicyEvaluator(execution_decision),
         StaticPolicyEvaluator(
-            static_policy,
-            allowlist_mode=allowlist_mode,
+            rules,
+            global_default=global_default,
             action_input=action_input,
         ),
         StructuredBoundaryPolicyEvaluator(boundary_context),

@@ -9,7 +9,7 @@ from xcode.harness.observability.permissions import (
     PermissionEngine,
     PermissionEngineConfig,
     PermissionPolicy,
-    PermissionRule,
+    StaticPermission,
 )
 from xcode.experimental.plugins import PluginManager
 from xcode.experimental.mcp import build_mcp_tools
@@ -74,13 +74,13 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
         engine = PermissionEngine(
             PermissionEngineConfig(
                 static_policy=PermissionPolicy(
-                    (
-                        PermissionRule("read_file", "allow"),
-                        PermissionRule("bash", "deny"),
-                    )
+                    rules=(
+                        StaticPermission("read_file", "allow"),
+                        StaticPermission("bash", "deny"),
+                    ),
+                    global_default="ask",
                 ),
                 restricted_dirs=("/private/secrets", "C:/Windows"),
-                allowlist_mode=True,
             )
         )
 
@@ -107,7 +107,9 @@ class XcodeMcpOverrideSecurityTests(unittest.TestCase):
     def test_permission_engine_restricted_dirs_override_allowed(self) -> None:
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("read_file", "allow"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission("read_file", "allow"),)
+                ),
                 restricted_dirs=("secrets",),
             )
         )

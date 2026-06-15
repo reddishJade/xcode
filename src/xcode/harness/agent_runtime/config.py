@@ -52,7 +52,6 @@ class GateConfig:
     approval_callback: ApprovalCallback | None = None
     permission_policy: PermissionPolicy | None = None
     restricted_dirs: tuple[str, ...] = ()
-    allowlist_mode: bool = False
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
     hook_manager: HookManager | None = None
     audit_logger: Callable[[AuditRecord], None] | None = None

@@ -10,7 +10,7 @@ from xcode.harness.observability import (
     PermissionEngine,
     PermissionEngineConfig,
     PermissionPolicy,
-    PermissionRule,
+    StaticPermission,
 )
 from xcode.harness.skills import ToolSpec
 from xcode.harness.agent_runtime import StructuredAgent
@@ -44,7 +44,7 @@ class XcodePermissionsTests(unittest.TestCase):
         tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("echo", "deny"),)),
+                static_policy=PermissionPolicy((StaticPermission("echo", "deny"),)),
             )
         )
         result = engine.decide(
@@ -69,7 +69,7 @@ class XcodePermissionsTests(unittest.TestCase):
         tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("echo", "ask"),)),
+                static_policy=PermissionPolicy((StaticPermission("echo", "ask"),)),
             )
         )
         result = engine.decide(
@@ -87,7 +87,7 @@ class XcodePermissionsTests(unittest.TestCase):
         )
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("danger", "allow"),)),
+                static_policy=PermissionPolicy((StaticPermission("danger", "allow"),)),
             )
         )
         result = engine.decide(
@@ -96,13 +96,16 @@ class XcodePermissionsTests(unittest.TestCase):
         self.assertFalse(result.blocked)
         self.assertEqual(tool.handler({"input": "go"}), "go")
 
-    def test_permission_policy_deny_overrides_allow_regardless_of_order(self) -> None:
+    def test_static_last_match_wins(self) -> None:
         rules = (
-            PermissionRule("bash", "allow"),
-            PermissionRule("*", "deny"),
+            StaticPermission("bash", "allow"),
+            StaticPermission("*", "deny"),
         )
         policy = PermissionPolicy(rules)
-        self.assertEqual(policy.decide("bash", "anything"), "deny")
+        engine = PermissionEngine(PermissionEngineConfig(static_policy=policy))
+        result = engine.decide("bash", "anything", tool_input={})
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.decision, "deny")
 
     def test_permission_engine_restricted_dirs_deny(self) -> None:
         engine = PermissionEngine(
@@ -130,7 +133,7 @@ class XcodePermissionsTests(unittest.TestCase):
             store.add(grant)
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+                static_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
                 session_grant_store=store,
             )
         )
@@ -142,16 +145,22 @@ class XcodePermissionsTests(unittest.TestCase):
         self.assertFalse(result.blocked)
         self.assertEqual(result.matched_rule, "session_grant")
 
-    def test_permission_engine_allowlist_mode(self) -> None:
+    def test_global_default_ask_applies_when_no_rule_matches(self) -> None:
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("read_file", "allow"),)),
-                allowlist_mode=True,
+                static_policy=PermissionPolicy(
+                    rules=(StaticPermission("read_file", "allow"),),
+                    global_default="ask",
+                ),
             )
         )
-        allowed = engine.decide("read_file", '{"path": "a.txt"}')
+        allowed = engine.decide(
+            "read_file", '{"path": "a.txt"}', tool_input={"path": "a.txt"}
+        )
         self.assertFalse(allowed.blocked)
-        unknown = engine.decide("write_file", '{"path": "b.txt"}')
+        unknown = engine.decide(
+            "write_file", '{"path": "b.txt"}', tool_input={"path": "b.txt"}
+        )
         self.assertTrue(unknown.blocked)
         self.assertEqual(unknown.decision, "ask")
 
@@ -187,7 +196,7 @@ class XcodePermissionsTests(unittest.TestCase):
         gate = ToolGate(
             mode_state=mode,
             approval_callback=approve,
-            permission_policy=PermissionPolicy((PermissionRule("bash", "deny"),)),
+            permission_policy=PermissionPolicy((StaticPermission("bash", "deny"),)),
             hook_manager=None,
             audit_logger=None,
             session_id="test",
@@ -236,7 +245,7 @@ class XcodePermissionsTests(unittest.TestCase):
                 ),
             ),
             gate=GateConfig(
-                permission_policy=PermissionPolicy((PermissionRule("echo", "deny"),)),
+                permission_policy=PermissionPolicy((StaticPermission("echo", "deny"),)),
             ),
         )
 
@@ -282,7 +291,7 @@ class XcodePermissionsTests(unittest.TestCase):
         tool = ToolSpec("failing", "Fails.", "text", fail_handler)
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("failing", "ask"),)),
+                static_policy=PermissionPolicy((StaticPermission("failing", "ask"),)),
             )
         )
         result = engine.decide(
@@ -305,7 +314,7 @@ class XcodePermissionsTests(unittest.TestCase):
         )
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+                static_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
             )
         )
         result = engine.decide(
@@ -327,7 +336,7 @@ class XcodePermissionsTests(unittest.TestCase):
         )
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+                static_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
             )
         )
         result = engine.decide(
@@ -434,13 +443,13 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_subagent_static_deny_inherited(self) -> None:
-        """子代理继承 deny_tools 静态策略。"""
+        """子代理继承静态 deny 规则。"""
         mode = ExecutionModeState()
         tool = ToolSpec("bash", "Bash.", "command", lambda v: "", schema=INPUT_SCHEMA)
         gate = ToolGate(
             mode_state=mode,
             approval_callback=None,
-            permission_policy=PermissionPolicy((PermissionRule("bash", "deny"),)),
+            permission_policy=PermissionPolicy((StaticPermission("bash", "deny"),)),
             hook_manager=None,
             audit_logger=None,
             session_id="subagent-test",
@@ -461,8 +470,8 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
         assert result is not None
         self.assertTrue(result.block)
 
-    def test_subagent_allowlist_mode(self) -> None:
-        """子代理继承 allowlist_mode，仅 allowlist 工具可通过。"""
+    def test_subagent_global_default_ask(self) -> None:
+        """子代理使用 global_default="ask"，仅显式 allow 的工具可通过。"""
         mode = ExecutionModeState()
         read_tool = ToolSpec(
             "read_file", "Read.", "path", lambda v: "", schema=INPUT_SCHEMA
@@ -473,8 +482,10 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
         gate = ToolGate(
             mode_state=mode,
             approval_callback=None,
-            permission_policy=PermissionPolicy((PermissionRule("read_file", "allow"),)),
-            allowlist_mode=True,
+            permission_policy=PermissionPolicy(
+                rules=(StaticPermission("read_file", "allow"),),
+                global_default="ask",
+            ),
             hook_manager=None,
             audit_logger=None,
             session_id="subagent-test",
@@ -554,7 +565,7 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
         gate = ToolGate(
             mode_state=mode,
             approval_callback=None,  # 子代理：无回调
-            permission_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
             hook_manager=None,
             audit_logger=None,
             session_id="subagent-test",
@@ -597,7 +608,7 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
         gate = ToolGate(
             mode_state=mode,
             approval_callback=None,
-            permission_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
             hook_manager=None,
             audit_logger=None,
             session_id="subagent-test",
@@ -647,7 +658,7 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             gate = ToolGate(
                 mode_state=mode,
                 approval_callback=None,
-                permission_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+                permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
                 hook_manager=None,
                 audit_logger=None,
                 session_id="subagent-test",
@@ -699,7 +710,7 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
                 ),
             ),
             gate=GateConfig(
-                permission_policy=PermissionPolicy((PermissionRule("echo", "deny"),)),
+                permission_policy=PermissionPolicy((StaticPermission("echo", "deny"),)),
             ),
         )
         result = agent.run("go")
@@ -944,7 +955,7 @@ class ToolGateBoundaryResolutionTests(unittest.TestCase):
         gate = ToolGate(
             mode_state=mode,
             approval_callback=None,
-            permission_policy=PermissionPolicy((PermissionRule("bash", "ask"),)),
+            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
             hook_manager=None,
             audit_logger=None,
             session_id="subagent-test",

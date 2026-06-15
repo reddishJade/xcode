@@ -142,7 +142,6 @@ def _execute_tool_via_gate(
         audit_logger=None,
         session_id="repl",
         restricted_dirs=getattr(agent, "restricted_dirs", ()),
-        allowlist_mode=bool(getattr(agent, "allowlist_mode", False)),
         hook_constraint_providers=getattr(agent, "hook_constraint_providers", ()),
         project_root=getattr(agent, "project_root", None),
     )

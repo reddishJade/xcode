@@ -1,15 +1,6 @@
 """工具执行的 allow/deny/ask 权限策略与 HITL 授权模型。
 
-权限架构：静态策略（配置） + 动态策略（执行模式）+ HITL 授权（会话/持久）
-
-决策优先级（从高到低）：
-0. restricted_dirs — 目录限制，硬阻断
-1. 静态 deny — SecurityRuntimeConfig.deny_tools
-2. 执行模式 deny — Plan/Review 模式禁用
-3. 静态 ask — SecurityRuntimeConfig.ask_tools
-4. HITL 授权 — session/persistent 满足前面的 ask
-    5. 静态 allow — SecurityRuntimeConfig.allow_tools
-    6. 默认放行 (risk_evaluator / high_risk 已移除)
+权限架构：静态策略（规则 + global_default）+ 动态策略（执行模式）+ HITL 授权（会话/持久）
 """
 
 from __future__ import annotations
@@ -30,6 +21,7 @@ from .permission_model import (
     GrantStore,
     PolicyEvaluator,
     PermissionResolver,
+    StaticPermission,
     StructuredBoundaryPolicyEvaluator,
     Verdict,
     compute_shadow_approval_candidate,
@@ -44,7 +36,6 @@ PermissionDecision = Literal["allow", "deny", "ask"]
 HITLDecision = Literal["allow", "deny"]
 HITLScope = Literal["once", "session", "permanent"]
 type PermissionMetadata = dict[str, JsonValue]
-type PermissionRuleData = dict[str, JsonValue]
 
 
 @dataclass(frozen=True)
@@ -55,49 +46,24 @@ class HITLResult:
     scope: HITLScope
 
 
-@dataclass(frozen=True)
-class PermissionRule:
-    tool: str
-    decision: PermissionDecision
-    input_contains: str | None = None
-    input_prefix: str | None = None
-
-
 PermissionToolSpec = Any
 PermissionApprovalCallback = Callable[[Any, dict[str, Any]], HITLResult]
 
 
 class PermissionPolicy:
-    """不可变的静态权限规则集，来自配置。
+    """不可变的静态权限规则容器。
 
-    decide() 按 deny > ask > allow 优先级返回，不依赖规则插入顺序。
+    仅存储 rules 和 global_default。
+    规则匹配由 StaticPolicyEvaluator 以 last-match-wins 完成。
     """
 
-    def __init__(self, rules: tuple[PermissionRule, ...] = ()) -> None:
+    def __init__(
+        self,
+        rules: tuple[StaticPermission, ...] = (),
+        global_default: str | None = None,
+    ) -> None:
         self.rules = rules
-
-    def decide(self, tool_name: str, action_input: str) -> PermissionDecision | None:
-        matching: list[PermissionDecision] = []
-        for rule in self.rules:
-            if rule.tool != tool_name and rule.tool != "*":
-                continue
-            if (
-                rule.input_contains is not None
-                and rule.input_contains not in action_input
-            ):
-                continue
-            if rule.input_prefix is not None and not action_input.startswith(
-                rule.input_prefix
-            ):
-                continue
-            matching.append(rule.decision)
-        if "deny" in matching:
-            return "deny"
-        if "ask" in matching:
-            return "ask"
-        if "allow" in matching:
-            return "allow"
-        return None
+        self.global_default = global_default
 
 
 def _approval_metadata(
@@ -157,7 +123,6 @@ class PermissionEngineConfig:
 
     static_policy: PermissionPolicy | None = None
     restricted_dirs: tuple[str, ...] = ()
-    allowlist_mode: bool = False
     defer_static_ask: bool = False
     shadow_model_enabled: bool = False
     project_root: Path | None = None
@@ -240,7 +205,7 @@ class PermissionEngine:
         tool_input: dict[str, Any] | None = None,
         approval_callback: PermissionApprovalCallback | None = None,
     ) -> PermissionEngineResult:
-        """统一的 resolver 决策路径（替换 _decide_current / _decide_cutover / _decide_shell_cutover）。"""
+        """通过约束求值与 PermissionResolver 生成权限裁决。"""
         action = ActionExtractor().extract(tool_name, tool_input or {})
         verdict = self._shadow_verdict(
             action,
@@ -324,7 +289,6 @@ class PermissionEngine:
             action,
             execution_decision=execution_decision,
             static_policy=self._config.static_policy,
-            allowlist_mode=self._config.allowlist_mode,
             action_input=action_input,
             boundary_context=self._boundary_context(),
             safety_backstop_enabled=True,

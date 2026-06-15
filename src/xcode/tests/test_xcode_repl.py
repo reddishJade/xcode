@@ -24,7 +24,7 @@ from xcode.harness.agent_runtime import (
     CancellationToken,
     StructuredAgentResult,
 )
-from xcode.harness.observability import PermissionPolicy, PermissionRule
+from xcode.harness.observability import PermissionPolicy, StaticPermission
 from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
     ReasoningDeltaStructuredEvent,
@@ -1271,9 +1271,8 @@ class StaticPermissionAgent:
     """提供 REPL 权限命令读取的静态策略字段。"""
 
     def __init__(self) -> None:
-        self.permission_policy = PermissionPolicy((PermissionRule("bash", "deny"),))
+        self.permission_policy = PermissionPolicy((StaticPermission("bash", "deny"),))
         self.restricted_dirs: tuple[str, ...] = ()
-        self.allowlist_mode = False
         self.approval_callback: ApprovalCallback | None = None
         self.cancellation_token = CancellationToken()
 
@@ -1686,9 +1685,8 @@ class DeniedToolAgent:
     """提供 /tool 直连执行读取的静态权限策略。"""
 
     def __init__(self) -> None:
-        self.permission_policy = PermissionPolicy((PermissionRule("bash", "deny"),))
+        self.permission_policy = PermissionPolicy((StaticPermission("bash", "deny"),))
         self.restricted_dirs: tuple[str, ...] = ()
-        self.allowlist_mode = False
         self.approval_callback = None
 
 

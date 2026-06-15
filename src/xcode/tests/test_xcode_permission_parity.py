@@ -9,7 +9,7 @@ from xcode.harness.observability import (
     PermissionEngine,
     PermissionEngineConfig,
     PermissionPolicy,
-    PermissionRule,
+    StaticPermission,
 )
 
 
@@ -87,7 +87,6 @@ class StructuredPermissionParityTests(unittest.TestCase):
         engine = PermissionEngine(
             PermissionEngineConfig(
                 static_policy=self._static_policy(),
-                allowlist_mode=True,
                 shadow_model_enabled=True,
                 project_root=Path.cwd(),
             )
@@ -127,12 +126,13 @@ class StructuredPermissionParityTests(unittest.TestCase):
     def _static_policy(self) -> PermissionPolicy:
         """构造同时覆盖 allow、ask、deny 与 allowlist fallback 的规则。"""
         return PermissionPolicy(
-            (
-                PermissionRule("read_file", "allow"),
-                PermissionRule("write_file", "ask"),
-                PermissionRule("edit_file", "deny", input_contains="static-policy"),
-                PermissionRule("edit_file", "ask", input_contains=".env"),
-            )
+            rules=(
+                StaticPermission("read_file", "allow"),
+                StaticPermission("write_file", "ask"),
+                StaticPermission("edit_file", "deny", input_contains="static-policy"),
+                StaticPermission("edit_file", "ask", input_contains=".env"),
+            ),
+            global_default="ask",
         )
 
 

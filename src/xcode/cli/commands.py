@@ -47,7 +47,6 @@ class CommandContext:
     permanent_grant_store: FileGrantStore | None = None
     static_policy: PermissionPolicy | None = None
     restricted_dirs: tuple[str, ...] = ()
-    allowlist_mode: bool = False
 
 
 CommandHandler = Callable[[str, CommandContext], bool]

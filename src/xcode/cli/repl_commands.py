@@ -428,7 +428,6 @@ def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
         ctx.permanent_grant_store,
         static_policy=ctx.static_policy,
         restricted_dirs=ctx.restricted_dirs,
-        allowlist_mode=ctx.allowlist_mode,
     )
     return False
 
@@ -598,7 +597,6 @@ def handle_command(
     permanent_grant_store: FileGrantStore | None = None,
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
-    allowlist_mode: bool = False,
 ) -> bool:
     ctx = CommandContext(
         store=store,
@@ -611,7 +609,6 @@ def handle_command(
         permanent_grant_store=permanent_grant_store,
         static_policy=static_policy,
         restricted_dirs=restricted_dirs,
-        allowlist_mode=allowlist_mode,
     )
     for prefix in sorted(COMMAND_REGISTRY, key=len, reverse=True):
         entry = COMMAND_REGISTRY[prefix]

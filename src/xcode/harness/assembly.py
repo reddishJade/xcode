@@ -39,8 +39,8 @@ from xcode.harness.observability import (
     JsonlAuditLogger,
     HookManager,
     PermissionPolicy,
-    PermissionRule,
 )
+from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
 from xcode.harness.observability.hooks import HookEvent
 from xcode.harness.skills import ToolInput, ToolSpec
@@ -387,7 +387,6 @@ def _build_subagent_integration(
             gate=GateConfig(
                 permission_policy=_permission_policy_from_security(sec),
                 restricted_dirs=sec.restricted_dirs,
-                allowlist_mode=bool(sec.allow_tools),
                 hook_constraint_providers=hook_constraint_providers,
                 hook_manager=child_hook_manager,
                 audit_logger=(
@@ -500,7 +499,6 @@ def build_agent(
         gate=GateConfig(
             permission_policy=_permission_policy_from_security(sec),
             restricted_dirs=sec.restricted_dirs,
-            allowlist_mode=bool(sec.allow_tools),
             hook_constraint_providers=hook_constraint_providers,
             hook_manager=hook_manager,
             audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
@@ -527,13 +525,23 @@ def build_agent(
 def _permission_policy_from_security(
     security: SecurityRuntimeConfig,
 ) -> PermissionPolicy | None:
-    """将运行时 security 配置转换为工具权限规则。"""
-    rules: list[PermissionRule] = []
-    rules.extend(PermissionRule(tool, "deny") for tool in security.deny_tools)
-    rules.extend(PermissionRule(tool, "ask") for tool in security.ask_tools)
-    rules.extend(PermissionRule(tool, "allow") for tool in security.allow_tools)
-    if security.resolve_approval_policy() == "always":
-        rules.append(PermissionRule("*", "ask"))
-    if not rules:
+    """将运行时 security 配置转换为 PermissionPolicy。"""
+    rules: list[StaticPermission] = []
+    for rd in security.rules:
+        rules.append(
+            StaticPermission(
+                tool=rd["tool"],
+                decision=rd["decision"],
+                target=rd.get("target"),
+                target_type=rd.get("target_type"),
+                input_contains=rd.get("input_contains"),
+                input_prefix=rd.get("input_prefix"),
+                input_regex=rd.get("input_regex"),
+            )
+        )
+    global_default: str | None = security.global_default
+    if global_default is None and security.resolve_approval_policy() == "always":
+        global_default = "ask"
+    if not rules and global_default is None:
         return None
-    return PermissionPolicy(tuple(rules))
+    return PermissionPolicy(tuple(rules), global_default=global_default)

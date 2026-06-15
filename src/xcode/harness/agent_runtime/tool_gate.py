@@ -43,7 +43,6 @@ class ToolGateSnapshot:
     permission_policy: PermissionPolicy | None
     tool_map: dict[str, ToolSpec]
     restricted_dirs: tuple[str, ...] = ()
-    allowlist_mode: bool = False
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
     project_root: Path | None = None
 
@@ -69,7 +68,6 @@ class ToolGate:
         audit_logger: Callable[[AuditRecord], None] | None,
         session_id: str,
         restricted_dirs: tuple[str, ...] = (),
-        allowlist_mode: bool = False,
         hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
         project_root: Path | None = None,
     ) -> None:
@@ -77,7 +75,6 @@ class ToolGate:
         self._approval_callback = approval_callback
         self._permission_policy = permission_policy
         self._restricted_dirs = restricted_dirs
-        self._allowlist_mode = allowlist_mode
         self._hook_constraint_providers = hook_constraint_providers
         self._hook_manager = hook_manager
         self._audit_logger = audit_logger
@@ -91,7 +88,6 @@ class ToolGate:
             permission_policy=self._permission_policy,
             tool_map={},
             restricted_dirs=self._restricted_dirs,
-            allowlist_mode=self._allowlist_mode,
             hook_constraint_providers=self._hook_constraint_providers,
             project_root=self._project_root,
         )
@@ -103,7 +99,6 @@ class ToolGate:
             permission_policy=self._permission_policy,
             tool_map={tool.name: tool for tool in registry},
             restricted_dirs=self._restricted_dirs,
-            allowlist_mode=self._allowlist_mode,
             hook_constraint_providers=self._hook_constraint_providers,
             project_root=self._project_root,
         )
@@ -230,7 +225,6 @@ class ToolGate:
             PermissionEngineConfig(
                 static_policy=snapshot.permission_policy,
                 restricted_dirs=snapshot.restricted_dirs,
-                allowlist_mode=snapshot.allowlist_mode,
                 hook_constraint_providers=snapshot.hook_constraint_providers,
                 project_root=snapshot.project_root,
                 defer_static_ask=True,

@@ -56,7 +56,9 @@
 | `ExecutionResult` | 执行结果 |
 | `ExecutionMode` | 执行模式（plan/review/act） |
 | `HookManager` | Hook 管理器 |
-| `PermissionPolicy` | 权限策略 |
+| `PermissionPolicy` | 静态权限策略（rules + global_default） |
+| `StaticPermission` | 单条静态权限规则 |
+| `PermissionResolver` | 约束优先级解析（non_bypassable_deny > deny > ask > allow） |
 | `StructuredAgent` | 结构化 agent |
 | `StructuredAgentEvent` | Agent 事件 |
 | `SubprocessExecutionEnv` | 子进程执行环境 |
@@ -92,7 +94,7 @@ def build_app(project_root, env_files=None, agent_config=None,
 ### 3.2 配置 `config.py`
 
 `ProviderTransport = Literal["openai_chat", "anthropic_messages", "chatglm_chat", "deepseek_chat", "mimo_chat"]`
-`ExecutionMode = Literal["plan", "review", "act"]`
+`ExecutionMode = Literal["plan", "build", "act"]`
 `PermissionMode = Literal["strict", "normal", "permissive"]`
 `ApprovalPolicy = Literal["always", "never"]`
 
@@ -102,7 +104,7 @@ def build_app(project_root, env_files=None, agent_config=None,
 | `RequestHygieneConfig` | `enabled=True, max_tool_result_bytes=8000, max_tool_arg_length=1000, keep_head_lines=50, keep_tail_lines=50` |
 | `ModelProfileRuntimeConfig` | `transport, chat_model, base_url, api_key, thinking, reasoning_effort, clear_thinking, tool_stream, response_format` |
 | `ProviderRuntimeConfig` | `model_profiles: dict[str, ModelProfileRuntimeConfig]` |
-| `SecurityRuntimeConfig` | `permission_mode, sandbox_mode, approval_policy, network_access, writable_roots, restricted_dirs, deny_tools, ask_tools, allow_tools` |
+| `SecurityRuntimeConfig` | `permission_mode, sandbox_mode, approval_policy, network_access, writable_roots, restricted_dirs, rules, global_default` |
 | `ToolsRuntimeConfig` | `enabled_groups=("core",), shell="auto"` |
 | `SkillsRuntimeConfig` | `auto_trigger=True` |
 | `PromptRuntimeConfig` | `modules: tuple[str, ...]` |

@@ -77,6 +77,15 @@ class ProviderRuntimeConfig:
     )
 
 
+_LEGACY_SECURITY_FIELDS: frozenset[str] = frozenset(
+    {
+        "deny_tools",
+        "ask_tools",
+        "allow_tools",
+    }
+)
+
+
 @dataclass
 class SecurityRuntimeConfig:
     permission_mode: PermissionMode = "normal"
@@ -85,11 +94,8 @@ class SecurityRuntimeConfig:
     network_access: bool = True
     writable_roots: tuple[str, ...] = ()
     restricted_dirs: tuple[str, ...] = ()
-    deny_tools: tuple[str, ...] = ()
-    ask_tools: tuple[str, ...] = ()
-    allow_tools: tuple[str, ...] = ()
-    approval_cutover_enabled: bool = True
-    shell_cutover_enabled: bool = True
+    rules: tuple[dict[str, Any], ...] = ()
+    global_default: str | None = None
 
     def resolve_approval_policy(self) -> str:
         if self.approval_policy in ("always", "never"):
@@ -100,6 +106,20 @@ class SecurityRuntimeConfig:
         if self.permission_mode == "strict":
             return True
         return self.sandbox_mode
+
+
+def _validate_legacy_security_fields(raw: dict[str, Any]) -> None:
+    """Fail-fast: legacy deny_tools/ask_tools/allow_tools detected."""
+    security = raw.get("security")
+    if not isinstance(security, dict):
+        return
+    found = _LEGACY_SECURITY_FIELDS & set(security)
+    if found:
+        raise ValueError(
+            "Security config contains deprecated fields: "
+            f"{', '.join(sorted(found))}. "
+            "Migrate to 'security.rules' and 'security.global_default'."
+        )
 
 
 @dataclass
@@ -230,6 +250,7 @@ def discover_runtime_config(
     merged = _deep_merge_raw(global_raw, project_raw)
     merged = _deep_merge_raw(merged, local_raw)
 
+    _validate_legacy_security_fields(merged)
     config = _config_from_dict(merged)
     config = _apply_env_overrides(config)
     return config
@@ -322,18 +343,6 @@ def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
     parsed_approval_policy = _parse_approval_policy(os.getenv("XCODE_APPROVAL_POLICY"))
     if parsed_approval_policy is not None:
         security_updates["approval_policy"] = parsed_approval_policy
-
-    approval_cutover = os.getenv("XCODE_APPROVAL_CUTOVER")
-    if approval_cutover in ("1", "true"):
-        security_updates["approval_cutover_enabled"] = True
-    elif approval_cutover in ("0", "false"):
-        security_updates["approval_cutover_enabled"] = False
-
-    shell_cutover = os.getenv("XCODE_SHELL_CUTOVER")
-    if shell_cutover in ("1", "true"):
-        security_updates["shell_cutover_enabled"] = True
-    elif shell_cutover in ("0", "false"):
-        security_updates["shell_cutover_enabled"] = False
 
     if security_updates:
         security = replace(config.security, **security_updates)

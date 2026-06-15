@@ -27,7 +27,7 @@ from xcode.harness.observability import (
     HITLResult,
     PermissionEngine,
     PermissionPolicy,
-    PermissionRule,
+    StaticPermission,
 )
 from xcode.harness.skills import (
     AGENT_CONTENT_BLOCKS_METADATA_KEY,
@@ -366,7 +366,7 @@ class TestPermissionSingleGate(unittest.TestCase):
         self._handler_called = False
         spec = self._make_spec(self._handler_ok)
         gate = self._make_gate(
-            PermissionPolicy((PermissionRule(self.TOOL_NAME, "allow"),))
+            PermissionPolicy((StaticPermission(self.TOOL_NAME, "allow"),))
         )
 
         decide_count: list[int] = [0]
@@ -389,7 +389,7 @@ class TestPermissionSingleGate(unittest.TestCase):
         """deny 路径：PermissionEngine.decide() 调用 1 次，handler 不运行。"""
         spec = self._make_spec(self._handler_never)
         gate = self._make_gate(
-            PermissionPolicy((PermissionRule(self.TOOL_NAME, "deny"),))
+            PermissionPolicy((StaticPermission(self.TOOL_NAME, "deny"),))
         )
 
         decide_count: list[int] = [0]
@@ -416,7 +416,7 @@ class TestPermissionSingleGate(unittest.TestCase):
         """
         spec = self._make_spec(self._handler_never)
         gate = self._make_gate(
-            PermissionPolicy((PermissionRule(self.TOOL_NAME, "ask"),)),
+            PermissionPolicy((StaticPermission(self.TOOL_NAME, "ask"),)),
             callback=lambda _t, _i: HITLResult("allow", "session"),
         )
 
@@ -466,7 +466,7 @@ class TestPermissionSingleGate(unittest.TestCase):
         self._handler_called = False
         spec = self._make_spec(self._handler_ok)
         gate = self._make_gate(
-            PermissionPolicy((PermissionRule(self.TOOL_NAME, "allow"),))
+            PermissionPolicy((StaticPermission(self.TOOL_NAME, "allow"),))
         )
 
         decide_count: list[int] = [0]

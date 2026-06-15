@@ -31,6 +31,7 @@ from .permission_model import (
     PolicyEvaluator,
     TargetFingerprint,
     PermissionResolver,
+    StaticPermission,
     StaticPolicyEvaluator,
     StructuredBoundaryPolicyEvaluator,
     Target,
@@ -48,7 +49,6 @@ from .permissions import (
     PermissionEngineConfig,
     PermissionEngineResult,
     PermissionPolicy,
-    PermissionRule,
 )
 
 __all__ = [
@@ -82,7 +82,7 @@ __all__ = [
     "PolicyEvaluator",
     "PermissionResolver",
     "SafetyBackstopPolicyEvaluator",
-    "PermissionRule",
+    "StaticPermission",
     "PostToolEvent",
     "PreToolEvent",
     "StaticPolicyEvaluator",

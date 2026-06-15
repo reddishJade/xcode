@@ -42,7 +42,6 @@ def handle_permissions(
     permanent_grant_store: FileGrantStore | None,
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
-    allowlist_mode: bool = False,
 ) -> None:
     parts = command.split(maxsplit=2)
     sub = parts[1] if len(parts) >= 2 else ""
@@ -55,7 +54,6 @@ def handle_permissions(
         permanent_grant_store,
         static_policy,
         restricted_dirs,
-        allowlist_mode,
     )
 
 
@@ -63,28 +61,35 @@ def _format_rules(rules: tuple) -> list[str]:
     lines = []
     for rule in rules:
         input_part = _format_rule_input(rule)
-        lines.append(f"    {rule.tool} = {rule.decision}{input_part}")
+        target_part = _format_rule_target(rule)
+        lines.append(f"    {rule.tool} = {rule.decision}{input_part}{target_part}")
     return lines
 
 
 def _format_rule_input(rule: object) -> str:
-    input_contains = getattr(rule, "input_contains", None)
-    input_prefix = getattr(rule, "input_prefix", None)
-    if input_prefix:
-        return f" (prefix: {input_prefix})"
-    if input_contains:
-        return f" (input: {input_contains})"
+    parts = []
+    ic = getattr(rule, "input_contains", None)
+    ip = getattr(rule, "input_prefix", None)
+    ir = getattr(rule, "input_regex", None)
+    if ip:
+        parts.append(f"prefix={ip}")
+    elif ic:
+        parts.append(f"contains={ic}")
+    if ir:
+        parts.append(f"regex={ir}")
+    return f" ({'; '.join(parts)})" if parts else ""
+
+
+def _format_rule_target(rule: object) -> str:
+    target = getattr(rule, "target", None)
+    target_type = getattr(rule, "target_type", None)
+    if target and target_type:
+        return f" [{target_type}:{target}]"
+    if target:
+        return f" [{target}]"
+    if target_type:
+        return f" [{target_type}]"
     return ""
-
-
-def _format_grant(record: object) -> str:
-    """格式化 GrantRecord 为可读行。"""
-    cap = getattr(record, "capability", "?")
-    op = getattr(record, "operation", "?")
-    target = getattr(record, "target_pattern", "?")
-    acc = getattr(record, "access", "?")
-    dec = getattr(record, "decision", "?")
-    return f"    {cap}/{op} on {target} ({acc}) = {dec}"
 
 
 def list_permissions(
@@ -92,7 +97,6 @@ def list_permissions(
     permanent_grant_store: FileGrantStore | None,
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
-    allowlist_mode: bool = False,
 ) -> None:
     lines = ["<permissions>"]
     has_any = False
@@ -103,15 +107,15 @@ def list_permissions(
         for line in _format_rules(static_policy.rules):
             lines.append("    " + line)
 
+        if static_policy.global_default is not None:
+            has_any = True
+            lines.append(f"  global_default: {static_policy.global_default}")
+
     if restricted_dirs:
         has_any = True
         lines.append("  restricted_dirs:")
         for d in restricted_dirs:
             lines.append(f"    {d}")
-
-    if allowlist_mode:
-        has_any = True
-        lines.append("  mode: allowlist (non-allowed tools ask)")
 
     if session_grant_store is not None:
         records = session_grant_store.records()
@@ -133,6 +137,16 @@ def list_permissions(
         lines.append("  (none)")
     lines.append("</permissions>")
     print("\n".join(lines))
+
+
+def _format_grant(record: object) -> str:
+    """格式化 GrantRecord 为可读行。"""
+    cap = getattr(record, "capability", "?")
+    op = getattr(record, "operation", "?")
+    target = getattr(record, "target_pattern", "?")
+    acc = getattr(record, "access", "?")
+    dec = getattr(record, "decision", "?")
+    return f"    {cap}/{op} on {target} ({acc}) = {dec}"
 
 
 def handle_model_command(command: str, app: object) -> None:

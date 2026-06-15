@@ -82,13 +82,47 @@ StructuredAgent → Agent → agent/tool_execution.py → ToolSpecAdapter → To
 
 `PermissionDecision`: `allow` / `deny` / `ask`。`PermissionEngine` 以 `SecurityRuntimeConfig` 派生静态策略。
 
-`PermissionEngineConfig` 参数：`static_policy`、`restricted_dirs`、`allowlist_mode`、`defer_static_ask`、`shadow_model_enabled`、`project_root`、`session_grant_store`、`permanent_grant_store`、`hook_constraint_providers`。
+`PermissionEngineConfig` 参数：`static_policy`、`restricted_dirs`、`defer_static_ask`、`shadow_model_enabled`、`project_root`、`session_grant_store`、`permanent_grant_store`、`hook_constraint_providers`。
 
 `SecurityRuntimeConfig`（config.py）：
 - `permission_mode`: strict / normal / permissive
 - `sandbox_mode`: bool
 - `approval_policy`: always / never
-- `writable_roots`、`restricted_dirs`、`deny_tools`、`ask_tools`、`allow_tools`
+- `writable_roots`、`restricted_dirs`
+- `rules`: 静态权限规则列表（替换 `deny_tools`/`ask_tools`/`allow_tools`）
+- `global_default`: 无规则匹配时的默认决策
+
+规则格式（`StaticPermission`）：
+```json
+{
+  "tool": "bash",
+  "decision": "deny",
+  "target": null,
+  "target_type": null,
+  "input_contains": null,
+  "input_prefix": null,
+  "input_regex": null
+}
+```
+
+`StaticPolicyEvaluator` 按声明顺序遍历规则，最后一个匹配的规则生效（last-match-wins）。
+全局 `PermissionResolver` 优先级不变：`non_bypassable_deny > deny > ask > allow`。
+
+配置示例：
+```json
+{
+  "security": {
+    "rules": [
+      {"tool": "bash", "decision": "deny"},
+      {"tool": "write_file", "decision": "ask"},
+      {"tool": "read_file", "decision": "allow"}
+    ],
+    "global_default": "ask"
+  }
+}
+```
+
+旧字段 `deny_tools`、`ask_tools`、`allow_tools` 已被移除。如果在配置中出现，Xcode 会在启动时抛出 `ValueError`，提示迁移至 `security.rules` + `security.global_default`。
 
 ### HITL
 
@@ -102,7 +136,7 @@ StructuredAgent → Agent → agent/tool_execution.py → ToolSpecAdapter → To
 
 ## 6. Isolation Surface
 
-### Plan / Review / Act
+### Plan / Build / Act
 
 REPL 支持三种执行模式。`/act --clear` 把 plan artifact 写入 `.local/session_artifacts/`，创建干净会话并注入 approved plan。
 
@@ -110,7 +144,7 @@ REPL 支持三种执行模式。`/act --clear` 把 plan artifact 写入 `.local/
 
 `ManagedSubagentRunner` 控制并发、超时和递归深度。支持 `worktree` 隔离。子 agent 使用过滤后的 tool registry。
 
-权限边界：子 agent 继承父级的静态策略（deny/ask/allow rules）、restricted_dirs、allowlist_mode、hook_constraint_providers。不继承 `approval_callback`、`session_grant_store`、`permanent_grant_store`，因此 `ask` 决策在子 agent 中退化为硬阻断。`project_root` 正确传递给子 agent 的 `PermissionEngine.boundary_context()`。
+权限边界：子 agent 继承父级的静态策略（rules + global_default）、restricted_dirs、hook_constraint_providers。不继承 `approval_callback`、`session_grant_store`、`permanent_grant_store`，因此 `ask` 决策在子 agent 中退化为硬阻断。`project_root` 正确传递给子 agent 的 `PermissionEngine.boundary_context()`。
 
 ### Worktree
 
