@@ -1,4 +1,19 @@
-"""四轴权限模型的数据结构、动作提取和约束解析。"""
+"""四轴权限模型的数据结构、动作提取和约束解析。
+
+本模块职责（请勿盲目拆分）：
+- 核心权限数据模型：Action, Target, Constraint, Verdict, GrantRecord, etc.
+- GrantStore 协议及实现：InMemoryGrantStore, FileGrantStore
+- PermissionResolver（约束优先级解析）
+- ModePolicyEvaluator, StaticPolicyEvaluator, StructuredBoundaryPolicyEvaluator
+- evaluate_policy_constraints（编排所有 evaluator）
+- ActionExtractor 及路径辅助函数
+
+SafetyBackstopPolicyEvaluator 及其 shell 命令分类已拆至 _safety_backstop.py。
+_safety_backstop 从本模块导入 Action/Constraint 等共享模型类型；
+本模块在 evaluate_policy_constraints 内局部导入 SafetyBackstopPolicyEvaluator
+以避免 import-time 循环。其余分组（grant store / resolver / evaluators / extractor）
+紧密关联，拆分需要谨慎评估依赖边界。
+"""
 
 from __future__ import annotations
 

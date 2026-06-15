@@ -1,10 +1,14 @@
 """Shell 命令安全分级（三桶分类）与复合命令拆分。
 
-按 section 10.2 的三桶模式对 shell 命令分类：
-- Bucket A: non-bypassable deny
-- Bucket B: ask
-- Bucket C: allow
-- 未匹配: ask（安全默认）
+本模块从 permission_model.py 拆分而来，仅处理 shell 命令安全分类：
+- SafetyBackstopPolicyEvaluator（Bucket A/B/C 分类）
+- shell 辅助谓词（_is_root_recursive_deletion, _split_compound_command, etc.）
+- 桶常量（BUCKET_A_CREDENTIAL_SUBSTRINGS, BUCKET_B_ASK_COMMANDS, etc.）
+
+模块边界规则：
+- 从 permission_model.py 导入 Action/Constraint 等共享模型类型（单向依赖）
+- 不允许反向导入 permission_model 的其他分组
+- 不包含 grant store、resolver、ActionExtractor 或其他 evaluator
 """
 
 from __future__ import annotations
