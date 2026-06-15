@@ -55,8 +55,7 @@ main.py → discover_runtime_config() → build_app() [harness/app.py]
 实现归 `coding_agent/tools/` 层所有，group 均为 `core`：
 - `read_file` / `write_file` / `edit_file`（file.py）
 - `glob_files` / `find_files` / `grep_search` / `ls`（code_search.py）
-- `bash`（bash.py）
-- `shell`（native_shell.py，Responses builtin shell 本地桥）
+- `bash`（bash.py，通过 ShellAdapter 选择宿主 shell）
 - `search_tools`（assembly.py，按关键字搜索已注册工具）
 
 `edit_file` 依赖 read-before-edit 指纹校验。`bash` 通过 `ShellAdapter` 选择宿主 shell，`Popen` 生命周期控制、超时和 cancellation token。

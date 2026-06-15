@@ -438,7 +438,6 @@ def build_project_scoped_registry(project_root, enabled, contextual_state, shell
 | `build_file_tools()` | `file.py` | `read_file`、`write_file`、`edit_file` |
 | `build_code_tools()` | `code_search.py` | `glob_files`、`find_files`、`grep_search`、`ls` |
 | `build_bash_tool()` | `bash.py` | `bash` |
-| `build_native_shell_tool()` | `native_shell.py` | `shell` |
 
 ### 9.3 辅助
 

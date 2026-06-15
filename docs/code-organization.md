@@ -144,7 +144,6 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `tools/file.py` | `build_file_tools` → `read_file`、`write_file`、`edit_file` |
 | `tools/code_search.py` | `build_code_tools` → `glob_files`、`find_files`、`grep_search`、`ls` |
 | `tools/bash.py` | `build_bash_tool` → `bash` |
-| `tools/native_shell.py` | `build_native_shell_tool` → `shell`（Responses builtin shell 本地桥） |
 | `tools/worktree.py` | `build_worktree_tools` → `create_worktree_task`、`remove_worktree_task` |
 | `tools/shell_adapter.py` | `ShellSpec`、`detect_shell`、`build_shell_argv` |
 | `tools/path_utils.py` | 路径解析、`is_path_blocked` |
@@ -210,7 +209,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 ## 工具组与默认可见工具
 
 Core tools（默认）：
-`read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`shell`、`search_tools`
+`read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`
 
 扩展组：
 `skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `mcp`（动态工具）→ `memory`（仅 hook）→ `plugins`（动态加载）→ `daemon`（仅服务）
