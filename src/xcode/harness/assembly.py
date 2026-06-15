@@ -236,6 +236,7 @@ def build_tool_registry(
     cancel_event: threading.Event | None = None,
     env: ExecutionEnv | None = None,
     skills_dir: Path | None = None,
+    hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
 ) -> tuple[tuple[ToolSpec, ...], ShellSpec, tuple[Callable[[], None], ...]]:
     from xcode.coding_agent.tools import detect_shell
 
@@ -268,6 +269,7 @@ def build_tool_registry(
         shell_spec=shell_spec,
         cancel_event=cancel_event,
         env=env,
+        hook_constraint_providers=hook_constraint_providers,
     )
     closers.extend(subagent_closers)
     registry += subagent_tools
@@ -319,6 +321,7 @@ def _build_subagent_integration(
     shell_spec: ShellSpec,
     cancel_event: threading.Event | None,
     env: ExecutionEnv | None,
+    hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
 ) -> tuple[list[Callable[[], None]], tuple[ToolSpec, ...]]:
     """构建子代理运行器和工具，返回 (closers, subagent_tools)。"""
     if "subagent" not in enabled:
@@ -344,10 +347,43 @@ def _build_subagent_integration(
                 cancel_event=cancel_event,
                 env=env,
             )
+        sec = runtime_config.security
+        child_hook_manager: HookManager | None = None
+        if child_contextual_state is not None:
+            child_hook_manager = HookManager()
+
+            def record_child_post_tool(record: object) -> None:
+                child_contextual_state.record_tool_result(
+                    getattr(record, "tool", ""),
+                    getattr(record, "output", ""),
+                )
+
+            child_hook_manager.register("post_tool", record_child_post_tool)
+
+        if child_hook_manager is not None:
+            child_hook_manager.register("before_agent_start", lambda r: None)
+            child_hook_manager.register("before_provider_request", lambda r: None)
+
+        child_audit_path = resolve_config_path(
+            project_root, runtime_config.observability.audit_path
+        )
+
         result = await StructuredAgent(
             provider=child_llms[model_profile],
             registry=effective_registry,
             config=config,
+            gate=GateConfig(
+                permission_policy=_permission_policy_from_security(sec),
+                restricted_dirs=sec.restricted_dirs,
+                allowlist_mode=bool(sec.allow_tools),
+                hook_constraint_providers=hook_constraint_providers,
+                hook_manager=child_hook_manager,
+                audit_logger=(
+                    JsonlAuditLogger(child_audit_path).write
+                    if child_audit_path
+                    else None
+                ),
+            ),
             runtime=AgentRuntimeConfig(
                 runtime_context_provider=build_runtime_context_provider(
                     child_root,

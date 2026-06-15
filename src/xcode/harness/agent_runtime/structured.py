@@ -103,6 +103,7 @@ class StructuredAgent:
             restricted_dirs=gate.restricted_dirs,
             allowlist_mode=gate.allowlist_mode,
             hook_constraint_providers=gate.hook_constraint_providers,
+            project_root=runtime.project_root,
         )
         self.audit_logger = gate.audit_logger
         self._history = HistoryManager()

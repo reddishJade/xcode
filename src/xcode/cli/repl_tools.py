@@ -144,13 +144,16 @@ def _execute_tool_via_gate(
         restricted_dirs=getattr(agent, "restricted_dirs", ()),
         allowlist_mode=bool(getattr(agent, "allowlist_mode", False)),
         hook_constraint_providers=getattr(agent, "hook_constraint_providers", ()),
+        project_root=getattr(agent, "project_root", None),
     )
     snapshot = gate.snapshot_for((tool,))
     before_hook = gate.build_before_tool_hook(snapshot)
 
     ctx = BeforeToolCallContext(
         assistant_message=AssistantMessage(content=[]),
-        tool_call=ToolCallContent(id="repl", name=tool.name, arguments=dict(tool_input)),
+        tool_call=ToolCallContent(
+            id="repl", name=tool.name, arguments=dict(tool_input)
+        ),
         args=tool_input,
         context=AgentContext(),
     )
@@ -160,7 +163,9 @@ def _execute_tool_via_gate(
 
     adapted = gate.adapt_tools((tool,))
     result = asyncio.run(adapted[0].execute("repl", tool_input))
-    return "".join(item.text for item in result.content if isinstance(item, TextContent))
+    return "".join(
+        item.text for item in result.content if isinstance(item, TextContent)
+    )
 
 
 def parse_tool_input(tool: ToolSpec, raw_input: str) -> ToolInput:

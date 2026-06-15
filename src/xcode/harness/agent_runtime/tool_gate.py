@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from xcode.ai.events import ToolCall
@@ -44,6 +45,7 @@ class ToolGateSnapshot:
     restricted_dirs: tuple[str, ...] = ()
     allowlist_mode: bool = False
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
+    project_root: Path | None = None
 
 
 class ToolGate:
@@ -69,6 +71,7 @@ class ToolGate:
         restricted_dirs: tuple[str, ...] = (),
         allowlist_mode: bool = False,
         hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
+        project_root: Path | None = None,
     ) -> None:
         self._mode = mode_state
         self._approval_callback = approval_callback
@@ -79,6 +82,7 @@ class ToolGate:
         self._hook_manager = hook_manager
         self._audit_logger = audit_logger
         self._session_id = session_id
+        self._project_root = project_root
         self._progress_steps_without_update: int = 0
 
     def snapshot(self) -> ToolGateSnapshot:
@@ -89,6 +93,7 @@ class ToolGate:
             restricted_dirs=self._restricted_dirs,
             allowlist_mode=self._allowlist_mode,
             hook_constraint_providers=self._hook_constraint_providers,
+            project_root=self._project_root,
         )
 
     def snapshot_for(self, registry: tuple[ToolSpec, ...]) -> ToolGateSnapshot:
@@ -100,6 +105,7 @@ class ToolGate:
             restricted_dirs=self._restricted_dirs,
             allowlist_mode=self._allowlist_mode,
             hook_constraint_providers=self._hook_constraint_providers,
+            project_root=self._project_root,
         )
 
     def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
@@ -224,6 +230,9 @@ class ToolGate:
             PermissionEngineConfig(
                 static_policy=snapshot.permission_policy,
                 restricted_dirs=snapshot.restricted_dirs,
+                allowlist_mode=snapshot.allowlist_mode,
+                hook_constraint_providers=snapshot.hook_constraint_providers,
+                project_root=snapshot.project_root,
                 defer_static_ask=True,
             )
         )
