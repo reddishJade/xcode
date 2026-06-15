@@ -15,6 +15,144 @@ from xcode.harness.config import (
 )
 
 
+class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
+    """验证配置合并语义：显式设置的默认值不会被静默丢弃。"""
+
+    def test_global_overridden_by_project_with_default_value(self) -> None:
+        """项目 config 显式设置与默认值相同的字段应覆盖全局。"""
+        root = Path(tempfile.mkdtemp())
+        try:
+            (root / "xcode.config.json").write_text(
+                '{"agent":{"max_steps":20}}',
+                encoding="utf-8",
+            )
+            global_home = root / "global_home"
+            global_home.mkdir(parents=True, exist_ok=True)
+            global_config = global_home / ".xcode" / "settings.json"
+            global_config.parent.mkdir(parents=True, exist_ok=True)
+            global_config.write_text(
+                '{"agent":{"max_steps":10}}',
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(Path, "home", return_value=global_home),
+            ):
+                config = discover_runtime_config(root)
+
+            # Project explicitly set max_steps=20 (same as default of 20),
+            # but it must override global's 10.
+            self.assertEqual(config.agent.max_steps, 20)
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_explicit_default_valued_field_survives_merge(self) -> None:
+        """显式设回默认值的字段在合并后应正确保留。"""
+        root = Path(tempfile.mkdtemp())
+        try:
+            config_path = root / "xcode.config.json"
+            config_path.write_text(
+                '{"provider":{"model_profiles":{'
+                '"main":{"thinking":true}'
+                '}}}',
+                encoding="utf-8",
+            )
+            local_path = root / ".local" / "settings.json"
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_text(
+                '{"agent":{"max_steps":20}}',
+                encoding="utf-8",
+            )
+            config = discover_runtime_config(root)
+
+            # thinking=true 是默认值，但用户显式设置了它，不应被丢弃
+            self.assertTrue(config.provider.model_profiles["main"].thinking)
+            self.assertEqual(config.agent.max_steps, 20)
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_missing_key_does_not_override_lower_layer(self) -> None:
+        """高层级配置中不存在的键不应覆盖低层级的值。"""
+        root = Path(tempfile.mkdtemp())
+        try:
+            config_path = root / "xcode.config.json"
+            config_path.write_text(
+                '{"agent":{"max_steps":15}}',
+                encoding="utf-8",
+            )
+            local_path = root / ".local" / "settings.json"
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            # 只写 provider，不写 agent
+            local_path.write_text(
+                '{"provider":{"model_profiles":{"main":{"transport":"deepseek_chat"}}}}',
+                encoding="utf-8",
+            )
+            config = discover_runtime_config(root)
+
+            # agent.max_steps 不在 local 中出现，应从 project 继承
+            self.assertEqual(config.agent.max_steps, 15)
+            self.assertEqual(
+                config.provider.model_profiles["main"].transport, "deepseek_chat"
+            )
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_env_override_still_wins(self) -> None:
+        """环境变量优先级仍然最高。"""
+        root = Path(tempfile.mkdtemp())
+        try:
+            config_path = root / "xcode.config.json"
+            config_path.write_text(
+                '{"security":{"sandbox_mode":false}}',
+                encoding="utf-8",
+            )
+            with patch.dict("os.environ", {"XCODE_SANDBOX_MODE": "true"}):
+                config = discover_runtime_config(root)
+            self.assertTrue(config.security.sandbox_mode)
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_unknown_key_handling_unchanged(self) -> None:
+        """未知键被静默忽略（与旧行为一致）。"""
+        root = Path(tempfile.mkdtemp())
+        try:
+            config_path = root / "xcode.config.json"
+            config_path.write_text(
+                '{"unknown_key":"value"}',
+                encoding="utf-8",
+            )
+            config = discover_runtime_config(root)
+            # 不抛出异常即为通过
+            self.assertIsNotNone(config)
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_nested_profile_merge_preserves_explicit_default(self) -> None:
+        """model_profiles 中显式设为默认值的字段正确保留。"""
+        root = Path(tempfile.mkdtemp())
+        try:
+            config_path = root / "xcode.config.json"
+            config_path.write_text(
+                '{"provider":{"model_profiles":{'
+                '"main":{"transport":"deepseek_chat","reasoning_effort":null}'
+                '}}}',
+                encoding="utf-8",
+            )
+            config = discover_runtime_config(root)
+            profile = config.provider.model_profiles["main"]
+
+            self.assertEqual(profile.transport, "deepseek_chat")
+            self.assertIsNone(profile.reasoning_effort)
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+
+
 class XcodeRuntimeConfigTests(unittest.TestCase):
     def test_missing_config_uses_defaults(self) -> None:
         config = load_runtime_config(None)

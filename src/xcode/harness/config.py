@@ -154,25 +154,6 @@ class XcodeRuntimeConfig:
 # ── 序列化 / 反序列化 ──
 
 
-def _config_to_dict(config: XcodeRuntimeConfig) -> dict[str, Any]:
-    """将 XcodeRuntimeConfig 转为可 JSON 序列化的 dict。"""
-
-    def _to_dict(obj: Any) -> Any:
-        if isinstance(obj, Path):
-            return str(obj)
-        if hasattr(obj, "__dataclass_fields__"):
-            return {
-                f.name: _to_dict(getattr(obj, f.name))
-                for f in obj.__dataclass_fields__.values()
-            }
-        if isinstance(obj, dict):
-            return {k: _to_dict(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [_to_dict(item) for item in obj]
-        return obj
-
-    return _to_dict(config)
-
 
 def _config_from_dict(data: dict[str, Any]) -> XcodeRuntimeConfig:
     """从 dict 递归构建 XcodeRuntimeConfig。"""
@@ -232,49 +213,59 @@ def _config_from_dict(data: dict[str, Any]) -> XcodeRuntimeConfig:
     return _build(XcodeRuntimeConfig, data)
 
 
-# 配置发现
+# ── 配置发现（基于 raw dict 合并，仅覆盖显式指定的键）──
 
 
 def discover_runtime_config(
     project_root: Path, explicit_path: Path | None = None
 ) -> XcodeRuntimeConfig:
-    global_config = _load_global_config()
-    project_config_path = explicit_path or project_root / "xcode.config.json"
-    project_config = _load_json_config(project_config_path)
-    local_config_path = project_root / ".local" / "settings.json"
-    local_config = _load_json_config(local_config_path)
-    merged = _deep_merge_configs(global_config, project_config)
-    merged = _deep_merge_configs(merged, local_config)
-    merged = _apply_env_overrides(merged)
-    return merged
+    global_raw = _load_raw_config(Path.home() / ".xcode" / "settings.json")
+    project_path = explicit_path or project_root / "xcode.config.json"
+    project_raw = _load_raw_config(project_path)
+    local_raw = _load_raw_config(project_root / ".local" / "settings.json")
+
+    global_raw = _resolve_profiles_in_raw(global_raw)
+    project_raw = _resolve_profiles_in_raw(project_raw)
+    local_raw = _resolve_profiles_in_raw(local_raw)
+
+    merged = _deep_merge_raw(global_raw, project_raw)
+    merged = _deep_merge_raw(merged, local_raw)
+
+    config = _config_from_dict(merged)
+    config = _apply_env_overrides(config)
+    return config
 
 
-def _load_global_config() -> XcodeRuntimeConfig:
-    home = Path.home()
-    return _load_json_config(home / ".xcode" / "settings.json")
-
-
-def _load_json_config(path: Path | None) -> XcodeRuntimeConfig:
+def _load_raw_config(path: Path | None) -> dict[str, Any]:
+    """读取 JSON 配置为原始 dict；文件不存在返回空 dict。"""
     if path is None or not path.exists():
-        return XcodeRuntimeConfig()
+        return {}
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"runtime config must be a JSON object: {path}")
-    return _from_dict_preserving_profiles(data)
+    return data
 
 
-def _from_dict_preserving_profiles(data: dict[str, Any]) -> XcodeRuntimeConfig:
-    provider = data.get("provider", {})
-    raw_profiles = provider.get("model_profiles", {})
-    if isinstance(raw_profiles, dict):
-        provider = dict(provider)
-        provider["model_profiles"] = _resolve_model_profiles(raw_profiles)
-    return _config_from_dict({**data, "provider": provider})
+def _resolve_profiles_in_raw(data: dict[str, Any]) -> dict[str, Any]:
+    """在原始 dict 中展开 model_profiles 继承。"""
+    if not data:
+        return data
+    provider = data.get("provider")
+    if not isinstance(provider, dict):
+        return data
+    raw_profiles = provider.get("model_profiles")
+    if not isinstance(raw_profiles, dict):
+        return data
+    result = dict(data)
+    result["provider"] = dict(provider)
+    result["provider"]["model_profiles"] = _resolve_model_profiles(raw_profiles)
+    return result
 
 
 def _resolve_model_profiles(
     raw_profiles: dict[str, object],
 ) -> dict[str, object]:
+    """在原始 dict 中展开 model_profiles 继承。"""
     main_raw: dict[str, object] = {}
     main_entry = raw_profiles.get(PROFILE_MAIN)
     if isinstance(main_entry, dict):
@@ -299,24 +290,19 @@ def _resolve_model_profiles(
     return resolved
 
 
-def _deep_merge_configs(
-    base: XcodeRuntimeConfig, override: XcodeRuntimeConfig
-) -> XcodeRuntimeConfig:
-    base_dict = _config_to_dict(base)
-    override_dict = _config_to_dict(override)
-    default_dict = _config_to_dict(XcodeRuntimeConfig())
-    merged = _merge_non_default(base_dict, override_dict, default_dict)
-    return _config_from_dict(merged)
+def _deep_merge_raw(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """递归合并 override 到 base；仅在 override 中显式存在的键覆盖 base。
 
-
-def _merge_non_default(base: dict, override: dict, default: dict) -> dict:
+    与旧 _merge_non_default 的区别：不比较 dataclass 默认值，
+    仅依据键是否在 override dict 中出现。用户显式设回默认值的键也会正确保留。
+    """
+    if not override:
+        return dict(base)
     result = dict(base)
     for key, val in override.items():
-        if key not in base:
-            result[key] = val
-        elif isinstance(val, dict) and isinstance(base[key], dict):
-            result[key] = _merge_non_default(base[key], val, default.get(key, {}))
-        elif val != default.get(key):
+        if isinstance(val, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge_raw(result[key], val)
+        else:
             result[key] = val
     return result
 
@@ -400,7 +386,9 @@ def _load_provider_transport(
 
 
 def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
-    return _load_json_config(path)
+    raw = _load_raw_config(path)
+    raw = _resolve_profiles_in_raw(raw)
+    return _config_from_dict(raw)
 
 
 def resolve_config_path(project_root: Path, path: Path | None) -> Path | None:
