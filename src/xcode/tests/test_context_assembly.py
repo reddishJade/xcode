@@ -38,6 +38,7 @@ from xcode.agent.context_collector import (
     TaskStateCollector,
 )
 from xcode.agent.messages import (
+    CompactionSummaryMessage,
     SystemMessage,
     ToolResultMessage,
     UserMessage,
@@ -1405,6 +1406,34 @@ class TestDefaultContextAssemblerSystemBlocks(unittest.TestCase):
         self.assertEqual(len(result.messages), 3)
         roles = [getattr(m, "role", "") for m in result.messages]
         self.assertEqual(roles, ["system", "system", "user"])
+
+    def test_compaction_summary_does_not_affect_injection_position(self) -> None:
+        """CompactionSummaryMessage 不会中断 system block scanning。
+
+        ProjectManifest SYSTEM 块应在 prompting system message 之后、
+        压缩历史（compaction_summary）之前注入。
+        """
+        result = self.assembler.assemble(
+            ContextAssemblyInput(
+                messages=[
+                    SystemMessage(content="identity prompt"),
+                    CompactionSummaryMessage(summary="previous turns"),
+                    UserMessage(content="current question"),
+                ],
+                context_blocks=[
+                    ContextBlock(
+                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        target=ContextBlockTarget.SYSTEM,
+                        priority=ContextPriority.CRITICAL,
+                        content="project rules",
+                    ),
+                ],
+            )
+        )
+        roles = [getattr(m, "role", "") for m in result.messages]
+        self.assertEqual(roles, ["system", "system", "compaction_summary", "user"])
+        self.assertEqual(result.messages[0].content, "identity prompt")
+        self.assertEqual(result.messages[1].content, "project rules")
 
 
 # ── ProjectManifestCollector 测试 ──

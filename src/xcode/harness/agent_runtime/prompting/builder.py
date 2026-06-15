@@ -1,3 +1,25 @@
+"""System prompt 构建器：agent 身份、工具纪律、环境快照、git preflight 等。
+
+本模块是 prompt 构建的两个系统之一（另一个见 agent/context_collector.py）。
+职责边界：
+- 稳定区：agent 身份、工具纪律、工具列表、搜索策略（注册表不变时缓存）
+- 动态区：环境信息（OS、Python、CWD）、CWD 目录快照（CWD 不变时缓存）
+- 易变区：git preflight、contextual retrieval 状态、session 通知（每轮重建）
+
+不属于本模块（由 context_collector 管理）：
+- 项目指令（AGENTS.md / CLAUDE.md）→ ProjectManifestCollector
+- 活动 diff 摘要 → ActiveDiffCollector
+- 验证失败 → RecentValidationCollector
+- 任务/计划状态 → TaskStateCollector
+- 笔记文件 → NotesCollector
+- 技能文件 → SkillCollector
+
+关于 git preflight 与 ActiveDiffCollector 的重叠：
+- 本模块的 git_preflight 提供工作区快照（status、last commit、diff --stat）
+- ActiveDiffCollector 提供任务特定的 diff 摘录（diff --unified=1 的实际代码变更）
+  两者在 git diff --stat 上重叠，但职责不同：**快照 vs 任务上下文**。
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable

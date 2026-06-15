@@ -1,8 +1,26 @@
 """上下文收集器模块——可插拔的 ContextBlock 来源注册与管理。
 
 提供 ContextCollector 协议和 ContextCollectorRegistry，
-用于从多个来源（技能、active diff、notes 等）收集结构化上下文块，
-然后注入 ContextAssembler。
+用于从多个来源收集结构化上下文块，然后注入 ContextAssembler。
+
+本模块是 prompt 构建的两个系统之一（另一个见 prompting/builder.py）。
+职责边界：
+- 项目指令（AGENTS.md / CLAUDE.md）→ ProjectManifestCollector（SYSTEM 目标）
+- 活动 diff 摘要  → ActiveDiffCollector（USER_CONTEXT 目标）
+- 最近验证失败   → RecentValidationCollector（USER_CONTEXT 目标）
+- 任务/计划状态   → TaskStateCollector（USER_CONTEXT 目标）
+- 笔记文件        → NotesCollector（USER_CONTEXT 目标）
+- 技能文件        → SkillCollector（USER_CONTEXT 目标）
+
+每个上下文来源有且仅有一个注入路径。
+不属于本模块（由 prompting/builder 管理）：
+agent 身份、工具纪律、工具列表、搜索策略、环境信息、CWD 快照、
+git preflight、contextual retrieval、session 通知。
+
+不要重新引入：
+- instructions.py（旧版提示词注入路径）
+- skill catalog injection（技能目录已被 SkillCollector 取代）
+- <active-tasks-graph> 或 <post-compact-metadata>（旧版压缩元数据）
 
 设计原则：
 - 未注册 collector 时，collect() 返回空列表，不影响现有行为
