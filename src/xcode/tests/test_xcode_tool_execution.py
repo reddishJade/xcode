@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import unittest
 from typing import cast
+from unittest.mock import patch
 
 from xcode.agent.tool_execution import (
+    ExecutedToolBatch,
     execute_tool_calls,
     partition_tool_calls_for_execution,
 )
@@ -18,8 +20,15 @@ from xcode.agent.events import AgentEvent, ToolExecutionEndEvent
 from xcode.agent.messages import AssistantMessage
 from xcode.agent.protocols import AgentTool
 from xcode.agent.types import ShellCallOutputContent, TextContent, ToolCallContent
-from xcode.harness.observability import HITLResult
 from xcode.harness.agent_runtime.tool_adapter import adapt_tool_specs
+from xcode.harness.agent_runtime.tool_gate import ToolGate
+from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
+from xcode.harness.observability import (
+    HITLResult,
+    PermissionEngine,
+    PermissionPolicy,
+    PermissionRule,
+)
 from xcode.harness.skills import (
     AGENT_CONTENT_BLOCKS_METADATA_KEY,
     ToolOutput,
@@ -150,23 +159,30 @@ class AgentToolExecutionTests(unittest.TestCase):
         self.assertTrue(called)
         self.assertFalse(result.is_error)
 
-    def test_toolspec_adapter_uses_approval_callback(self) -> None:
-        """approval_callback 在静态 ask 时仍有效。"""
+    def test_toolspec_adapter_execute_runs_handler_directly(self) -> None:
+        """ToolSpecAdapter 直接执行 handler，不检查权限（权限由 ToolGate 门控）。"""
+        called = False
+
+        def handler(_data: dict) -> str:
+            nonlocal called
+            called = True
+            return "changed"
+
         (tool,) = adapt_tool_specs(
             (
                 ToolSpec(
                     "write",
                     "Write.",
                     "text",
-                    lambda _data: "changed",
+                    handler,
                     schema=EMPTY_SCHEMA,
                 ),
             ),
-            approval_callback=lambda _tool, _input: HITLResult("allow", "once"),
         )
 
         result = asyncio.run(tool.execute("call-1", {}))
 
+        self.assertTrue(called)
         self.assertFalse(result.is_error)
         block = result.content[0]
         self.assertIsInstance(block, TextContent)
@@ -286,6 +302,186 @@ class AgentToolExecutionTests(unittest.TestCase):
         self.assertIsInstance(end_event, ToolExecutionEndEvent)
         assert isinstance(end_event, ToolExecutionEndEvent)
         self.assertTrue(end_event.is_error)
+
+
+class TestPermissionSingleGate(unittest.TestCase):
+    """验证 PermissionEngine.decide() 在完整的工具执行路径中恰好调用一次。
+
+    ToolGate 是唯一的权限门控点。ToolSpecAdapter 不执行任何权限检查。
+    所有测试通过 monkeypatch PermissionEngine.decide 计数来验证调用次数。
+    """
+
+    TOOL_NAME = "test_tool"
+
+    def _handler_ok(self, _data: object) -> str:
+        self._handler_called = True
+        return "ok"
+
+    def _handler_never(self, _data: object) -> str:
+        self.fail("handler should not be called when tool is denied")
+
+    def _make_spec(self, handler):
+        return ToolSpec(
+            self.TOOL_NAME,
+            "test description",
+            "{}",
+            handler,
+            schema=EMPTY_SCHEMA,
+        )
+
+    def _make_gate(self, policy: PermissionPolicy | None, callback=None) -> ToolGate:
+        return ToolGate(
+            mode_state=ExecutionModeState(),
+            approval_callback=callback,
+            permission_policy=policy,
+            hook_manager=None,
+            audit_logger=None,
+            session_id="test",
+        )
+
+    def _run_execution(
+        self, gate: ToolGate, spec: ToolSpec, args: dict | None = None
+    ) -> ExecutedToolBatch:
+        adapted = gate.adapt_tools((spec,))
+        snapshot = gate.snapshot_for((spec,))
+        config = AgentLoopConfig(
+            before_tool_call=gate.build_before_tool_hook(snapshot),
+        )
+        tool_call = ToolCallContent(id="call-1", name=spec.name, arguments=args or {})
+        return asyncio.run(
+            execute_tool_calls(
+                AgentContext(tools=cast(list[AgentTool], adapted)),
+                AssistantMessage(content=[tool_call]),
+                [tool_call],
+                config,
+                None,
+                lambda _: None,
+            )
+        )
+
+    # ── allow path ──
+
+    def test_allow_path_calls_permission_once(self) -> None:
+        """allow 路径：PermissionEngine.decide() 调用 1 次，handler 运行。"""
+        self._handler_called = False
+        spec = self._make_spec(self._handler_ok)
+        gate = self._make_gate(
+            PermissionPolicy((PermissionRule(self.TOOL_NAME, "allow"),))
+        )
+
+        decide_count: list[int] = [0]
+        orig_decide = PermissionEngine.decide
+
+        def counting_decide(self, tool_name, action_input, **kwargs):
+            decide_count[0] += 1
+            return orig_decide(self, tool_name, action_input, **kwargs)
+
+        with patch.object(PermissionEngine, "decide", counting_decide):
+            result = self._run_execution(gate, spec)
+
+        self.assertEqual(decide_count[0], 1, msg="decide 必须恰好调用一次")
+        self.assertTrue(self._handler_called, msg="handler 必须在 allow 时执行")
+        self.assertFalse(result.results[0].is_error)
+
+    # ── deny path ──
+
+    def test_deny_path_calls_permission_once_handler_skipped(self) -> None:
+        """deny 路径：PermissionEngine.decide() 调用 1 次，handler 不运行。"""
+        spec = self._make_spec(self._handler_never)
+        gate = self._make_gate(
+            PermissionPolicy((PermissionRule(self.TOOL_NAME, "deny"),))
+        )
+
+        decide_count: list[int] = [0]
+        orig_decide = PermissionEngine.decide
+
+        def counting_decide(self, tool_name, action_input, **kwargs):
+            decide_count[0] += 1
+            return orig_decide(self, tool_name, action_input, **kwargs)
+
+        with patch.object(PermissionEngine, "decide", counting_decide):
+            result = self._run_execution(gate, spec)
+
+        self.assertEqual(decide_count[0], 1, msg="decide 必须恰好调用一次")
+        self.assertTrue(result.results[0].is_error, msg="deny 工具必须返回 error")
+
+    # ── ask/defer path ──
+
+    def test_ask_defer_path_calls_permission_once_blocked(self) -> None:
+        """ask 路径：PermissionEngine.decide() 调用 1 次，工具被 block。
+
+        ToolGate 使用 defer_static_ask=True，ask 被推迟到外部 HITL。
+        handler 不执行；grant 在后续调用中满足。
+        *ask/grant 的完整周期测试见 test_xcode_permissions.py。
+        """
+        spec = self._make_spec(self._handler_never)
+        gate = self._make_gate(
+            PermissionPolicy((PermissionRule(self.TOOL_NAME, "ask"),)),
+            callback=lambda _t, _i: HITLResult("allow", "session"),
+        )
+
+        decide_count: list[int] = [0]
+        orig_decide = PermissionEngine.decide
+
+        def counting_decide(self, tool_name, action_input, **kwargs):
+            decide_count[0] += 1
+            return orig_decide(self, tool_name, action_input, **kwargs)
+
+        with patch.object(PermissionEngine, "decide", counting_decide):
+            result = self._run_execution(gate, spec)
+
+        self.assertEqual(decide_count[0], 1, msg="decide 必须恰好调用一次")
+        self.assertTrue(result.results[0].is_error, msg="ask defer 必须返回 error")
+
+    # ── ToolSpecAdapter direct (no PermissionEngine) ──
+
+    def test_adapter_direct_execute_no_permission(self) -> None:
+        """ToolSpecAdapter.execute() 直接调用不涉及 PermissionEngine。"""
+        called = False
+
+        def handler(_data: dict) -> str:
+            nonlocal called
+            called = True
+            return "direct"
+
+        (tool,) = adapt_tool_specs(
+            (ToolSpec("direct", "test", "{}", handler, schema=EMPTY_SCHEMA),)
+        )
+        result = asyncio.run(tool.execute("call-1", {}))
+        self.assertTrue(called)
+        self.assertFalse(result.is_error)
+        self.assertIn("direct", str(result.content))
+
+    def test_adapter_has_no_engine_attribute(self) -> None:
+        """ToolSpecAdapter 实例不包含 _engine 属性（PermissionEngine 已剥离）。"""
+        (tool,) = adapt_tool_specs(
+            (ToolSpec("x", "test", "{}", lambda _: "", schema=EMPTY_SCHEMA),)
+        )
+        self.assertFalse(hasattr(tool, "_engine"), msg="adapter 不应持有 _engine")
+
+    # ── production execution routes through ToolGate ──
+
+    def test_production_flow_routes_through_toolgate(self) -> None:
+        """验证完整生产路径经过 ToolGate 门控（通过 execute_tool_calls）。"""
+        self._handler_called = False
+        spec = self._make_spec(self._handler_ok)
+        gate = self._make_gate(
+            PermissionPolicy((PermissionRule(self.TOOL_NAME, "allow"),))
+        )
+
+        decide_count: list[int] = [0]
+        orig_decide = PermissionEngine.decide
+
+        def counting_decide(self, tool_name, action_input, **kwargs):
+            decide_count[0] += 1
+            return orig_decide(self, tool_name, action_input, **kwargs)
+
+        with patch.object(PermissionEngine, "decide", counting_decide):
+            result = self._run_execution(gate, spec)
+
+        self.assertEqual(decide_count[0], 1, msg="生产路径必须经过 ToolGate")
+        self.assertTrue(self._handler_called)
+        self.assertFalse(result.results[0].is_error)
 
 
 if __name__ == "__main__":

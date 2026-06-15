@@ -21,18 +21,9 @@ from ...agent.protocols import (
 from xcode.agent.types import ShellCallOutputContent, TextContent, ToolArguments
 from ..skills import (
     AGENT_CONTENT_BLOCKS_METADATA_KEY,
-    ApprovalCallback,
     ToolSpec,
-    stringify_tool_input,
 )
-from ..observability import (
-    PermissionCheckResult,
-    PermissionEngine,
-    PermissionEngineConfig,
-    PermissionPolicy,
-    redact_text,
-)
-from ..observability.permission_model import PolicyEvaluator
+from ..observability import redact_text
 
 
 class ToolSpecAdapter:
@@ -42,26 +33,8 @@ class ToolSpecAdapter:
     此类在 harness/ 层，实现 agent/ 层定义的 protocol。
     """
 
-    def __init__(
-        self,
-        spec: ToolSpec,
-        *,
-        approval_callback: ApprovalCallback | None = None,
-        permission_policy: PermissionPolicy | None = None,
-        restricted_dirs: tuple[str, ...] = (),
-        allowlist_mode: bool = False,
-        hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
-    ) -> None:
+    def __init__(self, spec: ToolSpec) -> None:
         self._spec = spec
-        self._approval_callback = approval_callback
-        self._engine = PermissionEngine(
-            PermissionEngineConfig(
-                static_policy=permission_policy,
-                restricted_dirs=restricted_dirs,
-                allowlist_mode=allowlist_mode,
-                hook_constraint_providers=hook_constraint_providers,
-            )
-        )
 
     @property
     def name(self) -> str:
@@ -105,49 +78,20 @@ class ToolSpecAdapter:
         on_update: ToolUpdateCallback | None = None,
     ) -> AgentToolResult:
         tool_input = _tool_input_from_arguments(params)
-        action_input = stringify_tool_input(tool_input)
-        result: PermissionCheckResult = self._engine.decide(
-            self._spec.name,
-            action_input,
-            tool_spec=self._spec,
-            tool_input=tool_input,
-            approval_callback=self._approval_callback,
-        )
-        if result.blocked:
-            return AgentToolResult(
-                content=[TextContent(text=result.reason)],
-                is_error=True,
-            )
-
         content = await asyncio.to_thread(self._spec.handler, tool_input)
         return AgentToolResult(content=_tool_result_content(content, tool_call_id))
 
 
-def adapt_tool_specs(
-    specs: tuple[ToolSpec, ...],
-    *,
-    approval_callback: ApprovalCallback | None = None,
-    permission_policy: PermissionPolicy | None = None,
-    restricted_dirs: tuple[str, ...] = (),
-    allowlist_mode: bool = False,
-    hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
-) -> list[ToolSpecAdapter]:
-    """批量将 ToolSpec 适配为 AgentTool。"""
+def adapt_tool_specs(specs: tuple[ToolSpec, ...]) -> list[ToolSpecAdapter]:
+    """批量将 ToolSpec 适配为 AgentTool。
+
+    权限门控由 ToolGate 在 before_tool_call 钩子中处理，不在本适配器中执行。
+    """
     missing_schema = [spec.name for spec in specs if spec.schema is None]
     if missing_schema:
         names = ", ".join(sorted(missing_schema))
         raise ValueError(f"tools must define JSON schemas: {names}")
-    return [
-        ToolSpecAdapter(
-            spec,
-            approval_callback=approval_callback,
-            permission_policy=permission_policy,
-            restricted_dirs=restricted_dirs,
-            allowlist_mode=allowlist_mode,
-            hook_constraint_providers=hook_constraint_providers,
-        )
-        for spec in specs
-    ]
+    return [ToolSpecAdapter(spec) for spec in specs]
 
 
 def _tool_result_content(

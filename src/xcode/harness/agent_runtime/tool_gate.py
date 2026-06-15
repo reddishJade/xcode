@@ -103,17 +103,12 @@ class ToolGate:
         )
 
     def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
-        """将 ToolSpec 注册表适配为带当前门控配置的 AgentTool。"""
-        return list(
-            adapt_tool_specs(
-                registry,
-                approval_callback=self._approval_callback,
-                permission_policy=self._permission_policy,
-                restricted_dirs=self._restricted_dirs,
-                allowlist_mode=self._allowlist_mode,
-                hook_constraint_providers=self._hook_constraint_providers,
-            )
-        )
+        """将 ToolSpec 注册表适配为 AgentTool。
+
+        权限门控由 build_before_tool_hook 中的 _precheck_permission 处理，
+        不在 ToolSpecAdapter 中执行。
+        """
+        return list(adapt_tool_specs(registry))
 
     @property
     def approval_callback(self) -> ApprovalCallback | None:
