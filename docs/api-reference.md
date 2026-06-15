@@ -94,7 +94,7 @@ def build_app(project_root, env_files=None, agent_config=None,
 `ProviderTransport = Literal["openai_chat", "anthropic_messages", "chatglm_chat", "deepseek_chat", "mimo_chat"]`
 `ExecutionMode = Literal["plan", "review", "act"]`
 `PermissionMode = Literal["strict", "normal", "permissive"]`
-`ApprovalPolicy = Literal["always", "high_risk_only", "never"]`
+`ApprovalPolicy = Literal["always", "never"]`
 
 | Dataclass | 关键字段 |
 |---|---|
@@ -138,34 +138,17 @@ ToolExecutionStatus = Literal["ok", "denied", "error", "approval_required"]
 @dataclass(frozen=True)
 class ToolSpec:
     name: str; description: str; input_hint: str; handler: ActionHandler
-    risk: str = "low"; schema: dict | None = None
+    schema: dict[str, Any] | None = None
     read_only: bool = False; concurrency_safe: bool = False
-    risk_evaluator: PermissionRiskEvaluator | None = None
     group: str = "core"; execution_mode: ToolExecutionMode | None = None
     counts_as_progress: bool | None = None
-    examples: list[dict] = field(default_factory=list)
+    examples: list[dict[str, Any]] = field(default_factory=list)
     prompt_snippet: str | None = None
     prompt_guidelines: tuple[str, ...] = ()
     builtin: dict[str, Any] | None = None
 ```
 
-### 3.5 Skill 加载器 `skill_loader.py`
-
-```python
-@dataclass(frozen=True)
-class SkillMatch: name: str; score: float; matched_use_when: tuple[str, ...]; matched_dont_use_when: tuple[str, ...]
-
-@dataclass(frozen=True)
-class SkillMetadata: name: str; description: str; path: Path; use_when: tuple[str, ...]; dont_use_when: tuple[str, ...]; risk: str; tools: tuple[str, ...]
-
-class SkillLoader:
-    def __init__(self, skills_dir: Path) -> None
-    def get_descriptions(self) -> str
-    def get_catalog(self, question: str | None = None) -> str
-    def get_content(self, name: str) -> str
-```
-
-### 3.6 会话管理 `session.py`
+### 3.5 会话管理 `session.py`
 
 ```python
 @dataclass(frozen=True)
@@ -233,7 +216,7 @@ class SystemPromptBuilder:
     def build(self, modules: tuple[str, ...]) -> str
     def register_module(self, name: str, fn: Callable) -> None
 
-def build_runtime_context_provider(project_root, registry, skill_loader, ...) -> RuntimeContextProvider | None
+def build_runtime_context_provider(project_root, registry, prompt_builder=None, contextual_state=None, modules=None, shell_spec=None) -> RuntimeContextProvider
 ```
 
 ---
@@ -244,7 +227,7 @@ def build_runtime_context_provider(project_root, registry, skill_loader, ...) ->
 
 ```python
 @dataclass
-class AuditRecord: session_id; tool; static_risk; dynamic_decision; policy_decision; final_status; approved; redacted_input; redacted_output; ...
+class AuditRecord: session_id; tool; dynamic_decision; policy_decision; final_status; approved; redacted_input; redacted_output; ...
 
 class JsonlAuditLogger:
     def write(self, record: AuditRecord) -> None
@@ -283,12 +266,6 @@ class PermissionEngine:
 
 class PermissionPolicy:
     def decide(self, tool_name, action_input) -> PermissionDecision | None
-    def grant(self, tool, decision, input_contains=None) -> None
-    def revoke(self, tool, input_contains=None) -> None
-    def clear(self) -> None
-
-class SessionPermissionPolicy(PermissionPolicy): ...  # 会话级覆盖
-class PersistentPermissionStore(PermissionPolicy): ...  # 文件持久化
 ```
 
 ---
