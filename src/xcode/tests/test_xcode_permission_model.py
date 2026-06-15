@@ -24,14 +24,16 @@ from xcode.harness.observability import (
     PermissionRule,
     evaluate_policy_constraints,
 )
-from xcode.harness.observability.permission_model import (
-    PermissionAccess,
-    PolicyEvaluator,
+from xcode.harness.observability._safety_backstop import (
     _is_dd_device_write,
     _is_root_recursive_deletion,
     _is_short_flag_with_r,
     _normalize_backslash_continuation,
     _split_compound_command,
+)
+from xcode.harness.observability.permission_model import (
+    PermissionAccess,
+    PolicyEvaluator,
 )
 from xcode.harness.skills import ToolSpec
 

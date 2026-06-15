@@ -7,10 +7,8 @@ import unittest
 from xcode.cli.repl_tools import parse_tool_input
 from xcode.coding_agent.tools import build_bash_tool
 from xcode.coding_agent.tools.bash import OutputAccumulator
-from xcode.harness.observability.permission_model import (
-    ActionExtractor,
-    SafetyBackstopPolicyEvaluator,
-)
+from xcode.harness.observability._safety_backstop import SafetyBackstopPolicyEvaluator
+from xcode.harness.observability.permission_model import ActionExtractor
 
 
 

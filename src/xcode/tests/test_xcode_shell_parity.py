@@ -9,9 +9,7 @@ from dataclasses import dataclass
 import unittest
 
 from xcode.harness.observability import ActionExtractor
-from xcode.harness.observability.permission_model import (
-    SafetyBackstopPolicyEvaluator,
-)
+from xcode.harness.observability._safety_backstop import SafetyBackstopPolicyEvaluator
 
 
 @dataclass(frozen=True)
