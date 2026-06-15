@@ -173,7 +173,7 @@ class XcodePermissionsTests(unittest.TestCase):
         self.assertTrue(result.blocked)
         self.assertEqual(result.matched_rule, "mode")
 
-    def test_tool_gate_static_deny_preempts_execution_mode_ask(self) -> None:
+    def test_tool_gate_static_deny_preempts_execution_mode(self) -> None:
         called = False
 
         def approve(_tool: ToolSpec, _input: dict[str, object]) -> HITLResult:
@@ -182,7 +182,7 @@ class XcodePermissionsTests(unittest.TestCase):
             return HITLResult("allow", "once")
 
         mode = ExecutionModeState()
-        mode.set_mode("review")
+        mode.set_mode("act")
         tool = ToolSpec("bash", "Bash.", "command", lambda _value: "")
         gate = ToolGate(
             mode_state=mode,

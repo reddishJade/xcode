@@ -13,7 +13,7 @@ ProviderTransport = Literal[
     "deepseek_chat",
     "mimo_chat",
 ]
-ExecutionMode = Literal["plan", "review", "act"]
+ExecutionMode = Literal["plan", "build", "act"]
 PermissionMode = Literal["strict", "normal", "permissive"]
 ApprovalPolicy = Literal["always", "never"]
 
@@ -152,7 +152,6 @@ class XcodeRuntimeConfig:
 
 
 # ── 序列化 / 反序列化 ──
-
 
 
 def _config_from_dict(data: dict[str, Any]) -> XcodeRuntimeConfig:

@@ -192,10 +192,12 @@ def cmd_plan(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
-def cmd_review(cmd: str, ctx: CommandContext) -> bool:
-    """进入 Review Mode（只读审查，修改需审批）。"""
-    ctx.state.mode = "review"
-    print("Review Mode enabled. Edits are blocked; validation requires approval.")
+def cmd_build(cmd: str, ctx: CommandContext) -> bool:
+    """进入 Build Mode（允许普通文件变更，高风险操作需审批）。"""
+    ctx.state.mode = "build"
+    print(
+        "Build Mode enabled. Ordinary file mutations are allowed; high-risk actions require approval."
+    )
     return False
 
 
@@ -255,8 +257,10 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
         ctx.state.mode = "act"
         print("Act Mode enabled. Normal tool use restored within policy.")
     elif choice == "3":
-        ctx.state.mode = "review"
-        print("Review Mode enabled. Edits are blocked; validation requires approval.")
+        ctx.state.mode = "build"
+        print(
+            "Build Mode enabled. Ordinary file mutations are allowed; high-risk actions require approval."
+        )
     elif choice == "4":
         print("Continuing in Plan Mode.")
     else:
@@ -279,7 +283,7 @@ def _select_act_transition() -> str | None:
                 title="Keep and Act (Keep current context and act directly)",
                 value="2",
             ),
-            questionary.Choice(title="Review Mode", value="3"),
+            questionary.Choice(title="Build Mode", value="3"),
             questionary.Choice(title="Continue in Plan Mode", value="4"),
         ],
         default="2",
@@ -520,9 +524,9 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         desc="Enter Plan Mode: read-only inspection tools, no edits or shell.",
         group=COMMAND_GROUP_MODE,
     ),
-    "/review": CommandEntry(
-        handler=cmd_review,
-        desc="Enter Review Mode: read-only review, guarded validation.",
+    "/build": CommandEntry(
+        handler=cmd_build,
+        desc="Enter Build Mode: ordinary file mutations allowed, high-risk actions require approval.",
         group=COMMAND_GROUP_MODE,
     ),
     "/act": CommandEntry(

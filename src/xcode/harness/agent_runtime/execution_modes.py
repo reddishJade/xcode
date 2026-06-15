@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol
 
 from xcode.ai.events import ToolCall
@@ -8,7 +7,7 @@ from ..config import ExecutionMode
 from ..observability.permissions import PermissionDecision
 from ..skills import ToolSpec
 
-"""Plan / Review / Act 的工具可见性策略。"""
+"""Plan / Build / Act 的工具可见性策略。"""
 
 
 class ExecutionPolicy(Protocol):
@@ -36,14 +35,14 @@ class ExecutionModeState:
             self._plan_enter_step = 0
 
     def check_plan_timeout(self) -> bool:
-        """检查 plan 模式是否超时，超时则自动切回 act。"""
+        """检查 plan 模式是否超时，超时则自动切换到 build。"""
         if self._current_mode != "plan":
             return False
         self._plan_enter_step += 1
         if self._plan_enter_step < self._max_plan_turns:
             return False
         self._plan_enter_step = 0
-        self._current_mode = "act"
+        self._current_mode = "build"
         return True
 
     def filter_tools(self, registry: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]:
@@ -57,39 +56,19 @@ PLAN_TOOL_NAMES = {
     "grep_search",
 }
 
-REVIEW_EXTRA_TOOL_NAMES = {
-    "bash",
-}
-
-REVIEW_BASH_PREFIXES = (
+BUILD_TOOL_NAMES = {
+    "read_file",
+    "write_file",
+    "edit_file",
+    "apply_patch",
+    "glob_files",
+    "grep_search",
+    "find_files",
     "ls",
-    "dir",
-    "find",
-    "rg",
-    "grep",
-    "git status",
-    "git diff",
-    "git show --stat",
-    "git show --oneline",
-)
-
-
-@dataclass(frozen=True)
-class ReviewCommand:
-    text: str
-
-    @classmethod
-    def from_tool_input(cls, action_input: dict[str, object]) -> "ReviewCommand":
-        command = action_input.get("command")
-        if command is None:
-            return cls(text="")
-        return cls(text=str(command).lower().strip())
-
-    def is_read_only_inspection(self) -> bool:
-        return any(
-            self.text == prefix or self.text.startswith(prefix + " ")
-            for prefix in REVIEW_BASH_PREFIXES
-        )
+    "bash",
+    "shell",
+    "search_tools",
+}
 
 
 class PlanPolicy:
@@ -100,16 +79,15 @@ class PlanPolicy:
         return "allow" if call.name in PLAN_TOOL_NAMES else "deny"
 
 
-class ReviewPolicy:
+class BuildPolicy:
+    """Build mode: ordinary file mutations allowed; high-risk through PermissionPipeline."""
+
     def filter_tools(self, tools: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]:
-        allowed = PLAN_TOOL_NAMES | REVIEW_EXTRA_TOOL_NAMES
-        return tuple(tool for tool in tools if tool.name in allowed)
+        return tuple(tool for tool in tools if tool.name in BUILD_TOOL_NAMES)
 
     def check_call(self, call: ToolCall) -> PermissionDecision:
-        if call.name in PLAN_TOOL_NAMES:
+        if call.name in BUILD_TOOL_NAMES:
             return "allow"
-        if call.name == "bash":
-            return "allow" if _is_review_bash_allowed(call.input) else "ask"
         return "deny"
 
 
@@ -127,8 +105,8 @@ def parse_execution_mode(value: object) -> ExecutionMode | None:
     match value:
         case "plan":
             return "plan"
-        case "review":
-            return "review"
+        case "build":
+            return "build"
         case "act":
             return "act"
         case _:
@@ -138,8 +116,8 @@ def parse_execution_mode(value: object) -> ExecutionMode | None:
 def policy_for_mode(mode: ExecutionMode) -> ExecutionPolicy:
     if mode == "plan":
         return PlanPolicy()
-    if mode == "review":
-        return ReviewPolicy()
+    if mode == "build":
+        return BuildPolicy()
     return ActPolicy()
 
 
@@ -158,15 +136,12 @@ def mode_notice(mode: ExecutionMode) -> str:
             "Do not modify files or run shell commands. Return only a concise plan.\n"
             "</execution-mode>"
         )
-    if mode == "review":
+    if mode == "build":
         return (
-            '<execution-mode name="review">\n'
-            "Review Mode is active. Tools are read-only by default. Edits are unavailable; "
-            "validation and static checks require approval. Report findings and risks only.\n"
+            '<execution-mode name="build">\n'
+            "Build Mode is active. Ordinary file mutations are allowed. "
+            "High-risk shell commands still require approval. "
+            "Execute the approved plan step by step.\n"
             "</execution-mode>"
         )
     return ""
-
-
-def _is_review_bash_allowed(action_input: dict[str, object]) -> bool:
-    return ReviewCommand.from_tool_input(action_input).is_read_only_inspection()

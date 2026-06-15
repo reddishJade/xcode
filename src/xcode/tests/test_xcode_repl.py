@@ -283,11 +283,11 @@ class XcodeReplTests(unittest.TestCase):
             self.assertIn("read @note.md", text)
             self.assertIn("file_references", text)
 
-    def test_run_repl_plan_review_and_act_toggle_execution_mode(self) -> None:
+    def test_run_repl_plan_build_and_act_toggle_execution_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = CapturingApp()
             prompt = FakePrompt(
-                ["/plan", "first", "/review", "second", "/act", "third", "/exit"]
+                ["/plan", "first", "/build", "second", "/act", "third", "/exit"]
             )
 
             with (
@@ -299,7 +299,7 @@ class XcodeReplTests(unittest.TestCase):
                 code = run_repl(app, Path(temp_dir), prompt)
 
             self.assertEqual(code, 0)
-            self.assertEqual(app.modes, ["plan", "review", "act"])
+            self.assertEqual(app.modes, ["plan", "build", "act"])
 
     def test_run_repl_tool_command_runs_registered_tool(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from xcode.ai.events import ToolCall
 from xcode.cli.repl_hitl import ReplHITLHandler
-from xcode.harness.agent_runtime.execution_modes import ActPolicy
+from xcode.harness.agent_runtime.execution_modes import ActPolicy, BuildPolicy
 from xcode.harness.observability import (
     ActionExtractor,
     FileGrantStore,
@@ -26,6 +26,29 @@ class ExecutionModeTests(unittest.TestCase):
             ToolCall(id="t1", name="bash", input={"command": "echo hello"})
         )
         self.assertEqual(result, "allow")
+
+    def test_build_policy_allows_file_write(self) -> None:
+        policy = BuildPolicy()
+        result = policy.check_call(
+            ToolCall(
+                id="t1", name="write_file", input={"path": "foo.txt", "content": "x"}
+            )
+        )
+        self.assertEqual(result, "allow")
+
+    def test_build_policy_allows_bash(self) -> None:
+        policy = BuildPolicy()
+        result = policy.check_call(
+            ToolCall(id="t1", name="bash", input={"command": "echo hello"})
+        )
+        self.assertEqual(result, "allow")
+
+    def test_build_policy_denies_network_tool(self) -> None:
+        policy = BuildPolicy()
+        result = policy.check_call(
+            ToolCall(id="t1", name="curl", input={"url": "http://example.com"})
+        )
+        self.assertEqual(result, "deny")
 
 
 class ReplHITLHandlerTests(unittest.TestCase):
