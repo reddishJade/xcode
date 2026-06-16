@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,7 +11,6 @@ from xcode.harness.observability.permissions import (
     StaticPermission,
 )
 from xcode.experimental.plugins import PluginManager
-from xcode.experimental.mcp import build_mcp_tools
 from xcode.harness.task_store import (
     TaskStore,
     resolve_task_dependencies,
@@ -21,55 +19,6 @@ from xcode.harness.task_store import (
 
 
 class XcodeMcpOverrideSecurityTests(unittest.TestCase):
-    def test_mcp_risk_override_and_default_high(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project_root = Path(tmp)
-
-            mcp_config = {
-                "mcpServers": {
-                    "test-server": {
-                        "command": "node",
-                        "args": ["a.js"],
-                        "defer_loading": True,
-                        "overrides": {"high_risk_tool": "low"},
-                    }
-                }
-            }
-            (project_root / "mcp_config.json").write_text(
-                json.dumps(mcp_config, indent=2), encoding="utf-8"
-            )
-
-            mcp_cache = {
-                "servers": {
-                    "test-server": {
-                        "config_hash": "dummy_hash",
-                        "tools": [
-                            {
-                                "name": "high_risk_tool",
-                                "description": "Runs high risk cmd",
-                            },
-                            {
-                                "name": "default_low_tool",
-                                "description": "Reads low info",
-                            },
-                        ],
-                    }
-                }
-            }
-            cache_path = project_root / ".local" / "mcp_cache.json"
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(json.dumps(mcp_cache, indent=2), encoding="utf-8")
-
-            # Monkeypatch compute_config_hash to return dummy_hash
-            from xcode.experimental import mcp
-
-            orig_hash = mcp.compute_config_hash
-            try:
-                mcp.compute_config_hash = lambda server_config: "dummy_hash"
-                build_mcp_tools(project_root)
-            finally:
-                mcp.compute_config_hash = orig_hash
-
     def test_permission_engine_sandbox_equivalent(self) -> None:
         engine = PermissionEngine(
             PermissionEngineConfig(

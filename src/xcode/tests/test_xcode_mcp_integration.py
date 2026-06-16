@@ -59,14 +59,13 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
             }
         ]
 
-        # 1. Prepare config files
+        # 1. Prepare config files — no overrides (Step 9 removes them)
         mcp_config = {
             "mcpServers": {
                 "fetcher": {
                     "command": "python",
                     "args": ["fetch_server.py"],
                     "env": {},
-                    "overrides": {"read_data": "low"},
                 }
             }
         }
@@ -84,7 +83,9 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         self.assertEqual(tools[0].group, "mcp")
 
         # Verify client was instantiated, started, queried, and stopped
-        mock_client_class.assert_called_once_with(["python", "fetch_server.py"], {})
+        mock_client_class.assert_called_once_with(
+            ["python", "fetch_server.py"], {}, timeout=None
+        )
         mock_client.start.assert_called_once()
         mock_client.list_tools.assert_called_once()
         mock_client.stop.assert_called_once()
@@ -113,7 +114,7 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
 
         build_mcp_tools(self.project_root)
         mock_client_class.assert_called_once_with(
-            ["python", "fetch_server.py", "--verbose"], {}
+            ["python", "fetch_server.py", "--verbose"], {}, timeout=None
         )
 
     @patch("xcode.experimental.mcp_client.McpClient")
@@ -175,8 +176,10 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         self.assertEqual(response, "Success")
 
         # Now connection should be created and started, and call_tool invoked
-        mock_client_class.assert_called_once_with(["python", "db_server.py"], None)
+        mock_client_class.assert_called_once_with(
+            ["python", "db_server.py"], None, timeout=None
+        )
         mock_client.start.assert_called_once()
         mock_client.call_tool.assert_called_once_with(
-            "edit_record", {"id": 42, "value": "new_val"}
+            "edit_record", {"id": 42, "value": "new_val"}, timeout=None
         )

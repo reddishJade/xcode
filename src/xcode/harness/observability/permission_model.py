@@ -989,6 +989,22 @@ class ActionExtractor:
             return self._path_action(
                 tool_name, tool_input, "write", "delete_file", "write"
             )
+        if tool_name.startswith("mcp__"):
+            # Invariant: only group="mcp" ToolSpecs reach here
+            # (enforced by registry assembly in assembly.py)
+            return Action(
+                tool=tool_name,
+                capability="mcp",
+                operation=tool_name,
+                targets=(
+                    Target(
+                        kind="mcp",
+                        value=tool_name,
+                        access="execute",
+                    ),
+                ),
+                input=tool_input,
+            )
         return Action(
             tool=tool_name,
             capability="unknown",

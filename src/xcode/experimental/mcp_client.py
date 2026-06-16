@@ -10,6 +10,7 @@ import atexit
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -17,11 +18,35 @@ from typing import Any, BinaryIO, cast
 
 logger = logging.getLogger("xcode.experimental.mcp_client")
 
+_REDACT_PATTERNS: list[re.Pattern] = [
+    re.compile(r"(Bearer\s+)[^\s]+", re.IGNORECASE),
+    re.compile(r"(sk-)[^\s]+", re.IGNORECASE),
+    re.compile(r"((?:api_key|token|secret)=)[^\s]+", re.IGNORECASE),
+]
+
+
+def redact_mcp_text(text: str) -> str:
+    for pattern in _REDACT_PATTERNS:
+        text = pattern.sub(r"\1****", text)
+    return text
+
+
+def truncate_redact(text: str, max_len: int = 200) -> str:
+    redacted = redact_mcp_text(text)
+    if len(redacted) > max_len:
+        redacted = redacted[:max_len] + "..."
+    return redacted
+
 
 class McpClient:
     """Standard Synchronous Model Context Protocol (MCP) Client over Stdio."""
 
-    def __init__(self, command: list[str], env: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        command: list[str],
+        env: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> None:
         self.command = command
         self.env = os.environ.copy()
         if env:
@@ -32,6 +57,12 @@ class McpClient:
         self._pending_responses: dict[int | str, dict[str, Any]] = {}
         self._read_thread: threading.Thread | None = None
         self._running = False
+        self._timeout = timeout
+        self._status: str = "pending"
+
+    @property
+    def status(self) -> str:
+        return self._status
 
     def start(self) -> None:
         if self.process is not None:
@@ -45,6 +76,7 @@ class McpClient:
                 env=self.env,
             )
         except OSError as e:
+            self._status = "failed"
             raise RuntimeError(f"Failed to start MCP server {self.command}: {e}")
 
         self._running = True
@@ -64,7 +96,10 @@ class McpClient:
             self.send_notification("notifications/initialized")
         except Exception as e:
             self.stop()
+            self._status = "failed"
             raise RuntimeError(f"MCP handshake failed: {e}")
+
+        self._status = "connected"
 
     def _read_loop(self) -> None:
         while self._running and self.process and self.process.stdout:
@@ -76,10 +111,14 @@ class McpClient:
                     self._pending_responses[msg["id"]] = msg
 
     def send_request(
-        self, method: str, params: dict, timeout: float = 10.0
+        self, method: str, params: dict, timeout: float | None = None
     ) -> dict[str, Any]:
         if not self._running or not self.process:
             raise RuntimeError("MCP client is not running.")
+
+        effective_timeout = timeout if timeout is not None else self._timeout
+        if effective_timeout is None:
+            effective_timeout = 10.0
 
         with self._lock:
             req_id = self.next_id
@@ -95,13 +134,14 @@ class McpClient:
             raise RuntimeError(f"Failed to write request to MCP server: {e}")
 
         start_time = time.time()
-        while time.time() - start_time < timeout:
+        while time.time() - start_time < effective_timeout:
             if self.process.poll() is not None:
                 err_content = ""
                 if self.process.stderr:
                     try:
                         raw_err = self.process.stderr.read()
-                        err_content = raw_err.decode("utf-8", errors="replace")
+                        raw_text = raw_err.decode("utf-8", errors="replace")
+                        err_content = truncate_redact(raw_text, max_len=200)
                     except Exception:
                         logger.debug("failed to read MCP server stderr", exc_info=True)
                 raise RuntimeError(
@@ -133,15 +173,17 @@ class McpClient:
         except OSError as e:
             raise RuntimeError(f"Failed to send notification to MCP server: {e}")
 
-    def list_tools(self, timeout: float = 10.0) -> list[dict[str, Any]]:
+    def list_tools(self, timeout: float | None = None) -> list[dict[str, Any]]:
         result = self.send_request("tools/list", {}, timeout=timeout)
         return result.get("tools", [])
 
     def call_tool(
-        self, name: str, arguments: dict, timeout: float = 30.0
+        self, name: str, arguments: dict, timeout: float | None = None
     ) -> dict[str, Any]:
         return self.send_request(
-            "tools/call", {"name": name, "arguments": arguments}, timeout=timeout
+            "tools/call",
+            {"name": name, "arguments": arguments},
+            timeout=timeout,
         )
 
     def stop(self) -> None:
@@ -172,6 +214,7 @@ class McpClient:
                 except Exception:
                     logger.debug("failed to kill MCP server process", exc_info=True)
             self.process = None
+        self._status = "disabled"
 
 
 # ── JSON-RPC 编解码 ──
@@ -238,10 +281,13 @@ class LazyClientRef:
         self.client: McpClient | None = None
 
     def get_or_create(self) -> McpClient:
-        if self.client is None:
+        if self.client is None or self.client.status == "failed":
+            if self.client is not None:
+                self.client.stop()
             command = [self.config["command"]] + self.config.get("args", [])
             env = self.config.get("env")
-            self.client = McpClient(command, env)
+            timeout = self.config.get("timeout")
+            self.client = McpClient(command, env, timeout=timeout)
             self.client.start()
         return self.client
 

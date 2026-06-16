@@ -269,7 +269,8 @@ def build_tool_registry(
     )
     registry = _extend_registry_with_features(registry, project_root, enabled)
 
-    child_registry = registry
+    # Step 9 host policy: MCP tools are always excluded from subagents
+    child_registry = tuple(t for t in registry if t.group != "mcp")
     registry += (build_search_tools_tool(registry),)
 
     subagent_closers, subagent_tools = _build_subagent_integration(
@@ -288,6 +289,15 @@ def build_tool_registry(
     )
     closers.extend(subagent_closers)
     registry += subagent_tools
+
+    # Step 9 invariant: only group="mcp" ToolSpecs may use mcp__ prefix
+    for spec in registry:
+        if spec.name.startswith("mcp__") and spec.group != "mcp":
+            raise ValueError(
+                f"Tool {spec.name!r} uses reserved prefix 'mcp__' "
+                f"but group is {spec.group!r}, not 'mcp'"
+            )
+
     return registry, shell_spec, tuple(closers), skill_registry
 
 

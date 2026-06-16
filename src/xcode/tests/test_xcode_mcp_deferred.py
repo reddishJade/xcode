@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from xcode.experimental.mcp import (
+    McpServerConfig,
     build_mcp_tools,
     build_mcp_tool_search,
     build_fetch_tools_tool,
@@ -85,7 +86,9 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
     def test_mcp_tool_search_cache_only(self) -> None:
         """测试 mcp_tool_search 仅从缓存中检索，不触发 lazy connection 物理连接。"""
         # 即使没有缓存，搜索工具在搜索时也不会启动 MCP 进程，而是返回 Schema not yet loaded
-        search_tool = build_mcp_tool_search(self.root, {"heavy_service"})
+        search_tool = build_mcp_tool_search(
+            self.root, {"heavy_service"}, {"heavy_service": "heavy_service"}
+        )
 
         # 执行搜索
         result = search_tool.handler({"query": "all"})
@@ -182,14 +185,18 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
         ):
             output = stub_tool.handler({"factor": 5})
             self.assertEqual(output, "result: 42")
-            mock_client.call_tool.assert_called_with("heavy_calculate", {"factor": 5})
+            mock_client.call_tool.assert_called_with(
+                "heavy_calculate", {"factor": 5}, timeout=None
+            )
 
     def test_fetch_tools_bootstrap_tool(self) -> None:
         """测试 fetch_tools 引导工具是否能正常冷启动拉取列表并缓存。"""
-        server_config = {"command": "node", "args": ["heavy.js"]}
-        bootstrap_tool = build_fetch_tools_tool(
-            self.root, "heavy_service", server_config
+        validated = McpServerConfig(
+            name="heavy_service",
+            command=("node",),
+            args=("heavy.js",),
         )
+        bootstrap_tool = build_fetch_tools_tool(self.root, "heavy_service", validated)
 
         # 模拟 McpClient 启动与拉取
         mock_client = MagicMock()

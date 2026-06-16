@@ -508,6 +508,14 @@ class PermissionEngine:
         effective_scope = hitl.scope
         metadata: PermissionMetadata = _approval_metadata("allow", hitl.scope)
 
+        # Step 9: MCP tools are session/once only — downgrade permanent
+        if action.capability == "mcp" and hitl.scope == "permanent":
+            effective_scope = "session"
+            metadata = dict(metadata)
+            metadata["requested_scope"] = "permanent"
+            metadata["effective_scope"] = "session"
+            metadata["mcp_scope_restriction"] = True
+
         if is_multi_target and hitl.scope in ("session", "permanent"):
             effective_scope = "once"
             metadata = dict(metadata)
@@ -515,9 +523,10 @@ class PermissionEngine:
             metadata["effective_scope"] = "once"
             metadata["multi_target_restriction"] = True
 
-        if hitl.scope == "session" and not is_multi_target:
+        write_scope = effective_scope
+        if write_scope == "session" and not is_multi_target:
             self._write_grants(action, decision="allow", scope="session")
-        elif hitl.scope == "permanent" and not is_multi_target:
+        elif write_scope == "permanent" and not is_multi_target:
             self._write_grants(action, decision="allow", scope="permanent")
 
         return PermissionEngineResult(
