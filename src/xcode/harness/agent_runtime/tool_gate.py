@@ -31,7 +31,11 @@ from ..observability import (
     PermissionDecision,
     PermissionPolicy,
 )
-from ..observability.permission_model import ExternalDirectory, PolicyEvaluator
+from ..observability.permission_model import (
+    ExternalDirectory,
+    GrantStore,
+    PolicyEvaluator,
+)
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 
@@ -46,6 +50,8 @@ class ToolGateSnapshot:
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
     project_root: Path | None = None
     external_directories: tuple[ExternalDirectory, ...] = ()
+    session_grant_store: GrantStore | None = None
+    permanent_grant_store: GrantStore | None = None
 
 
 class ToolGate:
@@ -72,6 +78,9 @@ class ToolGate:
         hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
         project_root: Path | None = None,
         external_directories: tuple[ExternalDirectory, ...] = (),
+        session_grant_store: GrantStore | None = None,
+        session_grant_store_provider: Callable[[], GrantStore | None] | None = None,
+        permanent_grant_store: GrantStore | None = None,
     ) -> None:
         self._mode = mode_state
         self._approval_callback = approval_callback
@@ -83,7 +92,15 @@ class ToolGate:
         self._audit_logger = audit_logger
         self._session_id = session_id
         self._project_root = project_root
+        self._session_grant_store = session_grant_store
+        self._session_grant_store_provider = session_grant_store_provider
+        self._permanent_grant_store = permanent_grant_store
         self._progress_steps_without_update: int = 0
+
+    def _resolve_session_store(self) -> GrantStore | None:
+        if self._session_grant_store_provider is not None:
+            return self._session_grant_store_provider()
+        return self._session_grant_store
 
     def snapshot(self) -> ToolGateSnapshot:
         return ToolGateSnapshot(
@@ -94,6 +111,8 @@ class ToolGate:
             hook_constraint_providers=self._hook_constraint_providers,
             project_root=self._project_root,
             external_directories=self._external_directories,
+            session_grant_store=self._resolve_session_store(),
+            permanent_grant_store=self._permanent_grant_store,
         )
 
     def snapshot_for(self, registry: tuple[ToolSpec, ...]) -> ToolGateSnapshot:
@@ -106,6 +125,8 @@ class ToolGate:
             hook_constraint_providers=self._hook_constraint_providers,
             project_root=self._project_root,
             external_directories=self._external_directories,
+            session_grant_store=self._resolve_session_store(),
+            permanent_grant_store=self._permanent_grant_store,
         )
 
     def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
@@ -124,6 +145,16 @@ class ToolGate:
     def set_approval_callback(self, approval_callback: ApprovalCallback | None) -> None:
         """更新后续工具适配与前置检查使用的 HITL 回调。"""
         self._approval_callback = approval_callback
+
+    def set_session_grant_store_provider(
+        self, provider: Callable[[], GrantStore | None] | None
+    ) -> None:
+        """设置或清除 session grant store provider。"""
+        self._session_grant_store_provider = provider
+
+    def set_permanent_grant_store(self, store: GrantStore | None) -> None:
+        """设置或清除 permanent grant store。"""
+        self._permanent_grant_store = store
 
     # ── 钩子构建 ──
 
@@ -233,7 +264,8 @@ class ToolGate:
                 hook_constraint_providers=snapshot.hook_constraint_providers,
                 project_root=snapshot.project_root,
                 external_directories=snapshot.external_directories,
-                defer_static_ask=True,
+                session_grant_store=snapshot.session_grant_store,
+                permanent_grant_store=snapshot.permanent_grant_store,
             )
         )
         result = engine.decide(

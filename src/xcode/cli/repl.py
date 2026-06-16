@@ -51,10 +51,8 @@ from xcode.harness.agent_runtime.events import (
     ToolUseStructuredEvent,
 )
 from xcode.harness.agent_runtime.result import StructuredAgentResult
-from xcode.harness.observability import (
-    FileGrantStore,
-    InMemoryGrantStore,
-)
+from xcode.harness.observability import FileGrantStore
+from xcode.harness.observability.permission_model import SessionGrantStoreManager
 from xcode.harness.session import SessionStore
 from xcode.agent.messages import UserMessage
 
@@ -104,12 +102,18 @@ def run_repl(
         lambda: current_model_options(app),
     )
     state = ReplState()
-    session_grant_store = InMemoryGrantStore()
+    grant_store_manager = SessionGrantStoreManager()
     permanent_grant_store = FileGrantStore.for_project_root(root)
-    hitl_handler = ReplHITLHandler(session_grant_store, permanent_grant_store, session)
+    hitl_handler = ReplHITLHandler(session)
     agent = getattr(app, "agent", None)
     if agent is not None:
         agent.approval_callback = hitl_handler
+        if hasattr(agent, "set_session_grant_store_provider"):
+            agent.set_session_grant_store_provider(
+                lambda: grant_store_manager.get_for_session(store.session_id)
+            )
+        if hasattr(agent, "set_permanent_grant_store"):
+            agent.set_permanent_grant_store(permanent_grant_store)
     clear_terminal_display()
     print_startup_banner(app, root)
     if resume_latest:
@@ -146,6 +150,9 @@ def run_repl(
             continue
         state.exit_pending = 0.0
         if text.startswith("/"):
+            current_session_store = grant_store_manager.get_for_session(
+                store.session_id
+            )
             if handle_command(
                 text,
                 store,
@@ -153,7 +160,7 @@ def run_repl(
                 markdown_renderer,
                 state,
                 session,
-                session_grant_store,
+                current_session_store,
                 permanent_grant_store,
                 static_policy=getattr(agent, "permission_policy", None),
                 restricted_dirs=getattr(agent, "restricted_dirs", ()),

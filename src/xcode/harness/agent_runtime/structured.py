@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import replace
 
 from xcode.ai.providers.protocol import StreamProvider
@@ -38,6 +38,7 @@ from .result import (
 from .tool_gate import ToolGate
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import HookRecord
+from ..observability.permission_model import GrantStore
 from ..skills import ApprovalCallback, ToolSpec
 
 _PROMPT_VERSION_CACHE: str | None = None
@@ -103,6 +104,9 @@ class StructuredAgent:
             restricted_dirs=gate.restricted_dirs,
             hook_constraint_providers=gate.hook_constraint_providers,
             project_root=runtime.project_root,
+            session_grant_store=gate.session_grant_store,
+            session_grant_store_provider=gate.session_grant_store_provider,
+            permanent_grant_store=gate.permanent_grant_store,
         )
         self.audit_logger = gate.audit_logger
         self._history = HistoryManager()
@@ -133,6 +137,17 @@ class StructuredAgent:
     def approval_callback(self, value: ApprovalCallback | None) -> None:
         """更新后续工具执行使用的 HITL 审批回调。"""
         self._gate.set_approval_callback(value)
+
+    def set_session_grant_store_provider(
+        self,
+        provider: Callable[[], GrantStore | None] | None,
+    ) -> None:
+        """设置当前会话的 session grant store provider。"""
+        self._gate.set_session_grant_store_provider(provider)
+
+    def set_permanent_grant_store(self, store: GrantStore | None) -> None:
+        """设置 permanent grant store。"""
+        self._gate.set_permanent_grant_store(store)
 
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history.load(messages)

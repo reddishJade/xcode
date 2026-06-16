@@ -33,7 +33,7 @@ from ...agent.messages import (
 from ...agent.protocols import AgentTool
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
-from ..observability.permission_model import PolicyEvaluator
+from ..observability.permission_model import GrantStore, PolicyEvaluator
 from ..observability.permission_model import ExternalDirectory
 from ..skills import ApprovalCallback, ToolSpec
 from .cancellation import CancellationToken
@@ -58,6 +58,9 @@ class GateConfig:
     audit_logger: Callable[[AuditRecord], None] | None = None
     session_id: str = "local"
     external_directories: tuple[ExternalDirectory, ...] = ()
+    session_grant_store: GrantStore | None = None
+    session_grant_store_provider: Callable[[], GrantStore | None] | None = None
+    permanent_grant_store: GrantStore | None = None
 
 
 @dataclass

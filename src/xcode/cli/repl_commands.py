@@ -51,8 +51,6 @@ def cmd_help(cmd: str, ctx: CommandContext) -> bool:
 def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
     """清空当前会话记录并开始新会话。"""
     ctx.store.clear()
-    if ctx.session_grant_store is not None:
-        ctx.session_grant_store.clear()
     sync_agent_history(ctx.app, ctx.store)
     clear_terminal_display()
     print_startup_banner(ctx.app, ctx.project_root)
@@ -67,8 +65,6 @@ def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
         print(f"fork_type must be one of {sorted(FORK_TYPES)}, got {fork_type!r}")
         return False
     meta = ctx.store.fork_into(fork_type)
-    if ctx.session_grant_store is not None:
-        ctx.session_grant_store.clear()
     sync_agent_history(ctx.app, ctx.store)
     label = f" ({fork_type})" if fork_type else ""
     print(f'Forked: "{meta.title}"{label}')
@@ -139,8 +135,6 @@ def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
     except ValueError as exc:
         print(str(exc))
         return False
-    if ctx.session_grant_store is not None:
-        ctx.session_grant_store.clear()
     sync_agent_history(ctx.app, ctx.store)
     print(resumed_message(view))
     print_loaded_history(ctx.store)
@@ -245,8 +239,6 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
         meta = ctx.store.fork_clean_into(
             "isolate", title=f"Act Continuation of Plan {parent_id}"
         )
-        if ctx.session_grant_store is not None:
-            ctx.session_grant_store.clear()
         sync_agent_history(ctx.app, ctx.store)
 
         ctx.state.approved_plan = str(last_assistant_content)

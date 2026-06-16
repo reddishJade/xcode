@@ -526,6 +526,11 @@ class SessionStore:
         name = path.stem
         return name.removeprefix("session-")
 
+    @property
+    def session_id(self) -> str:
+        """返回当前会话的 logical_session_id。"""
+        return self._session_id(self.current_path)
+
 
 @dataclass(frozen=True)
 class SessionMetadataView:

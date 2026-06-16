@@ -124,7 +124,6 @@ class PermissionEngineConfig:
 
     static_policy: PermissionPolicy | None = None
     restricted_dirs: tuple[str, ...] = ()
-    defer_static_ask: bool = False
     shadow_model_enabled: bool = False
     project_root: Path | None = None
     external_directories: tuple[ExternalDirectory, ...] = ()
@@ -197,6 +196,21 @@ class PermissionEngine:
             shadow_approval_candidate=shadow_approval_candidate,
         )
 
+    def _has_approval_mechanism(
+        self,
+        approval_callback: PermissionApprovalCallback | None,
+    ) -> bool:
+        """检查是否有机制处理 ask 决策。
+
+        如果存在 session grant store、permanent grant store 或 approval_callback
+        中的任意一个，则有能力处理 ask。
+        """
+        return (
+            self._config.session_grant_store is not None
+            or self._config.permanent_grant_store is not None
+            or approval_callback is not None
+        )
+
     def _decide_resolver(
         self,
         tool_name: str,
@@ -243,11 +257,11 @@ class PermissionEngine:
             )
 
         # ask → 按工具类型执行授权查找 + 回调
-        if self._config.defer_static_ask:
+        if not self._has_approval_mechanism(approval_callback):
             return PermissionEngineResult(
                 decision="ask",
                 blocked=True,
-                reason="tool requires approval",
+                reason="tool requires approval, no approval mechanism available",
                 matched_rule=MATCHED_STATIC_ASK,
             )
         return self._resolve_ask(

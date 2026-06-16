@@ -410,7 +410,7 @@ class TestPermissionSingleGate(unittest.TestCase):
     def test_ask_defer_path_calls_permission_once_blocked(self) -> None:
         """ask 路径：PermissionEngine.decide() 调用 1 次，工具被 block。
 
-        ToolGate 使用 defer_static_ask=True，ask 被推迟到外部 HITL。
+        ask blocks when no approval mechanism exists.
         handler 不执行；grant 在后续调用中满足。
         *ask/grant 的完整周期测试见 test_xcode_permissions.py。
         """

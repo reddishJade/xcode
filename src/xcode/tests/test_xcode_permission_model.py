@@ -41,6 +41,7 @@ from xcode.harness.observability.permission_model import (
     ExternalDirectory,
     PermissionAccess,
     PolicyEvaluator,
+    SessionGrantStoreManager,
 )
 from xcode.harness.skills import ToolSpec
 
@@ -2052,6 +2053,150 @@ class LegacyPermissionFieldValidationTests(unittest.TestCase):
 
     def test_no_security_does_not_raise(self) -> None:
         _validate_legacy_security_fields({})  # should not raise
+
+
+class SessionGrantIsolationTests(unittest.TestCase):
+    """SessionGrantStoreManager + ToolGate provider + subagent isolation."""
+
+    def test_same_session_id_reuses_store(self) -> None:
+        manager = SessionGrantStoreManager()
+        store_a1 = manager.get_for_session("session-A")
+        store_a2 = manager.get_for_session("session-A")
+        self.assertIs(store_a1, store_a2)
+
+    def test_different_session_id_different_store(self) -> None:
+        manager = SessionGrantStoreManager()
+        store_a = manager.get_for_session("session-A")
+        store_b = manager.get_for_session("session-B")
+        self.assertIsNot(store_a, store_b)
+
+    def test_grant_in_session_a_not_in_b(self) -> None:
+        """Grant added to session A is not visible in session B."""
+        manager = SessionGrantStoreManager()
+        store_a = manager.get_for_session("session-A")
+        store_b = manager.get_for_session("session-B")
+
+        grant = _grant("src/main.py")
+        store_a.add(grant)
+        self.assertIn(grant, store_a.records())
+        self.assertNotIn(grant, store_b.records())
+
+    def test_switch_back_reuses_store_with_grants(self) -> None:
+        """Switching back to a previously-visited session reuses its store."""
+        manager = SessionGrantStoreManager()
+        store_a = manager.get_for_session("session-A")
+        grant = _grant("src/main.py")
+        store_a.add(grant)
+
+        # "Switch" to B, then back to A
+        manager.get_for_session("session-B")
+        store_a_again = manager.get_for_session("session-A")
+        self.assertIs(store_a, store_a_again)
+        self.assertEqual(len(store_a_again.records()), 1)
+
+    def test_subagent_fresh_empty_store(self) -> None:
+        """Subagent receives a fresh empty InMemoryGrantStore."""
+        subagent_store = InMemoryGrantStore(session_id="subagent-abcdef01")
+        self.assertEqual(len(subagent_store.records()), 0)
+
+    def test_subagent_does_not_inherit_parent_grants(self) -> None:
+        """Subagent store is independent of parent session store."""
+        manager = SessionGrantStoreManager()
+        parent_store = manager.get_for_session("parent-session")
+        parent_store.add(_grant("src/main.py"))
+
+        subagent_store = InMemoryGrantStore(session_id="subagent-abcdef01")
+        self.assertEqual(len(subagent_store.records()), 0)
+
+    def test_session_restart_loses_grants(self) -> None:
+        """New SessionGrantStoreManager = process restart = all stores lost."""
+        manager1 = SessionGrantStoreManager()
+        store = manager1.get_for_session("session-A")
+        store.add(_grant("src/main.py"))
+        self.assertEqual(len(store.records()), 1)
+
+        manager2 = SessionGrantStoreManager()
+        store_new = manager2.get_for_session("session-A")
+        self.assertEqual(len(store_new.records()), 0)
+
+    def test_repl_hitl_handler_no_grant_lookup(self) -> None:
+        """ReplHITLHandler does not call lookup on any grant store."""
+        from xcode.cli.repl_hitl import ReplHITLHandler
+
+        handler = ReplHITLHandler()
+        self.assertFalse(hasattr(handler, "_session_store"))
+        self.assertFalse(hasattr(handler, "_permanent_store"))
+
+    def test_repl_hitl_handler_no_write_grants_method(self) -> None:
+        """ReplHITLHandler does not have _write_grants method."""
+        from xcode.cli.repl_hitl import ReplHITLHandler
+
+        handler = ReplHITLHandler()
+        self.assertFalse(hasattr(handler, "_write_grants"))
+
+    def test_toolgate_snapshot_uses_provider(self) -> None:
+        """ToolGate resolves session store from provider at snapshot time."""
+        from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
+        from xcode.harness.agent_runtime.tool_gate import ToolGate
+
+        manager = SessionGrantStoreManager()
+        mode = ExecutionModeState()
+
+        gate = ToolGate(
+            mode_state=mode,
+            approval_callback=None,
+            permission_policy=None,
+            hook_manager=None,
+            audit_logger=None,
+            session_id="test",
+            session_grant_store_provider=lambda: manager.get_for_session(
+                "provider-test"
+            ),
+        )
+        snap = gate.snapshot()
+        self.assertIsNotNone(snap.session_grant_store)
+        self.assertEqual(
+            snap.session_grant_store._session_id,  # type: ignore[attr-defined]
+            "provider-test",
+        )
+
+    def test_toolgate_provider_resolves_after_session_change(self) -> None:
+        """Provider resolves new store after session_id changes."""
+        from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
+        from xcode.harness.agent_runtime.tool_gate import ToolGate
+
+        manager = SessionGrantStoreManager()
+        mode = ExecutionModeState()
+
+        # Simulate changing session_id between turns
+        current_id = ["session-A"]
+
+        def provider() -> InMemoryGrantStore:
+            return manager.get_for_session(current_id[0])
+
+        gate = ToolGate(
+            mode_state=mode,
+            approval_callback=None,
+            permission_policy=None,
+            hook_manager=None,
+            audit_logger=None,
+            session_id="test",
+            session_grant_store_provider=provider,
+        )
+
+        snap_a = gate.snapshot()
+        snap_a.session_grant_store.add(_grant("src/a.py"))  # type: ignore[union-attr]
+
+        # "Switch" to session B
+        current_id[0] = "session-B"
+        snap_b = gate.snapshot()
+        self.assertIsNot(snap_a.session_grant_store, snap_b.session_grant_store)
+        self.assertEqual(len(snap_b.session_grant_store.records()), 0)  # type: ignore[union-attr]
+
+        # Switch back to A — store with grant is reused
+        current_id[0] = "session-A"
+        snap_a2 = gate.snapshot()
+        self.assertIs(snap_a.session_grant_store, snap_a2.session_grant_store)
 
 
 if __name__ == "__main__":

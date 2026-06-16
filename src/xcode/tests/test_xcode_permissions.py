@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 import tempfile
 import unittest
@@ -7,10 +8,13 @@ import unittest
 from xcode.harness.observability import (
     HITLResult,
     HookManager,
+    InMemoryGrantStore,
     PermissionEngine,
     PermissionEngineConfig,
     PermissionPolicy,
     StaticPermission,
+    ActionExtractor,
+    create_grant_record,
 )
 from xcode.harness.skills import ToolSpec
 from xcode.harness.agent_runtime import StructuredAgent
@@ -120,8 +124,6 @@ class XcodePermissionsTests(unittest.TestCase):
     def test_permission_engine_session_grant_satisfies_ask(self) -> None:
         from xcode.harness.observability import (
             InMemoryGrantStore,
-            ActionExtractor,
-            create_grant_record,
         )
 
         store = InMemoryGrantStore()
@@ -591,8 +593,6 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
         """子代理无 session grant store，ask 不能被已存在的 grant 满足。"""
         from xcode.harness.observability import (
             InMemoryGrantStore,
-            ActionExtractor,
-            create_grant_record,
         )
 
         store = InMemoryGrantStore()
@@ -635,8 +635,6 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
         """子代理无 permanent grant store，永久授权不生效。"""
         from xcode.harness.observability import (
             FileGrantStore,
-            ActionExtractor,
-            create_grant_record,
         )
 
         import tempfile
@@ -973,6 +971,203 @@ class ToolGateBoundaryResolutionTests(unittest.TestCase):
             ),
             None,
         )
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.block)
+
+
+class ToolGateGrantFlowTests(unittest.TestCase):
+    """验证 ToolGate 生产路径中的 canonical ask/grant/callback 流程。"""
+
+    INPUT_SCHEMA = {
+        "type": "object",
+        "properties": {"command": {"type": "string"}},
+        "required": ["command"],
+        "additionalProperties": False,
+    }
+
+    def _make_gate(
+        self,
+        *,
+        policy: PermissionPolicy | None = None,
+        session_store: InMemoryGrantStore | None = None,
+        callback: Callable | None = None,
+    ) -> ToolGate:
+        mode = ExecutionModeState()
+        return ToolGate(
+            mode_state=mode,
+            approval_callback=callback,
+            permission_policy=policy,
+            hook_manager=None,
+            audit_logger=None,
+            session_id="toolgate-test",
+            session_grant_store=session_store,
+        )
+
+    def _make_hook(self, gate: ToolGate) -> Callable:
+        tool = ToolSpec(
+            "bash", "Bash.", "command", lambda v: "", schema=self.INPUT_SCHEMA
+        )
+        return gate.build_before_tool_hook(gate.snapshot_for((tool,)))
+
+    def _call_hook(
+        self, hook, command: str = "echo hello"
+    ) -> BeforeToolCallResult | None:
+        return hook(
+            BeforeToolCallContext(
+                assistant_message=AssistantMessage(content=[]),
+                tool_call=ToolCallContent(
+                    id="x", name="bash", arguments={"command": command}
+                ),
+                args={"command": command},
+                context=AgentContext(),
+            ),
+            None,
+        )
+
+    # ── 1. ask + no grant → callback called ──
+
+    def test_ask_no_grant_calls_callback(self) -> None:
+        """Static policy ask + no matching grant → callback invoked."""
+        calls: list[bool] = []
+
+        def cb(_tool, _input):
+            calls.append(True)
+            return HITLResult("allow", "session")
+
+        gate = self._make_gate(
+            policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            session_store=InMemoryGrantStore(),
+            callback=cb,
+        )
+        hook = self._make_hook(gate)
+        result = self._call_hook(hook)
+        self.assertIsNone(result)  # not blocked
+        self.assertEqual(len(calls), 1)
+
+    # ── 2. callback allow/session writes grant ──
+
+    def test_callback_allow_session_writes_grant(self) -> None:
+        """Callback returning allow/session writes a grant to session store."""
+        store = InMemoryGrantStore()
+        gate = self._make_gate(
+            policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            session_store=store,
+            callback=lambda _t, _i: HITLResult("allow", "session"),
+        )
+        hook = self._make_hook(gate)
+        self._call_hook(hook, "git status")
+        self.assertEqual(len(store.records()), 1)
+        self.assertEqual(store.records()[0].decision, "allow")
+        self.assertEqual(store.records()[0].scope, "session")
+
+    # ── 3. same session reuses grant, callback not called again ──
+
+    def test_same_session_reuses_grant(self) -> None:
+        """Second call with same session store reuses grant, no callback."""
+        callback_calls: list[int] = []
+
+        def cb(_t, _i):
+            callback_calls.append(1)
+            return HITLResult("allow", "session")
+
+        store = InMemoryGrantStore()
+        gate = self._make_gate(
+            policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            session_store=store,
+            callback=cb,
+        )
+        hook = self._make_hook(gate)
+
+        # First call: no grant → callback → grant written
+        self._call_hook(hook, "git status")
+        self.assertEqual(len(callback_calls), 1)
+
+        # Second call: grant reused → callback NOT called
+        self._call_hook(hook, "git status")
+        self.assertEqual(len(callback_calls), 1)
+
+    # ── 4. different session store does not reuse grant ──
+
+    def test_different_store_does_not_reuse_grant(self) -> None:
+        """Switching to a different session store does not reuse old grant."""
+        callback_calls: list[int] = []
+
+        def cb(_t, _i):
+            callback_calls.append(1)
+            return HITLResult("allow", "session")
+
+        store_a = InMemoryGrantStore()
+        store_b = InMemoryGrantStore()
+        mode = ExecutionModeState()
+        tool = ToolSpec(
+            "bash", "Bash.", "command", lambda v: "", schema=self.INPUT_SCHEMA
+        )
+
+        # Session A: first call writes grant
+        gate = ToolGate(
+            mode_state=mode,
+            approval_callback=cb,
+            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            hook_manager=None,
+            audit_logger=None,
+            session_id="test-a",
+            session_grant_store=store_a,
+        )
+        hook = gate.build_before_tool_hook(gate.snapshot_for((tool,)))
+        self._call_hook(hook, "git status")
+        self.assertEqual(len(store_a.records()), 1)
+        self.assertEqual(len(callback_calls), 1)
+
+        # Session B: different store, grant must be re-approved
+        gate_b = ToolGate(
+            mode_state=mode,
+            approval_callback=cb,
+            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            hook_manager=None,
+            audit_logger=None,
+            session_id="test-b",
+            session_grant_store=store_b,
+        )
+        hook_b = gate_b.build_before_tool_hook(gate_b.snapshot_for((tool,)))
+        self._call_hook(hook_b, "git status")
+        self.assertEqual(len(store_b.records()), 1)  # new grant written
+        self.assertEqual(len(callback_calls), 2)  # callback called again
+
+    # ── 5. callback deny blocks the tool ──
+
+    def test_callback_deny_blocks_tool(self) -> None:
+        """Callback returning deny blocks the tool."""
+        gate = self._make_gate(
+            policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            session_store=InMemoryGrantStore(),
+            callback=lambda _t, _i: HITLResult("deny", "once"),
+        )
+        hook = self._make_hook(gate)
+        result = self._call_hook(hook, "rm -rf /")
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.block)
+
+    # ── 6. no store + no callback → ask blocks ──
+
+    def test_ask_blocks_when_no_approval_mechanism(self) -> None:
+        """No grant store and no approval_callback means ask blocks."""
+        mode = ExecutionModeState()
+        tool = ToolSpec(
+            "bash", "Bash.", "command", lambda v: "", schema=self.INPUT_SCHEMA
+        )
+        gate = ToolGate(
+            mode_state=mode,
+            approval_callback=None,
+            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            hook_manager=None,
+            audit_logger=None,
+            session_id="test-no-mechanism",
+            # no session_grant_store, no permanent_grant_store
+        )
+        hook = gate.build_before_tool_hook(gate.snapshot_for((tool,)))
+        result = self._call_hook(hook, "echo hello")
         self.assertIsNotNone(result)
         assert result is not None
         self.assertTrue(result.block)

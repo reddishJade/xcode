@@ -188,9 +188,18 @@ class GrantStore(Protocol):
 
 
 class InMemoryGrantStore:
-    """会话级内存授权存储。"""
+    """会话级内存授权存储。
 
-    def __init__(self, records: Iterable[GrantRecord] = ()) -> None:
+    通过 session_id 标识所属会话。不同会话的实例不应共享。
+    """
+
+    def __init__(
+        self,
+        records: Iterable[GrantRecord] = (),
+        *,
+        session_id: str = "",
+    ) -> None:
+        self._session_id = session_id
         self._records = tuple(records)
 
     def add(self, record: GrantRecord) -> GrantRecord:
@@ -224,6 +233,23 @@ class InMemoryGrantStore:
     def clear(self) -> None:
         """清空会话授权记录。"""
         self._records = ()
+
+
+class SessionGrantStoreManager:
+    """管理 session_id 到 InMemoryGrantStore 的映射。
+
+    同一 logical_session_id 在同一进程中复用同一 store。
+    进程重启后所有 session grants 丢失。
+    不管理 FileGrantStore（永久授权与会话无关）。
+    """
+
+    def __init__(self) -> None:
+        self._stores: dict[str, InMemoryGrantStore] = {}
+
+    def get_for_session(self, session_id: str) -> InMemoryGrantStore:
+        if session_id not in self._stores:
+            self._stores[session_id] = InMemoryGrantStore(session_id=session_id)
+        return self._stores[session_id]
 
 
 class FileGrantStore:

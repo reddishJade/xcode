@@ -11,6 +11,7 @@ import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 from typing import TYPE_CHECKING, Any, cast
 
 from xcode.harness.execution_env import ExecutionEnv
@@ -38,6 +39,7 @@ from xcode.ai.providers.protocol import ModelProvider
 from xcode.harness.observability import (
     JsonlAuditLogger,
     HookManager,
+    InMemoryGrantStore,
     PermissionPolicy,
 )
 from xcode.harness.observability.permission_model import ExternalDirectory
@@ -396,6 +398,9 @@ def _build_subagent_integration(
                     else None
                 ),
                 external_directories=_external_directories_from_security(sec),
+                session_grant_store=InMemoryGrantStore(
+                    session_id=f"subagent-{uuid4().hex[:8]}"
+                ),
             ),
             runtime=AgentRuntimeConfig(
                 runtime_context_provider=build_runtime_context_provider(
