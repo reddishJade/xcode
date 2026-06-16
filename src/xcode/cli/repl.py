@@ -54,6 +54,11 @@ from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.observability import FileGrantStore
 from xcode.harness.observability.permission_model import SessionGrantStoreManager
 from xcode.harness.session import SessionStore
+from xcode.harness.snapshot import (
+    SnapshotResult,
+    SnapshotStore,
+    SnapshotUnsupportedError,
+)
 from xcode.agent.messages import UserMessage
 
 
@@ -105,6 +110,11 @@ def run_repl(
     grant_store_manager = SessionGrantStoreManager()
     permanent_grant_store = FileGrantStore.for_project_root(root)
     hitl_handler = ReplHITLHandler(session)
+    snapshot_store: SnapshotStore | None = None
+    try:
+        snapshot_store = SnapshotStore(root)
+    except SnapshotUnsupportedError:
+        pass
     agent = getattr(app, "agent", None)
     if agent is not None:
         agent.approval_callback = hitl_handler
@@ -164,6 +174,7 @@ def run_repl(
                 permanent_grant_store,
                 static_policy=getattr(agent, "permission_policy", None),
                 restricted_dirs=getattr(agent, "restricted_dirs", ()),
+                snapshot_store=snapshot_store,
             ):
                 print_saved_conversation(store)
                 return 0
@@ -176,6 +187,15 @@ def run_repl(
             continue
 
         store.append("user", text)
+
+        # 用户轮次边界快照：拍摄 pre 快照，执行 agent 轮次，finally 中拍 post 快照
+        snapshot_turn_id: str | None = None
+        pre_result: SnapshotResult | None = None
+        if snapshot_store is not None:
+            snapshot_turn_id = snapshot_store.next_turn_id(store.session_id)
+            svc = snapshot_store.service(store.session_id)
+            pre_result = svc.track()
+
         expanded_text, references = expand_file_references(text, root)
         if references:
             store.append("event", file_reference_event(references))
@@ -194,7 +214,23 @@ def run_repl(
             session=session,
             text=agent_text,
         )
-        _run_agent_turn(ctx)
+        try:
+            _run_agent_turn(ctx)
+        finally:
+            if snapshot_store is not None and pre_result is not None:
+                svc = snapshot_store.service(store.session_id)
+                post_result = svc.track()
+                changes = svc.diff(pre_result.snapshot_id, post_result.snapshot_id)
+                all_skipped = list(pre_result.skipped_files)
+                all_skipped.extend(post_result.skipped_files)
+                snapshot_store.record_turn(
+                    session_id=store.session_id,
+                    turn_id=snapshot_turn_id or "000",
+                    pre_snapshot_id=pre_result.snapshot_id,
+                    post_snapshot_id=post_result.snapshot_id,
+                    changed_files=changes,
+                    skipped_files=all_skipped,
+                )
 
 
 @dataclass

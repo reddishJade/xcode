@@ -985,6 +985,10 @@ class ActionExtractor:
             return self._bash_action(tool_name, tool_input)
         if tool_name == "shell":
             return self._shell_action(tool_name, tool_input)
+        if tool_name == "delete_file":
+            return self._path_action(
+                tool_name, tool_input, "write", "delete_file", "write"
+            )
         return Action(
             tool=tool_name,
             capability="unknown",

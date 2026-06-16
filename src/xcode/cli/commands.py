@@ -14,6 +14,7 @@ from xcode.harness.observability import (
     InMemoryGrantStore,
     PermissionPolicy,
 )
+from xcode.harness.snapshot import SnapshotStore
 
 
 VerbosityLevel = Literal["normal", "verbose", "debug"]
@@ -47,6 +48,7 @@ class CommandContext:
     permanent_grant_store: FileGrantStore | None = None
     static_policy: PermissionPolicy | None = None
     restricted_dirs: tuple[str, ...] = ()
+    snapshot_store: SnapshotStore | None = None
 
 
 CommandHandler = Callable[[str, CommandContext], bool]

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime
+import subprocess
 
 from .app_contract import ReplApp
 from .commands import (
@@ -37,9 +39,14 @@ from .repl_tools import run_tool_command
 from xcode.harness.observability import (
     FileGrantStore,
     InMemoryGrantStore,
+    PermissionApprovalCallback,
+    PermissionEngine,
+    PermissionEngineConfig,
     PermissionPolicy,
 )
+from xcode.harness.skills import stringify_tool_input
 from xcode.harness.session import FORK_TYPES, SessionStore
+from xcode.harness.snapshot import SnapshotStore, TurnSnapshotRecord
 
 
 def cmd_help(cmd: str, ctx: CommandContext) -> bool:
@@ -438,6 +445,173 @@ def cmd_exit(cmd: str, ctx: CommandContext) -> bool:
     return True
 
 
+def _parse_undo_count(cmd: str) -> int:
+    parts = cmd.split()
+    if len(parts) <= 1:
+        return 1
+    try:
+        n = int(parts[1])
+        return max(n, 1)
+    except ValueError:
+        return 1
+
+
+def cmd_undo(cmd: str, ctx: CommandContext) -> bool:
+    """回退最近 N 轮用户轮次的文件变更（基于快照恢复）。"""
+    if ctx.snapshot_store is None:
+        print(
+            "Snapshot undo requires a git repository. This project is not a git repo."
+        )
+        return False
+
+    parts = cmd.split()
+    if len(parts) >= 2 and parts[1] == "--list":
+        records = ctx.snapshot_store.list_records(ctx.store.session_id)
+        if not records:
+            print("No snapshot records found.")
+        else:
+            print(f"Snapshot records ({len(records)} total):")
+            for r in reversed(records):
+                status = "UNDONE" if r.undone else "active"
+                print(
+                    f"  turn {r.turn_id} [{status}]: "
+                    f"{len(r.changed_files)} files, "
+                    f"{len(r.skipped_files)} skipped"
+                )
+        return False
+
+    n = _parse_undo_count(cmd)
+    records = ctx.snapshot_store.get_undoable_records(ctx.store.session_id, n)
+    if not records:
+        if ctx.snapshot_store.list_records(ctx.store.session_id):
+            print("Nothing to undo (all turns already undone).")
+        else:
+            print("Nothing to undo (no snapshot records).")
+        return False
+
+    from typing import cast
+
+    agent = getattr(ctx.app, "agent", None)
+    approval_callback = cast(
+        "PermissionApprovalCallback | None",
+        getattr(agent, "approval_callback", None) if agent else None,
+    )
+
+    for record in reversed(records):
+        result = _revert_turn(ctx, approval_callback, record)
+        _report_undo_result(record, result)
+        if result.fatal_error:
+            print("Fatal error during undo. Stack preserved.")
+            return False
+        record.undone = True
+        ctx.snapshot_store.update_record(ctx.store.session_id, record)
+    return False
+
+
+@dataclass
+class _RevertResult:
+    restored: list[str] = field(default_factory=list)
+    skipped: list[tuple[str, str]] = field(default_factory=list)
+    fatal_error: bool = False
+
+
+def _revert_turn(
+    ctx: CommandContext,
+    approval_callback: PermissionApprovalCallback | None,
+    record: TurnSnapshotRecord,
+) -> _RevertResult:
+    store = ctx.snapshot_store
+    assert store is not None, "snapshot_store required for undo"
+    svc = store.service(ctx.store.session_id)
+    result = _RevertResult()
+
+    for entry in record.changed_files:
+        try:
+            # Layer 1: 路径安全校验
+            svc._validate_path(entry.path)
+
+            # Layer 2: 确认路径在 changed_files 中
+            all_paths = {c.path for c in record.changed_files}
+            if entry.path not in all_paths:
+                result.skipped.append((entry.path, "path not in turn changed_files"))
+                continue
+
+            # Layer 3: 冲突检测 — 当前文件必须与 post 快照一致
+            if svc.has_conflict(record.post_snapshot_id, entry.path):
+                result.skipped.append((entry.path, "conflict: file changed after turn"))
+                continue
+
+            # Layer 4: 权限检查
+            if entry.kind == "created":
+                tool_name = "delete_file"
+                tool_input: dict[str, object] = {"path": entry.path}
+            elif entry.kind == "deleted":
+                result.skipped.append(
+                    (entry.path, "file was deleted during the turn — cannot restore")
+                )
+                continue
+            else:
+                tool_name = "write_file"
+                tool_input = {"path": entry.path}
+
+            undo_agent = getattr(ctx.app, "agent", None)
+            engine = PermissionEngine(
+                PermissionEngineConfig(
+                    static_policy=ctx.static_policy,
+                    restricted_dirs=ctx.restricted_dirs,
+                    project_root=ctx.project_root,
+                    external_directories=getattr(undo_agent, "external_directories", ())
+                    if undo_agent is not None
+                    else (),
+                    session_grant_store=ctx.session_grant_store,
+                    permanent_grant_store=ctx.permanent_grant_store,
+                )
+            )
+            perm_result = engine.decide(
+                tool_name=tool_name,
+                action_input=stringify_tool_input(tool_input),
+                tool_input=tool_input,
+                approval_callback=approval_callback,
+            )
+            if perm_result.blocked:
+                result.skipped.append(
+                    (entry.path, f"permission denied: {perm_result.reason}")
+                )
+                continue
+
+            # Layer 5: 执行
+            if entry.kind == "created":
+                abs_path = (ctx.project_root / entry.path).resolve()
+                if abs_path.exists():
+                    abs_path.unlink()
+                    result.restored.append(entry.path)
+                else:
+                    result.skipped.append((entry.path, "file already removed"))
+            else:
+                svc.restore_file(record.pre_snapshot_id, entry.path)
+                result.restored.append(entry.path)
+
+        except (ValueError, OSError, subprocess.CalledProcessError) as e:
+            result.skipped.append((entry.path, str(e)))
+            continue
+
+    return result
+
+
+def _report_undo_result(record: TurnSnapshotRecord, result: _RevertResult) -> None:
+    if result.fatal_error:
+        print(f"Turn {record.turn_id}: fatal error, stack preserved.")
+        return
+    if result.restored:
+        print(f"Turn {record.turn_id}: reverted {len(result.restored)} file(s):")
+        for p in result.restored:
+            print(f"  restored: {p}")
+    if result.skipped:
+        print(f"Turn {record.turn_id}: {len(result.skipped)} file(s) skipped:")
+        for path, reason in result.skipped:
+            print(f"  skipped: {path} ({reason})")
+
+
 COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/help": CommandEntry(
         handler=cmd_help, desc="Show this help.", group=COMMAND_GROUP_INFO
@@ -565,11 +739,18 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         accepts_args=True,
         group=COMMAND_GROUP_INFO,
     ),
+    "/undo": CommandEntry(
+        handler=cmd_undo,
+        desc="回退最近 N 轮用户轮次的文件变更（基于快照恢复）。",
+        args_desc="[N|--list]",
+        accepts_args=True,
+        group=COMMAND_GROUP_SESSION,
+    ),
     "/exit": CommandEntry(
-        handler=cmd_exit, desc="Exit the REPL.", group=COMMAND_GROUP_EXIT
+        handler=cmd_exit, desc="退出 REPL.", group=COMMAND_GROUP_EXIT
     ),
     "/quit": CommandEntry(
-        handler=cmd_exit, desc="Exit the REPL.", visible=False, group=COMMAND_GROUP_EXIT
+        handler=cmd_exit, desc="退出 REPL.", visible=False, group=COMMAND_GROUP_EXIT
     ),
 }
 
@@ -589,6 +770,7 @@ def handle_command(
     permanent_grant_store: FileGrantStore | None = None,
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
+    snapshot_store: SnapshotStore | None = None,
 ) -> bool:
     ctx = CommandContext(
         store=store,
@@ -601,6 +783,7 @@ def handle_command(
         permanent_grant_store=permanent_grant_store,
         static_policy=static_policy,
         restricted_dirs=restricted_dirs,
+        snapshot_store=snapshot_store,
     )
     for prefix in sorted(COMMAND_REGISTRY, key=len, reverse=True):
         entry = COMMAND_REGISTRY[prefix]
