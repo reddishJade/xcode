@@ -102,15 +102,36 @@
 |---|---|---|---|
 | `permission_mode` | string | `"normal"` | `strict`、`normal`、`permissive` |
 | `sandbox_mode` | bool | `false` | 沙箱模式 |
-| `approval_policy` | string | `"high_risk_only"` | `always`、`high_risk_only`、`never` |
+| `approval_policy` | string | `"never"` | `always`、`never` |
 | `network_access` | bool | `true` | 网络访问 |
 | `writable_roots` | array | `[]` | 可写目录白名单 |
 | `restricted_dirs` | array | `[]` | 禁止访问目录列表 |
-| `deny_tools` | array | `[]` | 拒绝工具列表 |
-| `ask_tools` | array | `[]` | 审批工具列表 |
-| `allow_tools` | array | `[]` | 免审批工具列表（启用 allowlist mode） |
+| `rules` | array | `[]` | 静态权限规则列表（替换已移除的 deny_tools/ask_tools/allow_tools） |
+| `global_default` | string/null | `null` | 无规则匹配时的默认决策：`allow`、`ask`、`deny` |
+| `external_directories` | array | `[]` | 外部目录白名单，每条包含 `path`（必填）和 `access`（可选，默认 `"read"`；可选值 `read`/`write`/`read_write`） |
 
-`resolve_approval_policy()`: `permission_mode` 为 `strict` 时强制 `always`，`normal` 时 `high_risk_only`，`permissive` 时 `never`。
+### rules 规则格式
+
+```json
+{"tool": "read_file", "decision": "allow"}
+{"tool": "bash", "decision": "ask", "input_contains": "curl"}
+{"tool": "*", "decision": "deny"}
+```
+
+规则按声明顺序匹配，最后匹配的规则生效（last-match-wins）。无规则匹配时使用 `global_default`。与全局 resolver 优先级 `non_bypassable_deny > deny > ask > allow` 配合，Boundary 和安全 evaluator 产生的 `deny` 不受静态 `allow` 规则覆盖。
+
+### external_directories 示例
+
+```json
+{"path": "/home/user/reference", "access": "read"}
+{"path": "/shared/templates", "access": "read_write"}
+```
+
+- `access=read`：仅允许读取操作
+- `access=write`：仅允许写入操作
+- `access=read_write`：读写均允许
+- `.env`、`.env.*`、`.git`、凭据路径在所有目录中均被拒绝
+- `.env.example` 读取允许，写入拒绝
 
 ---
 
