@@ -17,6 +17,7 @@ from .permission_model import (
     ApprovalCandidate,
     ApprovalResult,
     BoundaryContext,
+    ExternalDirectory,
     GrantRecord,
     GrantStore,
     PolicyEvaluator,
@@ -126,6 +127,7 @@ class PermissionEngineConfig:
     defer_static_ask: bool = False
     shadow_model_enabled: bool = False
     project_root: Path | None = None
+    external_directories: tuple[ExternalDirectory, ...] = ()
     session_grant_store: GrantStore | None = None
     permanent_grant_store: GrantStore | None = None
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
@@ -317,7 +319,10 @@ class PermissionEngine:
     def _boundary_context(self) -> BoundaryContext | None:
         if self._config.project_root is None:
             return None
-        return BoundaryContext(self._config.project_root)
+        return BoundaryContext(
+            self._config.project_root,
+            self._config.external_directories,
+        )
 
     def _shadow_diff(
         self,

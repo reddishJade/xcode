@@ -96,6 +96,7 @@ class SecurityRuntimeConfig:
     restricted_dirs: tuple[str, ...] = ()
     rules: tuple[dict[str, Any], ...] = ()
     global_default: str | None = None
+    external_directories: tuple[dict[str, Any], ...] = ()
 
     def resolve_approval_policy(self) -> str:
         if self.approval_policy in ("always", "never"):
@@ -120,6 +121,31 @@ def _validate_legacy_security_fields(raw: dict[str, Any]) -> None:
             f"{', '.join(sorted(found))}. "
             "Migrate to 'security.rules' and 'security.global_default'."
         )
+
+
+def _validate_external_directories(raw: dict[str, Any]) -> None:
+    """Fail-fast: invalid external_directory entries."""
+    security = raw.get("security")
+    if not isinstance(security, dict):
+        return
+    ext = security.get("external_directories")
+    if not isinstance(ext, list):
+        return
+    for i, entry in enumerate(ext):
+        if not isinstance(entry, dict):
+            raise ValueError(f"security.external_directories[{i}]: must be an object")
+        path_val = entry.get("path")
+        if not isinstance(path_val, str) or not path_val.strip():
+            raise ValueError(
+                f"security.external_directories[{i}]: 'path' is required "
+                "and must be a non-empty string"
+            )
+        access_val = entry.get("access", "read")
+        if access_val not in ("read", "write", "read_write"):
+            raise ValueError(
+                f"security.external_directories[{i}]: 'access' must be one of "
+                "'read', 'write', 'read_write'"
+            )
 
 
 @dataclass
@@ -251,6 +277,7 @@ def discover_runtime_config(
     merged = _deep_merge_raw(merged, local_raw)
 
     _validate_legacy_security_fields(merged)
+    _validate_external_directories(merged)
     config = _config_from_dict(merged)
     config = _apply_env_overrides(config)
     return config

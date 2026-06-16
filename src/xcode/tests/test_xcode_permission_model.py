@@ -25,7 +25,10 @@ from xcode.harness.observability import (
     StaticPolicyEvaluator,
     evaluate_policy_constraints,
 )
-from xcode.harness.config import _validate_legacy_security_fields
+from xcode.harness.config import (
+    _validate_external_directories,
+    _validate_legacy_security_fields,
+)
 from xcode.harness.observability._safety_backstop import (
     _is_dd_device_write,
     _is_root_recursive_deletion,
@@ -34,6 +37,8 @@ from xcode.harness.observability._safety_backstop import (
     _split_compound_command,
 )
 from xcode.harness.observability.permission_model import (
+    DirAccess,
+    ExternalDirectory,
     PermissionAccess,
     PolicyEvaluator,
 )
@@ -317,7 +322,7 @@ class StructuredBoundaryPolicyTests(unittest.TestCase):
             self.assertEqual(verdict.decision, "deny")
             assert verdict.winning_constraint is not None
             self.assertFalse(verdict.winning_constraint.non_bypassable)
-            self.assertIn("escapes workspace", verdict.reason)
+            self.assertIn("outside all approved roots", verdict.reason)
             outside.unlink()
 
     def test_symlink_to_git_write_produces_non_bypassable_deny(self) -> None:
@@ -462,6 +467,366 @@ class StructuredBoundaryPolicyTests(unittest.TestCase):
         self.assertEqual(verdict.decision, "ask")
         self.assertEqual(verdict.source, "rule")
 
+    # ── ExternalDirectory / .env.example / three-way classification tests ──
+
+    def test_env_example_read_in_workspace_allowed(self) -> None:
+        """read_file .env.example in workspace → boundary allow."""
+        action = ActionExtractor().extract("read_file", {"path": ".env.example"})
+        constraints = evaluate_policy_constraints(action)
+        verdict = PermissionResolver().resolve(constraints)
+
+        self.assertEqual(verdict.decision, "allow")
+        self.assertEqual(verdict.source, "boundary")
+
+    def test_env_example_write_in_workspace_denied(self) -> None:
+        """write_file .env.example in workspace → boundary deny."""
+        action = ActionExtractor().extract("write_file", {"path": ".env.example"})
+        verdict = PermissionResolver().resolve(evaluate_policy_constraints(action))
+
+        self.assertEqual(verdict.decision, "deny")
+        assert verdict.winning_constraint is not None
+        self.assertIn("sensitive path", verdict.reason)
+
+    def test_env_example_edit_in_workspace_denied(self) -> None:
+        """edit_file .env.example in workspace → boundary deny."""
+        action = ActionExtractor().extract("edit_file", {"path": ".env.example"})
+        verdict = PermissionResolver().resolve(evaluate_policy_constraints(action))
+
+        self.assertEqual(verdict.decision, "deny")
+        assert verdict.winning_constraint is not None
+        self.assertIn("sensitive path", verdict.reason)
+
+    def test_env_in_subdir_denied(self) -> None:
+        """.env in subdirectory → boundary deny."""
+        action = ActionExtractor().extract("read_file", {"path": "config/.env"})
+        verdict = PermissionResolver().resolve(evaluate_policy_constraints(action))
+
+        self.assertEqual(verdict.decision, "deny")
+        assert verdict.winning_constraint is not None
+        self.assertIn("sensitive path", verdict.reason)
+
+    def test_env_local_in_subdir_denied(self) -> None:
+        """.env.local in subdirectory → boundary deny."""
+        action = ActionExtractor().extract("read_file", {"path": "config/.env.local"})
+        verdict = PermissionResolver().resolve(evaluate_policy_constraints(action))
+
+        self.assertEqual(verdict.decision, "deny")
+        assert verdict.winning_constraint is not None
+        self.assertIn("sensitive path", verdict.reason)
+
+    # ── external_directory tests ──
+
+    def _boundary_context_with_ext(
+        self,
+        root: Path,
+        *,
+        ext_path: str = "/tmp/test-ext",
+        ext_access: DirAccess = "read",
+    ) -> BoundaryContext:
+        """Create BoundaryContext with one external directory."""
+        return BoundaryContext(
+            root,
+            external_directories=(
+                ExternalDirectory(path=Path(ext_path), access=ext_access),
+            ),
+        )
+
+    def test_external_directory_read_allowed(self) -> None:
+        """Absolute path inside approved external_directory with read access → allow."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            with tempfile.TemporaryDirectory() as ext_text:
+                ext_root = Path(ext_text)
+                (ext_root / "doc.md").write_text("hello", encoding="utf-8")
+                ctx = self._boundary_context_with_ext(
+                    root, ext_path=ext_root.as_posix(), ext_access="read"
+                )
+                path = (ext_root / "doc.md").as_posix()
+                action = ActionExtractor().extract("read_file", {"path": path})
+                verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(action, boundary_context=ctx)
+                )
+
+                self.assertEqual(verdict.decision, "allow")
+                self.assertEqual(verdict.source, "boundary")
+
+    def test_external_directory_write_denied_when_read_only(self) -> None:
+        """Write to ext_dir with access=read → boundary deny (insufficient access)."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            with tempfile.TemporaryDirectory() as ext_text:
+                ext_root = Path(ext_text)
+                ctx = self._boundary_context_with_ext(
+                    root, ext_path=ext_root.as_posix(), ext_access="read"
+                )
+                path = (ext_root / "new.txt").as_posix()
+                action = ActionExtractor().extract("write_file", {"path": path})
+                verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(action, boundary_context=ctx)
+                )
+
+                self.assertEqual(verdict.decision, "deny")
+                assert verdict.winning_constraint is not None
+                self.assertIn("outside all approved roots", verdict.reason)
+
+    def test_external_directory_write_allowed_with_write_access(self) -> None:
+        """Write to ext_dir with access=write → allow."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            with tempfile.TemporaryDirectory() as ext_text:
+                ext_root = Path(ext_text)
+                ctx = self._boundary_context_with_ext(
+                    root, ext_path=ext_root.as_posix(), ext_access="write"
+                )
+                path = (ext_root / "new.txt").as_posix()
+                action = ActionExtractor().extract("write_file", {"path": path})
+                verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(action, boundary_context=ctx)
+                )
+
+                self.assertEqual(verdict.decision, "allow")
+
+    def test_external_directory_read_denied_when_write_only(self) -> None:
+        """Read from ext_dir with access=write → boundary deny (insufficient access)."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            with tempfile.TemporaryDirectory() as ext_text:
+                ext_root = Path(ext_text)
+                (ext_root / "dat.md").write_text("data", encoding="utf-8")
+                ctx = self._boundary_context_with_ext(
+                    root, ext_path=ext_root.as_posix(), ext_access="write"
+                )
+                path = (ext_root / "dat.md").as_posix()
+                action = ActionExtractor().extract("read_file", {"path": path})
+                verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(action, boundary_context=ctx)
+                )
+
+                self.assertEqual(verdict.decision, "deny")
+                assert verdict.winning_constraint is not None
+                self.assertIn("outside all approved roots", verdict.reason)
+
+    def test_external_directory_read_write_access_both(self) -> None:
+        """read_write access allows both read and write."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            with tempfile.TemporaryDirectory() as ext_text:
+                ext_root = Path(ext_text)
+                (ext_root / "dat.md").write_text("data", encoding="utf-8")
+                ctx = self._boundary_context_with_ext(
+                    root, ext_path=ext_root.as_posix(), ext_access="read_write"
+                )
+
+                read_action = ActionExtractor().extract(
+                    "read_file", {"path": (ext_root / "dat.md").as_posix()}
+                )
+                read_verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(read_action, boundary_context=ctx)
+                )
+                self.assertEqual(read_verdict.decision, "allow")
+
+                write_action = ActionExtractor().extract(
+                    "write_file", {"path": (ext_root / "new.txt").as_posix()}
+                )
+                write_verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(write_action, boundary_context=ctx)
+                )
+                self.assertEqual(write_verdict.decision, "allow")
+
+    def test_path_outside_all_roots_denied(self) -> None:
+        """Path outside workspace and all external directories → deny."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            action = ActionExtractor().extract("read_file", {"path": "/etc/passwd"})
+            ctx = self._boundary_context_with_ext(
+                root, ext_path="/nonexistent-ext", ext_access="read"
+            )
+            verdict = PermissionResolver().resolve(
+                evaluate_policy_constraints(action, boundary_context=ctx)
+            )
+
+            self.assertEqual(verdict.decision, "deny")
+            assert verdict.winning_constraint is not None
+            self.assertIn("outside all approved roots", verdict.reason)
+
+    def test_ext_dir_prefix_not_mistaken(self) -> None:
+        """/tmp/foo2 does not match /tmp/foo via is_relative_to."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            ctx = self._boundary_context_with_ext(
+                root, ext_path="/tmp/foo", ext_access="read"
+            )
+            action = ActionExtractor().extract(
+                "read_file", {"path": "/tmp/foo2/secret.txt"}
+            )
+            verdict = PermissionResolver().resolve(
+                evaluate_policy_constraints(action, boundary_context=ctx)
+            )
+
+            self.assertEqual(verdict.decision, "deny")
+            assert verdict.winning_constraint is not None
+            self.assertIn("outside all approved roots", verdict.reason)
+
+    def test_sensitive_path_inside_external_directory_denied(self) -> None:
+        """.env inside external_directory remains denied."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            with tempfile.TemporaryDirectory() as ext_text:
+                ext_root = Path(ext_text)
+                (ext_root / ".env").write_text("SECRET=1", encoding="utf-8")
+                ctx = self._boundary_context_with_ext(
+                    root, ext_path=ext_root.as_posix(), ext_access="read_write"
+                )
+                path = (ext_root / ".env").as_posix()
+                action = ActionExtractor().extract("read_file", {"path": path})
+                verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(action, boundary_context=ctx)
+                )
+
+                self.assertEqual(verdict.decision, "deny")
+                assert verdict.winning_constraint is not None
+                self.assertIn("sensitive path", verdict.reason)
+
+    def test_env_example_write_inside_external_directory_denied(self) -> None:
+        """.env.example write inside external_directory remains denied."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            with tempfile.TemporaryDirectory() as ext_text:
+                ext_root = Path(ext_text)
+                ctx = self._boundary_context_with_ext(
+                    root, ext_path=ext_root.as_posix(), ext_access="read_write"
+                )
+                path = (ext_root / ".env.example").as_posix()
+                action = ActionExtractor().extract("write_file", {"path": path})
+                verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(action, boundary_context=ctx)
+                )
+
+                self.assertEqual(verdict.decision, "deny")
+                assert verdict.winning_constraint is not None
+                self.assertIn("sensitive path", verdict.reason)
+
+    def test_git_path_inside_external_directory_denied(self) -> None:
+        """.git/config inside external_directory remains denied."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            with tempfile.TemporaryDirectory() as ext_text:
+                ext_root = Path(ext_text)
+                git_dir = ext_root / ".git"
+                git_dir.mkdir()
+                (git_dir / "config").write_text("[core]\n", encoding="utf-8")
+                ctx = self._boundary_context_with_ext(
+                    root, ext_path=ext_root.as_posix(), ext_access="read_write"
+                )
+                path = (git_dir / "config").as_posix()
+                action = ActionExtractor().extract("read_file", {"path": path})
+                verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(action, boundary_context=ctx)
+                )
+
+                self.assertEqual(verdict.decision, "deny")
+                assert verdict.winning_constraint is not None
+                self.assertIn("git metadata path", verdict.reason)
+
+    def test_credential_path_inside_external_directory_denied(self) -> None:
+        """.ssh/id_rsa inside external_directory remains denied."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            with tempfile.TemporaryDirectory() as ext_text:
+                ext_root = Path(ext_text)
+                ssh_dir = ext_root / ".ssh"
+                ssh_dir.mkdir()
+                (ssh_dir / "id_rsa").write_text("key", encoding="utf-8")
+                ctx = self._boundary_context_with_ext(
+                    root, ext_path=ext_root.as_posix(), ext_access="read_write"
+                )
+                path = (ssh_dir / "id_rsa").as_posix()
+                action = ActionExtractor().extract("read_file", {"path": path})
+                verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(action, boundary_context=ctx)
+                )
+
+                self.assertEqual(verdict.decision, "deny")
+                assert verdict.winning_constraint is not None
+                self.assertIn("sensitive path", verdict.reason)
+
+    def test_boundary_deny_still_beats_static_allow_from_step3(self) -> None:
+        """PermissionResolver: boundary deny still beats static allow."""
+        resolver = PermissionResolver()
+        verdict = resolver.resolve(
+            (
+                Constraint("allow", "rule", "static allows"),
+                Constraint("deny", "boundary", "boundary denies"),
+            )
+        )
+        self.assertEqual(verdict.decision, "deny")
+        self.assertEqual(verdict.source, "boundary")
+
+    def test_env_example_read_inside_external_directory_allowed(self) -> None:
+        """.env.example read inside external_directory → allowed (doc)."""
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            with tempfile.TemporaryDirectory() as ext_text:
+                ext_root = Path(ext_text)
+                (ext_root / ".env.example").write_text("EXAMPLE=1", encoding="utf-8")
+                ctx = self._boundary_context_with_ext(
+                    root, ext_path=ext_root.as_posix(), ext_access="read"
+                )
+                path = (ext_root / ".env.example").as_posix()
+                action = ActionExtractor().extract("read_file", {"path": path})
+                verdict = PermissionResolver().resolve(
+                    evaluate_policy_constraints(action, boundary_context=ctx)
+                )
+
+                self.assertEqual(verdict.decision, "allow")
+
+
+class ExternalDirectoryConfigValidationTests(unittest.TestCase):
+    """验证 external_directories 配置的 fail-fast 校验。"""
+
+    def test_valid_external_directory_passes(self) -> None:
+        raw = {
+            "security": {
+                "external_directories": [{"path": "/tmp/valid", "access": "read"}]
+            }
+        }
+        _validate_external_directories(raw)  # should not raise
+
+    def test_valid_external_directory_default_access(self) -> None:
+        raw = {"security": {"external_directories": [{"path": "/tmp/valid"}]}}
+        _validate_external_directories(raw)  # default access=read, should not raise
+
+    def test_missing_path_raises(self) -> None:
+        raw = {"security": {"external_directories": [{"access": "read"}]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_external_directories(raw)
+        self.assertIn("path", str(ctx.exception))
+
+    def test_empty_path_raises(self) -> None:
+        raw = {"security": {"external_directories": [{"path": "", "access": "read"}]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_external_directories(raw)
+        self.assertIn("path", str(ctx.exception))
+
+    def test_invalid_access_raises(self) -> None:
+        raw = {
+            "security": {
+                "external_directories": [{"path": "/tmp/foo", "access": "delete"}]
+            }
+        }
+        with self.assertRaises(ValueError) as ctx:
+            _validate_external_directories(raw)
+        self.assertIn("access", str(ctx.exception))
+
+    def test_non_dict_entry_raises(self) -> None:
+        raw = {"security": {"external_directories": ["not-a-dict"]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_external_directories(raw)
+        self.assertIn("must be an object", str(ctx.exception))
+
+    def test_no_security_does_not_raise(self) -> None:
+        _validate_external_directories({})  # should not raise
+
 
 class GrantStoreTests(unittest.TestCase):
     def _grant(
@@ -601,7 +966,7 @@ class PermissionEngineShadowTests(unittest.TestCase):
             self.assertEqual(result.source, "boundary")
             assert result.shadow_verdict is not None
             self.assertEqual(result.shadow_verdict.decision, "deny")
-            self.assertIn("escapes workspace", result.shadow_verdict.reason)
+            self.assertIn("outside all approved roots", result.shadow_verdict.reason)
             outside.unlink()
 
     def test_shadow_static_policy_constraints_do_not_change_legacy_result(

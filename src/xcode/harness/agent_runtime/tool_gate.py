@@ -31,7 +31,7 @@ from ..observability import (
     PermissionDecision,
     PermissionPolicy,
 )
-from ..observability.permission_model import PolicyEvaluator
+from ..observability.permission_model import ExternalDirectory, PolicyEvaluator
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 
@@ -45,6 +45,7 @@ class ToolGateSnapshot:
     restricted_dirs: tuple[str, ...] = ()
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
     project_root: Path | None = None
+    external_directories: tuple[ExternalDirectory, ...] = ()
 
 
 class ToolGate:
@@ -70,12 +71,14 @@ class ToolGate:
         restricted_dirs: tuple[str, ...] = (),
         hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
         project_root: Path | None = None,
+        external_directories: tuple[ExternalDirectory, ...] = (),
     ) -> None:
         self._mode = mode_state
         self._approval_callback = approval_callback
         self._permission_policy = permission_policy
         self._restricted_dirs = restricted_dirs
         self._hook_constraint_providers = hook_constraint_providers
+        self._external_directories = external_directories
         self._hook_manager = hook_manager
         self._audit_logger = audit_logger
         self._session_id = session_id
@@ -90,6 +93,7 @@ class ToolGate:
             restricted_dirs=self._restricted_dirs,
             hook_constraint_providers=self._hook_constraint_providers,
             project_root=self._project_root,
+            external_directories=self._external_directories,
         )
 
     def snapshot_for(self, registry: tuple[ToolSpec, ...]) -> ToolGateSnapshot:
@@ -101,6 +105,7 @@ class ToolGate:
             restricted_dirs=self._restricted_dirs,
             hook_constraint_providers=self._hook_constraint_providers,
             project_root=self._project_root,
+            external_directories=self._external_directories,
         )
 
     def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
@@ -227,6 +232,7 @@ class ToolGate:
                 restricted_dirs=snapshot.restricted_dirs,
                 hook_constraint_providers=snapshot.hook_constraint_providers,
                 project_root=snapshot.project_root,
+                external_directories=snapshot.external_directories,
                 defer_static_ask=True,
             )
         )

@@ -26,11 +26,21 @@ from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
 PermissionAccess = Literal["read", "write", "execute", "network"]
+DirAccess = Literal["read", "write", "read_write"]
 GrantDecision = Literal["allow", "deny"]
 GrantScope = Literal["once", "session", "permanent"]
 PermissionDecisionV2 = Literal["allow", "ask", "deny"]
 TargetKind = Literal["path", "command", "domain", "mcp", "subagent"]
 type GrantRecordData = dict[str, object]
+
+
+@dataclass(frozen=True)
+class ExternalDirectory:
+    path: Path
+    access: DirAccess = "read"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "path", self.path.expanduser().resolve(strict=False))
 
 
 @dataclass(frozen=True)
@@ -83,6 +93,7 @@ class BoundaryContext:
     """结构化边界策略所需的文件系统上下文。"""
 
     project_root: Path
+    external_directories: tuple[ExternalDirectory, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -731,67 +742,119 @@ class StructuredBoundaryPolicyEvaluator:
         return tuple(constraints)
 
     def _path_constraint(self, action: Action, target: Target) -> Constraint:
-        path = target.value
-        if _is_external_path(path):
+        path_str = target.value
+
+        if self._context is None:
+            if _is_external_path(path_str):
+                return Constraint(
+                    decision="deny",
+                    source="boundary",
+                    reason=f"path escapes workspace boundary: {path_str}",
+                    target_pattern=path_str,
+                    operation=action.operation,
+                    access=target.access,
+                )
+            return self._check_restrictions(path_str, path_str, action, target)
+
+        # Three-way classification with BoundaryContext
+        try:
+            resolved = self._resolve_workspace_path(target)
+            # resolved is relative to workspace root
+            return self._check_restrictions(resolved, path_str, action, target)
+        except _BoundaryEscapeError:
+            pass
+        except _BoundaryResolutionError as exc:
+            candidate = self._try_external_directory(target, action)
+            if candidate is not None:
+                return candidate
             return Constraint(
                 decision="deny",
                 source="boundary",
-                reason=f"path escapes workspace boundary: {path}",
-                target_pattern=path,
+                reason=f"path cannot be resolved safely: {path_str}: {exc}",
+                non_bypassable=target.access in ("write", "execute"),
+                target_pattern=path_str,
                 operation=action.operation,
                 access=target.access,
             )
 
-        if self._context is not None:
-            try:
-                path = self._resolve_workspace_path(target)
-            except _BoundaryEscapeError:
-                return Constraint(
-                    decision="deny",
-                    source="boundary",
-                    reason=f"path escapes workspace boundary: {path}",
-                    target_pattern=path,
-                    operation=action.operation,
-                    access=target.access,
-                )
-            except _BoundaryResolutionError as exc:
-                return Constraint(
-                    decision="deny",
-                    source="boundary",
-                    reason=f"path cannot be resolved safely: {path}: {exc}",
-                    non_bypassable=target.access in ("write", "execute"),
-                    target_pattern=path,
-                    operation=action.operation,
-                    access=target.access,
-                )
+        # Outside workspace — check external_directory before denying
+        candidate = self._try_external_directory(target, action)
+        if candidate is not None:
+            return candidate
+        return Constraint(
+            decision="deny",
+            source="boundary",
+            reason=f"path outside all approved roots: {path_str}",
+            target_pattern=path_str,
+            operation=action.operation,
+            access=target.access,
+        )
 
-        if _is_git_path(path):
+    def _try_external_directory(
+        self, target: Target, action: Action
+    ) -> Constraint | None:
+        """If target is inside an approved external_directory with sufficient
+        access, run security checks and return a constraint.
+
+        Returns None if no external_directory matches.
+        """
+        assert self._context is not None
+        raw = target.value
+        resolved_root = self._context.project_root.resolve(strict=False)
+
+        try:
+            if _looks_absolute(raw):
+                candidate = Path(raw).resolve(strict=False)
+            else:
+                candidate = (resolved_root / raw).resolve(strict=False)
+        except (OSError, RuntimeError):
+            return None
+
+        for ext in self._context.external_directories:
+            if not _is_inside_path(candidate, ext.path):
+                continue
+            if not _access_satisfies(ext.access, target.access):
+                continue
+            check = candidate.as_posix()
+            return self._check_restrictions(check, raw, action, target)
+        return None
+
+    def _check_restrictions(
+        self,
+        check_path: str,
+        original_path: str,
+        action: Action,
+        target: Target,
+    ) -> Constraint:
+        """Run git, sensitive, and blocked-path checks on a path that has
+        already been classified as inside an approved root."""
+        if _is_git_path(check_path):
             return Constraint(
                 decision="deny",
                 source="boundary",
-                reason=f"git metadata path is blocked: {path}",
+                reason=f"git metadata path is blocked: {original_path}",
                 non_bypassable=target.access == "write",
-                target_pattern=path,
+                target_pattern=check_path,
                 operation=action.operation,
                 access=target.access,
             )
 
-        if _is_sensitive_path(path):
+        if _is_sensitive_path(check_path, access=target.access):
             return Constraint(
                 decision="deny",
                 source="boundary",
-                reason=f"sensitive path is blocked: {path}",
-                target_pattern=path,
+                reason=f"sensitive path is blocked: {original_path}",
+                target_pattern=check_path,
                 operation=action.operation,
                 access=target.access,
             )
 
-        if _is_blocked_workspace_path(path):
+        if _is_blocked_workspace_path(check_path):
             return Constraint(
                 decision="deny",
                 source="boundary",
-                reason=f"workspace blocked path is denied: {path}",
-                target_pattern=path,
+                reason=f"workspace blocked path is denied: {original_path}",
+                target_pattern=check_path,
                 operation=action.operation,
                 access=target.access,
             )
@@ -799,8 +862,8 @@ class StructuredBoundaryPolicyEvaluator:
         return Constraint(
             decision="allow",
             source="boundary",
-            reason=f"workspace-internal path is allowed: {path}",
-            target_pattern=path,
+            reason=f"path is allowed: {original_path}",
+            target_pattern=check_path,
             operation=action.operation,
             access=target.access,
         )
@@ -1021,6 +1084,16 @@ def _is_inside_path(candidate: Path, root: Path) -> bool:
     return candidate == root or candidate.is_relative_to(root)
 
 
+def _access_satisfies(dir_access: DirAccess, target_access: PermissionAccess) -> bool:
+    if dir_access == "read_write":
+        return True
+    if dir_access == "read":
+        return target_access == "read"
+    if dir_access == "write":
+        return target_access in ("write",)
+    return False
+
+
 def _validate_symlinks_can_resolve(root: Path, relative_path: str) -> None:
     current = root
     for part in _relative_path_parts(relative_path):
@@ -1035,18 +1108,24 @@ def _relative_path_parts(relative_path: str) -> tuple[str, ...]:
 
 
 def _is_git_path(path: str) -> bool:
-    return path == ".git" or path.startswith(".git/")
-
-
-def _is_sensitive_path(path: str) -> bool:
     parts = tuple(part for part in path.split("/") if part)
-    return any(_is_sensitive_part(part) for part in parts)
+    return ".git" in parts
 
 
-def _is_sensitive_part(part: str) -> bool:
-    if part == ".env" or part.startswith(".env."):
+def _is_sensitive_path(path: str, *, access: PermissionAccess = "read") -> bool:
+    name = Path(path).name
+
+    if name == ".env.example":
+        return access == "write"
+
+    if name == ".env" or name.startswith(".env."):
         return True
-    return part in StructuredBoundaryPolicyEvaluator.CREDENTIAL_PATH_PARTS
+
+    parts = tuple(part for part in path.split("/") if part)
+    return any(
+        part in StructuredBoundaryPolicyEvaluator.CREDENTIAL_PATH_PARTS
+        for part in parts
+    )
 
 
 def _is_blocked_workspace_path(path: str) -> bool:

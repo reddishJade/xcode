@@ -34,6 +34,7 @@ from ...agent.protocols import AgentTool
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
 from ..observability.permission_model import PolicyEvaluator
+from ..observability.permission_model import ExternalDirectory
 from ..skills import ApprovalCallback, ToolSpec
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
@@ -56,6 +57,7 @@ class GateConfig:
     hook_manager: HookManager | None = None
     audit_logger: Callable[[AuditRecord], None] | None = None
     session_id: str = "local"
+    external_directories: tuple[ExternalDirectory, ...] = ()
 
 
 @dataclass

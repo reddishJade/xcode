@@ -40,6 +40,7 @@ from xcode.harness.observability import (
     HookManager,
     PermissionPolicy,
 )
+from xcode.harness.observability.permission_model import ExternalDirectory
 from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
 from xcode.harness.observability.hooks import HookEvent
@@ -394,6 +395,7 @@ def _build_subagent_integration(
                     if child_audit_path
                     else None
                 ),
+                external_directories=_external_directories_from_security(sec),
             ),
             runtime=AgentRuntimeConfig(
                 runtime_context_provider=build_runtime_context_provider(
@@ -502,6 +504,7 @@ def build_agent(
             hook_constraint_providers=hook_constraint_providers,
             hook_manager=hook_manager,
             audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
+            external_directories=_external_directories_from_security(sec),
         ),
         runtime=AgentRuntimeConfig(
             compactor=compactor,
@@ -519,6 +522,15 @@ def build_agent(
             request_hygiene=runtime_config.request_hygiene,
             skill_registry=skill_registry,
         ),
+    )
+
+
+def _external_directories_from_security(
+    security: SecurityRuntimeConfig,
+) -> tuple[ExternalDirectory, ...]:
+    return tuple(
+        ExternalDirectory(path=Path(ed["path"]), access=ed.get("access", "read"))
+        for ed in security.external_directories
     )
 
 
