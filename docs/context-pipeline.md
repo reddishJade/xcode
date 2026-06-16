@@ -32,21 +32,21 @@
 
 | Source | Collector | Target | Priority |
 |---|---|---|---|
-| `PROJECT_MANIFEST` | `ProjectManifestCollector` | `SYSTEM` | `CRITICAL` |
+| `INSTRUCTION` | `InstructionCollector` | `SYSTEM` | `CRITICAL` |
 | `ACTIVE_DIFF` | `ActiveDiffCollector` | `USER_CONTEXT` | `HIGH` |
 | `RECENT_VALIDATION` | `RecentValidationCollector` | `USER_CONTEXT` | `HIGH` |
 | `TASK_STATE` | `TaskStateCollector` | `USER_CONTEXT` | `HIGH` |
 | `NOTES` | `NotesCollector` | `USER_CONTEXT` | `MEDIUM` |
-| `SKILL` | `SkillCollector` | `USER_CONTEXT` | `MEDIUM` |
+| `SKILL` | `SkillIndexCollector` | `USER_CONTEXT` | `MEDIUM` |
 
 ## 3. Collector Order (Registration Order)
 
-1. `ProjectManifestCollector`
+1. `InstructionCollector`
 2. `ActiveDiffCollector`
 3. `RecentValidationCollector`
 4. `TaskStateCollector`
 5. `NotesCollector`
-6. `SkillCollector`
+6. `SkillIndexCollector`
 
 Collectors run in registration order. Assembly sorts by priority within the budget; higher-priority blocks are retained first when trimming.
 

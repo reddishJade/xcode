@@ -5,7 +5,7 @@
 
 本模块是 prompt 构建的两个系统之一（另一个见 prompting/builder.py）。
 职责边界：
-- 项目指令（AGENTS.md / CLAUDE.md）→ ProjectManifestCollector（SYSTEM 目标）
+- 项目指令 → InstructionCollector（SYSTEM 目标）
 - 活动 diff 摘要  → ActiveDiffCollector（USER_CONTEXT 目标）
 - 最近验证失败   → RecentValidationCollector（USER_CONTEXT 目标）
 - 任务/计划状态   → TaskStateCollector（USER_CONTEXT 目标）
@@ -35,7 +35,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from xcode.agent.context_assembly import (
     ContextBlock,
@@ -132,7 +132,141 @@ class ContextCollectorRegistry:
         return len(self._collectors) > 0
 
 
-# ── 项目指令收集器 ──
+# ── 指令收集器 ──
+
+_INSTRUCTION_PRIORITY_MAP: dict[str, ContextPriority] = {
+    "critical": ContextPriority.CRITICAL,
+    "high": ContextPriority.HIGH,
+    "medium": ContextPriority.MEDIUM,
+    "low": ContextPriority.LOW,
+}
+
+
+@dataclass
+class InstructionSource:
+    """单个指令源的描述。"""
+
+    type: Literal["file", "inline"]
+    path: str | None = None
+    content: str | None = None
+    priority: ContextPriority = ContextPriority.CRITICAL
+
+
+class InstructionCollector:
+    """从配置的指令源 + 默认 AGENTS.md / CLAUDE.md 收集指令。
+
+    配置在 prompt.instructions 中（PromptRuntimeConfig）。
+    空配置时回退到 AGENTS.md / CLAUDE.md。
+    非空配置时：先收集配置源，再收集回退文件。
+    CLAUDE.md 仅包含 @AGENTS.md 引用时不重复发出块。
+    配置源与回退文件按解析后的路径去重，已配置源优先。
+    """
+
+    def __init__(
+        self,
+        sources: tuple[dict, ...] = (),
+        project_root: Path | None = None,
+    ) -> None:
+        self._project_root = project_root
+        self._sources: list[InstructionSource] = []
+        for entry in sources:
+            typ = entry["type"]
+            priority_str = entry.get("priority", "critical")
+            priority = _INSTRUCTION_PRIORITY_MAP[priority_str.lower()]
+            if typ == "file":
+                self._sources.append(
+                    InstructionSource(
+                        type="file",
+                        path=entry["path"],
+                        priority=priority,
+                    )
+                )
+            else:
+                self._sources.append(
+                    InstructionSource(
+                        type="inline",
+                        content=entry["content"],
+                        priority=priority,
+                    )
+                )
+
+    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
+        root = input.project_root or self._project_root
+        if root is None:
+            return []
+
+        blocks: list[ContextBlock] = []
+        configured_paths: set[Path] = set()
+
+        # 1. 配置源（按解析路径去重，首个配置源优先）
+        for source in self._sources:
+            if source.type == "file":
+                path = root / source.path  # type: ignore[arg-type]
+                resolved = path.resolve()
+                if resolved in configured_paths:
+                    continue
+                configured_paths.add(resolved)
+                blocks.extend(self._collect_file(path, source.priority))
+            else:
+                blocks.extend(self._collect_inline(source.content, source.priority))  # type: ignore[arg-type]
+
+        # 2. 回退 AGENTS.md
+        agents_path = root / "AGENTS.md"
+        if agents_path.is_file() and agents_path.resolve() not in configured_paths:
+            content = agents_path.read_text(encoding="utf-8", errors="replace").strip()
+            if content:
+                blocks.append(
+                    ContextBlock(
+                        source=ContextBlockSource.INSTRUCTION,
+                        target=ContextBlockTarget.SYSTEM,
+                        priority=ContextPriority.CRITICAL,
+                        content=_prepare_manifest(content),
+                    )
+                )
+
+        # 3. 回退 CLAUDE.md
+        claude_path = root / "CLAUDE.md"
+        if claude_path.is_file() and claude_path.resolve() not in configured_paths:
+            content = claude_path.read_text(encoding="utf-8", errors="replace").strip()
+            if content and not _is_agents_reference(content):
+                blocks.append(
+                    ContextBlock(
+                        source=ContextBlockSource.INSTRUCTION,
+                        target=ContextBlockTarget.SYSTEM,
+                        priority=ContextPriority.CRITICAL,
+                        content=_prepare_manifest(content),
+                    )
+                )
+
+        return blocks
+
+    @staticmethod
+    def _collect_file(path: Path, priority: ContextPriority) -> list[ContextBlock]:
+        if not path.is_file():
+            return []
+        content = path.read_text(encoding="utf-8", errors="replace").strip()
+        if not content:
+            return []
+        return [
+            ContextBlock(
+                source=ContextBlockSource.INSTRUCTION,
+                target=ContextBlockTarget.SYSTEM,
+                priority=priority,
+                content=_prepare_manifest(content),
+            )
+        ]
+
+    @staticmethod
+    def _collect_inline(content: str, priority: ContextPriority) -> list[ContextBlock]:
+        return [
+            ContextBlock(
+                source=ContextBlockSource.INSTRUCTION,
+                target=ContextBlockTarget.SYSTEM,
+                priority=priority,
+                content=_prepare_manifest(content),
+            )
+        ]
+
 
 # 大小治理常量
 MANIFEST_MAX_BYTES: int = 32 * 1024  # 32KB —— 超此阈值时压缩
@@ -174,7 +308,7 @@ def _utf8_prefix(text: str, max_bytes: int) -> str:
 
 
 def _condense_manifest(text: str) -> str:
-    """压缩超出预算的项目指令文本。
+    """压缩超出预算的指令文本。
 
     先为压缩标记预留字节，再依次添加开头内容和关键节段，
     确保标记始终完整存在于输出中。
@@ -182,7 +316,6 @@ def _condense_manifest(text: str) -> str:
     marker = _MANIFEST_TRUNCATED_MARKER
     marker_bytes = _utf8_size(marker)
 
-    # 预留标记字节 + 最大段落分隔符开销（3段 × 2 分隔符 = 4 字节）
     max_separator_bytes = _utf8_size("\n\n") * 2
     reserved = marker_bytes + max_separator_bytes
     content_budget = MANIFEST_MAX_BYTES - reserved
@@ -192,14 +325,12 @@ def _condense_manifest(text: str) -> str:
 
     parts: list[str] = []
 
-    # 开头内容（压缩到自身预算或剩余预算中较小者）
     opening_budget = min(MANIFEST_OPENING_BYTES, content_budget)
     opening = _utf8_prefix(text, opening_budget).strip()
     if opening:
         parts.append(opening)
         content_budget -= _utf8_size(opening)
 
-    # 关键节段（逐段检查是否适合剩余预算）
     sections = _extract_key_sections(text)
     if sections and content_budget > 0:
         section_header = "## Preserved Key Sections\n\n"
@@ -219,19 +350,13 @@ def _condense_manifest(text: str) -> str:
                 parts.append(section_text)
                 content_budget -= _utf8_size(section_text)
 
-    # 压缩标记始终在末尾
     parts.append(marker)
 
     return "\n\n".join(parts)
 
 
 def _extract_key_sections(text: str) -> list[str]:
-    """提取 Markdown 中匹配 MANIFEST_KEY_SECTIONS 的 ## 节。
-
-    每个节段用 _utf8_prefix 裁剪到 SECTION_BUDGET_BYTES 以避免单节
-    占用过多预算。该裁剪由 ProjectManifestCollector 调用方自行决定
-    是否使用，本函数只做初筛。
-    """
+    """提取 Markdown 中匹配 MANIFEST_KEY_SECTIONS 的 ## 节。"""
     sections: list[str] = []
     current_heading = ""
     current_lines: list[str] = []
@@ -271,63 +396,8 @@ def _drop_fenced_blocks(lines: list[str]) -> list[str]:
     return result
 
 
-class ProjectManifestCollector:
-    """从 AGENTS.md / CLAUDE.md 收集项目指令的 collector。
-
-    读取配置路径下的 AGENTS.md 和 CLAUDE.md 文件，产出 SYSTEM 目标的
-    ContextBlock。CLAUDE.md 仅包含 @AGENTS.md 引用时不重复发出块。
-
-    大小治理（两级策略）：
-    - ≤ MANIFEST_MAX_BYTES（32KB）：内容原样保留
-    - > MANIFEST_MAX_BYTES：自动压缩，保留开头和关键节段，末尾始终
-      包含 <manifest-truncated> 标记
-
-    优先级为 CRITICAL（最高优先等级）：项目指令定义 agent 在仓库中的
-    行为规则。优先级仅影响裁剪顺序——高优先级的块最后被丢弃。若 base
-    messages 已耗尽预算，CRITICAL 块也可能被丢弃。
-    """
-
-    def __init__(self, project_root: Path | None = None) -> None:
-        self._project_root = project_root
-
-    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
-        root = input.project_root or self._project_root
-        if root is None:
-            return []
-
-        blocks: list[ContextBlock] = []
-
-        agents_path = root / "AGENTS.md"
-        if agents_path.is_file():
-            content = agents_path.read_text(encoding="utf-8", errors="replace").strip()
-            if content:
-                blocks.append(
-                    ContextBlock(
-                        source=ContextBlockSource.PROJECT_MANIFEST,
-                        target=ContextBlockTarget.SYSTEM,
-                        priority=ContextPriority.CRITICAL,
-                        content=_prepare_manifest(content),
-                    )
-                )
-
-        claude_path = root / "CLAUDE.md"
-        if claude_path.is_file():
-            content = claude_path.read_text(encoding="utf-8", errors="replace").strip()
-            if content and not _is_agents_reference(content):
-                blocks.append(
-                    ContextBlock(
-                        source=ContextBlockSource.PROJECT_MANIFEST,
-                        target=ContextBlockTarget.SYSTEM,
-                        priority=ContextPriority.CRITICAL,
-                        content=_prepare_manifest(content),
-                    )
-                )
-
-        return blocks
-
-
 def _prepare_manifest(text: str) -> str:
-    """根据两级大小策略准备清单文本。
+    """根据两级大小策略准备指令文本。
 
     ≤ MANIFEST_MAX_BYTES：原样返回
     > MANIFEST_MAX_BYTES：压缩后返回

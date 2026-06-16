@@ -148,6 +148,72 @@ def _validate_external_directories(raw: dict[str, Any]) -> None:
             )
 
 
+_INSTRUCTION_PRIORITIES: frozenset[str] = frozenset(
+    {"critical", "high", "medium", "low"}
+)
+
+
+def _validate_instruction_sources(raw: dict[str, Any]) -> None:
+    """Fail-fast: invalid prompt.instructions entries."""
+    prompt = raw.get("prompt")
+    if not isinstance(prompt, dict):
+        return
+    instructions = prompt.get("instructions")
+    if not isinstance(instructions, list):
+        return
+    for i, entry in enumerate(instructions):
+        if not isinstance(entry, dict):
+            raise ValueError(f"prompt.instructions[{i}]: must be an object")
+        typ = entry.get("type")
+        if typ not in ("file", "inline"):
+            raise ValueError(
+                f"prompt.instructions[{i}]: type must be 'file' or 'inline'"
+            )
+        if typ == "file":
+            path_raw = entry.get("path")
+            if not isinstance(path_raw, str) or not path_raw.strip():
+                raise ValueError(
+                    f"prompt.instructions[{i}]: file path must be a non-empty string"
+                )
+            norm = path_raw.replace("\\", "/")
+            if norm.startswith("/"):
+                raise ValueError(
+                    f"prompt.instructions[{i}]: absolute path not allowed: {path_raw}"
+                )
+            if len(norm) >= 2 and norm[1] == ":":
+                raise ValueError(
+                    f"prompt.instructions[{i}]: absolute path not allowed: {path_raw}"
+                )
+            if norm.startswith("~"):
+                raise ValueError(
+                    f"prompt.instructions[{i}]: home-relative path not allowed: "
+                    f"{path_raw}"
+                )
+            for segment in norm.split("/"):
+                if segment == "..":
+                    raise ValueError(
+                        f"prompt.instructions[{i}]: traversal path not allowed: "
+                        f"{path_raw}"
+                    )
+        if typ == "inline":
+            content = entry.get("content")
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError(
+                    f"prompt.instructions[{i}]: inline content must be a "
+                    "non-empty string"
+                )
+        priority_raw = entry.get("priority")
+        if priority_raw is not None:
+            if (
+                not isinstance(priority_raw, str)
+                or priority_raw.lower() not in _INSTRUCTION_PRIORITIES
+            ):
+                raise ValueError(
+                    f"prompt.instructions[{i}]: invalid priority '{priority_raw}'. "
+                    "Must be one of: critical, high, medium, low"
+                )
+
+
 @dataclass
 class ToolsRuntimeConfig:
     enabled_groups: tuple[str, ...] = ("core", "skills")
@@ -162,6 +228,7 @@ class SkillsRuntimeConfig:
 @dataclass
 class PromptRuntimeConfig:
     modules: tuple[str, ...] = DEFAULT_PROMPT_MODULES
+    instructions: tuple[dict, ...] = ()
 
 
 @dataclass
@@ -278,6 +345,7 @@ def discover_runtime_config(
 
     _validate_legacy_security_fields(merged)
     _validate_external_directories(merged)
+    _validate_instruction_sources(merged)
     config = _config_from_dict(merged)
     config = _apply_env_overrides(config)
     return config

@@ -17,8 +17,8 @@ from ...agent.context_assembly import DefaultContextAssembler
 from ...agent.context_collector import (
     ActiveDiffCollector,
     ContextCollectorRegistry,
+    InstructionCollector,
     NotesCollector,
-    ProjectManifestCollector,
     RecentValidationCollector,
     TaskStateCollector,
 )
@@ -73,6 +73,7 @@ class AgentRuntimeConfig:
     project_root: Path | None = None
     request_hygiene: RequestHygieneConfig | None = None
     skill_registry: Any | None = None
+    prompt_instructions: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -211,6 +212,7 @@ def build_loop_config(
     get_prompt_version: Callable[[], str],
     project_root: Path | None = None,
     skill_registry: Any | None = None,
+    prompt_instructions: tuple[dict, ...] = (),
 ) -> AgentLoopConfig:
     gate_snapshot = gate.snapshot_for(registry)
 
@@ -275,7 +277,12 @@ def build_loop_config(
         )
 
         registry_ = ContextCollectorRegistry()
-        registry_.register(ProjectManifestCollector(project_root))
+        registry_.register(
+            InstructionCollector(
+                sources=prompt_instructions,
+                project_root=project_root,
+            )
+        )
         registry_.register(ActiveDiffCollector(project_root))
         registry_.register(RecentValidationCollector())
         task_provider = _build_task_state_provider(project_root)

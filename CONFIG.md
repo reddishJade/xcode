@@ -175,13 +175,34 @@
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `modules` | array | 11 个模块 | 参与拼接的 prompt 模块 |
+| `modules` | array | 9 个模块 | 参与拼接的 prompt 模块 |
+| `instructions` | array | `[]` | 指令源列表（见下方） |
 
-默认模块顺序：`identity`、`instructions`、`tool_discipline`、`tools`、`search_strategy`、`environment`、`cwd`、`git_preflight`、`contextual_retrieval`、`skills`、`notices`。
+默认模块顺序：`identity`、`tool_discipline`、`tools`、`search_strategy`、`environment`、`cwd`、`git_preflight`、`contextual_retrieval`、`notices`。
 
-分三个缓存区域：STABLE（identity/instructions/tool_discipline/tools/search_strategy）→ DYNAMIC（environment/cwd）→ VOLATILE（git_preflight/contextual_retrieval/skills/notices）。
+分三个缓存区域：STABLE（identity/tool_discipline/tools/search_strategy）→ DYNAMIC（environment/cwd）→ VOLATILE（git_preflight/contextual_retrieval/notices）。
 
-项目指令文件（`AGENTS.md`、`CLAUDE.md`）按 UTF-8 字节计入预算：≤24KB 完整注入，24-32KB 警告，>32KB 压缩保留关键章节。
+### prompt.instructions 格式
+
+每个元素为包含以下字段的对象：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `type` | string | 是 | `"file"` 或 `"inline"` |
+| `path` | string | 仅 file | 项目相对路径，禁止绝对路径、`~`、`..` 遍历 |
+| `content` | string | 仅 inline | 指令文本 |
+| `priority` | string | 否 | `"critical"`、`"high"`、`"medium"`、`"low"`；默认 `"critical"` |
+
+示例：
+```json
+{"type": "file", "path": "AGENTS.md", "priority": "critical"}
+{"type": "inline", "content": "No external dependencies without approval.", "priority": "high"}
+```
+
+未配置 `instructions` 时自动回退到 `AGENTS.md` / `CLAUDE.md`。
+配置非空时：先收集配置源，再收集回退文件。配置源与回退文件按路径去重，配置源优先。
+
+所有指令内容按 UTF-8 字节计入预算：≤32KB 完整注入，>32KB 压缩保留关键章节。
 
 ---
 

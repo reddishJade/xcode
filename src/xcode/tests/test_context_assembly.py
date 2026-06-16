@@ -29,8 +29,8 @@ from xcode.agent.context_collector import (
     ActiveDiffCollector,
     ContextCollectionInput,
     ContextCollectorRegistry,
+    InstructionCollector,
     NotesCollector,
-    ProjectManifestCollector,
     RecentValidationCollector,
     TaskStateCollector,
 )
@@ -1290,7 +1290,7 @@ class TestContextBlockTarget(unittest.TestCase):
     def test_system_target_explicit(self) -> None:
         """SYSTEM target 可显式设置。"""
         block = ContextBlock(
-            source=ContextBlockSource.PROJECT_MANIFEST,
+            source=ContextBlockSource.INSTRUCTION,
             target=ContextBlockTarget.SYSTEM,
             priority=ContextPriority.CRITICAL,
             content="system instructions",
@@ -1319,7 +1319,7 @@ class TestDefaultContextAssemblerSystemBlocks(unittest.TestCase):
                 messages=[UserMessage(content="hello")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        source=ContextBlockSource.INSTRUCTION,
                         target=ContextBlockTarget.SYSTEM,
                         priority=ContextPriority.CRITICAL,
                         content="project rules",
@@ -1342,7 +1342,7 @@ class TestDefaultContextAssemblerSystemBlocks(unittest.TestCase):
                 ],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        source=ContextBlockSource.INSTRUCTION,
                         target=ContextBlockTarget.SYSTEM,
                         priority=ContextPriority.CRITICAL,
                         content="project rules",
@@ -1363,7 +1363,7 @@ class TestDefaultContextAssemblerSystemBlocks(unittest.TestCase):
                 messages=[UserMessage(content="question")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        source=ContextBlockSource.INSTRUCTION,
                         target=ContextBlockTarget.SYSTEM,
                         priority=ContextPriority.CRITICAL,
                         content="project rules",
@@ -1391,13 +1391,13 @@ class TestDefaultContextAssemblerSystemBlocks(unittest.TestCase):
                 messages=[UserMessage(content="question")],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        source=ContextBlockSource.INSTRUCTION,
                         target=ContextBlockTarget.SYSTEM,
                         priority=ContextPriority.CRITICAL,
                         content="rules part 1",
                     ),
                     ContextBlock(
-                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        source=ContextBlockSource.INSTRUCTION,
                         target=ContextBlockTarget.SYSTEM,
                         priority=ContextPriority.CRITICAL,
                         content="rules part 2",
@@ -1424,7 +1424,7 @@ class TestDefaultContextAssemblerSystemBlocks(unittest.TestCase):
                 ],
                 context_blocks=[
                     ContextBlock(
-                        source=ContextBlockSource.PROJECT_MANIFEST,
+                        source=ContextBlockSource.INSTRUCTION,
                         target=ContextBlockTarget.SYSTEM,
                         priority=ContextPriority.CRITICAL,
                         content="project rules",
@@ -1438,91 +1438,191 @@ class TestDefaultContextAssemblerSystemBlocks(unittest.TestCase):
         self.assertEqual(result.messages[1].content, "project rules")
 
 
-# ── ProjectManifestCollector 测试 ──
+# ── InstructionCollector 测试 ──
 
 
-class TestProjectManifestCollector(unittest.TestCase):
-    """测试 ProjectManifestCollector。"""
+class TestInstructionCollector(unittest.TestCase):
+    """测试 InstructionCollector（空配置时回退到 AGENTS.md / CLAUDE.md）。"""
 
     def test_no_files_returns_empty(self) -> None:
         """项目根目录无 AGENTS.md / CLAUDE.md 时返回空列表。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 0)
 
-    def test_agents_md_content_collected(self) -> None:
-        """AGENTS.md 内容被收集为 PROJECT_MANIFEST + SYSTEM + CRITICAL。"""
+    def test_empty_config_fallback_agents(self) -> None:
+        """空配置时 AGENTS.md 回退。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("Use tests.", encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 1)
-            self.assertEqual(blocks[0].source, ContextBlockSource.PROJECT_MANIFEST)
+            self.assertEqual(blocks[0].source, ContextBlockSource.INSTRUCTION)
             self.assertEqual(blocks[0].target, ContextBlockTarget.SYSTEM)
             self.assertEqual(blocks[0].priority, ContextPriority.CRITICAL)
             self.assertEqual(blocks[0].content, "Use tests.")
 
-    def test_agents_md_via_input_project_root(self) -> None:
-        """project_root 可通过 ContextCollectionInput 传入。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "AGENTS.md").write_text("Project rules.", encoding="utf-8")
-            collector = ProjectManifestCollector()
-            inp = ContextCollectionInput(project_root=root)
-            blocks = collector.collect(inp)
-            self.assertEqual(len(blocks), 1)
-            self.assertIn("Project rules.", blocks[0].content)
-
-    def test_claude_md_agents_reference_skipped(self) -> None:
+    def test_empty_config_fallback_claude_dedup(self) -> None:
         """CLAUDE.md 仅包含 @AGENTS.md 引用时不重复发出块。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("Real content.", encoding="utf-8")
             (root / "CLAUDE.md").write_text("@AGENTS.md", encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 1)
             self.assertEqual(blocks[0].content, "Real content.")
 
-    def test_claude_md_own_content_not_skipped(self) -> None:
-        """CLAUDE.md 有自有内容时作为独立块发出。"""
+    def test_empty_config_both_files(self) -> None:
+        """AGENTS.md 和 CLAUDE.md 各自有内容时都收集。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("AGENTS content.", encoding="utf-8")
             (root / "CLAUDE.md").write_text("CLAUDE specific rules.", encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 2)
             contents = [b.content for b in blocks]
             self.assertIn("AGENTS content.", contents)
             self.assertIn("CLAUDE specific rules.", contents)
 
-    def test_claude_md_reference_with_whitespace(self) -> None:
+    def test_empty_config_claude_reference_with_whitespace(self) -> None:
         """带空格的 @AGENTS.md 引用也被识别。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("Content.", encoding="utf-8")
             (root / "CLAUDE.md").write_text("  @AGENTS.md  ", encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 1)
 
-    def test_only_claude_md_without_agents(self) -> None:
+    def test_empty_config_only_claude(self) -> None:
         """仅有 CLAUDE.md 且其内容有效时作为独立块发出。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "CLAUDE.md").write_text("CLAUDE rules.", encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 1)
             self.assertEqual(blocks[0].content, "CLAUDE rules.")
 
+    def test_agents_md_via_input_project_root(self) -> None:
+        """project_root 可通过 ContextCollectionInput 传入。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("Project rules.", encoding="utf-8")
+            collector = InstructionCollector()
+            inp = ContextCollectionInput(project_root=root)
+            blocks = collector.collect(inp)
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("Project rules.", blocks[0].content)
 
-class TestProjectManifestSizeGovernance(unittest.TestCase):
-    """测试项目指令大小治理。"""
+    def test_file_source(self) -> None:
+        """配置的 file 源被正确收集。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "CUSTOM.md").write_text("Custom instructions.", encoding="utf-8")
+            sources = ({"type": "file", "path": "CUSTOM.md"},)
+            collector = InstructionCollector(sources=sources, project_root=root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].source, ContextBlockSource.INSTRUCTION)
+            self.assertEqual(blocks[0].content, "Custom instructions.")
+
+    def test_file_source_priority(self) -> None:
+        """配置的 file 源的 priority 被正确映射。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "CUSTOM.md").write_text("Low priority.", encoding="utf-8")
+            sources = ({"type": "file", "path": "CUSTOM.md", "priority": "low"},)
+            collector = InstructionCollector(sources=sources, project_root=root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(blocks[0].priority, ContextPriority.LOW)
+
+    def test_inline_source(self) -> None:
+        """配置的 inline 源被正确收集。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sources = ({"type": "inline", "content": "No deps without approval."},)
+            collector = InstructionCollector(sources=sources, project_root=root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].source, ContextBlockSource.INSTRUCTION)
+            self.assertEqual(blocks[0].content, "No deps without approval.")
+
+    def test_inline_source_priority(self) -> None:
+        """配置的 inline 源的 priority 被正确映射。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sources = (
+                {"type": "inline", "content": "High priority.", "priority": "high"},
+            )
+            collector = InstructionCollector(sources=sources, project_root=root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(blocks[0].priority, ContextPriority.HIGH)
+
+    def test_configured_source_wins_dedup(self) -> None:
+        """AGENTS.md 配置为 file 源时，回退 AGENTS.md 被跳过。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("Fallback.", encoding="utf-8")
+            sources = ({"type": "file", "path": "AGENTS.md", "priority": "medium"},)
+            collector = InstructionCollector(sources=sources, project_root=root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].priority, ContextPriority.MEDIUM)
+            self.assertEqual(blocks[0].content, "Fallback.")
+
+    def test_duplicate_configured_file_source_first_wins(self) -> None:
+        """同一文件出现在两个配置源时，首个源优先。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "RULES.md").write_text("First priority.", encoding="utf-8")
+            sources = (
+                {"type": "file", "path": "RULES.md", "priority": "critical"},
+                {"type": "file", "path": "RULES.md", "priority": "low"},
+            )
+            collector = InstructionCollector(sources=sources, project_root=root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0].priority, ContextPriority.CRITICAL)
+            self.assertEqual(blocks[0].content, "First priority.")
+
+    def test_configured_plus_fallback(self) -> None:
+        """配置源 + 回退文件均收集，不回退未配置的文件。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("Fallback AGENTS.", encoding="utf-8")
+            (root / "CLAUDE.md").write_text("Fallback CLAUDE.", encoding="utf-8")
+            sources = ({"type": "inline", "content": "Inline instruction."},)
+            collector = InstructionCollector(sources=sources, project_root=root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertEqual(len(blocks), 3)
+            contents = [b.content for b in blocks]
+            self.assertIn("Inline instruction.", contents)
+            self.assertIn("Fallback AGENTS.", contents)
+            self.assertIn("Fallback CLAUDE.", contents)
+
+    def test_inline_source_size_governed(self) -> None:
+        """inline 内容 > 32KB 时被压缩。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "x" * 50000
+            sources = ({"type": "inline", "content": "# Guide\n\n" + body},)
+            collector = InstructionCollector(sources=sources, project_root=root)
+            blocks = collector.collect(ContextCollectionInput())
+            self.assertLessEqual(
+                len(blocks[0].content.encode("utf-8")),
+                32 * 1024,
+            )
+            self.assertIn("<manifest-truncated>", blocks[0].content)
+
+
+class TestInstructionCollectorSizeGovernance(unittest.TestCase):
+    """测试指令大小治理（与 InstructionCollector 配合）。"""
 
     def test_small_content_passes_unchanged(self) -> None:
         """小内容（≤24KB）保持原样。"""
@@ -1530,7 +1630,7 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             root = Path(tmp)
             content = "Small instruction file."
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 1)
             self.assertEqual(blocks[0].content, content)
@@ -1539,10 +1639,9 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
         """中等内容（size ≤ 32KB）保持原样。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            # 接近 32KB 但不超阈值
             content = "# Medium\n\n" + ("x" * (28 * 1024))
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 1)
             self.assertEqual(blocks[0].content, content)
@@ -1554,7 +1653,7 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             body = "background\n" * 5000
             content = "# Opening\n\n" + body + "\n\n## Validation\n\nRun tests.\n"
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 1)
             self.assertLessEqual(
@@ -1569,7 +1668,7 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             body = "background\n" * 5000
             content = "# Opening\n\n" + body
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertIn("<manifest-truncated>", blocks[0].content)
 
@@ -1584,7 +1683,7 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
                 + "\n\n## Validation\n\nRun targeted validation for modified files.\n"
             )
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertIn("Run targeted validation", blocks[0].content)
 
@@ -1595,7 +1694,7 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             body = "#" * 40000
             content = "# Guide\n\n" + body + "\n\n## Priority\n\nFirst.\n"
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             first = collector.collect(ContextCollectionInput())
             second = collector.collect(ContextCollectionInput())
             self.assertEqual(first[0].content, second[0].content)
@@ -1607,23 +1706,22 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             body = "#" * 40000
             content = "# Guide\n\n" + body + "\n\n## Random Notes\n\nNot important.\n"
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
-            # "Random Notes" 不在关键节段列表中，应被丢弃
             self.assertNotIn("Random Notes", blocks[0].content)
 
-    def test_system_message_injection_preserved(self) -> None:
-        """provider 仍通过 SystemMessage 收到项目指令（非 UserMessage）。"""
+    def test_system_target_preserved(self) -> None:
+        """指令块是 SYSTEM 目标。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             body = "#" * 40000
             content = "# Guide\n\n" + body + "\n\n## Priority\n\nFirst.\n"
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertEqual(len(blocks), 1)
             self.assertEqual(blocks[0].target, ContextBlockTarget.SYSTEM)
-            self.assertEqual(blocks[0].source, ContextBlockSource.PROJECT_MANIFEST)
+            self.assertEqual(blocks[0].source, ContextBlockSource.INSTRUCTION)
 
     def test_marker_fully_present_not_truncated(self) -> None:
         """压缩标记始终完整包含在输出中，不被截断。"""
@@ -1632,11 +1730,10 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             body = "#" * 50000
             content = "# Guide\n\n" + body
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertIn("<manifest-truncated>", blocks[0].content)
             self.assertIn("</manifest-truncated>", blocks[0].content)
-            # 标记两端都不应被截断
             self.assertTrue(blocks[0].content.strip().endswith("</manifest-truncated>"))
 
     def test_output_strictly_bounded(self) -> None:
@@ -1650,7 +1747,7 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
                 "\n\n## Git Safety\n\nNever.\n"
             )
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             self.assertLessEqual(
                 len(blocks[0].content.encode("utf-8")),
@@ -1664,13 +1761,107 @@ class TestProjectManifestSizeGovernance(unittest.TestCase):
             body = "x" * 50000
             content = body + "\n\n## Validation\n\nRun tests.\n"
             (root / "AGENTS.md").write_text(content, encoding="utf-8")
-            collector = ProjectManifestCollector(root)
+            collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             output = blocks[0].content
             self.assertIn("<manifest-truncated>", output)
             self.assertIn("</manifest-truncated>", output)
             self.assertTrue(output.strip().endswith("</manifest-truncated>"))
             self.assertLessEqual(len(output.encode("utf-8")), 32 * 1024)
+
+
+# ── 配置验证测试 ──
+
+
+class TestInstructionSourceValidation(unittest.TestCase):
+    """测试 prompt.instructions 配置验证。"""
+
+    def test_invalid_entry_raises(self) -> None:
+        """非 dict 条目抛出 ValueError。"""
+        from xcode.harness.config import _validate_instruction_sources
+
+        raw = {"prompt": {"instructions": ["bad"]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_instruction_sources(raw)
+        self.assertIn("prompt.instructions[0]", str(ctx.exception))
+
+    def test_invalid_type_raises(self) -> None:
+        """不支持的 type 抛出 ValueError。"""
+        from xcode.harness.config import _validate_instruction_sources
+
+        raw = {"prompt": {"instructions": [{"type": "xyz"}]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_instruction_sources(raw)
+        self.assertIn("prompt.instructions[0]", str(ctx.exception))
+
+    def test_absolute_path_posix_raises(self) -> None:
+        """POSIX 绝对路径抛出 ValueError。"""
+        from xcode.harness.config import _validate_instruction_sources
+
+        raw = {"prompt": {"instructions": [{"type": "file", "path": "/etc/passwd"}]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_instruction_sources(raw)
+        self.assertIn("prompt.instructions[0]", str(ctx.exception))
+
+    def test_absolute_path_windows_raises(self) -> None:
+        """Windows 绝对路径抛出 ValueError。"""
+        from xcode.harness.config import _validate_instruction_sources
+
+        raw = {"prompt": {"instructions": [{"type": "file", "path": "C:\\foo"}]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_instruction_sources(raw)
+        self.assertIn("prompt.instructions[0]", str(ctx.exception))
+
+    def test_home_relative_path_raises(self) -> None:
+        """~ 开头的路径抛出 ValueError。"""
+        from xcode.harness.config import _validate_instruction_sources
+
+        raw = {"prompt": {"instructions": [{"type": "file", "path": "~/foo"}]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_instruction_sources(raw)
+        self.assertIn("prompt.instructions[0]", str(ctx.exception))
+
+    def test_traversal_path_raises(self) -> None:
+        """../foo 抛出 ValueError。"""
+        from xcode.harness.config import _validate_instruction_sources
+
+        raw = {"prompt": {"instructions": [{"type": "file", "path": "../foo"}]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_instruction_sources(raw)
+        self.assertIn("prompt.instructions[0]", str(ctx.exception))
+
+    def test_traversal_path_segment_raises(self) -> None:
+        """路径中包含 .. 段抛出 ValueError。"""
+        from xcode.harness.config import _validate_instruction_sources
+
+        raw = {"prompt": {"instructions": [{"type": "file", "path": "foo/../../bar"}]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_instruction_sources(raw)
+        self.assertIn("prompt.instructions[0]", str(ctx.exception))
+
+    def test_inline_empty_content_raises(self) -> None:
+        """inline 内容为空抛出 ValueError。"""
+        from xcode.harness.config import _validate_instruction_sources
+
+        raw = {"prompt": {"instructions": [{"type": "inline", "content": ""}]}}
+        with self.assertRaises(ValueError) as ctx:
+            _validate_instruction_sources(raw)
+        self.assertIn("prompt.instructions[0]", str(ctx.exception))
+
+    def test_invalid_priority_raises(self) -> None:
+        """不支持的 priority 抛出 ValueError。"""
+        from xcode.harness.config import _validate_instruction_sources
+
+        raw = {
+            "prompt": {
+                "instructions": [
+                    {"type": "inline", "content": "ok", "priority": "urgent"}
+                ]
+            }
+        }
+        with self.assertRaises(ValueError) as ctx:
+            _validate_instruction_sources(raw)
+        self.assertIn("prompt.instructions[0]", str(ctx.exception))
 
 
 # ── ActiveDiffCollector 测试 ──

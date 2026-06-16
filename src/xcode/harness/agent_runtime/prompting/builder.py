@@ -7,7 +7,7 @@
 - 易变区：git preflight、contextual retrieval 状态、session 通知（每轮重建）
 
 不属于本模块（由 context_collector 管理）：
-- 项目指令（AGENTS.md / CLAUDE.md）→ ProjectManifestCollector
+- 项目指令 → InstructionCollector
 - 活动 diff 摘要 → ActiveDiffCollector
 - 验证失败 → RecentValidationCollector
 - 任务/计划状态 → TaskStateCollector

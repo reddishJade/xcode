@@ -406,6 +406,7 @@ def _build_subagent_integration(
                     modules=runtime_config.prompt.modules,
                 ),
                 project_root=child_root,
+                prompt_instructions=runtime_config.prompt.instructions,
             ),
         ).run_async(prompt)
         return result.answer
@@ -521,6 +522,7 @@ def build_agent(
             project_root=project_root,
             request_hygiene=runtime_config.request_hygiene,
             skill_registry=skill_registry,
+            prompt_instructions=runtime_config.prompt.instructions,
         ),
     )
 

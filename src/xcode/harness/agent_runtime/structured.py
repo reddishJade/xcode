@@ -228,6 +228,7 @@ class StructuredAgent:
             get_prompt_version=_get_prompt_version,
             project_root=self.project_root,
             skill_registry=self._runtime.skill_registry,
+            prompt_instructions=self._runtime.prompt_instructions,
         )
 
         _emit_hook(
