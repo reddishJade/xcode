@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, UTC
 import filelock
@@ -12,6 +13,10 @@ from collections.abc import Callable
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
+
+
+# 会话 id 的白名单正则：只允许字母数字、连字符和星号
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
 # 会话摘要字符限制（终端显示和可读性优化）
@@ -295,13 +300,16 @@ class SessionStore:
     def list_sessions(self, limit: int = 10) -> list[Path]:
         return [item.path for item in self.list_session_infos(limit=limit)]
 
-    def list_session_infos(self, limit: int = 10) -> list[SessionMetadataView]:
+    def list_session_infos(self, limit: int | None = 10) -> list[SessionMetadataView]:
         known = {item.id: item for item in self._load_metadata()}
         views: list[SessionMetadataView] = []
         for path in self._session_paths():
             metadata = known.get(self._session_id(path))
             views.append(self._view_for_path(path, metadata))
-        return sorted(views, key=lambda item: item.updated_at, reverse=True)[:limit]
+        sorted_views = sorted(views, key=lambda item: item.updated_at, reverse=True)
+        if limit is not None:
+            return sorted_views[:limit]
+        return sorted_views
 
     def ensure_metadata(self, first_user_text: str | None = None) -> SessionMetadata:
         existing = self._metadata_for_path(self.current_path)
@@ -511,6 +519,7 @@ class SessionStore:
             summary=metadata.summary,
             updated_at=metadata.updated_at,
             path=path,
+            project_path=metadata.project_path,
             parent_id=metadata.parent_id,
             fork_type=metadata.fork_type,
         )
@@ -531,6 +540,79 @@ class SessionStore:
         """返回当前会话的 logical_session_id。"""
         return self._session_id(self.current_path)
 
+    @staticmethod
+    def _validate_session_id(session_id: str) -> str:
+        """Whitelist-based session id validation. Raises ValueError for invalid input."""
+        if not session_id:
+            raise ValueError("session id is empty")
+        if not _SESSION_ID_RE.match(session_id):
+            raise ValueError(f"invalid session id: {session_id!r}")
+        return session_id
+
+    @staticmethod
+    def is_meaningful_session(path: Path) -> bool:
+        """True if the session file contains at least one real transcript record."""
+        if not path.exists():
+            return False
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                data = json.loads(line)
+                record = SessionRecord.from_dict(data)
+                if record is not None and record.type in {"user", "assistant", "event"}:
+                    return True
+        except (OSError, json.JSONDecodeError):
+            return False
+        return False
+
+    def find_latest_for_project(self, project_root: Path) -> SessionMetadataView | None:
+        """返回当前项目最新的有意义会话，或 None。
+
+        不调用 self.resume()。调用者必须使用 store.resume(view.id)。
+        如果当前会话有意义且是最新的，会被包含在内。
+        """
+        resolved = str(project_root.resolve())
+        for item in self.list_session_infos(limit=None):
+            if item.project_path != resolved:
+                continue
+            if not self.is_meaningful_session(item.path):
+                continue
+            return item
+        return None
+
+    def find_by_id(self, session_id: str) -> SessionMetadataView | None:
+        """Exact session lookup by id. Not capped by list_session_infos limit."""
+        try:
+            safe_id = self._validate_session_id(session_id)
+        except ValueError:
+            return None
+        # direct path construction (safe after whitelist validation)
+        candidate = self.sessions_dir / f"session-{safe_id}.jsonl"
+        if candidate.exists() and candidate.is_file():
+            metadata = self._metadata_for_path(candidate)
+            return self._view_for_path(candidate, metadata)
+        # metadata fallback — validate path containment via relative_to
+        sessions_root = self.sessions_dir.resolve()
+        for item in self._load_metadata():
+            if item.id != safe_id:
+                continue
+            stored = self.index_path.parent / item.transcript_path
+            stored_resolved = stored.resolve()
+            try:
+                stored_resolved.relative_to(sessions_root)
+            except ValueError:
+                continue
+            if not stored_resolved.is_file():
+                continue
+            if (
+                not stored_resolved.name.startswith("session-")
+                or stored_resolved.suffix != ".jsonl"
+            ):
+                continue
+            return self._view_for_path(stored_resolved, item)
+        return None
+
 
 @dataclass(frozen=True)
 class SessionMetadataView:
@@ -539,6 +621,7 @@ class SessionMetadataView:
     summary: str
     updated_at: str
     path: Path
+    project_path: str = ""
     parent_id: str | None = None
     fork_type: str | None = None
 

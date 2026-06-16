@@ -310,6 +310,8 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
                 sessions_dir=None,
                 config=config_path,
                 resume=False,
+                continue_=False,
+                session=None,
                 setup=False,
             )
 
@@ -357,6 +359,8 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
                 sessions_dir=None,
                 config=None,
                 resume=False,
+                continue_=False,
+                session=None,
                 setup=False,
             )
             captured: dict[str, object] = {}
@@ -397,6 +401,8 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
                 sessions_dir=None,
                 config=None,
                 resume=False,
+                continue_=False,
+                session=None,
                 setup=False,
             )
             captured: dict[str, object] = {}
@@ -430,6 +436,8 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
                 sessions_dir=None,
                 config=None,
                 resume=True,
+                continue_=False,
+                session=None,
                 setup=False,
             )
             captured: dict[str, object] = {}

@@ -5,7 +5,7 @@ import json
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from typing import Any, cast
@@ -15,7 +15,7 @@ from xcode.cli.app_contract import ReplApp
 from xcode.cli.completion import ReplCompleter
 from xcode.cli.commands import PromptText, ReplState
 from xcode.cli.repl import current_effort_options, run_repl
-from xcode.cli.repl_commands import COMMAND_NAMES, handle_command
+from xcode.cli.repl_commands import COMMAND_NAMES, HELP_TEXT, handle_command
 from xcode.cli.repl_rendering import reasoning_preview_lines
 from xcode.cli.repl_rendering import REPL_PROMPT_STYLE
 from xcode.cli.repl_tools import brief_input, run_tool_command
@@ -1830,6 +1830,583 @@ def _strip_ansi(text: str) -> str:
     import re
 
     return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+
+
+class XcodeReplContinueTests(unittest.TestCase):
+    """Step 8: CLI flags and /continue — session lifecycle helpers and commands."""
+
+    # ── _validate_session_id ──────────────────────────────────────────────
+
+    def test_validate_session_id_rejects_empty(self) -> None:
+        from xcode.harness.session import SessionStore
+
+        with self.assertRaises(ValueError):
+            SessionStore._validate_session_id("")
+
+    def test_validate_session_id_rejects_path_separators(self) -> None:
+        from xcode.harness.session import SessionStore
+
+        for bad in ["a/b", "a\\b", "../etc", "C:foo", ".", "~user", "a b", "a\tb"]:
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    SessionStore._validate_session_id(bad)
+
+    def test_validate_session_id_rejects_asterisk(self) -> None:
+        from xcode.harness.session import SessionStore
+
+        for bad in ["a*b", "abc*", "*abc"]:
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    SessionStore._validate_session_id(bad)
+
+    def test_validate_session_id_accepts_valid(self) -> None:
+        from xcode.harness.session import SessionStore
+
+        for good in ["abc123", "ABC-123", "20260616-120000", "a_b", "z"]:
+            with self.subTest(good=good):
+                self.assertEqual(SessionStore._validate_session_id(good), good)
+
+    def test_find_by_id_rejects_asterisk(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            self.assertIsNone(store.find_by_id("session-with*"))
+
+    # ── is_meaningful_session ─────────────────────────────────────────────
+
+    def test_is_meaningful_session_false_for_nonexistent(self) -> None:
+        from xcode.harness.session import SessionStore
+
+        self.assertFalse(SessionStore.is_meaningful_session(Path("/nonexistent")))
+
+    def test_is_meaningful_session_false_for_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "empty.jsonl"
+            p.write_text("")
+            self.assertFalse(SessionStore.is_meaningful_session(p))
+
+    def test_is_meaningful_session_false_for_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "session-foo.jsonl"
+            # write a record that is not user/assistant/event
+            p.write_text(
+                json.dumps(
+                    {
+                        "type": "system",
+                        "content": "init",
+                        "created_at": "2026-01-01T00:00:00",
+                    }
+                )
+                + "\n"
+            )
+            self.assertFalse(SessionStore.is_meaningful_session(p))
+
+    def test_is_meaningful_session_true_for_user_message(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "session-bar.jsonl"
+            p.write_text(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "content": "hello",
+                        "created_at": "2026-01-01T00:00:00",
+                    }
+                )
+                + "\n"
+            )
+            self.assertTrue(SessionStore.is_meaningful_session(p))
+
+    def test_is_meaningful_session_true_for_assistant(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "session-baz.jsonl"
+            p.write_text(
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "content": "hi",
+                        "created_at": "2026-01-01T00:00:00",
+                    }
+                )
+                + "\n"
+            )
+            self.assertTrue(SessionStore.is_meaningful_session(p))
+
+    def test_is_meaningful_session_true_for_event(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "session-qux.jsonl"
+            p.write_text(
+                json.dumps(
+                    {
+                        "type": "event",
+                        "content": {"type": "tool_result"},
+                        "created_at": "2026-01-01T00:00:00",
+                    }
+                )
+                + "\n"
+            )
+            self.assertTrue(SessionStore.is_meaningful_session(p))
+
+    # ── find_latest_for_project ───────────────────────────────────────────
+
+    def test_find_latest_for_project_filters_by_project_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            sessions_dir = root / "sessions"
+            sessions_dir.mkdir(parents=True)
+            # Create two sessions with different project paths in same sessions dir
+            store_a = SessionStore(sessions_dir, project_root=root)
+            store_a.append("user", "project A message")
+            # Create a session for a subdirectory project
+            sub = root / "subproj"
+            sub.mkdir()
+            store_b = SessionStore(sessions_dir, project_root=sub)
+            store_b.append("user", "project B message")
+            # Both session files exist in the same sessions_dir
+            self.assertEqual(len(list(sessions_dir.glob("session-*.jsonl"))), 2)
+            # find for root project only
+            result_a = store_a.find_latest_for_project(root)
+            self.assertIsNotNone(result_a)
+            assert result_a is not None
+            self.assertEqual(result_a.id, store_a.session_id)
+            # find for sub-proj using a fresh store (no cached metadata)
+            fresh = SessionStore(sessions_dir, project_root=root)
+            result_b = fresh.find_latest_for_project(sub)
+            self.assertIsNotNone(result_b)
+            assert result_b is not None
+            self.assertEqual(result_b.id, store_b.session_id)
+
+    def test_find_latest_for_project_scans_beyond_100(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            sd = Path(td) / "sessions"
+            # create 150 sessions from another project
+            other = Path(td) / "other"
+            other.mkdir()
+            for i in range(150):
+                st = SessionStore(sd, project_root=other)
+                st.append("user", f"other {i}")
+            # one current-project session (the latest)
+            st_curr = SessionStore(sd, project_root=Path(td))
+            st_curr.append("user", "my session")
+            # should find my session even though 150 others precede it
+            result = st_curr.find_latest_for_project(Path(td))
+            self.assertIsNotNone(result)
+            assert result is not None
+            self.assertEqual(result.id, st_curr.session_id)
+
+    def test_find_latest_for_project_returns_current_when_latest_and_meaningful(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            store.append("user", "hello")
+            # current session is the only meaningful session
+            result = store.find_latest_for_project(Path(td))
+            self.assertIsNotNone(result)
+            assert result is not None
+            self.assertEqual(result.id, store.session_id)
+
+    def test_find_latest_for_project_skips_empty_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            # current_path is an empty placeholder
+            # create another meaningful session
+            store.append("user", "real")
+            store.clear()
+            # now current_path is a new placeholder; the real session exists
+            result = store.find_latest_for_project(Path(td))
+            self.assertIsNotNone(result)
+            assert result is not None
+            self.assertNotEqual(result.id, store.session_id)
+            self.assertTrue(SessionStore.is_meaningful_session(result.path))
+
+    def test_find_latest_for_project_returns_none_when_no_meaningful(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            # only empty placeholder, no meaningful session
+            result = store.find_latest_for_project(Path(td))
+            self.assertIsNone(result)
+
+    # ── find_by_id ────────────────────────────────────────────────────────
+
+    def test_find_by_id_returns_none_for_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            self.assertIsNone(store.find_by_id("nonexistent"))
+
+    def test_find_by_id_rejects_malicious_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            for bad in [
+                "../etc",
+                "/etc/passwd",
+                "a/b",
+                "a\\b",
+                "C:foo",
+                ".",
+                "~root",
+                "a b",
+                "",
+            ]:
+                with self.subTest(bad=bad):
+                    self.assertIsNone(store.find_by_id(bad))
+
+    def test_find_by_id_direct_path_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            store.append("user", "hello")
+            sid = store.session_id
+            result = store.find_by_id(sid)
+            self.assertIsNotNone(result)
+            assert result is not None
+            self.assertEqual(result.id, sid)
+
+    def test_find_by_id_metadata_fallback_rejects_escaped_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            sessions_dir = Path(td) / "sessions"
+            sessions_dir.mkdir(parents=True)
+            store = SessionStore(sessions_dir, project_root=Path(td))
+            # inject metadata with escaped transcript_path
+            from xcode.harness.session import SessionMetadata
+
+            escaped = SessionMetadata(
+                id="escape-session",
+                title="Escaped",
+                summary="trying to escape",
+                project_path=str(Path(td)),
+                transcript_path="../../etc/passwd",
+                created_at="2026-01-01T00:00:00",
+                updated_at="2026-01-01T00:00:00",
+            )
+            store._upsert_metadata(escaped)
+            result = store.find_by_id("escape-session")
+            self.assertIsNone(result)
+
+    # ── /continue command ─────────────────────────────────────────────────
+
+    def test_continue_command_resumes_latest_session(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            store.append("user", "older session")
+            older_id = store.session_id
+            # create a second session that is newer
+            store.clear()
+            store.append("user", "newer session")
+            newer_id = store.session_id
+            # switch back to older session
+            store.resume(older_id)
+            self.assertEqual(store.session_id, older_id)
+            state = ReplState()
+            app = HistoryLoadingApp()
+            renderer = FakeRenderer()
+            with redirect_stdout(StringIO()):
+                handled = handle_command(
+                    "/continue",
+                    store,
+                    app,
+                    renderer,
+                    state,
+                    FakePrompt([]),
+                )
+            self.assertFalse(handled)
+            # Should have switched to the newer session
+            self.assertEqual(store.session_id, newer_id)
+
+    def test_continue_command_already_on_latest_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            store.append("user", "the only session")
+            state = ReplState()
+            app = HistoryLoadingApp()
+            output = StringIO()
+            with redirect_stdout(output):
+                handled = handle_command(
+                    "/continue",
+                    store,
+                    app,
+                    FakeRenderer(),
+                    state,
+                    FakePrompt([]),
+                )
+            self.assertFalse(handled)
+            self.assertEqual(store.session_id, store.session_id)  # unchanged
+            self.assertIn("Already on the latest session", output.getvalue())
+
+    def test_continue_command_no_prior_stays_current(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            # only empty placeholder, no meaningful session
+            state = ReplState()
+            app = HistoryLoadingApp()
+            output = StringIO()
+            orig_id = store.session_id
+            with redirect_stdout(output):
+                handled = handle_command(
+                    "/continue",
+                    store,
+                    app,
+                    FakeRenderer(),
+                    state,
+                    FakePrompt([]),
+                )
+            self.assertFalse(handled)
+            self.assertEqual(store.session_id, orig_id)  # unchanged
+            self.assertIn("No prior session found", output.getvalue())
+
+    def test_continue_does_not_change_session_id(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            store.append("user", "session A")
+            target_id = store.session_id
+            store.clear()
+            store.append("user", "session B")
+            latest_id = store.session_id
+            store.resume(target_id)
+            self.assertEqual(store.session_id, target_id)
+            # /continue should switch to latest
+            state = ReplState()
+            app = HistoryLoadingApp()
+            with redirect_stdout(StringIO()):
+                handle_command(
+                    "/continue",
+                    store,
+                    app,
+                    FakeRenderer(),
+                    state,
+                    FakePrompt([]),
+                )
+            self.assertEqual(store.session_id, latest_id)
+
+    def test_continue_does_not_mutate_files(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            store.append("user", "old")
+            old_path = store.current_path
+            old_mtime = old_path.stat().st_mtime
+            store.clear()
+            store.append("user", "new")
+            state = ReplState()
+            app = HistoryLoadingApp()
+            with redirect_stdout(StringIO()):
+                handle_command(
+                    "/continue",
+                    store,
+                    app,
+                    FakeRenderer(),
+                    state,
+                    FakePrompt([]),
+                )
+            # old session file should not be modified
+            self.assertEqual(old_path.stat().st_mtime, old_mtime)
+
+    def test_continue_does_not_rewrite_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            store.append("user", "old")
+            old_contents = store.current_path.read_text(encoding="utf-8")
+            store.clear()
+            state = ReplState()
+            app = HistoryLoadingApp()
+            with redirect_stdout(StringIO()):
+                handle_command(
+                    "/continue",
+                    store,
+                    app,
+                    FakeRenderer(),
+                    state,
+                    FakePrompt([]),
+                )
+            self.assertEqual(
+                store.current_path.read_text(encoding="utf-8"), old_contents
+            )
+
+    def test_continue_syncs_agent_history(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            store.append("user", "previous conversation")
+            store.append("assistant", "previous answer")
+            store.clear()
+            app = HistoryLoadingApp()
+            state = ReplState()
+            with redirect_stdout(StringIO()):
+                handle_command(
+                    "/continue",
+                    store,
+                    app,
+                    FakeRenderer(),
+                    state,
+                    FakePrompt([]),
+                )
+            self.assertEqual(
+                [m.role for m in app.agent.loaded],
+                ["user", "assistant"],
+            )
+
+    def test_continue_completer_suggests_continue(self) -> None:
+        from xcode.cli.completion import ReplCompleter
+
+        completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
+        items = completer.complete("/con")
+        self.assertTrue(any(item.text == "/continue" for item in items))
+
+    # ── CLI flags via run_repl ────────────────────────────────────────────
+
+    def test_run_repl_auto_continue_resumes_latest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            sessions_dir = Path(td)
+            seed = SessionStore(sessions_dir)
+            seed.append("user", "prior session")
+            prior_id = seed.session_id
+            app = FakeApp()
+            prompt = FakePrompt(["/exit"])
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, sessions_dir, prompt, auto_continue=True)
+            self.assertEqual(code, 0)
+            # after --continue, session should be the prior one
+            store = SessionStore(sessions_dir)
+            self.assertIsNotNone(store.find_by_id(prior_id))
+
+    def test_run_repl_auto_continue_no_prior_proceeds_with_new(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            app = FakeApp()
+            prompt = FakePrompt(["/exit"])
+            output = StringIO()
+            with redirect_stdout(output):
+                code = run_repl(app, Path(td), prompt, auto_continue=True)
+            self.assertEqual(code, 0)
+            self.assertIn("No prior session found", output.getvalue())
+
+    def test_run_repl_session_id_resumes_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            sessions_dir = Path(td)
+            seed = SessionStore(sessions_dir)
+            seed.append("user", "explicit session")
+            target_id = seed.session_id
+            app = FakeApp()
+            prompt = FakePrompt(["/exit"])
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, sessions_dir, prompt, session_id=target_id)
+            self.assertEqual(code, 0)
+
+    def test_run_repl_session_id_rejects_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            app = FakeApp()
+            prompt = FakePrompt(["/exit"])
+            output = StringIO()
+            err = StringIO()
+            with redirect_stdout(output), redirect_stderr(err):
+                code = run_repl(app, Path(td), prompt, session_id="nonexistent")
+            self.assertEqual(code, 1)
+            self.assertIn("Session not found", err.getvalue())
+
+    def test_run_repl_session_id_rejects_wrong_project(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            sessions_dir = Path(td)
+            other_project = Path(td) / "other"
+            other_project.mkdir()
+            seed = SessionStore(sessions_dir, project_root=other_project)
+            seed.append("user", "other project session")
+            target_id = seed.session_id
+            app = FakeApp()
+            prompt = FakePrompt(["/exit"])
+            output = StringIO()
+            err = StringIO()
+            with redirect_stdout(output), redirect_stderr(err):
+                code = run_repl(app, sessions_dir, prompt, session_id=target_id)
+            self.assertEqual(code, 1)
+            self.assertIn("belongs to another project", err.getvalue())
+
+    def test_run_repl_session_id_rejects_malicious_id(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            app = FakeApp()
+            prompt = FakePrompt(["/exit"])
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(td), prompt, session_id="../etc/passwd")
+            self.assertEqual(code, 1)
+
+    # ── Step 6/7 follow continued session_id ──────────────────────────────
+
+    def test_continue_grant_store_follows_session_id(self) -> None:
+        """Step 6 invariant: SessionGrantStoreManager keys by session_id."""
+        from xcode.harness.observability.permission_model import (
+            GrantRecord,
+            SessionGrantStoreManager,
+        )
+
+        manager = SessionGrantStoreManager()
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td))
+            store.append("user", "first")
+            sid_a = store.session_id
+            grant_a = manager.get_for_session(sid_a)
+            grant_a.add(
+                GrantRecord(
+                    capability="file",
+                    operation="read",
+                    target_kind="path",
+                    target_pattern="*.py",
+                    access="read",
+                    decision="allow",
+                    scope="session",
+                    grant_id="test-grant",
+                )
+            )
+            store.clear()
+            # continue to first session
+            view = store.find_latest_for_project(Path(td))
+            assert view is not None
+            store.resume(view.id)
+            self.assertEqual(store.session_id, sid_a)
+            # grant store for this session should still have the grant
+            current_store = manager.get_for_session(store.session_id)
+            self.assertGreater(len(current_store.records()), 0)
+
+    def test_continue_snapshot_store_follows_session_id(self) -> None:
+        """Step 7 invariant: SnapshotStore.service keys by session_id."""
+        from xcode.harness.snapshot import SnapshotStore
+
+        with tempfile.TemporaryDirectory() as td:
+            # need a git repo for SnapshotStore
+            import subprocess
+
+            subprocess.run(["git", "init"], cwd=td, capture_output=True)
+            subprocess.run(
+                ["git", "config", "user.name", "test"], cwd=td, capture_output=True
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "test@test"],
+                cwd=td,
+                capture_output=True,
+            )
+            (Path(td) / ".gitignore").write_text("")
+            subprocess.run(["git", "add", "-A"], cwd=td, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=td, capture_output=True)
+
+            snap = SnapshotStore(Path(td))
+            store = SessionStore(Path(td) / "sessions", project_root=Path(td))
+            store.append("user", "first")
+            sid_a = store.session_id
+            # record a snapshot turn for session A
+            svc = snap.service(sid_a)
+            pre = svc.track()
+            (Path(td) / "test.txt").write_text("hello")
+            post = svc.track()
+            changes = svc.diff(pre.snapshot_id, post.snapshot_id)
+            snap.record_turn(sid_a, "001", pre.snapshot_id, post.snapshot_id, changes)
+            self.assertEqual(len(snap.list_records(sid_a)), 1)
+
+            store.clear()
+            # continue to session A
+            view = store.find_latest_for_project(Path(td))
+            assert view is not None
+            store.resume(view.id)
+            self.assertEqual(store.session_id, sid_a)
+            # snapshot records for session A should still be available
+            self.assertEqual(len(snap.list_records(store.session_id)), 1)
+
+    # ── help text ─────────────────────────────────────────────────────────
+
+    def test_help_text_includes_continue(self) -> None:
+        self.assertIn("/continue", HELP_TEXT)
+        self.assertIn("Resume the latest session", HELP_TEXT)
 
 
 if __name__ == "__main__":

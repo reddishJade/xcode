@@ -29,6 +29,17 @@ def parse_args() -> argparse.Namespace:
         "--resume", action="store_true", help="Open the REPL resume picker on startup."
     )
     parser.add_argument(
+        "--continue",
+        action="store_true",
+        dest="continue_",
+        help="Resume the latest session for the current project.",
+    )
+    parser.add_argument(
+        "--session",
+        type=str,
+        help="Resume a specific session by id.",
+    )
+    parser.add_argument(
         "--setup", action="store_true", help="Force-run the provider setup wizard."
     )
     return parser.parse_args()
@@ -80,9 +91,23 @@ def _run(args, runtime_config) -> int:
     if daemon is not None:
         daemon.start()
     try:
-        return run_repl(
-            app, sessions_dir, resume_latest=args.resume, project_root=args.project_root
-        )
+        # precedence: --session > --continue > --resume > new session
+        if args.session:
+            return run_repl(
+                app,
+                sessions_dir,
+                session_id=args.session,
+                project_root=args.project_root,
+            )
+        if args.continue_:
+            return run_repl(
+                app, sessions_dir, auto_continue=True, project_root=args.project_root
+            )
+        if args.resume:
+            return run_repl(
+                app, sessions_dir, resume_latest=True, project_root=args.project_root
+            )
+        return run_repl(app, sessions_dir, project_root=args.project_root)
     finally:
         if daemon is not None:
             daemon.stop()

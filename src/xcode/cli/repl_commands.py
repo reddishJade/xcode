@@ -148,6 +148,22 @@ def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
+def cmd_continue(cmd: str, ctx: CommandContext) -> bool:
+    """切换到当前项目最新的有意义会话。"""
+    view = ctx.store.find_latest_for_project(ctx.project_root)
+    if view is None:
+        print("No prior session found for this project.")
+        return False
+    if view.id == ctx.store.session_id:
+        print(f"Already on the latest session: {view.title}")
+        return False
+    ctx.store.resume(view.id)
+    print(resumed_message(view))
+    print_loaded_history(ctx.store)
+    sync_agent_history(ctx.app, ctx.store)
+    return False
+
+
 def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
     """交互式选择并恢复历史会话。"""
     sessions = ctx.store.list_session_infos()
@@ -619,6 +635,11 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/clear": CommandEntry(
         handler=cmd_clear,
         desc="Start a new session transcript.",
+        group=COMMAND_GROUP_SESSION,
+    ),
+    "/continue": CommandEntry(
+        handler=cmd_continue,
+        desc="Resume the latest session for this project.",
         group=COMMAND_GROUP_SESSION,
     ),
     "/new": CommandEntry(

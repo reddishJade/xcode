@@ -53,7 +53,7 @@ from xcode.harness.agent_runtime.events import (
 from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.observability import FileGrantStore
 from xcode.harness.observability.permission_model import SessionGrantStoreManager
-from xcode.harness.session import SessionStore
+from xcode.harness.session import SessionMetadataView, SessionStore
 from xcode.harness.snapshot import (
     SnapshotResult,
     SnapshotStore,
@@ -90,6 +90,8 @@ def run_repl(
     sessions_dir: Path,
     prompt_session: PromptLike | None = None,
     resume_latest: bool = False,
+    auto_continue: bool = False,
+    session_id: str | None = None,
     renderer: MarkdownRenderer | None = None,
     project_root: Path | None = None,
 ) -> int:
@@ -126,8 +128,42 @@ def run_repl(
             agent.set_permanent_grant_store(permanent_grant_store)
     clear_terminal_display()
     print_startup_banner(app, root)
-    if resume_latest:
+
+    # session selection phase — exactly one path executes
+    selected_view: SessionMetadataView | None = None
+
+    if session_id is not None:
+        view = store.find_by_id(session_id)
+        if view is None:
+            print(f"Session not found: {session_id}", file=sys.stderr)
+            return 1
+        stored = Path(view.project_path).resolve() if view.project_path else None
+        if stored is None or str(stored) != str(root.resolve()):
+            print(
+                f"Session belongs to another project: {view.project_path}",
+                file=sys.stderr,
+            )
+            return 1
+        store.resume(session_id)
+        selected_view = view
+
+    elif auto_continue:
+        view = store.find_latest_for_project(root)
+        if view is not None:
+            store.resume(view.id)
+            selected_view = view
+        else:
+            print("No prior session found for this project. Starting a new session.")
+
+    elif resume_latest:
         resume_interactively(store, session)
+        sync_agent_history(app, store)
+
+    if selected_view is not None:
+        from .repl_sessions import resumed_message, print_loaded_history
+
+        print(resumed_message(selected_view))
+        print_loaded_history(store)
         sync_agent_history(app, store)
 
     while True:
