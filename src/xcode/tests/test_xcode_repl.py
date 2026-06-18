@@ -65,6 +65,7 @@ class XcodeReplTests(unittest.TestCase):
 
             self.assertEqual(removed, 2)
             self.assertEqual([record.content for record in records], ["first", "one"])
+            self.assertEqual(store.user_turn_count(), 1)
 
     def test_session_store_resumes_latest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -399,6 +399,73 @@ class TestSnapshotStore(unittest.TestCase):
         records = store.list_records("sess-tools-def")
         self.assertEqual(records[0].tool_names, [])
 
+    def test_rewind_removes_records_after_transcript_cursor(self) -> None:
+        store = SnapshotStore(self.root)
+        svc = store.service("sess-rewind")
+        for turn_number in range(1, 4):
+            snapshot = svc.track()
+            store.record_turn(
+                session_id="sess-rewind",
+                turn_id=f"{turn_number:03d}",
+                pre_snapshot_id=snapshot.snapshot_id,
+                post_snapshot_id=snapshot.snapshot_id,
+                changed_files=[],
+            )
+
+        removed = store.rewind_to_turn_count("sess-rewind", 1)
+
+        self.assertEqual(removed, 2)
+        self.assertEqual(
+            [record.turn_id for record in store.list_records("sess-rewind")],
+            ["001"],
+        )
+        self.assertEqual(store.next_turn_id("sess-rewind"), "002")
+        self.assertEqual(
+            [record.turn_id for record in store.get_undoable_records("sess-rewind", 5)],
+            ["001"],
+        )
+
+    def test_repeated_rewind_and_undone_records_are_consistent(self) -> None:
+        store = SnapshotStore(self.root)
+        svc = store.service("sess-repeat")
+        snapshot = svc.track()
+        for turn_number in range(1, 4):
+            store.record_turn(
+                session_id="sess-repeat",
+                turn_id=f"{turn_number:03d}",
+                pre_snapshot_id=snapshot.snapshot_id,
+                post_snapshot_id=snapshot.snapshot_id,
+                changed_files=[],
+            )
+        records = store.list_records("sess-repeat")
+        records[1].undone = True
+        store.update_record("sess-repeat", records[1])
+
+        self.assertEqual(store.rewind_to_turn_count("sess-repeat", 2), 1)
+        self.assertEqual(store.rewind_to_turn_count("sess-repeat", 1), 1)
+        self.assertEqual(store.rewind_to_turn_count("sess-repeat", 1), 0)
+        self.assertEqual(store.next_turn_id("sess-repeat"), "002")
+
+    def test_fork_session_copies_snapshot_history(self) -> None:
+        store = SnapshotStore(self.root)
+        svc = store.service("parent")
+        snapshot = svc.track()
+        store.record_turn(
+            session_id="parent",
+            turn_id="001",
+            pre_snapshot_id=snapshot.snapshot_id,
+            post_snapshot_id=snapshot.snapshot_id,
+            changed_files=[],
+        )
+
+        store.fork_session("parent", "child")
+
+        child_records = store.list_records("child")
+        self.assertEqual([record.turn_id for record in child_records], ["001"])
+        self.assertEqual(store.next_turn_id("child"), "002")
+        child_service = store.service("child")
+        self.assertEqual(child_service.track().snapshot_id, snapshot.snapshot_id)
+
 
 class TestSnapshotDeletedFile(unittest.TestCase):
     def setUp(self) -> None:

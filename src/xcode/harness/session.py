@@ -267,6 +267,10 @@ class SessionStore:
                     )
             return len(records) - len(kept)
 
+    def user_turn_count(self) -> int:
+        """返回当前 transcript 中保留的用户轮次数。"""
+        return sum(1 for record in self.load_records() if record.type == "user")
+
     def compact_current_session(self, max_tool_result_chars: int = 200) -> int:
         """压缩当前会话事件日志，截断过长的工具执行结果内容。"""
         with self._lock:

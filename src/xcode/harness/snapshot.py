@@ -5,6 +5,7 @@ from datetime import datetime, UTC
 import json
 import logging
 from pathlib import Path
+import shutil
 import subprocess
 import threading
 from typing import Literal
@@ -423,3 +424,42 @@ class SnapshotStore:
                     records[i] = record
                     break
             self._write_index(session_id, records)
+
+    def rewind_to_turn_count(self, session_id: str, turn_count: int) -> int:
+        """删除会话 rewind 游标之后的快照记录。"""
+        if turn_count < 0:
+            raise ValueError("turn_count must be non-negative")
+        with self._lock:
+            records = self._load_index(session_id)
+            kept = [
+                record
+                for record in records
+                if _numeric_turn_id(record.turn_id) <= turn_count
+            ]
+            removed = len(records) - len(kept)
+            if removed:
+                self._write_index(session_id, kept)
+            return removed
+
+    def fork_session(self, source_session_id: str, target_session_id: str) -> None:
+        """复制父会话快照仓库，使 transcript fork 保留相同撤销历史。"""
+        if source_session_id == target_session_id:
+            return
+        source = self._index_path(source_session_id).parent
+        target = self._index_path(target_session_id).parent
+        if not source.exists():
+            return
+        with self._lock:
+            if target.exists():
+                raise FileExistsError(f"snapshot session already exists: {target}")
+            shutil.copytree(source, target)
+            records = self._load_index(target_session_id)
+            self._write_index(target_session_id, records)
+
+
+def _numeric_turn_id(turn_id: str) -> int:
+    """解析快照轮次编号；无效编号不进入可见时间线。"""
+    try:
+        return int(turn_id)
+    except ValueError:
+        return -1

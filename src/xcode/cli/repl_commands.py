@@ -71,7 +71,10 @@ def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
     if fork_type is not None and fork_type not in FORK_TYPES:
         print(f"fork_type must be one of {sorted(FORK_TYPES)}, got {fork_type!r}")
         return False
+    parent_session_id = ctx.store.session_id
     meta = ctx.store.fork_into(fork_type)
+    if ctx.snapshot_store is not None:
+        ctx.snapshot_store.fork_session(parent_session_id, meta.id)
     sync_agent_history(ctx.app, ctx.store)
     label = f" ({fork_type})" if fork_type else ""
     print(f'Forked: "{meta.title}"{label}')
@@ -83,6 +86,11 @@ def cmd_rewind(cmd: str, ctx: CommandContext) -> bool:
     parts = cmd.split()
     turns = int(parts[1]) if len(parts) > 1 else 1
     removed = ctx.store.rewind_turns(turns)
+    if ctx.snapshot_store is not None:
+        ctx.snapshot_store.rewind_to_turn_count(
+            ctx.store.session_id,
+            ctx.store.user_turn_count(),
+        )
     sync_agent_history(ctx.app, ctx.store)
     turn_label = "turn" if turns == 1 else "turns"
     print(f"Rewound {turns} user {turn_label} ({removed} transcript records removed).")
