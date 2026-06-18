@@ -254,7 +254,12 @@ def build_tool_registry(
         )
 
         skill_registry: SkillRegistry | None = SkillRegistry()
-        skill_registry.discover(build_skill_search_dirs(project_root))
+        skill_registry.discover(
+            build_skill_search_dirs(
+                project_root,
+                trust_project_skills=runtime_config.skills.trust_project_skills,
+            )
+        )
     else:
         skill_registry = None
 

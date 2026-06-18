@@ -295,7 +295,12 @@ def build_loop_config(
         sr = skill_registry
         if sr is None:
             sr = SkillRegistry()
-            sr.discover(build_skill_search_dirs(project_root))
+            sr.discover(
+                build_skill_search_dirs(
+                    project_root,
+                    trust_project_skills=False,
+                )
+            )
         registry_.register(SkillIndexCollector(sr))
         assembler = DefaultContextAssembler()
 

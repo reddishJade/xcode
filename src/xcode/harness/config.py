@@ -222,7 +222,7 @@ class ToolsRuntimeConfig:
 
 @dataclass
 class SkillsRuntimeConfig:
-    pass
+    trust_project_skills: bool = False
 
 
 @dataclass

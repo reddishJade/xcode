@@ -32,13 +32,18 @@ logger = logging.getLogger(__name__)
 # 3: ~/.agents/skills/             用户级技能
 
 
-def build_skill_search_dirs(project_root: Path | None) -> list[tuple[Path, int]]:
+def build_skill_search_dirs(
+    project_root: Path | None,
+    *,
+    trust_project_skills: bool = True,
+) -> list[tuple[Path, int]]:
     """构建优先级排序的技能搜索目录列表。
 
     返回 [(Path, priority), ...]，priority 越小优先级越高。
+    项目级技能仅在调用方明确确认工作区可信时加入。
     """
     dirs: list[tuple[Path, int]] = []
-    if project_root is not None:
+    if project_root is not None and trust_project_skills:
         dirs.append((project_root / ".xcode" / "skills", 0))
         dirs.append((project_root / ".agents" / "skills", 1))
     home = Path.home()
@@ -413,12 +418,24 @@ def _find_body_start(text: str) -> str | None:
 
 def _xml_escape_content(text: str) -> str:
     """对 XML 元素内容进行转义。"""
-    return _xml.escape(text)
+    return _xml.escape(_xml_safe_text(text))
 
 
 def _xml_escape_attr(text: str) -> str:
     """对 XML 属性值进行转义（含引号）。返回带引号的字符串。"""
-    return _xml.quoteattr(text)
+    return _xml.quoteattr(_xml_safe_text(text))
+
+
+def _xml_safe_text(text: str) -> str:
+    """替换 XML 1.0 不允许的控制字符。"""
+    return "".join(
+        character
+        if character in "\t\n\r"
+        or "\u0020" <= character <= "\ud7ff"
+        or "\ue000" <= character <= "\ufffd"
+        else "\ufffd"
+        for character in text
+    )
 
 
 # ── load_skill 工具 ──
@@ -527,7 +544,12 @@ class SkillIndexCollector:
             return []
         lines: list[str] = ["<available-skills>"]
         for s in summaries:
-            lines.append(f'  <skill name="{s.name}">{s.description}</skill>')
+            safe_name = _xml_escape_attr(s.name)
+            description = s.description
+            if len(description) > 1024:
+                description = f"{description[:1021]}..."
+            safe_description = _xml_escape_content(description)
+            lines.append(f"  <skill name={safe_name}>{safe_description}</skill>")
         lines.append("</available-skills>")
         body = "\n".join(lines)
         return [
