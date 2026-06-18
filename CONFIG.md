@@ -52,7 +52,7 @@
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `max_steps` | int | `20` | 单次任务最大循环轮次 |
-| `execution_mode` | string | `"act"` | 默认执行模式：`plan`、`review`、`act` |
+| `execution_mode` | string | `"act"` | 默认执行模式：`plan`、`build`、`act` |
 | `compact_threshold` | int | `0` | 消息数阈值；0 关闭 |
 | `compact_token_threshold` | int | `0` | token 阈值；0 关闭 |
 | `max_recent_messages` | int | `10` | 压缩时保留的近期消息数 |
@@ -162,11 +162,6 @@
 `shell` 工具是 OpenAI Responses builtin 的本地执行桥，接收 `commands` 数组。`search_tools` 工具按关键字搜索已注册工具。
 
 ---
-
-## skills
-
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|---|
 
 ---
 

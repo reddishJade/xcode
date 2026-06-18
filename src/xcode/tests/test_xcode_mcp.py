@@ -1,7 +1,7 @@
 """Step 9 MCP canonicalization tests.
 
 Covers: config validation, naming/collisions, permission integration,
-error handling, redaction, subagent exclusion, fromClaude compat.
+error handling, redaction, subagent exclusion.
 """
 
 from __future__ import annotations
@@ -25,9 +25,7 @@ from xcode.experimental.mcp_client import (
     redact_mcp_text,
     truncate_redact,
 )
-from xcode.experimental.mcp_config_compat import (
-    from_claude_config,
-)
+
 from xcode.harness.observability.permission_model import (
     ActionExtractor,
     Action,
@@ -488,112 +486,6 @@ class TestMcpRedaction(TestCase):
         result = redact_mcp_text(msg)
         self.assertEqual(result, msg)
 
-
-# ════════════════════════════════════════════
-# 8. fromClaude 兼容工具
-# ════════════════════════════════════════════
-
-
-class TestMcpFromClaude(TestCase):
-    """from_claude_config utility tests."""
-
-    def test_local_command(self) -> None:
-        cfg, warnings = from_claude_config(
-            "my-srv",
-            {
-                "command": "python",
-                "args": ["server.py"],
-            },
-        )
-        self.assertIsNotNone(cfg)
-        self.assertEqual(len(warnings), 0)
-        assert cfg is not None
-        self.assertEqual(cfg.command, ("python", "server.py"))
-        self.assertTrue(cfg.enabled)
-
-    def test_local_command_no_args(self) -> None:
-        cfg, warnings = from_claude_config(
-            "my-srv",
-            {
-                "command": "npx",
-            },
-        )
-        self.assertIsNotNone(cfg)
-        self.assertEqual(len(warnings), 0)
-        assert cfg is not None
-        self.assertEqual(cfg.command, ("npx",))
-
-    def test_remote_url_warning(self) -> None:
-        cfg, warnings = from_claude_config(
-            "remote-srv",
-            {
-                "url": "https://example.com/mcp",
-            },
-        )
-        self.assertIsNone(cfg)
-        self.assertTrue(any("remote" in w for w in warnings))
-
-    def test_sse_unsupported(self) -> None:
-        cfg, warnings = from_claude_config(
-            "sse-srv",
-            {
-                "command": "python",
-                "type": "sse",
-            },
-        )
-        self.assertIsNone(cfg)
-        self.assertTrue(any("sse" in w for w in warnings))
-
-    def test_disabled(self) -> None:
-        cfg, warnings = from_claude_config(
-            "off",
-            {
-                "command": "python",
-                "disabled": True,
-            },
-        )
-        self.assertIsNotNone(cfg)
-        assert cfg is not None
-        self.assertFalse(cfg.enabled)
-
-    def test_environment(self) -> None:
-        cfg, warnings = from_claude_config(
-            "srv",
-            {
-                "command": "python",
-                "environment": {"KEY": "VAL"},
-            },
-        )
-        self.assertIsNotNone(cfg)
-        assert cfg is not None
-        self.assertEqual(cfg.env, {"KEY": "VAL"})
-
-    def test_env_fallback(self) -> None:
-        cfg, warnings = from_claude_config(
-            "srv",
-            {
-                "command": "python",
-                "env": {"KEY": "VAL"},
-            },
-        )
-        self.assertIsNotNone(cfg)
-        assert cfg is not None
-        self.assertEqual(cfg.env, {"KEY": "VAL"})
-
-    def test_not_an_object(self) -> None:
-        cfg, warnings = from_claude_config("srv", "string")
-        self.assertIsNone(cfg)
-        self.assertTrue(len(warnings) > 0)
-
-    def test_missing_command_and_url(self) -> None:
-        cfg, warnings = from_claude_config(
-            "srv",
-            {
-                "foo": "bar",
-            },
-        )
-        self.assertIsNone(cfg)
-        self.assertTrue(any("missing" in w for w in warnings))
 
 
 # ════════════════════════════════════════════

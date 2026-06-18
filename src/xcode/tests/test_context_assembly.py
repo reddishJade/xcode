@@ -764,7 +764,7 @@ class TestContextAssemblerAgentLoopIntegration(unittest.TestCase):
         user_msgs = [m for m in msgs if m["role"] == "user"]
         self.assertGreaterEqual(len(user_msgs), 1)
 
-    def test_legacy_transform_context_still_works(self) -> None:
+    def test_transform_context_without_assembler(self) -> None:
         """transform_context 在无 assembler 时正常工作。"""
         provider = CaptureProvider()
         transform_called = False
@@ -1193,7 +1193,7 @@ class TestContextCollectorWithAssembler(unittest.TestCase):
         )
         self.assertEqual(len(call_count), 0)
 
-    def test_legacy_transform_context_still_runs_after_collectors(self) -> None:
+    def test_transform_context_runs_after_collectors(self) -> None:
         """collector + assembler 配置下 transform_context 仍执行。"""
         transform_log: list[str] = []
 

@@ -54,7 +54,7 @@
 | `CancellationToken` | 取消令牌 |
 | `ExecutionEnv` | 执行环境 protocol |
 | `ExecutionResult` | 执行结果 |
-| `ExecutionMode` | 执行模式（plan/review/act） |
+| `ExecutionMode` | 执行模式（plan/build/act） |
 | `HookManager` | Hook 管理器 |
 | `PermissionPolicy` | 静态权限策略（rules + global_default） |
 | `StaticPermission` | 单条静态权限规则 |
@@ -106,7 +106,7 @@ def build_app(project_root, env_files=None, agent_config=None,
 | `ProviderRuntimeConfig` | `model_profiles: dict[str, ModelProfileRuntimeConfig]` |
 | `SecurityRuntimeConfig` | `permission_mode, sandbox_mode, approval_policy, network_access, writable_roots, restricted_dirs, rules, global_default` |
 | `ToolsRuntimeConfig` | `enabled_groups=("core",), shell="auto"` |
-| `SkillsRuntimeConfig` | (保留) |
+| `SkillsRuntimeConfig` | 技能配置 |
 | `PromptRuntimeConfig` | `modules: tuple[str, ...]` |
 | `PathsRuntimeConfig` | `sessions_dir, skills_dir` |
 | `ObservabilityRuntimeConfig` | `audit_path` |
@@ -382,7 +382,7 @@ def partition_tool_calls_for_execution(current_context, tool_calls) -> list[list
 | `/effort <level>` | 推理 effort |
 | `/thinking on/off` | thinking 显示 |
 | `/plan` | 只读检查 |
-| `/review` | 只读审查 |
+| `/build` | 构建模式 |
 | `/act [--clear]` | 执行模式 |
 | `/verbose [normal\|verbose\|debug]` | 详细级别 |
 | `/debug on/off` | 调试模式 |

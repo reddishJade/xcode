@@ -128,7 +128,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `agent_runtime/agent_helpers.py` | Agent 辅助函数 |
 | `agent_runtime/async_worker.py` | 异步工作线程 |
 | `agent_runtime/fallback.py` | 模型 fallback |
-| `agent_runtime/execution_modes.py` | 执行模式（plan/review/act） |
+| `agent_runtime/execution_modes.py` | 执行模式（plan/build/act） |
 | `observability/` | 可观测性 |
 | `observability/audit.py` | `AuditRecord`、`JsonlAuditLogger`、`redact_text` |
 | `observability/hooks.py` | `HookManager`、5 个事件类型 |
@@ -163,7 +163,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | 模块 | 职责 |
 |---|---|
 | `repl.py` | REPL 主循环和事件流展示编排 |
-| `repl_commands.py` | 20 个 slash command（/help、/clear、/fork、/rewind、/resume、/sessions、/tree、/branch、/model、/effort、/thinking、/plan、/review、/act、/verbose、/debug、/queue、/compact、/permissions、/tool、/exit、/quit） |
+| `repl_commands.py` | 20 个 slash command（/help、/clear、/fork、/rewind、/resume、/sessions、/tree、/branch、/model、/effort、/thinking、/plan、/build、/act、/verbose、/debug、/queue、/compact、/permissions、/tool、/exit、/quit） |
 | `repl_hitl.py` | HITL 审批（once/session/permanent） |
 | `repl_rendering.py` | 终端渲染、`LiveMarkdownStream`、`LiveReasoningPreview` |
 | `repl_sessions.py` | 会话恢复、历史记录转换 |

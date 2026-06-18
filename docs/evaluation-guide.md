@@ -9,7 +9,7 @@
 `src/xcode/evals/` 包含 `EvalRunner`，消费 `XcodeApp.aask_stream()` 事件流，记录 trace，输出 `report.json` / `report.html` / `report.csv`。
 
 `EvalTask` 支持：
-- `prompt`、`mode`（act/plan/review）
+- `prompt`、`mode`（act/plan/build）
 - `expected_answer_contains`、`expected_tool_calls`、`disallowed_tool_calls`
 - `max_tool_errors`、`llm_judge_criteria`
 - `metadata.evidence.files`（exists/contains/not_contains/changed）

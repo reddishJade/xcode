@@ -59,7 +59,7 @@ class HistoryManager:
     def restore_mode(self, run_state: RunState) -> ExecutionMode | None:
         """从 RunState 提取模式信息。"""
         mode = run_state.current_mode
-        if mode in {"act", "plan", "review"}:
+        if mode in {"act", "plan", "build"}:
             return mode
         return None
 
