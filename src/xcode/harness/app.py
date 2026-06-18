@@ -151,12 +151,6 @@ def build_app(
 
     providers = _assembly.build_providers(cfg.runtime_config, cfg.env_files)
 
-    plugins_data: dict[str, Any] = {"tools": [], "hooks": {}, "skills": []}
-    if "plugins" in enabled:
-        from xcode.experimental.plugins import PluginManager
-
-        plugins_data = PluginManager(project_root).scan_and_load()
-
     registry, shell_spec, closers, skill_registry = _assembly.build_tool_registry(
         project_root=project_root,
         llm=providers.llm,
@@ -167,9 +161,6 @@ def build_app(
         compact_controller=infra.compact_controller,
         cancel_event=infra.cancellation_token.event,
     )
-
-    if plugins_data.get("tools"):
-        registry = registry + tuple(plugins_data["tools"])
 
     fallback_provider = providers.llms.get("fallback")
     agent = build_agent(
@@ -185,7 +176,6 @@ def build_app(
         compact_controller=infra.compact_controller,
         cancellation_token=infra.cancellation_token,
         fallback_provider=fallback_provider,
-        plugins_hooks=plugins_data.get("hooks"),
         skill_registry=skill_registry,
     )
 

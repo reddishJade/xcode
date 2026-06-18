@@ -91,45 +91,27 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
     def test_default_runtime_does_not_enable_experimental_components(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
-            root = Path(tmp)
-            plugins_dir = root / ".local" / "plugins"
-            plugins_dir.mkdir(parents=True)
-            (plugins_dir / "demo.py").write_text(
-                "from xcode.harness.skills import ToolSpec\n"
-                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _data: 'ok', schema={'type':'object','properties':{},'additionalProperties':False})]\n",
-                encoding="utf-8",
-            )
-
             app = build_app(
-                project_root=root,
+                project_root=Path(tmp),
                 runtime_config=XcodeRuntimeConfig(
                     daemon=DaemonRuntimeConfig(enabled=True),
                 ),
             )
 
-        names = {tool.name for tool in app.registry}
-        self.assertNotIn("plugin_tool", names)
         self.assertIsNone(_layered_compactor(app).on_compact)
         self.assertIsNone(app.daemon)
         self.assertIsNone(app.mailbox)
         self.assertIsNone(app.progress)
 
-    def test_experimental_group_enables_experimental_components(self) -> None:
+    def test_experimental_group_enables_remaining_experimental_components(
+        self,
+    ) -> None:
         runtime_config = XcodeRuntimeConfig(
             tools=ToolsRuntimeConfig(enabled_groups=("core", "experimental")),
         )
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
-            root = Path(tmp)
-            plugins_dir = root / ".local" / "plugins"
-            plugins_dir.mkdir(parents=True)
-            (plugins_dir / "demo.py").write_text(
-                "from xcode.harness.skills import ToolSpec\n"
-                "exposed_tools = [ToolSpec('plugin_tool', 'Demo.', '{}', lambda _data: 'ok', schema={'type':'object','properties':{},'additionalProperties':False})]\n",
-                encoding="utf-8",
-            )
-
             app = build_app(
-                project_root=root,
+                project_root=Path(tmp),
                 runtime_config=runtime_config,
             )
 
@@ -138,7 +120,6 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertNotIn("create_task", names)
         self.assertNotIn("send_mailbox_message", names)
         self.assertNotIn("save_task_progress", names)
-        self.assertIn("plugin_tool", names)
         self.assertIsNotNone(_layered_compactor(app).on_compact)
         self.assertIsNone(app.daemon)
         self.assertIsNone(app.mailbox)

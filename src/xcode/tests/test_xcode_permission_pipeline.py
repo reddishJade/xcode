@@ -10,7 +10,6 @@ from xcode.harness.observability.permissions import (
     PermissionPolicy,
     StaticPermission,
 )
-from xcode.experimental.plugins import PluginManager
 from xcode.harness.task_store import (
     TaskStore,
     resolve_task_dependencies,
@@ -65,37 +64,6 @@ class XcodePermissionPipelineTests(unittest.TestCase):
         result = engine.decide("read_file", '{"path": "secrets/key.txt"}')
         self.assertTrue(result.blocked)
         self.assertEqual(result.decision, "deny")
-
-    def test_dynamic_plugin_loader(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project_root = Path(tmp)
-
-            # Write a dummy dynamic plugin python file
-            plugin_code = (
-                "from xcode.harness.skills import ToolSpec\n"
-                "exposed_tools = [\n"
-                "    ToolSpec(\n"
-                "        name='plugin_calc',\n"
-                "        description='Calculator',\n"
-                "        input_hint='{}',\n"
-                "        handler=lambda _data: '42',\n"
-                "    )\n"
-                "]\n"
-                "exposed_hooks = {\n"
-                "    'post_tool': lambda record: None\n"
-                "}\n"
-            )
-            plugins_dir = project_root / ".local" / "plugins"
-            plugins_dir.mkdir(parents=True, exist_ok=True)
-            (plugins_dir / "calculator.py").write_text(plugin_code, encoding="utf-8")
-
-            manager = PluginManager(project_root)
-            data = manager.scan_and_load()
-
-            self.assertEqual(len(data["tools"]), 1)
-            self.assertEqual(data["tools"][0].name, "plugin_calc")
-            self.assertEqual(data["tools"][0].handler({}), "42")
-            self.assertIn("post_tool", data["hooks"])
 
     def test_task_dependency_topo_sort_and_kanban_view(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

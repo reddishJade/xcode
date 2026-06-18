@@ -204,7 +204,6 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `mcp_client.py` | internal | MCP stdio JSON-RPC 客户端 |
 | `memory.py` | `memory` | `MEMORY.md` 记忆块、BM25 召回、压缩摘要 |
 | `memory_parsing.py` | internal | 记忆块解析 |
-| `plugins.py` | `plugins` | `.local/plugins/*.py` 动态加载 |
 
 ---
 
@@ -214,15 +213,15 @@ Core tools（默认）：
 `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`
 
 扩展组：
-`skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `mcp`（动态工具）→ `memory`（仅 hook）→ `plugins`（动态加载）→ `daemon`（仅服务）
+`skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `mcp`（动态工具）→ `memory`（仅 hook）→ `daemon`（仅服务）
 
-`experimental` 展开为 `mcp`、`memory`、`plugins`。
+`experimental` 展开为 `mcp`、`memory`。
 
 ---
 
 ## 本地状态路径
 
-`.local/sessions/`、`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`、`.local/plugins/`、`.team/inbox/`（mailbox）。
+`.local/sessions/`、`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`、`.team/inbox/`（mailbox）。
 
 ---
 

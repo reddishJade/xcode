@@ -454,4 +454,3 @@ class EvalRunner:
 |---|---|
 | `mcp` | stdio MCP client、动态工具注册 |
 | `memory` | `MEMORY.md` 记忆系统、BM25 召回 |
-| `plugins` | `.local/plugins/*.py` 动态加载 |

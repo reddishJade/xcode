@@ -84,7 +84,7 @@
 | `sessions_dir` | string/null | `null` | REPL 会话目录；未配置时 CLI 使用 `.local/sessions` |
 | `skills_dir` | string/null | `null` | Skill 扫描目录 |
 
-固定本地路径：`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`、`.local/plugins/`。
+固定本地路径：`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`。
 
 ---
 
@@ -161,9 +161,8 @@
 | `mailbox` | 可选 | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
 | `progress` | 可选 | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
 | `memory` | experimental | 启用 `MemoryManager` 压缩摘要 consolidation |
-| `plugins` | experimental | 扫描 `.local/plugins/*.py` 动态加载 |
 | `daemon` | 可选 | 构造 `HeartbeatDaemon` |
-| `experimental` | 总开关 | 展开为 `mcp`、`memory`、`plugins` |
+| `experimental` | 总开关 | 展开为 `mcp`、`memory` |
 
 `shell` 工具是 OpenAI Responses builtin 的本地执行桥，接收 `commands` 数组。`search_tools` 工具按关键字搜索已注册工具。
 

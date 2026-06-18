@@ -14,12 +14,12 @@ cli → coding_agent → harness → agent → ai
 ```
 
 核心 agent loop、工具执行、权限控制、上下文组装、会话恢复、文件快照和 CLI
-已经可用。当前源码仍将 MCP、memory 和 plugins 放在 `experimental/` 下，
+已经可用。当前源码仍将 MCP 和 memory 放在 `experimental/` 下，
 但目标产品分类不应继续沿用该目录现状：
 
 - Skill 和 MCP 是核心能力，应按基础范式兼容要求长期维护。
 - Memory 是正式能力，但在主动召回效果得到 eval 验证前可以保持可配置启用。
-- 现有 Plugins 不作为产品能力保留，应删除进程内动态 Python 加载路径。
+- 进程内 Python Plugins 已删除，不再作为产品扩展路径。
 - Subagent 和 eval 是正式的高级能力，不要求默认启用。
 
 当前主要架构缺口集中在：
@@ -224,7 +224,7 @@ cli → coding_agent → harness → agent → ai
 
 ---
 
-## L5 · Extension / MCP / Skill / Plugin
+## L5 · Extension / MCP / Skill
 
 状态：部分实现。
 
@@ -234,7 +234,6 @@ cli → coding_agent → harness → agent → ai
 - `src/xcode/experimental/mcp_client.py`
 - `src/xcode/harness/skills.py`
 - `src/xcode/harness/skills_registry.py`
-- `src/xcode/experimental/plugins.py`
 - `src/xcode/coding_agent/tools/worktree.py`
 
 ### 已实现
@@ -249,12 +248,6 @@ cli → coding_agent → harness → agent → ai
 - `LazyClientRef` 复用客户端，并暴露 pending/connected/failed/disabled 状态。
 - `SkillRegistry` 发现技能；`SkillIndexCollector` 注入摘要；
   `load_skill` 懒加载正文。
-- `PluginManager` 已实现：
-  - 扫描 `.local/plugins/*.py`。
-  - AST 提取 manifest。
-  - in-process `exec()` 加载。
-  - 收集 `exposed_tools`、`exposed_hooks`、`exposed_skills`。
-  - 校验 manifest 声明与实际导出。
 
 ### 当前限制
 
@@ -265,8 +258,6 @@ cli → coding_agent → harness → agent → ai
 - MCP 配置中的 `overrides` 当前明确跳过并警告。
 - skill approval 依赖宿主 PermissionEngine/HITL 配置；skill 本身不提供独立
   审批界面。
-- plugins 是受信任代码加载，不是沙箱。插件与宿主共享进程、文件系统和网络
-  权限。
 
 ---
 

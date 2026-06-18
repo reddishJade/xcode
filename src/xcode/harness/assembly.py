@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from xcode.harness.execution_env import ExecutionEnv
 
@@ -45,7 +45,6 @@ from xcode.harness.observability import (
 from xcode.harness.observability.permission_model import ExternalDirectory
 from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
-from xcode.harness.observability.hooks import HookEvent
 from xcode.harness.skills import ToolInput, ToolSpec
 from xcode.coding_agent.registry import build_project_scoped_registry
 from xcode.coding_agent.tools import ShellSpec
@@ -62,7 +61,6 @@ EXPERIMENTAL_FEATURE_GROUPS = frozenset(
     {
         "mcp",
         "memory",
-        "plugins",
     }
 )
 
@@ -415,9 +413,7 @@ def _build_subagent_integration(
                     else None
                 ),
                 external_directories=_external_directories_from_security(sec),
-                session_grant_store=InMemoryGrantStore(
-                    session_id=subagent_session_id
-                ),
+                session_grant_store=InMemoryGrantStore(session_id=subagent_session_id),
             ),
             runtime=AgentRuntimeConfig(
                 runtime_context_provider=build_runtime_context_provider(
@@ -491,7 +487,6 @@ def build_agent(
     cancellation_token: CancellationToken | None = None,
     compactor: LayeredCompactor | None = None,
     fallback_provider: ModelProvider | None = None,
-    plugins_hooks: dict[str, list[Callable]] | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     skill_registry: Any = None,
 ) -> StructuredAgent:
@@ -504,17 +499,9 @@ def build_agent(
 
         hook_manager.register("post_tool", record_post_tool)
 
-    if hook_manager is None and plugins_hooks:
-        hook_manager = HookManager()
-
     if hook_manager is not None:
         hook_manager.register("before_agent_start", lambda r: None)
         hook_manager.register("before_provider_request", lambda r: None)
-
-        if plugins_hooks:
-            for event, callbacks in plugins_hooks.items():
-                for cb in callbacks:
-                    hook_manager.register(cast("HookEvent", event), cb)
 
     sec = runtime_config.security
     return StructuredAgent(
