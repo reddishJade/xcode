@@ -44,7 +44,7 @@ from xcode.harness.observability import (
     PermissionEngineConfig,
     PermissionPolicy,
 )
-from xcode.harness.skills import stringify_tool_input
+from xcode.harness.skills import ToolSpec, stringify_tool_input
 from xcode.harness.session import FORK_TYPES, SessionStore
 from xcode.harness.snapshot import SnapshotStore, TurnSnapshotRecord
 
@@ -519,6 +519,9 @@ def cmd_undo(cmd: str, ctx: CommandContext) -> bool:
         if result.fatal_error:
             print("Fatal error during undo. Stack preserved.")
             return False
+        if result.skipped:
+            print(f"Turn {record.turn_id}: undo incomplete; record remains active.")
+            continue
         record.undone = True
         ctx.snapshot_store.update_record(ctx.store.session_id, record)
     return False
@@ -570,6 +573,28 @@ def _revert_turn(
                 tool_name = "write_file"
                 tool_input = {"path": entry.path}
 
+            tool_spec = next(
+                (
+                    spec
+                    for spec in tuple(getattr(ctx.app, "registry", ()) or ())
+                    if spec.name == tool_name
+                ),
+                None,
+            )
+            if tool_spec is None:
+                tool_spec = ToolSpec(
+                    name=tool_name,
+                    description="Restore a workspace file from a snapshot.",
+                    input_hint='JSON: {"path": "relative/path"}',
+                    handler=lambda _input: "",
+                    schema={
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                        "additionalProperties": False,
+                    },
+                )
+
             undo_agent = getattr(ctx.app, "agent", None)
             engine = PermissionEngine(
                 PermissionEngineConfig(
@@ -586,6 +611,7 @@ def _revert_turn(
             perm_result = engine.decide(
                 tool_name=tool_name,
                 action_input=stringify_tool_input(tool_input),
+                tool_spec=tool_spec,
                 tool_input=tool_input,
                 approval_callback=approval_callback,
             )

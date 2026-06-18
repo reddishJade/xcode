@@ -8,6 +8,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -18,13 +19,15 @@ from xcode.cli.repl import current_effort_options, run_repl
 from xcode.cli.repl_commands import COMMAND_NAMES, HELP_TEXT, handle_command
 from xcode.cli.repl_rendering import reasoning_preview_lines
 from xcode.cli.repl_rendering import REPL_PROMPT_STYLE
+from xcode.cli.repl_sessions import records_to_agent_messages
 from xcode.cli.repl_tools import brief_input, run_tool_command
-from xcode.harness.session import SessionStore
+from xcode.harness.session import SessionRecord, SessionStore
+from xcode.harness.snapshot import SnapshotStore
 from xcode.harness.agent_runtime import (
     CancellationToken,
     StructuredAgentResult,
 )
-from xcode.harness.observability import PermissionPolicy, StaticPermission
+from xcode.harness.observability import HITLResult, PermissionPolicy, StaticPermission
 from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
     ReasoningDeltaStructuredEvent,
@@ -34,7 +37,7 @@ from xcode.harness.agent_runtime.events import (
     ToolUseStructuredEvent,
 )
 from xcode.ai.events import ToolCall
-from xcode.agent.messages import AgentMessage
+from xcode.agent.messages import AgentMessage, AssistantMessage
 from xcode.harness.skills import ApprovalCallback, ToolSpec
 
 
@@ -74,6 +77,90 @@ class XcodeReplTests(unittest.TestCase):
 
             self.assertEqual(resumed, first)
             self.assertEqual(store.current_path, first)
+
+    def test_resumed_tool_turn_keeps_final_assistant_text(self) -> None:
+        """工具轮次恢复时保留最终助手文本。"""
+        created_at = "2026-01-01T00:00:00+00:00"
+        records = [
+            SessionRecord("user", "change file", created_at),
+            SessionRecord(
+                "event",
+                {
+                    "type": "assistant",
+                    "data": [
+                        {
+                            "type": "tool_use",
+                            "id": "write-1",
+                            "name": "write_file",
+                            "input": {"path": "hello.py"},
+                        }
+                    ],
+                },
+                created_at,
+            ),
+            SessionRecord(
+                "event",
+                {
+                    "type": "tool_result",
+                    "data": {
+                        "tool_use_id": "write-1",
+                        "status": "ok",
+                        "content": "wrote file: hello.py",
+                    },
+                },
+                created_at,
+            ),
+            SessionRecord("assistant", "Updated hello.py.", created_at),
+        ]
+
+        messages = records_to_agent_messages(records)
+
+        self.assertIsInstance(messages[-1], AssistantMessage)
+        final_message = cast(AssistantMessage, messages[-1])
+        self.assertEqual(final_message.content[0].text, "Updated hello.py.")
+
+    def test_resumed_tool_turn_deduplicates_event_assistant_text(self) -> None:
+        """工具事件已包含相同文本时不重复恢复。"""
+        created_at = "2026-01-01T00:00:00+00:00"
+        records = [
+            SessionRecord("user", "inspect file", created_at),
+            SessionRecord(
+                "event",
+                {
+                    "type": "assistant",
+                    "data": [
+                        {"type": "text", "text": "Inspecting hello.py."},
+                        {
+                            "type": "tool_use",
+                            "id": "read-1",
+                            "name": "read_file",
+                            "input": {"path": "hello.py"},
+                        },
+                    ],
+                },
+                created_at,
+            ),
+            SessionRecord(
+                "event",
+                {
+                    "type": "tool_result",
+                    "data": {
+                        "tool_use_id": "read-1",
+                        "status": "ok",
+                        "content": "hello",
+                    },
+                },
+                created_at,
+            ),
+            SessionRecord("assistant", "Inspecting hello.py.", created_at),
+        ]
+
+        messages = records_to_agent_messages(records)
+        assistant_messages = [
+            message for message in messages if isinstance(message, AssistantMessage)
+        ]
+
+        self.assertEqual(len(assistant_messages), 1)
 
     def test_session_store_writes_title_summary_index(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -377,6 +464,140 @@ class XcodeReplTests(unittest.TestCase):
             self.assertEqual(code, 0)
             # High-risk approval removed; tool runs by default
             self.assertEqual(renderer.rendered[0], "now")
+
+    def test_undo_uses_registered_tool_spec_for_approval(self) -> None:
+        """撤销写入时使用规范工具描述触发授权并恢复文件。"""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            subprocess.run(
+                ["git", "init"],
+                cwd=root,
+                capture_output=True,
+                check=True,
+            )
+            target = root / "hello.py"
+            target.write_text("before\n", encoding="utf-8")
+            sessions_dir = root / ".local" / "sessions"
+            store = SessionStore(sessions_dir, project_root=root)
+            store.append("user", "change hello.py")
+            snapshot_store = SnapshotStore(root)
+            service = snapshot_store.service(store.session_id)
+            pre = service.track()
+            target.write_text("after\n", encoding="utf-8")
+            post = service.track()
+            snapshot_store.record_turn(
+                store.session_id,
+                "001",
+                pre.snapshot_id,
+                post.snapshot_id,
+                service.diff(pre.snapshot_id, post.snapshot_id),
+            )
+            approvals: list[str] = []
+
+            def approve(tool: ToolSpec, _input: dict[str, object]) -> HITLResult:
+                approvals.append(tool.name)
+                return HITLResult("allow", "once")
+
+            app = SimpleNamespace(
+                registry=(
+                    ToolSpec(
+                        "write_file",
+                        "Write a file.",
+                        'JSON: {"path": "relative/path", "content": "text"}',
+                        lambda _input: "",
+                    ),
+                ),
+                agent=SimpleNamespace(
+                    approval_callback=approve,
+                    external_directories=(),
+                ),
+            )
+            policy = PermissionPolicy(
+                (StaticPermission("write_file", "ask"),),
+                global_default="allow",
+            )
+
+            with redirect_stdout(StringIO()):
+                handled = handle_command(
+                    "/undo",
+                    store,
+                    cast(Any, app),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                    static_policy=policy,
+                    snapshot_store=snapshot_store,
+                )
+
+            self.assertFalse(handled)
+            self.assertEqual(approvals, ["write_file"])
+            self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
+            self.assertTrue(snapshot_store.list_records(store.session_id)[0].undone)
+
+    def test_undo_denial_keeps_snapshot_record_active(self) -> None:
+        """撤销被拒绝时保留活动记录，允许后续重试。"""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            subprocess.run(
+                ["git", "init"],
+                cwd=root,
+                capture_output=True,
+                check=True,
+            )
+            target = root / "hello.py"
+            target.write_text("before\n", encoding="utf-8")
+            store = SessionStore(root / ".local" / "sessions", project_root=root)
+            store.append("user", "change hello.py")
+            snapshot_store = SnapshotStore(root)
+            service = snapshot_store.service(store.session_id)
+            pre = service.track()
+            target.write_text("after\n", encoding="utf-8")
+            post = service.track()
+            snapshot_store.record_turn(
+                store.session_id,
+                "001",
+                pre.snapshot_id,
+                post.snapshot_id,
+                service.diff(pre.snapshot_id, post.snapshot_id),
+            )
+            app = SimpleNamespace(
+                registry=(
+                    ToolSpec(
+                        "write_file",
+                        "Write a file.",
+                        'JSON: {"path": "relative/path", "content": "text"}',
+                        lambda _input: "",
+                    ),
+                ),
+                agent=SimpleNamespace(
+                    approval_callback=lambda _tool, _input: HITLResult("deny", "once"),
+                    external_directories=(),
+                ),
+            )
+            policy = PermissionPolicy(
+                (StaticPermission("write_file", "ask"),),
+                global_default="allow",
+            )
+
+            with redirect_stdout(StringIO()) as output:
+                handle_command(
+                    "/undo",
+                    store,
+                    cast(Any, app),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                    static_policy=policy,
+                    snapshot_store=snapshot_store,
+                )
+
+            self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+            self.assertFalse(snapshot_store.list_records(store.session_id)[0].undone)
+            self.assertIn("record remains active", output.getvalue())
 
     def test_tool_command_uses_static_permission_policy(self) -> None:
         app = DeniedToolApp()

@@ -107,16 +107,23 @@ def records_to_agent_messages(records: list[SessionRecord]) -> list[AgentMessage
     messages: list[AgentMessage] = []
     pending_tool_calls: list[ToolCallContent] = []
     seen_tool_call_ids: set[str] = set()
-    has_event_assistant_since_last_user = False
+    event_assistant_texts: list[str] = []
     for record in records:
         if record.type == "user":
             messages.append(UserMessage(content=str(record.content)))
-            has_event_assistant_since_last_user = False
+            event_assistant_texts.clear()
             continue
         if record.type == "assistant":
             text = str(record.content).strip()
-            if text and not has_event_assistant_since_last_user:
-                messages.append(AssistantMessage(content=[TextContent(text=text)]))
+            event_text = "\n\n".join(event_assistant_texts).strip()
+            remaining_text = text
+            if event_text and text.startswith(event_text):
+                remaining_text = text[len(event_text) :].strip()
+            if remaining_text:
+                messages.append(
+                    AssistantMessage(content=[TextContent(text=remaining_text)])
+                )
+            event_assistant_texts.clear()
             continue
         if record.type != "event":
             continue
@@ -125,7 +132,9 @@ def records_to_agent_messages(records: list[SessionRecord]) -> list[AgentMessage
             _append_tool_assistant_event(
                 messages, event, pending_tool_calls, seen_tool_call_ids
             )
-            has_event_assistant_since_last_user = True
+            event_assistant_texts.extend(
+                block.text for block in event.content if isinstance(block, TextContent)
+            )
         elif isinstance(event, _ToolUseTranscriptEvent):
             _queue_tool_use_event(event, pending_tool_calls, seen_tool_call_ids)
         elif isinstance(event, _ToolResultTranscriptEvent):
