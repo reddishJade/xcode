@@ -223,24 +223,56 @@ _active_clients: list[McpClient] = []
 
 
 def _encode_jsonrpc_message(message: dict[str, Any]) -> bytes:
-    body = json.dumps(message, ensure_ascii=False).encode("utf-8")
-    header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
-    return header + body
+    """Encode a JSON-RPC message in newline-delimited JSON format.
+
+    MCP SDK >= 1.0 uses newline-delimited JSON (one JSON object per line)
+    rather than the Content-Length header format used by earlier revisions.
+    """
+    body = json.dumps(message, ensure_ascii=False)
+    return (body + "\n").encode("utf-8")
 
 
 def _read_jsonrpc_message(stream: BinaryIO) -> dict[str, Any] | None:
+    """Read a JSON-RPC message from a stdio stream.
+
+    Supports both newline-delimited JSON (MCP SDK >= 1.0) and the older
+    Content-Length header format for backward compatibility.
+    """
+    line = stream.readline()
+    if not line:
+        return None
+
+    text = line.decode("utf-8", errors="replace")
+
+    # NDJSON: line starts with '{'
+    stripped = text.strip()
+    if stripped and stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+        return data if isinstance(data, dict) else None
+
+    # Content-Length header format
     headers: dict[str, str] = {}
+    # The first line we read may already be a header
+    header_line = text.strip()
+    if ":" in header_line:
+        key, value = header_line.split(":", 1)
+        headers[key.lower()] = value.strip()
+
     while True:
         line = stream.readline()
         if not line:
             return None
         if line in (b"\r\n", b"\n"):
             break
-        text = line.decode("ascii", errors="replace").strip()
-        if ":" not in text:
+        header_text = line.decode("ascii", errors="replace").strip()
+        if ":" not in header_text:
             continue
-        key, value = text.split(":", 1)
+        key, value = header_text.split(":", 1)
         headers[key.lower()] = value.strip()
+
     length_text = headers.get("content-length")
     if not length_text:
         return None

@@ -43,25 +43,16 @@ import sys
 import json
 
 def _read_message():
-    headers = {}
-    while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
-            return None
-        if line in (b"\r\n", b"\n"):
-            break
-        key, value = line.decode("ascii").strip().split(":", 1)
-        headers[key.lower()] = value.strip()
-    length = int(headers.get("content-length", "0"))
-    if length == 0:
+    line = sys.stdin.buffer.readline()
+    if not line:
         return None
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+    text = line.decode("utf-8").strip()
+    if not text:
+        return None
+    return json.loads(text)
 
 def _write_message(msg):
-    body = json.dumps(msg).encode("utf-8")
-    sys.stdout.buffer.write(
-        f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body
-    )
+    sys.stdout.buffer.write((json.dumps(msg) + "\n").encode("utf-8"))
     sys.stdout.buffer.flush()
 
 def main():
@@ -179,23 +170,16 @@ import sys
 import json
 
 def _read_message():
-    headers = {}
-    while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
-            return None
-        if line in (b"\r\n", b"\n"):
-            break
-        key, value = line.decode("ascii").strip().split(":", 1)
-        headers[key.lower()] = value.strip()
-    length = int(headers.get("content-length", "0"))
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+    line = sys.stdin.buffer.readline()
+    if not line:
+        return None
+    text = line.decode("utf-8").strip()
+    if not text:
+        return None
+    return json.loads(text)
 
 def _write_message(msg):
-    body = json.dumps(msg).encode("utf-8")
-    sys.stdout.buffer.write(
-        f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body
-    )
+    sys.stdout.buffer.write((json.dumps(msg) + "\n").encode("utf-8"))
     sys.stdout.buffer.flush()
 
 def main():
@@ -645,23 +629,16 @@ import json
 import time
 
 def _read_message():
-    headers = {}
-    while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
-            return None
-        if line in (b"\r\n", b"\n"):
-            break
-        key, value = line.decode("ascii").strip().split(":", 1)
-        headers[key.lower()] = value.strip()
-    length = int(headers["content-length"])
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+    line = sys.stdin.buffer.readline()
+    if not line:
+        return None
+    text = line.decode("utf-8").strip()
+    if not text:
+        return None
+    return json.loads(text)
 
 def _write_message(msg):
-    body = json.dumps(msg).encode("utf-8")
-    sys.stdout.buffer.write(
-        f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body
-    )
+    sys.stdout.buffer.write((json.dumps(msg) + "\n").encode("utf-8"))
     sys.stdout.buffer.flush()
 
 def main():
