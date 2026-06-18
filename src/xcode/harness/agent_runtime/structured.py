@@ -149,6 +149,14 @@ class StructuredAgent:
         """设置 permanent grant store。"""
         self._gate.set_permanent_grant_store(store)
 
+    @property
+    def session_id(self) -> str:
+        return self._gate.session_id
+
+    @session_id.setter
+    def session_id(self, value: str) -> None:
+        self._gate.session_id = value
+
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history.load(messages)
         self._reset_provider_conversation_state()

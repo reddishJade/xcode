@@ -30,6 +30,12 @@ class AuditRecord:
     timestamp: str = ""
     approval_scope: str | None = None
     user_decision: str | None = None
+    capability: str | None = None
+    target_kind: str | None = None
+    target_value: str | None = None
+    matched_rule: str | None = None
+    approval_source: str | None = None
+    approval_grant_id: str | None = None
 
     def to_dict(self, timestamp: str | None = None) -> dict[str, str | bool | None]:
         created_at = self.timestamp or timestamp or datetime.now(UTC).isoformat()
@@ -45,6 +51,12 @@ class AuditRecord:
             "timestamp": created_at,
             "approval_scope": self.approval_scope,
             "user_decision": self.user_decision,
+            "capability": self.capability,
+            "target_kind": self.target_kind,
+            "target_value": self.target_value,
+            "matched_rule": self.matched_rule,
+            "approval_source": self.approval_source,
+            "approval_grant_id": self.approval_grant_id,
         }
 
 

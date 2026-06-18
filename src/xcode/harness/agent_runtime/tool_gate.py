@@ -29,6 +29,7 @@ from ..observability import (
     PermissionEngine,
     PermissionEngineConfig,
     PermissionDecision,
+    PermissionEngineResult,
     PermissionPolicy,
 )
 from ..observability.permission_model import (
@@ -36,6 +37,7 @@ from ..observability.permission_model import (
     GrantStore,
     PolicyEvaluator,
 )
+from ..observability import redact_text
 from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
 
 
@@ -96,6 +98,7 @@ class ToolGate:
         self._session_grant_store_provider = session_grant_store_provider
         self._permanent_grant_store = permanent_grant_store
         self._progress_steps_without_update: int = 0
+        self._last_perm_results: dict[str, PermissionEngineResult] = {}
 
     def _resolve_session_store(self) -> GrantStore | None:
         if self._session_grant_store_provider is not None:
@@ -156,6 +159,14 @@ class ToolGate:
         """设置或清除 permanent grant store。"""
         self._permanent_grant_store = store
 
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @session_id.setter
+    def session_id(self, value: str) -> None:
+        self._session_id = value
+
     # ── 钩子构建 ──
 
     def build_before_tool_hook(
@@ -175,9 +186,14 @@ class ToolGate:
                 ToolCall(id=tool_call.id, name=tool_call.name, input=args)
             )
             permission_result = self._precheck_permission(
-                tool_call.name, args, decision, snapshot
+                tool_call.name, args, decision, snapshot, tool_call.id
             )
             if permission_result is not None:
+                perm_result = self._last_perm_results.pop(tool_call.id, None)
+                if perm_result is not None:
+                    self._audit_blocked(
+                        tool_call, args, perm_result, snapshot.tool_map,
+                    )
                 return permission_result
 
             emit_hook(
@@ -206,6 +222,9 @@ class ToolGate:
             action_input = stringify_tool_input(ctx.args)
             result_text = tool_result_text(ctx)
             emit_tool_hook(self._hook_manager, ctx, action_input, result_text)
+            perm_result = self._last_perm_results.pop(
+                ctx.tool_call.id, None
+            )
             emit_audit(
                 self._audit_logger,
                 self._session_id,
@@ -213,6 +232,7 @@ class ToolGate:
                 action_input,
                 result_text,
                 snapshot.tool_map,
+                perm_result=perm_result,
             )
             return None
 
@@ -250,12 +270,76 @@ class ToolGate:
 
     # ── 内部方法 ──
 
+    def _audit_blocked(
+        self,
+        tool_call: ToolCallContent,
+        args: dict[str, Any],
+        perm_result: PermissionEngineResult,
+        tool_map: dict[str, ToolSpec],
+    ) -> None:
+        if self._audit_logger is None:
+            return
+        action_input = stringify_tool_input(args)
+        metadata = perm_result.metadata or {}
+        approval_result = perm_result.approval_result
+        self._audit_logger(
+            AuditRecord(
+                session_id=self._session_id,
+                tool=tool_call.name,
+                dynamic_decision=perm_result.decision,
+                policy_decision=perm_result.matched_rule,
+                final_status="blocked",
+                approved=False,
+                redacted_input=redact_text(action_input),
+                redacted_output="",
+                approval_scope=(
+                    approval_result.scope
+                    if approval_result is not None and approval_result.scope
+                    else (
+                        str(metadata.get("approval_scope"))
+                        if metadata.get("approval_scope")
+                        else None
+                    )
+                ),
+                user_decision=(
+                    str(metadata.get("user_decision"))
+                    if metadata.get("user_decision")
+                    else None
+                ),
+                capability=(
+                    perm_result.action.capability
+                    if perm_result.action is not None
+                    else None
+                ),
+                target_kind=(
+                    str(perm_result.action.targets[0].kind)
+                    if perm_result.action is not None
+                    and perm_result.action.targets
+                    else None
+                ),
+                target_value=(
+                    str(perm_result.action.targets[0].value)
+                    if perm_result.action is not None
+                    and perm_result.action.targets
+                    else None
+                ),
+                matched_rule=perm_result.matched_rule,
+                approval_source=perm_result.source,
+                approval_grant_id=(
+                    approval_result.grant_id
+                    if approval_result is not None
+                    else None
+                ),
+            )
+        )
+
     def _precheck_permission(
         self,
         tool_name: str,
         args: dict[str, Any],
         execution_decision: PermissionDecision,
         snapshot: ToolGateSnapshot,
+        tool_call_id: str,
     ) -> BeforeToolCallResult | None:
         engine = PermissionEngine(
             PermissionEngineConfig(
@@ -276,6 +360,7 @@ class ToolGate:
             tool_input=args,
             approval_callback=snapshot.approval_callback,
         )
+        self._last_perm_results[tool_call_id] = result
         if result.blocked:
             return BeforeToolCallResult(block=True, reason=result.reason)
         return None

@@ -13,6 +13,7 @@ from xcode.harness.snapshot import (
     SnapshotService,
     SnapshotStore,
     SnapshotUnsupportedError,
+    TurnSnapshotRecord,
 )
 
 
@@ -354,6 +355,49 @@ class TestSnapshotStore(unittest.TestCase):
         records = store.list_records("sess-skp")
         self.assertEqual(len(records[0].skipped_files), 1)
         self.assertEqual(records[0].skipped_files[0].path, "big.bin")
+
+    def test_tool_names_stored_and_round_trip(self) -> None:
+        """验证 TurnSnapshotRecord 的 tool_names 字段持久化往返。"""
+        store = SnapshotStore(self.root)
+        svc = store.service("sess-tools")
+        pre = svc.track()
+        (self.root / "a.txt").write_text("a")
+        post = svc.track()
+        changes = svc.diff(pre.snapshot_id, post.snapshot_id)
+        store.record_turn(
+            session_id="sess-tools",
+            turn_id="001",
+            pre_snapshot_id=pre.snapshot_id,
+            post_snapshot_id=post.snapshot_id,
+            changed_files=changes,
+            tool_names=["read_file", "write_file"],
+        )
+        records = store.list_records("sess-tools")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].tool_names, ["read_file", "write_file"])
+
+        # 验证 JSON 往返
+        data = records[0].to_dict()
+        restored = TurnSnapshotRecord.from_dict(data)
+        self.assertEqual(restored.tool_names, ["read_file", "write_file"])
+
+    def test_tool_names_default_empty(self) -> None:
+        """验证不传 tool_names 时默认为空列表。"""
+        store = SnapshotStore(self.root)
+        svc = store.service("sess-tools-def")
+        pre = svc.track()
+        (self.root / "b.txt").write_text("b")
+        post = svc.track()
+        changes = svc.diff(pre.snapshot_id, post.snapshot_id)
+        store.record_turn(
+            session_id="sess-tools-def",
+            turn_id="001",
+            pre_snapshot_id=pre.snapshot_id,
+            post_snapshot_id=post.snapshot_id,
+            changed_files=changes,
+        )
+        records = store.list_records("sess-tools-def")
+        self.assertEqual(records[0].tool_names, [])
 
 
 class TestSnapshotDeletedFile(unittest.TestCase):

@@ -66,6 +66,7 @@ class TurnSnapshotRecord:
     skipped_files: list[SkippedFileInfo] = field(default_factory=list)
     timestamp: str = ""
     undone: bool = False
+    tool_names: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -80,6 +81,7 @@ class TurnSnapshotRecord:
             ],
             "timestamp": self.timestamp,
             "undone": self.undone,
+            "tool_names": self.tool_names,
         }
 
     @classmethod
@@ -117,6 +119,7 @@ class TurnSnapshotRecord:
             ],
             timestamp=str(data.get("timestamp", "")),
             undone=bool(data.get("undone", False)),
+            tool_names=_tool_names_from_data(data.get("tool_names")),
         )
 
 
@@ -295,6 +298,12 @@ class SnapshotService:
         self._git(["checkout", snapshot_id, "--", rel_path])
 
 
+def _tool_names_from_data(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str)]
+
+
 class SnapshotStore:
     """快照存储管理器，维护 TurnSnapshotRecord 索引。"""
 
@@ -380,6 +389,7 @@ class SnapshotStore:
         post_snapshot_id: str,
         changed_files: list[ChangeEntry],
         skipped_files: list[SkippedFileInfo] | None = None,
+        tool_names: list[str] | None = None,
     ) -> None:
         with self._lock:
             records = self._load_index(session_id)
@@ -390,6 +400,7 @@ class SnapshotStore:
                 changed_files=changed_files,
                 skipped_files=skipped_files or [],
                 timestamp=datetime.now(UTC).isoformat(timespec="seconds"),
+                tool_names=tool_names or [],
             )
             records.append(record)
             self._write_index(session_id, records)

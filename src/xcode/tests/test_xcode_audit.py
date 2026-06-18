@@ -6,15 +6,25 @@ import tempfile
 import unittest
 
 from xcode.harness.observability import (
+    Action,
+    ApprovalResult,
     AuditRecord,
     JsonlAuditLogger,
     PermissionEngine,
     PermissionEngineConfig,
+    PermissionEngineResult,
+    PermissionPolicy,
+    StaticPermission,
     redact_text,
+)
+from xcode.harness.observability.permissions import (
+    PermissionMetadata,
+    _approval_metadata,
 )
 from xcode.harness.skills import ToolSpec
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.config import GateConfig
+from xcode.harness.agent_runtime.tool_audit import emit_audit
 
 
 from xcode.tests.fixtures import FakeProvider
@@ -200,6 +210,203 @@ class XcodeAuditTests(unittest.TestCase):
         content = redact_text(str(raw))
         self.assertNotIn("mysecret", content)
         self.assertIn("REDACTED", content)
+
+    def test_audit_record_includes_approval_scope_from_session_grant(self) -> None:
+        """验证通过 session grant 放行的工具有 approval_scope 记录。"""
+        audit_records: list[object] = []
+
+        def capture(record: object) -> None:
+            audit_records.append(record)
+
+        responses: list[list[ProviderEvent]] = [
+            [
+                ToolCallEvent(
+                    calls=[ToolCall(id="t1", name="echo", input={"input": "hello"})]
+                ),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ],
+            [
+                TextDelta(chunk="done"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ],
+        ]
+        provider = FakeProvider(responses)
+        agent = StructuredAgent(
+            provider=provider,
+            registry=(
+                ToolSpec(
+                    "echo",
+                    "Echo.",
+                    "text",
+                    lambda value: value["input"],
+                    schema=INPUT_SCHEMA,
+                ),
+            ),
+            gate=GateConfig(
+                audit_logger=capture,
+                session_id="test-approval-scope",
+            ),
+        )
+        agent.run("go")
+        self.assertGreater(len(audit_records), 0)
+        record = audit_records[0]
+        self.assertEqual(
+            getattr(record, "session_id", None), "test-approval-scope"
+        )
+
+    def test_no_local_session_id_when_real_set(self) -> None:
+        """验证当真实 session_id 被设置后，审计记录不使用 'local'。"""
+        audit_records: list[object] = []
+
+        def capture(record: object) -> None:
+            audit_records.append(record)
+
+        responses: list[list[ProviderEvent]] = [
+            [
+                ToolCallEvent(
+                    calls=[ToolCall(id="t1", name="echo", input={"input": "x"})]
+                ),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ],
+            [
+                TextDelta(chunk="done"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ],
+        ]
+        provider = FakeProvider(responses)
+        agent = StructuredAgent(
+            provider=provider,
+            registry=(
+                ToolSpec(
+                    "echo",
+                    "Echo.",
+                    "text",
+                    lambda value: value["input"],
+                    schema=INPUT_SCHEMA,
+                ),
+            ),
+            gate=GateConfig(
+                audit_logger=capture,
+                session_id="real-session-001",
+            ),
+        )
+        agent.run("go")
+        self.assertGreater(len(audit_records), 0)
+        for record in audit_records:
+            sid = getattr(record, "session_id", None)
+            if sid is not None:
+                self.assertNotEqual(sid, "local")
+                self.assertEqual(sid, "real-session-001")
+
+    def test_denied_tool_records_blocked_status(self) -> None:
+        """验证被拒绝的工具产生 final_status=blocked 记录。"""
+        audit_records: list[object] = []
+
+        def capture(record: object) -> None:
+            audit_records.append(record)
+
+        responses: list[list[ProviderEvent]] = [
+            [
+                ToolCallEvent(
+                    calls=[ToolCall(id="t1", name="echo", input={"input": "x"})]
+                ),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ],
+            [
+                TextDelta(chunk="done"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ],
+        ]
+        provider = FakeProvider(responses)
+        agent = StructuredAgent(
+            provider=provider,
+            registry=(
+                ToolSpec(
+                    "echo",
+                    "Echo.",
+                    "text",
+                    lambda value: value["input"],
+                    schema=INPUT_SCHEMA,
+                ),
+            ),
+            gate=GateConfig(
+                audit_logger=capture,
+                session_id="test-deny",
+                permission_policy=PermissionPolicy(
+                    (StaticPermission("echo", "deny"),)
+                ),
+            ),
+        )
+        agent.run("go")
+        blocked_records = [
+            r for r in audit_records
+            if getattr(r, "final_status", None) == "blocked"
+        ]
+        self.assertGreater(len(blocked_records), 0)
+        for record in blocked_records:
+            self.assertFalse(getattr(record, "approved", True))
+            self.assertEqual(getattr(record, "dynamic_decision", ""), "deny")
+            self.assertEqual(getattr(record, "matched_rule", ""), "rule")
+
+    def test_audit_record_mcp_target_fields(self) -> None:
+        """验证 MCP 工具的 target_kind/target_value 出现在审计记录中。"""
+        audit_records: list[object] = []
+
+        def capture(record: object) -> None:
+            audit_records.append(record)
+
+        responses: list[list[ProviderEvent]] = [
+            [
+                ToolCallEvent(
+                    calls=[
+                        ToolCall(
+                            id="t1",
+                            name="mcp__srv__my_tool",
+                            input={"input": "x"},
+                        )
+                    ]
+                ),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ],
+            [
+                TextDelta(chunk="done"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ],
+        ]
+        provider = FakeProvider(responses)
+        agent = StructuredAgent(
+            provider=provider,
+            registry=(
+                ToolSpec(
+                    "mcp__srv__my_tool",
+                    "MCP tool.",
+                    "text",
+                    lambda value: value["input"],
+                    schema=INPUT_SCHEMA,
+                ),
+            ),
+            gate=GateConfig(
+                audit_logger=capture,
+                session_id="test-mcp",
+            ),
+        )
+        agent.run("go")
+        self.assertGreater(len(audit_records), 0)
+        mcp_records = [
+            r for r in audit_records
+            if getattr(r, "tool", "").startswith("mcp__")
+        ]
+        self.assertGreater(len(mcp_records), 0)
+        for record in mcp_records:
+            self.assertEqual(
+                getattr(record, "capability", None), "mcp"
+            )
+            self.assertEqual(
+                getattr(record, "target_kind", None), "mcp"
+            )
+            self.assertIn(
+                "mcp__", getattr(record, "target_value", "") or ""
+            )
 
 
 if __name__ == "__main__":

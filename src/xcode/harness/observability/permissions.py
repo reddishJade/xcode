@@ -116,6 +116,7 @@ class PermissionEngineResult:
     shadow_diff: str | None = None
     shadow_approval_candidate: ApprovalCandidate | None = None
     approval_result: ApprovalResult | None = None
+    action: Action | None = None
 
 
 @dataclass(frozen=True)
@@ -159,10 +160,12 @@ class PermissionEngine:
         tool_input: dict[str, Any] | None = None,
         approval_callback: PermissionApprovalCallback | None = None,
     ) -> PermissionEngineResult:
+        action = ActionExtractor().extract(tool_name, tool_input or {})
+
         # Tier 0: restricted_dirs 硬阻断
         dir_result = self._check_restricted_dirs(action_input, tool_name)
         if dir_result is not None:
-            return dir_result
+            return replace(dir_result, action=action)
 
         # 统一 resolver 路径：对所有工具生效
         result = self._decide_resolver(
@@ -173,6 +176,9 @@ class PermissionEngine:
             tool_input=tool_input,
             approval_callback=approval_callback,
         )
+
+        # 附加 action 信息到结果
+        result = replace(result, action=action)
 
         # Shadow 模式：附加 shadow 信息到结果
         if not self._config.shadow_model_enabled:

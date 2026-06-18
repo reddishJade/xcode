@@ -120,6 +120,7 @@ def run_repl(
     agent = getattr(app, "agent", None)
     if agent is not None:
         agent.approval_callback = hitl_handler
+        agent.session_id = store.session_id
         if hasattr(agent, "set_session_grant_store_provider"):
             agent.set_session_grant_store_provider(
                 lambda: grant_store_manager.get_for_session(store.session_id)
@@ -250,8 +251,9 @@ def run_repl(
             session=session,
             text=agent_text,
         )
+        tool_names: list[str] = []
         try:
-            _run_agent_turn(ctx)
+            tool_names = _run_agent_turn(ctx)
         finally:
             if snapshot_store is not None and pre_result is not None:
                 svc = snapshot_store.service(store.session_id)
@@ -266,6 +268,7 @@ def run_repl(
                     post_snapshot_id=post_result.snapshot_id,
                     changed_files=changes,
                     skipped_files=all_skipped,
+                    tool_names=tool_names,
                 )
 
 
@@ -279,7 +282,7 @@ class _AgentTurnContext:
     text: str
 
 
-def _run_agent_turn(ctx: _AgentTurnContext) -> None:
+def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
     turn = _ReplTurnRenderer(ctx.renderer, ctx.state)
     queued_input = _start_queue_input_reader(ctx.state, ctx.session)
 
@@ -350,7 +353,7 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> None:
                 print("[interrupt cancelled]")
         else:
             print("[interrupted] current run cancelled; session is still active.")
-        return
+        return turn.tool_names_in_turn
     finally:
         queued_lines = queued_input.drain() if queued_input is not None else []
         if queued_lines:
@@ -368,6 +371,7 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> None:
         answer = "\n\n".join(turn.step_answers)
         ctx.store.append("assistant", answer)
         ctx.store.update_summary()
+    return turn.tool_names_in_turn
 
 
 class _QueuedInput:
@@ -431,6 +435,7 @@ class _ReplTurnRenderer:
         self.reasoning_handler = ReasoningHandler(
             self.live_console, self.state.verbosity
         )
+        self.tool_names_in_turn: list[str] = []
 
     def handle_event(self, event: StructuredAgentEvent) -> None:
         if isinstance(event, ReasoningDeltaStructuredEvent):
@@ -445,6 +450,7 @@ class _ReplTurnRenderer:
             self._handle_assistant_event(event.data)
         elif isinstance(event, ToolUseStructuredEvent):
             self.tool_handler.record_tool_call(event.data)
+            self.tool_names_in_turn.append(event.data.name)
         elif isinstance(event, ToolUpdateStructuredEvent):
             self.tool_handler.handle_tool_update(event.data)
         elif isinstance(event, ToolResultStructuredEvent):

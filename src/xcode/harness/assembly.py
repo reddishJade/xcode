@@ -393,11 +393,13 @@ def _build_subagent_integration(
             project_root, runtime_config.observability.audit_path
         )
 
+        subagent_session_id = f"subagent-{uuid4().hex[:8]}"
         result = await StructuredAgent(
             provider=child_llms[model_profile],
             registry=effective_registry,
             config=config,
             gate=GateConfig(
+                session_id=subagent_session_id,
                 permission_policy=_permission_policy_from_security(sec),
                 restricted_dirs=sec.restricted_dirs,
                 hook_constraint_providers=hook_constraint_providers,
@@ -409,7 +411,7 @@ def _build_subagent_integration(
                 ),
                 external_directories=_external_directories_from_security(sec),
                 session_grant_store=InMemoryGrantStore(
-                    session_id=f"subagent-{uuid4().hex[:8]}"
+                    session_id=subagent_session_id
                 ),
             ),
             runtime=AgentRuntimeConfig(
