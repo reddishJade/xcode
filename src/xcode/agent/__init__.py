@@ -36,7 +36,7 @@ from .messages import (
     UserMessage,
 )
 from .protocols import AgentTool, CancellationSignal
-from .results import AgentLoopMetrics, AgentLoopResult
+from .results import AgentLoopMetrics, AgentLoopResult, TerminationReason
 
 __all__ = [
     "ActiveDiffCollector",
@@ -46,6 +46,7 @@ __all__ = [
     "AgentLoopConfig",
     "AgentLoopMetrics",
     "AgentLoopResult",
+    "TerminationReason",
     "AgentMessage",
     "AgentTool",
     "AssistantMessage",

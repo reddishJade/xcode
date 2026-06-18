@@ -304,10 +304,10 @@ def _event_payload(event: StructuredAgentEvent) -> object:
             {"id": c.id, "name": c.name, "input": c.input}
             for c in event.data.tool_calls
         ],
-        "stopped_by_limit": event.data.stopped_by_limit,
+        "termination_reason": event.data.termination_reason.value,
         "metrics": event.data.metrics,
-        "stopped_by_watchdog": event.data.stopped_by_watchdog,
         "watchdog_reason": event.data.watchdog_reason,
+        "error_detail": event.data.error_detail,
         "needs_follow_up": event.data.needs_follow_up,
         "last_agent": event.data.last_agent,
         "run_state": event.data.run_state.to_dict()
@@ -355,10 +355,15 @@ def print_tool_result_rich(
 
 
 def final_stop_reason(data: StructuredAgentResult) -> str | None:
-    if data.stopped_by_limit:
+    if data.termination_reason.value == "step_limit":
         return "[stopped] step limit reached"
-    if data.stopped_by_watchdog:
+    if data.termination_reason.value == "watchdog":
         reason = data.watchdog_reason or "repeated tool calls detected"
+        return f"[stopped] {reason}"
+    if data.termination_reason.value == "cancelled":
+        return "[stopped] cancelled"
+    if data.termination_reason.value == "provider_error":
+        reason = data.error_detail or "provider error"
         return f"[stopped] {reason}"
     return None
 

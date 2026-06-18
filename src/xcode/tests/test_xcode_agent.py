@@ -6,7 +6,7 @@ import unittest
 from xcode.agent.agent_loop import run_agent_loop
 from xcode.agent.message_converter import convert_to_llm
 from xcode.agent.config import AgentContext, AgentLoopConfig
-from xcode.agent.results import AgentLoopResult
+from xcode.agent.results import AgentLoopResult, TerminationReason
 from xcode.agent.events import AgentEvent
 from xcode.agent.messages import AssistantMessage, ToolResultMessage, UserMessage
 from xcode.agent.protocols import AgentToolResult, ToolExecutionMode
@@ -40,6 +40,16 @@ class TextProvider:
         self.messages = messages
         self.tools = tools
         yield TextDelta(chunk="ok")
+
+
+class CancelledSignal:
+    """始终处于取消状态的测试信号。"""
+
+    reason = "user cancelled"
+
+    def is_cancelled(self) -> bool:
+        """返回固定取消状态。"""
+        return True
 
 
 class ErrorTextProvider:
@@ -367,6 +377,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, AgentLoopResult)
         self.assertTrue(result.stopped_by_limit)
+        self.assertEqual(result.termination_reason, TerminationReason.STEP_LIMIT)
         self.assertEqual(result.steps, 3)
 
     async def test_error_retry_recovers(self) -> None:
@@ -446,6 +457,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(result.stopped_by_watchdog)
+        self.assertEqual(result.termination_reason, TerminationReason.WATCHDOG)
         self.assertIsNotNone(result.watchdog_reason)
         assert result.watchdog_reason is not None
         self.assertIn("repeated", result.watchdog_reason.lower())
@@ -499,9 +511,21 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(result.stopped_by_watchdog)
+        self.assertEqual(result.termination_reason, TerminationReason.WATCHDOG)
         self.assertIsNotNone(result.watchdog_reason)
         assert result.watchdog_reason is not None
         self.assertIn("consecutive steps", result.watchdog_reason.lower())
+
+    async def test_cancelled_loop_has_structured_termination_reason(self) -> None:
+        result = await run_agent_loop(
+            [UserMessage(content="stop")],
+            AgentContext(),
+            AgentLoopConfig(provider=TextProvider()),
+            lambda _event: None,
+            signal=CancelledSignal(),
+        )
+        self.assertEqual(result.termination_reason, TerminationReason.CANCELLED)
+        self.assertEqual(result.error_detail, "user cancelled")
 
     async def test_compaction_hook_called(self) -> None:
         compact_called = False

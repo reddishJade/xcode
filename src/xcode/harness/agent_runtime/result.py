@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...agent.config import AfterToolCallContext
-from ...agent.results import AgentLoopResult
+from ...agent.results import AgentLoopResult, TerminationReason
 from ...agent.messages import AssistantMessage
 from xcode.ai.events import ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
@@ -55,14 +55,28 @@ class StructuredAgentResult:
     messages: list[dict[str, Any]]
     steps: int
     tool_calls: list[ToolCall]
-    stopped_by_limit: bool = False
+    termination_reason: TerminationReason = TerminationReason.COMPLETED
     metrics: dict[str, Any] | None = None
-    stopped_by_watchdog: bool = False
-    stopped_by_error: bool = False
     watchdog_reason: str | None = None
+    error_detail: str | None = None
     needs_follow_up: bool = False
     last_agent: str = "main"
     run_state: RunState | None = None
+
+    @property
+    def stopped_by_limit(self) -> bool:
+        """兼容旧调用方；停止状态以 termination_reason 为准。"""
+        return self.termination_reason is TerminationReason.STEP_LIMIT
+
+    @property
+    def stopped_by_watchdog(self) -> bool:
+        """兼容旧调用方；停止状态以 termination_reason 为准。"""
+        return self.termination_reason is TerminationReason.WATCHDOG
+
+    @property
+    def stopped_by_error(self) -> bool:
+        """兼容旧调用方；停止状态以 termination_reason 为准。"""
+        return self.termination_reason is TerminationReason.PROVIDER_ERROR
 
 
 def _build_structured_result(
@@ -107,12 +121,15 @@ def _build_structured_result(
             "steps": result.metrics.steps,
         }
 
-    if result.stopped_by_watchdog and result.watchdog_reason:
+    if (
+        result.termination_reason is TerminationReason.WATCHDOG
+        and result.watchdog_reason
+    ):
         if answer:
             answer = answer + " " + result.watchdog_reason
         else:
             answer = result.watchdog_reason
-    elif result.stopped_by_limit and not answer:
+    elif result.termination_reason is TerminationReason.STEP_LIMIT and not answer:
         answer = "step limit reached"
 
     return StructuredAgentResult(
@@ -121,11 +138,10 @@ def _build_structured_result(
         steps=result.steps,
         tool_calls=tool_calls,
         last_agent="main",
-        stopped_by_limit=result.stopped_by_limit,
-        stopped_by_error=result.stopped_by_error,
+        termination_reason=result.termination_reason,
         metrics=metrics,
-        stopped_by_watchdog=result.stopped_by_watchdog,
         watchdog_reason=result.watchdog_reason,
+        error_detail=result.error_detail,
         run_state=RunState(messages=messages, current_mode=current_mode),
     )
 

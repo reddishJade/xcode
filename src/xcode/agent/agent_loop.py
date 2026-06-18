@@ -29,7 +29,7 @@ from .config import (
     ShouldStopAfterTurnContext,
     _LoopRunState,
 )
-from .results import AgentLoopMetrics, AgentLoopResult
+from .results import AgentLoopMetrics, AgentLoopResult, TerminationReason
 from .events import (
     AgentEndEvent,
     AgentEvent,
@@ -161,6 +161,8 @@ async def _run_loop(
                 metrics,
                 state.active_provider,
                 emit,
+                termination_reason=TerminationReason.CANCELLED,
+                error_detail=cancel_reason(signal),
             )
 
         # ── 处理 steer 队列 ──
@@ -216,7 +218,7 @@ async def _run_loop(
                 metrics,
                 state.active_provider,
                 emit,
-                stopped_by_error=True,
+                termination_reason=TerminationReason.PROVIDER_ERROR,
             )
 
         message, stop_reason, new_provider = inner_result
@@ -234,7 +236,12 @@ async def _run_loop(
             result = AgentLoopResult(
                 messages=new_messages,
                 steps=step,
-                stopped_by_error=stop_reason == "error",
+                termination_reason=(
+                    TerminationReason.PROVIDER_ERROR
+                    if stop_reason == "error"
+                    else TerminationReason.CANCELLED
+                ),
+                error_detail=_assistant_error_detail(message),
                 metrics=metrics,
                 active_provider=state.active_provider,
             )
@@ -279,7 +286,7 @@ async def _run_loop(
                 metrics,
                 state.active_provider,
                 emit,
-                stopped_by_watchdog=True,
+                termination_reason=TerminationReason.WATCHDOG,
                 watchdog_reason=repeated_watchdog_reason,
             )
 
@@ -294,7 +301,7 @@ async def _run_loop(
                 metrics,
                 state.active_provider,
                 emit,
-                stopped_by_watchdog=True,
+                termination_reason=TerminationReason.WATCHDOG,
                 watchdog_reason=idle_watchdog_reason,
             )
 
@@ -333,7 +340,7 @@ async def _run_loop(
     result = AgentLoopResult(
         messages=new_messages,
         steps=config.max_steps,
-        stopped_by_limit=True,
+        termination_reason=TerminationReason.STEP_LIMIT,
         metrics=metrics,
         active_provider=state.active_provider,
     )
@@ -348,18 +355,16 @@ def _finish_loop(
     active_provider: StreamProvider | None,
     emit: Callable[[AgentEvent], None],
     *,
-    stopped_by_watchdog: bool = False,
+    termination_reason: TerminationReason = TerminationReason.COMPLETED,
     watchdog_reason: str | None = None,
-    stopped_by_limit: bool = False,
-    stopped_by_error: bool = False,
+    error_detail: str | None = None,
 ) -> AgentLoopResult:
     result = AgentLoopResult(
         messages=new_messages,
         steps=step,
-        stopped_by_watchdog=stopped_by_watchdog,
+        termination_reason=termination_reason,
         watchdog_reason=watchdog_reason,
-        stopped_by_limit=stopped_by_limit,
-        stopped_by_error=stopped_by_error,
+        error_detail=error_detail,
         metrics=metrics,
         active_provider=active_provider,
     )
@@ -520,6 +525,7 @@ async def _handle_provider_error(
         msg = AssistantMessage(
             content=[TextContent(text="I encountered an error.")],
             stop_reason="error",
+            error_message=_assistant_error_detail(message),
         )
         emit(_message_start_event(msg))
         emit(_message_end_event(msg))
@@ -597,3 +603,13 @@ def _cancelled_message(signal: CancellationSignal | None) -> AssistantMessage:
         stop_reason="aborted",
         error_message=cancel_reason(signal),
     )
+
+
+def _assistant_error_detail(message: AssistantMessage) -> str | None:
+    """提取 provider 或取消返回的具体错误信息。"""
+    if message.error_message:
+        return message.error_message
+    text = " ".join(
+        block.text for block in message.content if isinstance(block, TextContent)
+    ).strip()
+    return text or None

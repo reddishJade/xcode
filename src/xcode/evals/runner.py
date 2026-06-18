@@ -329,20 +329,21 @@ def _extract_agent_metrics(events: list[StructuredAgentEvent]) -> dict[str, Any]
             agent_m = event.data.metrics
             if not isinstance(agent_m, dict):
                 return {}
-            return {
-                k: agent_m[k]
-                for k in (
-                    "llm_calls",
-                    "estimated_prompt_tokens",
-                    "model_latencies_ms",
-                    "tool_latencies_ms",
-                    "model_total_ms",
-                    "tool_total_ms",
-                    "total_observed_ms",
-                    "steps",
-                )
-                if k in agent_m
+            metric_names = (
+                "llm_calls",
+                "estimated_prompt_tokens",
+                "model_latencies_ms",
+                "tool_latencies_ms",
+                "model_total_ms",
+                "tool_total_ms",
+                "total_observed_ms",
+                "steps",
+            )
+            metrics = {
+                key: agent_m[key] for key in metric_names if key in agent_m
             }
+            metrics["termination_reason"] = event.data.termination_reason.value
+            return metrics
     return {}
 
 

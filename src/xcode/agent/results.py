@@ -6,8 +6,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from xcode.ai.providers.protocol import StreamProvider
+
+
+class TerminationReason(StrEnum):
+    """Agent 循环的统一终止原因。"""
+
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    STEP_LIMIT = "step_limit"
+    WATCHDOG = "watchdog"
+    PROVIDER_ERROR = "provider_error"
 
 
 @dataclass
@@ -25,9 +36,23 @@ class AgentLoopMetrics:
 class AgentLoopResult:
     messages: list = field(default_factory=list)
     steps: int = 0
-    stopped_by_limit: bool = False
-    stopped_by_watchdog: bool = False
-    stopped_by_error: bool = False
+    termination_reason: TerminationReason = TerminationReason.COMPLETED
     watchdog_reason: str | None = None
+    error_detail: str | None = None
     metrics: AgentLoopMetrics | None = None
     active_provider: StreamProvider | None = None
+
+    @property
+    def stopped_by_limit(self) -> bool:
+        """兼容旧调用方；停止状态以 termination_reason 为准。"""
+        return self.termination_reason is TerminationReason.STEP_LIMIT
+
+    @property
+    def stopped_by_watchdog(self) -> bool:
+        """兼容旧调用方；停止状态以 termination_reason 为准。"""
+        return self.termination_reason is TerminationReason.WATCHDOG
+
+    @property
+    def stopped_by_error(self) -> bool:
+        """兼容旧调用方；停止状态以 termination_reason 为准。"""
+        return self.termination_reason is TerminationReason.PROVIDER_ERROR
