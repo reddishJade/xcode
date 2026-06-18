@@ -21,6 +21,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
@@ -1052,7 +1053,11 @@ class ActionExtractor:
         command = tool_input.get("command")
         targets: tuple[Target, ...] = ()
         if isinstance(command, str) and command.strip():
-            targets = (Target("command", command.strip(), "execute"),)
+            normalized_command = command.strip()
+            targets = (
+                Target("command", normalized_command, "execute"),
+                *self._shell_path_targets(normalized_command),
+            )
         return Action(
             tool=tool_name,
             capability="shell",
@@ -1062,17 +1067,38 @@ class ActionExtractor:
         )
 
     def _shell_action(self, tool_name: str, tool_input: Mapping[str, object]) -> Action:
-        targets = tuple(
-            Target("command", command.strip(), "execute")
-            for command in self._shell_commands(tool_input)
-            if command.strip()
-        )
+        targets: list[Target] = []
+        for command in self._shell_commands(tool_input):
+            normalized_command = command.strip()
+            if not normalized_command:
+                continue
+            targets.append(Target("command", normalized_command, "execute"))
+            targets.extend(self._shell_path_targets(normalized_command))
         return Action(
             tool=tool_name,
             capability="shell",
             operation="run_command",
-            targets=targets,
+            targets=tuple(targets),
             input=tool_input,
+        )
+
+    def _shell_path_targets(self, command: str) -> tuple[Target, ...]:
+        """从已知文件系统命令中保守提取路径参数。"""
+        try:
+            tokens = shlex.split(command, posix=False)
+        except ValueError:
+            return ()
+        if not tokens:
+            return ()
+
+        command_name = Path(tokens[0].strip("\"'")).name.lower()
+        path_arguments = _filesystem_command_path_arguments(command_name, tokens[1:])
+        access: PermissionAccess = (
+            "read" if command_name in _READ_FILESYSTEM_COMMANDS else "write"
+        )
+        return tuple(
+            Target("path", _normalize_path_text(path), access)
+            for path in path_arguments
         )
 
     def _patch_paths(self, tool_input: Mapping[str, object]) -> tuple[str, ...]:
@@ -1110,6 +1136,53 @@ def _normalize_path_text(raw_path: str) -> str:
             continue
         parts.append(part)
     return "/".join(parts) or "."
+
+
+_READ_FILESYSTEM_COMMANDS = frozenset(
+    {
+        "cat",
+        "dir",
+        "get-childitem",
+        "get-content",
+        "head",
+        "less",
+        "ls",
+        "more",
+        "realpath",
+        "tail",
+    }
+)
+_WRITE_FILESYSTEM_COMMANDS = frozenset(
+    {
+        "copy-item",
+        "cp",
+        "del",
+        "move-item",
+        "mv",
+        "remove-item",
+        "rm",
+        "set-content",
+    }
+)
+
+
+def _filesystem_command_path_arguments(
+    command_name: str,
+    arguments: Sequence[str],
+) -> tuple[str, ...]:
+    """返回已知文件系统命令的位置路径参数。"""
+    if command_name not in _READ_FILESYSTEM_COMMANDS | _WRITE_FILESYSTEM_COMMANDS:
+        return ()
+
+    paths: list[str] = []
+    for argument in arguments:
+        cleaned = argument.strip("\"'")
+        if not cleaned or cleaned.startswith("-"):
+            continue
+        if cleaned in {"&&", "||", ";", "|"}:
+            break
+        paths.append(cleaned)
+    return tuple(paths)
 
 
 def _is_external_path(path: str) -> bool:

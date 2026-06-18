@@ -117,9 +117,104 @@ class XcodePermissionsTests(unittest.TestCase):
                 restricted_dirs=("secrets",),
             )
         )
-        result = engine.decide("read_file", '{"path": "secrets/key.txt"}')
+        result = engine.decide(
+            "read_file",
+            '{"path": "secrets/key.txt"}',
+            tool_input={"path": "secrets/key.txt"},
+        )
         self.assertTrue(result.blocked)
         self.assertEqual(result.matched_rule, "restricted_dirs")
+
+    def test_restricted_dirs_does_not_match_plain_text(self) -> None:
+        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        result = engine.decide(
+            "echo",
+            '{"input": "the secrets directory is documented"}',
+            tool_input={"input": "the secrets directory is documented"},
+        )
+        self.assertFalse(result.blocked)
+
+    def test_restricted_dirs_rejects_prefix_collision_only_when_contained(
+        self,
+    ) -> None:
+        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        result = engine.decide(
+            "read_file",
+            '{"path": "secrets-copy/key.txt"}',
+            tool_input={"path": "secrets-copy/key.txt"},
+        )
+        self.assertFalse(result.blocked)
+
+    def test_restricted_dirs_checks_all_patch_targets(self) -> None:
+        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        result = engine.decide(
+            "apply_patch",
+            '{"paths": ["src/app.py", "secrets/key.txt"]}',
+            tool_input={"paths": ["src/app.py", "secrets/key.txt"]},
+        )
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.matched_rule, "restricted_dirs")
+
+    def test_restricted_dirs_asks_for_unparseable_filesystem_command(self) -> None:
+        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        result = engine.decide(
+            "bash",
+            '{"command": "rm \\"unterminated"}',
+            tool_input={"command": 'rm "unterminated'},
+        )
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.decision, "ask")
+
+    def test_restricted_dirs_resolves_absolute_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            restricted = root / "secrets"
+            restricted.mkdir()
+            engine = PermissionEngine(
+                PermissionEngineConfig(
+                    restricted_dirs=(str(restricted),),
+                    project_root=root,
+                )
+            )
+            result = engine.decide(
+                "read_file",
+                '{"path": "absolute"}',
+                tool_input={"path": str(restricted / "key.txt")},
+            )
+        self.assertTrue(result.blocked)
+
+    def test_restricted_dirs_resolves_symlink_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            restricted = root / "secrets"
+            restricted.mkdir()
+            link = root / "public"
+            try:
+                link.symlink_to(restricted, target_is_directory=True)
+            except OSError:
+                self.skipTest("当前环境不允许创建目录符号链接")
+            engine = PermissionEngine(
+                PermissionEngineConfig(
+                    restricted_dirs=("secrets",),
+                    project_root=root,
+                )
+            )
+            result = engine.decide(
+                "read_file",
+                '{"path": "public/key.txt"}',
+                tool_input={"path": "public/key.txt"},
+            )
+        self.assertTrue(result.blocked)
+
+    def test_restricted_dirs_checks_shell_path_target(self) -> None:
+        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        result = engine.decide(
+            "bash",
+            '{"command": "cat secrets/key.txt"}',
+            tool_input={"command": "cat secrets/key.txt"},
+        )
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.decision, "deny")
 
     def test_permission_engine_session_grant_satisfies_ask(self) -> None:
         from xcode.harness.observability import (

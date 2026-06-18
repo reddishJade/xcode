@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -163,7 +164,7 @@ class PermissionEngine:
         action = ActionExtractor().extract(tool_name, tool_input or {})
 
         # Tier 0: restricted_dirs 硬阻断
-        dir_result = self._check_restricted_dirs(action_input, tool_name)
+        dir_result = self._check_restricted_dirs(action)
         if dir_result is not None:
             return replace(dir_result, action=action)
 
@@ -361,20 +362,111 @@ class PermissionEngine:
 
     def _check_restricted_dirs(
         self,
-        action_input: str,
-        tool_name: str,
+        action: Action,
     ) -> PermissionEngineResult | None:
-        input_lower = action_input.lower()
-        for restricted_dir in self._config.restricted_dirs:
-            if restricted_dir.lower() in input_lower:
+        if not self._config.restricted_dirs:
+            return None
+
+        path_targets = tuple(
+            target for target in action.targets if target.kind == "path"
+        )
+        for target in path_targets:
+            if self._is_restricted_path(target.value):
                 return PermissionEngineResult(
                     decision="deny",
                     blocked=True,
-                    reason=f"restricted directory matched for tool: {tool_name}",
+                    reason=f"restricted path matched for tool: {action.tool}",
                     matched_rule=MATCHED_RESTRICTED_DIRS,
                     source=SOURCE_CONFIG,
                 )
+
+        if self._requires_restricted_path_fallback(action, path_targets):
+            return PermissionEngineResult(
+                decision="ask",
+                blocked=True,
+                reason=(
+                    "filesystem paths could not be extracted safely while "
+                    f"restricted_dirs is configured for tool: {action.tool}"
+                ),
+                matched_rule=MATCHED_RESTRICTED_DIRS,
+                source=SOURCE_CONFIG,
+            )
         return None
+
+    def _is_restricted_path(self, target_path: str) -> bool:
+        """判断结构化路径 target 是否位于任一受限目录内。"""
+        project_root = self._config.project_root
+        for restricted_dir in self._config.restricted_dirs:
+            if project_root is None:
+                normalized_target = Path(target_path.replace("\\", "/"))
+                normalized_restricted = Path(restricted_dir.replace("\\", "/"))
+                if self._path_contains(normalized_target, normalized_restricted):
+                    return True
+                continue
+
+            resolved_root = project_root.expanduser().resolve(strict=False)
+            restricted_path = Path(restricted_dir).expanduser()
+            if not restricted_path.is_absolute():
+                restricted_path = resolved_root / restricted_path
+            target = Path(target_path).expanduser()
+            if not target.is_absolute():
+                target = resolved_root / target
+            try:
+                resolved_restricted = restricted_path.resolve(strict=False)
+                resolved_target = target.resolve(strict=False)
+            except (OSError, RuntimeError):
+                return True
+            if self._path_contains(resolved_target, resolved_restricted):
+                return True
+        return False
+
+    def _path_contains(self, candidate: Path, root: Path) -> bool:
+        """使用平台路径大小写规则执行目录边界判断。"""
+        normalized_candidate = os.path.normcase(os.path.abspath(candidate))
+        normalized_root = os.path.normcase(os.path.abspath(root))
+        try:
+            return os.path.commonpath((normalized_candidate, normalized_root)) == (
+                normalized_root
+            )
+        except ValueError:
+            return False
+
+    def _requires_restricted_path_fallback(
+        self,
+        action: Action,
+        path_targets: tuple[Any, ...],
+    ) -> bool:
+        """对无法结构化解析的高风险文件系统输入采用 ask。"""
+        if action.tool in {"read_file", "write_file", "edit_file", "apply_patch"}:
+            return not path_targets
+        if action.capability != "shell" or path_targets:
+            return False
+        filesystem_commands = {
+            "cat",
+            "copy-item",
+            "cp",
+            "del",
+            "dir",
+            "get-childitem",
+            "get-content",
+            "head",
+            "less",
+            "ls",
+            "more",
+            "move-item",
+            "mv",
+            "realpath",
+            "remove-item",
+            "rm",
+            "set-content",
+            "tail",
+        }
+        return any(
+            target.kind == "command"
+            and target.value.split(maxsplit=1)[0].strip("\"'").lower()
+            in filesystem_commands
+            for target in action.targets
+        )
 
     # ── 统一 ask 处理 ──
 
