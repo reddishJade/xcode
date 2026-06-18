@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import shutil
 
-from xcode.experimental.mcp import (
+from xcode.harness.mcp.tools import (
     build_mcp_tools,
     compute_config_hash,
 )
@@ -40,7 +40,7 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         self.assertEqual(compute_config_hash(config1), compute_config_hash(config2))
         self.assertNotEqual(compute_config_hash(config1), compute_config_hash(config3))
 
-    @patch("xcode.experimental.mcp_client.McpClient")
+    @patch("xcode.harness.mcp.client.McpClient")
     def test_build_mcp_tools_cache_hit_and_miss(
         self, mock_client_class: MagicMock
     ) -> None:
@@ -117,7 +117,7 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
             ["python", "fetch_server.py", "--verbose"], {}, timeout=None
         )
 
-    @patch("xcode.experimental.mcp_client.McpClient")
+    @patch("xcode.harness.mcp.client.McpClient")
     def test_build_mcp_tools_lazy_initialization(
         self, mock_client_class: MagicMock
     ) -> None:

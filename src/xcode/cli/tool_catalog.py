@@ -46,7 +46,7 @@ def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
 
 
 def _build_mcp_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    from xcode.experimental.mcp import build_mcp_tools
+    from xcode.harness.mcp import build_mcp_tools
 
     mcp_config = base_tmp / "mcp_config.json"
     if not mcp_config.exists():

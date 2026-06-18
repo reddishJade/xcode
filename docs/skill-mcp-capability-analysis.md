@@ -61,9 +61,9 @@ Xcode 已是可工作的 stdio tools client，但协议实现仍偏向单一 smo
 | Memory | Formal optional | 否，先保持显式配置 |
 | Plugins | Removed | 不适用 |
 
-MCP 和 Memory 应从 `experimental/` 迁出。该迁移表示维护承诺和模块边界变化，
-不表示所有可选协议功能都必须实现。原有进程内 Python Plugins 已删除，不作为
-正式扩展机制保留。
+MCP 已迁入 `harness/mcp/` 并由核心 runtime 自动发现配置；Memory 仍应从
+`experimental/` 迁出。该迁移表示维护承诺和模块边界变化，不表示所有可选协议
+功能都必须实现。原有进程内 Python Plugins 已删除，不作为正式扩展机制保留。
 
 ---
 

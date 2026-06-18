@@ -89,6 +89,31 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             },
         )
 
+    def test_default_runtime_discovers_configured_mcp_tools(self) -> None:
+        mcp_tool = ToolSpec(
+            name="mcp__demo__read",
+            description="Read from demo MCP server.",
+            input_hint="{}",
+            handler=lambda _data: "ok",
+            group="mcp",
+            schema={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        )
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _patched_provider_bundle([]),
+            patch("xcode.harness.mcp.build_mcp_tools", return_value=(mcp_tool,)),
+        ):
+            app = build_app(
+                project_root=Path(tmp),
+                runtime_config=XcodeRuntimeConfig(),
+            )
+
+        self.assertIn("mcp__demo__read", {tool.name for tool in app.registry})
+
     def test_default_runtime_does_not_enable_experimental_components(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             app = build_app(

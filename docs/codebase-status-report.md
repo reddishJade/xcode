@@ -14,8 +14,8 @@ cli → coding_agent → harness → agent → ai
 ```
 
 核心 agent loop、工具执行、权限控制、上下文组装、会话恢复、文件快照和 CLI
-已经可用。当前源码仍将 MCP 和 memory 放在 `experimental/` 下，
-但目标产品分类不应继续沿用该目录现状：
+已经可用。MCP 已迁入正式 runtime package；memory 仍位于 `experimental/`
+等待迁移：
 
 - Skill 和 MCP 是核心能力，应按基础范式兼容要求长期维护。
 - Memory 是正式能力，但在主动召回效果得到 eval 验证前可以保持可配置启用。
@@ -230,8 +230,8 @@ cli → coding_agent → harness → agent → ai
 
 ### 核心文件
 
-- `src/xcode/experimental/mcp.py`
-- `src/xcode/experimental/mcp_client.py`
+- `src/xcode/harness/mcp/tools.py`
+- `src/xcode/harness/mcp/client.py`
 - `src/xcode/harness/skills.py`
 - `src/xcode/harness/skills_registry.py`
 - `src/xcode/coding_agent/tools/worktree.py`

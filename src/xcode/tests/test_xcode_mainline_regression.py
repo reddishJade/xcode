@@ -28,7 +28,7 @@ from xcode.agent.context_collector import (
     ContextCollectionInput,
     InstructionCollector,
 )
-from xcode.experimental.mcp import build_mcp_tools
+from xcode.harness.mcp import build_mcp_tools
 from xcode.harness.observability import (
     AuditRecord,
     JsonlAuditLogger,

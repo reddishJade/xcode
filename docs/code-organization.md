@@ -105,6 +105,9 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `task_store.py` | `tasks` group：任务存储、依赖排序、Kanban |
 | `task_progress.py` | `progress` group：长任务 checklist |
 | `mailbox.py` | `mailbox` group：append-only JSONL mailbox |
+| `mcp/` | 核心 MCP stdio client、schema cache 和动态工具集成 |
+| `mcp/client.py` | MCP stdio JSON-RPC 客户端 |
+| `mcp/tools.py` | MCP 配置、schema cache 和动态 ToolSpec 构建 |
 | `agent_runtime/` | StructuredAgent 运行时 |
 | `agent_runtime/structured.py` | `StructuredAgent`（harness 对 agent loop 的适配器） |
 | `agent_runtime/subagent.py` | `ManagedSubagentRunner`、subagent 工具 |
@@ -200,8 +203,6 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 
 | 模块 | group | 职责 |
 |---|---|---|
-| `mcp.py` | `mcp` | stdio MCP client、schema cache、动态 MCP tool proxy |
-| `mcp_client.py` | internal | MCP stdio JSON-RPC 客户端 |
 | `memory.py` | `memory` | `MEMORY.md` 记忆块、BM25 召回、压缩摘要 |
 | `memory_parsing.py` | internal | 记忆块解析 |
 
@@ -213,9 +214,10 @@ Core tools（默认）：
 `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`
 
 扩展组：
-`skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `mcp`（动态工具）→ `memory`（仅 hook）→ `daemon`（仅服务）
+`skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `memory`（仅 hook）→ `daemon`（仅服务）
 
-`experimental` 展开为 `mcp`、`memory`。
+MCP 不使用 enabled group；存在 `.local/mcp_config.json` 时由核心 runtime 自动
+注册。`experimental` 暂时只展开为 `memory`。
 
 ---
 

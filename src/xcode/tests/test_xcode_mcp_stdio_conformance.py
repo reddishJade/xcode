@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 import unittest
 
-from xcode.experimental.mcp import build_mcp_tools
-from xcode.experimental.mcp_client import (
+from xcode.harness.mcp import build_mcp_tools
+from xcode.harness.mcp.client import (
     McpClient,
     redact_mcp_text,
     truncate_redact,

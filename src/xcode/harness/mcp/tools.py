@@ -23,9 +23,9 @@ from typing import Any
 
 from xcode.harness.skills import ToolInput, ToolSpec
 
-from . import mcp_client as _mcp_mod
+from . import client as _mcp_mod
 
-_log = logging.getLogger("xcode.experimental.mcp")
+_log = logging.getLogger(__name__)
 
 
 # ── 数据模型 ──

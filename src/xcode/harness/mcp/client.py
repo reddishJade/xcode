@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Any, BinaryIO, cast
 
-logger = logging.getLogger("xcode.experimental.mcp_client")
+logger = logging.getLogger(__name__)
 
 _REDACT_PATTERNS: list[re.Pattern] = [
     re.compile(r"(Bearer\s+)[^\s]+", re.IGNORECASE),

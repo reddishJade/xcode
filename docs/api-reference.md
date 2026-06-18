@@ -448,9 +448,9 @@ class EvalRunner:
 
 ---
 
-## 11. 实验性模块
+## 11. MCP 与实验性模块
 
 | 子模块 | 说明 |
 |---|---|
-| `mcp` | stdio MCP client、动态工具注册 |
+| `harness.mcp` | 核心 stdio MCP client、动态工具注册 |
 | `memory` | `MEMORY.md` 记忆系统、BM25 召回 |

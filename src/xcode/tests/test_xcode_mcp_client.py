@@ -4,7 +4,7 @@ import sys
 import unittest
 import tempfile
 from pathlib import Path
-from xcode.experimental.mcp_client import McpClient
+from xcode.harness.mcp.client import McpClient
 
 MOCK_SERVER_CODE = r"""
 import sys

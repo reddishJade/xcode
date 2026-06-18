@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from xcode.experimental.mcp import (
+from xcode.harness.mcp.tools import (
     McpServerConfig,
     build_mcp_tools,
     build_mcp_tool_search,
@@ -64,7 +64,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
 
         # 由于 compute_config_hash 计算真正的 hash，测试中我们需要 mock 计算或者保持一致
         with patch(
-            "xcode.experimental.mcp.compute_config_hash", return_value="dummy_hash"
+            "xcode.harness.mcp.tools.compute_config_hash", return_value="dummy_hash"
         ):
             tools = build_mcp_tools(self.root)
 
@@ -160,7 +160,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
         self.cache_path.write_text(json.dumps(cache), encoding="utf-8")
 
         with patch(
-            "xcode.experimental.mcp.compute_config_hash", return_value="dummy_hash"
+            "xcode.harness.mcp.tools.compute_config_hash", return_value="dummy_hash"
         ):
             tools = build_mcp_tools(self.root)
 
@@ -180,7 +180,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
         }
 
         with patch(
-            "xcode.experimental.mcp_client.LazyClientRef.get_or_create",
+            "xcode.harness.mcp.client.LazyClientRef.get_or_create",
             return_value=mock_client,
         ):
             output = stub_tool.handler({"factor": 5})
@@ -208,7 +208,7 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
             }
         ]
 
-        with patch("xcode.experimental.mcp_client.McpClient", return_value=mock_client):
+        with patch("xcode.harness.mcp.client.McpClient", return_value=mock_client):
             result = bootstrap_tool.handler({})
             self.assertIn("Successfully fetched 1 tools", result)
             self.assertTrue(self.cache_path.exists())

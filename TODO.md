@@ -13,30 +13,26 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P1 · 删除 src/xcode/experimental，迁移 MCP 和 Memory
+## P1 · 删除 src/xcode/experimental，迁移 Memory
 
 `src/xcode/experimental/` 当前仍包含：
 
-- `mcp.py`
-- `mcp_client.py`
 - `memory.py`
 - `memory_parsing.py`
 - `__init__.py`
 
-这与目标模块边界不一致。MCP 和 Memory 已确定为正式能力；原有进程内 Python
-Plugin 加载器及其 group、hook 装配和目录约定已经删除。
+这与目标模块边界不一致。MCP 已迁入 `src/xcode/harness/mcp/` 并作为核心能力
+自动发现配置；原有进程内 Python Plugin 加载器及其 group、hook 装配和目录约定
+已经删除。Memory 仍需迁入正式 runtime package。
 
 需要：
 
-- 将 MCP 迁入正式 runtime package，建议目标为
-  `src/xcode/harness/mcp/`，拆分 client、tool integration 和公开入口。
 - 将 Memory 迁入正式 runtime package，建议目标为
   `src/xcode/harness/memory/`，拆分 manager、parsing 和公开入口。
-- 更新 assembly、tool catalog、测试、patch target、logger name 和全部 import。
+- 更新 assembly、测试、patch target、logger name 和全部 import。
 - 删除 `src/xcode/experimental/__init__.py` 和整个
   `src/xcode/experimental/` 目录。
 - 删除 `EXPERIMENTAL_FEATURE_GROUPS` 和聚合的 `experimental` enable switch。
-- Skill 和 MCP 保持核心能力；MCP 无配置时自然注册为空。
 - Memory 使用独立、正式但可选的 group/config。
 - 更新 `CONFIG.md`、`README.md`、`docs/code-organization.md`、
   `docs/source-review.md` 和相关现状报告。

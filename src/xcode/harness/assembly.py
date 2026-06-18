@@ -59,7 +59,6 @@ if TYPE_CHECKING:
 
 EXPERIMENTAL_FEATURE_GROUPS = frozenset(
     {
-        "mcp",
         "memory",
     }
 )
@@ -310,6 +309,9 @@ def _extend_registry_with_features(
     enabled: set[str],
 ) -> tuple[ToolSpec, ...]:
     """添加可选功能工具到注册表。"""
+    from xcode.harness.mcp import build_mcp_tools
+
+    registry += build_mcp_tools(project_root)
     if "worktree" in enabled:
         from xcode.coding_agent.tools.worktree import (
             WorktreeTaskRunner,
@@ -317,10 +319,6 @@ def _extend_registry_with_features(
         )
 
         registry += build_worktree_tools(WorktreeTaskRunner(project_root))
-    if "mcp" in enabled:
-        from xcode.experimental.mcp import build_mcp_tools
-
-        registry += build_mcp_tools(project_root)
     if "tasks" in enabled:
         from xcode.harness.task_store import TaskStore, build_task_tools
 

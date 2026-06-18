@@ -13,7 +13,7 @@ from typing import Any
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from xcode.experimental.mcp import (
+from xcode.harness.mcp.tools import (
     McpServerConfig,
     _sanitize,
     _validate_server_config,
@@ -21,7 +21,7 @@ from xcode.experimental.mcp import (
     _detect_collisions,
     build_mcp_tools,
 )
-from xcode.experimental.mcp_client import (
+from xcode.harness.mcp.client import (
     redact_mcp_text,
     truncate_redact,
 )
@@ -487,13 +487,12 @@ class TestMcpRedaction(TestCase):
         self.assertEqual(result, msg)
 
 
-
 # ════════════════════════════════════════════
 # 9. MCP 工具构建（集成）
 # ════════════════════════════════════════════
 
 
-@patch("xcode.experimental.mcp_client.McpClient")
+@patch("xcode.harness.mcp.client.McpClient")
 class TestMcpBuildIntegration(TestCase):
     """Integration tests for build_mcp_tools."""
 
