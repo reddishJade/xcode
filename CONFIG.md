@@ -142,6 +142,12 @@
 | `enabled_groups` | array | `["core"]` | 启用的工具组 |
 | `shell` | string | `"auto"` | `auto`、`pwsh`、`powershell`、`cmd`、`bash`、`zsh`、`sh`、`fish` |
 
+## skills
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `trust_project_skills` | bool | `false` | 是否信任并披露项目内 `.xcode/skills/` 与 `.agents/skills/`；默认仅发现用户级技能 |
+
 ### 工具组
 
 | group | 状态 | 工具 |
