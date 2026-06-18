@@ -175,7 +175,6 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             config.provider.model_profiles["subagent"],
             config.provider.model_profiles["main"],
         )
-        self.assertTrue(config.skills.auto_trigger)
         self.assertEqual(config.agent.max_steps, 20)
         self.assertEqual(config.prompt.modules, DEFAULT_PROMPT_MODULES)
         self.assertIsNone(config.paths.sessions_dir)
@@ -197,7 +196,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
                 '"skills_dir":"skills"},'
                 '"observability":{"audit_path":"audit.jsonl"},'
                 '"tools":{"network_commands":"deny"},'
-                '"skills":{"auto_trigger":false},'
+                '"skills":{},'
                 '"prompt":{"modules":["identity","tools"]},'
                 '"daemon":{"enabled":true,"interval_seconds":15}}',
                 encoding="utf-8",
@@ -219,7 +218,6 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
                 config.provider.model_profiles["subagent"].chat_model,
                 "subagent-test",
             )
-            self.assertFalse(config.skills.auto_trigger)
             self.assertEqual(config.prompt.modules, ("identity", "tools"))
             self.assertEqual(config.agent.max_steps, 9)
             self.assertEqual(config.agent.tool_workers, 2)

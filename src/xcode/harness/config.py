@@ -222,7 +222,7 @@ class ToolsRuntimeConfig:
 
 @dataclass
 class SkillsRuntimeConfig:
-    auto_trigger: bool = True
+    pass
 
 
 @dataclass

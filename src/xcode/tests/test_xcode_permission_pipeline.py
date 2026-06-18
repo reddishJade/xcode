@@ -18,7 +18,7 @@ from xcode.harness.task_store import (
 )
 
 
-class XcodeMcpOverrideSecurityTests(unittest.TestCase):
+class XcodePermissionPipelineTests(unittest.TestCase):
     def test_permission_engine_sandbox_equivalent(self) -> None:
         engine = PermissionEngine(
             PermissionEngineConfig(

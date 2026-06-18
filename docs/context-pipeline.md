@@ -57,7 +57,6 @@ The following paths have been removed and must not be reintroduced:
 - `instructions.py` project instruction path
 - Semantic `SkillLoader`
 - Skill catalog prompt injection
-- `load_skill` tool
 - `.local/skills/active`
 - `enabled.txt` skill activation
 - Semantic skill matching
@@ -82,7 +81,18 @@ Each context source has exactly one injection path — no fallback or secondary 
 - Bounded traversal: max depth 3, max 50 files, single file ≤ 64 KB, total ≤ 16 KB.
 - Path traversal is prevented by `_is_child_path` check on symlink-resolved real paths.
 
-## 6. Compaction Boundary
+## 6. Skill Loading
+
+Skill loading follows a two-tier model:
+
+- **`SkillIndexCollector`** (automatic, every turn): injects an `<available-skills>` block with skill name and description only. No body content is loaded.
+- **`load_skill` tool** (on-demand, permissioned): loads the full `SKILL.md` body (after frontmatter) for a named skill.
+- **`load_skill(name=..., reference=...)`** (on-demand): loads a single reference file from a skill's `references/` directory. Reference content is never auto-injected; the agent must request it explicitly.
+- **`references/` metadata**: `load_skill` output includes a `<references>` block listing available reference filenames without their content. The agent can then load individual references via `load_skill`.
+
+Scripts (`scripts/` directory) are ignored. No automatic activation or semantic matching is performed.
+
+## 7. Compaction Boundary
 
 - `[Compressed]` remains the canonical compacted conversation history prefix.
 - Compaction (`LayeredCompactor`) does **not** duplicate content that is already covered by collectors:
@@ -93,7 +103,7 @@ Each context source has exactly one injection path — no fallback or secondary 
   - Task state
 - `TaskStateCollector` explicitly excludes `[Compressed]` message content.
 
-## 7. Safety Invariants
+## 8. Safety Invariants
 
 - **Single injection path**: each context source has exactly one injection path via its assigned collector.
 - **SYSTEM before USER_CONTEXT**: all `SYSTEM`-target blocks are injected before any `USER_CONTEXT` block.

@@ -106,7 +106,7 @@ def build_app(project_root, env_files=None, agent_config=None,
 | `ProviderRuntimeConfig` | `model_profiles: dict[str, ModelProfileRuntimeConfig]` |
 | `SecurityRuntimeConfig` | `permission_mode, sandbox_mode, approval_policy, network_access, writable_roots, restricted_dirs, rules, global_default` |
 | `ToolsRuntimeConfig` | `enabled_groups=("core",), shell="auto"` |
-| `SkillsRuntimeConfig` | `auto_trigger=True` |
+| `SkillsRuntimeConfig` | (保留) |
 | `PromptRuntimeConfig` | `modules: tuple[str, ...]` |
 | `PathsRuntimeConfig` | `sessions_dir, skills_dir` |
 | `ObservabilityRuntimeConfig` | `audit_path` |

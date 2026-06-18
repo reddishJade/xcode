@@ -93,7 +93,7 @@ uv run xcode --resume
 
 ## MCP
 
-MCP server 配置放在 `.local/mcp_config.json` 或项目根 `mcp_config.json`：
+MCP server 配置放在 `.local/mcp_config.json`：
 
 ```json
 {"mcpServers": {"demo": {"command": "python", "args": ["path/to/server.py"], "defer_loading": true}}}

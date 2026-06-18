@@ -604,11 +604,7 @@ class SkillSummary:
 - Returns full skill content
 - Goes through PermissionPipeline before execution
 
-**Config:**
-```yaml
-skills:
-  auto_trigger: true               # Match skills by name/relevance at context time
-```
+**Config:** (auto_trigger was planned but never implemented; removed in Step 9E)
 
 ### 5.2 Execution Modes
 

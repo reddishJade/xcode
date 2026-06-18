@@ -26,11 +26,10 @@ from xcode.harness.skills import ToolInput, ToolSpec
 logger = logging.getLogger(__name__)
 
 # ── 搜索路径优先级 ──
-# 0: <project>/.xcode/skills/      项目用户技能（最高）
-# 1: <project>/.agents/skills/     旧版项目技能
-# 2: <project>/skills/             内置技能
-# 3: ~/.xcode/skills/              全局用户技能
-# 4: ~/.agents/skills/             旧版全局技能
+# 0: <project>/.xcode/skills/      项目级技能（最高）
+# 1: <project>/.agents/skills/     项目级技能
+# 2: ~/.xcode/skills/              用户级技能
+# 3: ~/.agents/skills/             用户级技能
 
 
 def build_skill_search_dirs(project_root: Path | None) -> list[tuple[Path, int]]:
@@ -42,10 +41,9 @@ def build_skill_search_dirs(project_root: Path | None) -> list[tuple[Path, int]]
     if project_root is not None:
         dirs.append((project_root / ".xcode" / "skills", 0))
         dirs.append((project_root / ".agents" / "skills", 1))
-        dirs.append((project_root / "skills", 2))
     home = Path.home()
-    dirs.append((home / ".xcode" / "skills", 3))
-    dirs.append((home / ".agents" / "skills", 4))
+    dirs.append((home / ".xcode" / "skills", 2))
+    dirs.append((home / ".agents" / "skills", 3))
     return dirs
 
 
