@@ -124,6 +124,19 @@ class TestFrontmatterParser(unittest.TestCase):
 class TestSkillRegistry(unittest.TestCase):
     """测试 SkillRegistry 发现、摘要、懒加载。"""
 
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._home_tmp = tempfile.TemporaryDirectory()
+        cls._home_patcher = mock.patch.object(
+            Path, "home", return_value=Path(cls._home_tmp.name)
+        )
+        cls._home_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._home_patcher.stop()
+        cls._home_tmp.cleanup()
+
     def test_registry_discovers_skills(self) -> None:
         """SKILL.md 文件被发现，元数据缓存。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -323,6 +336,19 @@ class TestSkillRegistry(unittest.TestCase):
 
 class TestLoadSkillTool(unittest.TestCase):
     """测试 load_skill 工具基本功能。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._home_tmp = tempfile.TemporaryDirectory()
+        cls._home_patcher = mock.patch.object(
+            Path, "home", return_value=Path(cls._home_tmp.name)
+        )
+        cls._home_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._home_patcher.stop()
+        cls._home_tmp.cleanup()
 
     def test_load_existing_skill(self) -> None:
         """load_skill 返回现有技能的正文。"""

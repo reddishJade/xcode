@@ -31,6 +31,7 @@ import os
 import stat
 import tempfile
 from pathlib import Path
+from unittest import mock
 import unittest
 
 from xcode.harness.skills_registry import (
@@ -101,7 +102,7 @@ def _make_skill_tree(
         for name, content in references.items():
             ref_path = ref_dir / name
             ref_path.parent.mkdir(parents=True, exist_ok=True)
-            ref_path.write_text(content, encoding="utf-8")
+            ref_path.write_bytes(content.encode("utf-8"))
 
     if scripts:
         scripts_dir = skill_dir / "scripts"
@@ -117,6 +118,19 @@ def _make_skill_tree(
 
 class TestSkillConformance(unittest.TestCase):
     """Skill 生态系统兼容性冒烟测试。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._home_tmp = tempfile.TemporaryDirectory()
+        cls._home_patcher = mock.patch.object(
+            Path, "home", return_value=Path(cls._home_tmp.name)
+        )
+        cls._home_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._home_patcher.stop()
+        cls._home_tmp.cleanup()
 
     # ── 有效技能：SKILL.md + references/ ──
 
@@ -400,6 +414,19 @@ class TestSkillConformance(unittest.TestCase):
 
 class TestSkillReferences(unittest.TestCase):
     """Step 9C: references/ 扫描、加载、安全行为。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._home_tmp = tempfile.TemporaryDirectory()
+        cls._home_patcher = mock.patch.object(
+            Path, "home", return_value=Path(cls._home_tmp.name)
+        )
+        cls._home_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._home_patcher.stop()
+        cls._home_tmp.cleanup()
 
     # ── 引用元数据 ──
 

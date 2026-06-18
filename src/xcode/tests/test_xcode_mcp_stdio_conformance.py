@@ -525,12 +525,12 @@ class TestMcpStdioConformance(unittest.TestCase):
         self.assertEqual(client.status, "disabled")
         self.assertIsNone(client.process)
 
-        # 进程应已终止
+        # 进程应已终止（SIGTERM 跨平台兼容，OSError 覆盖 POSIX ProcessLookupError 和 Windows PermissionError）
         if pid is not None:
             import signal
 
-            with self.assertRaises(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
+            with self.assertRaises(OSError):
+                os.kill(pid, signal.SIGTERM)
 
     def test_build_mcp_tools_cleanup_on_query(self) -> None:
         """_query_server_tools 在列出工具后正确停止客户端。"""
