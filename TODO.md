@@ -13,36 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P1 · 删除 src/xcode/experimental，迁移 Memory
-
-`src/xcode/experimental/` 当前仍包含：
-
-- `memory.py`
-- `memory_parsing.py`
-- `__init__.py`
-
-这与目标模块边界不一致。MCP 已迁入 `src/xcode/harness/mcp/` 并作为核心能力
-自动发现配置；原有进程内 Python Plugin 加载器及其 group、hook 装配和目录约定
-已经删除。Memory 仍需迁入正式 runtime package。
-
-需要：
-
-- 将 Memory 迁入正式 runtime package，建议目标为
-  `src/xcode/harness/memory/`，拆分 manager、parsing 和公开入口。
-- 更新 assembly、测试、patch target、logger name 和全部 import。
-- 删除 `src/xcode/experimental/__init__.py` 和整个
-  `src/xcode/experimental/` 目录。
-- 删除 `EXPERIMENTAL_FEATURE_GROUPS` 和聚合的 `experimental` enable switch。
-- Memory 使用独立、正式但可选的 group/config。
-- 更新 `CONFIG.md`、`README.md`、`docs/code-organization.md`、
-  `docs/source-review.md` 和相关现状报告。
-- 添加测试，禁止重新引入 `xcode.experimental` import 或
-  `src/xcode/experimental/` 路径。
-
-该变更是后续 MCP 和 Memory 修改的前置任务，避免继续在将被删除的模块路径上
-累积实现。未来如有 Python 原生扩展的明确需求，应另行设计显式安装、版本化 API
-且被视为受信任本地代码的 Extension SDK，不恢复项目目录自动扫描执行机制。
-
 ## P1 · Skill model-driven activation 闭环不完整
 
 Xcode 已向模型注入 skill name/description catalog，也提供 `load_skill`，但

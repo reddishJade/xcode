@@ -34,7 +34,6 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
     ├── agent/
     ├── ai/
     ├── evals/
-    ├── experimental/
     └── tests/
 ```
 
@@ -108,6 +107,9 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `mcp/` | 核心 MCP stdio client、schema cache 和动态工具集成 |
 | `mcp/client.py` | MCP stdio JSON-RPC 客户端 |
 | `mcp/tools.py` | MCP 配置、schema cache 和动态 ToolSpec 构建 |
+| `memory/` | 正式 opt-in Memory 管理与解析 |
+| `memory/manager.py` | `MEMORY.md`、BM25 召回、consolidation 和 LRU |
+| `memory/parsing.py` | 记忆块数据类型、解析和评分辅助 |
 | `agent_runtime/` | StructuredAgent 运行时 |
 | `agent_runtime/structured.py` | `StructuredAgent`（harness 对 agent loop 的适配器） |
 | `agent_runtime/subagent.py` | `ManagedSubagentRunner`、subagent 工具 |
@@ -199,15 +201,6 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `adapters/registry.py` | 外部 benchmark adapter registry |
 | `adapters/swebench.py` | SWE-bench predictions helper |
 
-### `src/xcode/experimental/` — 实验性扩展
-
-| 模块 | group | 职责 |
-|---|---|---|
-| `memory.py` | `memory` | `MEMORY.md` 记忆块、BM25 召回、压缩摘要 |
-| `memory_parsing.py` | internal | 记忆块解析 |
-
----
-
 ## 工具组与默认可见工具
 
 Core tools（默认）：
@@ -217,7 +210,7 @@ Core tools（默认）：
 `skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `memory`（仅 hook）→ `daemon`（仅服务）
 
 MCP 不使用 enabled group；存在 `.local/mcp_config.json` 时由核心 runtime 自动
-注册。`experimental` 暂时只展开为 `memory`。
+注册。Memory 使用独立的 `memory` group。
 
 ---
 

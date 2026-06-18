@@ -128,9 +128,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertIsNone(app.mailbox)
         self.assertIsNone(app.progress)
 
-    def test_experimental_group_enables_remaining_experimental_components(
-        self,
-    ) -> None:
+    def test_removed_experimental_group_does_not_enable_memory(self) -> None:
         runtime_config = XcodeRuntimeConfig(
             tools=ToolsRuntimeConfig(enabled_groups=("core", "experimental")),
         )
@@ -145,7 +143,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertNotIn("create_task", names)
         self.assertNotIn("send_mailbox_message", names)
         self.assertNotIn("save_task_progress", names)
-        self.assertIsNotNone(_layered_compactor(app).on_compact)
+        self.assertIsNone(_layered_compactor(app).on_compact)
         self.assertIsNone(app.daemon)
         self.assertIsNone(app.mailbox)
         self.assertIsNone(app.progress)

@@ -104,12 +104,10 @@ Do not run end-to-end suites that require specific external environment variable
 
 ---
 
-## Experimental Features
+## Extension Boundaries
 
-- `src/xcode/experimental/` is opt-in.
-- Each experimental capability must have a dedicated `tools.enabled_groups` entry.
-- `experimental` is the total enable switch and must expand only to experimental groups.
-- `bm25` is an internal implementation detail of `memory`, not a separate group.
-- New experimental tools must document group, risk, schema, read-only behavior, and tests.
-
-Current experimental groups are documented in `CONFIG.md` and `docs/code-organization.md`.
+- Do not add an `experimental` package or aggregate enable switch.
+- MCP is part of the core runtime and must remain a no-op when no configuration exists.
+- Memory is a formal opt-in capability with its own `memory` group.
+- `bm25` is an internal implementation detail of Memory, not a separate group.
+- New tools must document group, risk, schema, read-only behavior, and tests.

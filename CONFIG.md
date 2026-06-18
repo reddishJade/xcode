@@ -159,9 +159,8 @@
 | `tasks` | 可选 | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
 | `mailbox` | 可选 | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
 | `progress` | 可选 | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
-| `memory` | experimental | 启用 `MemoryManager` 压缩摘要 consolidation |
+| `memory` | 可选 | 启用 `MemoryManager` 压缩摘要 consolidation |
 | `daemon` | 可选 | 构造 `HeartbeatDaemon` |
-| `experimental` | 总开关 | 展开为 `memory` |
 
 `shell` 工具是 OpenAI Responses builtin 的本地执行桥，接收 `commands` 数组。`search_tools` 工具按关键字搜索已注册工具。
 MCP 属于核心运行时：存在 `.local/mcp_config.json` 时自动注册动态

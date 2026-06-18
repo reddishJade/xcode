@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from rank_bm25 import BM25Okapi
-from xcode.experimental.memory import MemoryManager, MemorySearchEvalCase
+from xcode.harness.memory import MemoryManager, MemorySearchEvalCase
 
 
 class TestBM25AndMemory(unittest.TestCase):
@@ -93,7 +93,7 @@ class TestBM25AndMemory(unittest.TestCase):
         self.assertIn("Incident 2", results[0])
 
     def test_memory_search_demotes_deprecated_records(self) -> None:
-        from xcode.experimental.memory_parsing import adjust_score, parse_memory_record
+        from xcode.harness.memory.parsing import adjust_score, parse_memory_record
 
         base = 1.0
         old = parse_memory_record(

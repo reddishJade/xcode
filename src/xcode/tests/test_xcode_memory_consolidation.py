@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from xcode.harness.agent_runtime.compaction import LayeredCompactor
-from xcode.experimental.memory import MemoryManager
+from xcode.harness.memory import MemoryManager
 
 
 class TestMemoryConsolidationHook(unittest.TestCase):

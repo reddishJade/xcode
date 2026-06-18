@@ -14,8 +14,7 @@ cli → coding_agent → harness → agent → ai
 ```
 
 核心 agent loop、工具执行、权限控制、上下文组装、会话恢复、文件快照和 CLI
-已经可用。MCP 已迁入正式 runtime package；memory 仍位于 `experimental/`
-等待迁移：
+已经可用。MCP 和 Memory 均已迁入正式 runtime package：
 
 - Skill 和 MCP 是核心能力，应按基础范式兼容要求长期维护。
 - Memory 是正式能力，但在主动召回效果得到 eval 验证前可以保持可配置启用。
@@ -432,8 +431,8 @@ ExecutionModeState
 
 核心文件：
 
-- `src/xcode/experimental/memory.py`
-- `src/xcode/experimental/memory_parsing.py`
+- `src/xcode/harness/memory/manager.py`
+- `src/xcode/harness/memory/parsing.py`
 
 已实现：
 
@@ -688,9 +687,7 @@ Skill 和 MCP 的基础范式兼容属于产品核心方向，但具体范围需
 - 仅为架构完整性引入 OpenTelemetry。
 - Skill marketplace、harness 语义向量匹配和专用脚本执行引擎。
 
-## 正式能力迁移方向
-
-当前目录和 group 分类需要与目标产品定位分离。
+## 正式能力方向
 
 ### Skill
 
@@ -700,19 +697,16 @@ Skill 和 MCP 的基础范式兼容属于产品核心方向，但具体范围需
 
 ### MCP
 
-- 从 `experimental/` 迁入正式 runtime 模块。
-- 将 `mcp` 视为核心 group；无 MCP 配置时自然注册为空。
+- 已迁入正式 runtime 模块并由核心装配自动发现；无 MCP 配置时自然注册为空。
 - 基础兼容目标是可靠连接官方示例和常见 stdio tools server，而不是一次实现
   MCP 所有可选 feature。
 
 ### Memory
 
-- 从 `experimental/` 迁入正式 runtime 模块。
-- 保持独立 group 或配置开关，不与 `experimental` 总开关绑定。
+- 已迁入正式 runtime 模块，并保持独立 `memory` group。
 - consolidation 可正式使用；主动 recall 需通过 eval 后再默认接入。
 
 ## 审查边界
 
 - 本报告是源码静态审查，不代表所有路径均经过端到端运行验证。
 - “已实现”表示存在明确实现和装配调用链，不表示生产成熟度或完整测试覆盖。
-- experimental group 默认不应视为稳定公共 API。

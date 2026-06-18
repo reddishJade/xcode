@@ -1,6 +1,6 @@
 """记忆块解析与评分辅助。
 
-从 memory.py 提取的数据类型、字段解析、评分调整和分词工具函数。
+从 manager.py 提取的数据类型、字段解析、评分调整和分词工具函数。
 """
 
 from __future__ import annotations

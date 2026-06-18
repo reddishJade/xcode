@@ -183,16 +183,12 @@ Before marking any change done, verify:
 - Do not embed multi-line scripts directly in shell commands.
 - Prefer project utilities or tests over ad hoc scripts when the project already has a fitting entry point.
 
-### Experimental Features
+### Extension Boundaries
 
-See `CONFIG.md` and `docs/code-organization.md` for the current group list and internal implementation details.
-
-Rules:
-
-- `src/xcode/experimental/` is opt-in.
-- Each experimental capability must have a dedicated `tools.enabled_groups` entry.
-- `experimental` is the total enable switch and must expand to all experimental groups.
-- New experimental tools must document: group, risk, schema, read-only behavior, and tests.
+- Do not add an `experimental` package or aggregate enable switch.
+- MCP is a core runtime capability and must remain safe when no configuration exists.
+- Memory is a formal opt-in capability with its own `memory` group.
+- New tools must document group, risk, schema, read-only behavior, and tests.
 
 ---
 

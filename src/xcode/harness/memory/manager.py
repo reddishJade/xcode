@@ -12,7 +12,7 @@ from pathlib import Path
 from collections.abc import Sequence
 
 from rank_bm25 import BM25Okapi
-from xcode.experimental.memory_parsing import (
+from .parsing import (
     MemoryRecord,
     MemorySearchEvalCase,
     MemorySearchEvalResult,

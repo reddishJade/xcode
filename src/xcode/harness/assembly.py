@@ -57,12 +57,6 @@ if TYPE_CHECKING:
     from xcode.harness.daemon import HeartbeatDaemon
     from xcode.harness.mailbox import AgentMailbox
 
-EXPERIMENTAL_FEATURE_GROUPS = frozenset(
-    {
-        "memory",
-    }
-)
-
 
 @dataclass(frozen=True)
 class OptInServices:
@@ -123,10 +117,7 @@ def resolve_config(
 
 
 def effective_enabled_groups(configured_groups: tuple[str, ...]) -> set[str]:
-    enabled = set(configured_groups)
-    if "experimental" in enabled:
-        enabled.update(EXPERIMENTAL_FEATURE_GROUPS)
-    return enabled
+    return set(configured_groups)
 
 
 # ── 共享基础设施 ──
@@ -148,7 +139,7 @@ def build_shared_infra(
     )
     on_compact = None
     if "memory" in enabled:
-        from xcode.experimental.memory import MemoryManager
+        from xcode.harness.memory import MemoryManager
 
         on_compact = MemoryManager(project_root).consolidate
 
