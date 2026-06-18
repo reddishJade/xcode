@@ -148,6 +148,8 @@
 |---|---|---|---|
 | `trust_project_skills` | bool | `false` | 是否信任并披露项目内 `.xcode/skills/` 与 `.agents/skills/`；默认仅发现用户级技能 |
 
+无可见 skill 时不注册 `load_skill`，也不向上下文注入空 catalog。
+
 ### 工具组
 
 | group | 状态 | 工具 |

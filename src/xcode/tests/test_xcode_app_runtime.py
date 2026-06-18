@@ -27,6 +27,7 @@ from xcode.harness.config import (
     ObservabilityRuntimeConfig,
     PathsRuntimeConfig,
     SecurityRuntimeConfig,
+    SkillsRuntimeConfig,
     ToolsRuntimeConfig,
     XcodeRuntimeConfig,
 )
@@ -62,7 +63,11 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertNotIn("static_analysis", names)
 
     def test_default_tool_groups_do_not_construct_optional_groups(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _patched_provider_bundle([]),
+            patch.object(Path, "home", return_value=Path(tmp) / "home"),
+        ):
             with patch(
                 "xcode.coding_agent.tools.worktree.WorktreeTaskRunner",
                 side_effect=AssertionError,
@@ -85,9 +90,73 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 "ls",
                 "bash",
                 "search_tools",
-                "load_skill",
             },
         )
+
+    def test_matching_task_loads_discovered_skill_before_execution(self) -> None:
+        class SkillSelectingProvider(StreamProvider):
+            """模拟模型按 catalog 指令激活匹配技能。"""
+
+            def __init__(self) -> None:
+                self.calls: list[tuple[list[Message], list[ToolDefinition]]] = []
+
+            async def stream(
+                self,
+                messages: list[Message],
+                tools: list[ToolDefinition],
+                options: StreamOptions | None = None,
+                **kwargs: Any,
+            ) -> AsyncIterator[ProviderEvent]:
+                self.calls.append((messages, tools))
+                if len(self.calls) == 1:
+                    yield ToolCallEvent(
+                        calls=[
+                            ToolCall(
+                                id="skill-1",
+                                name="load_skill",
+                                input={"name": "code-review"},
+                            )
+                        ]
+                    )
+                    yield FinalMessage(content="", stop_reason="tool_use")
+                    return
+                yield TextDelta(chunk="review complete")
+                yield FinalMessage(content="", stop_reason="end_turn")
+
+        provider = SkillSelectingProvider()
+        bundle = SimpleNamespace(
+            llm=provider,
+            llms={"main": provider, "subagent": provider},
+            embedding=object(),
+        )
+        runtime_config = XcodeRuntimeConfig(
+            skills=SkillsRuntimeConfig(trust_project_skills=True),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = root / ".xcode" / "skills" / "review"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\n"
+                "name: code-review\n"
+                "description: Review code changes.\n"
+                "---\n\n"
+                "Follow the review workflow.",
+                encoding="utf-8",
+            )
+            with patch("xcode.harness.assembly.build_providers", return_value=bundle):
+                app = build_app(project_root=root, runtime_config=runtime_config)
+            result = app.agent.run("Review this code change.")
+
+        self.assertEqual(result.answer, "review complete")
+        self.assertEqual(len(provider.calls), 2)
+        first_messages, first_tools = provider.calls[0]
+        self.assertIn("load_skill", {tool.name for tool in first_tools})
+        first_context = "\n".join(str(message) for message in first_messages)
+        self.assertIn("call load_skill", first_context)
+        self.assertIn("Review code changes.", first_context)
+        second_context = "\n".join(str(message) for message in provider.calls[1][0])
+        self.assertIn("Follow the review workflow.", second_context)
 
     def test_default_runtime_discovers_configured_mcp_tools(self) -> None:
         mcp_tool = ToolSpec(

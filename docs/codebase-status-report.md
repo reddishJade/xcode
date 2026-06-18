@@ -118,6 +118,10 @@ cli → coding_agent → harness → agent → ai
   - `SkillIndexCollector`：技能摘要。
 - Skill catalog 会转义 XML 属性、正文和非法控制字符，并限制 description
   长度。
+- Skill catalog 明确要求 description 匹配任务时先调用 `load_skill`，并要求
+  无明确匹配时不加载。
+- `load_skill.name` schema 使用当前可见 skill names enum；无可见 skill 时不
+  注册工具，也不注入空 catalog。
 - 项目级 skill 默认不披露；仅在 `skills.trust_project_skills=true` 时加入
   discovery，用户级 skill 保持默认发现。
 

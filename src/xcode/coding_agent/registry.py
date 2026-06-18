@@ -47,7 +47,11 @@ def build_project_scoped_registry(
             env=env,
         ),
     )
-    if "skills" in enabled and skill_registry is not None:
+    if (
+        "skills" in enabled
+        and skill_registry is not None
+        and skill_registry.available_names()
+    ):
         from xcode.harness.skills_registry import build_load_skill_tool
 
         registry += (build_load_skill_tool(skill_registry),)

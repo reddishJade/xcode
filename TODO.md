@@ -13,23 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P1 · Skill model-driven activation 闭环不完整
-
-Xcode 已向模型注入 skill name/description catalog，也提供 `load_skill`，但
-catalog 没有明确指示“任务匹配 description 时应在执行前加载 skill”。这使
-skill 是否被使用依赖模型偶然选择工具。
-
-Agent Skills 的基础范式是模型读取 catalog 后自行判断并激活，不要求 harness
-先实现关键词或向量语义匹配。
-
-需要：
-
-- 在 skill catalog 中加入稳定、简短的 activation 行为指令。
-- 任务明确匹配 description 时，要求模型在执行前调用 `load_skill`。
-- `load_skill.name` schema 使用当前 discovered skill names 的 enum。
-- 没有可用 skill 时不注册 `load_skill`，也不注入空 catalog。
-- 添加真实任务触发、多个候选 skill、无匹配 skill 和错误名称测试。
-
 ## P1 · Skill activation 缺少资源根目录和生命周期管理
 
 `load_skill` 返回正文与 references 元数据，但没有提供 skill root，也没有跟踪

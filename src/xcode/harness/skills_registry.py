@@ -155,6 +155,7 @@ def _parse_frontmatter(text: str) -> dict[str, Any] | None:
 # ── 引用文件扫描与加载 ──
 
 _REFERENCE_MAX_BYTES = 50 * 1024  # 单个引用文件大小上限
+_CATALOG_DESCRIPTION_MAX_CHARS = 768
 
 
 def _collect_reference_files(ref_dir: Path) -> list[Path]:
@@ -352,6 +353,10 @@ class SkillRegistry:
             skill.to_summary() for skill in self._skills.values() if not skill.hidden
         ]
 
+    def available_names(self) -> tuple[str, ...]:
+        """返回可向模型披露和激活的技能名称。"""
+        return tuple(sorted(summary.name for summary in self.list_summaries()))
+
     def load(self, skill_name: str) -> SkillDef | None:
         """懒加载技能正文。
 
@@ -495,6 +500,7 @@ def build_load_skill_tool(
             return f"<skill name={safe_name}>\n{skill.content}{ref_suffix}\n</skill>"
         return f"<skill name={safe_name}>\n{skill.description}{ref_suffix}\n</skill>"
 
+    available_names = registry.available_names()
     return ToolSpec(
         name="load_skill",
         description=(
@@ -512,6 +518,7 @@ def build_load_skill_tool(
                 "name": {
                     "type": "string",
                     "description": "Name of the skill to load",
+                    "enum": list(available_names),
                 },
                 "reference": {
                     "type": "string",
@@ -542,12 +549,21 @@ class SkillIndexCollector:
         summaries = self._registry.list_summaries()
         if not summaries:
             return []
-        lines: list[str] = ["<available-skills>"]
+        lines: list[str] = [
+            "<skill-activation>",
+            (
+                "When the user task clearly matches a skill description below, "
+                "call load_skill with that exact name before performing the task. "
+                "Do not load a skill when no description clearly matches."
+            ),
+            "</skill-activation>",
+            "<available-skills>",
+        ]
         for s in summaries:
             safe_name = _xml_escape_attr(s.name)
             description = s.description
-            if len(description) > 1024:
-                description = f"{description[:1021]}..."
+            if len(description) > _CATALOG_DESCRIPTION_MAX_CHARS:
+                description = f"{description[: _CATALOG_DESCRIPTION_MAX_CHARS - 3]}..."
             safe_description = _xml_escape_content(description)
             lines.append(f"  <skill name={safe_name}>{safe_description}</skill>")
         lines.append("</available-skills>")
