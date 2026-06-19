@@ -107,7 +107,6 @@ def _resolve_api_key(
     if configured:
         return configured
     provider_candidates = {
-        "anthropic_messages": ("ANTHROPIC_API_KEY",),
         "chatglm": ("CHATGLM_API_KEY", "ZHIPUAI_API_KEY", "BIGMODEL_API_KEY"),
         "chatglm_chat": ("CHATGLM_API_KEY", "ZHIPUAI_API_KEY", "BIGMODEL_API_KEY"),
         "deepseek_chat": ("DEEPSEEK_API_KEY",),
@@ -173,12 +172,6 @@ def _build_llm_profile(
         "api_key": api_key,
         "model": profile.chat_model,
     }
-    # Anthropic Messages API 特殊处理原因：
-    # 1. 官方 SDK 无 base_url 参数（非 OpenAI-compatible）
-    # 2. 无 thinking/reasoning_effort 等扩展参数
-    if transport == "anthropic_messages":
-        return provider_cls(**kwargs)
-
     kwargs.update(
         {
             "base_url": profile.base_url,

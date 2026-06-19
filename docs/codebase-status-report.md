@@ -590,6 +590,8 @@ ExecutionModeState
 - main/subagent/fallback profile 和 profile 继承。
 - OpenAI、DeepSeek、ChatGLM、MiMo、OpenAI-compatible 和 faux provider。
 - `PROVIDER_REGISTRY` 已静态注册所有内置 transport，不是 stub。
+- runtime 配置仅声明已有 provider 实现的 transport；未知 transport 在配置
+  加载时明确失败，不静默回退。
 - `ProviderRuntime` 支持：
   - 本地最小调用间隔。
   - timeout/connection/429/500/502/503/529 临时错误识别。

@@ -8,7 +8,6 @@ from typing import Any, Literal, Union, get_origin, get_type_hints
 
 ProviderTransport = Literal[
     "openai_chat",
-    "anthropic_messages",
     "chatglm_chat",
     "deepseek_chat",
     "mimo_chat",
@@ -476,8 +475,6 @@ def _load_provider_transport(
     match value:
         case "openai_chat":
             return "openai_chat"
-        case "anthropic_messages":
-            return "anthropic_messages"
         case "chatglm_chat":
             return "chatglm_chat"
         case "deepseek_chat":
@@ -485,7 +482,11 @@ def _load_provider_transport(
         case "mimo_chat":
             return "mimo_chat"
         case _:
-            return default
+            raise ValueError(
+                f"Unsupported provider transport: {value!r}. "
+                "Supported transports: openai_chat, chatglm_chat, "
+                "deepseek_chat, mimo_chat"
+            )
 
 
 def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:

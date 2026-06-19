@@ -13,17 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P1 · PROVIDER_REGISTRY 不完整
-
-`ProviderTransport` 和 factory 分支接受 `anthropic_messages`，但
-`PROVIDER_REGISTRY` 没有对应 provider。合法配置会在运行时失败。
-
-需要：
-
-- 若 Anthropic provider 已确定进入当前版本，完成实现和注册。
-- 否则删除 transport literal、API key 映射和 factory 特殊分支。
-- 添加“所有声明 transport 均可解析”的注册表一致性测试。
-
 ## P2 · MCP tools/list 不支持分页和动态刷新
 
 `McpClient.list_tools()` 只发送一次空参数请求，忽略 `nextCursor`。

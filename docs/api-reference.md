@@ -93,7 +93,7 @@ def build_app(project_root, env_files=None, agent_config=None,
 
 ### 3.2 配置 `config.py`
 
-`ProviderTransport = Literal["openai_chat", "anthropic_messages", "chatglm_chat", "deepseek_chat", "mimo_chat"]`
+`ProviderTransport = Literal["openai_chat", "chatglm_chat", "deepseek_chat", "mimo_chat"]`
 `ExecutionMode = Literal["plan", "build", "act"]`
 `PermissionMode = Literal["strict", "normal", "permissive"]`
 `ApprovalPolicy = Literal["always", "never"]`

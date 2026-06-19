@@ -16,7 +16,7 @@
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `transport` | string | `"openai_chat"` | `openai_chat`、`deepseek_chat`、`mimo_chat`、`chatglm_chat`、`anthropic_messages` |
+| `transport` | string | `"openai_chat"` | `openai_chat`、`deepseek_chat`、`mimo_chat`、`chatglm_chat` |
 | `chat_model` | string | `"deepseek-v4-flash"` | 聊天模型名 |
 | `base_url` | string | `""` | OpenAI-compatible API 地址 |
 | `api_key` | string | `""` | 显式 API key；留空按环境变量查找 |

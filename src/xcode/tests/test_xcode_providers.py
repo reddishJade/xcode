@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from typing import Any
+from typing import Any, get_args
 from xcode.ai.events import TextDelta, ToolCallEvent
 from xcode.ai.types import ToolDefinition
 from dotenv import dotenv_values
@@ -18,9 +19,14 @@ from xcode.ai.providers.factory import (
     get_config_value,
     _resolve_api_key,
 )
+from xcode.ai.providers import PROVIDER_REGISTRY
 from xcode.ai.providers.openai import OpenAIChatProvider
 from xcode.ai.providers.chatglm import ChatGLMProvider
-from xcode.harness.config import ModelProfileRuntimeConfig
+from xcode.harness.config import (
+    ModelProfileRuntimeConfig,
+    ProviderTransport,
+    load_runtime_config,
+)
 
 
 # ── 测试辅助：创建 mock OpenAI 客户端 ──
@@ -71,6 +77,33 @@ class FakeStreamFunction:
 
 
 class XcodeProviderEnvTests(unittest.TestCase):
+    def test_all_declared_runtime_transports_are_registered(self) -> None:
+        """每个配置 transport 都必须有可构造 provider。"""
+        declared = set(get_args(ProviderTransport))
+        registered = set(PROVIDER_REGISTRY) - {"faux_chat"}
+
+        self.assertEqual(declared, registered)
+
+    def test_unsupported_anthropic_transport_fails_fast(self) -> None:
+        """未实现的 Anthropic transport 不再静默回退为 OpenAI。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "xcode.config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "provider": {
+                            "model_profiles": {
+                                "main": {"transport": "anthropic_messages"}
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "Unsupported provider transport"):
+                load_runtime_config(config_path)
+
     def test_env_file_loading_and_precedence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env_file = Path(temp_dir) / ".env"
