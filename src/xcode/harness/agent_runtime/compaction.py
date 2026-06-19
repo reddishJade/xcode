@@ -13,6 +13,7 @@ from typing import Any
 from xcode.agent.compaction import estimate_tokens
 from xcode.agent.message_converter import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
 from xcode.agent.config import CompactInstructions
+from ..skill_activation import is_skill_activation_content
 from ..skills import ToolSpec
 
 """分层上下文压缩工具。"""
@@ -67,6 +68,7 @@ class LayeredCompactor:
     def __call__(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         compacted = stale_snip_file_reads(messages)
         preserved_tool_results = latest_read_file_tool_result_ids(compacted)
+        preserved_tool_results.update(activated_skill_tool_result_ids(compacted))
         compacted = budget_large_tool_outputs(
             compacted,
             large_tool_output_chars=self.large_tool_output_chars,
@@ -212,6 +214,21 @@ def latest_read_file_tool_result_ids(messages: list[dict[str, Any]]) -> set[str]
     return set(path_to_latest.values())
 
 
+def activated_skill_tool_result_ids(messages: list[dict[str, Any]]) -> set[str]:
+    """返回包含完整技能激活内容的 tool_result id。"""
+    result_ids: set[str] = set()
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not (isinstance(part, dict) and part.get("type") == "tool_result"):
+                continue
+            if is_skill_activation_content(part.get("content", "")):
+                result_ids.add(str(part.get("tool_use_id", "")))
+    return {result_id for result_id in result_ids if result_id}
+
+
 def _read_file_tool_paths(messages: list[dict[str, Any]]) -> dict[str, str]:
     """提取所有 read_file 工具调用的 tool_use_id → 文件路径映射。"""
     tool_use_id_to_path: dict[str, str] = {}
@@ -248,6 +265,8 @@ def budget_large_tool_outputs(
 ) -> list[dict[str, Any]]:
     """在 token 压力大时，对超大工具结果进行头尾保留裁剪。"""
     compacted = deepcopy(messages)
+    protected_result_ids = set(preserve_tool_result_ids or ())
+    protected_result_ids.update(activated_skill_tool_result_ids(compacted))
     current_tokens = estimate_message_tokens(compacted)
     trigger_threshold = compact_token_threshold * budget_trigger_token_ratio
 
@@ -260,10 +279,7 @@ def budget_large_tool_outputs(
             for part in content:
                 if isinstance(part, dict) and part.get("type") == "tool_result":
                     tool_use_id = str(part.get("tool_use_id", ""))
-                    if (
-                        preserve_tool_result_ids
-                        and tool_use_id in preserve_tool_result_ids
-                    ):
+                    if tool_use_id in protected_result_ids:
                         continue
                     tool_content = part.get("content", "")
                     if (
@@ -365,10 +381,20 @@ def summarize_messages(
         effective_recent = max_recent_messages
 
     recent_start = max(1, len(messages) - effective_recent)
-    older = messages[1:recent_start]
+    protected_indices = _activated_skill_message_indices(messages)
+    protected_older = [
+        message
+        for index, message in enumerate(messages[1:recent_start], start=1)
+        if index in protected_indices
+    ]
+    older = [
+        message
+        for index, message in enumerate(messages[1:recent_start], start=1)
+        if index not in protected_indices
+    ]
 
     if not older:
-        return messages
+        return [messages[0], *protected_older, *messages[recent_start:]]
 
     if summarize_fn:
         raw = summarize_fn(older)
@@ -393,7 +419,41 @@ def summarize_messages(
         "role": "user",
         "content": summary_content,
     }
-    return [messages[0], summary, *messages[recent_start:]]
+    return [messages[0], summary, *protected_older, *messages[recent_start:]]
+
+
+def _activated_skill_message_indices(messages: list[dict[str, Any]]) -> set[int]:
+    """返回需成对保留的 load_skill tool_use 与激活结果消息索引。"""
+    activation_ids: set[str] = set()
+    protected_indices: set[int] = set()
+    for index, message in enumerate(messages):
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not (isinstance(part, dict) and part.get("type") == "tool_result"):
+                continue
+            if not is_skill_activation_content(part.get("content", "")):
+                continue
+            tool_use_id = str(part.get("tool_use_id", ""))
+            if tool_use_id:
+                activation_ids.add(tool_use_id)
+                protected_indices.add(index)
+
+    if not activation_ids:
+        return protected_indices
+    for index, message in enumerate(messages):
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        if any(
+            isinstance(part, dict)
+            and part.get("type") == "tool_use"
+            and str(part.get("id", "")) in activation_ids
+            for part in content
+        ):
+            protected_indices.add(index)
+    return protected_indices
 
 
 def summarize_inactive_branches(

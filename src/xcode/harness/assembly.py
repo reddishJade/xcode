@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from xcode.harness.execution_env import ExecutionEnv
 
@@ -56,6 +56,7 @@ from xcode.ai.providers.factory import (
 if TYPE_CHECKING:
     from xcode.harness.daemon import HeartbeatDaemon
     from xcode.harness.mailbox import AgentMailbox
+    from xcode.harness.skills_registry import SkillRegistry
 
 
 @dataclass(frozen=True)
@@ -228,7 +229,12 @@ def build_tool_registry(
     env: ExecutionEnv | None = None,
     skills_dir: Path | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
-) -> tuple[tuple[ToolSpec, ...], ShellSpec, tuple[Callable[[], None], ...], Any]:
+) -> tuple[
+    tuple[ToolSpec, ...],
+    ShellSpec,
+    tuple[Callable[[], None], ...],
+    SkillRegistry | None,
+]:
     from xcode.coding_agent.tools import detect_shell
 
     enabled = effective_enabled_groups(runtime_config.tools.enabled_groups)
@@ -477,7 +483,7 @@ def build_agent(
     compactor: LayeredCompactor | None = None,
     fallback_provider: ModelProvider | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
-    skill_registry: Any = None,
+    skill_registry: SkillRegistry | None = None,
 ) -> StructuredAgent:
     hook_manager = None
     if contextual_state is not None:

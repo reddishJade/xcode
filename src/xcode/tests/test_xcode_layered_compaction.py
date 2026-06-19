@@ -65,6 +65,54 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             self.assertIn("[Compressed]", compacted[1]["content"])
             self.assertEqual(compacted[-1]["content"], "old 5")
 
+    def test_compaction_preserves_activated_skill_tool_pair(self) -> None:
+        """压缩保留已激活技能的 tool_use 与完整结果。"""
+        activation = (
+            '<skill name="review" root="C:/skills/review" activated="true">\n'
+            '<skill-activation-state>{"name": "review"}</skill-activation-state>\n'
+            "FULL_SKILL_BODY\n"
+            "</skill>"
+        )
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "root"},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "skill-1",
+                        "name": "load_skill",
+                        "input": {"name": "review"},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "skill-1",
+                        "content": activation,
+                    }
+                ],
+            },
+            {"role": "user", "content": "later one"},
+            {"role": "assistant", "content": "later two"},
+            {"role": "user", "content": "latest"},
+        ]
+        compactor = LayeredCompactor(
+            max_recent_messages=2,
+            keep_recent_tool_results=0,
+            max_tool_result_chars=10,
+        )
+
+        compacted = compactor(messages)
+        rendered = str(compacted)
+
+        self.assertIn("load_skill", rendered)
+        self.assertIn("skill-1", rendered)
+        self.assertIn("FULL_SKILL_BODY", rendered)
+
     def test_summarize_inactive_branches_replaces_branch_run(self) -> None:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": "root"},

@@ -126,6 +126,8 @@ class StructuredAgent:
 
     def clear_history(self) -> None:
         self._history.clear()
+        if self._runtime.skill_registry is not None:
+            self._runtime.skill_registry.clear_activations()
         self._reset_provider_conversation_state()
 
     @property
@@ -159,6 +161,8 @@ class StructuredAgent:
 
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history.load(messages)
+        if self._runtime.skill_registry is not None:
+            self._runtime.skill_registry.restore_activations(messages)
         self._reset_provider_conversation_state()
 
     def set_resumed_notice(self, notice: str) -> None:
@@ -166,6 +170,8 @@ class StructuredAgent:
 
     def load_run_state(self, run_state: RunState) -> None:
         self._history.load_run_state(run_state)
+        if self._runtime.skill_registry is not None:
+            self._runtime.skill_registry.restore_activations(run_state.messages)
         self._reset_provider_conversation_state()
         restored = self._history.restore_mode(run_state)
         if restored is not None:

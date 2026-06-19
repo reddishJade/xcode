@@ -80,6 +80,7 @@ def _make_skill_tree(
     skil_md_content: str = "",
     references: dict[str, str] | None = None,
     scripts: dict[str, str] | None = None,
+    assets: dict[str, str] | None = None,
 ) -> Path:
     """在 base/parts.../ 下创建技能目录树并返回路径。
 
@@ -89,6 +90,7 @@ def _make_skill_tree(
         skil_md_content: SKILL.md 文件内容（空字符串表示不创建）
         references: references/ 下的文件名 -> 内容映射
         scripts: scripts/ 下的文件名 -> 内容映射
+        assets: assets/ 下的文件名 -> 内容映射
     """
     skill_dir = base.joinpath(*parts)
     skill_dir.mkdir(parents=True, exist_ok=True)
@@ -112,6 +114,14 @@ def _make_skill_tree(
             script_path.parent.mkdir(parents=True, exist_ok=True)
             script_path.write_text(content, encoding="utf-8")
             os.chmod(script_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IROTH)
+
+    if assets:
+        assets_dir = skill_dir / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        for name, content in assets.items():
+            asset_path = assets_dir / name
+            asset_path.parent.mkdir(parents=True, exist_ok=True)
+            asset_path.write_text(content, encoding="utf-8")
 
     return skill_dir
 
@@ -452,6 +462,62 @@ class TestSkillReferences(unittest.TestCase):
             self.assertIn("readme.md", output)
             self.assertNotIn("# Guide", output)
             self.assertNotIn("# Readme", output)
+
+    def test_activation_exposes_root_and_resource_paths_without_contents(self) -> None:
+        """激活输出包含 root 与资源相对路径，但不主动读取资源正文。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill_dir = _make_skill_tree(
+                root,
+                ".xcode",
+                "skills",
+                "resources",
+                skil_md_content=(
+                    "---\nname: resource-skill\ndescription: Resources.\n---\n\nBody."
+                ),
+                references={"guide.md": "REFERENCE_SECRET"},
+                scripts={"run.py": "SCRIPT_SECRET"},
+                assets={"templates/form.txt": "ASSET_SECRET"},
+            )
+            registry = SkillRegistry()
+            registry.discover(build_skill_search_dirs(root))
+            tool = build_load_skill_tool(registry)
+            output = tool.handler({"name": "resource-skill"})
+
+        self.assertIn(f'root="{skill_dir.resolve()}"', output)
+        self.assertIn('path="references/guide.md"', output)
+        self.assertIn('path="scripts/run.py"', output)
+        self.assertIn('path="assets/templates/form.txt"', output)
+        self.assertNotIn("REFERENCE_SECRET", output)
+        self.assertNotIn("SCRIPT_SECRET", output)
+        self.assertNotIn("ASSET_SECRET", output)
+
+    def test_repeated_activation_returns_short_status(self) -> None:
+        """同一会话重复激活不再次注入技能正文。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_skill_tree(
+                root,
+                ".xcode",
+                "skills",
+                "repeat",
+                skil_md_content=(
+                    "---\nname: repeat-skill\ndescription: Repeat.\n---\n\n"
+                    "FULL_SKILL_BODY"
+                ),
+            )
+            registry = SkillRegistry()
+            registry.discover(build_skill_search_dirs(root))
+            tool = build_load_skill_tool(registry)
+
+            first = tool.handler({"name": "repeat-skill"})
+            second = tool.handler({"name": "repeat-skill"})
+
+        self.assertIn("FULL_SKILL_BODY", first)
+        self.assertIn('activated="true"', first)
+        self.assertIn('status="already-active"', second)
+        self.assertNotIn("FULL_SKILL_BODY", second)
+        self.assertEqual(registry.activated_names(), ("repeat-skill",))
 
     def test_references_list_excludes_body_by_default(self) -> None:
         """默认 load_skill 的 <references> 块不含引用正文。"""

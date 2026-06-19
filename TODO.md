@@ -13,22 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P1 · Skill activation 缺少资源根目录和生命周期管理
-
-`load_skill` 返回正文与 references 元数据，但没有提供 skill root，也没有跟踪
-当前 session 已激活的 skill。skill 正文中的相对 scripts/assets 路径无法可靠
-解析，重复调用还会重复注入正文。
-
-需要：
-
-- activation output 包含 skill root。
-- 列出 `scripts/`、`references/` 和 `assets/` 的相对路径元数据，不主动读取
-  或执行。
-- session 内记录已激活 skill，避免重复注入全文。
-- compaction 保护已激活 skill 内容。
-- session resume 恢复 activation 状态。
-- 继续通过现有 read/bash 和 PermissionEngine 处理脚本，不增加独立脚本执行器。
-
 ## P1 · paths.skills_dir 配置已声明但未进入 Skill discovery
 
 `PathsRuntimeConfig.skills_dir`、`build_app(skills_dir=...)` 和

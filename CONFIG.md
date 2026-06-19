@@ -150,6 +150,10 @@
 
 无可见 skill 时不注册 `load_skill`，也不向上下文注入空 catalog。
 
+`load_skill` 首次激活返回 skill root、正文及 `scripts/`、`references/`、
+`assets/` 相对路径元数据，但不会主动读取或执行资源。相同 session 内重复激活
+只返回简短状态；activation 状态可从会话历史恢复，并在上下文压缩时保留。
+
 ### 工具组
 
 | group | 状态 | 工具 |

@@ -36,6 +36,7 @@ from ..observability import AuditRecord, HookManager, HookRecord, PermissionPoli
 from ..observability.permission_model import GrantStore, PolicyEvaluator
 from ..observability.permission_model import ExternalDirectory
 from ..skills import ApprovalCallback, ToolSpec
+from ..skills_registry import SkillRegistry
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
 from .execution_modes import ExecutionModeState, mode_notice
@@ -75,7 +76,7 @@ class AgentRuntimeConfig:
     fallback_provider: StreamProvider | None = None
     project_root: Path | None = None
     request_hygiene: RequestHygieneConfig | None = None
-    skill_registry: Any | None = None
+    skill_registry: SkillRegistry | None = None
     prompt_instructions: tuple[dict, ...] = ()
 
 
@@ -214,7 +215,7 @@ def build_loop_config(
     mode_state: ExecutionModeState,
     get_prompt_version: Callable[[], str],
     project_root: Path | None = None,
-    skill_registry: Any | None = None,
+    skill_registry: SkillRegistry | None = None,
     prompt_instructions: tuple[dict, ...] = (),
 ) -> AgentLoopConfig:
     gate_snapshot = gate.snapshot_for(registry)

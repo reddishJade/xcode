@@ -11,6 +11,8 @@ from pathlib import Path
 import shutil
 from collections.abc import Callable
 
+from xcode.harness.skill_activation import is_skill_activation_content
+
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 
@@ -285,6 +287,9 @@ class SessionStore:
                         data = record.content.get("data")
                         if isinstance(data, dict) and "content" in data:
                             content_str = str(data["content"])
+                            if is_skill_activation_content(content_str):
+                                new_records.append(record)
+                                continue
                             if len(content_str) > max_tool_result_chars:
                                 original_len = len(content_str)
                                 data["content"] = (

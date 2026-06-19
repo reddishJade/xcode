@@ -83,7 +83,7 @@ cli → coding_agent → harness → agent → ai
 
 ## L2 · Context Assembly
 
-状态：核心能力完整，生命周期管理有限。
+状态：核心能力完整。
 
 ### 核心文件
 
@@ -122,6 +122,12 @@ cli → coding_agent → harness → agent → ai
   无明确匹配时不加载。
 - `load_skill.name` schema 使用当前可见 skill names enum；无可见 skill 时不
   注册工具，也不注入空 catalog。
+- activation output 包含 skill root，以及 `scripts/`、`references/` 和
+  `assets/` 的相对路径元数据；资源内容不会被主动读取或执行。
+- session 内跟踪已激活 skill，重复 activation 返回简短状态，避免重复注入
+  正文。
+- compaction 保留 activation tool-use/result 对，session resume 从历史恢复
+  activation 状态。
 - 项目级 skill 默认不披露；仅在 `skills.trust_project_skills=true` 时加入
   discovery，用户级 skill 保持默认发现。
 
@@ -250,7 +256,7 @@ cli → coding_agent → harness → agent → ai
 - server stderr 脱敏和截断。
 - `LazyClientRef` 复用客户端，并暴露 pending/connected/failed/disabled 状态。
 - `SkillRegistry` 发现技能；`SkillIndexCollector` 注入摘要；
-  `load_skill` 懒加载正文。
+  `load_skill` 懒加载正文、资源路径和 session activation 状态。
 
 ### 当前限制
 

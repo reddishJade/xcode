@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import logging
 import os as _os
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 import xml.sax.saxutils as _xml
 
@@ -22,6 +24,10 @@ from xcode.agent.context_assembly import (
     ContextPriority,
 )
 from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.harness.skill_activation import (
+    activated_skill_names,
+    SKILL_ACTIVATION_STATE_TAG,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +87,16 @@ class SkillReference:
 
 
 @dataclass(frozen=True)
+class SkillResource:
+    """技能脚本或资产的相对路径元数据。"""
+
+    path: str
+    size: int = 0
+    skipped: bool = False
+    skipped_reason: str | None = None
+
+
+@dataclass(frozen=True)
 class SkillDef:
     """技能的完整定义，包含懒加载的正文内容和引用元数据。"""
 
@@ -91,6 +107,8 @@ class SkillDef:
     frontmatter: dict[str, object] = field(default_factory=dict)
     content: str | None = None
     references: tuple[SkillReference, ...] = ()
+    scripts: tuple[SkillResource, ...] = ()
+    assets: tuple[SkillResource, ...] = ()
 
     def to_summary(self) -> SkillSummary:
         return SkillSummary(
@@ -279,6 +297,51 @@ def _scan_skill_references(
     return references, ref_map
 
 
+def _scan_skill_resources(
+    skill_root: Path,
+    directory_name: str,
+) -> tuple[SkillResource, ...]:
+    """扫描 scripts/ 或 assets/，仅返回相对路径元数据。"""
+    resource_dir = skill_root / directory_name
+    if not resource_dir.is_dir():
+        return ()
+
+    resources: list[SkillResource] = []
+    for file_path in _collect_reference_files(resource_dir):
+        relative_path = file_path.relative_to(skill_root).as_posix()
+        if any(part.startswith(".") for part in relative_path.split("/")):
+            resources.append(
+                SkillResource(
+                    path=relative_path,
+                    skipped=True,
+                    skipped_reason="hidden",
+                )
+            )
+            continue
+        if file_path.is_symlink():
+            resources.append(
+                SkillResource(
+                    path=relative_path,
+                    skipped=True,
+                    skipped_reason="symlink",
+                )
+            )
+            continue
+        try:
+            size = file_path.stat().st_size
+        except OSError:
+            resources.append(
+                SkillResource(
+                    path=relative_path,
+                    skipped=True,
+                    skipped_reason="unreadable",
+                )
+            )
+            continue
+        resources.append(SkillResource(path=relative_path, size=size))
+    return tuple(sorted(resources, key=lambda resource: resource.path))
+
+
 # ── SkillRegistry ──
 
 
@@ -295,6 +358,7 @@ class SkillRegistry:
     def __init__(self) -> None:
         self._skills: dict[str, SkillDef] = {}
         self._ref_paths: dict[str, dict[str, Path]] = {}
+        self._activated: set[str] = set()
 
     def discover(self, search_dirs: list[tuple[Path, int]]) -> None:
         """扫描目录查找 SKILL.md 文件，缓存元数据。
@@ -331,6 +395,8 @@ class SkillRegistry:
                     body_start = _find_body_start(text)
 
                     refs, ref_map = _scan_skill_references(file_path.parent)
+                    scripts = _scan_skill_resources(file_path.parent, "scripts")
+                    assets = _scan_skill_resources(file_path.parent, "assets")
 
                     self._skills[name] = SkillDef(
                         name=name,
@@ -340,6 +406,8 @@ class SkillRegistry:
                         frontmatter=frontmatter,
                         content=body_start,
                         references=tuple(refs),
+                        scripts=scripts,
+                        assets=assets,
                     )
                     if ref_map:
                         self._ref_paths[name] = ref_map
@@ -356,6 +424,31 @@ class SkillRegistry:
     def available_names(self) -> tuple[str, ...]:
         """返回可向模型披露和激活的技能名称。"""
         return tuple(sorted(summary.name for summary in self.list_summaries()))
+
+    def activate(self, skill_name: str) -> tuple[SkillDef | None, bool]:
+        """激活技能并返回 (技能定义, 是否已激活)。"""
+        skill = self.load(skill_name)
+        if skill is None:
+            return None, False
+        already_activated = skill_name in self._activated
+        self._activated.add(skill_name)
+        return skill, already_activated
+
+    def clear_activations(self) -> None:
+        """清空当前会话的技能激活状态。"""
+        self._activated.clear()
+
+    def restore_activations(self, messages: Sequence[object]) -> None:
+        """从历史或压缩上下文中的激活标记恢复状态。"""
+        self.clear_activations()
+        for message in messages:
+            for name in activated_skill_names(message):
+                if name in self._skills:
+                    self._activated.add(name)
+
+    def activated_names(self) -> tuple[str, ...]:
+        """返回当前会话已激活技能名称。"""
+        return tuple(sorted(self._activated))
 
     def load(self, skill_name: str) -> SkillDef | None:
         """懒加载技能正文。
@@ -480,12 +573,27 @@ def build_load_skill_tool(
                 f"</skill>"
             )
 
+        activated_skill, already_activated = registry.activate(name)
+        assert activated_skill is not None
+        skill = activated_skill
+        safe_name = _xml_escape_attr(name)
+        safe_root = _xml_escape_attr(str(skill.file_path.parent.resolve()))
+        if already_activated:
+            return (
+                f"<skill-activation name={safe_name} root={safe_root} "
+                'status="already-active"/>'
+            )
+
         ref_xml_parts: list[str] = []
         if skill.references:
             ref_xml_parts.append("")
             ref_xml_parts.append("<references>")
             for ref in skill.references:
-                attrs = f'name={_xml_escape_attr(ref.name)} size="{ref.size}"'
+                relative_path = f"references/{ref.name}"
+                attrs = (
+                    f"name={_xml_escape_attr(ref.name)} "
+                    f'path={_xml_escape_attr(relative_path)} size="{ref.size}"'
+                )
                 if ref.truncated:
                     attrs += ' truncated="true"'
                 if ref.skipped:
@@ -493,12 +601,26 @@ def build_load_skill_tool(
                     attrs += f' skipped="true" reason={safe_reason}'
                 ref_xml_parts.append(f"  <reference {attrs}/>")
             ref_xml_parts.append("</references>")
-        ref_suffix = "\n".join(ref_xml_parts)
+        resource_xml_parts = [
+            *_render_resource_group("scripts", skill.scripts),
+            *_render_resource_group("assets", skill.assets),
+        ]
+        resource_suffix = "\n".join([*ref_xml_parts, *resource_xml_parts])
 
-        safe_name = _xml_escape_attr(name)
+        activation_state = json.dumps({"name": name}, ensure_ascii=False)
+        state_line = (
+            f"<{SKILL_ACTIVATION_STATE_TAG}>{activation_state}"
+            f"</{SKILL_ACTIVATION_STATE_TAG}>"
+        )
         if skill.content:
-            return f"<skill name={safe_name}>\n{skill.content}{ref_suffix}\n</skill>"
-        return f"<skill name={safe_name}>\n{skill.description}{ref_suffix}\n</skill>"
+            return (
+                f'<skill name={safe_name} root={safe_root} activated="true">\n'
+                f"{state_line}\n{skill.content}{resource_suffix}\n</skill>"
+            )
+        return (
+            f'<skill name={safe_name} root={safe_root} activated="true">\n'
+            f"{state_line}\n{skill.description}{resource_suffix}\n</skill>"
+        )
 
     available_names = registry.available_names()
     return ToolSpec(
@@ -529,6 +651,24 @@ def build_load_skill_tool(
             "additionalProperties": False,
         },
     )
+
+
+def _render_resource_group(
+    group_name: str,
+    resources: tuple[SkillResource, ...],
+) -> list[str]:
+    """渲染 scripts/assets 相对路径元数据。"""
+    if not resources:
+        return []
+    lines = ["", f"<{group_name}>"]
+    for resource in resources:
+        attrs = f'path={_xml_escape_attr(resource.path)} size="{resource.size}"'
+        if resource.skipped:
+            reason = _xml_escape_attr(resource.skipped_reason or "unknown")
+            attrs += f' skipped="true" reason={reason}'
+        lines.append(f"  <resource {attrs}/>")
+    lines.append(f"</{group_name}>")
+    return lines
 
 
 # ── SkillIndexCollector ──
