@@ -168,6 +168,43 @@ def compute_config_hash(server_config: dict[str, Any]) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def _cache_metadata(client: _mcp_mod.McpClient) -> dict[str, Any]:
+    """提取可用于验证缓存来源的协商元数据。"""
+    protocol_version = client.protocol_version
+    if protocol_version is None:
+        raise RuntimeError("MCP client has no negotiated protocol version")
+    return {
+        "protocol_version": protocol_version,
+        "server_info": client.server_info,
+    }
+
+
+def _compatible_cached_tools(
+    cached_entry: object,
+    config_hash: str,
+) -> list[dict[str, Any]] | None:
+    """返回来源可验证且配置未变化的缓存工具列表。"""
+    if not isinstance(cached_entry, dict):
+        return None
+    if cached_entry.get("config_hash") != config_hash:
+        return None
+    if cached_entry.get("protocol_version") not in (
+        _mcp_mod.SUPPORTED_PROTOCOL_VERSIONS
+    ):
+        return None
+    server_info = cached_entry.get("server_info")
+    if not isinstance(server_info, dict):
+        return None
+    server_name = server_info.get("name")
+    server_version = server_info.get("version")
+    if not isinstance(server_name, str) or not server_name.strip():
+        return None
+    if not isinstance(server_version, str) or not server_version.strip():
+        return None
+    tools = cached_entry.get("tools")
+    return tools if isinstance(tools, list) else None
+
+
 # ── 引导工具 ──
 
 
@@ -187,6 +224,7 @@ def build_fetch_tools_tool(
                 "timeout": validated.timeout,
             }
         )
+        client: _mcp_mod.McpClient | None = None
         try:
             command = [validated.command[0]] + list(validated.args)
             client = _mcp_mod.McpClient(
@@ -194,13 +232,14 @@ def build_fetch_tools_tool(
             )
             client.start()
             tools_list = client.list_tools()
-            client.stop()
+            cache_metadata = _cache_metadata(client)
 
             cache_path = _cache_path(project_root)
             cache_data = _load_cache(cache_path)
             cache_data.setdefault("servers", {})[server_name] = {
                 "config_hash": config_hash,
                 "tools": tools_list,
+                **cache_metadata,
             }
             _save_cache(cache_path, cache_data)
             return (
@@ -211,6 +250,9 @@ def build_fetch_tools_tool(
         except Exception as e:
             redacted = str(e)
             return f"Error fetching tools from server '{server_name}': {redacted}"
+        finally:
+            if client is not None:
+                client.stop()
 
     slug = _sanitize(server_name)
     return ToolSpec(
@@ -557,10 +599,9 @@ def _tools_for_server(
 ) -> list[dict[str, Any]]:
     config_hash = compute_config_hash(raw_config)
     cached_entry = cache_data.get("servers", {}).get(server_name, {})
-    if cached_entry.get("config_hash") == config_hash:
-        cached_tools = cached_entry.get("tools")
-        if isinstance(cached_tools, list):
-            return cached_tools
+    cached_tools = _compatible_cached_tools(cached_entry, config_hash)
+    if cached_tools is not None:
+        return cached_tools
 
     if is_deferred:
         tools_to_register.append(
@@ -588,24 +629,29 @@ def _query_server_tools(
     config_hash: str,
     cached_entry: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    client: _mcp_mod.McpClient | None = None
     try:
         command = [validated.command[0]] + list(validated.args)
         client = _mcp_mod.McpClient(command, validated.env, timeout=validated.timeout)
         client.start()
         tools_list = client.list_tools()
-        client.stop()
+        cache_metadata = _cache_metadata(client)
 
         cache_data.setdefault("servers", {})[server_name] = {
             "config_hash": config_hash,
             "tools": tools_list,
+            **cache_metadata,
         }
         _save_cache(cache_path, cache_data)
         return tools_list
     except Exception as e:
         redacted = _redact_and_truncate(str(e), max_len=200)
         _warn(f"error querying tools from MCP server {server_name!r}: {redacted}")
-        cached_tools = cached_entry.get("tools")
-        return cached_tools if isinstance(cached_tools, list) else []
+        cached_tools = _compatible_cached_tools(cached_entry, config_hash)
+        return cached_tools or []
+    finally:
+        if client is not None:
+            client.stop()
 
 
 def _build_registered_mcp_tool(

@@ -255,7 +255,11 @@ cli → coding_agent → harness → agent → ai
 
 - MCP 从 `.local/mcp_config.json` 加载本地 stdio server。
 - MCP 配置支持 command、args、env、enabled、timeout、defer_loading。
-- schema cache 使用配置 hash 避免无变化时重复发现 schema。
+- initialize 发送最新支持协议版本，校验 server 返回版本、capabilities 和
+  serverInfo，并保存 instructions。
+- tools 请求仅在 server 声明 `tools` capability 后发送。
+- schema cache 同时记录配置 hash、协商协议版本和 server identity；缺少协商
+  元数据的旧缓存会重新发现。
 - deferred server 使用 bootstrap 工具和 `mcp_tool_search` 懒加载。
 - MCP 工具名称清理和碰撞检测。
 - MCP `isError` 转换为结构化错误。

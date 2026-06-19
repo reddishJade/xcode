@@ -9,10 +9,10 @@
 
 - [Agent Skills specification](https://agentskills.io/specification)。
 - [Agent Skills client implementation guide](https://agentskills.io/client-implementation/adding-skills-support)。
-- [MCP specification 2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18)。
-- [MCP lifecycle](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle)。
-- [MCP transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)。
-- [MCP tools](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)。
+- [MCP specification 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25)。
+- [MCP lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)。
+- [MCP transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)。
+- [MCP tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)。
 
 ## 结论
 
@@ -41,13 +41,12 @@ Xcode 已是可工作的 stdio tools client，但协议实现仍偏向单一 smo
 
 正式化前最值得补齐：
 
-1. 协议版本协商和 server capability 校验。
-2. `tools/list` pagination。
-3. 区分 response、notification 和 server request；至少正确处理 ping。
-4. request timeout 后发送 cancellation notification。
-5. 更符合规范的 graceful shutdown。
-6. 正确处理 `structuredContent`，并明确非文本 content 的宿主映射策略。
-7. 为 persistent client 增加状态、重连和可诊断错误。
+1. `tools/list` pagination。
+2. 区分 response、notification 和 server request；至少正确处理 ping。
+3. request timeout 后发送 cancellation notification。
+4. 更符合规范的 graceful shutdown。
+5. 正确处理 `structuredContent`，并明确非文本 content 的宿主映射策略。
+6. 为 persistent client 增加状态、重连和可诊断错误。
 
 ## 产品分类建议
 
@@ -142,7 +141,7 @@ auto trigger 的替代，而是用户可控入口。
 | Canonical config | 已实现 | `.local/mcp_config.json` |
 | stdio transport | 已实现 | 子进程 + newline-delimited JSON |
 | Content-Length | 兼容读取 | 当前规范 stdio 使用 newline delimiter；Content-Length 只是旧格式兼容 |
-| initialize + initialized | 部分实现 | 有握手，但固定发送 2024-11-05，未验证响应版本和 capabilities |
+| initialize + initialized | 已实现 | 发送最新支持版本，校验协商版本、capabilities 和 serverInfo，并保存 instructions |
 | `tools/list` | 部分实现 | 不处理 pagination cursor |
 | `tools/call` | 已实现 | 支持 text 和 `isError` |
 | Tool naming | 已实现 | `mcp__<server>__<tool>` 和 collision detection |
@@ -201,15 +200,6 @@ Content:
 
 ### 值得优先实现
 
-#### M0 · 正确的版本和 capability negotiation
-
-- 发送客户端实际支持的最新版本。
-- 检查 server 返回版本；不支持时断开并报告。
-- 保存 server capabilities，只调用已协商 feature。
-- 保存 serverInfo 和 instructions 供诊断。
-
-当前固定版本且忽略响应内容，容易形成“握手成功但实际协议不兼容”的假成功。
-
 #### M0 · JSON-RPC 双向消息分类
 
 当前 read loop 将任何带 `id` 的消息放入 pending response。需要区分：
@@ -225,8 +215,6 @@ Content:
 
 - 实现 `tools/list` cursor pagination。
 - 支持 `notifications/tools/list_changed` 后刷新 cache/registry。
-- cache 记录 protocol version 和 server identity，避免只按 command/env hash
-  复用过期 schema。
 
 #### M1 · Timeout、取消和关闭
 

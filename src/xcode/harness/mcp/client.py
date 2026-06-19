@@ -18,6 +18,14 @@ from typing import Any, BinaryIO, cast
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_PROTOCOL_VERSIONS = (
+    "2025-11-25",
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05",
+)
+LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
+
 _REDACT_PATTERNS: list[re.Pattern] = [
     re.compile(r"(Bearer\s+)[^\s]+", re.IGNORECASE),
     re.compile(r"(sk-)[^\s]+", re.IGNORECASE),
@@ -26,20 +34,36 @@ _REDACT_PATTERNS: list[re.Pattern] = [
 
 
 def redact_mcp_text(text: str) -> str:
+    """脱敏 MCP 诊断文本中的常见凭据。"""
     for pattern in _REDACT_PATTERNS:
         text = pattern.sub(r"\1****", text)
     return text
 
 
 def truncate_redact(text: str, max_len: int = 200) -> str:
+    """先脱敏再按字符上限截断诊断文本。"""
     redacted = redact_mcp_text(text)
     if len(redacted) > max_len:
         redacted = redacted[:max_len] + "..."
     return redacted
 
 
+def _is_valid_server_info(value: object) -> bool:
+    """判断 serverInfo 是否包含稳定的名称和版本标识。"""
+    if not isinstance(value, dict):
+        return False
+    name = value.get("name")
+    version = value.get("version")
+    return (
+        isinstance(name, str)
+        and bool(name.strip())
+        and isinstance(version, str)
+        and bool(version.strip())
+    )
+
+
 class McpClient:
-    """Standard Synchronous Model Context Protocol (MCP) Client over Stdio."""
+    """基于 stdio 的同步 MCP 客户端。"""
 
     def __init__(
         self,
@@ -47,6 +71,7 @@ class McpClient:
         env: dict[str, str] | None = None,
         timeout: float | None = None,
     ) -> None:
+        """保存进程配置并初始化连接状态。"""
         self.command = command
         self.env = os.environ.copy()
         if env:
@@ -59,12 +84,18 @@ class McpClient:
         self._running = False
         self._timeout = timeout
         self._status: str = "pending"
+        self.protocol_version: str | None = None
+        self.server_capabilities: dict[str, Any] = {}
+        self.server_info: dict[str, Any] = {}
+        self.instructions: str | None = None
 
     @property
     def status(self) -> str:
+        """返回当前连接状态。"""
         return self._status
 
     def start(self) -> None:
+        """启动服务器进程并完成 initialize 协商。"""
         if self.process is not None:
             return
         try:
@@ -85,14 +116,15 @@ class McpClient:
         _active_clients.append(self)
 
         try:
-            self.send_request(
+            initialize_result = self.send_request(
                 "initialize",
                 {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": LATEST_PROTOCOL_VERSION,
                     "capabilities": {},
                     "clientInfo": {"name": "xcode-client", "version": "0.1.0"},
                 },
             )
+            self._apply_initialize_result(initialize_result)
             self.send_notification("notifications/initialized")
         except Exception as e:
             self.stop()
@@ -101,7 +133,48 @@ class McpClient:
 
         self._status = "connected"
 
+    def _apply_initialize_result(self, result: dict[str, Any]) -> None:
+        """校验 initialize 响应并保存协商后的服务器元数据。"""
+        protocol_version = result.get("protocolVersion")
+        if not isinstance(protocol_version, str):
+            raise RuntimeError("MCP initialize response has no protocolVersion")
+        if protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
+            supported = ", ".join(SUPPORTED_PROTOCOL_VERSIONS)
+            raise RuntimeError(
+                "Unsupported MCP protocol version "
+                f"{protocol_version!r}; client supports: {supported}"
+            )
+
+        capabilities = result.get("capabilities")
+        if not isinstance(capabilities, dict):
+            raise RuntimeError("MCP initialize response has invalid capabilities")
+        server_info = result.get("serverInfo")
+        if not _is_valid_server_info(server_info):
+            raise RuntimeError("MCP initialize response has invalid serverInfo")
+        server_info = cast(dict[str, Any], server_info)
+        instructions = result.get("instructions")
+        if instructions is not None and not isinstance(instructions, str):
+            raise RuntimeError("MCP initialize response has invalid instructions")
+
+        self.protocol_version = protocol_version
+        self.server_capabilities = capabilities
+        self.server_info = server_info
+        self.instructions = instructions
+
+    def has_server_capability(self, capability: str) -> bool:
+        """判断服务器是否在 initialize 响应中声明能力。"""
+        return isinstance(self.server_capabilities.get(capability), dict)
+
+    def _require_server_capability(self, capability: str, method: str) -> None:
+        """拒绝调用未协商的服务器能力。"""
+        if self.has_server_capability(capability):
+            return
+        raise RuntimeError(
+            f"MCP server did not negotiate {capability!r}; cannot call {method}"
+        )
+
     def _read_loop(self) -> None:
+        """持续读取 JSON-RPC 消息并暂存响应。"""
         while self._running and self.process and self.process.stdout:
             msg = _read_jsonrpc_message(cast(BinaryIO, self.process.stdout))
             if msg is None:
@@ -113,6 +186,7 @@ class McpClient:
     def send_request(
         self, method: str, params: dict, timeout: float | None = None
     ) -> dict[str, Any]:
+        """发送 JSON-RPC request 并同步等待对应响应。"""
         if not self._running or not self.process:
             raise RuntimeError("MCP client is not running.")
 
@@ -158,6 +232,7 @@ class McpClient:
         raise TimeoutError(f"Timeout waiting for response to {method} (id={req_id})")
 
     def send_notification(self, method: str, params: dict | None = None) -> None:
+        """发送不需要响应的 JSON-RPC notification。"""
         if not self._running or not self.process:
             raise RuntimeError("MCP client is not running.")
 
@@ -174,12 +249,16 @@ class McpClient:
             raise RuntimeError(f"Failed to send notification to MCP server: {e}")
 
     def list_tools(self, timeout: float | None = None) -> list[dict[str, Any]]:
+        """列出服务器工具，要求已协商 tools capability。"""
+        self._require_server_capability("tools", "tools/list")
         result = self.send_request("tools/list", {}, timeout=timeout)
         return result.get("tools", [])
 
     def call_tool(
         self, name: str, arguments: dict, timeout: float | None = None
     ) -> dict[str, Any]:
+        """调用服务器工具，要求已协商 tools capability。"""
+        self._require_server_capability("tools", "tools/call")
         return self.send_request(
             "tools/call",
             {"name": name, "arguments": arguments},
@@ -187,6 +266,7 @@ class McpClient:
         )
 
     def stop(self) -> None:
+        """停止读取循环并终止服务器进程。"""
         self._running = False
         if self in _active_clients:
             try:
@@ -223,21 +303,13 @@ _active_clients: list[McpClient] = []
 
 
 def _encode_jsonrpc_message(message: dict[str, Any]) -> bytes:
-    """Encode a JSON-RPC message in newline-delimited JSON format.
-
-    MCP SDK >= 1.0 uses newline-delimited JSON (one JSON object per line)
-    rather than the Content-Length header format used by earlier revisions.
-    """
+    """将 JSON-RPC 消息编码为换行分隔 JSON。"""
     body = json.dumps(message, ensure_ascii=False)
     return (body + "\n").encode("utf-8")
 
 
 def _read_jsonrpc_message(stream: BinaryIO) -> dict[str, Any] | None:
-    """Read a JSON-RPC message from a stdio stream.
-
-    Supports both newline-delimited JSON (MCP SDK >= 1.0) and the older
-    Content-Length header format for backward compatibility.
-    """
+    """读取换行分隔 JSON，并兼容旧 Content-Length framing。"""
     line = stream.readline()
     if not line:
         return None
@@ -291,6 +363,7 @@ def _read_jsonrpc_message(stream: BinaryIO) -> dict[str, Any] | None:
 
 
 def _cleanup_clients() -> None:
+    """在进程退出时停止仍存活的 MCP 客户端。"""
     while _active_clients:
         client = _active_clients[0]
         try:
@@ -305,14 +378,16 @@ atexit.register(_cleanup_clients)
 
 
 class LazyClientRef:
-    """Manages lazy instantiation of MCP clients to avoid startup overhead."""
+    """延迟创建并复用 MCP 客户端。"""
 
     def __init__(self, server_name: str, config: dict[str, Any]) -> None:
+        """保存服务器名称和原始运行配置。"""
         self.server_name = server_name
         self.config = config
         self.client: McpClient | None = None
 
     def get_or_create(self) -> McpClient:
+        """返回可用客户端，必要时完成启动和握手。"""
         if self.client is None or self.client.status == "failed":
             if self.client is not None:
                 self.client.stop()
@@ -324,6 +399,7 @@ class LazyClientRef:
         return self.client
 
     def stop(self) -> None:
+        """停止并清除当前客户端。"""
         if self.client is not None:
             self.client.stop()
             self.client = None

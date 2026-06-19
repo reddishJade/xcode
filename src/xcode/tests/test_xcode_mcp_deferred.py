@@ -46,6 +46,8 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
             "servers": {
                 "heavy_service": {
                     "config_hash": "dummy_hash",
+                    "protocol_version": "2025-11-25",
+                    "server_info": {"name": "heavy", "version": "1.0.0"},
                     "tools": [
                         {
                             "name": "heavy_calculate",
@@ -100,6 +102,8 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
             "servers": {
                 "heavy_service": {
                     "config_hash": "dummy",
+                    "protocol_version": "2025-11-25",
+                    "server_info": {"name": "heavy", "version": "1.0.0"},
                     "tools": [
                         {
                             "name": "heavy_calculate",
@@ -143,6 +147,8 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
             "servers": {
                 "heavy_service": {
                     "config_hash": "dummy_hash",
+                    "protocol_version": "2025-11-25",
+                    "server_info": {"name": "heavy", "version": "1.0.0"},
                     "tools": [
                         {
                             "name": "heavy_calculate",
@@ -200,6 +206,8 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
 
         # 模拟 McpClient 启动与拉取
         mock_client = MagicMock()
+        mock_client.protocol_version = "2025-11-25"
+        mock_client.server_info = {"name": "heavy", "version": "1.0.0"}
         mock_client.list_tools.return_value = [
             {
                 "name": "calc",
@@ -218,6 +226,11 @@ class TestXcodeMcpDeferredLoading(unittest.TestCase):
             entry = cache_data["servers"]["heavy_service"]
             self.assertEqual(len(entry["tools"]), 1)
             self.assertEqual(entry["tools"][0]["name"], "calc")
+            self.assertEqual(entry["protocol_version"], "2025-11-25")
+            self.assertEqual(
+                entry["server_info"],
+                {"name": "heavy", "version": "1.0.0"},
+            )
 
 
 if __name__ == "__main__":

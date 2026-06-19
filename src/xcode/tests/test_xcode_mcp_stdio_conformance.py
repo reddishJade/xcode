@@ -654,7 +654,7 @@ def main():
                     "jsonrpc": "2.0", "id": req_id,
                     "result": {
                         "protocolVersion": "2024-11-05",
-                        "capabilities": {},
+                        "capabilities": {"tools": {}},
                         "serverInfo": {"name": "slow-server", "version": "1.0.0"}
                     }
                 })

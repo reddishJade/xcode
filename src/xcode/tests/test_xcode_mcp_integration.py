@@ -47,6 +47,8 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         # Define mock client behavior
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
+        mock_client.protocol_version = "2025-11-25"
+        mock_client.server_info = {"name": "fetcher", "version": "1.0.0"}
         mock_client.list_tools.return_value = [
             {
                 "name": "read_data",
@@ -95,6 +97,14 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         self.assertTrue(cache_path.exists())
         cache_content = json.loads(cache_path.read_text(encoding="utf-8"))
         self.assertIn("fetcher", cache_content["servers"])
+        self.assertEqual(
+            cache_content["servers"]["fetcher"]["protocol_version"],
+            "2025-11-25",
+        )
+        self.assertEqual(
+            cache_content["servers"]["fetcher"]["server_info"],
+            {"name": "fetcher", "version": "1.0.0"},
+        )
 
         # Reset mocks
         mock_client_class.reset_mock()
@@ -123,6 +133,8 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
     ) -> None:
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
+        mock_client.protocol_version = "2025-11-25"
+        mock_client.server_info = {"name": "db-editor", "version": "1.0.0"}
         mock_client.list_tools.return_value = [
             {
                 "name": "edit_record",
@@ -183,3 +195,51 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         mock_client.call_tool.assert_called_once_with(
             "edit_record", {"id": 42, "value": "new_val"}, timeout=None
         )
+
+    @patch("xcode.harness.mcp.client.McpClient")
+    def test_legacy_cache_without_negotiation_metadata_is_refreshed(
+        self,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """仅有 config hash 的旧缓存不能绕过协议和身份协商。"""
+        mock_client = MagicMock()
+        mock_client.protocol_version = "2025-11-25"
+        mock_client.server_info = {"name": "refresh", "version": "2.0.0"}
+        mock_client.list_tools.return_value = [
+            {
+                "name": "fresh_tool",
+                "description": "Fresh",
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        ]
+        mock_client_class.return_value = mock_client
+        raw_config = {"command": "python", "args": ["server.py"]}
+        local_dir = self.project_root / ".local"
+        local_dir.mkdir(parents=True)
+        (local_dir / "mcp_config.json").write_text(
+            json.dumps({"mcpServers": {"refresh": raw_config}}),
+            encoding="utf-8",
+        )
+        (local_dir / "mcp_cache.json").write_text(
+            json.dumps(
+                {
+                    "servers": {
+                        "refresh": {
+                            "config_hash": compute_config_hash(raw_config),
+                            "tools": [
+                                {
+                                    "name": "stale_tool",
+                                    "inputSchema": {"type": "object"},
+                                }
+                            ],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        tools = build_mcp_tools(self.project_root)
+
+        self.assertEqual([tool.name for tool in tools], ["mcp__refresh__fresh_tool"])
+        mock_client.list_tools.assert_called_once()

@@ -498,6 +498,8 @@ class TestMcpBuildIntegration(TestCase):
 
     def test_builds_tools_from_config(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()
+        mock_instance.protocol_version = "2025-11-25"
+        mock_instance.server_info = {"name": "my-server", "version": "1.0.0"}
         mock_instance.list_tools.return_value = [
             _minimal_mcp_tool("greet"),
             _minimal_mcp_tool("echo"),
@@ -529,6 +531,11 @@ class TestMcpBuildIntegration(TestCase):
                 self.assertEqual(t.group, "mcp")
 
     def test_disabled_server_skipped(self, mock_client: MagicMock) -> None:
+        mock_instance = MagicMock()
+        mock_instance.protocol_version = "2025-11-25"
+        mock_instance.server_info = {"name": "enabled", "version": "1.0.0"}
+        mock_instance.list_tools.return_value = []
+        mock_client.return_value = mock_instance
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             local = root / ".local"
@@ -555,6 +562,11 @@ class TestMcpBuildIntegration(TestCase):
             self.assertIsInstance(tools, tuple)
 
     def test_overrides_server_skipped(self, mock_client: MagicMock) -> None:
+        mock_instance = MagicMock()
+        mock_instance.protocol_version = "2025-11-25"
+        mock_instance.server_info = {"name": "good", "version": "1.0.0"}
+        mock_instance.list_tools.return_value = []
+        mock_client.return_value = mock_instance
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             local = root / ".local"
@@ -578,6 +590,8 @@ class TestMcpBuildIntegration(TestCase):
 
     def test_mcp_metadata_on_tool_spec(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()
+        mock_instance.protocol_version = "2025-11-25"
+        mock_instance.server_info = {"name": "test-server", "version": "1.0.0"}
         mock_instance.list_tools.return_value = [
             _minimal_mcp_tool("my_tool"),
         ]
@@ -613,6 +627,8 @@ class TestMcpBuildIntegration(TestCase):
 
     def test_collision_disables_tools(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()
+        mock_instance.protocol_version = "2025-11-25"
+        mock_instance.server_info = {"name": "collision-server", "version": "1.0.0"}
         mock_instance.list_tools.return_value = [
             _minimal_mcp_tool("my tool"),
             _minimal_mcp_tool("my_tool"),

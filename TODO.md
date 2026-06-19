@@ -13,20 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P1 · MCP 版本和 capability negotiation 不完整
-
-`McpClient.start()` 固定发送 `2024-11-05`，但不校验 server 返回的
-`protocolVersion`，也不保存或执行 server capability negotiation。握手可能
-表现为成功，实际协议或 feature 并不兼容。
-
-需要：
-
-- 声明客户端实际支持的协议版本集合。
-- 校验 server 返回版本，不兼容时断开并报告。
-- 保存 server capabilities、serverInfo 和 instructions。
-- 只调用已协商的 server feature。
-- cache 记录协议版本和 server identity。
-
 ## P1 · MCP JSON-RPC 双向消息分类错误
 
 当前 read loop 将任何带 `id` 的消息放入 pending response。它没有区分：
