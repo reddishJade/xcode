@@ -160,6 +160,7 @@ def build_app(
         contextual_state=infra.contextual_state,
         compact_controller=infra.compact_controller,
         cancel_event=infra.cancellation_token.event,
+        skills_dir=cfg.skills_dir,
     )
 
     fallback_provider = providers.llms.get("fallback")

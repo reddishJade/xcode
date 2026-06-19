@@ -36,6 +36,15 @@ from xcode.coding_agent.tools.shell_adapter import detect_shell
 from xcode.harness.skills import ToolSpec
 
 
+def _write_skill(directory: Path, name: str, description: str, body: str) -> None:
+    """在指定技能目录写入最小 SKILL.md。"""
+    directory.mkdir(parents=True)
+    (directory / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n\n{body}",
+        encoding="utf-8",
+    )
+
+
 class XcodeAppRuntimeTests(unittest.TestCase):
     def test_app_async_ask_uses_native_async_agent(self) -> None:
         async def main():
@@ -157,6 +166,96 @@ class XcodeAppRuntimeTests(unittest.TestCase):
         self.assertIn("Review code changes.", first_context)
         second_context = "\n".join(str(message) for message in provider.calls[1][0])
         self.assertIn("Follow the review workflow.", second_context)
+
+    def test_build_app_uses_project_relative_configured_skills_dir(self) -> None:
+        """项目相对 paths.skills_dir 进入技能发现。"""
+        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+            root = Path(tmp)
+            _write_skill(
+                root / "configured-skills" / "review",
+                "configured-review",
+                "Review configured code.",
+                "CONFIGURED_BODY",
+            )
+            app = build_app(
+                project_root=root,
+                runtime_config=XcodeRuntimeConfig(
+                    paths=PathsRuntimeConfig(skills_dir=Path("configured-skills")),
+                ),
+            )
+
+        load_skill = next(tool for tool in app.registry if tool.name == "load_skill")
+        output = load_skill.handler({"name": "configured-review"})
+        self.assertIn("CONFIGURED_BODY", output)
+
+    def test_build_app_uses_absolute_skills_dir_argument(self) -> None:
+        """绝对 skills_dir API 参数进入技能发现。"""
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as skills_tmp,
+            _patched_provider_bundle([]),
+        ):
+            root = Path(tmp)
+            skills_dir = Path(skills_tmp)
+            _write_skill(
+                skills_dir / "review",
+                "absolute-review",
+                "Review absolute code.",
+                "ABSOLUTE_BODY",
+            )
+            app = build_app(project_root=root, skills_dir=skills_dir)
+
+        load_skill = next(tool for tool in app.registry if tool.name == "load_skill")
+        output = load_skill.handler({"name": "absolute-review"})
+        self.assertIn("ABSOLUTE_BODY", output)
+
+    def test_explicit_skills_dir_wins_duplicate_name(self) -> None:
+        """显式目录中的同名技能覆盖固定项目目录。"""
+        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+            root = Path(tmp)
+            explicit_dir = root / "configured-skills"
+            _write_skill(
+                explicit_dir / "review",
+                "duplicate-review",
+                "Configured review.",
+                "CONFIGURED_BODY",
+            )
+            _write_skill(
+                root / ".xcode" / "skills" / "review",
+                "duplicate-review",
+                "Project review.",
+                "PROJECT_BODY",
+            )
+            app = build_app(
+                project_root=root,
+                skills_dir=explicit_dir,
+                runtime_config=XcodeRuntimeConfig(
+                    skills=SkillsRuntimeConfig(trust_project_skills=True),
+                ),
+            )
+
+        load_skill = next(tool for tool in app.registry if tool.name == "load_skill")
+        output = load_skill.handler({"name": "duplicate-review"})
+        self.assertIn("CONFIGURED_BODY", output)
+        self.assertNotIn("PROJECT_BODY", output)
+
+    def test_disabled_skills_group_ignores_configured_directory(self) -> None:
+        """禁用 skills group 时不扫描或注册显式目录。"""
+        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+            root = Path(tmp)
+            with self.assertNoLogs(
+                "xcode.harness.skills_registry",
+                level="WARNING",
+            ):
+                app = build_app(
+                    project_root=root,
+                    skills_dir=root / "missing-skills",
+                    runtime_config=XcodeRuntimeConfig(
+                        tools=ToolsRuntimeConfig(enabled_groups=("core",)),
+                    ),
+                )
+
+        self.assertNotIn("load_skill", {tool.name for tool in app.registry})
 
     def test_default_runtime_discovers_configured_mcp_tools(self) -> None:
         mcp_tool = ToolSpec(

@@ -130,6 +130,8 @@ cli → coding_agent → harness → agent → ai
   activation 状态。
 - 项目级 skill 默认不披露；仅在 `skills.trust_project_skills=true` 时加入
   discovery，用户级 skill 保持默认发现。
+- `paths.skills_dir` 和 `build_app(skills_dir=...)` 作为最高优先级显式发现
+  目录；相对配置路径按项目根目录解析，不存在时记录 warning。
 
 ### 当前限制
 

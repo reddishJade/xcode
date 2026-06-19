@@ -252,6 +252,7 @@ def build_tool_registry(
             build_skill_search_dirs(
                 project_root,
                 trust_project_skills=runtime_config.skills.trust_project_skills,
+                skills_dir=skills_dir,
             )
         )
     else:

@@ -13,21 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P1 · paths.skills_dir 配置已声明但未进入 Skill discovery
-
-`PathsRuntimeConfig.skills_dir`、`build_app(skills_dir=...)` 和
-`ResolvedConfig.skills_dir` 均已存在，但 `build_app()` 调用
-`build_tool_registry()` 时没有传入该值，`build_tool_registry()` 内部也只扫描
-四个固定目录。用户配置自定义 skill 根目录后不会生效。
-
-需要：
-
-- 将解析后的 `skills_dir` 传入 SkillRegistry discovery。
-- 明确定义它在固定搜索路径中的优先级，建议作为最高优先级显式路径。
-- 路径不存在时记录可诊断 warning，不静默退回。
-- 添加项目相对路径、绝对 API 参数、重复 skill name 和禁用 skills group 测试。
-- `CONFIG.md` 明确列出固定发现目录和显式目录的覆盖顺序。
-
 ## P1 · grep fallback 与 glob 实现不符合工具契约
 
 `grep_search` 在存在 ripgrep 时使用 `rg`，因此默认遵循 `.gitignore`；但

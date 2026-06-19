@@ -32,30 +32,48 @@ from xcode.harness.skill_activation import (
 logger = logging.getLogger(__name__)
 
 # ── 搜索路径优先级 ──
-# 0: <project>/.xcode/skills/      项目级技能（最高）
-# 1: <project>/.agents/skills/     项目级技能
-# 2: ~/.xcode/skills/              用户级技能
-# 3: ~/.agents/skills/             用户级技能
+# 0: 显式 skills_dir                 调用方配置目录（最高）
+# 1: <project>/.xcode/skills/      项目级技能
+# 2: <project>/.agents/skills/     项目级技能
+# 3: ~/.xcode/skills/              用户级技能
+# 4: ~/.agents/skills/             用户级技能
 
 
 def build_skill_search_dirs(
     project_root: Path | None,
     *,
     trust_project_skills: bool = True,
+    skills_dir: Path | None = None,
 ) -> list[tuple[Path, int]]:
     """构建优先级排序的技能搜索目录列表。
 
     返回 [(Path, priority), ...]，priority 越小优先级越高。
     项目级技能仅在调用方明确确认工作区可信时加入。
+    显式 skills_dir 表示调用方已信任该目录，始终具有最高优先级。
     """
     dirs: list[tuple[Path, int]] = []
+    if skills_dir is not None:
+        explicit_dir = skills_dir.resolve()
+        if not explicit_dir.is_dir():
+            logger.warning(
+                "Configured skill directory does not exist: %s", explicit_dir
+            )
+        dirs.append((explicit_dir, 0))
     if project_root is not None and trust_project_skills:
-        dirs.append((project_root / ".xcode" / "skills", 0))
-        dirs.append((project_root / ".agents" / "skills", 1))
+        dirs.append(((project_root / ".xcode" / "skills").resolve(), 1))
+        dirs.append(((project_root / ".agents" / "skills").resolve(), 2))
     home = Path.home()
-    dirs.append((home / ".xcode" / "skills", 2))
-    dirs.append((home / ".agents" / "skills", 3))
-    return dirs
+    dirs.append(((home / ".xcode" / "skills").resolve(), 3))
+    dirs.append(((home / ".agents" / "skills").resolve(), 4))
+
+    unique_dirs: list[tuple[Path, int]] = []
+    seen_paths: set[Path] = set()
+    for path, priority in dirs:
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        unique_dirs.append((path, priority))
+    return unique_dirs
 
 
 # ── 数据模型 ──

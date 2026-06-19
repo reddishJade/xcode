@@ -336,6 +336,38 @@ class TestSkillRegistry(unittest.TestCase):
         self.assertIn(root / ".xcode" / "skills", paths)
         self.assertIn(root / ".agents" / "skills", paths)
 
+    def test_explicit_directory_has_highest_priority(self) -> None:
+        """显式技能目录优先于固定项目和用户目录。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            explicit_dir = root / "configured-skills"
+            explicit_dir.mkdir()
+            search_dirs = build_skill_search_dirs(
+                root,
+                trust_project_skills=True,
+                skills_dir=explicit_dir,
+            )
+
+        self.assertEqual(search_dirs[0], (explicit_dir.resolve(), 0))
+        self.assertEqual(search_dirs[1][0], (root / ".xcode" / "skills").resolve())
+
+    def test_missing_explicit_directory_logs_warning(self) -> None:
+        """显式技能目录不存在时记录可诊断警告。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "missing"
+            with self.assertLogs(
+                "xcode.harness.skills_registry",
+                level="WARNING",
+            ) as logs:
+                search_dirs = build_skill_search_dirs(
+                    Path(tmp),
+                    trust_project_skills=False,
+                    skills_dir=missing,
+                )
+
+        self.assertEqual(search_dirs[0], (missing.resolve(), 0))
+        self.assertIn("Configured skill directory does not exist", logs.output[0])
+
     def test_skill_index_collector_summaries_only(self) -> None:
         """SkillIndexCollector 注入摘要块，不含正文。"""
         with tempfile.TemporaryDirectory() as tmp:

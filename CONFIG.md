@@ -82,7 +82,7 @@
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `sessions_dir` | string/null | `null` | REPL 会话目录；未配置时 CLI 使用 `.local/sessions` |
-| `skills_dir` | string/null | `null` | Skill 扫描目录 |
+| `skills_dir` | string/null | `null` | 最高优先级 Skill 扫描目录；相对路径按项目根目录解析 |
 
 固定本地路径：`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`。
 
@@ -149,6 +149,12 @@
 | `trust_project_skills` | bool | `false` | 是否信任并披露项目内 `.xcode/skills/` 与 `.agents/skills/`；默认仅发现用户级技能 |
 
 无可见 skill 时不注册 `load_skill`，也不向上下文注入空 catalog。
+
+Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
+显式 `paths.skills_dir` / `build_app(skills_dir=...)` → 项目
+`.xcode/skills/` → 项目 `.agents/skills/` → 用户 `~/.xcode/skills/` → 用户
+`~/.agents/skills/`。项目固定目录仍受 `trust_project_skills` 控制；显式目录表示
+调用方已信任。显式目录不存在时记录 warning。
 
 `load_skill` 首次激活返回 skill root、正文及 `scripts/`、`references/`、
 `assets/` 相对路径元数据，但不会主动读取或执行资源。相同 session 内重复激活
