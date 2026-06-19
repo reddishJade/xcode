@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import sys
-import unittest
 import tempfile
+import unittest
 from pathlib import Path
-from xcode.harness.mcp.client import LATEST_PROTOCOL_VERSION, McpClient
+from unittest.mock import call, patch
+
+from xcode.harness.mcp.client import (
+    LATEST_PROTOCOL_VERSION,
+    MAX_TOOL_LIST_PAGES,
+    McpClient,
+)
 
 MOCK_SERVER_CODE = r"""
 import sys
@@ -263,6 +269,103 @@ class XcodeMcpClientTests(unittest.TestCase):
             "did not negotiate 'tools'",
         ):
             client.list_tools()
+
+    def test_mcp_client_collects_paginated_tools(self) -> None:
+        """工具发现会按 cursor 聚合所有分页结果。"""
+        client = McpClient(["unused"])
+        client.server_capabilities = {"tools": {}}
+        responses = [
+            {
+                "tools": [{"name": "first"}],
+                "nextCursor": "page-2",
+            },
+            {
+                "tools": [{"name": "second"}],
+            },
+        ]
+
+        with patch.object(client, "send_request", side_effect=responses) as request:
+            tools = client.list_tools(timeout=3.0)
+
+        self.assertEqual(tools, [{"name": "first"}, {"name": "second"}])
+        self.assertEqual(
+            request.call_args_list,
+            [
+                call("tools/list", {}, timeout=3.0),
+                call(
+                    "tools/list",
+                    {"cursor": "page-2"},
+                    timeout=3.0,
+                ),
+            ],
+        )
+
+    def test_mcp_client_rejects_repeated_tool_list_cursor(self) -> None:
+        """重复 cursor 会终止分页，避免服务器造成无限循环。"""
+        client = McpClient(["unused"])
+        client.server_capabilities = {"tools": {}}
+        responses = [
+            {"tools": [], "nextCursor": "repeated"},
+            {"tools": [], "nextCursor": "repeated"},
+        ]
+
+        with (
+            patch.object(client, "send_request", side_effect=responses),
+            self.assertRaisesRegex(RuntimeError, "repeated cursor"),
+        ):
+            client.list_tools()
+
+    def test_mcp_client_rejects_invalid_tool_list_page(self) -> None:
+        """分页响应中的 tools 和 nextCursor 必须具有协议要求的类型。"""
+        client = McpClient(["unused"])
+        client.server_capabilities = {"tools": {}}
+
+        invalid_responses = (
+            {"tools": "not-a-list"},
+            {"tools": [None]},
+            {"tools": [], "nextCursor": ""},
+            {"tools": [], "nextCursor": 2},
+        )
+        for response in invalid_responses:
+            with self.subTest(response=response):
+                with (
+                    patch.object(client, "send_request", return_value=response),
+                    self.assertRaisesRegex(RuntimeError, "invalid"),
+                ):
+                    client.list_tools()
+
+    def test_mcp_client_limits_tool_list_pages(self) -> None:
+        """分页数量达到保护上限后停止继续请求。"""
+        client = McpClient(["unused"])
+        client.server_capabilities = {"tools": {}}
+        page_index = 0
+
+        def next_page(
+            method: str,
+            params: dict[str, str],
+            timeout: float | None = None,
+        ) -> dict[str, object]:
+            """返回持续产生新 cursor 的异常分页响应。"""
+            nonlocal page_index
+            self.assertEqual(method, "tools/list")
+            self.assertIsNone(timeout)
+            if page_index == 0:
+                self.assertEqual(params, {})
+            else:
+                self.assertEqual(
+                    params,
+                    {"cursor": f"page-{page_index}"},
+                )
+            page_index += 1
+            return {"tools": [], "nextCursor": f"page-{page_index}"}
+
+        with (
+            patch.object(client, "send_request", side_effect=next_page) as request,
+            self.assertRaisesRegex(RuntimeError, "exceeded"),
+        ):
+            client.list_tools()
+
+        self.assertEqual(request.call_count, MAX_TOOL_LIST_PAGES)
 
     def test_mcp_client_rejects_invalid_server_identity(self) -> None:
         """缺少稳定名称或版本的 serverInfo 无法完成协商。"""

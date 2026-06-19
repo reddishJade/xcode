@@ -25,6 +25,7 @@ SUPPORTED_PROTOCOL_VERSIONS = (
     "2024-11-05",
 )
 LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
+MAX_TOOL_LIST_PAGES = 100
 
 _REDACT_PATTERNS: list[re.Pattern] = [
     re.compile(r"(Bearer\s+)[^\s]+", re.IGNORECASE),
@@ -323,8 +324,30 @@ class McpClient:
     def list_tools(self, timeout: float | None = None) -> list[dict[str, Any]]:
         """列出服务器工具，要求已协商 tools capability。"""
         self._require_server_capability("tools", "tools/list")
-        result = self.send_request("tools/list", {}, timeout=timeout)
-        return result.get("tools", [])
+        tools: list[dict[str, Any]] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        for _ in range(MAX_TOOL_LIST_PAGES):
+            params = {"cursor": cursor} if cursor is not None else {}
+            result = self.send_request("tools/list", params, timeout=timeout)
+            page_tools = result.get("tools")
+            if not isinstance(page_tools, list) or not all(
+                isinstance(tool, dict) for tool in page_tools
+            ):
+                raise RuntimeError("MCP tools/list response has invalid tools")
+            tools.extend(cast(list[dict[str, Any]], page_tools))
+
+            next_cursor = result.get("nextCursor")
+            if next_cursor is None:
+                return tools
+            if not isinstance(next_cursor, str) or not next_cursor:
+                raise RuntimeError("MCP tools/list response has invalid nextCursor")
+            if next_cursor in seen_cursors:
+                raise RuntimeError(f"MCP tools/list repeated cursor: {next_cursor!r}")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
+        raise RuntimeError(f"MCP tools/list exceeded {MAX_TOOL_LIST_PAGES} pages")
 
     def call_tool(
         self, name: str, arguments: dict, timeout: float | None = None
