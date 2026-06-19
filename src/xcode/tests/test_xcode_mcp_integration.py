@@ -8,9 +8,11 @@ import tempfile
 import shutil
 
 from xcode.harness.mcp.tools import (
+    McpRuntimeRegistry,
     build_mcp_tools,
     compute_config_hash,
 )
+from xcode.harness.skills import ToolSpec
 
 
 class XcodeMcpIntegrationTests(unittest.TestCase):
@@ -195,6 +197,82 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
         mock_client.call_tool.assert_called_once_with(
             "edit_record", {"id": 42, "value": "new_val"}, timeout=None
         )
+
+    @patch("xcode.harness.mcp.client.McpClient")
+    def test_tools_changed_refreshes_cache_and_runtime_registry(
+        self,
+        mock_client_class: MagicMock,
+    ) -> None:
+        """listChanged 会同步 schema cache 和运行时工具快照。"""
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+        mock_client.protocol_version = "2025-11-25"
+        mock_client.server_info = {"name": "dynamic", "version": "1.0.0"}
+        mock_client.list_tools.return_value = [
+            {
+                "name": "old_tool",
+                "description": "Old schema",
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        ]
+        mock_client.call_tool.return_value = {
+            "content": [{"type": "text", "text": "ok"}]
+        }
+        local_dir = self.project_root / ".local"
+        local_dir.mkdir(parents=True)
+        (local_dir / "mcp_config.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "dynamic": {
+                            "command": "python",
+                            "args": ["dynamic_server.py"],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        runtime_registry = McpRuntimeRegistry()
+        published: list[tuple[ToolSpec, ...]] = []
+        runtime_registry.subscribe(published.append)
+
+        tools = build_mcp_tools(self.project_root, runtime_registry)
+        tools[0].handler({})
+        callback = mock_client.set_tools_changed_callback.call_args.args[0]
+        mock_client.list_tools.return_value = [
+            {
+                "name": "new_tool",
+                "description": "New schema",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                    "required": ["value"],
+                },
+            }
+        ]
+
+        callback(mock_client)
+
+        self.assertEqual(
+            [tool.name for tool in published[-1]],
+            ["mcp__dynamic__new_tool"],
+        )
+        self.assertEqual(
+            published[-1][0].schema,
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            },
+        )
+        cache = json.loads((local_dir / "mcp_cache.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            cache["servers"]["dynamic"]["tools"][0]["name"],
+            "new_tool",
+        )
+        runtime_registry.close()
+        mock_client.stop.assert_called()
 
     @patch("xcode.harness.mcp.client.McpClient")
     def test_legacy_cache_without_negotiation_metadata_is_refreshed(

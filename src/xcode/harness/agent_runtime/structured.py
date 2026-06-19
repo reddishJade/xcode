@@ -39,7 +39,7 @@ from .tool_gate import ToolGate
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import HookRecord
 from ..observability.permission_model import GrantStore
-from ..skills import ApprovalCallback, ToolSpec
+from ..skills import ApprovalCallback, ToolRegistryState, ToolSpec
 
 _PROMPT_VERSION_CACHE: str | None = None
 
@@ -60,7 +60,7 @@ class StructuredAgent:
     def __init__(
         self,
         provider: StreamProvider,
-        registry: tuple[ToolSpec, ...],
+        registry: tuple[ToolSpec, ...] | ToolRegistryState,
         config: AgentConfig | None = None,
         gate: GateConfig | None = None,
         runtime: AgentRuntimeConfig | None = None,
@@ -76,8 +76,11 @@ class StructuredAgent:
             )
         self.project_root = runtime.project_root
         self._runtime = runtime
-        self.registry = registry
-        self.tool_map = {t.name: t for t in registry}
+        self._registry_state = (
+            registry
+            if isinstance(registry, ToolRegistryState)
+            else ToolRegistryState(registry)
+        )
         self.config = config
         self.compactor = runtime.compactor
         self._compact_controller = runtime.compact_controller
@@ -113,6 +116,16 @@ class StructuredAgent:
         self._resumed_notice: str | None = None
 
     # ── 公共 API ──
+
+    @property
+    def registry(self) -> tuple[ToolSpec, ...]:
+        """返回当前工具注册表快照。"""
+        return self._registry_state.snapshot()
+
+    @property
+    def tool_map(self) -> dict[str, ToolSpec]:
+        """按名称返回当前工具映射。"""
+        return {tool.name: tool for tool in self.registry}
 
     def steer(self, msg: AgentMessage) -> None:
         self._agent.steer(msg)

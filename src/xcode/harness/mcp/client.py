@@ -14,6 +14,7 @@ import re
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from typing import Any, BinaryIO, cast
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,7 @@ class McpClient:
         command: list[str],
         env: dict[str, str] | None = None,
         timeout: float | None = None,
+        tools_changed_callback: Callable[["McpClient"], None] | None = None,
     ) -> None:
         """保存进程配置并初始化连接状态。"""
         self.command = command
@@ -86,10 +88,14 @@ class McpClient:
         self.next_id = 1
         self._lock = threading.Lock()
         self._write_lock = threading.Lock()
+        self._tools_refresh_lock = threading.Lock()
+        self._tools_changed_event = threading.Event()
+        self._tools_refresh_thread: threading.Thread | None = None
         self._pending_responses: dict[int | str, dict[str, Any]] = {}
         self._read_thread: threading.Thread | None = None
         self._running = False
         self._timeout = timeout
+        self._tools_changed_callback = tools_changed_callback
         self._status: str = "pending"
         self.protocol_version: str | None = None
         self.server_capabilities: dict[str, Any] = {}
@@ -172,6 +178,13 @@ class McpClient:
         """判断服务器是否在 initialize 响应中声明能力。"""
         return isinstance(self.server_capabilities.get(capability), dict)
 
+    def set_tools_changed_callback(
+        self,
+        callback: Callable[["McpClient"], None] | None,
+    ) -> None:
+        """设置后续工具列表变更通知使用的回调。"""
+        self._tools_changed_callback = callback
+
     def _require_server_capability(self, capability: str, method: str) -> None:
         """拒绝调用未协商的服务器能力。"""
         if self.has_server_capability(capability):
@@ -230,8 +243,57 @@ class McpClient:
         )
 
     def _handle_server_notification(self, method: str) -> None:
-        """记录尚未支持的 server notification。"""
+        """处理已协商的 server notification。"""
+        if method == "notifications/tools/list_changed":
+            tools_capability = self.server_capabilities.get("tools")
+            if not isinstance(tools_capability, dict) or not tools_capability.get(
+                "listChanged", False
+            ):
+                logger.warning(
+                    "Ignoring MCP tools/list_changed notification without "
+                    "negotiated tools.listChanged capability"
+                )
+                return
+            if self._tools_changed_callback is None:
+                logger.debug(
+                    "Ignoring MCP tools/list_changed notification without callback"
+                )
+                return
+            self._schedule_tools_refresh()
+            return
         logger.warning("Ignoring unsupported MCP server notification: %s", method)
+
+    def _schedule_tools_refresh(self) -> None:
+        """合并连续通知，并保证每个客户端最多运行一个刷新线程。"""
+        self._tools_changed_event.set()
+        with self._tools_refresh_lock:
+            if (
+                self._tools_refresh_thread is not None
+                and self._tools_refresh_thread.is_alive()
+            ):
+                return
+            self._tools_refresh_thread = threading.Thread(
+                target=self._run_tools_changed_callback,
+                name="mcp-tools-list-changed",
+                daemon=True,
+            )
+            self._tools_refresh_thread.start()
+
+    def _run_tools_changed_callback(self) -> None:
+        """串行刷新工具列表，并处理刷新期间到达的新通知。"""
+        while True:
+            self._tools_changed_event.clear()
+            if not self._running or self._tools_changed_callback is None:
+                return
+            try:
+                self._tools_changed_callback(self)
+            except Exception:
+                logger.warning("Failed to refresh MCP tools", exc_info=True)
+            with self._tools_refresh_lock:
+                if self._tools_changed_event.is_set():
+                    continue
+                self._tools_refresh_thread = None
+                return
 
     def _send_jsonrpc_response(
         self,
@@ -475,10 +537,16 @@ atexit.register(_cleanup_clients)
 class LazyClientRef:
     """延迟创建并复用 MCP 客户端。"""
 
-    def __init__(self, server_name: str, config: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        server_name: str,
+        config: dict[str, Any],
+        tools_changed_callback: Callable[[McpClient], None] | None = None,
+    ) -> None:
         """保存服务器名称和原始运行配置。"""
         self.server_name = server_name
         self.config = config
+        self.tools_changed_callback = tools_changed_callback
         self.client: McpClient | None = None
 
     def get_or_create(self) -> McpClient:
@@ -490,6 +558,7 @@ class LazyClientRef:
             env = self.config.get("env")
             timeout = self.config.get("timeout")
             self.client = McpClient(command, env, timeout=timeout)
+            self.client.set_tools_changed_callback(self.tools_changed_callback)
             self.client.start()
         return self.client
 

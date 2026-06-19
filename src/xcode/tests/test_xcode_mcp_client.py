@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import call, patch
@@ -366,6 +367,55 @@ class XcodeMcpClientTests(unittest.TestCase):
             client.list_tools()
 
         self.assertEqual(request.call_count, MAX_TOOL_LIST_PAGES)
+
+    def test_mcp_client_dispatches_negotiated_tools_changed_notification(
+        self,
+    ) -> None:
+        """已协商的工具变更通知会在读取线程之外触发刷新。"""
+        callback_called = threading.Event()
+        client = McpClient(
+            ["unused"],
+            tools_changed_callback=lambda _client: callback_called.set(),
+        )
+        client.server_capabilities = {"tools": {"listChanged": True}}
+        client._running = True
+
+        client._handle_incoming_message(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/tools/list_changed",
+            }
+        )
+
+        self.assertTrue(callback_called.wait(timeout=1.0))
+        client._running = False
+
+    def test_mcp_client_ignores_undeclared_tools_changed_notification(
+        self,
+    ) -> None:
+        """服务器未声明 listChanged 时忽略工具变更通知。"""
+        callback_called = threading.Event()
+        client = McpClient(
+            ["unused"],
+            tools_changed_callback=lambda _client: callback_called.set(),
+        )
+        client.server_capabilities = {"tools": {}}
+        client._running = True
+
+        with self.assertLogs(
+            "xcode.harness.mcp.client",
+            level="WARNING",
+        ) as logs:
+            client._handle_incoming_message(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/tools/list_changed",
+                }
+            )
+
+        self.assertFalse(callback_called.wait(timeout=0.05))
+        self.assertTrue(any("without negotiated" in message for message in logs.output))
+        client._running = False
 
     def test_mcp_client_rejects_invalid_server_identity(self) -> None:
         """缺少稳定名称或版本的 serverInfo 无法完成协商。"""

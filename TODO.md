@@ -13,18 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P2 · MCP tools/list 不支持分页和动态刷新
-
-`McpClient.list_tools()` 只发送一次空参数请求，忽略 `nextCursor`。
-`notifications/tools/list_changed` 也未处理。
-
-需要：
-
-- 循环处理 `tools/list` cursor pagination。
-- server 声明 `tools.listChanged` 时处理 list-changed notification。
-- 刷新 schema cache 和 runtime tool registry。
-- 对重复 cursor 和异常分页设置保护。
-
 ## P2 · MCP timeout 未发送取消通知，关闭流程不符合完整生命周期
 
 请求超时后客户端直接停止等待，没有发送 MCP cancellation notification。

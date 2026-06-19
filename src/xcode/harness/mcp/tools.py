@@ -17,6 +17,8 @@ import hashlib
 import json
 import logging
 import re
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -50,6 +52,45 @@ class McpToolMetadata:
     tool_name: str
     tool_slug: str
     host_tool_id: str
+
+
+class McpRuntimeRegistry:
+    """协调 MCP 动态工具快照、订阅者和持久客户端生命周期。"""
+
+    def __init__(self) -> None:
+        """初始化空的运行时注册状态。"""
+        self._lock = threading.Lock()
+        self._callbacks: list[Callable[[tuple[ToolSpec, ...]], None]] = []
+        self._client_refs: list[_mcp_mod.LazyClientRef] = []
+
+    def subscribe(
+        self,
+        callback: Callable[[tuple[ToolSpec, ...]], None],
+    ) -> None:
+        """注册工具快照更新回调。"""
+        with self._lock:
+            self._callbacks.append(callback)
+
+    def publish(self, tools: tuple[ToolSpec, ...]) -> None:
+        """向所有订阅者发布完整 MCP 工具快照。"""
+        with self._lock:
+            callbacks = tuple(self._callbacks)
+        for callback in callbacks:
+            callback(tools)
+
+    def track_client_ref(self, ref: _mcp_mod.LazyClientRef) -> None:
+        """登记需要随应用关闭的延迟客户端。"""
+        with self._lock:
+            self._client_refs.append(ref)
+
+    def close(self) -> None:
+        """关闭所有已启动的 MCP 持久客户端。"""
+        with self._lock:
+            refs = tuple(self._client_refs)
+            self._client_refs.clear()
+            self._callbacks.clear()
+        for ref in refs:
+            ref.stop()
 
 
 # ── 名称清理 ──
@@ -489,8 +530,12 @@ def _detect_collisions(
 # ── 主入口 ──
 
 
-def build_mcp_tools(project_root: Path) -> tuple[ToolSpec, ...]:
+def build_mcp_tools(
+    project_root: Path,
+    runtime_registry: McpRuntimeRegistry | None = None,
+) -> tuple[ToolSpec, ...]:
     """根据配置文件加载和构建所有 MCP 工具。"""
+    runtime_registry = runtime_registry or McpRuntimeRegistry()
     config_path = _mcp_config_path(project_root)
     if config_path is None:
         return ()
@@ -516,6 +561,8 @@ def build_mcp_tools(project_root: Path) -> tuple[ToolSpec, ...]:
     deferred_servers: set[str] = set()
     slug_map: dict[str, str] = {}
     all_tools_by_server: dict[str, list[dict[str, Any]]] = {}
+    lazy_refs: dict[str, _mcp_mod.LazyClientRef] = {}
+    refresh_lock = threading.Lock()
 
     cache_path = _cache_path(project_root)
     cache_data = _load_cache(cache_path)
@@ -543,32 +590,106 @@ def build_mcp_tools(project_root: Path) -> tuple[ToolSpec, ...]:
         if tools_list:
             all_tools_by_server[server_name] = tools_list
 
-    # Collision detection
-    disabled = _detect_collisions(all_tools_by_server, validated_servers)
+    bootstrap_tools = tuple(tools_to_register)
+    search_tools = (
+        (build_mcp_tool_search(project_root, deferred_servers, slug_map),)
+        if deferred_servers
+        else ()
+    )
 
-    # Build ToolSpecs for non-colliding tools
+    def refresh_server_tools(
+        server_name: str,
+        client: _mcp_mod.McpClient,
+    ) -> None:
+        """重新发现服务器工具并同步缓存与宿主运行时注册表。"""
+        validated = validated_servers[server_name]
+        tools_list = client.list_tools(timeout=validated.timeout)
+        cache_metadata = _cache_metadata(client)
+        config_hash = compute_config_hash(mcp_servers[server_name])
+        with refresh_lock:
+            current_cache = _load_cache(cache_path)
+            current_cache.setdefault("servers", {})[server_name] = {
+                "config_hash": config_hash,
+                "tools": tools_list,
+                **cache_metadata,
+            }
+            _save_cache(cache_path, current_cache)
+            all_tools_by_server[server_name] = tools_list
+            refreshed = _build_runtime_mcp_tools(
+                all_tools_by_server=all_tools_by_server,
+                validated_servers=validated_servers,
+                raw_servers=mcp_servers,
+                deferred_servers=deferred_servers,
+                cache_path=cache_path,
+                lazy_refs=lazy_refs,
+                runtime_registry=runtime_registry,
+                refresh_server_tools=refresh_server_tools,
+            )
+        runtime_registry.publish(bootstrap_tools + refreshed + search_tools)
+
+    registered_tools = _build_runtime_mcp_tools(
+        all_tools_by_server=all_tools_by_server,
+        validated_servers=validated_servers,
+        raw_servers=mcp_servers,
+        deferred_servers=deferred_servers,
+        cache_path=cache_path,
+        lazy_refs=lazy_refs,
+        runtime_registry=runtime_registry,
+        refresh_server_tools=refresh_server_tools,
+    )
+    return bootstrap_tools + registered_tools + search_tools
+
+
+def _build_runtime_mcp_tools(
+    *,
+    all_tools_by_server: dict[str, list[dict[str, Any]]],
+    validated_servers: dict[str, McpServerConfig],
+    raw_servers: dict[str, dict[str, Any]],
+    deferred_servers: set[str],
+    cache_path: Path,
+    lazy_refs: dict[str, _mcp_mod.LazyClientRef],
+    runtime_registry: McpRuntimeRegistry,
+    refresh_server_tools: Callable[[str, _mcp_mod.McpClient], None],
+) -> tuple[ToolSpec, ...]:
+    """根据最新服务器 schema 构建无冲突的运行时 MCP 工具。"""
+    disabled = _detect_collisions(all_tools_by_server, validated_servers)
+    registered: list[ToolSpec] = []
+
     for server_name, tools_list in all_tools_by_server.items():
         validated = validated_servers[server_name]
-        raw_config = mcp_servers.get(server_name, {})
-        lazy_ref = _mcp_mod.LazyClientRef(server_name, raw_config)
-        server_slug = _sanitize(server_name)
+        lazy_ref = lazy_refs.get(server_name)
+        if lazy_ref is None:
 
+            def on_tools_changed(
+                client: _mcp_mod.McpClient,
+                current_server: str = server_name,
+            ) -> None:
+                """将客户端通知转交给对应服务器的注册表刷新。"""
+                refresh_server_tools(current_server, client)
+
+            lazy_ref = _mcp_mod.LazyClientRef(
+                server_name,
+                raw_servers[server_name],
+                tools_changed_callback=on_tools_changed,
+            )
+            lazy_refs[server_name] = lazy_ref
+            runtime_registry.track_client_ref(lazy_ref)
+
+        server_slug = _sanitize(server_name)
         for tool in tools_list:
             tool_key = f"{server_name}:{tool['name']}"
             if tool_key in disabled:
                 continue
 
             tool_slug = _sanitize(tool["name"])
-            host_id = f"mcp__{server_slug}__{tool_slug}"
             metadata = McpToolMetadata(
                 server_name=server_name,
                 server_slug=server_slug,
                 tool_name=tool["name"],
                 tool_slug=tool_slug,
-                host_tool_id=host_id,
+                host_tool_id=f"mcp__{server_slug}__{tool_slug}",
             )
-
-            tools_to_register.append(
+            registered.append(
                 _build_registered_mcp_tool(
                     validated,
                     tool,
@@ -579,12 +700,7 @@ def build_mcp_tools(project_root: Path) -> tuple[ToolSpec, ...]:
                 )
             )
 
-    if deferred_servers:
-        tools_to_register.append(
-            build_mcp_tool_search(project_root, deferred_servers, slug_map)
-        )
-
-    return tuple(tools_to_register)
+    return tuple(registered)
 
 
 def _tools_for_server(

@@ -28,7 +28,12 @@ import platform
 from pathlib import Path
 
 from xcode.harness.config import DEFAULT_PROMPT_MODULES
-from xcode.harness.skills import ToolSpec, build_tool_guidelines, build_tool_prompt
+from xcode.harness.skills import (
+    ToolRegistryState,
+    ToolSpec,
+    build_tool_guidelines,
+    build_tool_prompt,
+)
 from xcode.coding_agent.tools.shell_adapter import ShellSpec
 
 from ..contextual import ContextualRetrievalState
@@ -227,7 +232,7 @@ def _tool_prompt_section(registry: tuple[ToolSpec, ...]) -> str:
 
 def build_runtime_context_provider(
     project_root: Path,
-    registry: tuple[ToolSpec, ...],
+    registry: tuple[ToolSpec, ...] | ToolRegistryState,
     prompt_builder: SystemPromptBuilder | None = None,
     resumed_notice: Callable[[], str | None] | None = None,
     interrupted_notice: Callable[[], str | None] | None = None,
@@ -239,11 +244,14 @@ def build_runtime_context_provider(
     root = project_root.resolve()
 
     def provide(question: str) -> list[str]:
+        current_registry = (
+            registry.snapshot() if isinstance(registry, ToolRegistryState) else registry
+        )
         return [
             builder.build(
                 PromptContext(
                     project_root=root,
-                    registry=registry,
+                    registry=current_registry,
                     question=question,
                     resumed_notice=resumed_notice() if resumed_notice else None,
                     interrupted_notice=interrupted_notice()

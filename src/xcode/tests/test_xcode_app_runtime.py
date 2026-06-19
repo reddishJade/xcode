@@ -33,6 +33,7 @@ from xcode.harness.config import (
 )
 from xcode.harness.agent_runtime.compaction import LayeredCompactor
 from xcode.coding_agent.tools.shell_adapter import detect_shell
+from xcode.harness.mcp import McpRuntimeRegistry
 from xcode.harness.skills import ToolSpec
 
 
@@ -281,6 +282,53 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             )
 
         self.assertIn("mcp__demo__read", {tool.name for tool in app.registry})
+
+    def test_runtime_registry_applies_dynamic_mcp_tool_snapshot(self) -> None:
+        """MCP 发布的新 schema 会进入 agent、应用和工具搜索视图。"""
+        old_tool = ToolSpec(
+            name="mcp__demo__old",
+            description="Old MCP tool.",
+            input_hint="{}",
+            handler=lambda _data: "old",
+            group="mcp",
+        )
+        new_tool = ToolSpec(
+            name="mcp__demo__new",
+            description="New MCP tool.",
+            input_hint="{}",
+            handler=lambda _data: "new",
+            group="mcp",
+        )
+        runtime_registries: list[McpRuntimeRegistry] = []
+
+        def build_dynamic_tools(
+            _project_root: Path,
+            runtime_registry: McpRuntimeRegistry,
+        ) -> tuple[ToolSpec, ...]:
+            """记录装配使用的 MCP 运行时注册器。"""
+            runtime_registries.append(runtime_registry)
+            return (old_tool,)
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _patched_provider_bundle([]),
+            patch(
+                "xcode.harness.mcp.build_mcp_tools",
+                side_effect=build_dynamic_tools,
+            ),
+        ):
+            app = build_app(
+                project_root=Path(tmp),
+                runtime_config=XcodeRuntimeConfig(),
+            )
+
+        runtime_registries[0].publish((new_tool,))
+
+        self.assertIn("mcp__demo__new", {tool.name for tool in app.registry})
+        self.assertNotIn("mcp__demo__old", {tool.name for tool in app.agent.registry})
+        search_tool = next(tool for tool in app.registry if tool.name == "search_tools")
+        self.assertIn("mcp__demo__new", search_tool.handler({"query": "new"}))
+        app.close()
 
     def test_default_runtime_does_not_enable_experimental_components(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):

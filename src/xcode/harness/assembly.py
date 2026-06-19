@@ -45,7 +45,7 @@ from xcode.harness.observability import (
 from xcode.harness.observability.permission_model import ExternalDirectory
 from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
-from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.harness.skills import ToolInput, ToolRegistryState, ToolSpec
 from xcode.coding_agent.registry import build_project_scoped_registry
 from xcode.coding_agent.tools import ShellSpec
 from xcode.ai.providers.factory import (
@@ -56,6 +56,7 @@ from xcode.ai.providers.factory import (
 if TYPE_CHECKING:
     from xcode.harness.daemon import HeartbeatDaemon
     from xcode.harness.mailbox import AgentMailbox
+    from xcode.harness.mcp import McpRuntimeRegistry
     from xcode.harness.skills_registry import SkillRegistry
 
 
@@ -173,11 +174,12 @@ def build_providers(runtime_config: XcodeRuntimeConfig, env_files: tuple[Path, .
 
 
 def build_search_tools_tool(
-    registry: tuple[ToolSpec, ...],
+    registry_provider: Callable[[], tuple[ToolSpec, ...]],
 ) -> ToolSpec:
     """按关键字搜索所有已注册工具。"""
 
     def search_tools(data: ToolInput) -> str:
+        registry = registry_provider()
         query = str(data.get("query", "")).strip().lower()
         if not query:
             lines = [f"Available tools ({len(registry)}):"]
@@ -230,12 +232,13 @@ def build_tool_registry(
     skills_dir: Path | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
 ) -> tuple[
-    tuple[ToolSpec, ...],
+    ToolRegistryState,
     ShellSpec,
     tuple[Callable[[], None], ...],
     SkillRegistry | None,
 ]:
     from xcode.coding_agent.tools import detect_shell
+    from xcode.harness.mcp import McpRuntimeRegistry
 
     enabled = effective_enabled_groups(runtime_config.tools.enabled_groups)
     closers: list[Callable[[], None]] = []
@@ -267,11 +270,18 @@ def build_tool_registry(
         env=env,
         skill_registry=skill_registry,
     )
-    registry = _extend_registry_with_features(registry, project_root, enabled)
+    mcp_runtime_registry = McpRuntimeRegistry()
+    registry = _extend_registry_with_features(
+        registry,
+        project_root,
+        enabled,
+        mcp_runtime_registry,
+    )
 
     # Step 9 host policy: MCP tools are always excluded from subagents
     child_registry = tuple(t for t in registry if t.group != "mcp")
-    registry += (build_search_tools_tool(registry),)
+    registry_state = ToolRegistryState(registry)
+    registry += (build_search_tools_tool(registry_state.snapshot),)
 
     subagent_closers, subagent_tools = _build_subagent_integration(
         project_root=project_root,
@@ -289,6 +299,14 @@ def build_tool_registry(
     )
     closers.extend(subagent_closers)
     registry += subagent_tools
+    registry_state.replace(registry)
+
+    def replace_mcp_tools(tools: tuple[ToolSpec, ...]) -> None:
+        """将动态 MCP 快照替换到主 agent 工具注册表。"""
+        registry_state.replace_group("mcp", tools)
+
+    mcp_runtime_registry.subscribe(replace_mcp_tools)
+    closers.append(mcp_runtime_registry.close)
 
     # Step 9 invariant: only group="mcp" ToolSpecs may use mcp__ prefix
     for spec in registry:
@@ -298,18 +316,19 @@ def build_tool_registry(
                 f"but group is {spec.group!r}, not 'mcp'"
             )
 
-    return registry, shell_spec, tuple(closers), skill_registry
+    return registry_state, shell_spec, tuple(closers), skill_registry
 
 
 def _extend_registry_with_features(
     registry: tuple[ToolSpec, ...],
     project_root: Path,
     enabled: set[str],
+    mcp_runtime_registry: McpRuntimeRegistry,
 ) -> tuple[ToolSpec, ...]:
     """添加可选功能工具到注册表。"""
     from xcode.harness.mcp import build_mcp_tools
 
-    registry += build_mcp_tools(project_root)
+    registry += build_mcp_tools(project_root, mcp_runtime_registry)
     if "worktree" in enabled:
         from xcode.coding_agent.tools.worktree import (
             WorktreeTaskRunner,
@@ -473,7 +492,7 @@ def load_opt_in_services(
 def build_agent(
     project_root: Path,
     llm: ModelProvider,
-    registry: tuple[ToolSpec, ...],
+    registry: tuple[ToolSpec, ...] | ToolRegistryState,
     config: AgentConfig,
     audit_path: Path | None,
     runtime_config: XcodeRuntimeConfig,

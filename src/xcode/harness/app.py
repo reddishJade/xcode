@@ -16,7 +16,7 @@ from xcode.harness.agent_runtime import (
     StructuredAgent,
     StructuredAgentEvent,
 )
-from xcode.harness.skills import ToolSpec
+from xcode.harness.skills import ToolRegistryState, ToolSpec
 from . import assembly as _assembly
 from .assembly import (
     build_agent,
@@ -33,7 +33,7 @@ class XcodeApp:
     """Xcode 应用句柄。"""
 
     agent: StructuredAgent
-    registry: tuple[ToolSpec, ...] = ()
+    registry: tuple[ToolSpec, ...] | ToolRegistryState = ()
     contextual_state: ContextualRetrievalState | None = None
     daemon: HeartbeatDaemon | None = None
     mailbox: AgentMailbox | None = None
@@ -151,7 +151,7 @@ def build_app(
 
     providers = _assembly.build_providers(cfg.runtime_config, cfg.env_files)
 
-    registry, shell_spec, closers, skill_registry = _assembly.build_tool_registry(
+    registry_state, shell_spec, closers, skill_registry = _assembly.build_tool_registry(
         project_root=project_root,
         llm=providers.llm,
         llm_profiles=providers.llms,
@@ -167,7 +167,7 @@ def build_app(
     agent = build_agent(
         project_root=project_root,
         llm=providers.llm,
-        registry=registry,
+        registry=registry_state,
         config=cfg.agent_config,
         audit_path=cfg.audit_path,
         runtime_config=cfg.runtime_config,
@@ -186,7 +186,7 @@ def build_app(
 
     return XcodeApp(
         agent=agent,
-        registry=registry,
+        registry=registry_state,
         contextual_state=infra.contextual_state,
         daemon=opt_in_services.daemon,
         mailbox=opt_in_services.mailbox,

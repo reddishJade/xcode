@@ -6,10 +6,11 @@ handler 前根据 risk 字段和 permission policy 决定是否需要 approval c
 from __future__ import annotations
 
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import threading
 from typing import Any
 
 from ..agent.protocols import ToolExecutionMode
@@ -62,6 +63,51 @@ class ToolSpec:
     prompt_snippet: str | None = None
     prompt_guidelines: tuple[str, ...] = ()
     builtin: dict[str, Any] | None = None
+
+
+class ToolRegistryState:
+    """保存可在运行期间原子替换的工具注册表快照。"""
+
+    def __init__(self, registry: tuple[ToolSpec, ...]) -> None:
+        """使用初始工具列表创建线程安全状态。"""
+        self._lock = threading.Lock()
+        self._registry = registry
+
+    def snapshot(self) -> tuple[ToolSpec, ...]:
+        """返回当前不可变工具快照。"""
+        with self._lock:
+            return self._registry
+
+    def __iter__(self) -> Iterator[ToolSpec]:
+        """迭代调用开始时的稳定工具快照。"""
+        return iter(self.snapshot())
+
+    def __len__(self) -> int:
+        """返回当前工具数量。"""
+        return len(self.snapshot())
+
+    def replace(self, registry: tuple[ToolSpec, ...]) -> None:
+        """原子替换完整工具注册表。"""
+        with self._lock:
+            self._registry = registry
+
+    def replace_group(
+        self,
+        group: str,
+        tools: tuple[ToolSpec, ...],
+    ) -> tuple[ToolSpec, ...]:
+        """在原有位置替换指定工具组，并返回新快照。"""
+        with self._lock:
+            existing = self._registry
+            insertion_index = next(
+                (index for index, tool in enumerate(existing) if tool.group == group),
+                len(existing),
+            )
+            retained = tuple(tool for tool in existing if tool.group != group)
+            self._registry = (
+                retained[:insertion_index] + tools + retained[insertion_index:]
+            )
+            return self._registry
 
 
 def resolve_project_path(project_root: Path, raw_path: str) -> Path:
