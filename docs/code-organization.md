@@ -156,7 +156,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `tools/path_utils.py` | 路径解析、`is_path_blocked` |
 | `tools/truncate.py` | 输出截断 |
 | `tools/output_accumulator.py` | 命令输出累积 |
-| `tools/tools_manager.py` | 外部工具检测（fd、ripgrep 等） |
+| `tools/tools_manager.py` | 外部工具检测（ripgrep 等） |
 | `tools/file_handlers.py` | 文件操作处理 |
 | `tools/file_image.py` | 图片文件处理 |
 | `tools/file_mutation_queue.py` | 文件变更队列 |

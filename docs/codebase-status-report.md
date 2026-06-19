@@ -217,6 +217,10 @@ cli → coding_agent → harness → agent → ai
 - `ToolSpec` 包含 risk、group、read_only、concurrency_safe、
   execution_mode、counts_as_progress 等元数据。
 - JSON Schema 参数校验。
+- `glob_files` 和 `find_files` 共用基于 `rg --files` 的候选枚举与 Python
+  fallback；两条路径统一遵循 `.gitignore`、hidden 和 blocked path 规则。
+- `glob_files` 按修改时间降序和稳定路径次序返回；grep/glob 数值参数执行明确
+  边界校验，ripgrep 错误保留 stderr 诊断。
 - bash 支持：
   - 每次调用传入 timeout。
   - 默认 30 秒和最大 timeout schema 约束。

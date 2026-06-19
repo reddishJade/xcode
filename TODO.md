@@ -13,37 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P1 · grep fallback 与 glob 实现不符合工具契约
-
-`grep_search` 在存在 ripgrep 时使用 `rg`，因此默认遵循 `.gitignore`；但
-`glob_files` 始终使用 Python `Path.glob()`，不会遵循 `.gitignore`，并按路径
-字典序而不是修改时间返回。`grep_search` 和 `find_files` 的 Python fallback
-同样没有完整复现 ripgrep/fd 的 ignore 语义。工具描述与实际行为因此依赖宿主
-是否安装外部命令。
-
-这是实现正确性问题，而不只是性能或体验差异：
-
-- `glob_files` 宣称用于项目文件发现，但会返回 `.gitignore` 已排除的文件。
-- `glob_files` 未按工具约定的修改时间排序。
-- `grep_search` 在有无 ripgrep 时可能搜索不同的文件集合。
-- 同一请求在不同开发机上可能得到不同结果，破坏工具行为的可预测性。
-
-需要：
-
-- `glob_files` 优先基于 `rg --files` 或同等实现枚举文件，再应用 glob pattern。
-- grep、glob 和 fallback 使用一致的 `.gitignore`、hidden file 和 blocked path
-  规则。
-- glob 结果按修改时间降序排列，并使用稳定路径次序处理同一时间戳。
-- ripgrep 返回 regex、路径或权限错误时返回明确诊断，不误报为
-  `No matches found.`。
-- 校验 `max_results`、`context` 等数值边界。
-- 添加 ignored file、hidden file、无 git 仓库、无 rg/fd、mtime 排序和非法
-  regex 测试。
-
-保留 `grep_search` 与 `glob_files` 两种面向模型的工具是合理的：前者搜索内容，
-后者发现路径。`find_files` 与 `glob_files` 的职责应在实现时合并或明确区分，
-避免维护两套近似的路径搜索语义。
-
 ## P1 · MCP 版本和 capability negotiation 不完整
 
 `McpClient.start()` 固定发送 `2024-11-05`，但不校验 server 返回的

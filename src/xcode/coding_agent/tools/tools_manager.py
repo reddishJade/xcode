@@ -1,4 +1,4 @@
-"""检查系统已安装的外部工具（如 fd、ripgrep）。"""
+"""检查系统已安装的外部工具（如 ripgrep）。"""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ class ExternalToolDefinition:
 
 
 _TOOLS: dict[str, ExternalToolDefinition] = {
-    "fd": ExternalToolDefinition(display_name="fd", candidate_names=("fd", "fdfind")),
     "rg": ExternalToolDefinition(display_name="rg", candidate_names=("rg",)),
 }
 

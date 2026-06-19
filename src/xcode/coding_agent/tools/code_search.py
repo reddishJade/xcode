@@ -1,64 +1,69 @@
+"""供编码 Agent 使用的只读代码搜索工具。"""
+
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+import pathspec
+
 from xcode.harness.skills import ToolInput, ToolSpec, resolve_project_path
-from .path_utils import is_path_blocked, truncate_output, display_path
+from .path_utils import display_path, is_path_blocked, truncate_output
 from .tools_manager import ensure_tool
 from .truncate import GREP_MAX_LINE_LENGTH, truncate_line, truncate_tail
 
-"""供编码 Agent 使用的只读代码搜索工具。"""
-
 
 class GrepOperations(Protocol):
-    def is_directory(self, path: Path) -> bool: ...
+    """定义 Python grep fallback 所需的文件读取边界。"""
 
-    def read_file(self, path: Path) -> str: ...
+    def read_file(self, path: Path) -> str:
+        """读取文本文件。"""
+        ...
 
 
 class LsOperations(Protocol):
-    def exists(self, path: Path) -> bool: ...
+    """定义 ls 工具所需的文件系统操作。"""
 
-    def is_directory(self, path: Path) -> bool: ...
+    def exists(self, path: Path) -> bool:
+        """判断路径是否存在。"""
+        ...
 
-    def list_dir(self, path: Path) -> list[Path]: ...
+    def is_directory(self, path: Path) -> bool:
+        """判断路径是否为目录。"""
+        ...
 
-
-class FindOperations(Protocol):
-    def exists(self, path: Path) -> bool: ...
-
-    def is_directory(self, path: Path) -> bool: ...
+    def list_dir(self, path: Path) -> list[Path]:
+        """列出目录中的直接子项。"""
+        ...
 
 
 class LocalGrepOperations:
-    def is_directory(self, path: Path) -> bool:
-        return path.is_dir()
+    """提供本地文件系统 grep 操作。"""
 
     def read_file(self, path: Path) -> str:
+        """读取 UTF-8 文本并忽略无法解码的字节。"""
         return path.read_text(encoding="utf-8", errors="ignore")
 
 
 class LocalLsOperations:
+    """提供本地文件系统 ls 操作。"""
+
     def exists(self, path: Path) -> bool:
+        """判断路径是否存在。"""
         return path.exists()
 
     def is_directory(self, path: Path) -> bool:
+        """判断路径是否为目录。"""
         return path.is_dir()
 
     def list_dir(self, path: Path) -> list[Path]:
+        """列出目录中的直接子项。"""
         return list(path.iterdir())
-
-
-class LocalFindOperations:
-    def exists(self, path: Path) -> bool:
-        return path.exists()
-
-    def is_directory(self, path: Path) -> bool:
-        return path.is_dir()
 
 
 # 输出限制：平衡 LLM 上下文窗口利用率与响应速度
@@ -72,28 +77,34 @@ def build_code_tools(
     project_root: Path,
     grep_ops: GrepOperations | None = None,
     ls_ops: LsOperations | None = None,
-    find_ops: FindOperations | None = None,
     cancel_event: threading.Event | None = None,
 ) -> tuple[ToolSpec, ...]:
+    """构建项目范围内的只读代码搜索工具。"""
     root = project_root.resolve()
     local_grep = grep_ops or LocalGrepOperations()
     local_ls = ls_ops or LocalLsOperations()
-    local_find = find_ops or LocalFindOperations()
 
     def _cancel_check() -> None:
+        """在调用开始前检查取消状态。"""
         if cancel_event is not None and cancel_event.is_set():
             raise ValueError("Tool cancelled")
 
     def grep_search(data: ToolInput) -> str:
+        """执行内容搜索。"""
         pattern = str(data.get("pattern", "")).strip()
         if not pattern:
             raise ValueError("pattern is required")
         base = _safe_path(root, str(data.get("path", ".")))
         glob = data.get("glob")
-        max_results = int(data.get("max_results", MAX_GREP_RESULTS))
+        max_results = _validated_int(
+            data,
+            "max_results",
+            MAX_GREP_RESULTS,
+            minimum=1,
+        )
         ignore_case = bool(data.get("ignore_case", False))
         literal = bool(data.get("literal", False))
-        context = int(data.get("context", 0))
+        context = _validated_int(data, "context", 0, minimum=0)
         _cancel_check()
         return _grep(
             root,
@@ -109,26 +120,39 @@ def build_code_tools(
         )
 
     def glob_files(data: ToolInput) -> str:
+        """按项目相对 glob 搜索文件。"""
         _cancel_check()
         pattern = str(data.get("pattern", "*")).strip() or "*"
         base = _safe_path(root, str(data.get("path", ".")))
-        max_results = int(data.get("max_results", MAX_GLOB_RESULTS))
-        return _glob_files(root, base, pattern, max_results)
+        max_results = _validated_int(
+            data,
+            "max_results",
+            MAX_GLOB_RESULTS,
+            minimum=1,
+        )
+        return _glob_files(root, base, pattern, max_results, recursive_basename=False)
 
     def find_files(data: ToolInput) -> str:
+        """递归按文件名或路径 glob 搜索文件。"""
         _cancel_check()
         pattern = str(data.get("pattern", "")).strip()
         if not pattern:
             raise ValueError("pattern is required")
         base = _safe_path(root, str(data.get("path", ".")))
-        max_results = int(data.get("max_results", MAX_GLOB_RESULTS))
-        return _find_files_fd(root, base, pattern, max_results, local_find)
+        max_results = _validated_int(
+            data,
+            "max_results",
+            MAX_GLOB_RESULTS,
+            minimum=1,
+        )
+        return _glob_files(root, base, pattern, max_results, recursive_basename=True)
 
     def ls_files(data: ToolInput) -> str:
+        """列出目录中的直接子项。"""
         _cancel_check()
         raw_path = str(data.get("path", ".")).strip()
         base = _safe_path(root, raw_path)
-        limit = int(data.get("limit", MAX_LS_ENTRIES))
+        limit = _validated_int(data, "limit", MAX_LS_ENTRIES, minimum=1)
         return _ls(root, base, limit, local_ls)
 
     return (
@@ -144,13 +168,16 @@ def build_code_tools(
                 "properties": {
                     "path": {"type": "string"},
                     "pattern": {"type": "string"},
-                    "max_results": {"type": "integer"},
+                    "max_results": {"type": "integer", "minimum": 1},
                 },
             },
         ),
         ToolSpec(
             name="find_files",
-            description="Find files by glob pattern using fd (fast) with Python glob fallback. Respects .gitignore.",
+            description=(
+                "Find files recursively by name or path glob. "
+                "Uses the same .gitignore-aware discovery engine as glob_files."
+            ),
             input_hint='JSON: {"path": ".", "pattern": "*.py", "max_results": 100}',
             handler=find_files,
             read_only=True,
@@ -169,6 +196,7 @@ def build_code_tools(
                     "max_results": {
                         "type": "integer",
                         "description": "Max results (default: 200)",
+                        "minimum": 1,
                     },
                 },
                 "required": ["pattern"],
@@ -200,6 +228,7 @@ def build_code_tools(
                     "max_results": {
                         "type": "integer",
                         "description": "Max matches (default: 100)",
+                        "minimum": 1,
                     },
                     "ignore_case": {
                         "type": "boolean",
@@ -212,6 +241,7 @@ def build_code_tools(
                     "context": {
                         "type": "integer",
                         "description": "Lines of context before and after each match (default: 0)",
+                        "minimum": 0,
                     },
                 },
                 "required": ["pattern"],
@@ -235,6 +265,7 @@ def build_code_tools(
                     "limit": {
                         "type": "integer",
                         "description": "Maximum entries (default: 500)",
+                        "minimum": 1,
                     },
                 },
                 "additionalProperties": False,
@@ -256,21 +287,55 @@ def _grep(
     context: int = 0,
     cancel_event: threading.Event | None = None,
 ) -> str:
+    """优先使用 ripgrep 搜索内容，缺失时使用 Python fallback。"""
     global _RG_MISSING_HINT_EMITTED
     rg = ensure_tool("rg", silent=True)
     if rg:
-        command = [rg, "--line-number", "--no-heading", "--color", "never"]
+        search_paths = [base]
+        if glob:
+            matcher = _build_path_matcher(glob, recursive_basename=True)
+            search_paths = [
+                path
+                for path in _enumerate_search_files(root, base)
+                if matcher(
+                    path.relative_to(base).as_posix() if base.is_dir() else path.name
+                )
+            ]
+            if not search_paths:
+                return "No matches found."
+            if _command_path_chars(search_paths) > 24_000:
+                return _grep_fallback(
+                    root,
+                    base,
+                    pattern,
+                    glob,
+                    max_results,
+                    grep_ops,
+                    ignore_case=ignore_case,
+                    literal=literal,
+                    context=context,
+                )
+        command = [
+            rg,
+            "--line-number",
+            "--no-heading",
+            "--with-filename",
+            "--color",
+            "never",
+            "--no-require-git",
+            "--no-ignore-dot",
+            "--no-ignore-exclude",
+            "--no-ignore-global",
+        ]
         if ignore_case:
             command.append("--ignore-case")
         if literal:
             command.append("--fixed-strings")
         if context > 0:
             command.extend(["--context", str(context)])
-        command.append("--")
-        command.append(pattern)
-        if glob:
-            command.extend(["-g", glob])
-        command.append(str(base))
+        command.extend(_rg_exclusion_args())
+        command.extend(["--", pattern])
+        command.extend(str(path) for path in search_paths)
         proc = subprocess.Popen(
             command,
             cwd=root,
@@ -283,6 +348,8 @@ def _grep(
         assert proc.stderr is not None
         lines: list[str] = []
         lines_truncated = 0
+        stopped_for_limit = False
+        stderr = ""
         try:
             while True:
                 if cancel_event is not None and cancel_event.is_set():
@@ -297,12 +364,17 @@ def _grep(
                     lines_truncated += 1
                 lines.append(truncated)
                 if len(lines) >= max_results:
+                    stopped_for_limit = True
                     proc.kill()
                     break
             proc.wait(timeout=5)
+            stderr = proc.stderr.read().strip()
         finally:
             proc.stdout.close()
             proc.stderr.close()
+        if not stopped_for_limit and proc.returncode not in (0, 1):
+            detail = stderr or f"exit code {proc.returncode}"
+            raise ValueError(f"ripgrep failed: {detail}")
         if not lines:
             return "No matches found."
         result = "\n".join(lines)
@@ -335,95 +407,27 @@ def _grep(
     )
 
 
-def _find_files_fd(
+def _glob_files(
     root: Path,
     base: Path,
     pattern: str,
     max_results: int,
-    find_ops: FindOperations,
+    *,
+    recursive_basename: bool,
 ) -> str:
-    if not find_ops.exists(base):
-        raise FileNotFoundError(f"Path not found: {_display(root, base)}")
-    if not find_ops.is_directory(base):
-        raise NotADirectoryError(f"Not a directory: {_display(root, base)}")
-
-    fd = ensure_tool("fd", silent=True)
-    if fd:
-        try:
-            args = [
-                fd,
-                "--glob",
-                "--color=never",
-                "--hidden",
-                "--no-require-git",
-                "--max-results",
-                str(max_results),
-            ]
-            adjusted = pattern
-            if (
-                "/" in pattern
-                and not adjusted.startswith("**/")
-                and not adjusted.startswith("/")
-            ):
-                adjusted = f"**/{pattern}"
-                args.append("--full-path")
-            elif adjusted.startswith("**/") or adjusted.startswith("/"):
-                args.append("--full-path")
-            args.extend(["--", adjusted, str(base)])
-            completed = subprocess.run(
-                args,
-                cwd=root,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=30,
-                check=False,
-            )
-            if completed.returncode == 0 or completed.stdout.strip():
-                lines = completed.stdout.strip().splitlines()
-                relativized: list[str] = []
-                for line in lines:
-                    raw = line.strip()
-                    if not raw:
-                        continue
-                    p = Path(raw)
-                    try:
-                        rel = p.resolve().relative_to(root)
-                        suffix = "/" if p.is_dir() else ""
-                        relativized.append(rel.as_posix() + suffix)
-                    except ValueError:
-                        relativized.append(str(p))
-                if not relativized:
-                    return "No files found."
-                result = "\n".join(relativized)
-                total_hits = len(lines)
-                truncated_by_count = len(relativized) >= max_results
-                tr = truncate_tail(result)
-                if tr.truncated:
-                    result = tr.content
-                if truncated_by_count or tr.truncated:
-                    result += (
-                        f"\n[Found {total_hits} results, showing {tr.output_lines if tr.truncated else len(relativized)}. "
-                        f"Use 'max_results=N*2' for more, or refine pattern.]"
-                    )
-                return result
-        except subprocess.TimeoutExpired:
-            pass
-
-    return _glob_files(root, base, pattern, max_results)
-
-
-def _glob_files(root: Path, base: Path, pattern: str, max_results: int) -> str:
-    files = sorted(base.glob(pattern) if base.is_dir() else [base])
-    matches: list[str] = []
-    for path in files:
-        if len(matches) >= max_results:
-            break
-        if path.is_file() and not _is_blocked(root, path):
-            matches.append(_display(root, path))
+    """枚举并按 glob、修改时间和结果上限筛选文件。"""
+    files = _enumerate_search_files(root, base)
+    matcher = _build_path_matcher(pattern, recursive_basename=recursive_basename)
+    matching_files = [
+        path
+        for path in files
+        if matcher(path.relative_to(base).as_posix() if base.is_dir() else path.name)
+    ]
+    matching_files.sort(key=lambda path: (-_mtime_ns(path), _display(root, path)))
+    matches = [_display(root, path) for path in matching_files[:max_results]]
     if not matches:
         return "No files found."
-    suffix = "\n... truncated" if len(matches) >= max_results else ""
+    suffix = "\n... truncated" if len(matching_files) > max_results else ""
     return "\n".join(matches) + suffix
 
 
@@ -433,6 +437,7 @@ def _ls(
     limit: int,
     ls_ops: LsOperations,
 ) -> str:
+    """列出目录内容并应用 blocked path 规则。"""
     if not ls_ops.exists(base):
         raise FileNotFoundError(f"Path not found: {_display(root, base)}")
     if not ls_ops.is_directory(base):
@@ -473,7 +478,17 @@ def _grep_fallback(
     literal: bool = False,
     context: int = 0,
 ) -> str:
-    files = sorted(base.rglob(glob or "*")) if grep_ops.is_directory(base) else [base]
+    """使用 Python 正则逐文件执行内容搜索。"""
+    files = _enumerate_search_files(root, base, use_ripgrep=False)
+    if glob:
+        matcher = _build_path_matcher(glob, recursive_basename=True)
+        files = [
+            path
+            for path in files
+            if matcher(
+                path.relative_to(base).as_posix() if base.is_dir() else path.name
+            )
+        ]
 
     re_pattern: re.Pattern[str] | None = None
     if not literal:
@@ -518,20 +533,234 @@ def _grep_fallback(
     return _truncate("\n".join(matches)) if matches else "No matches found."
 
 
+def _enumerate_search_files(
+    root: Path,
+    base: Path,
+    *,
+    use_ripgrep: bool = True,
+) -> list[Path]:
+    """枚举可搜索文件，并统一应用 ignore、hidden 和 blocked 规则。"""
+    if not base.exists():
+        raise FileNotFoundError(f"Path not found: {_display(root, base)}")
+    if base.is_file():
+        return [] if _is_search_path_excluded(root, base) else [base]
+    if not base.is_dir():
+        raise NotADirectoryError(f"Not a directory: {_display(root, base)}")
+
+    if use_ripgrep:
+        rg = ensure_tool("rg", silent=True)
+        if rg:
+            return _enumerate_with_ripgrep(root, base, rg)
+    return _enumerate_with_python(root, base)
+
+
+def _enumerate_with_ripgrep(root: Path, base: Path, rg: str) -> list[Path]:
+    """使用 ripgrep 枚举文件，并将命令错误转换为明确诊断。"""
+    command = [
+        rg,
+        "--files",
+        "--color",
+        "never",
+        "--no-require-git",
+        "--no-ignore-dot",
+        "--no-ignore-exclude",
+        "--no-ignore-global",
+        *_rg_exclusion_args(),
+    ]
+    command.extend(["--", str(base)])
+    completed = subprocess.run(
+        command,
+        cwd=root,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+    if completed.returncode not in (0, 1):
+        detail = completed.stderr.strip() or f"exit code {completed.returncode}"
+        raise ValueError(f"ripgrep file discovery failed: {detail}")
+
+    files: list[Path] = []
+    for line in completed.stdout.splitlines():
+        raw_path = line.strip()
+        if not raw_path:
+            continue
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = root / path
+        path = path.resolve()
+        if path.is_file() and not _is_search_path_excluded(root, path):
+            files.append(path)
+    return files
+
+
+def _enumerate_with_python(root: Path, base: Path) -> list[Path]:
+    """使用 Python walker 和 .gitignore 规则枚举文件。"""
+    ignore_specs = _load_gitignore_specs(root)
+    files: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+        directory = Path(dirpath)
+        kept_dirs: list[str] = []
+        for dirname in sorted(dirnames):
+            child = directory / dirname
+            if child.is_symlink() or _is_search_path_excluded(root, child):
+                continue
+            if _is_gitignored(child, ignore_specs, directory=True):
+                continue
+            kept_dirs.append(dirname)
+        dirnames[:] = kept_dirs
+
+        for filename in sorted(filenames):
+            path = directory / filename
+            if path.is_symlink() or _is_search_path_excluded(root, path):
+                continue
+            if _is_gitignored(path, ignore_specs):
+                continue
+            files.append(path.resolve())
+    return files
+
+
+def _load_gitignore_specs(
+    root: Path,
+) -> tuple[tuple[Path, pathspec.GitIgnoreSpec], ...]:
+    """按目录加载项目内 .gitignore 规则。"""
+    specs: list[tuple[Path, pathspec.GitIgnoreSpec]] = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        directory = Path(dirpath)
+        dirnames[:] = [
+            dirname
+            for dirname in sorted(dirnames)
+            if not dirname.startswith(".")
+            and not _is_blocked(root, directory / dirname)
+            and not (directory / dirname).is_symlink()
+        ]
+        if ".gitignore" not in filenames:
+            continue
+        ignore_path = directory / ".gitignore"
+        try:
+            lines = ignore_path.read_text(
+                encoding="utf-8",
+                errors="replace",
+            ).splitlines()
+        except OSError:
+            continue
+        specs.append((directory.resolve(), pathspec.GitIgnoreSpec.from_lines(lines)))
+    return tuple(specs)
+
+
+def _is_gitignored(
+    path: Path,
+    specs: tuple[tuple[Path, pathspec.GitIgnoreSpec], ...],
+    *,
+    directory: bool = False,
+) -> bool:
+    """按父目录到子目录顺序应用 .gitignore 的最后匹配规则。"""
+    ignored = False
+    resolved = path.resolve()
+    for spec_root, spec in specs:
+        try:
+            relative = resolved.relative_to(spec_root).as_posix()
+        except ValueError:
+            continue
+        if directory:
+            relative += "/"
+        decision = spec.check_file(relative).include
+        if decision is not None:
+            ignored = decision
+    return ignored
+
+
+def _build_path_matcher(
+    pattern: str,
+    *,
+    recursive_basename: bool,
+) -> Callable[[str], bool]:
+    """构建相对路径 glob matcher。"""
+    normalized = pattern.replace("\\", "/").removeprefix("./")
+    if recursive_basename and "/" not in normalized:
+        normalized = f"**/{normalized}"
+    try:
+        spec = pathspec.GitIgnoreSpec.from_lines([f"/{normalized}"])
+    except ValueError as exc:
+        raise ValueError(f"Invalid glob pattern: {exc}") from exc
+    return spec.match_file
+
+
+def _rg_exclusion_args() -> list[str]:
+    """返回 ripgrep 搜索与文件枚举共用的 blocked path 排除参数。"""
+    patterns = (
+        "!**/.git/**",
+        "!**/.venv/**",
+        "!**/__pycache__/**",
+        "!**/.local/chroma_db/**",
+        "!**/.env",
+        "!**/.env.*",
+    )
+    args: list[str] = []
+    for pattern in patterns:
+        args.extend(["--glob", pattern])
+    return args
+
+
+def _is_search_path_excluded(root: Path, path: Path) -> bool:
+    """判断路径是否因 hidden 或 blocked 规则排除。"""
+    try:
+        relative = path.resolve().relative_to(root)
+    except ValueError:
+        return True
+    return _is_blocked(root, path) or any(
+        part.startswith(".") for part in relative.parts
+    )
+
+
+def _mtime_ns(path: Path) -> int:
+    """返回文件修改时间；无法读取时按最旧处理。"""
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _command_path_chars(paths: list[Path]) -> int:
+    """估算文件路径参数占用，避免超过 Windows 命令行限制。"""
+    return sum(len(str(path)) + 1 for path in paths)
+
+
+def _validated_int(
+    data: ToolInput,
+    key: str,
+    default: int,
+    *,
+    minimum: int,
+) -> int:
+    """读取并校验工具整数参数。"""
+    raw = data.get(key, default)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValueError(f"{key} must be an integer")
+    if raw < minimum:
+        raise ValueError(f"{key} must be at least {minimum}")
+    return raw
+
+
 def _safe_path(root: Path, raw_path: str) -> Path:
+    """解析项目路径并拒绝 hidden 或 blocked 目标。"""
     path = resolve_project_path(root, raw_path)
-    if _is_blocked(root, path):
+    if _is_search_path_excluded(root, path):
         raise ValueError(f"path is blocked: {_display(root, path)}")
     return path
 
 
 def _is_blocked(root: Path, path: Path) -> bool:
+    """判断路径是否命中项目 blocked 规则。"""
     return is_path_blocked(root, path)
 
 
 def _truncate(text: str) -> str:
+    """按工具输出预算截断文本。"""
     return truncate_output(text)
 
 
 def _display(root: Path, path: Path) -> str:
+    """返回稳定的项目相对显示路径。"""
     return display_path(root, path)
