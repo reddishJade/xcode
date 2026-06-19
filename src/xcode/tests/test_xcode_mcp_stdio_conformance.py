@@ -533,6 +533,57 @@ class TestMcpStdioConformance(unittest.TestCase):
             with self.assertRaises(OSError):
                 os.kill(pid, signal.SIGTERM)
 
+    def test_server_shutdown_receives_stdin_eof(self) -> None:
+        """stop() 先关闭 stdin，让服务器完成自行退出逻辑。"""
+        shutdown_path = self.temp_dir / "shutdown.txt"
+        server_code = r"""
+import json
+import sys
+from pathlib import Path
+
+SHUTDOWN_PATH = Path(__SHUTDOWN_PATH__)
+
+def read_message():
+    line = sys.stdin.buffer.readline()
+    if not line:
+        return None
+    return json.loads(line.decode("utf-8"))
+
+def write_message(message):
+    sys.stdout.buffer.write((json.dumps(message) + "\n").encode("utf-8"))
+    sys.stdout.buffer.flush()
+
+while True:
+    request = read_message()
+    if request is None:
+        SHUTDOWN_PATH.write_text("stdin-eof", encoding="utf-8")
+        break
+    if request.get("method") == "initialize":
+        write_message({
+            "jsonrpc": "2.0",
+            "id": request["id"],
+            "result": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "shutdown", "version": "1.0.0"}
+            }
+        })
+"""
+        server_code = server_code.replace(
+            "__SHUTDOWN_PATH__",
+            json.dumps(str(shutdown_path)),
+        )
+        server_file = _write_server_script(self.temp_dir, server_code)
+        client = McpClient([sys.executable, "-u", str(server_file)])
+        client.start()
+
+        client.stop()
+
+        self.assertEqual(
+            shutdown_path.read_text(encoding="utf-8"),
+            "stdin-eof",
+        )
+
     def test_build_mcp_tools_cleanup_on_query(self) -> None:
         """_query_server_tools 在列出工具后正确停止客户端。"""
         server_file = _write_server_script(self.temp_dir, FAKE_MCP_SERVER_CODE)

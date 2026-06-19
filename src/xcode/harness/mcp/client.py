@@ -27,6 +27,9 @@ SUPPORTED_PROTOCOL_VERSIONS = (
 )
 LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
 MAX_TOOL_LIST_PAGES = 100
+SHUTDOWN_GRACE_SECONDS = 1.0
+TERMINATE_GRACE_SECONDS = 1.0
+KILL_GRACE_SECONDS = 1.0
 
 _REDACT_PATTERNS: list[re.Pattern] = [
     re.compile(r"(Bearer\s+)[^\s]+", re.IGNORECASE),
@@ -473,35 +476,78 @@ class McpClient:
         )
 
     def stop(self) -> None:
-        """停止读取循环并终止服务器进程。"""
+        """关闭 stdin 后等待服务器退出，必要时逐级终止进程。"""
         self._running = False
         if self in _active_clients:
             try:
                 _active_clients.remove(self)
             except ValueError:
                 pass
-        if self.process:
-            for stream_attr in ("stdin", "stdout", "stderr"):
-                stream = getattr(self.process, stream_attr, None)
-                if stream:
-                    try:
-                        stream.close()
-                    except Exception:
-                        logger.debug(
-                            "failed to close MCP server stream %s",
-                            stream_attr,
-                            exc_info=True,
-                        )
-            try:
-                self.process.terminate()
-                self.process.wait(timeout=1.0)
-            except Exception:
-                try:
-                    self.process.kill()
-                except Exception:
-                    logger.debug("failed to kill MCP server process", exc_info=True)
+        process = self.process
+        if process is not None:
+            self._stop_process(process)
             self.process = None
+        with self._lock:
+            self._active_request_ids.clear()
+            self._pending_responses.clear()
         self._status = "disabled"
+
+    def _stop_process(self, process: subprocess.Popen) -> None:
+        """执行 stdin EOF、TERM、KILL 的分级关闭流程。"""
+        self._close_process_stream(process, "stdin")
+        try:
+            process.wait(timeout=SHUTDOWN_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            self._terminate_process(process)
+        finally:
+            self._close_process_stream(process, "stdout")
+            self._close_process_stream(process, "stderr")
+            read_thread = self._read_thread
+            if (
+                read_thread is not None
+                and read_thread is not threading.current_thread()
+            ):
+                read_thread.join(timeout=KILL_GRACE_SECONDS)
+            self._read_thread = None
+
+    def _terminate_process(self, process: subprocess.Popen) -> None:
+        """先发送 TERM，超时后发送 KILL 并回收进程。"""
+        try:
+            process.terminate()
+        except OSError:
+            logger.debug("failed to terminate MCP server process", exc_info=True)
+        try:
+            process.wait(timeout=TERMINATE_GRACE_SECONDS)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+        try:
+            process.kill()
+        except OSError:
+            logger.debug("failed to kill MCP server process", exc_info=True)
+        try:
+            process.wait(timeout=KILL_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            logger.warning("MCP server process did not exit after kill")
+
+    @staticmethod
+    def _close_process_stream(
+        process: subprocess.Popen,
+        stream_name: str,
+    ) -> None:
+        """关闭指定进程流，并忽略已关闭或失效的流。"""
+        stream = getattr(process, stream_name, None)
+        if stream is None:
+            return
+        try:
+            stream.close()
+        except (OSError, ValueError):
+            logger.debug(
+                "failed to close MCP server stream %s",
+                stream_name,
+                exc_info=True,
+            )
 
 
 # ── JSON-RPC 编解码 ──

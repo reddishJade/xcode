@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import tempfile
 import threading
@@ -10,9 +11,12 @@ from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 from xcode.harness.mcp.client import (
+    KILL_GRACE_SECONDS,
     LATEST_PROTOCOL_VERSION,
     MAX_TOOL_LIST_PAGES,
     McpClient,
+    SHUTDOWN_GRACE_SECONDS,
+    TERMINATE_GRACE_SECONDS,
 )
 
 MOCK_SERVER_CODE = r"""
@@ -446,6 +450,55 @@ class XcodeMcpClientTests(unittest.TestCase):
         self.assertTrue(
             any("request 1 timed out" in message for message in logs.output)
         )
+
+    def test_mcp_client_stop_allows_server_to_exit_after_stdin_eof(self) -> None:
+        """服务器在 stdin EOF 后自行退出时不发送终止信号。"""
+        client = McpClient(["unused"])
+        process = MagicMock()
+        client.process = process
+        client._running = True
+        client._status = "connected"
+
+        client.stop()
+
+        process.stdin.close.assert_called_once()
+        process.wait.assert_called_once_with(timeout=SHUTDOWN_GRACE_SECONDS)
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
+        process.stdout.close.assert_called_once()
+        process.stderr.close.assert_called_once()
+        self.assertIsNone(client.process)
+        self.assertEqual(client.status, "disabled")
+
+    def test_mcp_client_stop_kills_server_after_graceful_and_term_timeout(
+        self,
+    ) -> None:
+        """服务器忽略 EOF 和 TERM 时最终发送 KILL 并等待回收。"""
+        client = McpClient(["unused"])
+        process = MagicMock()
+        process.wait.side_effect = [
+            subprocess.TimeoutExpired(["server"], SHUTDOWN_GRACE_SECONDS),
+            subprocess.TimeoutExpired(["server"], TERMINATE_GRACE_SECONDS),
+            0,
+        ]
+        client.process = process
+        client._running = True
+
+        client.stop()
+
+        process.stdin.close.assert_called_once()
+        process.terminate.assert_called_once()
+        process.kill.assert_called_once()
+        self.assertEqual(
+            process.wait.call_args_list,
+            [
+                call(timeout=SHUTDOWN_GRACE_SECONDS),
+                call(timeout=TERMINATE_GRACE_SECONDS),
+                call(timeout=KILL_GRACE_SECONDS),
+            ],
+        )
+        process.stdout.close.assert_called_once()
+        process.stderr.close.assert_called_once()
 
     def test_mcp_client_dispatches_negotiated_tools_changed_notification(
         self,
