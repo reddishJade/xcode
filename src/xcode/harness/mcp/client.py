@@ -62,6 +62,11 @@ def _is_valid_server_info(value: object) -> bool:
     )
 
 
+def _is_valid_message_id(value: object) -> bool:
+    """判断 JSON-RPC id 是否为支持的字符串或整数。"""
+    return isinstance(value, (int, str)) and not isinstance(value, bool)
+
+
 class McpClient:
     """基于 stdio 的同步 MCP 客户端。"""
 
@@ -79,6 +84,7 @@ class McpClient:
         self.process: subprocess.Popen | None = None
         self.next_id = 1
         self._lock = threading.Lock()
+        self._write_lock = threading.Lock()
         self._pending_responses: dict[int | str, dict[str, Any]] = {}
         self._read_thread: threading.Thread | None = None
         self._running = False
@@ -174,14 +180,79 @@ class McpClient:
         )
 
     def _read_loop(self) -> None:
-        """持续读取 JSON-RPC 消息并暂存响应。"""
+        """持续读取 JSON-RPC 消息并分派响应、请求和通知。"""
         while self._running and self.process and self.process.stdout:
             msg = _read_jsonrpc_message(cast(BinaryIO, self.process.stdout))
             if msg is None:
                 break
-            if "id" in msg:
-                with self._lock:
-                    self._pending_responses[msg["id"]] = msg
+            self._handle_incoming_message(msg)
+
+    def _handle_incoming_message(self, message: dict[str, Any]) -> None:
+        """按 JSON-RPC 形状分派单条入站消息。"""
+        if "id" in message and ("result" in message or "error" in message):
+            response_id = message.get("id")
+            if not _is_valid_message_id(response_id):
+                logger.warning("Ignoring MCP response with invalid id: %s", message)
+                return
+            response_id = cast(int | str, response_id)
+            with self._lock:
+                self._pending_responses[response_id] = message
+            return
+
+        method = message.get("method")
+        if not isinstance(method, str):
+            logger.warning("Ignoring malformed MCP JSON-RPC message: %s", message)
+            return
+        if "id" in message:
+            request_id = message.get("id")
+            if not _is_valid_message_id(request_id):
+                logger.warning(
+                    "Ignoring MCP server request with invalid id: %s", message
+                )
+                return
+            request_id = cast(int | str, request_id)
+            self._handle_server_request(request_id, method)
+            return
+        self._handle_server_notification(method)
+
+    def _handle_server_request(self, request_id: int | str, method: str) -> None:
+        """处理 server-to-client request。"""
+        if method == "ping":
+            self._send_jsonrpc_response(request_id, result={})
+            return
+        self._send_jsonrpc_response(
+            request_id,
+            error={
+                "code": -32601,
+                "message": f"Method not found: {method}",
+            },
+        )
+
+    def _handle_server_notification(self, method: str) -> None:
+        """记录尚未支持的 server notification。"""
+        logger.warning("Ignoring unsupported MCP server notification: %s", method)
+
+    def _send_jsonrpc_response(
+        self,
+        request_id: int | str,
+        *,
+        result: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+    ) -> None:
+        """向服务器发送 JSON-RPC response。"""
+        response: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id}
+        if error is not None:
+            response["error"] = error
+        else:
+            response["result"] = result or {}
+        try:
+            self._write_message(response)
+        except RuntimeError:
+            logger.warning(
+                "Failed to respond to MCP server request %r",
+                request_id,
+                exc_info=True,
+            )
 
     def send_request(
         self, method: str, params: dict, timeout: float | None = None
@@ -199,13 +270,7 @@ class McpClient:
             self.next_id += 1
 
         req = {"jsonrpc": "2.0", "method": method, "id": req_id, "params": params}
-        payload = _encode_jsonrpc_message(req)
-        try:
-            assert self.process.stdin is not None
-            self.process.stdin.write(payload)
-            self.process.stdin.flush()
-        except OSError as e:
-            raise RuntimeError(f"Failed to write request to MCP server: {e}")
+        self._write_message(req)
 
         start_time = time.time()
         while time.time() - start_time < effective_timeout:
@@ -240,13 +305,20 @@ class McpClient:
         if params is not None:
             req["params"] = params
 
-        payload = _encode_jsonrpc_message(req)
+        self._write_message(req)
+
+    def _write_message(self, message: dict[str, Any]) -> None:
+        """串行写入单条 JSON-RPC 消息，避免多线程交错。"""
+        if not self._running or not self.process:
+            raise RuntimeError("MCP client is not running.")
+        payload = _encode_jsonrpc_message(message)
         try:
-            assert self.process.stdin is not None
-            self.process.stdin.write(payload)
-            self.process.stdin.flush()
-        except OSError as e:
-            raise RuntimeError(f"Failed to send notification to MCP server: {e}")
+            with self._write_lock:
+                assert self.process.stdin is not None
+                self.process.stdin.write(payload)
+                self.process.stdin.flush()
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"Failed to write to MCP server: {exc}") from exc
 
     def list_tools(self, timeout: float | None = None) -> list[dict[str, Any]]:
         """列出服务器工具，要求已协商 tools capability。"""

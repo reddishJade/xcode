@@ -91,6 +91,91 @@ if __name__ == "__main__":
     main()
 """
 
+INTERLEAVED_SERVER_CODE = r"""
+import sys
+import json
+
+def read_message():
+    line = sys.stdin.buffer.readline()
+    if not line:
+        return None
+    text = line.decode("utf-8").strip()
+    return json.loads(text) if text else None
+
+def write_message(message):
+    sys.stdout.buffer.write((json.dumps(message) + "\n").encode("utf-8"))
+    sys.stdout.buffer.flush()
+
+def main():
+    while True:
+        req = read_message()
+        if req is None:
+            break
+        req_id = req.get("id")
+        method = req.get("method")
+        if req_id is None:
+            continue
+        if method == "initialize":
+            write_message({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "interleaved", "version": "1.0.0"}
+                }
+            })
+            continue
+        if method != "tools/list":
+            continue
+
+        write_message({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "ping",
+            "params": {}
+        })
+        ping_response = read_message()
+
+        write_message({
+            "jsonrpc": "2.0",
+            "id": "server-unknown",
+            "method": "custom/request",
+            "params": {}
+        })
+        unknown_response = read_message()
+
+        write_message({
+            "jsonrpc": "2.0",
+            "method": "notifications/custom",
+            "params": {}
+        })
+
+        tools = []
+        if ping_response == {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {}
+        }:
+            tools.append({"name": "ping_ok", "inputSchema": {"type": "object"}})
+        if (
+            unknown_response.get("id") == "server-unknown"
+            and unknown_response.get("error", {}).get("code") == -32601
+        ):
+            tools.append({
+                "name": "method_not_found_ok",
+                "inputSchema": {"type": "object"}
+            })
+        write_message({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {"tools": tools}
+        })
+
+if __name__ == "__main__":
+    main()
+"""
+
 
 class XcodeMcpClientTests(unittest.TestCase):
     """验证 MCP 客户端基础生命周期和协商约束。"""
@@ -191,6 +276,30 @@ class XcodeMcpClientTests(unittest.TestCase):
                     "serverInfo": {"name": "missing-version"},
                 }
             )
+
+    def test_server_requests_interleave_with_normal_response(self) -> None:
+        """server request 和 notification 不会被误判为 client response。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            server_file = Path(temp_dir) / "interleaved_server.py"
+            server_file.write_text(INTERLEAVED_SERVER_CODE, encoding="utf-8")
+            client = McpClient([sys.executable, "-u", str(server_file)])
+            client.start()
+
+            with self.assertLogs(
+                "xcode.harness.mcp.client",
+                level="WARNING",
+            ) as logs:
+                tools = client.list_tools()
+
+            client.stop()
+
+        self.assertEqual(
+            [tool["name"] for tool in tools],
+            ["ping_ok", "method_not_found_ok"],
+        )
+        self.assertTrue(
+            any("notifications/custom" in message for message in logs.output)
+        )
 
 
 if __name__ == "__main__":

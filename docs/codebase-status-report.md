@@ -258,6 +258,9 @@ cli → coding_agent → harness → agent → ai
 - initialize 发送最新支持协议版本，校验 server 返回版本、capabilities 和
   serverInfo，并保存 instructions。
 - tools 请求仅在 server 声明 `tools` capability 后发送。
+- read loop 按 JSON-RPC 形状区分 response、server request 和 notification；
+  ping 返回空结果，未知 request 返回 method-not-found，未知 notification 记录
+  warning。
 - schema cache 同时记录配置 hash、协商协议版本和 server identity；缺少协商
   元数据的旧缓存会重新发现。
 - deferred server 使用 bootstrap 工具和 `mcp_tool_search` 懒加载。

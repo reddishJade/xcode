@@ -42,11 +42,10 @@ Xcode 已是可工作的 stdio tools client，但协议实现仍偏向单一 smo
 正式化前最值得补齐：
 
 1. `tools/list` pagination。
-2. 区分 response、notification 和 server request；至少正确处理 ping。
-3. request timeout 后发送 cancellation notification。
-4. 更符合规范的 graceful shutdown。
-5. 正确处理 `structuredContent`，并明确非文本 content 的宿主映射策略。
-6. 为 persistent client 增加状态、重连和可诊断错误。
+2. request timeout 后发送 cancellation notification。
+3. 更符合规范的 graceful shutdown。
+4. 正确处理 `structuredContent`，并明确非文本 content 的宿主映射策略。
+5. 为 persistent client 增加状态、重连和可诊断错误。
 
 ## 产品分类建议
 
@@ -153,7 +152,7 @@ auto trigger 的替代，而是用户可控入口。
 | OAuth | 未实现 | 仅在 remote transport 进入范围后需要 |
 | Resources/prompts | 未实现 | MCP server 的可选 feature，不是 tools client 的最低门槛 |
 | List changed | 未实现 | persistent tool catalog 场景值得支持 |
-| Ping/server requests | 未实现 | 基础生命周期健壮性缺口 |
+| Ping/server requests | 已实现 | 入站 response/request/notification 分流；支持 ping，未知 request 返回 method-not-found |
 | Cancellation/progress | 未实现 | timeout cancellation 值得先做；progress 可后置 |
 | Non-text results | 未实现 | 当前只返回 placeholder |
 | Structured content/output schema | 未实现 | 对现代 tools server 有实际兼容价值 |
@@ -199,17 +198,6 @@ Content:
 支持门槛。
 
 ### 值得优先实现
-
-#### M0 · JSON-RPC 双向消息分类
-
-当前 read loop 将任何带 `id` 的消息放入 pending response。需要区分：
-
-- response：有 `result` 或 `error`。
-- server request：有 `method` 和 `id`。
-- notification：有 `method`、无 `id`。
-
-至少处理 ping，并对未支持 server request 返回标准 method-not-found，而不是把它
-误认为 client request 的响应。
 
 #### M1 · Tool discovery 完整性
 

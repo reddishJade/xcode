@@ -13,22 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P1 · MCP JSON-RPC 双向消息分类错误
-
-当前 read loop 将任何带 `id` 的消息放入 pending response。它没有区分：
-
-- response：包含 `result` 或 `error`。
-- server request：包含 `method` 和 `id`。
-- notification：包含 `method` 且无 `id`。
-
-需要：
-
-- 正确分类三类消息。
-- 至少处理 ping。
-- 对未支持 server request 返回标准 method-not-found。
-- 对未知 notification 记录可诊断日志，不阻断连接。
-- 添加 server request 与普通 response 交错到达测试。
-
 ## P1 · LLM-as-judge eval 未实际生效
 
 `src/xcode/evals/graders.py:run_llm_judge()` 从 `app.agent.provider` 获取 judge
