@@ -112,9 +112,11 @@ class EvalRunner:
 
         # LLM-as-judge：当 task.llm_judge_criteria 非空时执行
         if task.llm_judge_criteria:
-            judge_provider = getattr(app.agent, "provider", None)
-            judge_graders = run_llm_judge(
-                task, answer, events, judge_provider=judge_provider
+            judge_graders = await run_llm_judge(
+                task,
+                answer,
+                events,
+                judge_provider=app.agent.provider,
             )
             graders = graders + judge_graders
 
@@ -339,9 +341,7 @@ def _extract_agent_metrics(events: list[StructuredAgentEvent]) -> dict[str, Any]
                 "total_observed_ms",
                 "steps",
             )
-            metrics = {
-                key: agent_m[key] for key in metric_names if key in agent_m
-            }
+            metrics = {key: agent_m[key] for key in metric_names if key in agent_m}
             metrics["termination_reason"] = event.data.termination_reason.value
             return metrics
     return {}
@@ -422,21 +422,27 @@ def _build_run_metrics(
             "max": sv[-1],
             "mean": round(sum(sv) / len(sv), 1),
         }
-    all_graders = [g for t in trials for g in t.graders]
-    if all_graders:
-        total_g = len(all_graders)
-        passed_g = sum(1 for g in all_graders if g.passed)
+    all_graders = [grader for trial in trials for grader in trial.graders]
+    skipped_graders = [grader for grader in all_graders if grader.skipped]
+    evaluated_graders = [grader for grader in all_graders if not grader.skipped]
+    if skipped_graders:
+        metrics["grader_skipped_count"] = len(skipped_graders)
+    if evaluated_graders:
+        total_g = len(evaluated_graders)
+        passed_g = sum(1 for grader in evaluated_graders if grader.passed)
         metrics["grader_pass_rate"] = round(passed_g / total_g, 4)
         by_name: dict[str, list[bool]] = {}
-        for g in all_graders:
-            by_name.setdefault(g.name, []).append(g.passed)
+        for grader in evaluated_graders:
+            by_name.setdefault(grader.name, []).append(grader.passed)
         metrics["per_grader_pass_rate"] = {
             name: round(sum(v) / len(v), 4) for name, v in by_name.items()
         }
         task_graders: dict[str, list[bool]] = defaultdict(list)
-        for t in trials:
-            for g in t.graders:
-                task_graders[t.task_id].append(g.passed)
+        for trial in trials:
+            for grader in trial.graders:
+                if grader.skipped:
+                    continue
+                task_graders[trial.task_id].append(grader.passed)
         metrics["per_task_grader_rate"] = {
             tid: round(sum(v) / len(v), 4) for tid, v in sorted(task_graders.items())
         }

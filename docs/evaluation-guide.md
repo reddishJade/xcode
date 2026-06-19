@@ -94,6 +94,7 @@
 | `grader_pass_rate` | 所有 grader 通过率 |
 | `per_grader_pass_rate` | 每个 grader 维度通过率 |
 | `per_task_grader_rate` | 每任务 grader 通过率 |
+| `grader_skipped_count` | 未执行或无法解析的 grader 数量；不计入通过率和 trial 成败 |
 | `total_llm_calls` / `total_tool_calls` / `total_model_ms` | 用量统计 |
 | `model_patch` | Git 工作区补丁 |
 
@@ -141,3 +142,8 @@ uv run python -m xcode.evals.cli --tasks path/to/tasks.jsonl
 ```
 
 真实 provider task 需要 `metadata.fixture_dir` 或 `--allow-project-mutation`。
+
+配置 `llm_judge_criteria` 时，runner 通过当前 agent provider 的标准
+`stream()` 协议发起独立 judge 请求。judge provider 不可用、调用失败或输出
+不可解析时，JSON/HTML/CSV report 会记录 `llm_judge:skipped`，该项不计入
+grader 通过率或 trial 成败。

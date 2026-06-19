@@ -13,20 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P1 · LLM-as-judge eval 未实际生效
-
-`src/xcode/evals/graders.py:run_llm_judge()` 从 `app.agent.provider` 获取 judge
-provider，但 `ModelProvider` 协议仅保证 `stream()`，而 judge 只检查 `ask()`
-和 `run()`，导致普通 provider 路径返回空 tuple。内置 eval 套件的
-`llm_judge_criteria` 不参与评分。
-
-需要：
-
-- 为 judge 定义明确协议并单独注入 provider，或基于 `ModelProvider.stream()`
-  构建 judge 调用。
-- judge 未执行时在 report 中显式记录 skipped，而不是静默返回空结果。
-- 添加真实 provider protocol 的离线替身测试。
-
 ## P1 · PROVIDER_REGISTRY 不完整
 
 `ProviderTransport` 和 factory 分支接受 `anthropic_messages`，但

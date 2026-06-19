@@ -410,7 +410,8 @@ ExecutionModeState
   - 预期/禁止工具检查。
   - 文件存在、修改和内容证据。
   - validation command。
-  - LLM-as-judge。
+  - LLM-as-judge，通过统一 `StreamProvider.stream()` 协议执行；judge
+    不可用、调用失败或输出不可解析时生成显式 skipped grader。
 - `TraceRecorder` 输出 JSONL agent 事件。
 - pass@k 无偏估计和 pass^k。
 - trial metrics 包括模型调用、实际 input/output token、模型延迟、工具调用和

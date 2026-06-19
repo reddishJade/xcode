@@ -30,9 +30,12 @@ class EvalTask:
 
 @dataclass(frozen=True)
 class GraderResult:
+    """单个 grader 的评判结果。"""
+
     name: str
     passed: bool
     details: str = ""
+    skipped: bool = False
 
 
 @dataclass(frozen=True)

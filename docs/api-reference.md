@@ -434,6 +434,7 @@ def build_project_scoped_registry(project_root, enabled, contextual_state, shell
 
 ```python
 @dataclass EvalTask: id, prompt, mode, expected_answer_contains, expected_tool_calls, disallowed_tool_calls, max_tool_errors, llm_judge_criteria, tags, metadata
+@dataclass GraderResult: name, passed, details, skipped
 @dataclass TrialResult: task_id, trial, scores, ...
 @dataclass EvalReport: report_id, timestamp, suite_name, trials, ...
 ```

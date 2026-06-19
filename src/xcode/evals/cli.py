@@ -120,10 +120,18 @@ def _print_enhanced_summary(report) -> None:
         print(f"pass@k: {pass_at_k}{rate_str}   pass^k: {pass_pow_k}{pow_str}")
     grader_rate = m.get("grader_pass_rate")
     if grader_rate is not None:
-        all_graders = [g for t in report.trials for g in t.graders]
-        passed_g = sum(1 for g in all_graders if g.passed)
-        print(f"Graders: {passed_g}/{len(all_graders)} ({grader_rate * 100:.1f}%)")
+        evaluated = [
+            grader
+            for trial in report.trials
+            for grader in trial.graders
+            if not grader.skipped
+        ]
+        passed_g = sum(1 for grader in evaluated if grader.passed)
+        print(f"Graders: {passed_g}/{len(evaluated)} ({grader_rate * 100:.1f}%)")
         _print_grader_bars(m.get("per_grader_pass_rate", {}))
+    skipped_count = m.get("grader_skipped_count", 0)
+    if skipped_count:
+        print(f"Skipped graders: {skipped_count}")
     parts = []
     total_llm = m.get("total_llm_calls", 0)
     if total_llm:
@@ -152,8 +160,9 @@ def _print_task_table(report) -> None:
     id_w = min(max(max(len(t.task_id) for t in trials) + 2, 12), 30)
     for task_id, task_trials in task_map.items():
         best = next((t for t in task_trials if t.success), task_trials[0])
-        g_pass = sum(1 for g in best.graders if g.passed)
-        g_total = len(best.graders)
+        evaluated = [grader for grader in best.graders if not grader.skipped]
+        g_pass = sum(1 for grader in evaluated if grader.passed)
+        g_total = len(evaluated)
         status = "PASS" if best.success else "FAIL"
         calls = best.metrics.get("tool_calls", "")
         tokens = best.metrics.get("estimated_prompt_tokens", "")

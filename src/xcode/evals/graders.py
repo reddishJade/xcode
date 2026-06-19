@@ -1,30 +1,13 @@
+"""Eval 确定性与 LLM grader。"""
+
 from __future__ import annotations
 
-from typing import Protocol, TypeGuard
-
+from xcode.ai.events import FinalMessage, TextDelta
+from xcode.ai.providers.protocol import StreamProvider
+from xcode.ai.types import StreamOptions
 from xcode.harness.agent_runtime import StructuredAgentEvent
 
 from .schema import EvalTask, GraderResult
-
-
-class JudgeAskProvider(Protocol):
-    def ask(self, prompt: str) -> str: ...
-
-
-class JudgeRunResult(Protocol):
-    answer: str
-
-
-class JudgeRunProvider(Protocol):
-    def run(self, prompt: str) -> JudgeRunResult: ...
-
-
-def _has_ask(provider: object) -> TypeGuard[JudgeAskProvider]:
-    return hasattr(provider, "ask")
-
-
-def _has_run(provider: object) -> TypeGuard[JudgeRunProvider]:
-    return hasattr(provider, "run")
 
 
 # ── 确定性 grader ──
@@ -138,23 +121,18 @@ FAIL: 2: 代码存在未定义变量
 仅输出评测行，不要输出其他内容。"""
 
 
-def run_llm_judge(
+async def run_llm_judge(
     task: EvalTask,
     answer: str,
     events: list[StructuredAgentEvent],
-    judge_provider: object | None = None,
+    judge_provider: StreamProvider | None = None,
 ) -> tuple[GraderResult, ...]:
-    """使用 LLM 作为评判标准评委。
-
-    judge_provider 必须具有 `ask(question: str) -> str` 接口。
-    当 judge_provider 不可用、调用异常或输出解析失败时返回空 tuple，
-    不产生 grader 条目 —— 调用方据此判断 judge 未执行，不计入 success 判定。
-    """
+    """通过统一 StreamProvider 协议执行 LLM-as-judge。"""
     if not task.llm_judge_criteria:
         return ()
 
     if judge_provider is None:
-        return ()
+        return _skipped_llm_judge("judge provider is unavailable")
 
     tool_calls = [
         f"{event.data.name}({getattr(event.data, 'input', {})})"
@@ -174,19 +152,41 @@ def run_llm_judge(
         tool_calls_text=tool_calls_text,
     )
 
+    response_parts: list[str] = []
+    final_content = ""
     try:
-        if _has_ask(judge_provider):
-            judge_response = judge_provider.ask(prompt)
-        elif _has_run(judge_provider):
-            # StructuredAgent.run() 返回具有 .answer 属性的对象
-            result = judge_provider.run(prompt)
-            judge_response = result.answer
-        else:
-            return ()
-    except Exception:
-        return ()
+        async for event in judge_provider.stream(
+            [{"role": "user", "content": prompt}],
+            [],
+            StreamOptions(temperature=0.0, max_tokens=2_000),
+        ):
+            if isinstance(event, TextDelta):
+                response_parts.append(event.chunk)
+            elif isinstance(event, FinalMessage):
+                final_content = event.content
+    except Exception as exc:
+        return _skipped_llm_judge(f"judge provider failed: {type(exc).__name__}: {exc}")
 
-    return _parse_judge_response(judge_response, task.llm_judge_criteria)
+    judge_response = "".join(response_parts).strip() or final_content.strip()
+    if not judge_response:
+        return _skipped_llm_judge("judge provider returned no text")
+
+    parsed = _parse_judge_response(judge_response, task.llm_judge_criteria)
+    if not parsed:
+        return _skipped_llm_judge("judge output could not be parsed")
+    return parsed
+
+
+def _skipped_llm_judge(reason: str) -> tuple[GraderResult, ...]:
+    """构建不影响 trial 成败的显式 skipped grader。"""
+    return (
+        GraderResult(
+            name="llm_judge:skipped",
+            passed=True,
+            details=reason,
+            skipped=True,
+        ),
+    )
 
 
 def _parse_judge_response(
@@ -197,7 +197,7 @@ def _parse_judge_response(
 
     支持 ``PASS: <编号>: <理由>`` / ``FAIL: <编号>: <理由>`` 和
     ``PASS|FAIL: <编号>: <理由>`` 两种格式。
-    当无任何一行被成功解析时返回空 tuple（调用方据此不纳入 success 判定）。
+    当无任何一行被成功解析时返回空 tuple。
     """
     results: list[GraderResult] = []
     for line in response.strip().splitlines():

@@ -43,6 +43,7 @@ def write_csv_report(report: EvalReport) -> str:
             "success",
             "graders_pass",
             "graders_total",
+            "graders_skipped",
             "tool_calls",
             "tool_errors",
             "llm_calls",
@@ -51,8 +52,10 @@ def write_csv_report(report: EvalReport) -> str:
         ]
     )
     for trial in report.trials:
-        g_pass = sum(1 for g in trial.graders if g.passed)
-        g_total = len(trial.graders)
+        evaluated_graders = [grader for grader in trial.graders if not grader.skipped]
+        g_pass = sum(1 for grader in evaluated_graders if grader.passed)
+        g_total = len(evaluated_graders)
+        g_skipped = sum(1 for grader in trial.graders if grader.skipped)
         writer.writerow(
             [
                 trial.task_id,
@@ -60,6 +63,7 @@ def write_csv_report(report: EvalReport) -> str:
                 trial.success,
                 g_pass,
                 g_total,
+                g_skipped,
                 trial.metrics.get("tool_calls", ""),
                 trial.metrics.get("tool_errors", ""),
                 trial.metrics.get("llm_calls", ""),
@@ -94,6 +98,7 @@ def report_to_dict(report: EvalReport) -> dict[str, Any]:
                     {
                         "name": grader.name,
                         "passed": grader.passed,
+                        "skipped": grader.skipped,
                         "details": grader.details,
                     }
                     for grader in trial.graders
@@ -143,6 +148,7 @@ def report_to_html(report: EvalReport) -> str:
     th {{ background: #f6f8fa; }}
     .pass {{ color: #116329; font-weight: 600; }}
     .fail {{ color: #cf222e; font-weight: 600; }}
+    .skip {{ color: #656d76; font-weight: 600; }}
     code {{ background: #f6f8fa; padding: 2px 4px; border-radius: 4px; }}
     pre {{ white-space: pre-wrap; margin: 0; max-height: 160px; overflow: auto; }}
     .badge {{ display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin: 2px; }}
@@ -224,13 +230,23 @@ def _grader_summary_table(per_grader: dict[str, float]) -> str:
 def _trial_row(trial) -> str:
     status = "PASS" if trial.success else "FAIL"
     # grader 列表
-    graders = "<br>".join(
-        f'<span class="{"pass" if grader.passed else "fail"}">'
-        f"{escape('PASS' if grader.passed else 'FAIL')}</span> "
-        f"{escape(grader.name)}"
-        f"{': ' + escape(grader.details) if grader.details else ''}"
-        for grader in trial.graders
-    )
+    grader_lines: list[str] = []
+    for grader in trial.graders:
+        if grader.skipped:
+            css_class = "skip"
+            label = "SKIP"
+        elif grader.passed:
+            css_class = "pass"
+            label = "PASS"
+        else:
+            css_class = "fail"
+            label = "FAIL"
+        grader_lines.append(
+            f'<span class="{css_class}">{label}</span> '
+            f"{escape(grader.name)}"
+            f"{': ' + escape(grader.details) if grader.details else ''}"
+        )
+    graders = "<br>".join(grader_lines)
     # 指标展示：过滤掉大数组字段，格式化延迟
     skip_keys = {"model_latencies_ms", "tool_latencies_ms", "file_evidence"}
     pills = []
