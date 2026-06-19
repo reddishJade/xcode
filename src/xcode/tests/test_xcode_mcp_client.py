@@ -7,7 +7,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import call, patch
+from unittest.mock import MagicMock, call, patch
 
 from xcode.harness.mcp.client import (
     LATEST_PROTOCOL_VERSION,
@@ -367,6 +367,85 @@ class XcodeMcpClientTests(unittest.TestCase):
             client.list_tools()
 
         self.assertEqual(request.call_count, MAX_TOOL_LIST_PAGES)
+
+    def test_mcp_client_cancels_timed_out_request(self) -> None:
+        """请求超时后发送 cancellation notification 并清理活动状态。"""
+        client = McpClient(["unused"])
+        client.process = MagicMock()
+        client.process.poll.return_value = None
+        client._running = True
+
+        with (
+            patch.object(client, "_write_message") as write_message,
+            self.assertRaisesRegex(TimeoutError, "tools/call"),
+        ):
+            client.send_request(
+                "tools/call",
+                {"name": "slow", "arguments": {}},
+                timeout=0.0,
+            )
+
+        self.assertEqual(
+            write_message.call_args_list,
+            [
+                call(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "tools/call",
+                        "id": 1,
+                        "params": {"name": "slow", "arguments": {}},
+                    }
+                ),
+                call(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "notifications/cancelled",
+                        "params": {
+                            "requestId": 1,
+                            "reason": "Client timeout waiting for tools/call",
+                        },
+                    }
+                ),
+            ],
+        )
+        self.assertEqual(client._active_request_ids, set())
+        self.assertEqual(client._pending_responses, {})
+
+        client._handle_incoming_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {"content": []},
+            }
+        )
+        self.assertEqual(client._pending_responses, {})
+
+    def test_mcp_client_preserves_timeout_when_cancellation_write_fails(
+        self,
+    ) -> None:
+        """取消通知写入失败不会覆盖原始 timeout 异常。"""
+        client = McpClient(["unused"])
+        client.process = MagicMock()
+        client.process.poll.return_value = None
+        client._running = True
+
+        with (
+            patch.object(
+                client,
+                "_write_message",
+                side_effect=[None, RuntimeError("closed")],
+            ),
+            self.assertLogs(
+                "xcode.harness.mcp.client",
+                level="WARNING",
+            ) as logs,
+            self.assertRaises(TimeoutError),
+        ):
+            client.send_request("tools/list", {}, timeout=0.0)
+
+        self.assertTrue(
+            any("request 1 timed out" in message for message in logs.output)
+        )
 
     def test_mcp_client_dispatches_negotiated_tools_changed_notification(
         self,

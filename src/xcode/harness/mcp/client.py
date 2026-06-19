@@ -91,6 +91,7 @@ class McpClient:
         self._tools_refresh_lock = threading.Lock()
         self._tools_changed_event = threading.Event()
         self._tools_refresh_thread: threading.Thread | None = None
+        self._active_request_ids: set[int | str] = set()
         self._pending_responses: dict[int | str, dict[str, Any]] = {}
         self._read_thread: threading.Thread | None = None
         self._running = False
@@ -210,6 +211,12 @@ class McpClient:
                 return
             response_id = cast(int | str, response_id)
             with self._lock:
+                if response_id not in self._active_request_ids:
+                    logger.debug(
+                        "Ignoring late or duplicate MCP response id=%r",
+                        response_id,
+                    )
+                    return
                 self._pending_responses[response_id] = message
             return
 
@@ -331,13 +338,19 @@ class McpClient:
         with self._lock:
             req_id = self.next_id
             self.next_id += 1
+            self._active_request_ids.add(req_id)
 
         req = {"jsonrpc": "2.0", "method": method, "id": req_id, "params": params}
-        self._write_message(req)
+        try:
+            self._write_message(req)
+        except RuntimeError:
+            self._abandon_request(req_id)
+            raise
 
-        start_time = time.time()
-        while time.time() - start_time < effective_timeout:
+        deadline = time.monotonic() + effective_timeout
+        while time.monotonic() < deadline:
             if self.process.poll() is not None:
+                self._abandon_request(req_id)
                 err_content = ""
                 if self.process.stderr:
                     try:
@@ -349,15 +362,52 @@ class McpClient:
                 raise RuntimeError(
                     f"MCP server process exited unexpectedly. Stderr: {err_content}"
                 )
-            with self._lock:
-                if req_id in self._pending_responses:
-                    resp = self._pending_responses.pop(req_id)
-                    if "error" in resp:
-                        raise RuntimeError(f"MCP error response: {resp['error']}")
-                    return resp.get("result", {})
+            response = self._take_response(req_id)
+            if response is not None:
+                return self._response_result(response)
             time.sleep(0.01)
 
+        response = self._take_response(req_id)
+        if response is not None:
+            return self._response_result(response)
+
+        self._abandon_request(req_id)
+        try:
+            self.send_notification(
+                "notifications/cancelled",
+                {
+                    "requestId": req_id,
+                    "reason": f"Client timeout waiting for {method}",
+                },
+            )
+        except RuntimeError:
+            logger.warning(
+                "Failed to notify MCP server that request %r timed out",
+                req_id,
+                exc_info=True,
+            )
         raise TimeoutError(f"Timeout waiting for response to {method} (id={req_id})")
+
+    def _take_response(self, request_id: int | str) -> dict[str, Any] | None:
+        """提取已到达响应，并结束对应活动请求。"""
+        with self._lock:
+            response = self._pending_responses.pop(request_id, None)
+            if response is not None:
+                self._active_request_ids.discard(request_id)
+            return response
+
+    def _abandon_request(self, request_id: int | str) -> None:
+        """清除不再等待的请求及其可能已到达的响应。"""
+        with self._lock:
+            self._active_request_ids.discard(request_id)
+            self._pending_responses.pop(request_id, None)
+
+    @staticmethod
+    def _response_result(response: dict[str, Any]) -> dict[str, Any]:
+        """将 JSON-RPC response 转换为调用结果或协议错误。"""
+        if "error" in response:
+            raise RuntimeError(f"MCP error response: {response['error']}")
+        return cast(dict[str, Any], response.get("result", {}))
 
     def send_notification(self, method: str, params: dict | None = None) -> None:
         """发送不需要响应的 JSON-RPC notification。"""

@@ -18,9 +18,10 @@ import json
 import os
 import sys
 import tempfile
+import time
+import unittest
 from pathlib import Path
 from typing import Any
-import unittest
 
 from xcode.harness.mcp import build_mcp_tools
 from xcode.harness.mcp.client import (
@@ -621,12 +622,14 @@ class TestMcpStdioErrorHandling(unittest.TestCase):
         self.assertIn("Failed to start", str(ctx.exception))
 
     def test_timeout_on_unresponsive_server(self) -> None:
-        """无响应的服务器超时。"""
-        # 创建不返回复杂响应的最小化服务器
+        """无响应的服务器超时后收到 cancellation notification。"""
+        cancellation_path = self.temp_dir / "cancellation.json"
         slow_code = r"""
 import sys
 import json
-import time
+from pathlib import Path
+
+CANCELLATION_PATH = Path(__CANCELLATION_PATH__)
 
 def _read_message():
     line = sys.stdin.buffer.readline()
@@ -659,23 +662,43 @@ def main():
                     }
                 })
             elif method == "tools/list":
-                # Delay to trigger timeout
-                time.sleep(5)
-                _write_message({
-                    "jsonrpc": "2.0", "id": req_id,
-                    "result": {"tools": []}
-                })
-        # ignore notifications
+                continue
+        if method == "notifications/cancelled":
+            CANCELLATION_PATH.write_text(
+                json.dumps(req),
+                encoding="utf-8",
+            )
 
 if __name__ == "__main__":
     main()
 """
+        slow_code = slow_code.replace(
+            "__CANCELLATION_PATH__",
+            json.dumps(str(cancellation_path)),
+        )
         server_file = _write_server_script(self.temp_dir, slow_code)
         cmd = [sys.executable, "-u", str(server_file)]
-        client = McpClient(cmd, timeout=1.0)
+        client = McpClient(cmd, timeout=0.1)
         client.start()
         with self.assertRaises(TimeoutError):
             client.list_tools()
+
+        deadline = time.monotonic() + 1.0
+        while not cancellation_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        cancellation = json.loads(cancellation_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            cancellation,
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {
+                    "requestId": 2,
+                    "reason": "Client timeout waiting for tools/list",
+                },
+            },
+        )
         client.stop()
 
     def test_unknown_tool_raises_runtime_error(self) -> None:
