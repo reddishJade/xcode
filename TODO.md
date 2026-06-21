@@ -13,16 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P3 · tool_catalog.py 新增 builder 无代码强制
-
-`src/xcode/cli/tool_catalog.py` 的 docstring 要求 `build_*_tools()` 必须注册入
-`_builders()`，但无类型系统或测试约束。新增 builder 后工具目录会遗漏。
-
-需要：
-
-- 优先添加 registry/catalog 一致性测试。
-- 只有出现多个实际调用方时再考虑引入通用 builder registry。
-
 ## P3 · slash command 与 @file 仅支持前缀补全
 
 `ReplCompleter` 对 slash command、tool name 和当前目录层级的 `@file` 使用
