@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from xcode.ai.events import ToolCall
 
@@ -24,6 +24,7 @@ from .tool_audit import emit_audit
 from .tool_hooks import emit_hook, emit_tool_hook, tool_result_text
 from ..observability import (
     AuditRecord,
+    ExternalHookRunner,
     HookManager,
     HookRecord,
     PermissionEngine,
@@ -76,6 +77,9 @@ class ToolGate:
         hook_manager: HookManager | None,
         audit_logger: Callable[[AuditRecord], None] | None,
         session_id: str,
+        external_hook_runner: ExternalHookRunner | None = None,
+        external_hooks_subagent: bool = False,
+        external_hooks_cwd: Path | None = None,
         restricted_dirs: tuple[str, ...] = (),
         hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
         project_root: Path | None = None,
@@ -91,6 +95,9 @@ class ToolGate:
         self._hook_constraint_providers = hook_constraint_providers
         self._external_directories = external_directories
         self._hook_manager = hook_manager
+        self._external_hook_runner = external_hook_runner
+        self._external_hooks_subagent = external_hooks_subagent
+        self._external_hooks_cwd = external_hooks_cwd
         self._audit_logger = audit_logger
         self._session_id = session_id
         self._project_root = project_root
@@ -185,6 +192,11 @@ class ToolGate:
             decision = effective_policy.check_call(
                 ToolCall(id=tool_call.id, name=tool_call.name, input=args)
             )
+            args, decision = self._apply_external_pre_hooks(
+                tool_call.name,
+                args,
+                decision,
+            )
             permission_result = self._precheck_permission(
                 tool_call.name, args, decision, snapshot, tool_call.id
             )
@@ -192,10 +204,14 @@ class ToolGate:
                 perm_result = self._last_perm_results.pop(tool_call.id, None)
                 if perm_result is not None:
                     self._audit_blocked(
-                        tool_call, args, perm_result, snapshot.tool_map,
+                        tool_call,
+                        args,
+                        perm_result,
+                        snapshot.tool_map,
                     )
                 return permission_result
 
+            ctx.args = args
             emit_hook(
                 self._hook_manager,
                 HookRecord(
@@ -204,7 +220,7 @@ class ToolGate:
                     input=stringify_tool_input(args),
                 ),
             )
-            return None
+            return BeforeToolCallResult(args=args)
 
         return before_tool
 
@@ -222,9 +238,7 @@ class ToolGate:
             action_input = stringify_tool_input(ctx.args)
             result_text = tool_result_text(ctx)
             emit_tool_hook(self._hook_manager, ctx, action_input, result_text)
-            perm_result = self._last_perm_results.pop(
-                ctx.tool_call.id, None
-            )
+            perm_result = self._last_perm_results.pop(ctx.tool_call.id, None)
             emit_audit(
                 self._audit_logger,
                 self._session_id,
@@ -270,6 +284,41 @@ class ToolGate:
 
     # ── 内部方法 ──
 
+    def _apply_external_pre_hooks(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        decision: PermissionDecision,
+    ) -> tuple[dict[str, Any], PermissionDecision]:
+        """应用参数变换，并仅允许 hook 收紧准入决策。"""
+        runner = self._external_hook_runner
+        if runner is None:
+            return args, decision
+        executions = runner.execute(
+            HookRecord(
+                "pre_tool",
+                tool=tool_name,
+                input=stringify_tool_input(args),
+            ),
+            subagent=self._external_hooks_subagent,
+            cwd=self._external_hooks_cwd,
+        )
+        transformed_args = args
+        effective_decision = decision
+        for execution in executions:
+            if execution.status != "succeeded":
+                continue
+            response_args = execution.response.get("arguments")
+            if isinstance(response_args, dict):
+                transformed_args = cast(dict[str, Any], response_args)
+            response_decision = execution.response.get("decision")
+            if response_decision in {"allow", "deny", "ask"}:
+                effective_decision = _stricter_decision(
+                    effective_decision,
+                    cast(PermissionDecision, response_decision),
+                )
+        return transformed_args, effective_decision
+
     def _audit_blocked(
         self,
         tool_call: ToolCallContent,
@@ -313,22 +362,18 @@ class ToolGate:
                 ),
                 target_kind=(
                     str(perm_result.action.targets[0].kind)
-                    if perm_result.action is not None
-                    and perm_result.action.targets
+                    if perm_result.action is not None and perm_result.action.targets
                     else None
                 ),
                 target_value=(
                     str(perm_result.action.targets[0].value)
-                    if perm_result.action is not None
-                    and perm_result.action.targets
+                    if perm_result.action is not None and perm_result.action.targets
                     else None
                 ),
                 matched_rule=perm_result.matched_rule,
                 approval_source=perm_result.source,
                 approval_grant_id=(
-                    approval_result.grant_id
-                    if approval_result is not None
-                    else None
+                    approval_result.grant_id if approval_result is not None else None
                 ),
             )
         )
@@ -386,3 +431,16 @@ def _tool_results_count_as_progress(
         if spec and spec.read_only:
             return True
     return False
+
+
+def _stricter_decision(
+    current: PermissionDecision,
+    proposed: PermissionDecision,
+) -> PermissionDecision:
+    """合并准入决策，禁止外部 hook 放宽现有约束。"""
+    priority: dict[PermissionDecision, int] = {
+        "allow": 0,
+        "ask": 1,
+        "deny": 2,
+    }
+    return proposed if priority[proposed] > priority[current] else current

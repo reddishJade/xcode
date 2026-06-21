@@ -37,6 +37,8 @@ from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.ai.providers.protocol import ModelProvider
 from xcode.harness.observability import (
+    ExternalHookRunner,
+    HookRecord,
     JsonlAuditLogger,
     HookManager,
     InMemoryGrantStore,
@@ -231,6 +233,7 @@ def build_tool_registry(
     env: ExecutionEnv | None = None,
     skills_dir: Path | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
+    external_hook_runner: ExternalHookRunner | None = None,
 ) -> tuple[
     ToolRegistryState,
     ShellSpec,
@@ -296,6 +299,7 @@ def build_tool_registry(
         cancel_event=cancel_event,
         env=env,
         hook_constraint_providers=hook_constraint_providers,
+        external_hook_runner=external_hook_runner,
     )
     closers.extend(subagent_closers)
     registry += subagent_tools
@@ -365,6 +369,7 @@ def _build_subagent_integration(
     cancel_event: threading.Event | None,
     env: ExecutionEnv | None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
+    external_hook_runner: ExternalHookRunner | None = None,
 ) -> tuple[list[Callable[[], None]], tuple[ToolSpec, ...]]:
     """构建子代理运行器和工具，返回 (closers, subagent_tools)。"""
     if "subagent" not in enabled:
@@ -391,21 +396,12 @@ def _build_subagent_integration(
                 env=env,
             )
         sec = runtime_config.security
-        child_hook_manager: HookManager | None = None
-        if child_contextual_state is not None:
-            child_hook_manager = HookManager()
-
-            def record_child_post_tool(record: object) -> None:
-                child_contextual_state.record_tool_result(
-                    getattr(record, "tool", ""),
-                    getattr(record, "output", ""),
-                )
-
-            child_hook_manager.register("post_tool", record_child_post_tool)
-
-        if child_hook_manager is not None:
-            child_hook_manager.register("before_agent_start", lambda r: None)
-            child_hook_manager.register("before_provider_request", lambda r: None)
+        child_hook_manager = _build_hook_manager(
+            child_contextual_state,
+            external_hook_runner,
+            child_root,
+            subagent=True,
+        )
 
         child_audit_path = resolve_config_path(
             project_root, runtime_config.observability.audit_path
@@ -422,6 +418,9 @@ def _build_subagent_integration(
                 restricted_dirs=sec.restricted_dirs,
                 hook_constraint_providers=hook_constraint_providers,
                 hook_manager=child_hook_manager,
+                external_hook_runner=external_hook_runner,
+                external_hooks_subagent=True,
+                external_hooks_cwd=child_root,
                 audit_logger=(
                     JsonlAuditLogger(child_audit_path).write
                     if child_audit_path
@@ -504,19 +503,14 @@ def build_agent(
     fallback_provider: ModelProvider | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     skill_registry: SkillRegistry | None = None,
+    external_hook_runner: ExternalHookRunner | None = None,
 ) -> StructuredAgent:
-    hook_manager = None
-    if contextual_state is not None:
-        hook_manager = HookManager()
-
-        def record_post_tool(record) -> None:
-            contextual_state.record_tool_result(record.tool, record.output)
-
-        hook_manager.register("post_tool", record_post_tool)
-
-    if hook_manager is not None:
-        hook_manager.register("before_agent_start", lambda r: None)
-        hook_manager.register("before_provider_request", lambda r: None)
+    hook_manager = _build_hook_manager(
+        contextual_state,
+        external_hook_runner,
+        project_root,
+        subagent=False,
+    )
 
     sec = runtime_config.security
     return StructuredAgent(
@@ -528,6 +522,8 @@ def build_agent(
             restricted_dirs=sec.restricted_dirs,
             hook_constraint_providers=hook_constraint_providers,
             hook_manager=hook_manager,
+            external_hook_runner=external_hook_runner,
+            external_hooks_cwd=project_root,
             audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
             external_directories=_external_directories_from_security(sec),
         ),
@@ -549,6 +545,50 @@ def build_agent(
             prompt_instructions=runtime_config.prompt.instructions,
         ),
     )
+
+
+def _build_hook_manager(
+    contextual_state: ContextualRetrievalState | None,
+    external_hook_runner: ExternalHookRunner | None,
+    project_root: Path,
+    *,
+    subagent: bool,
+) -> HookManager | None:
+    """组合内部订阅者和外部命令 hook。"""
+    if contextual_state is None and external_hook_runner is None:
+        return None
+    manager = HookManager()
+    if contextual_state is not None:
+
+        def record_post_tool(record: object) -> None:
+            contextual_state.record_tool_result(
+                getattr(record, "tool", ""),
+                getattr(record, "output", ""),
+            )
+
+        manager.register("post_tool", record_post_tool)
+    if external_hook_runner is not None:
+        for event in (
+            "post_tool",
+            "on_error",
+            "on_compact",
+            "before_agent_start",
+            "before_provider_request",
+        ):
+
+            def run_external(
+                record: HookRecord,
+                runner: ExternalHookRunner = external_hook_runner,
+                is_subagent: bool = subagent,
+            ) -> None:
+                runner.execute(
+                    record,
+                    subagent=is_subagent,
+                    cwd=project_root,
+                )
+
+            manager.register(event, run_external)
+    return manager
 
 
 def _external_directories_from_security(

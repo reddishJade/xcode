@@ -32,7 +32,13 @@ from ...agent.messages import (
 )
 from ...agent.protocols import AgentTool
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
-from ..observability import AuditRecord, HookManager, HookRecord, PermissionPolicy
+from ..observability import (
+    AuditRecord,
+    ExternalHookRunner,
+    HookManager,
+    HookRecord,
+    PermissionPolicy,
+)
 from ..observability.permission_model import GrantStore, PolicyEvaluator
 from ..observability.permission_model import ExternalDirectory
 from ..skills import ApprovalCallback, ToolSpec
@@ -56,6 +62,9 @@ class GateConfig:
     restricted_dirs: tuple[str, ...] = ()
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
     hook_manager: HookManager | None = None
+    external_hook_runner: ExternalHookRunner | None = None
+    external_hooks_subagent: bool = False
+    external_hooks_cwd: Path | None = None
     audit_logger: Callable[[AuditRecord], None] | None = None
     session_id: str = "local"
     external_directories: tuple[ExternalDirectory, ...] = ()

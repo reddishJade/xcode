@@ -114,6 +114,9 @@ class StructuredAgent:
             approval_callback=gate.approval_callback,
             permission_policy=resolved_permission_policy,
             hook_manager=gate.hook_manager,
+            external_hook_runner=gate.external_hook_runner,
+            external_hooks_subagent=gate.external_hooks_subagent,
+            external_hooks_cwd=gate.external_hooks_cwd,
             audit_logger=gate.audit_logger,
             session_id=gate.session_id,
             restricted_dirs=gate.restricted_dirs,
@@ -299,12 +302,14 @@ class StructuredAgent:
             ),
             None,
         )
-        if before_result is not None:
+        if before_result is not None and before_result.block:
             return ExplicitSkillActivationResult(
                 name=name,
                 status="blocked",
                 message=before_result.reason or f"Skill activation blocked: {name}",
             )
+        if before_result is not None and before_result.args is not None:
+            arguments = before_result.args
 
         try:
             adapted_tool = self._gate.adapt_tools((load_skill,))[0]

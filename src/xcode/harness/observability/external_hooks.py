@@ -95,13 +95,20 @@ class ExternalHookRunner:
         record: HookRecord,
         *,
         subagent: bool = False,
+        cwd: Path | None = None,
     ) -> tuple[ExternalHookExecution, ...]:
         """按声明顺序执行匹配 hook，并应用失败策略。"""
+        working_directory = (cwd or self._project_root).resolve()
         executions: list[ExternalHookExecution] = []
         for index, entry in enumerate(self._entries):
             if not _matches(entry, record, subagent):
                 continue
-            execution = self._execute_one(index, entry, record)
+            execution = self._execute_one(
+                index,
+                entry,
+                record,
+                working_directory,
+            )
             executions.append(execution)
             if execution.status == "failed":
                 self._handle_failure(entry, execution)
@@ -119,13 +126,14 @@ class ExternalHookRunner:
         index: int,
         entry: ExternalHookRuntimeConfig,
         record: HookRecord,
+        working_directory: Path,
     ) -> ExternalHookExecution:
         """执行单个 hook 并记录结果。"""
         timestamp = datetime.now(UTC).isoformat()
         try:
             completed = subprocess.run(
                 list(entry.command),
-                cwd=self._project_root,
+                cwd=working_directory,
                 input=_hook_payload(record),
                 text=True,
                 capture_output=True,
@@ -137,6 +145,7 @@ class ExternalHookRunner:
                 error = _process_error(completed.returncode, completed.stderr)
                 return self._failed(index, entry, error, timestamp)
             response = _parse_hook_response(completed.stdout)
+            _validate_hook_response(record.event, response)
         except subprocess.TimeoutExpired:
             return self._failed(
                 index,
@@ -293,6 +302,26 @@ def _parse_hook_response(stdout: str) -> dict[str, JsonValue]:
     if not isinstance(decoded, dict):
         raise ValueError("hook stdout must be a JSON object")
     return {str(key): _json_value(item) for key, item in decoded.items()}
+
+
+def _validate_hook_response(
+    event: str,
+    response: dict[str, JsonValue],
+) -> None:
+    """校验事件允许的响应形状。"""
+    if event != "pre_tool" or not response:
+        return
+    allowed_keys = {"decision", "arguments"}
+    unknown_keys = set(response) - allowed_keys
+    if unknown_keys:
+        names = ", ".join(sorted(unknown_keys))
+        raise ValueError(f"pre_tool hook returned unsupported fields: {names}")
+    decision = response.get("decision")
+    if decision is not None and decision not in {"allow", "deny", "ask"}:
+        raise ValueError("pre_tool hook decision must be allow, deny, or ask")
+    arguments = response.get("arguments")
+    if arguments is not None and not isinstance(arguments, dict):
+        raise ValueError("pre_tool hook arguments must be a JSON object")
 
 
 def _json_value(value: object) -> JsonValue:

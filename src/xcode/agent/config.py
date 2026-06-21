@@ -72,6 +72,7 @@ class BeforeToolCallContext:
 class BeforeToolCallResult:
     block: bool = False
     reason: str = ""
+    args: ToolArguments | None = None
 
 
 @dataclass

@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from xcode.agent.types import (
     TextContent,
@@ -26,6 +26,7 @@ from .config import (
     AgentContext,
     AgentLoopConfig,
     BeforeToolCallContext,
+    BeforeToolCallResult,
 )
 from .events import (
     AgentEvent,
@@ -207,18 +208,32 @@ async def _execute_one_impl(
         return _error_result(tool_call, f"unknown tool: {tool_call.name}")
 
     args: ToolArguments = tool_call.arguments or {}
-    validation_error = validate_tool_arguments(tool, tool_call, args)
-    if validation_error is not None:
-        return _error_result(tool_call, validation_error)
-
     if is_cancelled(signal):
         return _error_result(tool_call, cancel_reason(signal))
 
-    before_block = _run_before_tool_hook(
+    before_result = _run_before_tool_hook(
         current_context, assistant_message, tool_call, args, config, signal
     )
-    if before_block is not None:
-        return before_block
+    if before_result is not None and before_result.block:
+        return _error_result(
+            tool_call,
+            before_result.reason or "Tool execution was blocked",
+        )
+    if before_result is not None and before_result.args is not None:
+        args = before_result.args
+        tool_call = replace(tool_call, arguments=args)
+        assistant_message.content = [
+            (
+                tool_call
+                if isinstance(block, ToolCallContent) and block.id == tool_call.id
+                else block
+            )
+            for block in assistant_message.content
+        ]
+
+    validation_error = validate_tool_arguments(tool, tool_call, args)
+    if validation_error is not None:
+        return _error_result(tool_call, validation_error)
 
     def _on_update(partial: AgentToolResult) -> None:
         emit(
@@ -282,7 +297,7 @@ def _run_before_tool_hook(
     args: ToolArguments,
     config: AgentLoopConfig,
     signal: CancellationSignal | None,
-) -> tuple[ToolResultMessage, bool] | None:
+) -> BeforeToolCallResult | None:
     if not config.before_tool_call:
         return None
     ctx = BeforeToolCallContext(
@@ -291,13 +306,7 @@ def _run_before_tool_hook(
         args=args,
         context=current_context,
     )
-    before_result = config.before_tool_call(ctx, signal)
-    if before_result and before_result.block:
-        return _error_result(
-            tool_call,
-            before_result.reason or "Tool execution was blocked",
-        )
-    return None
+    return config.before_tool_call(ctx, signal)
 
 
 async def _run_tool_handler(
