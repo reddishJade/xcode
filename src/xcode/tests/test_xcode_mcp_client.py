@@ -13,7 +13,9 @@ from unittest.mock import MagicMock, call, patch
 from xcode.harness.mcp.client import (
     KILL_GRACE_SECONDS,
     LATEST_PROTOCOL_VERSION,
+    MAX_LAZY_CONNECT_ATTEMPTS,
     MAX_TOOL_LIST_PAGES,
+    LazyClientRef,
     McpClient,
     SHUTDOWN_GRACE_SECONDS,
     TERMINATE_GRACE_SECONDS,
@@ -371,6 +373,76 @@ class XcodeMcpClientTests(unittest.TestCase):
             client.list_tools()
 
         self.assertEqual(request.call_count, MAX_TOOL_LIST_PAGES)
+
+    def test_lazy_client_ref_reconnects_within_attempt_limit(self) -> None:
+        """首次连接失败后会在同次调用内有限重连。"""
+        callback = MagicMock()
+        first_client = MagicMock(spec=McpClient)
+        first_client.start.side_effect = RuntimeError("first failure")
+        second_client = MagicMock(spec=McpClient)
+        second_client.status = "connected"
+        ref = LazyClientRef(
+            "fixture",
+            {
+                "command": "python",
+                "args": ["server.py"],
+                "env": {"TOKEN": "value"},
+                "timeout": 4.0,
+            },
+            tools_changed_callback=callback,
+        )
+
+        with patch(
+            "xcode.harness.mcp.client.McpClient",
+            side_effect=[first_client, second_client],
+        ) as client_class:
+            connected = ref.get_or_create()
+
+        self.assertIs(connected, second_client)
+        self.assertIsNone(ref.last_error)
+        self.assertEqual(client_class.call_count, MAX_LAZY_CONNECT_ATTEMPTS)
+        client_class.assert_called_with(
+            ["python", "server.py"],
+            {"TOKEN": "value"},
+            timeout=4.0,
+        )
+        first_client.stop.assert_called_once_with()
+        second_client.set_tools_changed_callback.assert_called_once_with(callback)
+        second_client.start.assert_called_once_with()
+
+    def test_lazy_client_ref_retains_last_error_after_retry_exhaustion(self) -> None:
+        """重连耗尽后保留已脱敏的最后一次连接错误。"""
+        clients = [MagicMock(spec=McpClient) for _ in range(2)]
+        clients[0].start.side_effect = RuntimeError("old failure")
+        clients[1].start.side_effect = RuntimeError("Bearer secret-token")
+        ref = LazyClientRef(
+            "fixture",
+            {"command": "server"},
+            max_connect_attempts=len(clients),
+        )
+
+        with (
+            patch(
+                "xcode.harness.mcp.client.McpClient",
+                side_effect=clients,
+            ) as client_class,
+            self.assertRaisesRegex(RuntimeError, "after 2 attempts"),
+        ):
+            ref.get_or_create()
+
+        self.assertEqual(client_class.call_count, len(clients))
+        self.assertEqual(ref.last_error, "Bearer ****")
+        for client in clients:
+            client.stop.assert_called_once_with()
+
+    def test_lazy_client_ref_rejects_empty_attempt_budget(self) -> None:
+        """连接尝试次数必须至少允许一次启动。"""
+        with self.assertRaisesRegex(ValueError, "at least 1"):
+            LazyClientRef(
+                "fixture",
+                {"command": "server"},
+                max_connect_attempts=0,
+            )
 
     def test_mcp_client_cancels_timed_out_request(self) -> None:
         """请求超时后发送 cancellation notification 并清理活动状态。"""

@@ -258,24 +258,29 @@ cli → coding_agent → harness → agent → ai
 - initialize 发送最新支持协议版本，校验 server 返回版本、capabilities 和
   serverInfo，并保存 instructions。
 - tools 请求仅在 server 声明 `tools` capability 后发送。
+- `tools/list` 聚合 cursor pagination，并拒绝无效、重复或超量分页。
 - read loop 按 JSON-RPC 形状区分 response、server request 和 notification；
   ping 返回空结果，未知 request 返回 method-not-found，未知 notification 记录
   warning。
+- server 声明 `tools.listChanged` 后，变更通知会刷新 schema cache 和下一轮
+  runtime registry。
+- 请求 timeout 会发送 `notifications/cancelled`；关闭时先关闭 stdin 并等待
+  server，随后按 TERM/KILL 逐级清理。
 - schema cache 同时记录配置 hash、协商协议版本和 server identity；缺少协商
   元数据的旧缓存会重新发现。
 - deferred server 使用 bootstrap 工具和 `mcp_tool_search` 懒加载。
 - MCP 工具名称清理和碰撞检测。
 - MCP `isError` 转换为结构化错误。
 - server stderr 脱敏和截断。
-- `LazyClientRef` 复用客户端，并暴露 pending/connected/failed/disabled 状态。
+- `LazyClientRef` 复用客户端，对失败连接进行有限重连，并保留脱敏后的最后错误。
 - `SkillRegistry` 发现技能；`SkillIndexCollector` 注入摘要；
   `load_skill` 懒加载正文、资源路径和 session activation 状态。
 
 ### 当前限制
 
 - MCP 仅支持本地 stdio；没有 SSE、HTTP、Streamable HTTP、OAuth、
-  resources、prompts 或 server notifications。
-- 没有运行时 MCP server 增删、重连和状态管理 UI。
+  resources、prompts 或除工具列表刷新外的 feature notification。
+- 没有运行时 MCP server 增删和状态管理 UI。
 - `LazyClientRef` 没有连接池、周期健康检查或自动故障转移。
 - MCP 配置中的 `overrides` 当前明确跳过并警告。
 - skill approval 依赖宿主 PermissionEngine/HITL 配置；skill 本身不提供独立

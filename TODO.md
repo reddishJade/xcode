@@ -13,19 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P2 · MCP timeout 未发送取消通知，关闭流程不符合完整生命周期
-
-请求超时后客户端直接停止等待，没有发送 MCP cancellation notification。
-`stop()` 直接关闭所有 stream 并 terminate process，没有先关闭 stdin 并等待
-server 自行退出。
-
-需要：
-
-- request timeout 后发送 `notifications/cancelled`。
-- graceful shutdown：关闭 stdin、等待 server、再 TERM/KILL。
-- `LazyClientRef` 对失败连接进行有限重连并保留 last error。
-- 为 timeout、cancel、server 自行退出和强制 kill 添加测试。
-
 ## P2 · MCP 现代 tool result 支持不完整
 
 当前 handler 主要拼接 text content。image、audio、resource link 和 embedded

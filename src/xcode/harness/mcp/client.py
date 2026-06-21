@@ -27,6 +27,7 @@ SUPPORTED_PROTOCOL_VERSIONS = (
 )
 LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
 MAX_TOOL_LIST_PAGES = 100
+MAX_LAZY_CONNECT_ATTEMPTS = 2
 SHUTDOWN_GRACE_SECONDS = 1.0
 TERMINATE_GRACE_SECONDS = 1.0
 KILL_GRACE_SECONDS = 1.0
@@ -638,28 +639,54 @@ class LazyClientRef:
         server_name: str,
         config: dict[str, Any],
         tools_changed_callback: Callable[[McpClient], None] | None = None,
+        max_connect_attempts: int = MAX_LAZY_CONNECT_ATTEMPTS,
     ) -> None:
         """保存服务器名称和原始运行配置。"""
+        if max_connect_attempts < 1:
+            raise ValueError("max_connect_attempts must be at least 1")
         self.server_name = server_name
         self.config = config
         self.tools_changed_callback = tools_changed_callback
+        self.max_connect_attempts = max_connect_attempts
         self.client: McpClient | None = None
+        self.last_error: str | None = None
+        self._lock = threading.Lock()
 
     def get_or_create(self) -> McpClient:
         """返回可用客户端，必要时完成启动和握手。"""
-        if self.client is None or self.client.status == "failed":
-            if self.client is not None:
-                self.client.stop()
+        with self._lock:
+            if self.client is not None and self.client.status != "failed":
+                return self.client
+            self._stop_client()
+
             command = [self.config["command"]] + self.config.get("args", [])
             env = self.config.get("env")
             timeout = self.config.get("timeout")
-            self.client = McpClient(command, env, timeout=timeout)
-            self.client.set_tools_changed_callback(self.tools_changed_callback)
-            self.client.start()
-        return self.client
+            for _ in range(self.max_connect_attempts):
+                client = McpClient(command, env, timeout=timeout)
+                client.set_tools_changed_callback(self.tools_changed_callback)
+                try:
+                    client.start()
+                except RuntimeError as exc:
+                    self.last_error = truncate_redact(str(exc))
+                    client.stop()
+                    continue
+                self.client = client
+                self.last_error = None
+                return client
+
+            raise RuntimeError(
+                f"MCP server {self.server_name!r} connection failed after "
+                f"{self.max_connect_attempts} attempts: {self.last_error}"
+            )
 
     def stop(self) -> None:
         """停止并清除当前客户端。"""
+        with self._lock:
+            self._stop_client()
+
+    def _stop_client(self) -> None:
+        """停止当前客户端；调用方必须持有实例锁。"""
         if self.client is not None:
             self.client.stop()
             self.client = None

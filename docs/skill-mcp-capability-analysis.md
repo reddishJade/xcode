@@ -35,17 +35,13 @@ Agent Skills 官方实现指南明确说明，多数客户端的 model-driven ac
 
 ### MCP
 
-Xcode 已是可工作的 stdio tools client，但协议实现仍偏向单一 smoke-test
-路径。对于本地 coding agent，stdio + tools 足以作为正式基础能力；不需要先
-实现 resources、prompts、OAuth 和 Streamable HTTP。
+Xcode 已具备可工作的 stdio tools client，并完成分页发现、动态刷新、timeout
+cancellation、graceful shutdown 和有限重连。对于本地 coding agent，
+stdio + tools 足以作为正式基础能力；不需要先实现 resources、prompts、
+OAuth 和 Streamable HTTP。
 
-正式化前最值得补齐：
-
-1. `tools/list` pagination。
-2. request timeout 后发送 cancellation notification。
-3. 更符合规范的 graceful shutdown。
-4. 正确处理 `structuredContent`，并明确非文本 content 的宿主映射策略。
-5. 为 persistent client 增加状态、重连和可诊断错误。
+当前最值得补齐的是正确处理 `structuredContent`，并明确非文本 content 的
+宿主映射策略。
 
 ## 产品分类建议
 
@@ -141,7 +137,7 @@ auto trigger 的替代，而是用户可控入口。
 | stdio transport | 已实现 | 子进程 + newline-delimited JSON |
 | Content-Length | 兼容读取 | 当前规范 stdio 使用 newline delimiter；Content-Length 只是旧格式兼容 |
 | initialize + initialized | 已实现 | 发送最新支持版本，校验协商版本、capabilities 和 serverInfo，并保存 instructions |
-| `tools/list` | 部分实现 | 不处理 pagination cursor |
+| `tools/list` | 已实现 | 聚合 cursor pagination，并限制页数和重复 cursor |
 | `tools/call` | 已实现 | 支持 text 和 `isError` |
 | Tool naming | 已实现 | `mcp__<server>__<tool>` 和 collision detection |
 | Permission integration | 已实现 | MCP action、HITL、grant scope 限制 |
@@ -151,9 +147,9 @@ auto trigger 的替代，而是用户可控入口。
 | Streamable HTTP | 未实现 | 对本地基础能力不是阻塞项 |
 | OAuth | 未实现 | 仅在 remote transport 进入范围后需要 |
 | Resources/prompts | 未实现 | MCP server 的可选 feature，不是 tools client 的最低门槛 |
-| List changed | 未实现 | persistent tool catalog 场景值得支持 |
+| List changed | 已实现 | server 声明能力后刷新 cache 和下一轮 runtime registry |
 | Ping/server requests | 已实现 | 入站 response/request/notification 分流；支持 ping，未知 request 返回 method-not-found |
-| Cancellation/progress | 未实现 | timeout cancellation 值得先做；progress 可后置 |
+| Cancellation/progress | 部分实现 | timeout 发送 cancelled notification；progress 可后置 |
 | Non-text results | 未实现 | 当前只返回 placeholder |
 | Structured content/output schema | 未实现 | 对现代 tools server 有实际兼容价值 |
 
@@ -199,24 +195,16 @@ Content:
 
 ### 值得优先实现
 
-#### M1 · Tool discovery 完整性
-
-- 实现 `tools/list` cursor pagination。
-- 支持 `notifications/tools/list_changed` 后刷新 cache/registry。
-
-#### M1 · Timeout、取消和关闭
-
-- request timeout 后发送 `notifications/cancelled`。
-- graceful shutdown：先关闭 stdin，等待进程，随后 TERM/KILL。
-- persistent client 失败后提供有限重连和明确状态。
-- 对所有异常保留脱敏后的 server、method、request id 和状态信息。
-
 #### M1 · 现代 tool result
 
 - 支持 `structuredContent`。
 - 保留 `outputSchema` 并在可行时验证。
 - 对 image/audio/resource link/embedded resource 返回结构化宿主内容或明确、
   可诊断的 unsupported result，不能只保留第一个 placeholder。
+
+#### M2 · 错误诊断完整性
+
+- 对协议和工具异常补齐脱敏后的 server、method、request id 和状态信息。
 
 #### M2 · 正式模块和配置管理
 
