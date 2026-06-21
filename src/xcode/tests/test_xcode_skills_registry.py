@@ -94,6 +94,74 @@ class TestFrontmatterParser(unittest.TestCase):
         self.assertNotIn("risk", result)
         self.assertNotIn("tools", result)
 
+    def test_preserves_optional_spec_fields(self) -> None:
+        """规范可选字段会以稳定类型保留。"""
+        text = (
+            "---\n"
+            "name: pdf-processing\n"
+            "description: Process PDFs.\n"
+            "license: Apache-2.0\n"
+            "compatibility: Requires pdftotext and network access\n"
+            "metadata:\n"
+            "  author: example-org\n"
+            "  version: '1.0'\n"
+            "allowed-tools: Bash(pdftotext:*) Read\n"
+            "---\n"
+        )
+
+        result = _parse_frontmatter(text)
+
+        assert result is not None
+        self.assertEqual(result["license"], "Apache-2.0")
+        self.assertEqual(
+            result["compatibility"],
+            "Requires pdftotext and network access",
+        )
+        self.assertEqual(
+            result["metadata"],
+            {"author": "example-org", "version": "1.0"},
+        )
+        self.assertEqual(result["allowed-tools"], "Bash(pdftotext:*) Read")
+
+    def test_recovers_common_unquoted_colon_value(self) -> None:
+        """description 中未引用的冒号会窄范围修复后解析。"""
+        text = (
+            "---\n"
+            "name: pdf-processing\n"
+            "description: Use this skill when: the user asks about PDFs\n"
+            "---\n"
+        )
+
+        with self.assertLogs("xcode.harness.skills_registry", level="WARNING"):
+            result = _parse_frontmatter(text)
+
+        assert result is not None
+        self.assertEqual(
+            result["description"],
+            "Use this skill when: the user asks about PDFs",
+        )
+
+    def test_overlong_compatibility_warns_but_is_preserved(self) -> None:
+        """超过规范长度的 compatibility 仍保留。"""
+        compatibility = "x" * 501
+        text = (
+            "---\n"
+            "name: environment-check\n"
+            "description: Check the environment.\n"
+            f"compatibility: {compatibility}\n"
+            "---\n"
+        )
+
+        with self.assertLogs(
+            "xcode.harness.skills_registry",
+            level="WARNING",
+        ) as logs:
+            result = _parse_frontmatter(text)
+
+        assert result is not None
+        self.assertEqual(result["compatibility"], compatibility)
+        self.assertIn("exceeds 500 characters", "\n".join(logs.output))
+
     def test_malformed_frontmatter_skip(self) -> None:
         """没有闭合 --- 分隔符视为 malformed。"""
         text = "---\nname: test\ndescription: Test.\n"
@@ -158,6 +226,120 @@ class TestSkillRegistry(unittest.TestCase):
             self.assertEqual(len(summaries), 1)
             self.assertEqual(summaries[0].name, "code-review")
             self.assertEqual(summaries[0].description, "Review code changes.")
+
+    def test_cosmetic_name_issues_warn_but_load(self) -> None:
+        """名称格式、连续 hyphen 和目录不一致只产生警告。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_skill(
+                root,
+                ".xcode",
+                "skills",
+                "pdf-processing",
+                content=(
+                    "---\n"
+                    "name: PDF--Processing\n"
+                    "description: Process PDFs.\n"
+                    "---\n\n"
+                    "Body."
+                ),
+            )
+            registry = SkillRegistry()
+
+            with self.assertLogs(
+                "xcode.harness.skills_registry",
+                level="WARNING",
+            ) as logs:
+                registry.discover(build_skill_search_dirs(root))
+
+            skill = registry.load("PDF--Processing")
+
+        self.assertIsNotNone(skill)
+        self.assertIn("violates", "\n".join(logs.output))
+        self.assertIn("does not match directory", "\n".join(logs.output))
+
+    def test_overlong_name_warns_but_loads(self) -> None:
+        """超过 64 字符的名称只产生警告。"""
+        long_name = "a" * 65
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_skill(
+                root,
+                ".xcode",
+                "skills",
+                long_name,
+                content=(
+                    f"---\nname: {long_name}\ndescription: Long name.\n---\n\nBody."
+                ),
+            )
+            registry = SkillRegistry()
+
+            with self.assertLogs(
+                "xcode.harness.skills_registry",
+                level="WARNING",
+            ) as logs:
+                registry.discover(build_skill_search_dirs(root))
+
+        self.assertIsNotNone(registry.load(long_name))
+        self.assertIn("exceeds 64 characters", "\n".join(logs.output))
+
+    def test_missing_name_uses_directory_fallback(self) -> None:
+        """缺少 name 时使用技能目录名并继续加载。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_skill(
+                root,
+                ".xcode",
+                "skills",
+                "directory-name",
+                content=(
+                    "---\ndescription: Uses the directory fallback.\n---\n\nBody."
+                ),
+            )
+            registry = SkillRegistry()
+
+            with self.assertLogs(
+                "xcode.harness.skills_registry",
+                level="WARNING",
+            ) as logs:
+                registry.discover(build_skill_search_dirs(root))
+
+            skill = registry.load("directory-name")
+
+        self.assertIsNotNone(skill)
+        self.assertIn("using directory name", "\n".join(logs.output))
+
+    def test_optional_fields_are_stored_on_skill_definition(self) -> None:
+        """SkillDef 保留规范可选字段和 allowed-tools 提示。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_skill(
+                root,
+                ".xcode",
+                "skills",
+                "review",
+                content=(
+                    "---\n"
+                    "name: review\n"
+                    "description: Review code.\n"
+                    "license: MIT\n"
+                    "compatibility: Requires git\n"
+                    "metadata:\n"
+                    "  author: xcode\n"
+                    "allowed-tools: Bash(git:*) Read\n"
+                    "---\n\n"
+                    "Body."
+                ),
+            )
+            registry = SkillRegistry()
+            registry.discover(build_skill_search_dirs(root))
+            skill = registry.load("review")
+
+        assert skill is not None
+        self.assertEqual(skill.license, "MIT")
+        self.assertEqual(skill.compatibility, "Requires git")
+        self.assertEqual(skill.metadata, {"author": "xcode"})
+        self.assertEqual(skill.allowed_tools, "Bash(git:*) Read")
 
     def test_skill_summary_omits_body(self) -> None:
         """list_summaries() 返回的摘要不含正文。"""
@@ -251,8 +433,8 @@ class TestSkillRegistry(unittest.TestCase):
             assert skill is not None
             self.assertEqual(skill.content, "Secret body.")
 
-    def test_malformed_frontmatter_skipped(self) -> None:
-        """malformed frontmatter 的技能被跳过并记录警告。"""
+    def test_missing_description_skill_is_skipped(self) -> None:
+        """缺少 description 的技能被跳过并记录警告。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _make_skill(
@@ -260,7 +442,7 @@ class TestSkillRegistry(unittest.TestCase):
                 ".xcode",
                 "skills",
                 "bad",
-                content=("---\nname: ''\ndescription: Incomplete.\n---\n\nBody."),
+                content=("---\nname: bad\n---\n\nBody."),
             )
             _make_skill(
                 root,
@@ -529,6 +711,41 @@ class TestLoadSkillTool(unittest.TestCase):
             output = tool.handler({"name": "code-review"})
             self.assertIn("code-review", output)
             self.assertIn("Full workflow.", output)
+
+    def test_activation_exposes_compatibility_and_advisory_allowed_tools(
+        self,
+    ) -> None:
+        """activation 向模型披露兼容性，但不授予 allowed-tools 权限。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_skill(
+                root,
+                ".xcode",
+                "skills",
+                "review",
+                content=(
+                    "---\n"
+                    "name: review\n"
+                    "description: Review code.\n"
+                    "compatibility: Requires git < 3\n"
+                    "allowed-tools: Bash(git:*) Read\n"
+                    "---\n\n"
+                    "Body."
+                ),
+            )
+            registry = SkillRegistry()
+            registry.discover(build_skill_search_dirs(root))
+            output = build_load_skill_tool(registry).handler({"name": "review"})
+
+        self.assertIn(
+            "<compatibility>Requires git &lt; 3</compatibility>",
+            output,
+        )
+        self.assertIn(
+            '<allowed-tools advisory="true" permission-bypass="false">',
+            output,
+        )
+        self.assertIn("Bash(git:*) Read", output)
 
     def test_load_skill_name_schema_uses_discovered_names(self) -> None:
         """name schema 仅允许当前可见的技能名称。"""

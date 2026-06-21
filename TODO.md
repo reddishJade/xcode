@@ -13,20 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P2 · Skill frontmatter 与 Agent Skills 规范不完整
-
-当前解析 name、description、hidden，但未完整校验名称格式、长度、连续 hyphen
-和目录名一致性，也未保留 `license`、`compatibility`、`metadata`、
-`allowed-tools`。
-
-需要：
-
-- 对 cosmetic 问题采用 warn + load。
-- 缺少 description 或 YAML 完全无法解析时 skip。
-- 保留 compatibility、license 和 metadata。
-- activation 时向模型提供 compatibility。
-- 暂不让 `allowed-tools` 绕过 PermissionEngine；该字段只作为提示或忽略。
-
 ## P2 · 缺少用户可配置的显式 Hook 系统
 
 Xcode 已有内部 `HookManager` 和固定事件，但 `build_app()`、运行时配置与 REPL

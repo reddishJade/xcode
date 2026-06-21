@@ -280,6 +280,11 @@ cli → coding_agent → harness → agent → ai
 - `LazyClientRef` 复用客户端，对失败连接进行有限重连，并保留脱敏后的最后错误。
 - `SkillRegistry` 发现技能；`SkillIndexCollector` 注入摘要；
   `load_skill` 懒加载正文、资源路径和 session activation 状态。
+- Skill frontmatter 对名称格式、长度、连续 hyphen 和目录一致性采用
+  warn + load；缺少 description 或不可恢复 YAML 时跳过。license、
+  compatibility、metadata 和 allowed-tools 会保留。
+- activation 向模型披露 compatibility；allowed-tools 仅标记为 advisory，
+  不改变 PermissionEngine 决策。
 - `$skill-name` 和 `/skill skill-name` 通过 canonical `load_skill` ToolSpec 与
   PermissionEngine 激活，并将工具调用/结果写入 history 和 transcript；
   REPL 为两种语法提供 skill name 补全。
