@@ -6,6 +6,7 @@ from typing import Protocol
 from xcode.agent.messages import AgentMessage
 from xcode.harness.agent_runtime import CancellationToken, StructuredAgentEvent
 from xcode.harness.config import ExecutionMode
+from xcode.harness.skill_activation import ExplicitSkillActivationResult
 from xcode.harness.skills import ApprovalCallback, ToolSpec
 
 
@@ -27,6 +28,10 @@ class ReplAgent(Protocol):
     def load_history(self, messages: list[AgentMessage]) -> None: ...
 
     def request_compaction(self) -> None: ...
+
+    def available_skill_names(self) -> tuple[str, ...]: ...
+
+    def activate_skill(self, skill_name: str) -> ExplicitSkillActivationResult: ...
 
 
 class ModelControlApp(Protocol):

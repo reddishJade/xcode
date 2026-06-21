@@ -32,6 +32,11 @@ from .repl_sessions import (
     resume_interactively,
     sync_agent_history,
 )
+from .repl_skills import (
+    activate_skill,
+    available_skill_names,
+    parse_skill_invocation,
+)
 from .repl_tools import (
     event_to_dict,
     file_reference_event,
@@ -107,6 +112,7 @@ def run_repl(
         COMMAND_REGISTRY_EXPORT,
         lambda: current_effort_options(app),
         lambda: current_model_options(app),
+        lambda: available_skill_names(app),
     )
     state = ReplState()
     grant_store_manager = SessionGrantStoreManager()
@@ -196,6 +202,16 @@ def run_repl(
         if not text:
             continue
         state.exit_pending = 0.0
+        skill_invocation = parse_skill_invocation(text)
+        if skill_invocation is not None:
+            skill_name, remaining_text = skill_invocation
+            activation = activate_skill(app, store, skill_name)
+            print(activation.message)
+            if activation.status not in {"activated", "already_active"}:
+                continue
+            if not remaining_text:
+                continue
+            text = remaining_text
         if text.startswith("/"):
             current_session_store = grant_store_manager.get_for_session(
                 store.session_id

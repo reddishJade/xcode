@@ -249,6 +249,7 @@ cli → coding_agent → harness → agent → ai
 - `src/xcode/harness/mcp/client.py`
 - `src/xcode/harness/skills.py`
 - `src/xcode/harness/skills_registry.py`
+- `src/xcode/cli/repl_skills.py`
 - `src/xcode/coding_agent/tools/worktree.py`
 
 ### 已实现
@@ -279,6 +280,9 @@ cli → coding_agent → harness → agent → ai
 - `LazyClientRef` 复用客户端，对失败连接进行有限重连，并保留脱敏后的最后错误。
 - `SkillRegistry` 发现技能；`SkillIndexCollector` 注入摘要；
   `load_skill` 懒加载正文、资源路径和 session activation 状态。
+- `$skill-name` 和 `/skill skill-name` 通过 canonical `load_skill` ToolSpec 与
+  PermissionEngine 激活，并将工具调用/结果写入 history 和 transcript；
+  REPL 为两种语法提供 skill name 补全。
 
 ### 当前限制
 

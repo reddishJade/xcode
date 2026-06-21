@@ -177,7 +177,8 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `repl_tools.py` | `/tool` 解析、`!COMMAND` 快捷入口、事件序列化 |
 | `repl_turn_handler.py` | 单轮处理 |
 | `commands.py` | `CommandRegistry`、`ReplState`、`CommandContext` |
-| `completion.py` | `ReplCompleter` 自动补全（命令/工具/@file/!shell） |
+| `completion.py` | `ReplCompleter` 自动补全（命令/工具/skill/@file/!shell） |
+| `repl_skills.py` | `$skill-name`、`/skill` 激活解析和 transcript 记录 |
 | `file_refs.py` | `@relative/path` 解析和文件内容注入 |
 | `markdown.py` | `TerminalMarkdownRenderer` |
 | `tool_catalog.py` | 工具目录自省 |

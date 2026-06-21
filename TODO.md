@@ -13,17 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P2 · Skill 缺少用户显式激活入口
-
-模型自动选择之外，用户应能直接激活 skill。
-
-需要：
-
-- 支持 `$skill-name`、`/skill skill-name` 或等价语法。
-- 在 REPL 中提供 skill name 补全。
-- 显式激活通过同一 activation 状态和 compaction 保护路径。
-- 未知或被禁用 skill 返回明确错误。
-
 ## P2 · Skill frontmatter 与 Agent Skills 规范不完整
 
 当前解析 name、description、hidden，但未完整校验名称格式、长度、连续 hyphen

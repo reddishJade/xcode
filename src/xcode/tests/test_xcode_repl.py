@@ -20,7 +20,9 @@ from xcode.cli.repl_commands import COMMAND_NAMES, HELP_TEXT, handle_command
 from xcode.cli.repl_rendering import reasoning_preview_lines
 from xcode.cli.repl_rendering import REPL_PROMPT_STYLE
 from xcode.cli.repl_sessions import records_to_agent_messages
+from xcode.cli.repl_skills import parse_skill_invocation
 from xcode.cli.repl_tools import brief_input, run_tool_command
+from xcode.harness.skill_activation import ExplicitSkillActivationResult
 from xcode.harness.session import SessionRecord, SessionStore
 from xcode.harness.snapshot import SnapshotStore
 from xcode.harness.agent_runtime import (
@@ -842,6 +844,87 @@ class XcodeReplTests(unittest.TestCase):
 
         self.assertEqual([item.text for item in items], ["/new"])
 
+    def test_repl_completer_suggests_skill_names(self) -> None:
+        """`/skill` 和 `$` 入口共享技能名称补全。"""
+        completer = ReplCompleter(
+            Path.cwd(),
+            command_names=COMMAND_NAMES,
+            skill_options=("code-review", "pdf"),
+        )
+
+        command_items = completer.complete("/skill co")
+        reference_items = completer.complete("$")
+
+        self.assertEqual([item.text for item in command_items], ["code-review"])
+        self.assertEqual(
+            [item.text for item in reference_items],
+            ["$code-review", "$pdf"],
+        )
+
+    def test_parse_skill_invocation_preserves_follow_up_task(self) -> None:
+        """`$skill-name` 只消费激活前缀，保留后续任务。"""
+        self.assertEqual(
+            parse_skill_invocation("$code-review inspect this patch"),
+            ("code-review", "inspect this patch"),
+        )
+        self.assertEqual(
+            parse_skill_invocation("$code-review"),
+            ("code-review", ""),
+        )
+        self.assertIsNone(parse_skill_invocation("price is $5"))
+
+    def test_skill_command_records_activation_events(self) -> None:
+        """`/skill` 调用运行时并写入可恢复的工具事件。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            app = ExplicitSkillApp()
+            output = StringIO()
+
+            with redirect_stdout(output):
+                handle_command(
+                    "/skill code-review",
+                    store,
+                    app,
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+            records = store.load_records()
+
+        self.assertIn("Activated skill: code-review", output.getvalue())
+        self.assertEqual(
+            [record.content["type"] for record in records],
+            ["tool_use", "tool_result"],
+        )
+        restored = records_to_agent_messages(records)
+        self.assertEqual(
+            [message.role for message in restored],
+            ["assistant", "tool_result"],
+        )
+
+    def test_repl_dollar_skill_activates_before_follow_up(self) -> None:
+        """`$skill task` 激活技能后仅把剩余任务发送给 agent。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            app = ExplicitSkillApp()
+            output = StringIO()
+
+            with redirect_stdout(output):
+                exit_code = run_repl(
+                    app,
+                    root / "sessions",
+                    prompt_session=FakePrompt(
+                        ["$code-review inspect this patch", "/exit"]
+                    ),
+                    renderer=FakeRenderer(),
+                    project_root=root,
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(app.questions, ["inspect this patch"])
+        self.assertEqual(app.agent.activated, ["code-review"])
+
     def test_repl_completer_hides_quit_alias(self) -> None:
         completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
@@ -1458,6 +1541,16 @@ class _StubAgent:
 
     def set_permanent_grant_store(self, store: object) -> None: ...
 
+    def available_skill_names(self) -> tuple[str, ...]:
+        return ()
+
+    def activate_skill(self, skill_name: str) -> ExplicitSkillActivationResult:
+        return ExplicitSkillActivationResult(
+            name=skill_name,
+            status="disabled",
+            message="Skills are disabled for this runtime.",
+        )
+
 
 class FakeApp:
     agent = _StubAgent()
@@ -1491,6 +1584,42 @@ class FakeApp:
                 tool_calls=[],
             ),
         )
+
+
+class ExplicitSkillAgent(_StubAgent):
+    """记录 REPL 显式技能激活调用。"""
+
+    def __init__(self) -> None:
+        self.activated: list[str] = []
+
+    def available_skill_names(self) -> tuple[str, ...]:
+        return ("code-review",)
+
+    def activate_skill(self, skill_name: str) -> ExplicitSkillActivationResult:
+        self.activated.append(skill_name)
+        return ExplicitSkillActivationResult(
+            name=skill_name,
+            status="activated",
+            message=f"Activated skill: {skill_name}",
+            content=(
+                f'<skill name="{skill_name}" activated="true">\n'
+                f'<skill-activation-state>{{"name": "{skill_name}"}}'
+                "</skill-activation-state>\nBODY\n</skill>"
+            ),
+            tool_call_id=f"explicit-skill-{len(self.activated)}",
+        )
+
+
+class ExplicitSkillApp(FakeApp):
+    """支持显式技能激活的最小 REPL app。"""
+
+    def __init__(self) -> None:
+        self.agent = ExplicitSkillAgent()
+        self.questions: list[str] = []
+
+    def ask_stream(self, question: str, mode: str | None = None):
+        self.questions.append(question)
+        yield from super().ask_stream(question, mode)
 
 
 class StaticPermissionAgent:

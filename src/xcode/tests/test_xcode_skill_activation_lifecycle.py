@@ -5,10 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 
-from xcode.agent.messages import ToolResultMessage
+from xcode.agent.messages import AssistantMessage, ToolResultMessage
+from xcode.cli.repl_sessions import records_to_agent_messages
+from xcode.cli.repl_skills import activate_skill
 from xcode.harness.agent_runtime import StructuredAgent
-from xcode.harness.agent_runtime.config import AgentRuntimeConfig
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
+from xcode.harness.observability import PermissionPolicy, StaticPermission
 from xcode.harness.session import SessionStore
 from xcode.harness.skills_registry import (
     SkillRegistry,
@@ -18,8 +22,127 @@ from xcode.harness.skills_registry import (
 from xcode.tests.fixtures import FakeProvider
 
 
+class _ResettableFakeProvider(FakeProvider):
+    """记录显式激活后的 provider 会话重置。"""
+
+    def __init__(self) -> None:
+        super().__init__([])
+        self.reset_count = 0
+
+    def reset_conversation_state(self) -> None:
+        """记录 provider 会话状态重置次数。"""
+        self.reset_count += 1
+
+
+def _skill_registry(root: Path) -> SkillRegistry:
+    """创建包含单一可激活技能的测试注册表。"""
+    skill_dir = root / ".xcode" / "skills" / "review"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        ("---\nname: code-review\ndescription: Review.\n---\n\nFULL_SKILL_BODY"),
+        encoding="utf-8",
+    )
+    registry = SkillRegistry()
+    registry.discover(build_skill_search_dirs(root))
+    return registry
+
+
 class XcodeSkillActivationLifecycleTests(unittest.TestCase):
     """验证 Skill 激活状态可恢复且不会被 transcript 压缩破坏。"""
+
+    def test_explicit_activation_uses_canonical_history_pair(self) -> None:
+        """显式激活会执行 load_skill 并记录可保护的工具消息对。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            registry = _skill_registry(root)
+            provider = _ResettableFakeProvider()
+            agent = StructuredAgent(
+                provider=provider,
+                registry=(build_load_skill_tool(registry),),
+                runtime=AgentRuntimeConfig(skill_registry=registry),
+            )
+
+            result = agent.activate_skill("code-review")
+            repeated = agent.activate_skill("code-review")
+            history = agent.history_messages()
+
+        self.assertEqual(result.status, "activated")
+        self.assertIsNotNone(result.tool_call_id)
+        self.assertIn("FULL_SKILL_BODY", result.content)
+        self.assertEqual(repeated.status, "already_active")
+        self.assertEqual(provider.reset_count, 1)
+        self.assertEqual(len(history), 2)
+        self.assertIsInstance(history[0], AssistantMessage)
+        self.assertIsInstance(history[1], ToolResultMessage)
+        assert isinstance(history[1], ToolResultMessage)
+        self.assertEqual(history[1].tool_call_id, result.tool_call_id)
+        self.assertIn("<skill-activation-state>", str(history[1].content))
+
+    def test_explicit_activation_reports_unknown_disabled_and_blocked(self) -> None:
+        """未知、禁用和权限阻止状态会返回明确诊断。"""
+        disabled_agent = StructuredAgent(
+            provider=FakeProvider([]),
+            registry=(),
+        )
+        disabled = disabled_agent.activate_skill("code-review")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            registry = _skill_registry(root)
+            tool = build_load_skill_tool(registry)
+            agent = StructuredAgent(
+                provider=FakeProvider([]),
+                registry=(tool,),
+                gate=GateConfig(
+                    permission_policy=PermissionPolicy(
+                        (StaticPermission("load_skill", "deny"),)
+                    )
+                ),
+                runtime=AgentRuntimeConfig(skill_registry=registry),
+            )
+            unknown = agent.activate_skill("missing")
+            blocked = agent.activate_skill("code-review")
+
+        self.assertEqual(disabled.status, "disabled")
+        self.assertEqual(unknown.status, "unknown")
+        self.assertEqual(blocked.status, "blocked")
+        self.assertIn("Unknown skill", unknown.message)
+
+    def test_explicit_activation_round_trips_through_repl_session(self) -> None:
+        """显式激活事件可从 transcript 恢复到同一 activation 状态。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            registry = _skill_registry(root)
+            agent = StructuredAgent(
+                provider=FakeProvider([]),
+                registry=(build_load_skill_tool(registry),),
+                runtime=AgentRuntimeConfig(skill_registry=registry),
+            )
+            store = SessionStore(root / "sessions", project_root=root)
+
+            result = activate_skill(
+                SimpleNamespace(agent=agent),
+                store,
+                "code-review",
+            )
+            compacted = store.compact_current_session(max_tool_result_chars=10)
+            restored_messages = records_to_agent_messages(store.load_records())
+
+            resumed_registry = _skill_registry(root)
+            resumed_agent = StructuredAgent(
+                provider=FakeProvider([]),
+                registry=(build_load_skill_tool(resumed_registry),),
+                runtime=AgentRuntimeConfig(skill_registry=resumed_registry),
+            )
+            resumed_agent.load_history(restored_messages)
+
+        self.assertEqual(result.status, "activated")
+        self.assertEqual(compacted, 0)
+        self.assertEqual(resumed_registry.activated_names(), ("code-review",))
+        self.assertEqual(
+            resumed_agent.activate_skill("code-review").status,
+            "already_active",
+        )
 
     def test_registry_restores_activation_from_history(self) -> None:
         """恢复历史后重复加载返回 already-active。"""

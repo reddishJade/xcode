@@ -390,13 +390,15 @@ def partition_tool_calls_for_execution(current_context, tool_calls) -> list[list
 | `/compact` | 手动压缩 |
 | `/permissions [revoke\|clear]` | 权限管理 |
 | `/tool NAME INPUT\|list` | 手动工具 |
+| `/skill NAME` | 显式激活技能 |
 | `/exit\|/quit` | 退出 |
 
 ### 8.2 辅助
 
 `expand_file_references(text, project_root) -> tuple[str, list[FileReference]]`，匹配 `@path` 并注入内容。
 
-`ReplCompleter`：补全命令、effort 级别、模型名、工具名、shell 路径、`@file`。
+`ReplCompleter`：补全命令、effort 级别、模型名、工具名、skill 名、
+shell 路径、`@file`。行首 `$skill-name` 可激活技能并继续执行同一行后续任务。
 
 `TerminalMarkdownRenderer`：终端 markdown 渲染。
 

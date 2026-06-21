@@ -70,6 +70,7 @@ class ReplCompleter(Completer):
         command_registry: dict[str, CommandEntry] | None = None,
         effort_options: Iterable[str] | Callable[[], Iterable[str]] = (),
         model_options: Iterable[str] | Callable[[], Iterable[str]] = (),
+        skill_options: Iterable[str] | Callable[[], Iterable[str]] = (),
     ) -> None:
         self.project_root = project_root.resolve()
         self.tool_names = tuple(sorted(tool.name for tool in registry))
@@ -86,6 +87,7 @@ class ReplCompleter(Completer):
                         self._command_args[name] = entry.args_desc
         self._effort_options = effort_options
         self._model_options = model_options
+        self._skill_options = skill_options
         self._directory_cache: dict[Path, tuple[str, ...]] = {}
 
     @property
@@ -130,8 +132,12 @@ class ReplCompleter(Completer):
             return self._complete_model(text_before_cursor)
         if text_before_cursor.startswith("/tool "):
             return self._complete_tool_name(text_before_cursor)
+        if text_before_cursor.startswith("/skill "):
+            return self._complete_skill_name(text_before_cursor)
         if text_before_cursor.startswith("/"):
             return self._complete_command(text_before_cursor)
+        if text_before_cursor.startswith("$"):
+            return self._complete_skill_reference(text_before_cursor)
         if text_before_cursor.startswith("!"):
             return self._complete_shell(text_before_cursor)
         return self._complete_file_reference(text_before_cursor)
@@ -163,6 +169,29 @@ class ReplCompleter(Completer):
         return [
             CompletionItem(name, -len(partial), "tool")
             for name in self.tool_names
+            if name.startswith(partial)
+        ]
+
+    def _complete_skill_name(self, text: str) -> list[CompletionItem]:
+        """补全 `/skill` 命令参数。"""
+        parts = text.split(maxsplit=2)
+        if len(parts) > 2:
+            return []
+        partial = parts[1] if len(parts) == 2 else ""
+        return [
+            CompletionItem(name, -len(partial), "skill")
+            for name in self._current_skill_options()
+            if name.startswith(partial)
+        ]
+
+    def _complete_skill_reference(self, text: str) -> list[CompletionItem]:
+        """补全行首 `$skill-name` 语法。"""
+        if any(character.isspace() for character in text):
+            return []
+        partial = text[1:]
+        return [
+            CompletionItem(f"${name}", -len(text), "skill")
+            for name in self._current_skill_options()
             if name.startswith(partial)
         ]
 
@@ -223,6 +252,15 @@ class ReplCompleter(Completer):
             else self._effort_options
         )
         return normalize_reasoning_effort_options(options)
+
+    def _current_skill_options(self) -> tuple[str, ...]:
+        """返回当前可激活技能名称。"""
+        options = (
+            self._skill_options()
+            if callable(self._skill_options)
+            else self._skill_options
+        )
+        return tuple(sorted(options))
 
     def _complete_shell(self, text: str) -> list[CompletionItem]:
         marker = _active_shell_word(text)

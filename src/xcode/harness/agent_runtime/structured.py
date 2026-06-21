@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import replace
+from uuid import uuid4
 
 from xcode.ai.providers.protocol import StreamProvider
 
 from ...agent.agent import Agent
-from ...agent.messages import AgentMessage, UserMessage
-from ...agent.protocols import AgentTool
+from ...agent.config import AgentContext, BeforeToolCallContext
+from ...agent.messages import (
+    AgentMessage,
+    AssistantMessage,
+    ToolResultMessage,
+    UserMessage,
+)
+from ...agent.protocols import AgentTool, AgentToolResult
+from ...agent.types import TextContent, ToolCallContent
 from .agent_helpers import aiter_to_sync_iter, run_coro_sync
 from .cancellation import CancellationToken
 from .config import (
@@ -39,6 +47,10 @@ from .tool_gate import ToolGate
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
 from ..observability import HookRecord
 from ..observability.permission_model import GrantStore
+from ..skill_activation import (
+    ExplicitSkillActivationResult,
+    is_skill_activation_content,
+)
 from ..skills import ApprovalCallback, ToolRegistryState, ToolSpec
 
 _PROMPT_VERSION_CACHE: str | None = None
@@ -192,6 +204,169 @@ class StructuredAgent:
 
     def history_messages(self) -> list[AgentMessage]:
         return self._history.messages()
+
+    def available_skill_names(self) -> tuple[str, ...]:
+        """返回当前运行时允许显式激活的技能名称。"""
+        registry = self._runtime.skill_registry
+        return registry.available_names() if registry is not None else ()
+
+    def activate_skill(self, skill_name: str) -> ExplicitSkillActivationResult:
+        """通过 canonical load_skill 工具显式激活技能。"""
+        name = skill_name.strip()
+        unavailable = self._explicit_skill_unavailable(name)
+        if unavailable is not None:
+            return unavailable
+        load_skill = next(tool for tool in self.registry if tool.name == "load_skill")
+
+        tool_call_id = f"explicit-skill-{uuid4().hex}"
+        execution = self._execute_explicit_skill(
+            name,
+            load_skill,
+            tool_call_id,
+        )
+        if isinstance(execution, ExplicitSkillActivationResult):
+            return execution
+        assistant_message, tool_result = execution
+        return self._record_explicit_skill_activation(
+            name,
+            tool_call_id,
+            load_skill.name,
+            assistant_message,
+            tool_result,
+        )
+
+    def _explicit_skill_unavailable(
+        self,
+        name: str,
+    ) -> ExplicitSkillActivationResult | None:
+        """返回显式激活前的名称或运行时可用性错误。"""
+        if not name:
+            return ExplicitSkillActivationResult(
+                name="",
+                status="unknown",
+                message="Skill name is required.",
+            )
+        skill_registry = self._runtime.skill_registry
+        if skill_registry is None:
+            return ExplicitSkillActivationResult(
+                name=name,
+                status="disabled",
+                message="Skills are disabled for this runtime.",
+            )
+        if not skill_registry.contains(name):
+            return ExplicitSkillActivationResult(
+                name=name,
+                status="unknown",
+                message=f"Unknown skill: {name}",
+            )
+        if not skill_registry.is_available(name):
+            return ExplicitSkillActivationResult(
+                name=name,
+                status="disabled",
+                message=f"Skill is unavailable for explicit activation: {name}",
+            )
+        if not any(tool.name == "load_skill" for tool in self.registry):
+            return ExplicitSkillActivationResult(
+                name=name,
+                status="disabled",
+                message="The skills tool group is disabled.",
+            )
+        return None
+
+    def _execute_explicit_skill(
+        self,
+        name: str,
+        load_skill: ToolSpec,
+        tool_call_id: str,
+    ) -> tuple[AssistantMessage, AgentToolResult] | ExplicitSkillActivationResult:
+        """通过 ToolGate 执行单次显式 load_skill 调用。"""
+        arguments: dict[str, object] = {"name": name}
+        tool_call = ToolCallContent(
+            id=tool_call_id,
+            name=load_skill.name,
+            arguments=arguments,
+        )
+        assistant_message = AssistantMessage(content=[tool_call])
+        before_hook = self._gate.build_before_tool_hook(
+            self._gate.snapshot_for((load_skill,))
+        )
+        before_result = before_hook(
+            BeforeToolCallContext(
+                assistant_message=assistant_message,
+                tool_call=tool_call,
+                args=arguments,
+                context=AgentContext(),
+            ),
+            None,
+        )
+        if before_result is not None:
+            return ExplicitSkillActivationResult(
+                name=name,
+                status="blocked",
+                message=before_result.reason or f"Skill activation blocked: {name}",
+            )
+
+        try:
+            adapted_tool = self._gate.adapt_tools((load_skill,))[0]
+            tool_result = run_coro_sync(
+                adapted_tool.execute(tool_call_id, arguments, None)
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            return ExplicitSkillActivationResult(
+                name=name,
+                status="error",
+                message=f"Failed to activate skill {name}: {exc}",
+            )
+        return assistant_message, tool_result
+
+    def _record_explicit_skill_activation(
+        self,
+        name: str,
+        tool_call_id: str,
+        tool_name: str,
+        assistant_message: AssistantMessage,
+        tool_result: AgentToolResult,
+    ) -> ExplicitSkillActivationResult:
+        """分类激活结果，并仅记录首次成功的 canonical 消息对。"""
+        content = "".join(
+            block.text
+            for block in tool_result.content
+            if isinstance(block, TextContent)
+        )
+        if tool_result.is_error:
+            return ExplicitSkillActivationResult(
+                name=name,
+                status="error",
+                message=content or f"Failed to activate skill: {name}",
+            )
+        if 'status="already-active"' in content:
+            return ExplicitSkillActivationResult(
+                name=name,
+                status="already_active",
+                message=f"Skill already active: {name}",
+                content=content,
+            )
+        if not is_skill_activation_content(content):
+            return ExplicitSkillActivationResult(
+                name=name,
+                status="error",
+                message=content or f"Skill activation returned no content: {name}",
+            )
+
+        result_message = ToolResultMessage(
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            content=content,
+        )
+        self._history.save_turn([assistant_message, result_message])
+        self._reset_provider_conversation_state()
+        return ExplicitSkillActivationResult(
+            name=name,
+            status="activated",
+            message=f"Activated skill: {name}",
+            content=content,
+            tool_call_id=tool_call_id,
+        )
 
     def run(
         self, question: str, mode: ExecutionMode | None = None

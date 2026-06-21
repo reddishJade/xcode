@@ -4,12 +4,33 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
+from typing import Literal
 
 
 SKILL_ACTIVATION_STATE_TAG = "skill-activation-state"
 _ACTIVATION_STATE_PATTERN = re.compile(
     rf"<{SKILL_ACTIVATION_STATE_TAG}>(.*?)</{SKILL_ACTIVATION_STATE_TAG}>"
 )
+type ExplicitSkillActivationStatus = Literal[
+    "activated",
+    "already_active",
+    "unknown",
+    "disabled",
+    "blocked",
+    "error",
+]
+
+
+@dataclass(frozen=True)
+class ExplicitSkillActivationResult:
+    """显式技能激活的稳定运行时结果。"""
+
+    name: str
+    status: ExplicitSkillActivationStatus
+    message: str
+    content: str = ""
+    tool_call_id: str | None = None
 
 
 def is_skill_activation_content(content: object) -> bool:

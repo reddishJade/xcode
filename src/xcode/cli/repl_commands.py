@@ -35,6 +35,7 @@ from .repl_settings import (
     handle_permissions,
     handle_thinking_command,
 )
+from .repl_skills import activate_skill
 from .repl_tools import run_tool_command
 from xcode.harness.observability import (
     FileGrantStore,
@@ -464,6 +465,17 @@ def cmd_tool(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
+def cmd_skill(cmd: str, ctx: CommandContext) -> bool:
+    """显式激活一个已发现的技能。"""
+    parts = cmd.split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].strip():
+        print("Usage: /skill NAME")
+        return False
+    result = activate_skill(ctx.app, ctx.store, parts[1].strip())
+    print(result.message)
+    return False
+
+
 def cmd_exit(cmd: str, ctx: CommandContext) -> bool:
     """退出 REPL。"""
     return True
@@ -791,6 +803,13 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         handler=cmd_tool,
         desc="Run one registered tool directly, or list tools.",
         args_desc="NAME INPUT|list",
+        accepts_args=True,
+        group=COMMAND_GROUP_INFO,
+    ),
+    "/skill": CommandEntry(
+        handler=cmd_skill,
+        desc="Activate a discovered skill for this session.",
+        args_desc="NAME",
         accepts_args=True,
         group=COMMAND_GROUP_INFO,
     ),

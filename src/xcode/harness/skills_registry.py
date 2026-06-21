@@ -443,6 +443,15 @@ class SkillRegistry:
         """返回可向模型披露和激活的技能名称。"""
         return tuple(sorted(summary.name for summary in self.list_summaries()))
 
+    def contains(self, skill_name: str) -> bool:
+        """判断技能名称是否已被发现。"""
+        return skill_name in self._skills
+
+    def is_available(self, skill_name: str) -> bool:
+        """判断技能是否允许用户或模型显式激活。"""
+        skill = self._skills.get(skill_name)
+        return skill is not None and not skill.hidden
+
     def activate(self, skill_name: str) -> tuple[SkillDef | None, bool]:
         """激活技能并返回 (技能定义, 是否已激活)。"""
         skill = self.load(skill_name)

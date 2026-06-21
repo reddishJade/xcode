@@ -206,6 +206,7 @@ def create_prompt_session(
     command_registry: dict[str, CommandEntry] | None = None,
     effort_options: Iterable[str] | Callable[[], Iterable[str]] = (),
     model_options: Iterable[str] | Callable[[], Iterable[str]] = (),
+    skill_options: Iterable[str] | Callable[[], Iterable[str]] = (),
 ) -> PromptLike:
     try:
         from prompt_toolkit import PromptSession
@@ -231,13 +232,14 @@ def create_prompt_session(
         pass
     bindings.add("escape", "enter")(insert_newline)
 
-    @bindings.add("c-c")
     def handle_ctrl_c(event) -> None:
         buf = event.current_buffer
         if buf.text:
             buf.reset()
         else:
             event.app.exit(exception=KeyboardInterrupt())
+
+    bindings.add("c-c")(handle_ctrl_c)
 
     completer = ReplCompleter(
         project_root or Path.cwd(),
@@ -246,6 +248,7 @@ def create_prompt_session(
         command_registry,
         effort_options,
         model_options,
+        skill_options,
     )
 
     suggester = CommandArgsSuggester(completer.command_args)
