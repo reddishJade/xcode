@@ -96,6 +96,41 @@
 
 ---
 
+## hooks
+
+`hooks.entries` 声明受信任的外部命令 hook。每个配置层的 entries 数组整体替换
+低优先级数组，不按元素合并。命令必须是 argv 数组；不经过 shell，不支持进程内
+Python callback。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `event` | string | 必填 | `pre_tool`、`post_tool`、`on_error`、`on_compact`、`before_agent_start`、`before_provider_request` |
+| `command` | string[] | 必填 | 非空 argv 数组 |
+| `matcher` | string/null | `null` | 可选事件匹配表达式 |
+| `timeout` | number | `10.0` | 正数秒数 |
+| `enabled` | bool | `true` | 是否启用 |
+| `failure_policy` | string | `"warn"` | `ignore`、`warn`、`fail` |
+| `inherit_to_subagents` | bool | `false` | 是否显式传播给 subagent；默认不传播 |
+
+```json
+{
+  "hooks": {
+    "entries": [
+      {
+        "event": "pre_tool",
+        "matcher": "bash",
+        "command": ["python", "hooks/check_shell.py"],
+        "timeout": 5,
+        "failure_policy": "fail",
+        "inherit_to_subagents": false
+      }
+    ]
+  }
+}
+```
+
+---
+
 ## security
 
 | 字段 | 类型 | 默认值 | 说明 |

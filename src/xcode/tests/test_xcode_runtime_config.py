@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -156,6 +157,46 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
 
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_project_hook_list_replaces_global_hook_list(self) -> None:
+        """高优先级 hooks.entries 按列表替换语义覆盖全局声明。"""
+        root = Path(tempfile.mkdtemp())
+        try:
+            global_home = root / "global_home"
+            global_path = global_home / ".xcode" / "settings.json"
+            global_path.parent.mkdir(parents=True)
+            global_path.write_text(
+                '{"hooks":{"entries":[{"event":"post_tool",'
+                '"command":["global-hook"]}]}}',
+                encoding="utf-8",
+            )
+            project_path = root / "xcode.config.json"
+            project_path.write_text(
+                '{"hooks":{"entries":[{"event":"pre_tool",'
+                '"command":["project-hook"],"matcher":"bash",'
+                '"timeout":2.5,"enabled":false,'
+                '"failure_policy":"fail",'
+                '"inherit_to_subagents":true}]}}',
+                encoding="utf-8",
+            )
+
+            with patch.object(Path, "home", return_value=global_home):
+                config = discover_runtime_config(root)
+
+            self.assertEqual(len(config.hooks.entries), 1)
+            hook = config.hooks.entries[0]
+            self.assertEqual(hook.event, "pre_tool")
+            self.assertEqual(hook.command, ("project-hook",))
+            self.assertEqual(hook.matcher, "bash")
+            self.assertEqual(hook.timeout, 2.5)
+            self.assertFalse(hook.enabled)
+            self.assertEqual(hook.failure_policy, "fail")
+            self.assertTrue(hook.inherit_to_subagents)
+            self.assertEqual(hook.source, str(project_path))
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
 
 class XcodeRuntimeConfigTests(unittest.TestCase):
     def test_missing_config_uses_defaults(self) -> None:
@@ -180,6 +221,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
         self.assertIsNone(config.paths.sessions_dir)
         self.assertFalse(config.daemon.enabled)
         self.assertEqual(config.daemon.interval_seconds, 30)
+        self.assertEqual(config.hooks.entries, ())
 
     def test_loads_runtime_config_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -226,6 +268,59 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             self.assertEqual(config.observability.audit_path, Path("audit.jsonl"))
             self.assertTrue(config.daemon.enabled)
             self.assertEqual(config.daemon.interval_seconds, 15)
+
+    def test_loads_external_hook_config(self) -> None:
+        """外部 hook 声明转换为类型化 argv 配置。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "xcode.config.json"
+            path.write_text(
+                '{"hooks":{"entries":['
+                '{"event":"before_provider_request",'
+                '"command":["python","hook.py"],'
+                '"matcher":"main","timeout":3,'
+                '"failure_policy":"ignore"}'
+                "]}}",
+                encoding="utf-8",
+            )
+
+            config = load_runtime_config(path)
+
+        self.assertEqual(len(config.hooks.entries), 1)
+        hook = config.hooks.entries[0]
+        self.assertEqual(hook.command, ("python", "hook.py"))
+        self.assertEqual(hook.timeout, 3)
+        self.assertEqual(hook.source, str(path))
+
+    def test_rejects_invalid_external_hook_entries(self) -> None:
+        """无效 event、argv、timeout 和策略会 fail-fast。"""
+        invalid_entries = (
+            {"event": "unknown", "command": ["hook"]},
+            {"event": "pre_tool", "command": "hook"},
+            {"event": "pre_tool", "command": []},
+            {"event": "pre_tool", "command": [""]},
+            {"event": "pre_tool", "command": ["hook"], "matcher": ""},
+            {"event": "pre_tool", "command": ["hook"], "timeout": 0},
+            {"event": "pre_tool", "command": ["hook"], "enabled": "yes"},
+            {
+                "event": "pre_tool",
+                "command": ["hook"],
+                "failure_policy": "sometimes",
+            },
+            {
+                "event": "pre_tool",
+                "command": ["hook"],
+                "inherit_to_subagents": "yes",
+            },
+        )
+        for entry in invalid_entries:
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "xcode.config.json"
+                path.write_text(
+                    json.dumps({"hooks": {"entries": [entry]}}),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ValueError):
+                    load_runtime_config(path)
 
     def test_loads_chatglm_profile_options(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

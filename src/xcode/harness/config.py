@@ -15,6 +15,15 @@ ProviderTransport = Literal[
 ExecutionMode = Literal["plan", "build", "act"]
 PermissionMode = Literal["strict", "normal", "permissive"]
 ApprovalPolicy = Literal["always", "never"]
+HookEventName = Literal[
+    "pre_tool",
+    "post_tool",
+    "on_error",
+    "on_compact",
+    "before_agent_start",
+    "before_provider_request",
+]
+HookFailurePolicy = Literal["ignore", "warn", "fail"]
 
 PROFILE_MAIN = "main"
 PROFILE_SUBAGENT = "subagent"
@@ -241,6 +250,27 @@ class ObservabilityRuntimeConfig:
     audit_path: Path | None = None
 
 
+@dataclass(frozen=True)
+class ExternalHookRuntimeConfig:
+    """单个受信任外部命令 hook 声明。"""
+
+    event: HookEventName
+    command: tuple[str, ...]
+    matcher: str | None = None
+    timeout: float = 10.0
+    enabled: bool = True
+    failure_policy: HookFailurePolicy = "warn"
+    inherit_to_subagents: bool = False
+    source: str = ""
+
+
+@dataclass
+class HooksRuntimeConfig:
+    """外部命令 hook 配置集合。"""
+
+    entries: tuple[ExternalHookRuntimeConfig, ...] = ()
+
+
 @dataclass
 class DaemonRuntimeConfig:
     enabled: bool = False
@@ -258,6 +288,7 @@ class XcodeRuntimeConfig:
     observability: ObservabilityRuntimeConfig = field(
         default_factory=ObservabilityRuntimeConfig
     )
+    hooks: HooksRuntimeConfig = field(default_factory=HooksRuntimeConfig)
     daemon: DaemonRuntimeConfig = field(default_factory=DaemonRuntimeConfig)
     request_hygiene: RequestHygieneConfig = field(default_factory=RequestHygieneConfig)
     security: SecurityRuntimeConfig = field(default_factory=SecurityRuntimeConfig)
@@ -309,7 +340,8 @@ def _config_from_dict(data: dict[str, Any]) -> XcodeRuntimeConfig:
         # 处理元组
         if origin is tuple:
             if isinstance(val, list):
-                return tuple(val)
+                item_type = args[0] if args else object
+                return tuple(_resolve_value(item_type, item) for item in val)
             return val
 
         # 处理字典
@@ -330,14 +362,19 @@ def _config_from_dict(data: dict[str, Any]) -> XcodeRuntimeConfig:
 def discover_runtime_config(
     project_root: Path, explicit_path: Path | None = None
 ) -> XcodeRuntimeConfig:
-    global_raw = _load_raw_config(Path.home() / ".xcode" / "settings.json")
+    global_path = Path.home() / ".xcode" / "settings.json"
     project_path = explicit_path or project_root / "xcode.config.json"
+    local_path = project_root / ".local" / "settings.json"
+    global_raw = _load_raw_config(global_path)
     project_raw = _load_raw_config(project_path)
-    local_raw = _load_raw_config(project_root / ".local" / "settings.json")
+    local_raw = _load_raw_config(local_path)
 
     global_raw = _resolve_profiles_in_raw(global_raw)
     project_raw = _resolve_profiles_in_raw(project_raw)
     local_raw = _resolve_profiles_in_raw(local_raw)
+    global_raw = _annotate_hook_sources(global_raw, global_path)
+    project_raw = _annotate_hook_sources(project_raw, project_path)
+    local_raw = _annotate_hook_sources(local_raw, local_path)
 
     merged = _deep_merge_raw(global_raw, project_raw)
     merged = _deep_merge_raw(merged, local_raw)
@@ -345,6 +382,7 @@ def discover_runtime_config(
     _validate_legacy_security_fields(merged)
     _validate_external_directories(merged)
     _validate_instruction_sources(merged)
+    _validate_external_hooks(merged)
     config = _config_from_dict(merged)
     config = _apply_env_overrides(config)
     return config
@@ -358,6 +396,104 @@ def _load_raw_config(path: Path | None) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"runtime config must be a JSON object: {path}")
     return data
+
+
+def _annotate_hook_sources(
+    data: dict[str, Any],
+    source_path: Path,
+) -> dict[str, Any]:
+    """为当前配置层的 hook 声明附加来源路径。"""
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return data
+    entries = hooks.get("entries")
+    if not isinstance(entries, list):
+        return data
+
+    annotated_entries: list[object] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            annotated_entries.append(entry)
+            continue
+        annotated = dict(entry)
+        annotated["source"] = str(source_path)
+        annotated_entries.append(annotated)
+
+    result = dict(data)
+    result["hooks"] = dict(hooks)
+    result["hooks"]["entries"] = annotated_entries
+    return result
+
+
+_HOOK_EVENTS: frozenset[str] = frozenset(
+    {
+        "pre_tool",
+        "post_tool",
+        "on_error",
+        "on_compact",
+        "before_agent_start",
+        "before_provider_request",
+    }
+)
+_HOOK_FAILURE_POLICIES: frozenset[str] = frozenset({"ignore", "warn", "fail"})
+
+
+def _validate_external_hooks(raw: dict[str, Any]) -> None:
+    """Fail-fast 校验 hooks.entries 声明。"""
+    hooks = raw.get("hooks")
+    if hooks is None:
+        return
+    if not isinstance(hooks, dict):
+        raise ValueError("hooks must be an object")
+    entries = hooks.get("entries", [])
+    if not isinstance(entries, list):
+        raise ValueError("hooks.entries must be an array")
+    for index, entry in enumerate(entries):
+        _validate_external_hook_entry(entry, index)
+
+
+def _validate_external_hook_entry(entry: object, index: int) -> None:
+    """校验单个外部 hook 声明。"""
+    prefix = f"hooks.entries[{index}]"
+    if not isinstance(entry, dict):
+        raise ValueError(f"{prefix}: must be an object")
+    event = entry.get("event")
+    if event not in _HOOK_EVENTS:
+        allowed = ", ".join(sorted(_HOOK_EVENTS))
+        raise ValueError(f"{prefix}.event: must be one of {allowed}")
+
+    command = entry.get("command")
+    if not isinstance(command, list) or not command:
+        raise ValueError(f"{prefix}.command: must be a non-empty argv array")
+    if any(not isinstance(item, str) or not item.strip() for item in command):
+        raise ValueError(f"{prefix}.command: argv items must be non-empty strings")
+
+    matcher = entry.get("matcher")
+    if matcher is not None and (
+        not isinstance(matcher, str) or not matcher.strip()
+    ):
+        raise ValueError(f"{prefix}.matcher: must be a non-empty string")
+
+    timeout = entry.get("timeout", 10.0)
+    if (
+        not isinstance(timeout, int | float)
+        or isinstance(timeout, bool)
+        or timeout <= 0
+    ):
+        raise ValueError(f"{prefix}.timeout: must be a positive number")
+
+    enabled = entry.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ValueError(f"{prefix}.enabled: must be a boolean")
+
+    failure_policy = entry.get("failure_policy", "warn")
+    if failure_policy not in _HOOK_FAILURE_POLICIES:
+        allowed = ", ".join(sorted(_HOOK_FAILURE_POLICIES))
+        raise ValueError(f"{prefix}.failure_policy: must be one of {allowed}")
+
+    inherit = entry.get("inherit_to_subagents", False)
+    if not isinstance(inherit, bool):
+        raise ValueError(f"{prefix}.inherit_to_subagents: must be a boolean")
 
 
 def _resolve_profiles_in_raw(data: dict[str, Any]) -> dict[str, Any]:
@@ -492,6 +628,9 @@ def _load_provider_transport(
 def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
     raw = _load_raw_config(path)
     raw = _resolve_profiles_in_raw(raw)
+    if path is not None:
+        raw = _annotate_hook_sources(raw, path)
+    _validate_external_hooks(raw)
     return _config_from_dict(raw)
 
 
