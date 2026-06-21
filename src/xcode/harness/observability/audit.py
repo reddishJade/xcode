@@ -28,6 +28,9 @@ class AuditRecord:
     redacted_input: str
     redacted_output: str
     timestamp: str = ""
+    turn_id: str = ""
+    request_id: str = ""
+    tool_call_id: str = ""
     approval_scope: str | None = None
     user_decision: str | None = None
     capability: str | None = None
@@ -49,6 +52,9 @@ class AuditRecord:
             "redacted_input": self.redacted_input,
             "redacted_output": self.redacted_output,
             "timestamp": created_at,
+            "turn_id": self.turn_id,
+            "request_id": self.request_id,
+            "tool_call_id": self.tool_call_id,
             "approval_scope": self.approval_scope,
             "user_decision": self.user_decision,
             "capability": self.capability,

@@ -32,6 +32,9 @@ from ..observability import (
     PermissionDecision,
     PermissionEngineResult,
     PermissionPolicy,
+    RuntimeCorrelation,
+    hook_correlation_fields,
+    HookCorrelationFields,
 )
 from ..observability.permission_model import (
     ExternalDirectory,
@@ -80,6 +83,7 @@ class ToolGate:
         external_hook_runner: ExternalHookRunner | None = None,
         external_hooks_subagent: bool = False,
         external_hooks_cwd: Path | None = None,
+        correlation: RuntimeCorrelation | None = None,
         restricted_dirs: tuple[str, ...] = (),
         hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
         project_root: Path | None = None,
@@ -98,6 +102,7 @@ class ToolGate:
         self._external_hook_runner = external_hook_runner
         self._external_hooks_subagent = external_hooks_subagent
         self._external_hooks_cwd = external_hooks_cwd
+        self._correlation = correlation or RuntimeCorrelation(session_id)
         self._audit_logger = audit_logger
         self._session_id = session_id
         self._project_root = project_root
@@ -196,6 +201,7 @@ class ToolGate:
                 tool_call.name,
                 args,
                 decision,
+                tool_call.id,
             )
             permission_result = self._precheck_permission(
                 tool_call.name, args, decision, snapshot, tool_call.id
@@ -218,6 +224,7 @@ class ToolGate:
                     "pre_tool",
                     tool=tool_call.name,
                     input=stringify_tool_input(args),
+                    **self._hook_correlation_fields(tool_call.id),
                 ),
             )
             return BeforeToolCallResult(args=args)
@@ -237,7 +244,13 @@ class ToolGate:
                 self._progress_steps_without_update = 0
             action_input = stringify_tool_input(ctx.args)
             result_text = tool_result_text(ctx)
-            emit_tool_hook(self._hook_manager, ctx, action_input, result_text)
+            emit_tool_hook(
+                self._hook_manager,
+                ctx,
+                action_input,
+                result_text,
+                self._hook_correlation_fields(ctx.tool_call.id),
+            )
             perm_result = self._last_perm_results.pop(ctx.tool_call.id, None)
             emit_audit(
                 self._audit_logger,
@@ -247,6 +260,7 @@ class ToolGate:
                 result_text,
                 snapshot.tool_map,
                 perm_result=perm_result,
+                correlation=self._hook_correlation_fields(ctx.tool_call.id),
             )
             return None
 
@@ -289,6 +303,7 @@ class ToolGate:
         tool_name: str,
         args: dict[str, Any],
         decision: PermissionDecision,
+        tool_call_id: str,
     ) -> tuple[dict[str, Any], PermissionDecision]:
         """应用参数变换，并仅允许 hook 收紧准入决策。"""
         runner = self._external_hook_runner
@@ -299,6 +314,7 @@ class ToolGate:
                 "pre_tool",
                 tool=tool_name,
                 input=stringify_tool_input(args),
+                **self._hook_correlation_fields(tool_call_id),
             ),
             subagent=self._external_hooks_subagent,
             cwd=self._external_hooks_cwd,
@@ -319,6 +335,10 @@ class ToolGate:
                 )
         return transformed_args, effective_decision
 
+    def _hook_correlation_fields(self, tool_call_id: str = "") -> HookCorrelationFields:
+        """返回当前工具 hook 的共享关联字段。"""
+        return hook_correlation_fields(self._correlation.snapshot(tool_call_id))
+
     def _audit_blocked(
         self,
         tool_call: ToolCallContent,
@@ -331,6 +351,7 @@ class ToolGate:
         action_input = stringify_tool_input(args)
         metadata = perm_result.metadata or {}
         approval_result = perm_result.approval_result
+        correlation = self._hook_correlation_fields(tool_call.id)
         self._audit_logger(
             AuditRecord(
                 session_id=self._session_id,
@@ -341,6 +362,10 @@ class ToolGate:
                 approved=False,
                 redacted_input=redact_text(action_input),
                 redacted_output="",
+                timestamp=correlation["timestamp"],
+                turn_id=correlation["turn_id"],
+                request_id=correlation["request_id"],
+                tool_call_id=tool_call.id,
                 approval_scope=(
                     approval_result.scope
                     if approval_result is not None and approval_result.scope

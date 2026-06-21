@@ -271,6 +271,11 @@ def _hook_payload(record: HookRecord) -> str:
         "output": record.output,
         "error": record.error,
         "metadata": record.metadata or {},
+        "timestamp": record.timestamp,
+        "session_id": record.session_id,
+        "turn_id": record.turn_id,
+        "request_id": record.request_id,
+        "tool_call_id": record.tool_call_id,
     }
     return json.dumps(_redacted_json(payload), ensure_ascii=False)
 

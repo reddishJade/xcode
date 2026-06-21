@@ -15,6 +15,7 @@ from ..config import ExecutionMode
 from ..session_todo import SessionTodoState, TodoItem
 from .agent_helpers import text_from_blocks, to_dict
 from .events import FinalStructuredEvent
+from ..observability import EventCorrelation
 from .execution_modes import parse_execution_mode
 
 
@@ -125,6 +126,8 @@ def _build_structured_result(
             "estimated_completion_tokens": result.metrics.output_tokens,
             "model_latencies_ms": result.metrics.model_latencies_ms,
             "tool_latencies_ms": result.metrics.tool_latencies_ms,
+            "model_time_ms": sum(result.metrics.model_latencies_ms),
+            "tool_time_ms": sum(result.metrics.tool_latencies_ms),
             "steps": result.metrics.steps,
         }
 
@@ -178,5 +181,14 @@ def _tool_result_text(ctx: AfterToolCallContext) -> str:
     return "".join(c.text for c in ctx.result.content if isinstance(c, TextContent))
 
 
-def _final_event(step: int, result: StructuredAgentResult) -> FinalStructuredEvent:
-    return FinalStructuredEvent("final", step, result)
+def _final_event(
+    step: int,
+    result: StructuredAgentResult,
+    correlation: EventCorrelation | None = None,
+) -> FinalStructuredEvent:
+    return FinalStructuredEvent(
+        "final",
+        step,
+        result,
+        correlation or EventCorrelation(),
+    )

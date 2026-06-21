@@ -13,19 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P2 · observability 缺少基础关联字段
-
-Audit record 已有时间戳，但 HookRecord、provider/tool event 和 final result
-尚无统一的 session、turn、request/tool-call 关联信息。
-
-需要：
-
-- 为 hook/event 增加 UTC timestamp。
-- 统一传递 session_id、turn_id、request_id 和 tool_call_id。
-- final result 提供本轮模型与工具耗时汇总。
-- 暂不引入 OpenTelemetry；先保证 JSONL audit、hook subscriber 和 eval trace
-  可以关联同一轮执行。
-
 ## P3 · tool_catalog.py 新增 builder 无代码强制
 
 `src/xcode/cli/tool_catalog.py` 的 docstring 要求 `build_*_tools()` 必须注册入

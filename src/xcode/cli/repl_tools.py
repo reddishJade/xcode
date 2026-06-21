@@ -259,7 +259,12 @@ def summarize_intents(intents: list[str]) -> str:
 
 
 def event_to_dict(event: StructuredAgentEvent) -> dict[str, Any]:
-    return {"type": event.type, "step": event.step, "data": _event_payload(event)}
+    return {
+        "type": event.type,
+        "step": event.step,
+        "data": _event_payload(event),
+        "correlation": asdict(event.correlation),
+    }
 
 
 def _event_payload(event: StructuredAgentEvent) -> object:

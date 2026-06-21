@@ -29,6 +29,7 @@ from xcode.agent.types import (
     ToolCallContent,
 )
 from ..session_todo import TodoItem
+from ..observability import EventCorrelation, RuntimeCorrelation
 
 if TYPE_CHECKING:
     from .result import StructuredAgentResult
@@ -50,6 +51,7 @@ class TextDeltaStructuredEvent:
     type: Literal["text_delta"]
     step: int
     data: str
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,7 @@ class ReasoningDeltaStructuredEvent:
     type: Literal["reasoning_delta"]
     step: int
     data: str
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,7 @@ class MessageStartStructuredEvent:
     type: Literal["message_start"]
     step: int
     data: AgentMessage | None
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,7 @@ class TurnEndStructuredEvent:
     type: Literal["turn_end"]
     step: int
     data: TurnEndData
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -93,6 +98,7 @@ class AssistantStructuredEvent:
     type: Literal["assistant"]
     step: int
     data: tuple[AssistantEventBlock, ...]
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -100,6 +106,7 @@ class ToolUseStructuredEvent:
     type: Literal["tool_use"]
     step: int
     data: ToolCall
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -114,6 +121,7 @@ class ToolUpdateStructuredEvent:
     type: Literal["tool_update"]
     step: int
     data: ToolUpdateData
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -129,6 +137,7 @@ class ToolResultStructuredEvent:
     type: Literal["tool_result"]
     step: int
     data: ToolResultBlock
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -138,6 +147,7 @@ class TodoUpdateStructuredEvent:
     type: Literal["todo_update"]
     step: int
     data: tuple[TodoItem, ...]
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -153,6 +163,7 @@ class CompactionStructuredEvent:
     type: Literal["compaction"]
     step: int
     data: CompactionData
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -160,6 +171,7 @@ class FinalStructuredEvent:
     type: Literal["final"]
     step: int
     data: StructuredAgentResult
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 type StructuredAgentEvent = (
@@ -181,6 +193,9 @@ type StructuredAgentEvent = (
 class _StreamTranslationState:
     step: int = 0
     text_seen: dict[int, str] = field(default_factory=dict)
+    correlation: RuntimeCorrelation = field(
+        default_factory=lambda: RuntimeCorrelation("local")
+    )
 
 
 def _translate_event(
@@ -206,11 +221,21 @@ def _translate_event(
                     if not delta:
                         return None
                     state.text_seen[step] = full
-                    return TextDeltaStructuredEvent("text_delta", step, delta)
+                    return TextDeltaStructuredEvent(
+                        "text_delta",
+                        step,
+                        delta,
+                        state.correlation.snapshot(),
+                    )
         return None
 
     if isinstance(event, MessageStartEvent):
-        return MessageStartStructuredEvent("message_start", state.step, event.message)
+        return MessageStartStructuredEvent(
+            "message_start",
+            state.step,
+            event.message,
+            state.correlation.snapshot(),
+        )
 
     if isinstance(event, TurnEndEvent):
         return TurnEndStructuredEvent(
@@ -222,11 +247,15 @@ def _translate_event(
                     for r in event.tool_results
                 ]
             ),
+            state.correlation.snapshot(),
         )
 
     if isinstance(event, ThinkingUpdateEvent):
         return ReasoningDeltaStructuredEvent(
-            "reasoning_delta", state.step, event.reasoning_content
+            "reasoning_delta",
+            state.step,
+            event.reasoning_content,
+            state.correlation.snapshot(),
         )
 
     if isinstance(event, MessageEndEvent):
@@ -234,7 +263,12 @@ def _translate_event(
         if isinstance(msg, AssistantMessage) and msg.content:
             blocks = _assistant_event_blocks(msg)
             if blocks:
-                return AssistantStructuredEvent("assistant", state.step, blocks)
+                return AssistantStructuredEvent(
+                    "assistant",
+                    state.step,
+                    blocks,
+                    state.correlation.snapshot(),
+                )
         return None
 
     if isinstance(event, ToolExecutionStartEvent):
@@ -243,7 +277,12 @@ def _translate_event(
             name=event.tool_name,
             input=event.args or {},
         )
-        return ToolUseStructuredEvent("tool_use", state.step, tool_use)
+        return ToolUseStructuredEvent(
+            "tool_use",
+            state.step,
+            tool_use,
+            state.correlation.snapshot(event.tool_call_id),
+        )
 
     if isinstance(event, ToolExecutionUpdateEvent):
         return ToolUpdateStructuredEvent(
@@ -254,6 +293,7 @@ def _translate_event(
                 tool_name=event.tool_name,
                 partial_result=_tool_update_text(event.partial_result),
             ),
+            state.correlation.snapshot(event.tool_call_id),
         )
 
     if isinstance(event, ToolExecutionEndEvent):
@@ -265,13 +305,19 @@ def _translate_event(
                 content=str(event.result.content) if event.result else "",
                 status="error" if event.is_error else "ok",
             ),
+            state.correlation.snapshot(event.tool_call_id),
         )
         todo_items = _todo_items_from_result(event)
         if todo_items is None:
             return result_event
         return [
             result_event,
-            TodoUpdateStructuredEvent("todo_update", state.step, todo_items),
+            TodoUpdateStructuredEvent(
+                "todo_update",
+                state.step,
+                todo_items,
+                state.correlation.snapshot(event.tool_call_id),
+            ),
         ]
 
     if isinstance(event, CompactionEvent):
@@ -284,6 +330,7 @@ def _translate_event(
                 summary_token_estimate=event.summary_token_estimate,
                 trigger=event.trigger,
             ),
+            state.correlation.snapshot(),
         )
 
     return None

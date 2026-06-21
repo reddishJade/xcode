@@ -138,6 +138,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `agent_runtime/execution_modes.py` | 执行模式（plan/build/act） |
 | `observability/` | 可观测性 |
 | `observability/audit.py` | `AuditRecord`、`JsonlAuditLogger`、`redact_text` |
+| `observability/correlation.py` | hook、结构化事件与 audit 共享的 session/turn/request/tool-call 关联状态 |
 | `observability/hooks.py` | `HookManager`、6 个事件类型 |
 | `observability/external_hooks.py` | 外部命令 hook 的 JSON 进程边界、失败策略和诊断状态 |
 | `observability/permissions.py` | `PermissionEngine`、`PermissionEngineConfig`、`PermissionPolicy` |

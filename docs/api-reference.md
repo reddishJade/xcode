@@ -243,6 +243,10 @@ def redact_text(value: Any) -> str
 HookEvent = Literal["pre_tool", "post_tool", "on_error", "on_compact",
                     "before_agent_start", "before_provider_request"]
 
+@dataclass class HookRecord:
+    event, tool, input, output, error, metadata
+    timestamp, session_id, turn_id, request_id, tool_call_id
+
 @dataclass class PreToolEvent: type, tool, input
 @dataclass class PostToolEvent: type, tool, input, output
 @dataclass class ErrorEvent: type, tool, input, error
@@ -255,6 +259,10 @@ class HookManager:
     def remove(self, event: HookEvent, callback: HookCallback) -> None
     def emit(self, record: HookRecord) -> None
 ```
+
+所有 typed hook event 通过 `correlation` 暴露相同字段。Structured agent event
+的 transcript JSON 也包含顶层 `correlation`；final result `metrics` 同时提供
+`model_time_ms` 和 `tool_time_ms` 汇总。
 
 ### 5.3 权限系统 `permissions.py`
 

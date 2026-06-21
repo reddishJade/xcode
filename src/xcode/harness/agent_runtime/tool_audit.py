@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from ...agent.config import AfterToolCallContext
-from ..observability import AuditRecord, redact_text
+from ..observability import AuditRecord, HookCorrelationFields, redact_text
 from ..skills import ToolSpec
 
 if TYPE_CHECKING:
@@ -21,6 +21,7 @@ def emit_audit(
     result_text: str,
     tool_map: dict[str, ToolSpec],
     perm_result: PermissionEngineResult | None = None,
+    correlation: HookCorrelationFields | None = None,
 ) -> None:
     if audit_logger is None:
         return
@@ -39,11 +40,13 @@ def emit_audit(
                 perm_result.matched_rule if perm_result is not None else None
             ),
             final_status="error" if ctx.is_error else "ok",
-            approved=(
-                not perm_result.blocked if perm_result is not None else True
-            ),
+            approved=(not perm_result.blocked if perm_result is not None else True),
             redacted_input=redact_text(action_input),
             redacted_output=redact_text(result_text),
+            timestamp=(correlation or {}).get("timestamp", ""),
+            turn_id=(correlation or {}).get("turn_id", ""),
+            request_id=(correlation or {}).get("request_id", ""),
+            tool_call_id=tool_call.id,
             approval_scope=(
                 approval_result.scope
                 if approval_result is not None and approval_result.scope
@@ -60,8 +63,7 @@ def emit_audit(
             ),
             capability=(
                 perm_result.action.capability
-                if perm_result is not None
-                and perm_result.action is not None
+                if perm_result is not None and perm_result.action is not None
                 else None
             ),
             target_kind=(
@@ -81,13 +83,9 @@ def emit_audit(
             matched_rule=(
                 perm_result.matched_rule if perm_result is not None else None
             ),
-            approval_source=(
-                perm_result.source if perm_result is not None else None
-            ),
+            approval_source=(perm_result.source if perm_result is not None else None),
             approval_grant_id=(
-                approval_result.grant_id
-                if approval_result is not None
-                else None
+                approval_result.grant_id if approval_result is not None else None
             ),
         )
     )

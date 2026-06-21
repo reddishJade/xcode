@@ -11,6 +11,12 @@ from .external_hooks import (
     ExternalHookFailure,
     ExternalHookRunner,
 )
+from .correlation import (
+    EventCorrelation,
+    hook_correlation_fields,
+    HookCorrelationFields,
+    RuntimeCorrelation,
+)
 from .hooks import (
     BeforeAgentStartEvent,
     BeforeProviderRequestEvent,
@@ -74,6 +80,9 @@ __all__ = [
     "ExternalHookExecution",
     "ExternalHookFailure",
     "ExternalHookRunner",
+    "EventCorrelation",
+    "hook_correlation_fields",
+    "HookCorrelationFields",
     "ExternalDirectory",
     "FileGrantStore",
     "FingerprintLookupResult",
@@ -91,6 +100,7 @@ __all__ = [
     "PermissionEngineConfig",
     "PermissionEngineResult",
     "PermissionPolicy",
+    "RuntimeCorrelation",
     "PolicyEvaluator",
     "PermissionResolver",
     "SafetyBackstopPolicyEvaluator",

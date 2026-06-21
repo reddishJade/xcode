@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ...agent.config import AfterToolCallContext
 from ...agent.types import TextContent
-from ..observability import HookManager, HookRecord
+from ..observability import HookCorrelationFields, HookManager, HookRecord
 
 
 def emit_hook(
@@ -20,6 +20,7 @@ def emit_tool_hook(
     ctx: AfterToolCallContext,
     action_input: str,
     result_text: str,
+    correlation: HookCorrelationFields,
 ) -> None:
     tool_call = ctx.tool_call
     if ctx.is_error:
@@ -30,6 +31,7 @@ def emit_tool_hook(
                 tool=tool_call.name,
                 input=action_input,
                 error=result_text,
+                **correlation,
             ),
         )
         return
@@ -40,6 +42,7 @@ def emit_tool_hook(
             tool=tool_call.name,
             input=action_input,
             output=result_text,
+            **correlation,
         ),
     )
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
 
 from xcode.ai.providers.protocol import StreamProvider
@@ -267,9 +268,11 @@ async def _run_loop(
             )
 
         # ── 工具执行 ──
+        tool_started_at = time.perf_counter()
         executed: ExecutedToolBatch = await execute_tool_calls(
             current_context, message, tool_calls, config, signal, emit
         )
+        metrics.tool_latencies_ms.append((time.perf_counter() - tool_started_at) * 1000)
         tool_results = executed.results
         _append_tool_results(current_context, new_messages, metrics, tool_results)
 

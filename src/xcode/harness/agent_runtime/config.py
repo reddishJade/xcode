@@ -38,6 +38,8 @@ from ..observability import (
     HookManager,
     HookRecord,
     PermissionPolicy,
+    RuntimeCorrelation,
+    hook_correlation_fields,
 )
 from ..observability.permission_model import GrantStore, PolicyEvaluator
 from ..observability.permission_model import ExternalDirectory
@@ -72,6 +74,7 @@ class GateConfig:
     session_grant_store: GrantStore | None = None
     session_grant_store_provider: Callable[[], GrantStore | None] | None = None
     permanent_grant_store: GrantStore | None = None
+    correlation: RuntimeCorrelation | None = None
 
 
 @dataclass
@@ -137,9 +140,17 @@ def _compact_and_emit(
     loop_messages: list[AgentMessage],
     compactor: StructuredCompactor | None,
     emit_hook: Callable[[HookRecord], None],
+    correlation: RuntimeCorrelation,
 ) -> list[AgentMessage]:
     """执行消息压缩并发射 Hook。"""
-    emit_hook(HookRecord("on_compact", metadata={"messages": len(loop_messages)}))
+    current = correlation.snapshot()
+    emit_hook(
+        HookRecord(
+            "on_compact",
+            metadata={"messages": len(loop_messages)},
+            **hook_correlation_fields(current),
+        )
+    )
     if compactor is None:
         return loop_messages
     dict_messages = [_to_dict_safe(m) for m in loop_messages]
@@ -156,10 +167,13 @@ def _to_dict_safe(message: AgentMessage) -> dict[str, Any]:
 def _build_before_provider_request_closure(
     emit_hook: Callable[[HookRecord], None],
     get_prompt_version: Callable[[], str],
+    correlation: RuntimeCorrelation,
 ) -> Callable[[list[dict[str, Any]], list[Any]], None]:
     """构建 provider 请求前的 hook 发射回调。"""
 
     def closure(msgs: list[dict[str, Any]], tools: list[Any]) -> None:
+        correlation.begin_turn()
+        current = correlation.begin_request()
         system_prompt = "\n\n".join(
             str(message.get("content", ""))
             for message in msgs
@@ -177,6 +191,7 @@ def _build_before_provider_request_closure(
                     "prompt_sha256": prompt_sha,
                     "system_prompt_bytes": prompt_bytes,
                 },
+                **hook_correlation_fields(current),
             )
         )
 
@@ -228,7 +243,9 @@ def build_loop_config(
     project_root: Path | None = None,
     skill_registry: SkillRegistry | None = None,
     prompt_instructions: tuple[dict, ...] = (),
+    correlation: RuntimeCorrelation | None = None,
 ) -> AgentLoopConfig:
+    active_correlation = correlation or RuntimeCorrelation("local")
     gate_snapshot = gate.snapshot_for(registry)
 
     def should_compact_fn(loop_messages: list[AgentMessage]) -> bool:
@@ -241,7 +258,12 @@ def build_loop_config(
         )
 
     def compact_fn(loop_messages: list[AgentMessage]) -> list[AgentMessage]:
-        return _compact_and_emit(loop_messages, compactor, emit_hook)
+        return _compact_and_emit(
+            loop_messages,
+            compactor,
+            emit_hook,
+            active_correlation,
+        )
 
     def transform_fn(
         messages: list[AgentMessage],
@@ -337,7 +359,9 @@ def build_loop_config(
         before_tool_call=gate.build_before_tool_hook(gate_snapshot),
         after_tool_call=gate.build_after_tool_hook(gate_snapshot),
         before_provider_request=_build_before_provider_request_closure(
-            emit_hook, get_prompt_version
+            emit_hook,
+            get_prompt_version,
+            active_correlation,
         ),
         prepare_next_turn=prepare_next_turn_fn,
     )

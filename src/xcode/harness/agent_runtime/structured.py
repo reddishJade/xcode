@@ -45,7 +45,7 @@ from .result import (
 )
 from .tool_gate import ToolGate
 from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
-from ..observability import HookRecord
+from ..observability import HookRecord, RuntimeCorrelation
 from ..observability.permission_model import GrantStore
 from ..skill_activation import (
     ExplicitSkillActivationResult,
@@ -100,6 +100,7 @@ class StructuredAgent:
         self.cancellation_token = runtime.cancellation_token or CancellationToken()
         self.request_hygiene = runtime.request_hygiene or RequestHygieneConfig()
         self._todo_state = runtime.todo_state
+        self._correlation = gate.correlation or RuntimeCorrelation(gate.session_id)
         self._last_prompt_tokens: int | None = None
 
         self._hook_manager = gate.hook_manager
@@ -118,6 +119,7 @@ class StructuredAgent:
             external_hook_runner=gate.external_hook_runner,
             external_hooks_subagent=gate.external_hooks_subagent,
             external_hooks_cwd=gate.external_hooks_cwd,
+            correlation=self._correlation,
             audit_logger=gate.audit_logger,
             session_id=gate.session_id,
             restricted_dirs=gate.restricted_dirs,
@@ -189,6 +191,7 @@ class StructuredAgent:
     @session_id.setter
     def session_id(self, value: str) -> None:
         self._gate.session_id = value
+        self._correlation.session_id = value
 
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history.load(messages)
@@ -429,6 +432,7 @@ class StructuredAgent:
         self._mode.set_mode(effective_mode)
         active_registry = self._mode.filter_tools(snapshot.registry)
         self.cancellation_token.reset()
+        self._correlation.reset(self.session_id)
 
         context_messages = build_turn_context_messages(
             question, effective_mode, snapshot, self._resumed_notice
@@ -465,17 +469,23 @@ class StructuredAgent:
             project_root=self.project_root,
             skill_registry=self._runtime.skill_registry,
             prompt_instructions=self._runtime.prompt_instructions,
+            correlation=self._correlation,
         )
 
+        current = self._correlation.snapshot()
         _emit_hook(
             self._hook_manager,
             HookRecord(
                 "before_agent_start",
                 metadata={"question": question, "mode": effective_mode},
+                timestamp=current.timestamp,
+                session_id=current.session_id,
+                turn_id=current.turn_id,
+                request_id=current.request_id,
             ),
         )
 
-        translation_state = _StreamTranslationState()
+        translation_state = _StreamTranslationState(correlation=self._correlation)
 
         async for event in self._agent.run_stream(
             turn_messages,
@@ -506,7 +516,11 @@ class StructuredAgent:
             self._todo_state.snapshot() if self._todo_state is not None else (),
         )
 
-        yield _final_event(result.steps, final)
+        yield _final_event(
+            result.steps,
+            final,
+            self._correlation.snapshot(),
+        )
 
     # ── 内部 ──
 

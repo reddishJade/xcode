@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 import logging
 from typing import Literal
 
 from blinker import Signal
 
 from ..session import JsonValue
+from .correlation import EventCorrelation
 
 """类型安全的执行框架事件钩子系统。"""
 
@@ -43,6 +45,11 @@ class HookRecord:
     output: str = ""
     error: str = ""
     metadata: Mapping[str, object] | None = None
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    session_id: str = ""
+    turn_id: str = ""
+    request_id: str = ""
+    tool_call_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -52,6 +59,7 @@ class PreToolEvent:
     type: Literal["pre_tool"] = "pre_tool"
     tool: str = ""
     input: str = ""
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -62,6 +70,7 @@ class PostToolEvent:
     tool: str = ""
     input: str = ""
     output: str = ""
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -72,6 +81,7 @@ class ErrorEvent:
     tool: str = ""
     input: str = ""
     error: str = ""
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -80,6 +90,7 @@ class CompactEvent:
 
     type: Literal["on_compact"] = "on_compact"
     metadata: HookMetadata = field(default_factory=dict)
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -90,6 +101,7 @@ class BeforeAgentStartEvent:
     question: str = ""
     mode: str = "act"
     metadata: HookMetadata = field(default_factory=dict)
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 @dataclass(frozen=True)
@@ -100,6 +112,7 @@ class BeforeProviderRequestEvent:
     messages: list[HookMetadata] = field(default_factory=list)
     tools: list[HookMetadata] = field(default_factory=list)
     metadata: HookMetadata = field(default_factory=dict)
+    correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
 type HarnessEvent = (
@@ -141,24 +154,46 @@ class HookManager:
 
 def _harness_event_from_hook(record: HookRecord) -> HarnessEvent:
     metadata = _hook_metadata(record.metadata)
+    correlation = EventCorrelation(
+        timestamp=record.timestamp,
+        session_id=record.session_id,
+        turn_id=record.turn_id,
+        request_id=record.request_id,
+        tool_call_id=record.tool_call_id,
+    )
 
     def _pre_tool() -> PreToolEvent:
-        return PreToolEvent(tool=record.tool, input=record.input)
+        return PreToolEvent(
+            tool=record.tool,
+            input=record.input,
+            correlation=correlation,
+        )
 
     def _post_tool() -> PostToolEvent:
-        return PostToolEvent(tool=record.tool, input=record.input, output=record.output)
+        return PostToolEvent(
+            tool=record.tool,
+            input=record.input,
+            output=record.output,
+            correlation=correlation,
+        )
 
     def _on_error() -> ErrorEvent:
-        return ErrorEvent(tool=record.tool, input=record.input, error=record.error)
+        return ErrorEvent(
+            tool=record.tool,
+            input=record.input,
+            error=record.error,
+            correlation=correlation,
+        )
 
     def _on_compact() -> CompactEvent:
-        return CompactEvent(metadata=metadata)
+        return CompactEvent(metadata=metadata, correlation=correlation)
 
     def _before_agent_start() -> BeforeAgentStartEvent:
         return BeforeAgentStartEvent(
             question=str(metadata.get("question", "")),
             mode=str(metadata.get("mode", "act")),
             metadata=metadata,
+            correlation=correlation,
         )
 
     def _before_provider_request() -> BeforeProviderRequestEvent:
@@ -166,6 +201,7 @@ def _harness_event_from_hook(record: HookRecord) -> HarnessEvent:
             messages=_hook_metadata_list(metadata.get("messages")),
             tools=_hook_metadata_list(metadata.get("tools")),
             metadata=metadata,
+            correlation=correlation,
         )
 
     _DISPATCH: dict[str, Callable[[], HarnessEvent]] = {
@@ -177,7 +213,11 @@ def _harness_event_from_hook(record: HookRecord) -> HarnessEvent:
         "before_provider_request": _before_provider_request,
     }
     builder = _DISPATCH.get(record.event)
-    return builder() if builder is not None else CompactEvent(metadata=metadata)
+    return (
+        builder()
+        if builder is not None
+        else CompactEvent(metadata=metadata, correlation=correlation)
+    )
 
 
 def _hook_metadata(value: object) -> HookMetadata:

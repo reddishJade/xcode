@@ -394,11 +394,10 @@ ExecutionModeState
 
 ### 当前限制
 
-- `HookRecord` 和多数类型化 hook event 不自带时间戳。
-- 没有 OpenTelemetry、span/trace parent、分布式 trace 或 exporter。
-- 默认装配中的空 lambda 只是保活注册，不提供实际消费逻辑。
-- 运行时有 latency/token 数组，但没有在线 histogram、percentile、告警或
-  指标后端。
+- 本地事件已具备 UTC timestamp 和 session/turn/request/tool-call 关联字段，
+  但没有 OpenTelemetry、span parent、分布式 trace 或 exporter。
+- 运行时有 latency/token 数组和每轮耗时汇总，但没有在线 histogram、
+  percentile、告警或指标后端。
 - `on_error` 主要覆盖工具错误，不等同于统一 runtime error bus。
 
 ---
@@ -693,10 +692,8 @@ taxonomy。
 
 这些问题直接影响安全、状态一致性、资源稳定性或故障定位。
 
-1. 为 hook 和最终运行结果补充时间、session/turn/request 关联字段；先完成
-   本地可追踪性，不直接引入 OpenTelemetry。
-
-这些项目已按优先级写入 `TODO.md`。
+当前近期正确性和资源稳定性项目已转入实现；后续能力扩展仍以明确需求和 eval
+证据为准。
 
 ### B · 有明确需求或 eval 证据后实现
 
