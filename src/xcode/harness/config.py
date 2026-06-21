@@ -49,6 +49,7 @@ class AgentConfig:
     compact_token_threshold: int = 0
     max_recent_messages: int = 10
     tool_workers: int = 4
+    subagent_workers: int = 4
     watchdog_repeated_tool_limit: int = 3
 
 

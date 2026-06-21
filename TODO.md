@@ -13,17 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P2 · subagent 缺少独立并发上限
-
-`ManagedSubagentRunner` 可以持续提交独立 worker job，没有明确的 active job
-额度。它与普通工具并发属于不同资源，应单独治理。
-
-需要：
-
-- 增加可配置的最大 active subagent 数。
-- 超限时返回明确 busy 状态或排队，不无限创建任务。
-- shutdown、cancel、timeout 和 finished job 清理必须释放额度。
-
 ## P2 · observability 缺少基础关联字段
 
 Audit record 已有时间戳，但 HookRecord、provider/tool event 和 final result

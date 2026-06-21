@@ -233,7 +233,8 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
                 '"subagent":{"chat_model":"subagent-test"}}},'
                 '"agent":{"max_steps":9,"compact_threshold":20,'
                 '"compact_token_threshold":3000,"max_recent_messages":7,'
-                '"tool_workers":2,"watchdog_repeated_tool_limit":4},'
+                '"tool_workers":2,"subagent_workers":3,'
+                '"watchdog_repeated_tool_limit":4},'
                 '"paths":{"sessions_dir":"sessions",'
                 '"skills_dir":"skills"},'
                 '"observability":{"audit_path":"audit.jsonl"},'
@@ -263,6 +264,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             self.assertEqual(config.prompt.modules, ("identity", "tools"))
             self.assertEqual(config.agent.max_steps, 9)
             self.assertEqual(config.agent.tool_workers, 2)
+            self.assertEqual(config.agent.subagent_workers, 3)
             self.assertEqual(config.paths.sessions_dir, Path("sessions"))
             self.assertEqual(config.paths.skills_dir, Path("skills"))
             self.assertEqual(config.observability.audit_path, Path("audit.jsonl"))

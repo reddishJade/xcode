@@ -482,6 +482,7 @@ def _build_subagent_integration(
         available_profiles=tuple(child_llms),
         default_profile=PROFILE_SUBAGENT,
         worktree_runner=worktree_runner,
+        max_active_jobs=config.subagent_workers,
     )
     return [managed_runner.shutdown], build_managed_subagent_tools(managed_runner)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import sys
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -14,9 +15,123 @@ from xcode.harness.agent_runtime import (
     SubagentStartEvent,
     build_managed_subagent_tools,
 )
+from xcode.harness.agent_runtime.subagent import SubagentBusyError
 
 
 class XcodeSubagentToolTests(unittest.TestCase):
+    def test_active_job_limit_returns_busy_and_releases_on_finish(self) -> None:
+        """完成的 job 自动释放独立 subagent 额度。"""
+        release = threading.Event()
+
+        async def run_child(
+            prompt: str, _model_profile: str, _cwd_override: Path | None
+        ) -> str:
+            if prompt == "hold":
+                await asyncio.to_thread(release.wait)
+            return prompt
+
+        runner = ManagedSubagentRunner(
+            run_child,
+            timeout_seconds=1,
+            max_active_jobs=1,
+        )
+        try:
+            first = runner.submit("hold")
+            self.assertEqual(runner.active_job_count, 1)
+            with self.assertRaisesRegex(SubagentBusyError, "1/1 active"):
+                runner.submit("blocked")
+
+            release.set()
+            self._wait_status(runner, first, "done")
+            self._wait_active_count(runner, 0)
+
+            second = runner.submit("next")
+            self._wait_status(runner, second, "done")
+            self.assertEqual(runner.result(second), "next")
+        finally:
+            runner.shutdown()
+
+    def test_busy_tool_result_is_explicit(self) -> None:
+        """submit_subagent 在额度耗尽时返回明确 busy 状态。"""
+        release = threading.Event()
+
+        async def run_child(
+            _prompt: str, _model_profile: str, _cwd_override: Path | None
+        ) -> str:
+            await asyncio.to_thread(release.wait)
+            return "done"
+
+        runner = ManagedSubagentRunner(
+            run_child,
+            timeout_seconds=1,
+            max_active_jobs=1,
+        )
+        try:
+            tools = {tool.name: tool for tool in build_managed_subagent_tools(runner)}
+            tools["submit_subagent"].handler({"prompt": "first"})
+
+            output = tools["submit_subagent"].handler({"prompt": "second"})
+
+            self.assertIn("subagent busy", output)
+        finally:
+            release.set()
+            runner.shutdown()
+
+    def test_timeout_releases_active_job_limit(self) -> None:
+        """超时失败后可立即提交新的 subagent job。"""
+        calls = 0
+
+        async def run_child(
+            _prompt: str, _model_profile: str, _cwd_override: Path | None
+        ) -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                await asyncio.sleep(999)
+            return "done"
+
+        runner = ManagedSubagentRunner(
+            run_child,
+            timeout_seconds=0.01,
+            max_active_jobs=1,
+        )
+        try:
+            first = runner.submit("slow")
+            self._wait_status(runner, first, "failed")
+            self._wait_active_count(runner, 0)
+
+            second = runner.submit("fast")
+            self._wait_status(runner, second, "done")
+            self.assertEqual(runner.result(second), "done")
+        finally:
+            runner.shutdown()
+
+    def test_cancel_releases_active_job_limit(self) -> None:
+        """取消完成后释放额度，允许后续提交。"""
+
+        async def run_child(
+            prompt: str, _model_profile: str, _cwd_override: Path | None
+        ) -> str:
+            if prompt == "slow":
+                await asyncio.sleep(999)
+            return "done"
+
+        runner = ManagedSubagentRunner(
+            run_child,
+            timeout_seconds=None,
+            max_active_jobs=1,
+        )
+        try:
+            first = runner.submit("slow")
+            self.assertEqual(runner.cancel(first), "cancel requested")
+            self._wait_active_count(runner, 0)
+
+            second = runner.submit("fast")
+            self._wait_status(runner, second, "done")
+            self.assertEqual(runner.result(second), "done")
+        finally:
+            runner.shutdown()
+
     def test_managed_subagent_runner_tracks_real_async_lifecycle(self) -> None:
         async def run_child(
             prompt: str, model_profile: str, cwd_override: Path | None
@@ -215,6 +330,7 @@ class XcodeSubagentToolTests(unittest.TestCase):
 
         self.assertLess(time.perf_counter() - started, 2.0)
         self.assertEqual(runner.status(job_id), "unknown")
+        self.assertEqual(runner.active_job_count, 0)
 
     def test_windows_worker_uses_selector_event_loop(self) -> None:
         if not hasattr(asyncio, "SelectorEventLoop"):
@@ -244,6 +360,16 @@ class XcodeSubagentToolTests(unittest.TestCase):
                 return
             time.sleep(0.01)
         self.fail(f"subagent did not reach {expected}: {runner.status(job_id)}")
+
+    def _wait_active_count(self, runner: ManagedSubagentRunner, expected: int) -> None:
+        """等待 active job 额度释放。"""
+        for _ in range(100):
+            if runner.active_job_count == expected:
+                return
+            time.sleep(0.01)
+        self.fail(
+            f"active subagent count did not reach {expected}: {runner.active_job_count}"
+        )
 
 
 async def _immediate(value: str) -> str:

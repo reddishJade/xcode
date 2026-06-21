@@ -468,7 +468,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
     def test_build_app_consumes_runtime_config_defaults(self) -> None:
         runtime_config = XcodeRuntimeConfig(
-            agent=AgentConfig(max_steps=7, tool_workers=2),
+            agent=AgentConfig(max_steps=7, tool_workers=2, subagent_workers=3),
             paths=PathsRuntimeConfig(sessions_dir=Path("sessions")),
             observability=ObservabilityRuntimeConfig(audit_path=Path("audit.jsonl")),
         )
@@ -481,6 +481,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         self.assertEqual(app.agent.config.max_steps, 7)
         self.assertEqual(app.agent.config.tool_workers, 2)
+        self.assertEqual(app.agent.config.subagent_workers, 3)
         self.assertIsNotNone(app.agent.audit_logger)
 
     def test_security_approval_policy_never_allows_high_risk_tools(self) -> None:

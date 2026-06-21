@@ -57,6 +57,7 @@
 | `compact_token_threshold` | int | `0` | token 阈值；0 关闭 |
 | `max_recent_messages` | int | `10` | 压缩时保留的近期消息数 |
 | `tool_workers` | int | `4` | 单个 parallel batch 的最大活跃工具数；小于 1 时按 1 执行 |
+| `subagent_workers` | int | `4` | 最大活跃 subagent job 数；超限时 `submit_subagent` 返回 busy |
 | `watchdog_repeated_tool_limit` | int | `3` | 连续重复同一工具阈值 |
 
 ---

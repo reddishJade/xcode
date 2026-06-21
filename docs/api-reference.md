@@ -100,7 +100,7 @@ def build_app(project_root, env_files=None, agent_config=None,
 
 | Dataclass | 关键字段 |
 |---|---|
-| `AgentConfig` | `max_steps=20, execution_mode="act", compact_threshold=0, compact_token_threshold=0, max_recent_messages=10, tool_workers=4, watchdog_repeated_tool_limit=3` |
+| `AgentConfig` | `max_steps=20, execution_mode="act", compact_threshold=0, compact_token_threshold=0, max_recent_messages=10, tool_workers=4, subagent_workers=4, watchdog_repeated_tool_limit=3` |
 | `RequestHygieneConfig` | `enabled=True, max_tool_result_bytes=8000, max_tool_arg_length=1000, keep_head_lines=50, keep_tail_lines=50` |
 | `ModelProfileRuntimeConfig` | `transport, chat_model, base_url, api_key, thinking, reasoning_effort, clear_thinking, tool_stream, response_format` |
 | `ProviderRuntimeConfig` | `model_profiles: dict[str, ModelProfileRuntimeConfig]` |

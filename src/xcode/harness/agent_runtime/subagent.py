@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import itertools
 from pathlib import Path
+import threading
 from typing import Literal
 
 from ..config import PROFILE_SUBAGENT
@@ -23,6 +24,10 @@ from ...agent.messages import BranchSummaryMessage
 SubagentStatus = Literal["running", "done", "cancelled", "failed"]
 RunChild = Callable[[str, str, Path | None], Awaitable[str]]
 SubagentLifecycleCallback = Callable[["SubagentLifecycleEvent"], None]
+
+
+class SubagentBusyError(RuntimeError):
+    """active subagent 额度已满。"""
 
 
 @dataclass(frozen=True)
@@ -90,6 +95,7 @@ class ManagedSubagentRunner:
         worktree_runner=None,
         worker: IsolatedAsyncWorker | None = None,
         lifecycle_callback: SubagentLifecycleCallback | None = None,
+        max_active_jobs: int = 4,
     ) -> None:
         self.run_child = run_child
         self.timeout_seconds = timeout_seconds
@@ -97,8 +103,11 @@ class ManagedSubagentRunner:
         self.default_profile = default_profile
         self.worktree_runner = worktree_runner
         self.lifecycle_callback = lifecycle_callback
+        self.max_active_jobs = max(1, max_active_jobs)
         self._worker = worker or IsolatedAsyncWorker(name="xcode-subagent-worker")
         self._jobs: dict[str, SubagentJob] = {}
+        self._active_job_ids: set[str] = set()
+        self._lock = threading.Lock()
         self._ids = itertools.count(1)
         self._closing = False
 
@@ -114,9 +123,21 @@ class ManagedSubagentRunner:
         profile = (model_profile or self.default_profile).strip()
         if profile not in self.available_profiles:
             raise ValueError(_unknown_profile(profile, self.available_profiles))
-        isolation_mode, cwd_override, worktree_task_id = self._resolve_isolation(
-            prompt, isolation
-        )
+        with self._lock:
+            if len(self._active_job_ids) >= self.max_active_jobs:
+                raise SubagentBusyError(
+                    "subagent busy: "
+                    f"{len(self._active_job_ids)}/{self.max_active_jobs} active"
+                )
+            job_id = f"subagent-{next(self._ids)}"
+            self._active_job_ids.add(job_id)
+        try:
+            isolation_mode, cwd_override, worktree_task_id = self._resolve_isolation(
+                prompt, isolation
+            )
+        except Exception:
+            self._release_active(job_id)
+            raise
 
         async def entry() -> str:
             coro = self.run_child(prompt, profile, cwd_override)
@@ -124,9 +145,14 @@ class ManagedSubagentRunner:
                 return await coro
             return await asyncio.wait_for(coro, timeout=self.timeout_seconds)
 
-        job_id = f"subagent-{next(self._ids)}"
-        future = self._worker.submit(entry())
-        self._jobs[job_id] = SubagentJob(
+        entry_coro = entry()
+        try:
+            future = self._worker.submit(entry_coro)
+        except Exception:
+            entry_coro.close()
+            self._release_active(job_id)
+            raise
+        job = SubagentJob(
             id=job_id,
             prompt=prompt,
             model_profile=profile,
@@ -137,14 +163,24 @@ class ManagedSubagentRunner:
             cwd_override=cwd_override,
             worktree_task_id=worktree_task_id,
         )
-        self._emit_start(self._jobs[job_id])
+        with self._lock:
+            self._jobs[job_id] = job
+        future.add_done_callback(lambda _future: self._release_active(job_id))
+        self._emit_start(job)
         return job_id
 
     def status(self, job_id: str) -> str:
-        job = self._jobs.get(job_id)
+        with self._lock:
+            job = self._jobs.get(job_id)
         if job is None:
             return "unknown"
         return job.status()
+
+    @property
+    def active_job_count(self) -> int:
+        """返回当前占用 subagent 执行额度的 job 数。"""
+        with self._lock:
+            return len(self._active_job_ids)
 
     def result(self, job_id: str, timeout: float | None = None) -> str:
         job = self._require_job(job_id)
@@ -161,7 +197,8 @@ class ManagedSubagentRunner:
             return result
         finally:
             if job.future.done():
-                self._jobs.pop(job_id, None)
+                with self._lock:
+                    self._jobs.pop(job_id, None)
 
     def job_prompt(self, job_id: str) -> str:
         """返回指定 job 的 prompt 文本。"""
@@ -169,30 +206,40 @@ class ManagedSubagentRunner:
         return job.prompt
 
     def cancel(self, job_id: str) -> str:
-        job = self._jobs.get(job_id)
+        with self._lock:
+            job = self._jobs.get(job_id)
         if job is None:
             return f"unknown job: {job_id}"
         ok = job.future.cancel()
         if ok:
             self._emit_end(job, "cancelled")
         if job.future.done():
-            self._jobs.pop(job_id, None)
+            with self._lock:
+                self._jobs.pop(job_id, None)
         return "cancel requested" if ok else "already completed"
 
     def sweep_finished(self) -> None:
-        finished = [job_id for job_id, job in self._jobs.items() if job.future.done()]
-        for job_id in finished:
-            self._jobs.pop(job_id, None)
+        with self._lock:
+            finished = [
+                job_id for job_id, job in self._jobs.items() if job.future.done()
+            ]
+            for job_id in finished:
+                self._jobs.pop(job_id, None)
 
     def shutdown(self, drain_timeout: float = 2.0) -> None:
         self._closing = True
-        futures = [job.future for job in self._jobs.values() if not job.future.done()]
+        with self._lock:
+            futures = [
+                job.future for job in self._jobs.values() if not job.future.done()
+            ]
         for future in futures:
             future.cancel()
         if futures:
             concurrent.futures.wait(futures, timeout=drain_timeout)
         self._worker.close()
-        self._jobs.clear()
+        with self._lock:
+            self._jobs.clear()
+            self._active_job_ids.clear()
 
     def _resolve_isolation(
         self, prompt: str, isolation: str | None
@@ -208,10 +255,16 @@ class ManagedSubagentRunner:
         return isolation_mode, None, None
 
     def _require_job(self, job_id: str) -> SubagentJob:
-        try:
-            return self._jobs[job_id]
-        except KeyError:
-            raise KeyError(f"unknown subagent job: {job_id}") from None
+        with self._lock:
+            try:
+                return self._jobs[job_id]
+            except KeyError:
+                raise KeyError(f"unknown subagent job: {job_id}") from None
+
+    def _release_active(self, job_id: str) -> None:
+        """释放完成、取消或超时 job 的 active 额度。"""
+        with self._lock:
+            self._active_job_ids.discard(job_id)
 
     def _emit_start(self, job: SubagentJob) -> None:
         if self.lifecycle_callback is None:
@@ -250,7 +303,7 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
         isolation = str(data.get("isolation", "context")).strip()
         try:
             job_id = runner.submit(prompt, model_profile, isolation)
-        except ValueError as exc:
+        except (SubagentBusyError, ValueError) as exc:
             return str(exc)
         return f"subagent job {job_id} submitted"
 
