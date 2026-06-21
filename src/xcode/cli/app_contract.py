@@ -7,13 +7,14 @@ from xcode.agent.messages import AgentMessage
 from xcode.harness.agent_runtime import CancellationToken, StructuredAgentEvent
 from xcode.harness.config import ExecutionMode
 from xcode.harness.observability import ExternalHookDiagnostic
+from xcode.harness.session_todo import TodoItem
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
-from xcode.harness.skills import ApprovalCallback, ToolSpec
+from xcode.harness.skills import ApprovalCallback, ToolRegistryState, ToolSpec
 
 
 class ToolRegistryApp(Protocol):
     @property
-    def registry(self) -> tuple[ToolSpec, ...]: ...
+    def registry(self) -> tuple[ToolSpec, ...] | ToolRegistryState: ...
 
 
 class ReplAgent(Protocol):
@@ -55,10 +56,12 @@ class ReplApp(ModelControlApp, ToolRegistryApp, Protocol):
     def agent(self) -> ReplAgent: ...
 
     @property
-    def registry(self) -> tuple[ToolSpec, ...]: ...
+    def registry(self) -> tuple[ToolSpec, ...] | ToolRegistryState: ...
 
     def ask_stream(
         self, question: str, mode: ExecutionMode | None = None
     ) -> Iterator[StructuredAgentEvent]: ...
 
     def hook_diagnostics(self) -> tuple[ExternalHookDiagnostic, ...]: ...
+
+    def restore_todos(self, items: list[dict[str, object]]) -> tuple[TodoItem, ...]: ...

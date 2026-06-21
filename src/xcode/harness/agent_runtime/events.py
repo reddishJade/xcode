@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -27,6 +28,7 @@ from xcode.agent.types import (
     ToolArguments,
     ToolCallContent,
 )
+from ..session_todo import TodoItem
 
 if TYPE_CHECKING:
     from .result import StructuredAgentResult
@@ -130,6 +132,15 @@ class ToolResultStructuredEvent:
 
 
 @dataclass(frozen=True)
+class TodoUpdateStructuredEvent:
+    """会话待办完整替换事件。"""
+
+    type: Literal["todo_update"]
+    step: int
+    data: tuple[TodoItem, ...]
+
+
+@dataclass(frozen=True)
 class CompactionData:
     messages_removed: int
     messages_after: int
@@ -160,6 +171,7 @@ type StructuredAgentEvent = (
     | ToolUseStructuredEvent
     | ToolUpdateStructuredEvent
     | ToolResultStructuredEvent
+    | TodoUpdateStructuredEvent
     | CompactionStructuredEvent
     | FinalStructuredEvent
 )
@@ -174,7 +186,7 @@ class _StreamTranslationState:
 def _translate_event(
     event: AgentEvent,
     state: _StreamTranslationState,
-) -> StructuredAgentEvent | None:
+) -> StructuredAgentEvent | list[StructuredAgentEvent] | None:
     if isinstance(event, AgentStartEvent):
         return None
 
@@ -245,7 +257,7 @@ def _translate_event(
         )
 
     if isinstance(event, ToolExecutionEndEvent):
-        return ToolResultStructuredEvent(
+        result_event = ToolResultStructuredEvent(
             "tool_result",
             state.step,
             ToolResultBlock(
@@ -254,6 +266,13 @@ def _translate_event(
                 status="error" if event.is_error else "ok",
             ),
         )
+        todo_items = _todo_items_from_result(event)
+        if todo_items is None:
+            return result_event
+        return [
+            result_event,
+            TodoUpdateStructuredEvent("todo_update", state.step, todo_items),
+        ]
 
     if isinstance(event, CompactionEvent):
         return CompactionStructuredEvent(
@@ -268,6 +287,36 @@ def _translate_event(
         )
 
     return None
+
+
+def _todo_items_from_result(
+    event: ToolExecutionEndEvent,
+) -> tuple[TodoItem, ...] | None:
+    """从成功的 update_todo 工具结果构建结构化事件。"""
+    if event.tool_name != "update_todo" or event.is_error or event.result is None:
+        return None
+    try:
+        payload = json.loads(str(event.result.content))
+    except json.JSONDecodeError:
+        return None
+    raw_items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(raw_items, list):
+        return None
+    items: list[TodoItem] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            return None
+        item_id = raw_item.get("id")
+        content = raw_item.get("content")
+        status = raw_item.get("status")
+        if (
+            not isinstance(item_id, str)
+            or not isinstance(content, str)
+            or status not in {"pending", "in_progress", "completed"}
+        ):
+            return None
+        items.append(TodoItem(item_id, content, status))
+    return tuple(items)
 
 
 def _tool_update_text(partial_result: AgentToolResult | None) -> str:

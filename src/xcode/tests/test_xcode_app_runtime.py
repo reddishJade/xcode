@@ -100,6 +100,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 "ls",
                 "bash",
                 "search_tools",
+                "update_todo",
             },
         )
 
@@ -257,6 +258,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 )
 
         self.assertNotIn("load_skill", {tool.name for tool in app.registry})
+        self.assertIn("update_todo", {tool.name for tool in app.registry})
 
     def test_default_runtime_discovers_configured_mcp_tools(self) -> None:
         mcp_tool = ToolSpec(
@@ -668,8 +670,40 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         self.assertTrue(seen_child_tools, "child tools should not be empty")
         self.assertIn("read_file", seen_child_tools[0])
+        self.assertNotIn("update_todo", seen_child_tools[0])
         self.assertNotIn("submit_subagent", seen_child_tools[0])
         self.assertNotIn("create_worktree_task", seen_child_tools[0])
+
+    def test_subagent_can_explicitly_allow_session_todo_tool(self) -> None:
+        """subagent 仅在明确 allowlist 时继承 update_todo。"""
+        seen_child_tools: list[list[str]] = []
+        runtime_config = XcodeRuntimeConfig(
+            tools=ToolsRuntimeConfig(
+                enabled_groups=("core", "subagent"),
+                subagent_tool_allowlist=("update_todo",),
+            ),
+        )
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _patched_provider_bundle(seen_child_tools),
+        ):
+            app = build_app(
+                project_root=Path(tmp),
+                runtime_config=runtime_config,
+            )
+
+        tools = {tool.name: tool for tool in app.registry}
+        tools["submit_subagent"].handler({"prompt": "inspect"})
+
+        import time
+
+        for _ in range(100):
+            if seen_child_tools:
+                break
+            time.sleep(0.01)
+
+        self.assertTrue(seen_child_tools)
+        self.assertIn("update_todo", seen_child_tools[0])
 
     def test_subagent_receives_runtime_prompt_context(self) -> None:
         seen_messages: list[list[Message]] = []

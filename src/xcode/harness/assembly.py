@@ -48,6 +48,10 @@ from xcode.harness.observability.permission_model import ExternalDirectory
 from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
 from xcode.harness.skills import ToolInput, ToolRegistryState, ToolSpec
+from xcode.harness.session_todo import (
+    build_session_todo_tools,
+    SessionTodoState,
+)
 from xcode.coding_agent.registry import build_project_scoped_registry
 from xcode.coding_agent.tools import ShellSpec
 from xcode.ai.providers.factory import (
@@ -234,6 +238,7 @@ def build_tool_registry(
     skills_dir: Path | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     external_hook_runner: ExternalHookRunner | None = None,
+    todo_state: SessionTodoState | None = None,
 ) -> tuple[
     ToolRegistryState,
     ShellSpec,
@@ -273,6 +278,8 @@ def build_tool_registry(
         env=env,
         skill_registry=skill_registry,
     )
+    if todo_state is not None:
+        registry += build_session_todo_tools(todo_state)
     mcp_runtime_registry = McpRuntimeRegistry()
     registry = _extend_registry_with_features(
         registry,
@@ -282,7 +289,13 @@ def build_tool_registry(
     )
 
     # Step 9 host policy: MCP tools are always excluded from subagents
-    child_registry = tuple(t for t in registry if t.group != "mcp")
+    subagent_allowlist = set(runtime_config.tools.subagent_tool_allowlist)
+    child_registry = tuple(
+        tool
+        for tool in registry
+        if tool.group != "mcp"
+        and (tool.name != "update_todo" or tool.name in subagent_allowlist)
+    )
     registry_state = ToolRegistryState(registry)
     registry += (build_search_tools_tool(registry_state.snapshot),)
 
@@ -300,6 +313,7 @@ def build_tool_registry(
         env=env,
         hook_constraint_providers=hook_constraint_providers,
         external_hook_runner=external_hook_runner,
+        todo_state=todo_state,
     )
     closers.extend(subagent_closers)
     registry += subagent_tools
@@ -370,6 +384,7 @@ def _build_subagent_integration(
     env: ExecutionEnv | None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     external_hook_runner: ExternalHookRunner | None = None,
+    todo_state: SessionTodoState | None = None,
 ) -> tuple[list[Callable[[], None]], tuple[ToolSpec, ...]]:
     """构建子代理运行器和工具，返回 (closers, subagent_tools)。"""
     if "subagent" not in enabled:
@@ -379,6 +394,11 @@ def _build_subagent_integration(
     if not child_llms:
         child_llms[PROFILE_MAIN] = llm
     child_llms.setdefault(PROFILE_SUBAGENT, child_llms[PROFILE_MAIN])
+    child_todo_state = (
+        todo_state
+        if "update_todo" in runtime_config.tools.subagent_tool_allowlist
+        else None
+    )
 
     async def run_child(prompt, model_profile=PROFILE_SUBAGENT, cwd_override=None):
         child_root = project_root.resolve()
@@ -394,6 +414,12 @@ def _build_subagent_integration(
                 shell_spec=shell_spec,
                 cancel_event=cancel_event,
                 env=env,
+            )
+            effective_registry += tuple(
+                tool
+                for tool in child_registry
+                if tool.name in runtime_config.tools.subagent_tool_allowlist
+                and tool.group == "session"
             )
         sec = runtime_config.security
         child_hook_manager = _build_hook_manager(
@@ -436,9 +462,11 @@ def _build_subagent_integration(
                     shell_spec=shell_spec,
                     contextual_state=child_contextual_state,
                     modules=runtime_config.prompt.modules,
+                    todo_state=child_todo_state,
                 ),
                 project_root=child_root,
                 prompt_instructions=runtime_config.prompt.instructions,
+                todo_state=child_todo_state,
             ),
         ).run_async(prompt)
         return result.answer
@@ -504,6 +532,7 @@ def build_agent(
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     skill_registry: SkillRegistry | None = None,
     external_hook_runner: ExternalHookRunner | None = None,
+    todo_state: SessionTodoState | None = None,
 ) -> StructuredAgent:
     hook_manager = _build_hook_manager(
         contextual_state,
@@ -537,12 +566,14 @@ def build_agent(
                 shell_spec=shell_spec,
                 contextual_state=contextual_state,
                 modules=runtime_config.prompt.modules,
+                todo_state=todo_state,
             ),
             fallback_provider=fallback_provider,
             project_root=project_root,
             request_hygiene=runtime_config.request_hygiene,
             skill_registry=skill_registry,
             prompt_instructions=runtime_config.prompt.instructions,
+            todo_state=todo_state,
         ),
     )
 

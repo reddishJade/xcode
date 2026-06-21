@@ -180,8 +180,15 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `enabled_groups` | array | `["core"]` | 启用的工具组 |
+| `enabled_groups` | array | `["core", "skills"]` | 启用的工具组 |
+| `subagent_tool_allowlist` | string[] | `[]` | 额外允许 subagent 继承的主 agent 工具名；`update_todo` 默认不继承 |
 | `shell` | string | `"auto"` | `auto`、`pwsh`、`powershell`、`cmd`、`bash`、`zsh`、`sh`、`fish` |
+
+`update_todo` 是主 agent 默认可用的会话级工具，不属于持久化 `tasks` /
+`progress` 组。它以完整列表替换当前清单，最多允许一个 `in_progress` 项。清单写入
+session transcript 和 `RunState`，并在每轮动态上下文中重新注入，因此不会因
+compaction 丢失。只有将 `"update_todo"` 加入 `subagent_tool_allowlist` 时，
+subagent 才会共享该会话清单。
 
 ## skills
 

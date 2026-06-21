@@ -103,6 +103,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `daemon.py` | `HeartbeatDaemon` |
 | `task_store.py` | `tasks` group：任务存储、依赖排序、Kanban |
 | `task_progress.py` | `progress` group：长任务 checklist |
+| `session_todo.py` | 主 agent 会话级 `update_todo` 工具与内存状态 |
 | `mailbox.py` | `mailbox` group：append-only JSONL mailbox |
 | `mcp/` | 核心 MCP stdio client、schema cache 和动态工具集成 |
 | `mcp/client.py` | MCP stdio JSON-RPC 客户端 |
@@ -206,8 +207,8 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 
 ## 工具组与默认可见工具
 
-Core tools（默认）：
-`read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`
+Core/session tools（默认）：
+`read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`、`update_todo`
 
 扩展组：
 `skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `memory`（仅 hook）→ `daemon`（仅服务）

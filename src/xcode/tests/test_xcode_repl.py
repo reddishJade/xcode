@@ -41,11 +41,13 @@ from xcode.harness.agent_runtime.events import (
     TextDeltaStructuredEvent,
     ToolResultBlock,
     ToolResultStructuredEvent,
+    TodoUpdateStructuredEvent,
     ToolUseStructuredEvent,
 )
 from xcode.ai.events import ToolCall
 from xcode.agent.messages import AgentMessage, AssistantMessage
 from xcode.harness.skills import ApprovalCallback, ToolSpec
+from xcode.harness.session_todo import TodoItem
 
 
 class XcodeReplTests(unittest.TestCase):
@@ -353,6 +355,21 @@ class XcodeReplTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn('grep_search: pattern="mcp", path="src/xcode"', text)
             self.assertIn("← ok", text)
+
+    def test_run_repl_renders_structured_todo_update(self) -> None:
+        """结构化 todo_update 事件显示当前完整清单。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = TodoEventApp()
+            prompt = FakePrompt(["plan", "/exit"])
+
+            with redirect_stdout(StringIO()) as output:
+                code = run_repl(cast(Any, app), Path(temp_dir), prompt)
+
+        self.assertEqual(code, 0)
+        rendered = output.getvalue()
+        self.assertIn("Todo (2 items)", rendered)
+        self.assertIn("[/] Implement feature", rendered)
+        self.assertIn("[ ] Run tests", rendered)
 
     def test_reasoning_preview_lines_keep_latest_three_visual_lines(self) -> None:
         self.assertEqual(
@@ -2015,6 +2032,46 @@ class ToolEventApp:
             "tool_result",
             1,
             ToolResultBlock("call_1", "ok", "ok"),
+        )
+        yield FinalStructuredEvent(
+            "final",
+            1,
+            StructuredAgentResult(
+                answer="",
+                messages=[],
+                steps=1,
+                tool_calls=[],
+            ),
+        )
+
+
+class TodoEventApp:
+    agent = _StubAgent()
+    registry: tuple[ToolSpec, ...] = ()
+
+    def get_model_info(self) -> dict[str, str]:
+        return {}
+
+    def set_model(
+        self,
+        *,
+        model: str = "",
+        profile: str = "main",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        return "unknown"
+
+    def ask_stream(self, question: str, mode: str | None = None):
+        yield TodoUpdateStructuredEvent(
+            "todo_update",
+            1,
+            (
+                TodoItem("implement", "Implement feature", "in_progress"),
+                TodoItem("test", "Run tests", "pending"),
+            ),
         )
         yield FinalStructuredEvent(
             "final",

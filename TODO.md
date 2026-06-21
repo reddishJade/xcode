@@ -13,24 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P2 · 缺少轻量 TodoWrite 会话工具
-
-现有 `tasks` 和 `progress` 是持久化任务图、依赖和长任务租约系统，不适合作为
-一次编码会话中的轻量执行清单。当前没有模型可直接维护并向用户展示的
-TodoWrite 等价能力。
-
-需要：
-
-- 增加单一 `update_todo` 工具，以完整列表替换当前会话清单。
-- item 至少包含稳定 id、content 和
-  `pending` / `in_progress` / `completed` 状态。
-- 强制最多一个 `in_progress`，拒绝空内容、重复 id 和无效状态。
-- 清单进入 session state、resume 和 compaction 保护，并通过结构化事件在 REPL
-  中渲染。
-- 默认仅主 agent 可用；subagent 默认排除，但允许通过明确 allowlist 手动启用。
-- 不复用 TaskStore 的依赖图、租约和跨任务状态机，避免把轻量清单耦合到长期任务
-  编排。
-
 ## P2 · tool_workers 未限制工具并发
 
 `AgentConfig.tool_workers` 可配置并被传入 runtime，但工具执行路径没有消费该

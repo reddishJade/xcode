@@ -225,6 +225,7 @@ def _validate_instruction_sources(raw: dict[str, Any]) -> None:
 @dataclass
 class ToolsRuntimeConfig:
     enabled_groups: tuple[str, ...] = ("core", "skills")
+    subagent_tool_allowlist: tuple[str, ...] = ()
     shell: str = "auto"
 
 

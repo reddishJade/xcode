@@ -72,6 +72,7 @@ def sync_agent_history(app: object, store: SessionStore) -> None:
     records = store.load_records()
     load_history(records_to_agent_messages(records))
     _restore_contextual_state(app, records)
+    _restore_todo_state(app, records)
     set_notice = getattr(agent, "set_resumed_notice", None)
     if callable(set_notice):
         set_notice(
@@ -101,6 +102,35 @@ def _restore_contextual_state(app: object, records: list[SessionRecord]) -> None
             content = str(event_data.get("content", "") or "")
             if tool_name:
                 contextual_state.record_tool_result(tool_name, content)
+
+
+def _restore_todo_state(app: object, records: list[SessionRecord]) -> None:
+    """从最后一个 todo_update 事件恢复会话待办真值源。"""
+    restore = getattr(app, "restore_todos", None)
+    if not callable(restore):
+        return
+    latest: list[dict[str, object]] = []
+    for record in records:
+        if record.type != "event" or not isinstance(record.content, dict):
+            continue
+        if record.content.get("type") != "todo_update":
+            continue
+        raw_items = record.content.get("data")
+        if not isinstance(raw_items, list):
+            continue
+        latest = [
+            {
+                "id": item.get("id"),
+                "content": item.get("content"),
+                "status": item.get("status"),
+            }
+            for item in raw_items
+            if isinstance(item, dict)
+        ]
+    try:
+        restore(latest)
+    except ValueError:
+        restore([])
 
 
 def records_to_agent_messages(records: list[SessionRecord]) -> list[AgentMessage]:

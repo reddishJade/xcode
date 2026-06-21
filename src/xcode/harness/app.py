@@ -18,6 +18,7 @@ from xcode.harness.agent_runtime import (
 )
 from xcode.harness.skills import ToolRegistryState, ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
+from xcode.harness.session_todo import SessionTodoState, TodoItem
 from . import assembly as _assembly
 from .assembly import (
     build_agent,
@@ -40,6 +41,7 @@ class XcodeApp:
     mailbox: AgentMailbox | None = None
     progress: bool | None = None
     external_hook_runner: ExternalHookRunner | None = None
+    todo_state: SessionTodoState | None = None
     _model_profiles: dict[str, Any] | None = None
     _env_files: tuple[Path, ...] = ()
     _closers: tuple[Callable[[], None], ...] = ()
@@ -132,6 +134,12 @@ class XcodeApp:
             return ()
         return self.external_hook_runner.diagnostics()
 
+    def restore_todos(self, items: list[dict[str, object]]) -> tuple[TodoItem, ...]:
+        """从会话记录恢复轻量待办状态。"""
+        if self.todo_state is None:
+            return ()
+        return self.todo_state.replace(items)
+
     def close(self) -> None:
         if self._closed:
             return
@@ -163,6 +171,7 @@ def build_app(
         if cfg.runtime_config.hooks.entries
         else None
     )
+    todo_state = SessionTodoState()
 
     registry_state, shell_spec, closers, skill_registry = _assembly.build_tool_registry(
         project_root=project_root,
@@ -175,6 +184,7 @@ def build_app(
         cancel_event=infra.cancellation_token.event,
         skills_dir=cfg.skills_dir,
         external_hook_runner=external_hook_runner,
+        todo_state=todo_state,
     )
 
     fallback_provider = providers.llms.get("fallback")
@@ -193,6 +203,7 @@ def build_app(
         fallback_provider=fallback_provider,
         skill_registry=skill_registry,
         external_hook_runner=external_hook_runner,
+        todo_state=todo_state,
     )
 
     opt_in_services = _assembly.load_opt_in_services(
@@ -207,6 +218,7 @@ def build_app(
         mailbox=opt_in_services.mailbox,
         progress=opt_in_services.progress,
         external_hook_runner=external_hook_runner,
+        todo_state=todo_state,
         _env_files=cfg.env_files,
         _model_profiles=cfg.runtime_config.provider.model_profiles,
         _closers=closers,

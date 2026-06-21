@@ -34,6 +34,7 @@ from xcode.harness.skills import (
     build_tool_guidelines,
     build_tool_prompt,
 )
+from xcode.harness.session_todo import SessionTodoState
 from xcode.coding_agent.tools.shell_adapter import ShellSpec
 
 from ..contextual import ContextualRetrievalState
@@ -239,6 +240,7 @@ def build_runtime_context_provider(
     contextual_state: ContextualRetrievalState | None = None,
     modules: tuple[str, ...] | None = None,
     shell_spec: ShellSpec | None = None,
+    todo_state: SessionTodoState | None = None,
 ) -> Callable[[str], list[str]]:
     builder = prompt_builder or SystemPromptBuilder()
     root = project_root.resolve()
@@ -247,7 +249,7 @@ def build_runtime_context_provider(
         current_registry = (
             registry.snapshot() if isinstance(registry, ToolRegistryState) else registry
         )
-        return [
+        parts = [
             builder.build(
                 PromptContext(
                     project_root=root,
@@ -266,6 +268,11 @@ def build_runtime_context_provider(
                 )
             )
         ]
+        if todo_state is not None:
+            rendered_todos = todo_state.render_context()
+            if rendered_todos:
+                parts.append(rendered_todos)
+        return parts
 
     return provide
 

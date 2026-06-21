@@ -31,6 +31,7 @@ from xcode.harness.agent_runtime.events import (
     TextDeltaStructuredEvent,
     ToolResultBlock,
     ToolResultStructuredEvent,
+    TodoUpdateStructuredEvent,
     ToolUpdateStructuredEvent,
     ToolUseStructuredEvent,
     TurnEndStructuredEvent,
@@ -290,6 +291,15 @@ def _event_payload(event: StructuredAgentEvent) -> object:
             "status": event.data.status,
             "type": "tool_result",
         }
+    if isinstance(event, TodoUpdateStructuredEvent):
+        return [
+            {
+                "id": item.id,
+                "content": item.content,
+                "status": item.status,
+            }
+            for item in event.data
+        ]
     if isinstance(event, CompactionStructuredEvent):
         return {
             "messages_removed": event.data.messages_removed,

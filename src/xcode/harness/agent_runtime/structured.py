@@ -99,6 +99,7 @@ class StructuredAgent:
         self.runtime_context_provider = runtime.runtime_context_provider
         self.cancellation_token = runtime.cancellation_token or CancellationToken()
         self.request_hygiene = runtime.request_hygiene or RequestHygieneConfig()
+        self._todo_state = runtime.todo_state
         self._last_prompt_tokens: int | None = None
 
         self._hook_manager = gate.hook_manager
@@ -154,6 +155,8 @@ class StructuredAgent:
 
     def clear_history(self) -> None:
         self._history.clear()
+        if self._todo_state is not None:
+            self._todo_state.replace([])
         if self._runtime.skill_registry is not None:
             self._runtime.skill_registry.clear_activations()
         self._reset_provider_conversation_state()
@@ -198,6 +201,17 @@ class StructuredAgent:
 
     def load_run_state(self, run_state: RunState) -> None:
         self._history.load_run_state(run_state)
+        if self._todo_state is not None:
+            self._todo_state.replace(
+                [
+                    {
+                        "id": item.id,
+                        "content": item.content,
+                        "status": item.status,
+                    }
+                    for item in run_state.todos
+                ]
+            )
         if self._runtime.skill_registry is not None:
             self._runtime.skill_registry.restore_activations(run_state.messages)
         self._reset_provider_conversation_state()
@@ -486,7 +500,10 @@ class StructuredAgent:
             else result
         )
         final = _build_structured_result(
-            visible_result, snapshot.config.max_steps, self._mode.current_mode
+            visible_result,
+            snapshot.config.max_steps,
+            self._mode.current_mode,
+            self._todo_state.snapshot() if self._todo_state is not None else (),
         )
 
         yield _final_event(result.steps, final)
