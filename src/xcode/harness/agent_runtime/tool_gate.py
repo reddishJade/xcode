@@ -192,6 +192,7 @@ class ToolGate:
         ) -> BeforeToolCallResult | None:
             tool_call = ctx.tool_call
             args = ctx.args
+            original_args = args
 
             effective_policy = policy_for_mode(self._mode.current_mode)
             decision = effective_policy.check_call(
@@ -227,7 +228,9 @@ class ToolGate:
                     **self._hook_correlation_fields(tool_call.id),
                 ),
             )
-            return BeforeToolCallResult(args=args)
+            if args != original_args:
+                return BeforeToolCallResult(args=args)
+            return None
 
         return before_tool
 
