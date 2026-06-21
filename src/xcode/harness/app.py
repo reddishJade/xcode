@@ -17,7 +17,7 @@ from xcode.harness.agent_runtime import (
     StructuredAgentEvent,
 )
 from xcode.harness.skills import ToolRegistryState, ToolSpec
-from xcode.harness.observability import ExternalHookRunner
+from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from . import assembly as _assembly
 from .assembly import (
     build_agent,
@@ -125,6 +125,12 @@ class XcodeApp:
     ) -> AsyncIterator[StructuredAgentEvent]:
         async for event in self.agent.arun_stream(question, mode=mode):
             yield event
+
+    def hook_diagnostics(self) -> tuple[ExternalHookDiagnostic, ...]:
+        """返回外部命令 hook 的运行时诊断。"""
+        if self.external_hook_runner is None:
+            return ()
+        return self.external_hook_runner.diagnostics()
 
     def close(self) -> None:
         if self._closed:

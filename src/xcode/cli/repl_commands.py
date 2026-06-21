@@ -456,6 +456,35 @@ def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
+def cmd_hooks(cmd: str, ctx: CommandContext) -> bool:
+    """显示外部命令 hook 配置来源和最近运行状态。"""
+    diagnostics = ctx.app.hook_diagnostics()
+    if not diagnostics:
+        print("No external hooks configured.")
+        return False
+
+    print(f"External hooks ({len(diagnostics)}):")
+    for diagnostic in diagnostics:
+        matcher = diagnostic.matcher or "*"
+        status = (
+            f"{diagnostic.last_status} at {diagnostic.last_run_at}"
+            if diagnostic.last_run_at
+            else diagnostic.last_status
+        )
+        print(
+            f"  [{diagnostic.index}] {diagnostic.event} "
+            f"{'enabled' if diagnostic.enabled else 'disabled'} "
+            f"matcher={matcher} policy={diagnostic.failure_policy} "
+            f"subagents={'yes' if diagnostic.inherit_to_subagents else 'no'}"
+        )
+        print(
+            f"      source={diagnostic.source} runs={diagnostic.run_count} last={status}"
+        )
+        if diagnostic.last_error:
+            print(f"      error={diagnostic.last_error}")
+    return False
+
+
 def cmd_tool(cmd: str, ctx: CommandContext) -> bool:
     """直接执行一个已注册的工具。"""
     output = run_tool_command(cmd, ctx.app)
@@ -797,6 +826,11 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         handler=cmd_permissions,
         desc="List / revoke / clear permission rules.",
         accepts_args=True,
+        group=COMMAND_GROUP_INFO,
+    ),
+    "/hooks": CommandEntry(
+        handler=cmd_hooks,
+        desc="Show external hook sources and recent status.",
         group=COMMAND_GROUP_INFO,
     ),
     "/tool": CommandEntry(

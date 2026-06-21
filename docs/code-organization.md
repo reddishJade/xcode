@@ -170,7 +170,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | 模块 | 职责 |
 |---|---|
 | `repl.py` | REPL 主循环和事件流展示编排 |
-| `repl_commands.py` | 20 个 slash command（/help、/clear、/fork、/rewind、/resume、/sessions、/tree、/branch、/model、/effort、/thinking、/plan、/build、/act、/verbose、/debug、/queue、/compact、/permissions、/tool、/exit、/quit） |
+| `repl_commands.py` | slash command 注册与分发，包括会话、模式、模型、权限、hook、工具和退出命令 |
 | `repl_hitl.py` | HITL 审批（once/session/permanent） |
 | `repl_rendering.py` | 终端渲染、`LiveMarkdownStream`、`LiveReasoningPreview` |
 | `repl_sessions.py` | 会话恢复、历史记录转换 |

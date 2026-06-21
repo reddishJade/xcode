@@ -29,7 +29,12 @@ from xcode.harness.agent_runtime import (
     CancellationToken,
     StructuredAgentResult,
 )
-from xcode.harness.observability import HITLResult, PermissionPolicy, StaticPermission
+from xcode.harness.observability import (
+    ExternalHookDiagnostic,
+    HITLResult,
+    PermissionPolicy,
+    StaticPermission,
+)
 from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
     ReasoningDeltaStructuredEvent,
@@ -623,6 +628,64 @@ class XcodeReplTests(unittest.TestCase):
             self.assertIn("static:", rendered)
             self.assertIn("bash = deny", rendered)
             self.assertNotIn("(none)", rendered)
+
+    def test_hooks_command_shows_source_state_and_recent_error(self) -> None:
+        """`/hooks` 展示配置来源、启用状态和最近脱敏错误。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir), project_root=Path(temp_dir))
+            app = SimpleNamespace(
+                hook_diagnostics=lambda: (
+                    ExternalHookDiagnostic(
+                        index=0,
+                        event="pre_tool",
+                        source=".xcode/settings.json",
+                        command=("python", "check.py"),
+                        matcher="bash",
+                        enabled=True,
+                        failure_policy="warn",
+                        inherit_to_subagents=False,
+                        run_count=2,
+                        last_status="failed",
+                        last_error="api_key=[REDACTED]",
+                        last_run_at="2026-06-22T01:02:03+00:00",
+                    ),
+                )
+            )
+
+            with redirect_stdout(StringIO()) as output:
+                handled = handle_command(
+                    "/hooks",
+                    store,
+                    cast(Any, app),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+        self.assertFalse(handled)
+        rendered = output.getvalue()
+        self.assertIn("pre_tool enabled", rendered)
+        self.assertIn("source=.xcode/settings.json", rendered)
+        self.assertIn("runs=2", rendered)
+        self.assertIn("error=api_key=[REDACTED]", rendered)
+
+    def test_hooks_command_reports_empty_configuration(self) -> None:
+        """未配置外部 hook 时给出明确诊断。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir), project_root=Path(temp_dir))
+            app = SimpleNamespace(hook_diagnostics=lambda: ())
+
+            with redirect_stdout(StringIO()) as output:
+                handle_command(
+                    "/hooks",
+                    store,
+                    cast(Any, app),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+        self.assertIn("No external hooks configured.", output.getvalue())
 
     def test_run_repl_tool_list_shows_visible_and_hidden_groups(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

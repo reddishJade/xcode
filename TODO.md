@@ -13,30 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P2 · 缺少用户可配置的显式 Hook 系统
-
-Xcode 已有内部 `HookManager` 和固定事件，但 `build_app()`、运行时配置与 REPL
-均没有用户级 hook 注册、禁用、查看或诊断入口。原有 Python Plugin 外部注入
-路径已经删除。
-
-需要：
-
-- 在配置中提供显式 hooks 列表，至少支持
-  `pre_tool`、`post_tool`、`on_error`、`on_compact`、
-  `before_agent_start` 和 `before_provider_request`。
-- 每项声明 event、可选 matcher、command、timeout、enabled 和 failure policy。
-- Hook 作为受信任的外部子进程执行，通过 JSON stdin/stdout 交换结构化数据；
-  不使用 `exec()`、动态 import 或隐式 shell。
-- pre hook 只允许返回结构化 allow/deny/ask 或参数变换；任何权限放宽仍必须经过
-  PermissionEngine，不能覆盖 non-bypassable deny。
-- 支持 `/hooks` 或等价诊断入口，显示来源、启用状态和最近错误。
-- 主 agent 与 subagent 的继承规则必须显式配置，默认不向 subagent 传播外部
-  command hook。
-- 增加超时、非零退出、无效 JSON、敏感字段脱敏和配置合并测试。
-
-不提供任意进程内 Python callback 配置。库调用方仍可通过明确的编程接口注入
-`HookManager`，但配置文件能力必须保持进程隔离和权限边界。
-
 ## P2 · 缺少轻量 TodoWrite 会话工具
 
 现有 `tasks` 和 `progress` 是持久化任务图、依赖和长任务租约系统，不适合作为

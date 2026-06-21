@@ -102,6 +102,12 @@
 低优先级数组，不按元素合并。命令必须是 argv 数组；不经过 shell，不支持进程内
 Python callback。
 
+运行时按事件顺序启动命令，以脱敏后的 `HookRecord` JSON 作为 stdin。命令可向
+stdout 返回单个 JSON object；空 stdout 等价于 `{}`。`pre_tool` 仅接受
+`decision`（`allow` / `deny` / `ask`）和 `arguments`（完整参数 object）。
+参数变换后会重新执行工具 schema 校验和 PermissionEngine；hook 不能放宽已有
+deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近错误。
+
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `event` | string | 必填 | `pre_tool`、`post_tool`、`on_error`、`on_compact`、`before_agent_start`、`before_provider_request` |
