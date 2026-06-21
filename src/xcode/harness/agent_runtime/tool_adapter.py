@@ -18,7 +18,13 @@ from ...agent.protocols import (
     ToolResultContentBlock,
     ToolUpdateCallback,
 )
-from xcode.agent.types import ShellCallOutputContent, TextContent, ToolArguments
+from xcode.agent.types import (
+    FileContent,
+    ImageContent,
+    ShellCallOutputContent,
+    TextContent,
+    ToolArguments,
+)
 from ..skills import (
     AGENT_CONTENT_BLOCKS_METADATA_KEY,
     ToolSpec,
@@ -79,7 +85,12 @@ class ToolSpecAdapter:
     ) -> AgentToolResult:
         tool_input = _tool_input_from_arguments(params)
         content = await asyncio.to_thread(self._spec.handler, tool_input)
-        return AgentToolResult(content=_tool_result_content(content, tool_call_id))
+        metadata = getattr(content, "metadata", None)
+        return AgentToolResult(
+            content=_tool_result_content(content, tool_call_id),
+            details=metadata if isinstance(metadata, dict) else None,
+            is_error=bool(getattr(content, "is_error", False)),
+        )
 
 
 def adapt_tool_specs(specs: tuple[ToolSpec, ...]) -> list[ToolSpecAdapter]:
@@ -123,6 +134,8 @@ def _structured_content_blocks(
     for block in raw_blocks:
         if isinstance(block, ShellCallOutputContent):
             blocks.append(_redacted_shell_call_output(block, tool_call_id))
+        elif isinstance(block, ImageContent | FileContent):
+            blocks.append(block)
     return blocks
 
 

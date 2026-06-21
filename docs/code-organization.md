@@ -107,6 +107,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `mcp/` | 核心 MCP stdio client、schema cache 和动态工具集成 |
 | `mcp/client.py` | MCP stdio JSON-RPC 客户端 |
 | `mcp/tools.py` | MCP 配置、schema cache 和动态 ToolSpec 构建 |
+| `mcp/results.py` | MCP structuredContent 校验和 typed content 宿主映射 |
 | `memory/` | 正式 opt-in Memory 管理与解析 |
 | `memory/manager.py` | `MEMORY.md`、BM25 召回、consolidation 和 LRU |
 | `memory/parsing.py` | 记忆块数据类型、解析和评分辅助 |

@@ -25,12 +25,14 @@ from xcode.harness.mcp.client import (
     redact_mcp_text,
     truncate_redact,
 )
+from xcode.harness.mcp.results import MCP_RESULT_METADATA_KEY
 
 from xcode.harness.observability.permission_model import (
     ActionExtractor,
     Action,
     Target,
 )
+from xcode.harness.skills import ToolOutput
 
 
 # ── 辅助 ──
@@ -592,8 +594,14 @@ class TestMcpBuildIntegration(TestCase):
         mock_instance = MagicMock()
         mock_instance.protocol_version = "2025-11-25"
         mock_instance.server_info = {"name": "test-server", "version": "1.0.0"}
+        tool = _minimal_mcp_tool("my_tool")
+        tool["outputSchema"] = {
+            "type": "object",
+            "properties": {"value": {"type": "integer"}},
+        }
+        tool["annotations"] = {"readOnlyHint": True}
         mock_instance.list_tools.return_value = [
-            _minimal_mcp_tool("my_tool"),
+            tool,
         ]
         mock_instance.status = "connected"
         mock_client.return_value = mock_instance
@@ -624,6 +632,49 @@ class TestMcpBuildIntegration(TestCase):
             self.assertEqual(meta.get("server_slug"), "test-srv")
             self.assertEqual(meta.get("tool"), "my_tool")
             self.assertEqual(meta.get("tool_slug"), "my_tool")
+            self.assertEqual(meta.get("outputSchema"), tool["outputSchema"])
+            self.assertEqual(meta.get("annotations"), {"readOnlyHint": True})
+
+    def test_mcp_handler_preserves_modern_result(self, mock_client: MagicMock) -> None:
+        """注册后的 handler 会校验并保留 structuredContent。"""
+        mock_instance = MagicMock()
+        mock_instance.protocol_version = "2025-11-25"
+        mock_instance.server_info = {"name": "modern", "version": "1.0.0"}
+        tool = _minimal_mcp_tool("weather")
+        tool["outputSchema"] = {
+            "type": "object",
+            "properties": {"temperature": {"type": "number"}},
+            "required": ["temperature"],
+        }
+        mock_instance.list_tools.return_value = [tool]
+        mock_instance.call_tool.return_value = {
+            "content": [{"type": "text", "text": "22.5 C"}],
+            "structuredContent": {"temperature": 22.5},
+        }
+        mock_instance.status = "connected"
+        mock_client.return_value = mock_instance
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_config(
+                root / ".local" / "mcp_config.json",
+                {"mcpServers": {"modern": {"command": "python"}}},
+            )
+            (spec,) = build_mcp_tools(root)
+
+            output = spec.handler({})
+
+        self.assertIsInstance(output, ToolOutput)
+        assert isinstance(output, ToolOutput)
+        self.assertIn("22.5 C", output)
+        details = output.metadata[MCP_RESULT_METADATA_KEY]
+        assert isinstance(details, dict)
+        self.assertEqual(details["validation"]["status"], "valid")
+        mock_instance.call_tool.assert_called_once_with(
+            "weather",
+            {},
+            timeout=None,
+        )
 
     def test_collision_disables_tools(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()

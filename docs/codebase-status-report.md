@@ -270,7 +270,11 @@ cli → coding_agent → harness → agent → ai
   元数据的旧缓存会重新发现。
 - deferred server 使用 bootstrap 工具和 `mcp_tool_search` 懒加载。
 - MCP 工具名称清理和碰撞检测。
-- MCP `isError` 转换为结构化错误。
+- MCP `structuredContent` 进入宿主 result details，并按保留的 `outputSchema`
+  校验；tool 和 content annotations 会保留。
+- image 映射为宿主图片块，audio、resource link 和 embedded resource 映射为
+  文件块；未知 content block 返回包含完整脱敏原始块的诊断。
+- MCP `isError` 转换为宿主结构化错误状态。
 - server stderr 脱敏和截断。
 - `LazyClientRef` 复用客户端，对失败连接进行有限重连，并保留脱敏后的最后错误。
 - `SkillRegistry` 发现技能；`SkillIndexCollector` 注入摘要；

@@ -17,7 +17,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from xcode.agent.types import (
-    ShellCallOutputContent,
     TextContent,
     ToolArguments,
     ToolCallContent,
@@ -365,7 +364,7 @@ def _tool_result_message(
     result_content: ToolResultMessageContent
     if not content:
         result_content = ""
-    elif any(isinstance(item, ShellCallOutputContent) for item in content):
+    elif any(not isinstance(item, TextContent) for item in content):
         result_content = content
     else:
         result_content = "".join(

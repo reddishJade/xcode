@@ -36,12 +36,9 @@ Agent Skills 官方实现指南明确说明，多数客户端的 model-driven ac
 ### MCP
 
 Xcode 已具备可工作的 stdio tools client，并完成分页发现、动态刷新、timeout
-cancellation、graceful shutdown 和有限重连。对于本地 coding agent，
-stdio + tools 足以作为正式基础能力；不需要先实现 resources、prompts、
-OAuth 和 Streamable HTTP。
-
-当前最值得补齐的是正确处理 `structuredContent`，并明确非文本 content 的
-宿主映射策略。
+cancellation、graceful shutdown、有限重连和现代 tool result 映射。对于本地
+coding agent，stdio + tools 足以作为正式基础能力；不需要先实现 resources、
+prompts、OAuth 和 Streamable HTTP。
 
 ## 产品分类建议
 
@@ -138,7 +135,7 @@ auto trigger 的替代，而是用户可控入口。
 | Content-Length | 兼容读取 | 当前规范 stdio 使用 newline delimiter；Content-Length 只是旧格式兼容 |
 | initialize + initialized | 已实现 | 发送最新支持版本，校验协商版本、capabilities 和 serverInfo，并保存 instructions |
 | `tools/list` | 已实现 | 聚合 cursor pagination，并限制页数和重复 cursor |
-| `tools/call` | 已实现 | 支持 text 和 `isError` |
+| `tools/call` | 已实现 | 支持 text、typed content、structuredContent 和 `isError` |
 | Tool naming | 已实现 | `mcp__<server>__<tool>` 和 collision detection |
 | Permission integration | 已实现 | MCP action、HITL、grant scope 限制 |
 | Deferred loading | 已实现 | schema cache、bootstrap 和 search tool |
@@ -150,8 +147,8 @@ auto trigger 的替代，而是用户可控入口。
 | List changed | 已实现 | server 声明能力后刷新 cache 和下一轮 runtime registry |
 | Ping/server requests | 已实现 | 入站 response/request/notification 分流；支持 ping，未知 request 返回 method-not-found |
 | Cancellation/progress | 部分实现 | timeout 发送 cancelled notification；progress 可后置 |
-| Non-text results | 未实现 | 当前只返回 placeholder |
-| Structured content/output schema | 未实现 | 对现代 tools server 有实际兼容价值 |
+| Non-text results | 已实现 | image 映射为图片；audio/resource 映射为文件；未知块返回完整诊断 |
+| Structured content/output schema | 已实现 | 保留并校验 outputSchema，structuredContent 进入宿主 details |
 
 ### 基础正式能力的建议边界
 
@@ -194,13 +191,6 @@ Content:
 支持门槛。
 
 ### 值得优先实现
-
-#### M1 · 现代 tool result
-
-- 支持 `structuredContent`。
-- 保留 `outputSchema` 并在可行时验证。
-- 对 image/audio/resource link/embedded resource 返回结构化宿主内容或明确、
-  可诊断的 unsupported result，不能只保留第一个 placeholder。
 
 #### M2 · 错误诊断完整性
 

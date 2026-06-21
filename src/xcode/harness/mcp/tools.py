@@ -26,6 +26,7 @@ from typing import Any
 from xcode.harness.skills import ToolInput, ToolSpec
 
 from . import client as _mcp_mod
+from .results import convert_mcp_tool_result
 
 _log = logging.getLogger(__name__)
 
@@ -422,6 +423,7 @@ def _make_handler(
     deferred: bool,
     server_name: str,
     cache_path: Path,
+    output_schema: object,
 ) -> Any:
     def handler(args: ToolInput) -> str:
         if deferred:
@@ -458,39 +460,9 @@ def _make_handler(
         response = client_instance.call_tool(
             original_tool_name, args, timeout=ref.config.get("timeout")
         )
-        if "content" in response:
-            text_parts: list[str] = []
-            non_text_hint: str | None = None
-            for block in response.get("content", []):
-                if not isinstance(block, dict):
-                    continue
-                block_type = block.get("type", "")
-                if block_type == "text":
-                    text_parts.append(block.get("text", ""))
-                else:
-                    if non_text_hint is None:
-                        non_text_hint = f"[unsupported content type: {block_type}]"
-            content_str = "\n".join(text_parts)
-            if non_text_hint:
-                if content_str:
-                    content_str += f"\n{non_text_hint}"
-                else:
-                    content_str = non_text_hint
-            if response.get("isError", False):
-                redacted = _redact_and_truncate(content_str, max_len=200)
-                raise _MCPToolError(redacted, is_error=True)
-            return content_str
-        return str(response)
+        return convert_mcp_tool_result(response, output_schema)
 
     return handler
-
-
-class _MCPToolError(Exception):
-    """Structured MCP tool error with isError flag."""
-
-    def __init__(self, message: str, is_error: bool = True) -> None:
-        super().__init__(message)
-        self.is_error = is_error
 
 
 # ── 碰撞检测 ──
@@ -791,6 +763,7 @@ def _build_registered_mcp_tool(
             is_deferred,
             validated.name,
             cache_path,
+            tool.get("outputSchema"),
         ),
         schema=tool_schema,
         group="mcp",
@@ -800,6 +773,8 @@ def _build_registered_mcp_tool(
                 "server_slug": metadata.server_slug,
                 "tool": metadata.tool_name,
                 "tool_slug": metadata.tool_slug,
+                "outputSchema": tool.get("outputSchema"),
+                "annotations": tool.get("annotations"),
             }
         },
     )

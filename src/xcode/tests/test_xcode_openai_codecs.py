@@ -11,7 +11,7 @@ from xcode.agent.messages import (
     CompactionSummaryMessage,
     ToolResultMessage,
 )
-from xcode.agent.types import ToolCallContent
+from xcode.agent.types import FileContent, ImageContent, TextContent, ToolCallContent
 from xcode.ai.events import ReasoningDelta, TextDelta, ToolCallEvent
 from xcode.ai.providers.codec import to_chat_messages, to_chat_tool
 from xcode.ai.providers.stream_codec import chat_stream_to_events
@@ -139,6 +139,42 @@ class OpenAIToolCodecTest(unittest.TestCase):
 
         self.assertEqual(raw_messages[0]["tool_calls"][0]["id"], "t1")
         self.assertEqual(raw_messages[1]["role"], "tool")
+
+    def test_typed_tool_results_do_not_inline_binary_data(self) -> None:
+        """provider 文本只保留类型摘要，不复制图片或文件数据。"""
+        image = ImageContent(
+            source={
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "secret-image-data",
+            }
+        )
+        file = FileContent(
+            filename="audio.wav",
+            file_data="secret-audio-data",
+        )
+        raw_messages = convert_to_llm(
+            [
+                ToolResultMessage(
+                    tool_call_id="t1",
+                    content=[
+                        TextContent(text="summary"),
+                        image,
+                        file,
+                    ],
+                )
+            ]
+        )
+
+        content = raw_messages[0]["content"]
+        self.assertEqual(
+            content,
+            "summary[image result: image/png][file result: audio.wav]",
+        )
+        self.assertNotIn("secret-image-data", content)
+        self.assertNotIn("secret-audio-data", content)
+        self.assertNotIn("secret-image-data", repr(image))
+        self.assertNotIn("secret-audio-data", repr(file))
 
 
 class OpenAIStreamCodecTest(unittest.TestCase):

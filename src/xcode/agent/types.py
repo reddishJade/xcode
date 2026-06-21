@@ -20,15 +20,25 @@ class TextContent:
     text: str = ""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class ImageContent:
     """图像内容块。"""
 
     type: str = "image"
     source: ContentSource | None = None
 
+    def __repr__(self) -> str:
+        """返回不包含内联图片数据的诊断表示。"""
+        source = self.source or {}
+        source_type = source.get("type", "unknown")
+        media_type = source.get("media_type", "unknown")
+        return (
+            f"ImageContent(type={self.type!r}, source_type={source_type!r}, "
+            f"media_type={media_type!r})"
+        )
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, repr=False)
 class FileContent:
     """文件内容块。"""
 
@@ -37,6 +47,11 @@ class FileContent:
     file_id: str | None = None
     filename: str | None = None
     file_data: str | None = None
+
+    def __repr__(self) -> str:
+        """返回不包含内联文件数据的诊断表示。"""
+        identity = self.filename or self.file_id or "unnamed"
+        return f"FileContent(type={self.type!r}, identity={identity!r})"
 
 
 @dataclass(frozen=True)

@@ -94,9 +94,9 @@ def _tool_result_content_text(content: object) -> str:
             if isinstance(item, TextContent):
                 parts.append(item.text)
             elif isinstance(item, ImageContent):
-                parts.append(str(item))
+                parts.append(_image_result_summary(item))
             elif isinstance(item, FileContent):
-                parts.append(str(item))
+                parts.append(_file_result_summary(item))
             elif isinstance(item, ShellCallOutputContent):
                 parts.append(str(item.output))
             elif isinstance(item, ToolResultContent):
@@ -105,6 +105,20 @@ def _tool_result_content_text(content: object) -> str:
                 parts.append(str(item))
         return "".join(parts)
     return str(content)
+
+
+def _image_result_summary(content: ImageContent) -> str:
+    """将图片结果压缩为不含二进制数据的 provider 文本。"""
+    source = content.source or {}
+    media_type = source.get("media_type")
+    suffix = f": {media_type}" if isinstance(media_type, str) else ""
+    return f"[image result{suffix}]"
+
+
+def _file_result_summary(content: FileContent) -> str:
+    """将文件结果压缩为不含内联数据的 provider 文本。"""
+    identity = content.filename or content.file_id or "unnamed"
+    return f"[file result: {identity}]"
 
 
 def _convert_block(block: ContentBlock) -> dict[str, Any] | None:

@@ -14,12 +14,13 @@ import threading
 from typing import Any
 
 from ..agent.protocols import ToolExecutionMode
-from ..agent.types import ShellCallOutputContent
+from ..agent.types import FileContent, ImageContent, ShellCallOutputContent
 from .observability import HITLResult
 from .session import JsonValue
 
 ToolInput = dict[str, Any]
-type ToolMetadataValue = JsonValue | list[ShellCallOutputContent]
+type AgentResultContentBlock = ImageContent | FileContent | ShellCallOutputContent
+type ToolMetadataValue = JsonValue | list[AgentResultContentBlock]
 type ToolMetadata = dict[str, ToolMetadataValue]
 ActionHandler = Callable[[ToolInput], str]
 ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
@@ -30,14 +31,17 @@ class ToolOutput(str):
     """带结构化元数据的工具输出文本。"""
 
     metadata: ToolMetadata
+    is_error: bool
 
     def __new__(
         cls,
         content: str,
         metadata: Mapping[str, object] | None = None,
+        is_error: bool = False,
     ) -> "ToolOutput":
         output = str.__new__(cls, content)
         output.metadata = _tool_metadata(metadata)
+        output.is_error = is_error
         return output
 
 
@@ -161,11 +165,15 @@ def _tool_metadata(value: object) -> ToolMetadata:
     return metadata
 
 
-def _agent_content_blocks(value: object) -> list[ShellCallOutputContent]:
+def _agent_content_blocks(value: object) -> list[AgentResultContentBlock]:
     """提取可传递给 agent loop 的结构化内容块。"""
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, ShellCallOutputContent)]
+    return [
+        item
+        for item in value
+        if isinstance(item, ImageContent | FileContent | ShellCallOutputContent)
+    ]
 
 
 def _json_value(value: object) -> JsonValue:

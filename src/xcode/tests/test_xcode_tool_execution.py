@@ -19,7 +19,13 @@ from xcode.agent.config import (
 from xcode.agent.events import AgentEvent, ToolExecutionEndEvent
 from xcode.agent.messages import AssistantMessage
 from xcode.agent.protocols import AgentTool
-from xcode.agent.types import ShellCallOutputContent, TextContent, ToolCallContent
+from xcode.agent.types import (
+    FileContent,
+    ImageContent,
+    ShellCallOutputContent,
+    TextContent,
+    ToolCallContent,
+)
 from xcode.harness.agent_runtime.tool_adapter import adapt_tool_specs
 from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
@@ -133,6 +139,80 @@ class AgentToolExecutionTests(unittest.TestCase):
         assert isinstance(block, ShellCallOutputContent)
         self.assertEqual(block.call_id, "call-1")
         self.assertEqual(block.output[0]["stdout"], "ok")
+
+    def test_toolspec_adapter_preserves_typed_result_and_details(self) -> None:
+        """ToolOutput 的类型块、详情和错误状态会进入 AgentToolResult。"""
+        image = ImageContent(
+            source={
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "encoded",
+            }
+        )
+        file = FileContent(filename="result.txt", file_data="content")
+        output = ToolOutput(
+            "summary",
+            metadata={
+                AGENT_CONTENT_BLOCKS_METADATA_KEY: [image, file],
+                "provider_result": {"status": "invalid"},
+            },
+            is_error=True,
+        )
+        (tool,) = adapt_tool_specs(
+            (
+                ToolSpec(
+                    "typed",
+                    "Return typed content.",
+                    "{}",
+                    lambda _data: output,
+                    schema=EMPTY_SCHEMA,
+                ),
+            )
+        )
+
+        result = asyncio.run(tool.execute("call-1", {}))
+
+        self.assertTrue(result.is_error)
+        self.assertEqual(result.details["provider_result"], {"status": "invalid"})
+        self.assertIs(result.content[1], image)
+        self.assertIs(result.content[2], file)
+
+    def test_tool_execution_message_preserves_non_text_blocks(self) -> None:
+        """工具执行消息不会在存在非文本块时只保留文本。"""
+        image = ImageContent(source={"type": "base64", "data": "encoded"})
+        output = ToolOutput(
+            "summary",
+            metadata={AGENT_CONTENT_BLOCKS_METADATA_KEY: [image]},
+        )
+        (tool,) = adapt_tool_specs(
+            (
+                ToolSpec(
+                    "typed",
+                    "Return typed content.",
+                    "{}",
+                    lambda _data: output,
+                    schema=EMPTY_SCHEMA,
+                ),
+            )
+        )
+        tool_call = ToolCallContent(id="call-1", name="typed", arguments={})
+        context = AgentContext(tools=cast(list[AgentTool], [tool]))
+
+        batch = asyncio.run(
+            execute_tool_calls(
+                context,
+                AssistantMessage(content=[tool_call]),
+                [tool_call],
+                AgentLoopConfig(),
+                None,
+                lambda _event: None,
+            )
+        )
+
+        message_content = batch.results[0].content
+        self.assertIsInstance(message_content, list)
+        assert isinstance(message_content, list)
+        self.assertIs(message_content[1], image)
 
     def test_toolspec_adapter_default_allow(self) -> None:
         """无风险审批后，工具默认 allow。"""

@@ -13,20 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P2 · MCP 现代 tool result 支持不完整
-
-当前 handler 主要拼接 text content。image、audio、resource link 和 embedded
-resource 只产生 placeholder；`structuredContent`、`outputSchema` 和 annotations
-没有进入宿主结果模型。
-
-需要：
-
-- 支持 `structuredContent`。
-- 保留 `outputSchema`，在可行时验证 structured result。
-- 为非文本 content 定义结构化宿主映射；暂不支持的类型必须返回完整、可诊断
-  的 unsupported result。
-- 不因第一个未知 block 丢失后续 content。
-
 ## P2 · Skill 缺少用户显式激活入口
 
 模型自动选择之外，用户应能直接激活 skill。
