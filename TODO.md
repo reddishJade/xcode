@@ -13,22 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P3 · slash command 与 @file 仅支持前缀补全
-
-`ReplCompleter` 对 slash command、tool name 和当前目录层级的 `@file` 使用
-`startswith()`。`@file` 不做跨目录候选检索，输入 `@` 本身也不返回候选；
-command dispatch 则只接受精确命令。
-
-需要：
-
-- slash command 和 `/tool` 补全增加轻量 fuzzy ranking，但提交执行仍要求唯一、
-  精确命令。
-- `@file` 使用项目文件索引进行 basename、路径片段和子序列匹配。
-- 文件候选遵循与 glob 相同的 `.gitignore`、hidden 和 blocked path 规则。
-- 精确前缀结果优先于模糊结果，并限制候选数量和扫描时间。
-- 不缓存失效的完整项目树；使用短生命周期缓存或文件索引版本。
-- 添加重名文件、深层路径、Windows 分隔符、ignored file 和 typo command 测试。
-
 ## 明确不进入近期范围
 
 - 通过 JSON/YAML 配置直接定义任意可执行 Tool；外部工具扩展统一使用 MCP。

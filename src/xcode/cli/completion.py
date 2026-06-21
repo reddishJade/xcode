@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import TYPE_CHECKING, Callable
 
 from xcode.harness.skills import ToolSpec
+from xcode.coding_agent.tools.file_index import build_project_file_index
 
 from .commands import COMMAND_GROUP_ORDER, CommandEntry
 from .reasoning_effort import normalize_reasoning_effort_options
@@ -37,6 +39,8 @@ else:
 
 
 MAX_FILE_COMPLETIONS = 100
+MAX_NAME_COMPLETIONS = 25
+FILE_INDEX_TTL_SECONDS = 0.25
 BLOCKED_PARTS = {".git", ".venv", "__pycache__"}
 
 
@@ -89,6 +93,7 @@ class ReplCompleter(Completer):
         self._model_options = model_options
         self._skill_options = skill_options
         self._directory_cache: dict[Path, tuple[str, ...]] = {}
+        self._file_index_cache: tuple[float, tuple[str, ...]] | None = None
 
     @property
     def command_args(self) -> dict[str, str]:
@@ -143,11 +148,10 @@ class ReplCompleter(Completer):
         return self._complete_file_reference(text_before_cursor)
 
     def _complete_command(self, text: str) -> list[CompletionItem]:
-        matched = [
-            command for command in self.command_names if command.startswith(text)
-        ]
+        matched = _ranked_matches(text, self.command_names)
         matched.sort(
             key=lambda name: (
+                _fuzzy_score(text, name),
                 COMMAND_GROUP_ORDER.get(self._command_group.get(name, ""), 99),
                 name,
             )
@@ -158,7 +162,7 @@ class ReplCompleter(Completer):
                 -len(text),
                 display_meta=self._command_meta.get(command, ""),
             )
-            for command in matched
+            for command in matched[:MAX_NAME_COMPLETIONS]
         ]
 
     def _complete_tool_name(self, text: str) -> list[CompletionItem]:
@@ -166,10 +170,10 @@ class ReplCompleter(Completer):
         if len(parts) > 2:
             return []
         partial = parts[1] if len(parts) == 2 else ""
+        matched = _ranked_matches(partial, self.tool_names)
         return [
             CompletionItem(name, -len(partial), "tool")
-            for name in self.tool_names
-            if name.startswith(partial)
+            for name in matched[:MAX_NAME_COMPLETIONS]
         ]
 
     def _complete_skill_name(self, text: str) -> list[CompletionItem]:
@@ -202,10 +206,29 @@ class ReplCompleter(Completer):
         partial, start_position = marker
         return [
             CompletionItem(path, start_position, "file")
-            for path in _matching_files(
-                self.project_root, partial, self._directory_cache
-            )
+            for path in self._matching_project_files(partial)
         ]
+
+    def _matching_project_files(self, partial: str) -> list[str]:
+        """使用短生命周期项目索引补全 @file。"""
+        now = time.monotonic()
+        cached = self._file_index_cache
+        if cached is None or now - cached[0] > FILE_INDEX_TTL_SECONDS:
+            files = build_project_file_index(self.project_root)
+            self._file_index_cache = (now, files)
+        else:
+            files = cached[1]
+        normalized = partial.replace("\\", "/").casefold()
+        ranked = [
+            path for path in files if _file_fuzzy_score(normalized, path) is not None
+        ]
+        ranked.sort(
+            key=lambda path: (
+                _file_fuzzy_score(normalized, path),
+                path.casefold(),
+            )
+        )
+        return ranked[:MAX_FILE_COMPLETIONS]
 
     def _complete_effort(self, text: str) -> list[CompletionItem]:
         parts = text.split(maxsplit=1)
@@ -287,11 +310,74 @@ def _active_file_marker(text: str) -> tuple[str, int] | None:
     if not token.startswith("@"):
         return None
     partial = token[1:]
-    if not partial:
-        return None
     if any(char in partial for char in "*?[]"):
         return None
     return partial, -len(partial)
+
+
+def _ranked_matches(query: str, candidates: Iterable[str]) -> list[str]:
+    """按前缀、子串、子序列顺序返回名称候选。"""
+    matched = [
+        candidate
+        for candidate in candidates
+        if _fuzzy_score(query, candidate) is not None
+    ]
+    matched.sort(key=lambda candidate: (_fuzzy_score(query, candidate), candidate))
+    return matched
+
+
+def _fuzzy_score(query: str, candidate: str) -> tuple[int, int, int] | None:
+    """返回轻量 fuzzy 排名；值越小越优先。"""
+    needle = query.casefold()
+    haystack = candidate.casefold()
+    if not needle:
+        return 0, 0, len(candidate)
+    if haystack.startswith(needle):
+        return 0, 0, len(candidate)
+    substring_index = haystack.find(needle)
+    if substring_index >= 0:
+        return 1, substring_index, len(candidate)
+    positions = _subsequence_positions(needle, haystack)
+    if positions is None:
+        return None
+    span = positions[-1] - positions[0] + 1
+    return 2, span - len(needle), len(candidate)
+
+
+def _file_fuzzy_score(
+    normalized_query: str,
+    candidate: str,
+) -> tuple[int, int, int] | None:
+    """按完整路径、basename 和子序列对文件候选排序。"""
+    normalized = candidate.casefold()
+    basename = Path(candidate).name.casefold()
+    path_score = _fuzzy_score(normalized_query, normalized)
+    basename_score = _fuzzy_score(normalized_query, basename)
+    scores: list[tuple[int, int, int]] = []
+    if path_score is not None:
+        scores.append((path_score[0] * 2, path_score[1], path_score[2]))
+    if basename_score is not None:
+        scores.append(
+            (
+                basename_score[0] * 2 + 1,
+                basename_score[1],
+                basename_score[2],
+            )
+        )
+    return min(scores) if scores else None
+
+
+def _subsequence_positions(needle: str, haystack: str) -> list[int] | None:
+    """返回 needle 作为 haystack 子序列时的匹配位置。"""
+    positions: list[int] = []
+    search_from = 0
+    for character in needle:
+        index = haystack.find(character, search_from)
+        if index < 0:
+            return None
+        positions.append(index)
+        search_from = index + 1
+    return positions
 
 
 def _active_shell_word(text: str) -> tuple[str, int, int] | None:

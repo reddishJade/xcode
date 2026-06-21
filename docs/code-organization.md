@@ -158,6 +158,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `tools/worktree.py` | `build_worktree_tools` → `create_worktree_task`、`remove_worktree_task` |
 | `tools/shell_adapter.py` | `ShellSpec`、`detect_shell`、`build_shell_argv` |
 | `tools/path_utils.py` | 路径解析、`is_path_blocked` |
+| `tools/file_index.py` | 有时间和数量预算的 `.gitignore` 感知项目文件索引 |
 | `tools/truncate.py` | 输出截断 |
 | `tools/output_accumulator.py` | 命令输出累积 |
 | `tools/tools_manager.py` | 外部工具检测（ripgrep 等） |
@@ -180,7 +181,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `repl_tools.py` | `/tool` 解析、`!COMMAND` 快捷入口、事件序列化 |
 | `repl_turn_handler.py` | 单轮处理 |
 | `commands.py` | `CommandRegistry`、`ReplState`、`CommandContext` |
-| `completion.py` | `ReplCompleter` 自动补全（命令/工具/skill/@file/!shell） |
+| `completion.py` | `ReplCompleter` fuzzy 命令/工具补全、项目级 `@file` 索引和 `!shell` 路径补全 |
 | `repl_skills.py` | `$skill-name`、`/skill` 激活解析和 transcript 记录 |
 | `file_refs.py` | `@relative/path` 解析和文件内容注入 |
 | `markdown.py` | `TerminalMarkdownRenderer` |

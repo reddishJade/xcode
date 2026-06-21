@@ -917,12 +917,36 @@ class XcodeReplTests(unittest.TestCase):
 
         self.assertEqual([item.text for item in items], ["/plan"])
 
+    def test_repl_completer_fuzzy_ranks_typo_command_without_dispatching(self) -> None:
+        """slash typo 仅提供候选，命令执行仍由精确 dispatch 决定。"""
+        completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
+
+        items = completer.complete("/pln")
+
+        self.assertEqual([item.text for item in items], ["/plan"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            state = ReplState()
+            with redirect_stdout(StringIO()) as output:
+                handle_command(
+                    "/pln",
+                    store,
+                    cast(Any, FakeApp()),
+                    FakeRenderer(),
+                    state,
+                    FakePrompt([]),
+                )
+
+        self.assertEqual(state.mode, "act")
+        self.assertIn("Unknown command: /pln", output.getvalue())
+
     def test_repl_completer_suggests_new_command(self) -> None:
         completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
         items = completer.complete("/ne")
 
-        self.assertEqual([item.text for item in items], ["/new"])
+        self.assertEqual(items[0].text, "/new")
 
     def test_repl_completer_suggests_skill_names(self) -> None:
         """`/skill` 和 `$` 入口共享技能名称补全。"""
@@ -1162,6 +1186,19 @@ class XcodeReplTests(unittest.TestCase):
             ["read_file"],
         )
 
+    def test_repl_completer_fuzzy_ranks_tool_names(self) -> None:
+        completer = ReplCompleter(
+            Path.cwd(),
+            (
+                ToolSpec("read_file", "Read.", "path", lambda value: value["input"]),
+                ToolSpec("write_file", "Write.", "path", lambda value: value["input"]),
+            ),
+        )
+
+        items = completer.complete("/tool rdf")
+
+        self.assertEqual([item.text for item in items], ["read_file"])
+
     def test_repl_completer_does_not_suggest_shell_commands(self) -> None:
         completer = ReplCompleter(Path.cwd())
 
@@ -1206,14 +1243,20 @@ class XcodeReplTests(unittest.TestCase):
 
             items = completer.complete("read @do")
 
-            self.assertEqual([item.text for item in items], ["docs/"])
+            self.assertEqual([item.text for item in items], ["docs/note.md"])
 
-    def test_repl_completer_ignores_empty_file_marker(self) -> None:
-        completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
+    def test_repl_completer_lists_project_files_for_empty_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "a.txt").write_text("a", encoding="utf-8")
+            (root / "b.txt").write_text("b", encoding="utf-8")
+            completer = ReplCompleter(root, command_names=COMMAND_NAMES)
 
-        self.assertEqual(completer.complete("@"), [])
+            items = completer.complete("@")
 
-    def test_repl_completer_scans_only_current_directory_level(self) -> None:
+        self.assertEqual([item.text for item in items], ["a.txt", "b.txt"])
+
+    def test_repl_completer_searches_deep_project_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / "docs").mkdir()
@@ -1225,7 +1268,8 @@ class XcodeReplTests(unittest.TestCase):
             items = completer.complete("read @docs/")
 
             self.assertEqual(
-                [item.text for item in items], ["docs/nested/", "docs/note.md"]
+                [item.text for item in items],
+                ["docs/note.md", "docs/nested/deep.md"],
             )
 
     def test_repl_completer_filters_sensitive_file_references(self) -> None:
@@ -1240,8 +1284,76 @@ class XcodeReplTests(unittest.TestCase):
             items = completer.complete("read @")
             public_items = completer.complete("read @p")
 
-            self.assertEqual(items, [])
+            self.assertEqual([item.text for item in items], ["public.txt"])
             self.assertEqual([item.text for item in public_items], ["public.txt"])
+
+    def test_repl_completer_filters_gitignored_and_hidden_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / ".gitignore").write_text(
+                "ignored.txt\nbuild/\n",
+                encoding="utf-8",
+            )
+            (root / "ignored.txt").write_text("ignored", encoding="utf-8")
+            (root / ".hidden.txt").write_text("hidden", encoding="utf-8")
+            (root / "build").mkdir()
+            (root / "build" / "artifact.txt").write_text(
+                "ignored",
+                encoding="utf-8",
+            )
+            (root / "visible.txt").write_text("visible", encoding="utf-8")
+            completer = ReplCompleter(root)
+
+            items = completer.complete("@")
+
+        self.assertEqual([item.text for item in items], ["visible.txt"])
+
+    def test_repl_completer_handles_duplicate_basenames_and_windows_separators(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "src" / "utils").mkdir(parents=True)
+            (root / "tests" / "utils").mkdir(parents=True)
+            (root / "src" / "utils" / "helper.py").write_text(
+                "src",
+                encoding="utf-8",
+            )
+            (root / "tests" / "utils" / "helper.py").write_text(
+                "tests",
+                encoding="utf-8",
+            )
+            completer = ReplCompleter(root)
+
+            duplicate_items = completer.complete("@helper")
+            windows_items = completer.complete(r"@src\utl")
+
+        self.assertEqual(
+            [item.text for item in duplicate_items],
+            ["src/utils/helper.py", "tests/utils/helper.py"],
+        )
+        self.assertEqual(
+            [item.text for item in windows_items],
+            ["src/utils/helper.py"],
+        )
+
+    def test_repl_completer_file_index_cache_expires_quickly(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "first.txt").write_text("first", encoding="utf-8")
+            completer = ReplCompleter(root)
+            completer.complete("@")
+            (root / "second.txt").write_text("second", encoding="utf-8")
+
+            cached = completer.complete("@")
+            time.sleep(0.3)
+            refreshed = completer.complete("@")
+
+        self.assertEqual([item.text for item in cached], ["first.txt"])
+        self.assertEqual(
+            [item.text for item in refreshed],
+            ["first.txt", "second.txt"],
+        )
 
     def test_repl_completer_supports_prompt_toolkit_async_api(self) -> None:
         try:
