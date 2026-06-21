@@ -56,7 +56,7 @@
 | `compact_threshold` | int | `0` | 消息数阈值；0 关闭 |
 | `compact_token_threshold` | int | `0` | token 阈值；0 关闭 |
 | `max_recent_messages` | int | `10` | 压缩时保留的近期消息数 |
-| `tool_workers` | int | `4` | 并发安全工具最大并行数 |
+| `tool_workers` | int | `4` | 单个 parallel batch 的最大活跃工具数；小于 1 时按 1 执行 |
 | `watchdog_repeated_tool_limit` | int | `3` | 连续重复同一工具阈值 |
 
 ---

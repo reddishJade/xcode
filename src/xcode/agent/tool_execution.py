@@ -137,6 +137,22 @@ async def _execute_parallel(
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
+    semaphore = asyncio.Semaphore(max(1, config.tool_workers))
+
+    async def execute_limited(
+        tool_call: ToolCallContent,
+    ) -> tuple[ToolResultMessage, bool]:
+        """在共享并发额度内执行单个 parallel 工具。"""
+        async with semaphore:
+            return await _execute_one(
+                current_context,
+                assistant_message,
+                tool_call,
+                config,
+                signal,
+                emit,
+            )
+
     tasks = []
     for tool_call in tool_calls:
         emit(
@@ -146,11 +162,7 @@ async def _execute_parallel(
                 args=tool_call.arguments or {},
             )
         )
-        tasks.append(
-            _execute_one(
-                current_context, assistant_message, tool_call, config, signal, emit
-            )
-        )
+        tasks.append(execute_limited(tool_call))
 
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
     results: list[ToolResultMessage] = []

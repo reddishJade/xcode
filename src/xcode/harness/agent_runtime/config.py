@@ -322,6 +322,7 @@ def build_loop_config(
         context_collectors=registry_,
         context_assembler=assembler,
         max_steps=snapshot.config.max_steps,
+        tool_workers=snapshot.config.tool_workers,
         max_step_retries=3,
         retry_backoff_base=0.5,
         max_tokens_continuation=True,

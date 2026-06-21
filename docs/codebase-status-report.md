@@ -693,8 +693,8 @@ taxonomy。
 
 这些问题直接影响安全、状态一致性、资源稳定性或故障定位。
 
-1. 让现有 `tool_workers` 配置真正限制并行工具调用，并为 subagent 增加独立
-   并发上限。当前不设计通用资源调度器。
+1. 为 subagent 增加独立并发上限。普通 parallel 工具调用已由
+   `tool_workers` 限制；当前不设计通用资源调度器。
 2. 为 hook 和最终运行结果补充时间、session/turn/request 关联字段；先完成
    本地可追踪性，不直接引入 OpenTelemetry。
 

@@ -153,6 +153,7 @@ type ShouldStopAfterTurnHook = Callable[[ShouldStopAfterTurnContext], bool]
 class AgentLoopConfig:
     provider: StreamProvider | None = None
     tool_execution: ToolExecutionMode = "parallel"
+    tool_workers: int = 4
 
     convert_to_llm: MessageConverter | None = None
     transform_context: ContextTransformer | None = None

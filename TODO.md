@@ -13,18 +13,6 @@
 同一优先级内按依赖顺序排列。Skill 和 MCP 是核心能力；Memory 是正式但可选的
 能力。现有 Python Plugin 系统不作为产品能力保留。
 
-## P2 · tool_workers 未限制工具并发
-
-`AgentConfig.tool_workers` 可配置并被传入 runtime，但工具执行路径没有消费该
-值。parallel batch 的并发数量由模型一次返回的 tool calls 决定。
-
-需要：
-
-- 使用有界 semaphore 或 worker pool 限制 parallel tool call。
-- 保持 sequential 工具的顺序语义。
-- 将取消信号和异常收集行为纳入并发限制测试。
-- 首版只限制总 parallel tool calls，不设计资源标签或依赖图。
-
 ## P2 · subagent 缺少独立并发上限
 
 `ManagedSubagentRunner` 可以持续提交独立 worker job，没有明确的 active job

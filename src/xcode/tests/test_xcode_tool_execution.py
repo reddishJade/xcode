@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 import unittest
 from typing import cast
 from unittest.mock import patch
@@ -27,6 +29,7 @@ from xcode.agent.types import (
     ToolCallContent,
 )
 from xcode.harness.agent_runtime.tool_adapter import adapt_tool_specs
+from xcode.harness.agent_runtime.cancellation import CancellationToken
 from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
 from xcode.harness.observability import (
@@ -50,6 +53,156 @@ EMPTY_SCHEMA = {
 
 
 class AgentToolExecutionTests(unittest.TestCase):
+    def test_parallel_tools_respect_worker_limit(self) -> None:
+        """parallel batch 的活跃 handler 数不超过 tool_workers。"""
+        lock = threading.Lock()
+        active = 0
+        max_active = 0
+
+        def handler(_data: dict[str, object]) -> str:
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.03)
+            with lock:
+                active -= 1
+            return "ok"
+
+        (tool,) = adapt_tool_specs(
+            (
+                ToolSpec(
+                    "read",
+                    "Read.",
+                    "{}",
+                    handler,
+                    read_only=True,
+                    concurrency_safe=True,
+                    schema=EMPTY_SCHEMA,
+                ),
+            )
+        )
+        calls = [
+            ToolCallContent(id=f"call-{index}", name="read", arguments={})
+            for index in range(6)
+        ]
+
+        result = asyncio.run(
+            execute_tool_calls(
+                AgentContext(tools=cast(list[AgentTool], [tool])),
+                AssistantMessage(content=list(calls)),
+                calls,
+                AgentLoopConfig(tool_workers=2),
+                None,
+                lambda _event: None,
+            )
+        )
+
+        self.assertEqual(len(result.results), 6)
+        self.assertEqual(max_active, 2)
+
+    def test_cancelled_waiting_parallel_tool_does_not_start_handler(self) -> None:
+        """等待并发额度的工具在取消后不进入 handler。"""
+        started = threading.Event()
+        release = threading.Event()
+        calls_started = 0
+
+        def handler(_data: dict[str, object]) -> str:
+            nonlocal calls_started
+            calls_started += 1
+            started.set()
+            release.wait(timeout=1)
+            return "ok"
+
+        (tool,) = adapt_tool_specs(
+            (
+                ToolSpec(
+                    "read",
+                    "Read.",
+                    "{}",
+                    handler,
+                    read_only=True,
+                    concurrency_safe=True,
+                    schema=EMPTY_SCHEMA,
+                ),
+            )
+        )
+        calls = [
+            ToolCallContent(id=f"call-{index}", name="read", arguments={})
+            for index in range(2)
+        ]
+        token = CancellationToken()
+
+        async def run_cancelled_batch() -> ExecutedToolBatch:
+            task = asyncio.create_task(
+                execute_tool_calls(
+                    AgentContext(tools=cast(list[AgentTool], [tool])),
+                    AssistantMessage(content=list(calls)),
+                    calls,
+                    AgentLoopConfig(tool_workers=1),
+                    token,
+                    lambda _event: None,
+                )
+            )
+            await asyncio.to_thread(started.wait, 1)
+            token.cancel("cancelled in test")
+            release.set()
+            return await task
+
+        result = asyncio.run(run_cancelled_batch())
+
+        self.assertEqual(calls_started, 1)
+        self.assertEqual(len(result.results), 2)
+        self.assertIn("cancelled in test", str(result.results[1].content))
+
+    def test_parallel_worker_limit_collects_handler_errors(self) -> None:
+        """受限并发仍收集每个工具结果，包括 handler 异常。"""
+
+        def handler(data: dict[str, object]) -> str:
+            if data.get("fail"):
+                raise ValueError("expected failure")
+            return "ok"
+
+        schema = {
+            "type": "object",
+            "properties": {"fail": {"type": "boolean"}},
+            "additionalProperties": False,
+        }
+        (tool,) = adapt_tool_specs(
+            (
+                ToolSpec(
+                    "read",
+                    "Read.",
+                    "{}",
+                    handler,
+                    read_only=True,
+                    concurrency_safe=True,
+                    schema=schema,
+                ),
+            )
+        )
+        calls = [
+            ToolCallContent(id="ok-1", name="read", arguments={}),
+            ToolCallContent(id="bad", name="read", arguments={"fail": True}),
+            ToolCallContent(id="ok-2", name="read", arguments={}),
+        ]
+
+        result = asyncio.run(
+            execute_tool_calls(
+                AgentContext(tools=cast(list[AgentTool], [tool])),
+                AssistantMessage(content=list(calls)),
+                calls,
+                AgentLoopConfig(tool_workers=1),
+                None,
+                lambda _event: None,
+            )
+        )
+
+        self.assertEqual(len(result.results), 3)
+        self.assertFalse(result.results[0].is_error)
+        self.assertTrue(result.results[1].is_error)
+        self.assertFalse(result.results[2].is_error)
+
     def test_toolspec_adapter_derives_execution_mode_from_metadata(self) -> None:
         read_tool, write_tool, explicit_parallel = adapt_tool_specs(
             (
