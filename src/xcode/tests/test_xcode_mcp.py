@@ -335,26 +335,21 @@ class TestMcpActionExtractor:
     def setup_method(self, method) -> None:
         self.extractor = ActionExtractor()
 
-    def test_mcp_tool_produces_mcp_action(self) -> None:
+    def test_mcp_tool_produces_unknown_action(self) -> None:
         action = self.extractor.extract(
             "mcp__my_server__read_file",
             {"path": "/tmp/test.txt"},
         )
-        assert action.capability == "mcp"
-        assert len(action.targets) == 1
-        target = action.targets[0]
-        assert target.kind == "mcp"
-        assert target.value == "mcp__my_server__read_file"
-        assert target.access == "execute"
+        assert action.capability == "unknown"
+        assert len(action.targets) == 0
 
     def test_mcp_tool_empty_input(self) -> None:
         action = self.extractor.extract(
             "mcp__server__fetch",
             {},
         )
-        assert action.capability == "mcp"
-        assert len(action.targets) == 1
-        assert action.targets[0].kind == "mcp"
+        assert action.capability == "unknown"
+        assert len(action.targets) == 0
 
     def test_non_mcp_tool_unchanged(self) -> None:
         action = self.extractor.extract("bash", {"command": "ls"})

@@ -595,8 +595,8 @@ class PermissionEngine:
         effective_scope = hitl.scope
         metadata: PermissionMetadata = _approval_metadata("allow", hitl.scope)
 
-        # Step 9: MCP tools are session/once only — downgrade permanent
-        if action.capability == "mcp" and hitl.scope == "permanent":
+        # Step 9: MCP/unknown-tool tools are session/once only — downgrade permanent
+        if action.capability in ("mcp", "unknown") and hitl.scope == "permanent":
             effective_scope = "session"
             metadata = dict(metadata)
             metadata["requested_scope"] = "permanent"

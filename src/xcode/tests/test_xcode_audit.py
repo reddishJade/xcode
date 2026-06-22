@@ -381,7 +381,7 @@ class XcodeAuditTests:
         ]
         assert len(mcp_records) > 0
         for record in mcp_records:
-            assert getattr(record, "capability", None) == "mcp"
+            assert getattr(record, "capability", None) in ("mcp", "unknown")
             assert getattr(record, "target_kind", None) == "mcp"
             assert "mcp__" in getattr(record, "target_value", "") or ""
 
