@@ -28,6 +28,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 ├── docs/ examples/ skills/
 └── src/xcode/
     ├── main.py → 入口：解析参数 → 配置发现 → build_app() → REPL/--prompt
+    ├── __main__.py → `python -m xcode` 入口
     ├── cli/
     ├── coding_agent/
     ├── harness/
@@ -101,6 +102,9 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `session.py` | JSONL 会话存储、索引、resume、fork、rewind |
 | `execution_env.py` | `ExecutionEnv` protocol、`SubprocessExecutionEnv`、`SandboxExecutionEnv` |
 | `daemon.py` | `HeartbeatDaemon` |
+| `snapshot.py` | Git tree 文件快照、每轮 pre/post snapshot、undo |
+| `skill_activation.py` | Skill activation 内容解析 |
+| `skills_registry.py` | Skill 发现、索引、懒加载 |
 | `task_store.py` | `tasks` group：任务存储、依赖排序、Kanban |
 | `task_progress.py` | `progress` group：长任务 checklist |
 | `session_todo.py` | 主 agent 会话级 `update_todo` 工具与内存状态 |
@@ -210,8 +214,11 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 
 ## 工具组与默认可见工具
 
-Core/session tools（默认）：
-`read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`、`update_todo`
+Core tools（默认，`group="core"`）：
+`read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`
+
+Session tools（默认，`group="session"`）：
+`update_todo`
 
 扩展组：
 `skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `memory`（search_memory + 主动召回 + consolidation）→ `daemon`（仅服务）
@@ -229,4 +236,4 @@ MCP 不使用 enabled group；存在 `.local/mcp_config.json` 时由核心 runti
 
 ## 测试目录
 
-`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和扩展组件（56 个测试文件 + fixtures.py）。
+`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和扩展组件（71 个测试文件 + fixtures.py + conftest.py）。

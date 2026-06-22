@@ -125,9 +125,10 @@ uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3
 uv run python -m xcode.evals.cli --list-benchmarks
 ```
 
-CLI `--benchmark` 支持：humaneval、swebench-lite、evalplus-humaneval、evalplus-mbpp。
+CLI `--benchmark` 支持：humaneval、swebench-lite、swebench-verified、evalplus-humaneval、evalplus-mbpp、terminal-bench、aider-polyglot。
+完整列表以 `--list-benchmarks` 为准。
 
-SWE-bench adapter helper 位于 `src/xcode/evals/adapters/swebench.py`。
+Benchmark adapter helpers 位于 `src/xcode/evals/adapters/`。
 
 ---
 

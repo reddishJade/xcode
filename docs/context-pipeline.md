@@ -69,17 +69,17 @@ Each context source has exactly one injection path — no fallback or secondary 
 
 **Search paths** (highest priority first):
 
-1. `<project_root>/.xcode/skills/`
-2. `<project_root>/.agents/skills/`
+0. `<explicit_skills_dir>` — configured via `paths.skills_dir` or `build_app(skills_dir=...)`
+1. `<project_root>/.xcode/skills/` (only if `trust_project_skills=true`)
+2. `<project_root>/.agents/skills/` (only if `trust_project_skills=true`)
 3. `~/.xcode/skills/`
 4. `~/.agents/skills/`
 
 **Rules**:
-- File presence is activation — any `.md`, `.mdx`, or `.txt` file under a search path is included.
+- Skill discovery uses `SKILL.md` frontmatter; any `.md` file under a search path with valid YAML frontmatter is a candidate.
 - Only `.md`, `.mdx`, and `.txt` files are considered.
 - Higher-priority path overrides lower-priority same relative path (deduplication by relative path).
-- Bounded traversal: max depth 3, max 50 files, single file ≤ 64 KB, total ≤ 16 KB.
-- Path traversal is prevented by `_is_child_path` check on symlink-resolved real paths.
+- Skill file max size: 50 KB (`_REFERENCE_MAX_BYTES`). No fixed depth, file count, or total byte cap.
 
 ## 6. Skill Loading
 

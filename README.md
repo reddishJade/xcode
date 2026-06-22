@@ -75,18 +75,31 @@ xcode
 REPL 支持以下会话命令：
 
 | 命令 | 功能 |
-|---|---|
-| `/plan` | 查看/编辑当前计划 |
-| `/build` | 执行当前计划 |
-| `/act` | 切换至执行模式 |
+|---|---|---|
+| `/plan` | 进入 Plan 模式（只读检查，禁止写入） |
+| `/build` | 进入 Build 模式（允许写入，高风险需审批） |
+| `/act` | 进入 Act 模式（完整权限） |
 | `/compact` | 手动触发上下文压缩 |
+| `/clear` | 开始新会话 |
+| `/fork [type]` | 分支（explore/verify/isolate） |
+| `/rewind [n]` | 回退 n 轮 |
+| `/resume [last\|id]` | 恢复历史会话 |
 | `/sessions` | 列出所有历史会话 |
-| `/resume` | 恢复历史会话 |
-| `/branch` | 基于已有会话创建分支 |
-| `/queue` | 查看消息队列 |
-| `/model` | 切换当前模型 |
-| `/tool` | 查看/切换工具组 |
+| `/branch [list\|tree\|id]` | 切换分支 |
+| `/tree` | 查看会话树 |
+| `/model [name]` | 切换当前模型 |
+| `/effort <level>` | 设置推理 effort |
+| `/thinking on/off` | 切换 thinking 显示 |
+| `/tool [list\|NAME INPUT]` | 查看/调用工具 |
+| `/skill NAME` | 显式激活技能 |
 | `/memory` | 检索、列出或添加项目级与用户级记忆 |
+| `/permissions [revoke\|clear]` | 权限管理 |
+| `/hooks` | 查看 hook 状态 |
+| `/context` | 查看上下文 token 占用 |
+| `/btw` | 侧问题快速问答 |
+| `/undo` | 文件级撤销 |
+| `/exit\|/quit` | 退出 |
+| `$skill-name ...` | 行首 `$` 激活技能并传递任务 |
 | `!COMMAND` | 执行 shell 命令 |
 | `@file` | 引用并读取文件内容 |
 
@@ -103,9 +116,11 @@ REPL 支持以下会话命令：
   脱敏；`JsonlAuditLogger` 记录审计日志。
 - **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果，
   支持压缩后重建文件指纹。
-- **REPL 会话管理** — `/plan`、`/build`、`/act`、`/compact`、`/sessions`、
-  `/resume`、`/branch`、`/queue`、`/model`、`/tool`、`!COMMAND` shell 快捷入口、
-  `@file` 引用和 session transcript 落盘。
+- **REPL 会话管理** — `/plan`、`/build`、`/act`、`/compact`、`/clear`、`/fork`、
+  `/rewind`、`/sessions`、`/resume`、`/branch`、`/tree`、`/model`、`/effort`、
+  `/thinking`、`/tool`、`/skill`、`/memory`、`/permissions`、`/hooks`、`/undo`、
+  `$skill-name` 快捷入口、`!COMMAND` shell 快捷入口、`@file` 引用、
+  `/context`、`/btw` 和 session transcript 落盘。
 - **MCP 工具集成** — 核心运行时自动读取 `.local/mcp_config.json`；无配置时
   不注册额外工具。
 - **可选扩展** — subagent、worktree、tasks、mailbox、progress、memory、daemon。
@@ -117,7 +132,7 @@ REPL 支持以下会话命令：
 运行时配置来自项目根 `xcode.config.json`，没有配置文件时使用默认配置：
 
 ```json
-{"tools": {"enabled_groups": ["core"]}}
+{"tools": {"enabled_groups": ["core", "skills"]}}
 ```
 
 配置发现栈：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地
@@ -127,11 +142,11 @@ REPL 支持以下会话命令：
 
 ## 工具组
 
-默认 `enabled_groups=["core"]`。可用 group：
+默认 `enabled_groups=["core", "skills"]`。可用 group：
 
 | group | 状态 | 工具 |
 |---|---|---|
-| `core` | 默认 | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`shell`、`search_tools` |
+| `core` | 默认 | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools` |
 | `skills` | 可选 | `load_skill` |
 | `subagent` | 可选 | `submit_subagent`、`check_subagent`、`cancel_subagent` |
 | `worktree` | 可选 | `create_worktree_task`、`remove_worktree_task` |
@@ -197,7 +212,7 @@ uv run pyright src/
 - 纯函数优先，职责分离（IO / 计算 / 展示）
 - 异常捕获明确具体类型，禁止 bare `except:`
 
-详细规范见 [docs/code-standards.md](docs/code-standards.md)。
+详细规范见 [AGENTS.md](AGENTS.md)。
 
 ---
 
@@ -205,13 +220,11 @@ uv run pyright src/
 
 | 文档 | 内容 |
 |---|---|
-| [AGENTS.md](AGENTS.md) | 本仓库 Agent 开发入口和约束 |
+| [AGENTS.md](AGENTS.md) | Agent 开发入口和 Python 编码规范 |
 | [CONFIG.md](CONFIG.md) | 运行时配置参考 |
 | [docs/code-organization.md](docs/code-organization.md) | 模块职责与工具组映射 |
 | [docs/source-review.md](docs/source-review.md) | 源码级架构审查 |
 | [docs/evaluation-guide.md](docs/evaluation-guide.md) | 测试和 eval 工作流 |
-| [docs/api-reference.md](docs/api-reference.md) | 公开 API 参考 |
-| [docs/code-standards.md](docs/code-standards.md) | Python 编码规范 |
 
 ---
 
