@@ -3,19 +3,16 @@
 测试带文件变更感知的重复工具调用抑制。
 """
 
-import unittest
-
 from xcode.agent.types import ToolCallContent
 from xcode.agent.watchdog import (
-    is_file_mutation_tool,
+is_file_mutation_tool,
     is_file_read_tool,
     should_clear_read_history,
     tool_call_signature,
     tool_calls_signature,
 )
-
-
-class TestToolSignature(unittest.TestCase):
+import pytest
+class TestToolSignature:
     """测试工具签名生成。"""
 
     def test_single_call_signature(self):
@@ -26,8 +23,8 @@ class TestToolSignature(unittest.TestCase):
             arguments={"path": "/test/file.txt"},
         )
         sig = tool_call_signature(call)
-        self.assertIn("read_file", sig)
-        self.assertIn("/test/file.txt", sig)
+        assert "read_file" in sig
+        assert "/test/file.txt" in sig
 
     def test_signature_stable_same_args(self):
         """测试相同参数生成相同签名。"""
@@ -41,7 +38,7 @@ class TestToolSignature(unittest.TestCase):
             name="test",
             arguments={"b": 2, "a": 1},  # 参数顺序不同
         )
-        self.assertEqual(tool_call_signature(call1), tool_call_signature(call2))
+        assert tool_call_signature(call1) == tool_call_signature(call2)
 
     def test_batch_signature_order_independent(self):
         """测试批次签名与调用顺序无关。"""
@@ -53,25 +50,24 @@ class TestToolSignature(unittest.TestCase):
             ToolCallContent(id="3", name="tool_b", arguments={}),
             ToolCallContent(id="4", name="tool_a", arguments={}),
         ]
-        self.assertEqual(tool_calls_signature(calls1), tool_calls_signature(calls2))
+        assert tool_calls_signature(calls1) == tool_calls_signature(calls2)
 
-
-class TestToolClassification(unittest.TestCase):
+class TestToolClassification:
     """测试工具分类。"""
 
     def test_file_mutation_tools(self):
         """测试文件变更工具识别。"""
-        self.assertTrue(is_file_mutation_tool("write_file"))
-        self.assertTrue(is_file_mutation_tool("edit_file"))
-        self.assertTrue(is_file_mutation_tool("bash"))
-        self.assertFalse(is_file_mutation_tool("read_file"))
+        assert is_file_mutation_tool("write_file")
+        assert is_file_mutation_tool("edit_file")
+        assert is_file_mutation_tool("bash")
+        assert not (is_file_mutation_tool("read_file"))
 
     def test_file_read_tools(self):
         """测试只读工具识别。"""
-        self.assertTrue(is_file_read_tool("read_file"))
-        self.assertTrue(is_file_read_tool("grep_search"))
-        self.assertTrue(is_file_read_tool("glob_files"))
-        self.assertFalse(is_file_read_tool("write_file"))
+        assert is_file_read_tool("read_file")
+        assert is_file_read_tool("grep_search")
+        assert is_file_read_tool("glob_files")
+        assert not (is_file_read_tool("write_file"))
 
     def test_should_clear_read_history(self):
         """测试是否应清除只读历史。"""
@@ -82,10 +78,9 @@ class TestToolClassification(unittest.TestCase):
             ToolCallContent(id="2", name="write_file", arguments={}),
         ]
         # 只读调用不清除历史
-        self.assertFalse(should_clear_read_history(read_calls, []))
+        assert not (should_clear_read_history(read_calls, []))
         # 写入调用清除历史
-        self.assertTrue(should_clear_read_history(write_calls, []))
-
+        assert should_clear_read_history(write_calls, [])
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

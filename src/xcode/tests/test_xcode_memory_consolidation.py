@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from xcode.harness.agent_runtime.compaction import LayeredCompactor
 from xcode.harness.memory import MemoryManager
-
-
-class TestMemoryConsolidationHook(unittest.TestCase):
-    def setUp(self) -> None:
+import pytest
+class TestMemoryConsolidationHook:
+    def setup_method(self, method) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.manager = MemoryManager(self.root)
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method) -> None:
         self.temp_dir.cleanup()
 
     def test_consolidation_hook_triggers_on_compaction(self) -> None:
@@ -46,15 +44,15 @@ class TestMemoryConsolidationHook(unittest.TestCase):
 
         # Compactor should summarize the older messages (index 1 to 2)
         # Check that the summary message was created and starts with [Compressed]
-        self.assertTrue(len(final_messages) < len(messages))
-        self.assertEqual(final_messages[1]["role"], "user")
-        self.assertTrue(final_messages[1]["content"].startswith("[Compressed]"))
+        assert len(final_messages) < len(messages)
+        assert final_messages[1]["role"] == "user"
+        assert final_messages[1]["content"].startswith("[Compressed]")
 
         # Verify that the memory block was consolidated into MEMORY.md!
-        self.assertTrue(self.manager.memory_file.exists())
+        assert self.manager.memory_file.exists()
         memory_text = self.manager.memory_file.read_text(encoding="utf-8")
-        self.assertIn("Incident 99: Memory compaction works", memory_text)
-        self.assertIn("Hook into Summary Compact", memory_text)
+        assert "Incident 99: Memory compaction works" in memory_text
+        assert "Hook into Summary Compact" in memory_text
 
     def test_consolidation_hook_archives_invalid_attempt(self) -> None:
         compactor = LayeredCompactor(
@@ -82,16 +80,13 @@ class TestMemoryConsolidationHook(unittest.TestCase):
 
         # Verify that MEMORY.md does not contain the invalid block
         if self.manager.memory_file.exists():
-            self.assertNotIn(
-                "Incident 100", self.manager.memory_file.read_text(encoding="utf-8")
-            )
+            assert "Incident 100" not in self.manager.memory_file.read_text(encoding="utf-8")
 
         # Verify that the invalid block was safely archived to the archive directory
         archive_files = list(self.manager.archive_dir.glob("*.md"))
-        self.assertEqual(len(archive_files), 1)
+        assert len(archive_files) == 1
         archive_text = archive_files[0].read_text(encoding="utf-8")
-        self.assertIn("Incident 100: Corrupt compaction", archive_text)
-
+        assert "Incident 100: Corrupt compaction" in archive_text
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

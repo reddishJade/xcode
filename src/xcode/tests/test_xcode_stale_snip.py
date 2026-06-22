@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import unittest
 from typing import Any
 from xcode.harness.agent_runtime.compaction import stale_snip_file_reads
-
-
-class TestXcodeStaleSnip(unittest.TestCase):
+import pytest
+class TestXcodeStaleSnip:
     def test_stale_snip_only_keeps_latest_read_file(self) -> None:
         messages: list[dict[str, Any]] = [
             {
@@ -83,23 +81,23 @@ class TestXcodeStaleSnip(unittest.TestCase):
         # Assertions
         # 1. Check that the first read of b.txt is snipped
         b1_result = compacted[2]["content"][0]
-        self.assertEqual(b1_result["tool_use_id"], "use_b1")
-        self.assertEqual(b1_result["content"], "[Content snipped - re-read if needed]")
+        assert b1_result["tool_use_id"] == "use_b1"
+        assert b1_result["content"] == "[Content snipped - re-read if needed]"
 
         # 2. Check that the read of a.txt is NOT snipped
         a_result = compacted[2]["content"][1]
-        self.assertEqual(a_result["tool_use_id"], "use_a1")
-        self.assertEqual(a_result["content"], "content of a")
+        assert a_result["tool_use_id"] == "use_a1"
+        assert a_result["content"] == "content of a"
 
         # 3. Check that the second read of b.txt is NOT snipped
         b2_result = compacted[4]["content"][0]
-        self.assertEqual(b2_result["tool_use_id"], "use_b2")
-        self.assertEqual(b2_result["content"], "content of b version 2")
+        assert b2_result["tool_use_id"] == "use_b2"
+        assert b2_result["content"] == "content of b version 2"
 
         # 4. Check that grep_search is NOT snipped
         other_result = compacted[4]["content"][1]
-        self.assertEqual(other_result["tool_use_id"], "use_other")
-        self.assertEqual(other_result["content"], "some grep results")
+        assert other_result["tool_use_id"] == "use_other"
+        assert other_result["content"] == "some grep results"
 
     def test_stale_snip_no_error_on_missing_fields(self) -> None:
         messages: list[dict[str, Any]] = [
@@ -134,8 +132,7 @@ class TestXcodeStaleSnip(unittest.TestCase):
         ]
         # Should execute successfully without throwing errors
         compacted = stale_snip_file_reads(messages)
-        self.assertEqual(len(compacted), 5)
-
+        assert len(compacted) == 5
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

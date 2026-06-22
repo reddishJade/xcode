@@ -3,17 +3,14 @@
 测试工具配对修复和请求 hygiene 压缩。
 """
 
-import unittest
-
 from xcode.agent.history import (
     apply_request_hygiene,
     repair_tool_pairing,
 )
 from xcode.agent.messages import AssistantMessage, ToolResultMessage, UserMessage
 from xcode.agent.types import TextContent, ToolCallContent
-
-
-class TestRepairToolPairing(unittest.TestCase):
+import pytest
+class TestRepairToolPairing:
     """测试工具调用配对修复。"""
 
     def test_repair_removes_orphan_results(self):
@@ -27,8 +24,8 @@ class TestRepairToolPairing(unittest.TestCase):
             ),
         ]
         repaired = repair_tool_pairing(messages)
-        self.assertEqual(len(repaired), 1)
-        self.assertIsInstance(repaired[0], UserMessage)
+        assert len(repaired) == 1
+        assert isinstance(repaired[0], UserMessage)
 
     def test_repair_removes_incomplete_calls(self):
         """测试移除未完成的 tool_call。"""
@@ -45,8 +42,8 @@ class TestRepairToolPairing(unittest.TestCase):
             UserMessage(content=[TextContent(text="test")]),
         ]
         repaired = repair_tool_pairing(messages)
-        self.assertEqual(len(repaired), 1)
-        self.assertIsInstance(repaired[0], UserMessage)
+        assert len(repaired) == 1
+        assert isinstance(repaired[0], UserMessage)
 
     def test_repair_keeps_valid_pairs(self):
         """测试保留有效配对。"""
@@ -67,9 +64,9 @@ class TestRepairToolPairing(unittest.TestCase):
             ),
         ]
         repaired = repair_tool_pairing(messages)
-        self.assertEqual(len(repaired), 2)
-        self.assertIsInstance(repaired[0], AssistantMessage)
-        self.assertIsInstance(repaired[1], ToolResultMessage)
+        assert len(repaired) == 2
+        assert isinstance(repaired[0], AssistantMessage)
+        assert isinstance(repaired[1], ToolResultMessage)
 
     def test_repair_mixed_content(self):
         """测试混合内容（text + tool_call）。"""
@@ -96,15 +93,14 @@ class TestRepairToolPairing(unittest.TestCase):
             ),
         ]
         repaired = repair_tool_pairing(messages)
-        self.assertEqual(len(repaired), 2)
+        assert len(repaired) == 2
         assistant = repaired[0]
         assert isinstance(assistant, AssistantMessage)
-        self.assertEqual(len(assistant.content), 2)
-        self.assertIsInstance(assistant.content[0], TextContent)
-        self.assertIsInstance(assistant.content[1], ToolCallContent)
+        assert len(assistant.content) == 2
+        assert isinstance(assistant.content[0], TextContent)
+        assert isinstance(assistant.content[1], ToolCallContent)
 
-
-class TestApplyRequestHygiene(unittest.TestCase):
+class TestApplyRequestHygiene:
     """测试请求 hygiene 压缩。"""
 
     def test_hygiene_truncates_large_result(self):
@@ -135,8 +131,8 @@ class TestApplyRequestHygiene(unittest.TestCase):
         assert isinstance(result_msg, ToolResultMessage)
         result_text = result_msg.content
         assert isinstance(result_text, str)
-        self.assertIn("omitted", result_text)
-        self.assertLess(len(result_text.splitlines()), 200)
+        assert "omitted" in result_text
+        assert len(result_text.splitlines()) < 200
 
     def test_hygiene_truncates_tool_args(self):
         """测试压缩超长工具参数。"""
@@ -163,7 +159,7 @@ class TestApplyRequestHygiene(unittest.TestCase):
         call = assistant.content[0]
         assert isinstance(call, ToolCallContent)
         assert call.arguments is not None
-        self.assertIn("truncated", str(call.arguments.get("content")))
+        assert "truncated" in str(call.arguments.get("content"))
 
     def test_hygiene_detects_base64(self):
         """测试检测 base64 payload。"""
@@ -192,8 +188,8 @@ class TestApplyRequestHygiene(unittest.TestCase):
         assert isinstance(result_msg, ToolResultMessage)
         result_text = result_msg.content
         assert isinstance(result_text, str)
-        self.assertIn("base64", result_text)
-        self.assertIn("bytes", result_text)
+        assert "base64" in result_text
+        assert "bytes" in result_text
 
     def test_hygiene_preserves_signal_lines(self):
         """测试保留错误/警告信号行。"""
@@ -228,7 +224,7 @@ class TestApplyRequestHygiene(unittest.TestCase):
         assert isinstance(result_msg, ToolResultMessage)
         result_text = result_msg.content
         assert isinstance(result_text, str)
-        self.assertIn("ERROR: something went wrong", result_text)
+        assert "ERROR: something went wrong" in result_text
 
     def test_hygiene_no_truncate_small_content(self):
         """测试小内容不压缩。"""
@@ -253,17 +249,13 @@ class TestApplyRequestHygiene(unittest.TestCase):
         second = cleaned[1]
         assert isinstance(second, ToolResultMessage)
         assert isinstance(second.content, str)
-        self.assertEqual(second.content, small_content)
+        assert second.content == small_content
         first = cleaned[0]
         assert isinstance(first, AssistantMessage)
         call = first.content[0]
         assert isinstance(call, ToolCallContent)
         assert call.arguments is not None
-        self.assertEqual(
-            call.arguments.get("param"),
-            "short",
-        )
-
+        assert call.arguments.get("param") == "short"
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

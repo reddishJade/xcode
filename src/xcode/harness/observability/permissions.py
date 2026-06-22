@@ -154,14 +154,13 @@ class PermissionEngine:
     def decide(
         self,
         tool_name: str,
-        action_input: str,
+        tool_input: dict[str, Any],
         *,
         execution_decision: PermissionDecision | None = None,
         tool_spec: PermissionToolSpec | None = None,
-        tool_input: dict[str, Any] | None = None,
         approval_callback: PermissionApprovalCallback | None = None,
     ) -> PermissionEngineResult:
-        action = ActionExtractor().extract(tool_name, tool_input or {})
+        action = ActionExtractor().extract(tool_name, tool_input)
 
         # Tier 0: restricted_dirs 硬阻断
         dir_result = self._check_restricted_dirs(action)
@@ -170,8 +169,7 @@ class PermissionEngine:
 
         # 统一 resolver 路径：对所有工具生效
         result = self._decide_resolver(
-            tool_name,
-            action_input,
+            action,
             execution_decision=execution_decision,
             tool_spec=tool_spec,
             tool_input=tool_input,
@@ -185,19 +183,17 @@ class PermissionEngine:
         if not self._config.shadow_model_enabled:
             return result
 
-        shadow_action = ActionExtractor().extract(tool_name, tool_input or {})
         shadow_verdict = self._shadow_verdict(
-            shadow_action,
-            action_input=action_input,
+            action,
             execution_decision=execution_decision,
         )
         shadow_approval_candidate = self._compute_shadow_approval(
-            shadow_action,
+            action,
             shadow_verdict,
         )
         return replace(
             result,
-            shadow_action=shadow_action,
+            shadow_action=action,
             shadow_verdict=shadow_verdict,
             shadow_diff=self._shadow_diff(result, shadow_verdict),
             shadow_approval_candidate=shadow_approval_candidate,
@@ -220,19 +216,16 @@ class PermissionEngine:
 
     def _decide_resolver(
         self,
-        tool_name: str,
-        action_input: str,
+        action: Action,
         *,
         execution_decision: PermissionDecision | None = None,
         tool_spec: PermissionToolSpec | None = None,
-        tool_input: dict[str, Any] | None = None,
+        tool_input: dict[str, Any],
         approval_callback: PermissionApprovalCallback | None = None,
     ) -> PermissionEngineResult:
         """通过约束求值与 PermissionResolver 生成权限裁决。"""
-        action = ActionExtractor().extract(tool_name, tool_input or {})
         verdict = self._shadow_verdict(
             action,
-            action_input=action_input,
             execution_decision=execution_decision,
         )
 
@@ -274,7 +267,6 @@ class PermissionEngine:
         return self._resolve_ask(
             action,
             verdict,
-            action_input=action_input,
             approval_callback=approval_callback,
             tool_spec=tool_spec,
             tool_input=tool_input,
@@ -285,10 +277,9 @@ class PermissionEngine:
         action: Action,
         verdict: Verdict,
         *,
-        action_input: str,
         approval_callback: PermissionApprovalCallback | None = None,
         tool_spec: PermissionToolSpec | None = None,
-        tool_input: dict[str, Any] | None = None,
+        tool_input: dict[str, Any],
     ) -> PermissionEngineResult:
         """统一的 ask 处理：grant 查找 + 回调。"""
         # 统一路径：所有工具通过 _execute_cutover_ask 处理 grant 查找、回调、写入
@@ -304,7 +295,6 @@ class PermissionEngine:
         self,
         action: Action,
         *,
-        action_input: str,
         execution_decision: PermissionDecision | None,
     ) -> Verdict:
         """解析当前已接入的 shadow policy constraints。"""
@@ -312,7 +302,6 @@ class PermissionEngine:
             action,
             execution_decision=execution_decision,
             static_policy=self._config.static_policy,
-            action_input=action_input,
             boundary_context=self._boundary_context(),
             safety_backstop_enabled=True,
             hook_constraint_providers=self._config.hook_constraint_providers,

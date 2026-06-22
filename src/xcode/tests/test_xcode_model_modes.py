@@ -3,31 +3,28 @@ from __future__ import annotations
 from contextlib import redirect_stdout
 from io import StringIO
 from typing import cast
-import unittest
-
 from xcode.ai.model_modes import parse_model_mode
 from xcode.cli.repl_settings import handle_effort_command, handle_model_command
 from xcode.harness.app import XcodeApp
 from xcode.harness.agent_runtime import StructuredAgent
-
-
-class XcodeModelModeTests(unittest.TestCase):
+import pytest
+class XcodeModelModeTests:
     def test_parse_model_mode_plain_model(self) -> None:
         parsed = parse_model_mode("deepseek-v4")
 
-        self.assertEqual(parsed.model, "deepseek-v4")
-        self.assertIsNone(parsed.provider)
-        self.assertIsNone(parsed.thinking_level)
+        assert parsed.model == "deepseek-v4"
+        assert parsed.provider is None
+        assert parsed.thinking_level is None
 
     def test_parse_model_mode_provider_and_thinking(self) -> None:
         parsed = parse_model_mode("judge/gpt-5:xhigh")
 
-        self.assertEqual(parsed.provider, "judge")
-        self.assertEqual(parsed.model, "gpt-5")
-        self.assertEqual(parsed.thinking_level, "xhigh")
+        assert parsed.provider == "judge"
+        assert parsed.model == "gpt-5"
+        assert parsed.thinking_level == "xhigh"
 
     def test_parse_model_mode_rejects_unknown_thinking_level(self) -> None:
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             parse_model_mode("gpt-5:turbo")
 
     def test_model_command_applies_profile_and_thinking_level(self) -> None:
@@ -36,10 +33,10 @@ class XcodeModelModeTests(unittest.TestCase):
         with redirect_stdout(StringIO()):
             handle_model_command("/model judge/gpt-5:off", app)
 
-        self.assertEqual(app.calls[0]["profile"], "judge")
-        self.assertEqual(app.calls[0]["model"], "gpt-5")
-        self.assertFalse(app.calls[0]["thinking"])
-        self.assertIsNone(app.calls[0]["reasoning_effort"])
+        assert app.calls[0]["profile"] == "judge"
+        assert app.calls[0]["model"] == "gpt-5"
+        assert not (app.calls[0]["thinking"])
+        assert app.calls[0]["reasoning_effort"] is None
 
     def test_effort_command_applies_supported_levels(self) -> None:
         app = _EffortApp(transport="openai_chat")
@@ -47,7 +44,7 @@ class XcodeModelModeTests(unittest.TestCase):
         with redirect_stdout(StringIO()):
             handle_effort_command("/effort xhigh", app)
 
-        self.assertEqual(app.calls[0]["reasoning_effort"], "xhigh")
+        assert app.calls[0]["reasoning_effort"] == "xhigh"
 
     def test_effort_command_rejects_unsupported_transports(self) -> None:
         app = _EffortApp(transport="chatglm_chat")
@@ -56,8 +53,8 @@ class XcodeModelModeTests(unittest.TestCase):
         with redirect_stdout(output):
             handle_effort_command("/effort high", app)
 
-        self.assertEqual(app.calls, [])
-        self.assertIn("does not support reasoning effort", output.getvalue())
+        assert app.calls == []
+        assert "does not support reasoning effort" in output.getvalue()
 
     def test_get_model_info_uses_active_provider_transport(self) -> None:
         agent = cast(
@@ -68,9 +65,8 @@ class XcodeModelModeTests(unittest.TestCase):
 
         info = app.get_model_info()
 
-        self.assertEqual(info["transport"], "deepseek_chat")
-        self.assertEqual(info["reasoning_effort"], "high")
-
+        assert info["transport"] == "deepseek_chat"
+        assert info["reasoning_effort"] == "high"
 
 class _ModelApp:
     def __init__(self) -> None:
@@ -100,7 +96,6 @@ class _ModelApp:
             }
         )
         return model
-
 
 class _EffortApp:
     def __init__(self, transport: str) -> None:
@@ -136,7 +131,6 @@ class _EffortApp:
         )
         return model
 
-
 class _Provider:
     def __init__(self, transport: str) -> None:
         self.transport = transport
@@ -145,16 +139,13 @@ class _Provider:
         self.thinking = True
         self.reasoning_effort = "high"
 
-
 class _ProviderWrapper:
     def __init__(self, active_provider: _Provider) -> None:
         self.active_provider = active_provider
-
 
 class _Agent:
     def __init__(self, provider: _ProviderWrapper) -> None:
         self.provider = provider
 
-
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

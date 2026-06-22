@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,17 +9,16 @@ from xcode.harness.agent_runtime.prompting import (
     PromptContext,
 )
 from xcode.harness.skills import ToolSpec
-
-
-class TestXcodePromptCacheMemoization(unittest.TestCase):
+import pytest
+class TestXcodePromptCacheMemoization:
     """系统提示词三级缓存 (Memoization Cache) 单元测试。"""
 
-    def setUp(self) -> None:
+    def setup_method(self, method) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.builder = SystemPromptBuilder()
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method) -> None:
         self.temp_dir.cleanup()
 
     def test_stable_and_dynamic_regions_are_cached(self) -> None:
@@ -49,7 +47,7 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
             second_prompt = self.builder.build(context)
             mock_build_tool.assert_not_called()  # 没有重新生成工具提示词，说明命中了静态缓存！
 
-        self.assertEqual(first_prompt, second_prompt)
+        assert first_prompt == second_prompt
 
     def test_stable_cache_invalidates_when_registry_changes(self) -> None:
         """测试当注册的工具变更时，静态缓存能正确失效并重建。"""
@@ -66,8 +64,8 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
         second_prompt = self.builder.build(context_2)
 
         # 注册表增加了新工具，缓存应当更新重建，产生不同的系统提示词
-        self.assertNotEqual(first_prompt, second_prompt)
-        self.assertIn("tool_new", second_prompt)
+        assert first_prompt != second_prompt
+        assert "tool_new" in second_prompt
 
     def test_stable_cache_invalidates_when_tool_prompt_surface_changes(self) -> None:
         """测试同名工具的 prompt 可见内容变化时，静态缓存正确失效。"""
@@ -89,9 +87,9 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
         first_prompt = self.builder.build(context_1)
         second_prompt = self.builder.build(context_2)
 
-        self.assertNotEqual(first_prompt, second_prompt)
-        self.assertIn("snippet changed", second_prompt)
-        self.assertIn("Use tool_a for cache tests.", second_prompt)
+        assert first_prompt != second_prompt
+        assert "snippet changed" in second_prompt
+        assert "Use tool_a for cache tests." in second_prompt
 
     def test_dynamic_cache_invalidates_when_project_root_changes(self) -> None:
         """测试当工作目录或项目路径变更时，动态环境缓存失效。"""
@@ -104,7 +102,7 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
             first_prompt = self.builder.build(context_1)
             second_prompt = self.builder.build(context_2)
 
-            self.assertNotEqual(first_prompt, second_prompt)
+            assert first_prompt != second_prompt
 
     def test_volatile_region_always_recalculates(self) -> None:
         """测试易失区（如 notice 和 routed skills）即使在其他区域命中缓存时，依然每轮独立生成。"""
@@ -116,12 +114,11 @@ class TestXcodePromptCacheMemoization(unittest.TestCase):
         second_prompt = self.builder.build(context_2)
 
         # 静态和动态区虽然被缓存，但 notices 作为易失区在两轮中分别独立生成
-        self.assertIn("Notice 1", first_prompt)
-        self.assertNotIn("Notice 2", first_prompt)
+        assert "Notice 1" in first_prompt
+        assert "Notice 2" not in first_prompt
 
-        self.assertIn("Notice 2", second_prompt)
-        self.assertNotIn("Notice 1", second_prompt)
-
+        assert "Notice 2" in second_prompt
+        assert "Notice 1" not in second_prompt
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

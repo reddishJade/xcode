@@ -2,13 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
-import unittest
-
 from xcode.cli.repl_tools import parse_tool_input
 from xcode.coding_agent.tools import build_file_tools
 from xcode.coding_agent.tools.file_handlers import LocalFileOperations
-
-
+import pytest
 class RecordingFileOperations(LocalFileOperations):
     def __init__(self) -> None:
         self.reads: list[Path] = []
@@ -27,8 +24,7 @@ class RecordingFileOperations(LocalFileOperations):
         self.mkdirs.append(path)
         super().mkdir(path)
 
-
-class XcodeSandboxedFileToolsTests(unittest.TestCase):
+class XcodeSandboxedFileToolsTests:
     def _tools(self, root: Path):
         return {tool.name: tool for tool in build_file_tools(root)}
 
@@ -45,8 +41,8 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
 
             output = tools["read_file"].handler({"path": "a.txt", "limit": 2})
 
-            self.assertIn("one\ntwo", output)
-            self.assertIn('"offset": 3', output)
+            assert "one\ntwo" in output
+            assert '"offset": 3' in output
 
     def test_file_tools_use_injected_operations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -61,10 +57,10 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
                 {"path": "a.txt", "old_text": "old", "new_text": "updated"}
             )
 
-            self.assertIn(root / "a.txt", operations.reads)
-            self.assertIn(root / "b.txt", operations.writes)
-            self.assertIn(root / "a.txt", operations.writes)
-            self.assertIn(root, operations.mkdirs)
+            assert root / "a.txt" in operations.reads
+            assert root / "b.txt" in operations.writes
+            assert root / "a.txt" in operations.writes
+            assert root in operations.mkdirs
 
     def test_read_file_with_offset_and_continuation_hint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -76,9 +72,9 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
                 {"path": "a.txt", "offset": 2, "limit": 2}
             )
 
-            self.assertIn("two\nthree", output)
-            self.assertIn('"offset": 4', output)
-            self.assertIn('"limit": 2', output)
+            assert "two\nthree" in output
+            assert '"offset": 4' in output
+            assert '"limit": 2' in output
 
     def test_read_file_with_offset_without_limit_reads_to_end(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -88,7 +84,7 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
 
             output = tools["read_file"].handler({"path": "a.txt", "offset": 2})
 
-            self.assertEqual(output, "two\nthree")
+            assert output == "two\nthree"
 
     def test_read_file_rejects_invalid_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -96,9 +92,9 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             (root / "a.txt").write_text("one", encoding="utf-8")
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "limit must be an integer"):
+            with pytest.raises(ValueError, match="limit must be an integer"):
                 tools["read_file"].handler({"path": "a.txt", "limit": "bad"})
-            with self.assertRaisesRegex(ValueError, "limit must be non-negative"):
+            with pytest.raises(ValueError, match="limit must be non-negative"):
                 tools["read_file"].handler({"path": "a.txt", "limit": -1})
 
     def test_read_file_rejects_invalid_offset(self) -> None:
@@ -107,11 +103,11 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             (root / "a.txt").write_text("one", encoding="utf-8")
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "offset must be an integer"):
+            with pytest.raises(ValueError, match="offset must be an integer"):
                 tools["read_file"].handler({"path": "a.txt", "offset": "bad"})
-            with self.assertRaisesRegex(ValueError, "offset must be positive"):
+            with pytest.raises(ValueError, match="offset must be positive"):
                 tools["read_file"].handler({"path": "a.txt", "offset": 0})
-            with self.assertRaisesRegex(ValueError, "beyond end of file"):
+            with pytest.raises(ValueError, match="beyond end of file"):
                 tools["read_file"].handler({"path": "a.txt", "offset": 2})
 
     def test_rejects_absolute_parent_and_sensitive_paths(self) -> None:
@@ -119,15 +115,15 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             root = Path(tmp)
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "absolute"):
+            with pytest.raises(ValueError, match="absolute"):
                 tools["read_file"].handler({"path": str(root / "a.txt")})
-            with self.assertRaisesRegex(ValueError, "parent-directory"):
+            with pytest.raises(ValueError, match="parent-directory"):
                 tools["read_file"].handler({"path": "../secret.txt"})
-            with self.assertRaisesRegex(ValueError, "blocked"):
+            with pytest.raises(ValueError, match="blocked"):
                 tools["read_file"].handler({"path": ".env"})
-            with self.assertRaisesRegex(ValueError, "blocked"):
+            with pytest.raises(ValueError, match="blocked"):
                 tools["read_file"].handler({"path": "xcode/.local/chroma_db/index"})
-            with self.assertRaisesRegex(ValueError, "blocked"):
+            with pytest.raises(ValueError, match="blocked"):
                 tools["read_file"].handler({"path": ".local/chroma_db/index"})
 
     def test_rejects_symlink_escape(self) -> None:
@@ -142,10 +138,10 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             try:
                 link.symlink_to(target)
             except OSError:
-                self.skipTest("symlinks are not available on this platform")
+                pytest.skip("symlinks are not available on this platform")
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "escapes project root"):
+            with pytest.raises(ValueError, match="escapes project root"):
                 tools["read_file"].handler({"path": "link.txt"})
 
     def test_edit_file_requires_unique_match(self) -> None:
@@ -155,7 +151,7 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             path.write_text("x\nx\n", encoding="utf-8")
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "Found 2 occurrences"):
+            with pytest.raises(ValueError, match="Found 2 occurrences"):
                 tools["edit_file"].handler(
                     {"path": "a.txt", "old_text": "x", "new_text": "y"}
                 )
@@ -168,10 +164,10 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
                     "replace_all": True,
                 }
             )
-            self.assertIn("replacements=2", output)
-            self.assertIn("--- a/a.txt", output)
-            self.assertIn("+++ b/a.txt", output)
-            self.assertEqual(path.read_text(encoding="utf-8"), "y\ny\n")
+            assert "replacements=2" in output
+            assert "--- a/a.txt" in output
+            assert "+++ b/a.txt" in output
+            assert path.read_text(encoding="utf-8") == "y\ny\n"
 
     def test_edit_file_preserves_utf8_sig_encoding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -185,9 +181,9 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
                 {"path": "a.txt", "old_text": "old", "new_text": "new"}
             )
 
-            self.assertIn("-old", output)
-            self.assertIn("+new", output)
-            self.assertTrue(path.read_bytes().startswith(b"\xef\xbb\xbf"))
+            assert "-old" in output
+            assert "+new" in output
+            assert path.read_bytes().startswith(b"\xef\xbb\xbf")
 
     def test_write_file_creates_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -196,11 +192,8 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
 
             tools["write_file"].handler({"path": "docs/a.md", "content": "hello"})
 
-            self.assertTrue((root / "docs" / "a.md").is_file())
-            self.assertEqual(
-                (root / "docs" / "a.md").read_text(encoding="utf-8"),
-                "hello",
-            )
+            assert (root / "docs" / "a.md").is_file()
+            assert (root / "docs" / "a.md").read_text(encoding="utf-8") == "hello"
 
     def test_write_file_accepts_structured_input(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -211,17 +204,15 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
                 {"path": "docs/a.md", "content": "hello"}
             )
 
-            self.assertIn("wrote file: docs/a.md", output)
-            self.assertEqual(
-                (root / "docs" / "a.md").read_text(encoding="utf-8"), "hello"
-            )
+            assert "wrote file: docs/a.md" in output
+            assert (root / "docs" / "a.md").read_text(encoding="utf-8") == "hello"
 
     def test_write_file_requires_path_instead_of_writing_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "path is required"):
+            with pytest.raises(ValueError, match="path is required"):
                 tools["write_file"].handler({"content": "hello"})
 
     def test_write_file_requires_content_key(self) -> None:
@@ -229,10 +220,10 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             root = Path(tmp)
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "content is required"):
+            with pytest.raises(ValueError, match="content is required"):
                 tools["write_file"].handler({"path": "docs/a.md"})
 
-            self.assertFalse((root / "docs" / "a.md").exists())
+            assert not ((root / "docs" / "a.md").exists())
 
     def test_write_file_accepts_explicit_empty_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -241,8 +232,8 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
 
             output = tools["write_file"].handler({"path": "empty.txt", "content": ""})
 
-            self.assertIn("wrote file: empty.txt", output)
-            self.assertEqual((root / "empty.txt").read_text(encoding="utf-8"), "")
+            assert "wrote file: empty.txt" in output
+            assert (root / "empty.txt").read_text(encoding="utf-8") == ""
 
     def test_write_file_rejects_directory_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -250,7 +241,7 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             (root / "docs").mkdir()
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "path is a directory: docs"):
+            with pytest.raises(ValueError, match="path is a directory: docs"):
                 tools["write_file"].handler({"path": "docs", "content": "hello"})
 
     def test_write_file_rejects_large_content(self) -> None:
@@ -258,12 +249,12 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             root = Path(tmp)
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "write content too large"):
+            with pytest.raises(ValueError, match="write content too large"):
                 tools["write_file"].handler(
                     {"path": "large.txt", "content": "x" * 1_000_001}
                 )
 
-            self.assertFalse((root / "large.txt").exists())
+            assert not ((root / "large.txt").exists())
 
     def test_edit_file_rejects_large_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -272,7 +263,7 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             path.write_text("small", encoding="utf-8")
             tools = self._tools(root)
 
-            with self.assertRaisesRegex(ValueError, "write content too large"):
+            with pytest.raises(ValueError, match="write content too large"):
                 tools["edit_file"].handler(
                     {
                         "path": "a.txt",
@@ -281,7 +272,7 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
                     }
                 )
 
-            self.assertEqual(path.read_text(encoding="utf-8"), "small")
+            assert path.read_text(encoding="utf-8") == "small"
 
     def test_file_tools_have_structured_schemas(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -290,11 +281,9 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             assert tools["read_file"].schema is not None
             assert tools["write_file"].schema is not None
             assert tools["edit_file"].schema is not None
-            self.assertIn("offset", tools["read_file"].schema["properties"])
-            self.assertEqual(
-                tools["write_file"].schema["required"], ["path", "content"]
-            )
-            self.assertEqual(tools["edit_file"].schema["required"], ["path"])
+            assert "offset" in tools["read_file"].schema["properties"]
+            assert tools["write_file"].schema["required"] == ["path", "content"]
+            assert tools["edit_file"].schema["required"] == ["path"]
 
     def test_file_tools_have_prompt_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -304,35 +293,28 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             edit_snippet = tools["edit_file"].prompt_snippet
             assert write_snippet is not None
             assert edit_snippet is not None
-            self.assertIn("replace entire files", write_snippet)
-            self.assertIn(
-                "Use write_file only for new files",
-                tools["write_file"].prompt_guidelines[0],
-            )
-            self.assertIn("precise file edits", edit_snippet)
-            self.assertTrue(
-                any(
+            assert "replace entire files" in write_snippet
+            assert "Use write_file only for new files" in tools["write_file"].prompt_guidelines[0]
+            assert "precise file edits" in edit_snippet
+            assert any(
                     "multiple entries in edits" in guideline
                     for guideline in tools["edit_file"].prompt_guidelines
                 )
-            )
-            self.assertTrue(
-                any(
+            assert any(
                     "offset and limit" in guideline
                     for guideline in tools["read_file"].prompt_guidelines
                 )
-            )
 
     def test_file_tool_invalid_json_is_clear_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tool = self._tools(Path(tmp))["write_file"]
-            with self.assertRaisesRegex(ValueError, "invalid JSON input"):
+            with pytest.raises(ValueError, match="invalid JSON input"):
                 parse_tool_input(tool, '{"path": "a.txt",')
 
     def test_file_tool_rejects_non_object_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tool = self._tools(Path(tmp))["read_file"]
-            with self.assertRaisesRegex(ValueError, "JSON input must be an object"):
+            with pytest.raises(ValueError, match="JSON input must be an object"):
                 parse_tool_input(tool, '["a.txt"]')
 
     def test_edit_file_external_modification_uses_old_text_matching(self) -> None:
@@ -344,7 +326,7 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             tools = self._tools(root)
 
             path.write_text("modified externally", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "Could not find the exact text"):
+            with pytest.raises(ValueError, match="Could not find the exact text"):
                 tools["edit_file"].handler(
                     {
                         "path": "a.txt",
@@ -365,8 +347,8 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
                 {"path": "a.txt", "old_text": "hello", "new_text": "hi"}
             )
 
-            self.assertIn("replacements=1", output)
-            self.assertEqual(path.read_text(encoding="utf-8"), "hi world")
+            assert "replacements=1" in output
+            assert path.read_text(encoding="utf-8") == "hi world"
 
     def test_edit_file_result_includes_patch_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -379,12 +361,10 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
                 {"path": "a.txt", "old_text": "two", "new_text": "three"}
             )
 
-            self.assertIn("-two", output)
-            self.assertIn("+three", output)
-            self.assertEqual(
-                getattr(output, "metadata", {}).get("first_changed_line"), 2
-            )
-            self.assertEqual(path.read_text(encoding="utf-8"), "one\nthree\n")
+            assert "-two" in output
+            assert "+three" in output
+            assert getattr(output, "metadata", {}).get("first_changed_line") == 2
+            assert path.read_text(encoding="utf-8") == "one\nthree\n"
 
     def test_edit_file_requires_new_text_key_but_allows_empty_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -394,15 +374,14 @@ class XcodeSandboxedFileToolsTests(unittest.TestCase):
             tools = self._tools(root)
 
             tools["read_file"].handler({"path": "a.txt"})
-            with self.assertRaisesRegex(ValueError, "new_text is required"):
+            with pytest.raises(ValueError, match="new_text is required"):
                 tools["edit_file"].handler({"path": "a.txt", "old_text": "delete me"})
             deleted = tools["edit_file"].handler(
                 {"path": "a.txt", "old_text": "delete me", "new_text": ""}
             )
 
-            self.assertIn("replacements=1", deleted)
-            self.assertEqual(path.read_text(encoding="utf-8"), "")
-
+            assert "replacements=1" in deleted
+            assert path.read_text(encoding="utf-8") == ""
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

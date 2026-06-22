@@ -10,7 +10,6 @@ import json
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from xcode.harness.mcp.tools import (
@@ -33,15 +32,12 @@ from xcode.harness.observability.permission_model import (
     Target,
 )
 from xcode.harness.skills import ToolOutput
-
-
+import pytest
 # ── 辅助 ──
-
 
 def _write_config(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
 
 def _minimal_mcp_tool(name: str = "test_tool") -> dict[str, Any]:
     return {
@@ -54,13 +50,11 @@ def _minimal_mcp_tool(name: str = "test_tool") -> dict[str, Any]:
         },
     }
 
-
 # ════════════════════════════════════════════
 # 1. 配置校验
 # ════════════════════════════════════════════
 
-
-class TestMcpConfigValidation(TestCase):
+class TestMcpConfigValidation:
     """Config schema validation tests."""
 
     def test_valid_config(self) -> None:
@@ -74,24 +68,24 @@ class TestMcpConfigValidation(TestCase):
                 "timeout": 15.0,
             },
         )
-        self.assertIsNotNone(cfg)
         assert cfg is not None
-        self.assertEqual(cfg.name, "my_server")
-        self.assertEqual(cfg.command, ("python",))
-        self.assertEqual(cfg.args, ("server.py",))
-        self.assertEqual(cfg.env, {"KEY": "VAL"})
-        self.assertTrue(cfg.enabled)
-        self.assertEqual(cfg.timeout, 15.0)
+        assert cfg is not None
+        assert cfg.name == "my_server"
+        assert cfg.command == ("python",)
+        assert cfg.args == ("server.py",)
+        assert cfg.env == {"KEY": "VAL"}
+        assert cfg.enabled
+        assert cfg.timeout == 15.0
 
     def test_minimal_config(self) -> None:
         cfg = _validate_server_config("min", {"command": "node"})
-        self.assertIsNotNone(cfg)
         assert cfg is not None
-        self.assertEqual(cfg.command, ("node",))
-        self.assertEqual(cfg.args, ())
-        self.assertIsNone(cfg.env)
-        self.assertTrue(cfg.enabled)
-        self.assertIsNone(cfg.timeout)
+        assert cfg is not None
+        assert cfg.command == ("node",)
+        assert cfg.args == ()
+        assert cfg.env is None
+        assert cfg.enabled
+        assert cfg.timeout is None
 
     def test_overrides_skips_server(self) -> None:
         cfg = _validate_server_config(
@@ -101,15 +95,15 @@ class TestMcpConfigValidation(TestCase):
                 "overrides": {"tool": "low"},
             },
         )
-        self.assertIsNone(cfg)
+        assert cfg is None
 
     def test_empty_command_skips(self) -> None:
         cfg = _validate_server_config("bad", {"command": ""})
-        self.assertIsNone(cfg)
+        assert cfg is None
 
     def test_non_dict_config_skips(self) -> None:
         cfg = _validate_server_config("bad", "not_a_dict")  # type: ignore[arg-type]
-        self.assertIsNone(cfg)
+        assert cfg is None
 
     def test_enabled_false(self) -> None:
         cfg = _validate_server_config(
@@ -119,9 +113,9 @@ class TestMcpConfigValidation(TestCase):
                 "enabled": False,
             },
         )
-        self.assertIsNotNone(cfg)
         assert cfg is not None
-        self.assertFalse(cfg.enabled)
+        assert cfg is not None
+        assert not (cfg.enabled)
 
     def test_timeout_as_int(self) -> None:
         cfg = _validate_server_config(
@@ -131,9 +125,9 @@ class TestMcpConfigValidation(TestCase):
                 "timeout": 5000,
             },
         )
-        self.assertIsNotNone(cfg)
         assert cfg is not None
-        self.assertEqual(cfg.timeout, 5000.0)
+        assert cfg is not None
+        assert cfg.timeout == 5000.0
 
     def test_invalid_timeout_ignored(self) -> None:
         cfg = _validate_server_config(
@@ -143,9 +137,9 @@ class TestMcpConfigValidation(TestCase):
                 "timeout": "fast",
             },
         )
-        self.assertIsNotNone(cfg)
         assert cfg is not None
-        self.assertIsNone(cfg.timeout)
+        assert cfg is not None
+        assert cfg.timeout is None
 
     def test_invalid_env_ignored(self) -> None:
         cfg = _validate_server_config(
@@ -155,9 +149,9 @@ class TestMcpConfigValidation(TestCase):
                 "env": "not_a_dict",
             },
         )
-        self.assertIsNotNone(cfg)
         assert cfg is not None
-        self.assertIsNone(cfg.env)
+        assert cfg is not None
+        assert cfg.env is None
 
     def test_non_list_args_skips(self) -> None:
         cfg = _validate_server_config(
@@ -167,17 +161,15 @@ class TestMcpConfigValidation(TestCase):
                 "args": "not_a_list",
             },
         )
-        self.assertIsNotNone(cfg)
         assert cfg is not None
-        self.assertEqual(cfg.args, ())
-
+        assert cfg is not None
+        assert cfg.args == ()
 
 # ════════════════════════════════════════════
 # 2. 配置路径
 # ════════════════════════════════════════════
 
-
-class TestMcpConfigPath(TestCase):
+class TestMcpConfigPath:
     """Config path canonicalization tests."""
 
     def test_canonical_path(self) -> None:
@@ -187,20 +179,20 @@ class TestMcpConfigPath(TestCase):
             local.mkdir()
             _write_config(local / "mcp_config.json", {"mcpServers": {}})
             result = _mcp_config_path(root)
-            self.assertEqual(result, local / "mcp_config.json")
+            assert result == local / "mcp_config.json"
 
     def test_legacy_root_path_returns_none(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_config(root / "mcp_config.json", {"mcpServers": {}})
             result = _mcp_config_path(root)
-            self.assertIsNone(result)
+            assert result is None
 
     def test_no_config_returns_none(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             result = _mcp_config_path(root)
-            self.assertIsNone(result)
+            assert result is None
 
     def test_canonical_takes_precedence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -214,51 +206,47 @@ class TestMcpConfigPath(TestCase):
                 root / "mcp_config.json", {"mcpServers": {"bad": {"command": "b"}}}
             )
             result = _mcp_config_path(root)
-            self.assertEqual(result, local / "mcp_config.json")
-
+            assert result == local / "mcp_config.json"
 
 # ════════════════════════════════════════════
 # 3. 名称清理
 # ════════════════════════════════════════════
 
-
-class TestMcpSanitize(TestCase):
+class TestMcpSanitize:
     """Name sanitization tests."""
 
     def test_basic(self) -> None:
-        self.assertEqual(_sanitize("hello"), "hello")
+        assert _sanitize("hello") == "hello"
 
     def test_spaces_to_underscore(self) -> None:
-        self.assertEqual(_sanitize("my server"), "my_server")
+        assert _sanitize("my server") == "my_server"
 
     def test_special_chars(self) -> None:
-        self.assertEqual(_sanitize("foo@bar!baz"), "foo_bar_baz")
+        assert _sanitize("foo@bar!baz") == "foo_bar_baz"
 
     def test_unicode_replaced(self) -> None:
-        self.assertEqual(_sanitize("café"), "caf_")
+        assert _sanitize("café") == "caf_"
 
     def test_dots_replaced(self) -> None:
-        self.assertEqual(_sanitize("server.local"), "server_local")
+        assert _sanitize("server.local") == "server_local"
 
     def test_hyphen_preserved(self) -> None:
-        self.assertEqual(_sanitize("my-server"), "my-server")
+        assert _sanitize("my-server") == "my-server"
 
     def test_already_slug(self) -> None:
-        self.assertEqual(_sanitize("my_server"), "my_server")
+        assert _sanitize("my_server") == "my_server"
 
     def test_empty_returns_empty(self) -> None:
-        self.assertEqual(_sanitize(""), "")
+        assert _sanitize("") == ""
 
     def test_leading_trailing_spaces(self) -> None:
-        self.assertEqual(_sanitize("  tool  "), "__tool__")
-
+        assert _sanitize("  tool  ") == "__tool__"
 
 # ════════════════════════════════════════════
 # 4. 碰撞检测
 # ════════════════════════════════════════════
 
-
-class TestMcpCollisionDetection(TestCase):
+class TestMcpCollisionDetection:
     """Collision detection tests."""
 
     def _make_tool(self, name: str) -> dict[str, Any]:
@@ -268,14 +256,14 @@ class TestMcpCollisionDetection(TestCase):
         tools = {"s1": [self._make_tool("read"), self._make_tool("write")]}
         servers = {"s1": McpServerConfig(name="s1", command=("python",))}
         disabled = _detect_collisions(tools, servers)
-        self.assertEqual(disabled, set())
+        assert disabled == set()
 
     def test_same_server_collision(self) -> None:
         # Space becomes _, making "my tool" and "my_tool" collide
         tools = {"s1": [self._make_tool("my tool"), self._make_tool("my_tool")]}
         servers = {"s1": McpServerConfig(name="s1", command=("python",))}
         disabled = _detect_collisions(tools, servers)
-        self.assertEqual(disabled, {"s1:my tool", "s1:my_tool"})
+        assert disabled == {"s1:my tool", "s1:my_tool"}
 
     def test_cross_server_collision(self) -> None:
         # Same tool name on different servers produces different host IDs
@@ -289,7 +277,7 @@ class TestMcpCollisionDetection(TestCase):
             "s2": McpServerConfig(name="s2", command=("python",)),
         }
         disabled = _detect_collisions(tools, servers)
-        self.assertEqual(disabled, set())
+        assert disabled == set()
 
     def test_cross_server_collision_same_slug(self) -> None:
         # Different server names that sanitize to same slug cause collision
@@ -303,7 +291,7 @@ class TestMcpCollisionDetection(TestCase):
         }
         disabled = _detect_collisions(tools, servers)
         # Both produce mcp__my_srv__read
-        self.assertEqual(disabled, {"my srv:read", "my_srv:read"})
+        assert disabled == {"my srv:read", "my_srv:read"}
 
     def test_complex_collision(self) -> None:
         # Multiple paths to same host_tool_id
@@ -320,25 +308,20 @@ class TestMcpCollisionDetection(TestCase):
         }
         disabled = _detect_collisions(tools, servers)
         # All produce mcp__my_srv__get_data
-        self.assertEqual(
-            disabled,
-            {
+        assert disabled == {
                 "my srv:get data",
                 "my srv:get_data",
                 "my_srv:get data",
-            },
-        )
-
+            }
 
 # ════════════════════════════════════════════
 # 5. 权限 - ActionExtractor MCP 分支
 # ════════════════════════════════════════════
 
-
-class TestMcpActionExtractor(TestCase):
+class TestMcpActionExtractor:
     """ActionExtractor MCP branch tests."""
 
-    def setUp(self) -> None:
+    def setup_method(self, method) -> None:
         self.extractor = ActionExtractor()
 
     def test_mcp_tool_produces_mcp_action(self) -> None:
@@ -346,39 +329,37 @@ class TestMcpActionExtractor(TestCase):
             "mcp__my_server__read_file",
             {"path": "/tmp/test.txt"},
         )
-        self.assertEqual(action.capability, "mcp")
-        self.assertEqual(len(action.targets), 1)
+        assert action.capability == "mcp"
+        assert len(action.targets) == 1
         target = action.targets[0]
-        self.assertEqual(target.kind, "mcp")
-        self.assertEqual(target.value, "mcp__my_server__read_file")
-        self.assertEqual(target.access, "execute")
+        assert target.kind == "mcp"
+        assert target.value == "mcp__my_server__read_file"
+        assert target.access == "execute"
 
     def test_mcp_tool_empty_input(self) -> None:
         action = self.extractor.extract(
             "mcp__server__fetch",
             {},
         )
-        self.assertEqual(action.capability, "mcp")
-        self.assertEqual(len(action.targets), 1)
-        self.assertEqual(action.targets[0].kind, "mcp")
+        assert action.capability == "mcp"
+        assert len(action.targets) == 1
+        assert action.targets[0].kind == "mcp"
 
     def test_non_mcp_tool_unchanged(self) -> None:
         action = self.extractor.extract("bash", {"command": "ls"})
-        self.assertEqual(action.capability, "shell")
-        self.assertNotEqual(action.targets[0].kind, "mcp" if action.targets else "mcp")
+        assert action.capability == "shell"
+        assert action.targets[0].kind != "mcp" if action.targets else "mcp"
 
     def test_unknown_tool_fallback(self) -> None:
         action = self.extractor.extract("custom_tool", {})
-        self.assertEqual(action.capability, "unknown")
-        self.assertEqual(action.targets, ())
-
+        assert action.capability == "unknown"
+        assert action.targets == ()
 
 # ════════════════════════════════════════════
 # 6. 权限 - PermissionEngine 决策路径
 # ════════════════════════════════════════════
 
-
-class TestMcpPermissionDecisions(TestCase):
+class TestMcpPermissionDecisions:
     """PermissionEngine behavior for MCP tools.
 
     Tests are simplified: we verify the ActionExtractor output that
@@ -390,7 +371,7 @@ class TestMcpPermissionDecisions(TestCase):
         """Grant lookup and storage now work because targets are non-empty."""
         extractor = ActionExtractor()
         action = extractor.extract("mcp__srv__tool", {"arg": "val"})
-        self.assertTrue(len(action.targets) > 0)
+        assert len(action.targets) > 0
 
     def test_mcp_target_enables_grant_lookup(self) -> None:
         """compute_shadow_approval_candidate no longer returns None."""
@@ -404,14 +385,13 @@ class TestMcpPermissionDecisions(TestCase):
         candidate = compute_shadow_approval_candidate(action)
         # Candidate may still be None if no grants exist, but not because
         # targets is empty
-        self.assertIsNotNone(candidate)
+        assert candidate is not None
 
     def test_mcp_grant_written(self) -> None:
         """Grant records for MCP tools are created correctly."""
         from xcode.harness.observability.permission_model import (
             create_grant_record,
         )
-
         action = Action(
             tool="mcp__srv__tool",
             capability="mcp",
@@ -425,77 +405,73 @@ class TestMcpPermissionDecisions(TestCase):
             decision="allow",
             scope="session",
         )
-        self.assertEqual(grant.capability, "mcp")
-        self.assertEqual(grant.target_kind, "mcp")
-        self.assertEqual(grant.target_pattern, "mcp__srv__tool")
-        self.assertEqual(grant.access, "execute")
-
+        assert grant.capability == "mcp"
+        assert grant.target_kind == "mcp"
+        assert grant.target_pattern == "mcp__srv__tool"
+        assert grant.access == "execute"
 
 # ════════════════════════════════════════════
 # 7. 错误处理与脱敏
 # ════════════════════════════════════════════
 
-
-class TestMcpRedaction(TestCase):
+class TestMcpRedaction:
     """Stderr redaction and truncation tests."""
 
     def test_bearer_token_redacted(self) -> None:
         result = redact_mcp_text("Bearer sk-abc123def456")
-        self.assertIn("****", result)
-        self.assertNotIn("sk-abc123def456", result)
+        assert "****" in result
+        assert "sk-abc123def456" not in result
 
     def test_api_key_redacted(self) -> None:
         result = redact_mcp_text("API_KEY=super_secret_key_123")
-        self.assertIn("****", result)
-        self.assertNotIn("super_secret_key_123", result)
+        assert "****" in result
+        assert "super_secret_key_123" not in result
 
     def test_token_redacted(self) -> None:
         result = redact_mcp_text("TOKEN=abc123")
-        self.assertIn("****", result)
-        self.assertNotIn("abc123", result)
+        assert "****" in result
+        assert "abc123" not in result
 
     def test_secret_redacted(self) -> None:
         result = redact_mcp_text("SECRET=my_secret_value")
-        self.assertIn("****", result)
-        self.assertNotIn("my_secret_value", result)
+        assert "****" in result
+        assert "my_secret_value" not in result
 
     def test_mixed_content(self) -> None:
         msg = "Error: Bearer sk-abc, status: 500"
         result = redact_mcp_text(msg)
-        self.assertIn("Error:", result)
-        self.assertNotIn("sk-abc", result)
+        assert "Error:" in result
+        assert "sk-abc" not in result
 
     def test_truncate_short(self) -> None:
         msg = "short error"
         result = truncate_redact(msg, max_len=200)
-        self.assertEqual(result, msg)
+        assert result == msg
 
     def test_truncate_long(self) -> None:
         msg = "x" * 300
         result = truncate_redact(msg, max_len=200)
-        self.assertEqual(len(result), 203)  # 200 + "..."
-        self.assertTrue(result.endswith("..."))
+        assert len(result) == 203  # 200 + "..."
+        assert result.endswith("...")
 
     def test_truncate_with_redaction(self) -> None:
         msg = "Error: Token=abc123 " + "x" * 300
         result = truncate_redact(msg, max_len=200)
-        self.assertNotIn("abc123", result)
-        self.assertIn("****", result)
-        self.assertTrue(result.endswith("..."))
+        assert "abc123" not in result
+        assert "****" in result
+        assert result.endswith("...")
 
     def test_no_sensitive_content_passes_through(self) -> None:
         msg = "normal error message"
         result = redact_mcp_text(msg)
-        self.assertEqual(result, msg)
-
+        assert result == msg
 
 # ════════════════════════════════════════════
 # 9. MCP 工具构建（集成）
 # ════════════════════════════════════════════
 
-
 @patch("xcode.harness.mcp.client.McpClient")
-class TestMcpBuildIntegration(TestCase):
+class TestMcpBuildIntegration:
     """Integration tests for build_mcp_tools."""
 
     def test_builds_tools_from_config(self, mock_client: MagicMock) -> None:
@@ -525,12 +501,12 @@ class TestMcpBuildIntegration(TestCase):
                 },
             )
             tools = build_mcp_tools(root)
-            self.assertEqual(len(tools), 2)
+            assert len(tools) == 2
             names = [t.name for t in tools]
-            self.assertIn("mcp__my_server__greet", names)
-            self.assertIn("mcp__my_server__echo", names)
+            assert "mcp__my_server__greet" in names
+            assert "mcp__my_server__echo" in names
             for t in tools:
-                self.assertEqual(t.group, "mcp")
+                assert t.group == "mcp"
 
     def test_disabled_server_skipped(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()
@@ -561,7 +537,7 @@ class TestMcpBuildIntegration(TestCase):
             tools = build_mcp_tools(root)
             # disabled_srv produces no tools; enabled_srv hits cache miss
             # and fails because mock has no list_tools — returns empty
-            self.assertIsInstance(tools, tuple)
+            assert isinstance(tools, tuple)
 
     def test_overrides_server_skipped(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()
@@ -588,7 +564,7 @@ class TestMcpBuildIntegration(TestCase):
             tools = build_mcp_tools(root)
             # Only "good" server's tools (if any) appear
             # bad is skipped due to overrides
-            self.assertIsInstance(tools, tuple)
+            assert isinstance(tools, tuple)
 
     def test_mcp_metadata_on_tool_spec(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()
@@ -621,19 +597,19 @@ class TestMcpBuildIntegration(TestCase):
                 },
             )
             tools = build_mcp_tools(root)
-            self.assertEqual(len(tools), 1)
+            assert len(tools) == 1
             spec = tools[0]
-            self.assertEqual(spec.name, "mcp__test-srv__my_tool")
-            self.assertEqual(spec.group, "mcp")
-            self.assertIsNotNone(spec.builtin)
+            assert spec.name == "mcp__test-srv__my_tool"
+            assert spec.group == "mcp"
+            assert spec.builtin is not None
             assert spec.builtin is not None
             meta = spec.builtin.get("mcp_metadata", {})
-            self.assertEqual(meta.get("server"), "test-srv")
-            self.assertEqual(meta.get("server_slug"), "test-srv")
-            self.assertEqual(meta.get("tool"), "my_tool")
-            self.assertEqual(meta.get("tool_slug"), "my_tool")
-            self.assertEqual(meta.get("outputSchema"), tool["outputSchema"])
-            self.assertEqual(meta.get("annotations"), {"readOnlyHint": True})
+            assert meta.get("server") == "test-srv"
+            assert meta.get("server_slug") == "test-srv"
+            assert meta.get("tool") == "my_tool"
+            assert meta.get("tool_slug") == "my_tool"
+            assert meta.get("outputSchema") == tool["outputSchema"]
+            assert meta.get("annotations") == {"readOnlyHint": True}
 
     def test_mcp_handler_preserves_modern_result(self, mock_client: MagicMock) -> None:
         """注册后的 handler 会校验并保留 structuredContent。"""
@@ -664,12 +640,12 @@ class TestMcpBuildIntegration(TestCase):
 
             output = spec.handler({})
 
-        self.assertIsInstance(output, ToolOutput)
         assert isinstance(output, ToolOutput)
-        self.assertIn("22.5 C", output)
+        assert isinstance(output, ToolOutput)
+        assert "22.5 C" in output
         details = output.metadata[MCP_RESULT_METADATA_KEY]
         assert isinstance(details, dict)
-        self.assertEqual(details["validation"]["status"], "valid")
+        assert details["validation"]["status"] == "valid"
         mock_instance.call_tool.assert_called_once_with(
             "weather",
             {},
@@ -703,21 +679,19 @@ class TestMcpBuildIntegration(TestCase):
             )
             tools = build_mcp_tools(root)
             # Both tools produce mcp__srv__my_tool → collision → both disabled
-            self.assertEqual(len(tools), 0)
-
+            assert len(tools) == 0
 
 # ════════════════════════════════════════════
 # 10. MCP 红action/脱敏 — McpClient 集成
 # ════════════════════════════════════════════
 
-
-class TestMcpClientRedaction(TestCase):
+class TestMcpClientRedaction:
     """McpClient stderr redaction in error messages."""
 
     def test_stderr_redacted_and_truncated(self) -> None:
         """Verify that stderr in process-exit errors is redacted."""
         raw = "Bearer sk-secret123\n" + "x" * 500
         result = truncate_redact(raw, max_len=200)
-        self.assertNotIn("sk-secret123", result)
-        self.assertIn("****", result)
-        self.assertLessEqual(len(result), 203)  # 200 + "..."
+        assert "sk-secret123" not in result
+        assert "****" in result
+        assert len(result) <= 203  # 200 + "..."

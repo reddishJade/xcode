@@ -4,7 +4,7 @@ import asyncio
 import json
 import sys
 import threading
-import unittest
+
 from unittest.mock import patch
 
 from collections.abc import Iterator
@@ -28,8 +28,7 @@ from xcode.harness.agent_runtime.events import FinalStructuredEvent
 from xcode.agent.messages import UserMessage
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
-
-
+import pytest
 EMPTY_SCHEMA = {
     "type": "object",
     "properties": {},
@@ -58,7 +57,6 @@ ANY_OBJECT_SCHEMA = {
     "additionalProperties": True,
 }
 
-
 class ResettableFakeProvider(FakeProvider):
     """记录会话状态重置次数的测试 provider。"""
 
@@ -74,21 +72,20 @@ class ResettableFakeProvider(FakeProvider):
         """记录重置调用。"""
         self.reset_count += 1
 
-
-class XcodeStructuredAgentTests(unittest.TestCase):
+class XcodeStructuredAgentTests:
     def _assert_final_answer(self, event: StructuredAgentEvent, expected: str) -> None:
         """断言最终事件包含指定答案。"""
-        self.assertIsInstance(event, FinalStructuredEvent)
         assert isinstance(event, FinalStructuredEvent)
-        self.assertEqual(event.data.answer, expected)
+        assert isinstance(event, FinalStructuredEvent)
+        assert event.data.answer == expected
 
     def test_chat_turn_still_uses_normal_runtime_boundary(self) -> None:
         seen_tools: list[list[str]] = []
 
         def factory(messages, tools):
             seen_tools.append([tool.name for tool in tools])
-            self.assertEqual(messages[0]["role"], "system")
-            self.assertIn("<git-preflight>", messages[0]["content"])
+            assert messages[0]["role"] == "system"
+            assert "<git-preflight>" in messages[0]["content"]
             return [
                 TextDelta(chunk="你好，我是 Xcode。"),
                 FinalMessage(content="", stop_reason="end_turn"),
@@ -113,9 +110,9 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("hello, who are you?")
 
-        self.assertEqual(result.answer, "你好，我是 Xcode。")
-        self.assertEqual(seen_tools, [["read_file"]])
-        self.assertEqual(result.tool_calls, [])
+        assert result.answer == "你好，我是 Xcode。"
+        assert seen_tools == [["read_file"]]
+        assert result.tool_calls == []
 
     def test_no_tool_call_returns_text(self) -> None:
         events: list[ProviderEvent] = [
@@ -129,12 +126,12 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("hello")
 
-        self.assertEqual(result.answer, "done")
-        self.assertEqual(result.steps, 1)
-        self.assertEqual(result.last_agent, "main")
-        self.assertEqual(result.tool_calls, [])
+        assert result.answer == "done"
+        assert result.steps == 1
+        assert result.last_agent == "main"
+        assert result.tool_calls == []
         assert result.metrics is not None
-        self.assertEqual(result.metrics["llm_calls"], 1)
+        assert result.metrics["llm_calls"] == 1
 
     def test_follow_up_turn_receives_previous_messages(self) -> None:
         """短追问应看到上一轮 user 和 assistant 消息。"""
@@ -164,17 +161,11 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         list(agent.run_stream("AGENTS.md的字节数是多少？"))
         second_events = list(agent.run_stream("正好是10000？"))
 
-        self.assertEqual(
-            [message["role"] for message in seen_messages[1]],
-            ["user", "assistant", "user"],
-        )
-        self.assertIn("AGENTS.md的字节数", str(seen_messages[1][0]["content"]))
-        self.assertIn("10000 bytes", str(seen_messages[1][1]["content"]))
-        self.assertIn("正好是10000", str(seen_messages[1][2]["content"]))
-        self.assertEqual(
-            [event.type for event in second_events],
-            ["message_start", "text_delta", "assistant", "turn_end", "final"],
-        )
+        assert [message["role"] for message in seen_messages[1]] == ["user", "assistant", "user"]
+        assert "AGENTS.md的字节数" in str(seen_messages[1][0]["content"])
+        assert "10000 bytes" in str(seen_messages[1][1]["content"])
+        assert "正好是10000" in str(seen_messages[1][2]["content"])
+        assert [event.type for event in second_events] == ["message_start", "text_delta", "assistant", "turn_end", "final"]
 
     def test_load_run_state_restores_history_messages(self) -> None:
         seen_messages: list[list[dict[str, Any]]] = []
@@ -201,14 +192,11 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         agent.load_run_state(RunState.from_dict(run_state.to_dict()))
         result = agent.run("next question")
 
-        self.assertEqual(result.answer, "restored")
-        self.assertIsNotNone(result.run_state)
+        assert result.answer == "restored"
         assert result.run_state is not None
-        self.assertEqual(result.run_state.current_mode, "act")
-        self.assertEqual(
-            [message["role"] for message in seen_messages[0]],
-            ["user", "assistant", "user"],
-        )
+        assert result.run_state is not None
+        assert result.run_state.current_mode == "act"
+        assert [message["role"] for message in seen_messages[0]] == ["user", "assistant", "user"]
 
     def test_history_replacement_resets_provider_conversation_state(self) -> None:
         provider = ResettableFakeProvider()
@@ -218,7 +206,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         agent.load_history([UserMessage(content="old")])
         agent.load_run_state(RunState(messages=[], current_mode="act"))
 
-        self.assertEqual(provider.reset_count, 3)
+        assert provider.reset_count == 3
 
     def test_provider_events_drive_main_loop(self) -> None:
         events: list[ProviderEvent] = [
@@ -232,7 +220,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("hello")
 
-        self.assertEqual(result.answer, "done")
+        assert result.answer == "done"
 
     def test_multiple_tool_calls_append_tool_results(self) -> None:
         responses: Iterator[list[ProviderEvent]] = iter(
@@ -269,11 +257,11 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("go")
 
-        self.assertEqual(result.answer, "finished")
-        self.assertEqual(len(result.tool_calls), 2)
+        assert result.answer == "finished"
+        assert len(result.tool_calls) == 2
         assert result.metrics is not None
-        self.assertEqual(result.metrics["tool_calls"], 2)
-        self.assertEqual(result.messages[2]["content"][0]["tool_use_id"], "a")
+        assert result.metrics["tool_calls"] == 2
+        assert result.messages[2]["content"][0]["tool_use_id"] == "a"
 
     def test_unknown_tool_is_returned_as_tool_result(self) -> None:
         responses: Iterator[list[ProviderEvent]] = iter(
@@ -296,11 +284,9 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("use missing")
 
-        self.assertIn(
-            "unknown tool: missing", result.messages[2]["content"][0]["content"]
-        )
-        self.assertEqual(result.messages[2]["content"][0]["status"], "error")
-        self.assertEqual(result.answer, "saw error")
+        assert "unknown tool: missing" in result.messages[2]["content"][0]["content"]
+        assert result.messages[2]["content"][0]["status"] == "error"
+        assert result.answer == "saw error"
 
     def test_step_limit(self) -> None:
         events: list[ProviderEvent] = [
@@ -315,8 +301,8 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("loop")
 
-        self.assertTrue(result.stopped_by_limit)
-        self.assertEqual(result.answer, "step limit reached")
+        assert result.stopped_by_limit
+        assert result.answer == "step limit reached"
 
     def test_watchdog_stops_repeated_tool_call(self) -> None:
         tool = ToolSpec(
@@ -346,9 +332,9 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("loop")
 
-        self.assertTrue(result.stopped_by_watchdog)
-        self.assertEqual(result.steps, 3)
-        self.assertIn("watchdog stopped", result.answer)
+        assert result.stopped_by_watchdog
+        assert result.steps == 3
+        assert "watchdog stopped" in result.answer
 
     def test_watchdog_signature_stable_for_dict_input(self) -> None:
         tool = ToolSpec(
@@ -386,8 +372,8 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("test")
 
-        self.assertTrue(result.stopped_by_watchdog)
-        self.assertIn("watchdog stopped", result.answer)
+        assert result.stopped_by_watchdog
+        assert "watchdog stopped" in result.answer
 
     def test_idle_watchdog_allows_successful_read_only_steps(self) -> None:
         mock_response_list: list[list[ProviderEvent]] = [
@@ -427,7 +413,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("inspect")
 
-        self.assertEqual(result.answer, "done")
+        assert result.answer == "done"
 
     def test_runtime_context_provider_injects_system_message(self) -> None:
         seen = []
@@ -451,9 +437,9 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("please review this")
 
-        self.assertEqual(result.answer, "done")
-        self.assertEqual(seen[0]["role"], "system")
-        self.assertIn("Review workflow", seen[0]["content"])
+        assert result.answer == "done"
+        assert seen[0]["role"] == "system"
+        assert "Review workflow" in seen[0]["content"]
 
     def test_plan_mode_exposes_read_tools_and_blocks_write_tools(self) -> None:
         seen_tools = []
@@ -496,12 +482,9 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("plan")
 
-        self.assertEqual(seen_tools, [["read_file"]])
-        self.assertEqual(called, [])
-        self.assertIn(
-            "unknown tool: edit_file",
-            result.messages[3]["content"][0]["content"],
-        )
+        assert seen_tools == [["read_file"]]
+        assert called == []
+        assert "unknown tool: edit_file" in result.messages[3]["content"][0]["content"]
 
     def test_run_stream_yields_tool_and_final_events(self) -> None:
         responses: Iterator[list[ProviderEvent]] = iter(
@@ -533,9 +516,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         events = list(agent.run_stream("go"))
 
-        self.assertEqual(
-            [event.type for event in events],
-            [
+        assert [event.type for event in events] == [
                 "message_start",
                 "assistant",
                 "tool_use",
@@ -545,8 +526,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 "assistant",
                 "turn_end",
                 "final",
-            ],
-        )
+            ]
         self._assert_final_answer(events[-1], "done")
 
     def test_run_stream_yields_text_delta_events(self) -> None:
@@ -562,23 +542,20 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         events = list(agent.run_stream("go"))
 
-        self.assertEqual(
-            [event.type for event in events],
-            [
+        assert [event.type for event in events] == [
                 "message_start",
                 "text_delta",
                 "text_delta",
                 "assistant",
                 "turn_end",
                 "final",
-            ],
-        )
-        self.assertEqual(events[1].data, "he")
+            ]
+        assert events[1].data == "he"
         self._assert_final_answer(events[-1], "hello")
 
     def test_run_stream_uses_windows_selector_worker(self) -> None:
         if not hasattr(asyncio, "SelectorEventLoop"):
-            self.skipTest("SelectorEventLoop is unavailable")
+            pytest.skip("SelectorEventLoop is unavailable")
 
         mock_events: list[ProviderEvent] = [
             TextDelta(chunk="done"),
@@ -598,7 +575,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         ):
             events = list(agent.run_stream("go"))
 
-        self.assertTrue(selector_loop.called)
+        assert selector_loop.called
         self._assert_final_answer(events[-1], "done")
 
     def test_run_stream_does_not_call_asyncio_run_in_bridge(self) -> None:
@@ -633,7 +610,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = asyncio.run(main())
 
-        self.assertEqual(result.answer, "async done")
+        assert result.answer == "async done"
 
     def test_run_async_returns_result_inside_event_loop(self) -> None:
         async def main():
@@ -649,7 +626,7 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = asyncio.run(main())
 
-        self.assertEqual(result.answer, "async done")
+        assert result.answer == "async done"
 
     def test_arun_stream_yields_events_inside_event_loop(self) -> None:
         async def main():
@@ -669,17 +646,14 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         events = asyncio.run(main())
 
-        self.assertEqual(
-            [event.type for event in events],
-            [
+        assert [event.type for event in events] == [
                 "message_start",
                 "text_delta",
                 "text_delta",
                 "assistant",
                 "turn_end",
                 "final",
-            ],
-        )
+            ]
         self._assert_final_answer(events[-1], "hello")
 
     def test_sync_api_rejects_active_event_loop(self) -> None:
@@ -692,13 +666,13 @@ class XcodeStructuredAgentTests(unittest.TestCase):
                 provider=FakeProvider(events),
                 registry=(),
             )
-            with self.assertRaises(RuntimeError) as ctx:
+            with pytest.raises(RuntimeError) as exc_info:
                 agent.run("go")
-            return str(ctx.exception)
+            return str(exc_info.value)
 
         message = asyncio.run(main())
 
-        self.assertIn("use await StructuredAgent.run_async()", message)
+        assert "use await StructuredAgent.run_async()" in message
 
     def test_read_only_tools_run_in_threadpool(self) -> None:
         started_second = threading.Event()
@@ -757,8 +731,8 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("go")
 
-        self.assertEqual(result.messages[2]["content"][0]["content"], "one")
-        self.assertEqual(result.messages[3]["content"][0]["content"], "two")
+        assert result.messages[2]["content"][0]["content"] == "one"
+        assert result.messages[3]["content"][0]["content"] == "two"
 
     def test_tool_exception_is_error_result_and_agent_continues(self) -> None:
         responses: Iterator[list[ProviderEvent]] = iter(
@@ -785,9 +759,9 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("go")
 
-        self.assertEqual(result.messages[2]["content"][0]["status"], "error")
-        self.assertIn("broken", result.messages[2]["content"][0]["content"])
-        self.assertEqual(result.answer, "recovered")
+        assert result.messages[2]["content"][0]["status"] == "error"
+        assert "broken" in result.messages[2]["content"][0]["content"]
+        assert result.answer == "recovered"
 
     def test_cancelled_token_marks_tool_result_interrupted(self) -> None:
         token = CancellationToken()
@@ -815,8 +789,8 @@ class XcodeStructuredAgentTests(unittest.TestCase):
 
         result = agent.run("go")
 
-        self.assertEqual(result.messages[2]["content"][0]["status"], "interrupted")
-        self.assertIn("interrupted", result.messages[2]["content"][0]["content"])
+        assert result.messages[2]["content"][0]["status"] == "interrupted"
+        assert "interrupted" in result.messages[2]["content"][0]["content"]
 
     def test_max_tokens_truncation_triggers_continuation(self) -> None:
         calls = []
@@ -839,10 +813,10 @@ class XcodeStructuredAgentTests(unittest.TestCase):
             registry=(),
         )
         result = agent.run("hello")
-        self.assertEqual(result.answer, "part1 part2")
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[1][-1]["role"], "user")
-        self.assertEqual(calls[1][-1]["content"], "continue")
+        assert result.answer == "part1 part2"
+        assert len(calls) == 2
+        assert calls[1][-1]["role"] == "user"
+        assert calls[1][-1]["content"] == "continue"
 
     def test_low_token_continuation_circuit_breaker(self) -> None:
         def factory(messages, tools) -> list[ProviderEvent]:
@@ -857,8 +831,8 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         )
         result = agent.run("hello")
 
-        self.assertTrue(result.stopped_by_error)
-        self.assertIn("Diminishing Returns", result.answer)
+        assert result.stopped_by_error
+        assert "Diminishing Returns" in result.answer
 
     def test_transient_error_retry(self) -> None:
         import unittest.mock as mock
@@ -880,13 +854,12 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         )
         with mock.patch("asyncio.sleep", new=mock.AsyncMock()) as mock_sleep:
             result = agent.run("hello")
-            self.assertEqual(result.answer, "success")
-            self.assertEqual(len(calls), 3)
-            self.assertEqual(mock_sleep.call_count, 2)
+            assert result.answer == "success"
+            assert len(calls) == 3
+            assert mock_sleep.call_count == 2
 
     def test_provider_error_retry_exhaustion_returns_fallback_message(self) -> None:
         import unittest.mock as mock
-
         def factory(_messages, _tools) -> list[ProviderEvent]:
             raise RuntimeError("provider down")
 
@@ -898,9 +871,8 @@ class XcodeStructuredAgentTests(unittest.TestCase):
         with mock.patch("asyncio.sleep", new=mock.AsyncMock()):
             result = agent.run("hello")
 
-        self.assertTrue(result.stopped_by_error)
-        self.assertIn("I encountered an error.", result.answer)
-
+        assert result.stopped_by_error
+        assert "I encountered an error." in result.answer
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

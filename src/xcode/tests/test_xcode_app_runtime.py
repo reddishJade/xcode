@@ -5,7 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 from typing import Any
-import unittest
 from unittest.mock import patch
 
 from xcode.harness.assembly import build_project_scoped_registry
@@ -35,8 +34,8 @@ from xcode.harness.agent_runtime.compaction import LayeredCompactor
 from xcode.coding_agent.tools.shell_adapter import detect_shell
 from xcode.harness.mcp import McpRuntimeRegistry
 from xcode.harness.skills import ToolSpec
-
-
+import pytest
+from xcode.tests._helpers import assert_logs, assert_no_logs
 def _write_skill(directory: Path, name: str, description: str, body: str) -> None:
     """在指定技能目录写入最小 SKILL.md。"""
     directory.mkdir(parents=True)
@@ -45,8 +44,7 @@ def _write_skill(directory: Path, name: str, description: str, body: str) -> Non
         encoding="utf-8",
     )
 
-
-class XcodeAppRuntimeTests(unittest.TestCase):
+class XcodeAppRuntimeTests:
     def test_app_async_ask_uses_native_async_agent(self) -> None:
         async def main():
             provider = MockProvider([])
@@ -55,7 +53,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         import asyncio
 
-        self.assertEqual(asyncio.run(main()), "child done")
+        assert asyncio.run(main()) == "child done"
 
     def test_default_tool_groups_hide_extensions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
@@ -66,11 +64,11 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         names = {tool.name for tool in app.registry}
 
-        self.assertIn("read_file", names)
-        self.assertNotIn("lsp_diagnostics", names)
-        self.assertNotIn("task", names)
-        self.assertNotIn("create_worktree_task", names)
-        self.assertNotIn("static_analysis", names)
+        assert "read_file" in names
+        assert "lsp_diagnostics" not in names
+        assert "task" not in names
+        assert "create_worktree_task" not in names
+        assert "static_analysis" not in names
 
     def test_default_tool_groups_do_not_construct_optional_groups(self) -> None:
         with (
@@ -88,9 +86,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 )
 
         names = {tool.name for tool in app.registry}
-        self.assertEqual(
-            names,
-            {
+        assert names == {
                 "read_file",
                 "write_file",
                 "edit_file",
@@ -101,8 +97,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 "bash",
                 "search_tools",
                 "update_todo",
-            },
-        )
+            }
 
     def test_matching_task_loads_discovered_skill_before_execution(self) -> None:
         class SkillSelectingProvider(StreamProvider):
@@ -159,15 +154,15 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 app = build_app(project_root=root, runtime_config=runtime_config)
             result = app.agent.run("Review this code change.")
 
-        self.assertEqual(result.answer, "review complete")
-        self.assertEqual(len(provider.calls), 2)
+        assert result.answer == "review complete"
+        assert len(provider.calls) == 2
         first_messages, first_tools = provider.calls[0]
-        self.assertIn("load_skill", {tool.name for tool in first_tools})
+        assert "load_skill" in {tool.name for tool in first_tools}
         first_context = "\n".join(str(message) for message in first_messages)
-        self.assertIn("call load_skill", first_context)
-        self.assertIn("Review code changes.", first_context)
+        assert "call load_skill" in first_context
+        assert "Review code changes." in first_context
         second_context = "\n".join(str(message) for message in provider.calls[1][0])
-        self.assertIn("Follow the review workflow.", second_context)
+        assert "Follow the review workflow." in second_context
 
     def test_build_app_uses_project_relative_configured_skills_dir(self) -> None:
         """项目相对 paths.skills_dir 进入技能发现。"""
@@ -188,7 +183,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         load_skill = next(tool for tool in app.registry if tool.name == "load_skill")
         output = load_skill.handler({"name": "configured-review"})
-        self.assertIn("CONFIGURED_BODY", output)
+        assert "CONFIGURED_BODY" in output
 
     def test_build_app_uses_absolute_skills_dir_argument(self) -> None:
         """绝对 skills_dir API 参数进入技能发现。"""
@@ -209,7 +204,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         load_skill = next(tool for tool in app.registry if tool.name == "load_skill")
         output = load_skill.handler({"name": "absolute-review"})
-        self.assertIn("ABSOLUTE_BODY", output)
+        assert "ABSOLUTE_BODY" in output
 
     def test_explicit_skills_dir_wins_duplicate_name(self) -> None:
         """显式目录中的同名技能覆盖固定项目目录。"""
@@ -238,14 +233,14 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         load_skill = next(tool for tool in app.registry if tool.name == "load_skill")
         output = load_skill.handler({"name": "duplicate-review"})
-        self.assertIn("CONFIGURED_BODY", output)
-        self.assertNotIn("PROJECT_BODY", output)
+        assert "CONFIGURED_BODY" in output
+        assert "PROJECT_BODY" not in output
 
     def test_disabled_skills_group_ignores_configured_directory(self) -> None:
         """禁用 skills group 时不扫描或注册显式目录。"""
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             root = Path(tmp)
-            with self.assertNoLogs(
+            with assert_no_logs(
                 "xcode.harness.skills_registry",
                 level="WARNING",
             ):
@@ -257,8 +252,8 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                     ),
                 )
 
-        self.assertNotIn("load_skill", {tool.name for tool in app.registry})
-        self.assertIn("update_todo", {tool.name for tool in app.registry})
+        assert "load_skill" not in {tool.name for tool in app.registry}
+        assert "update_todo" in {tool.name for tool in app.registry}
 
     def test_default_runtime_discovers_configured_mcp_tools(self) -> None:
         mcp_tool = ToolSpec(
@@ -283,7 +278,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 runtime_config=XcodeRuntimeConfig(),
             )
 
-        self.assertIn("mcp__demo__read", {tool.name for tool in app.registry})
+        assert "mcp__demo__read" in {tool.name for tool in app.registry}
 
     def test_runtime_registry_applies_dynamic_mcp_tool_snapshot(self) -> None:
         """MCP 发布的新 schema 会进入 agent、应用和工具搜索视图。"""
@@ -326,10 +321,10 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         runtime_registries[0].publish((new_tool,))
 
-        self.assertIn("mcp__demo__new", {tool.name for tool in app.registry})
-        self.assertNotIn("mcp__demo__old", {tool.name for tool in app.agent.registry})
+        assert "mcp__demo__new" in {tool.name for tool in app.registry}
+        assert "mcp__demo__old" not in {tool.name for tool in app.agent.registry}
         search_tool = next(tool for tool in app.registry if tool.name == "search_tools")
-        self.assertIn("mcp__demo__new", search_tool.handler({"query": "new"}))
+        assert "mcp__demo__new" in search_tool.handler({"query": "new"})
         app.close()
 
     def test_default_runtime_does_not_enable_experimental_components(self) -> None:
@@ -341,10 +336,10 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 ),
             )
 
-        self.assertIsNone(_layered_compactor(app).on_compact)
-        self.assertIsNone(app.daemon)
-        self.assertIsNone(app.mailbox)
-        self.assertIsNone(app.progress)
+        assert _layered_compactor(app).on_compact is None
+        assert app.daemon is None
+        assert app.mailbox is None
+        assert app.progress is None
 
     def test_removed_experimental_group_does_not_enable_memory(self) -> None:
         runtime_config = XcodeRuntimeConfig(
@@ -357,14 +352,14 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             )
 
         names = {tool.name for tool in app.registry}
-        self.assertNotIn("create_worktree_task", names)
-        self.assertNotIn("create_task", names)
-        self.assertNotIn("send_mailbox_message", names)
-        self.assertNotIn("save_task_progress", names)
-        self.assertIsNone(_layered_compactor(app).on_compact)
-        self.assertIsNone(app.daemon)
-        self.assertIsNone(app.mailbox)
-        self.assertIsNone(app.progress)
+        assert "create_worktree_task" not in names
+        assert "create_task" not in names
+        assert "send_mailbox_message" not in names
+        assert "save_task_progress" not in names
+        assert _layered_compactor(app).on_compact is None
+        assert app.daemon is None
+        assert app.mailbox is None
+        assert app.progress is None
 
     def test_individual_experimental_feature_groups_enable_individual_features(
         self,
@@ -379,12 +374,12 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             )
 
         names = {tool.name for tool in app.registry}
-        self.assertNotIn("create_worktree_task", names)
-        self.assertNotIn("create_task", names)
-        self.assertIsNotNone(_layered_compactor(app).on_compact)
-        self.assertIsNone(app.daemon)
-        self.assertIsNone(app.mailbox)
-        self.assertIsNone(app.progress)
+        assert "create_worktree_task" not in names
+        assert "create_task" not in names
+        assert _layered_compactor(app).on_compact is not None
+        assert app.daemon is None
+        assert app.mailbox is None
+        assert app.progress is None
 
     def test_mailbox_group_adds_mailbox_tools_only(self) -> None:
         runtime_config = XcodeRuntimeConfig(
@@ -397,13 +392,13 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             )
 
         names = {tool.name for tool in app.registry}
-        self.assertIn("send_mailbox_message", names)
-        self.assertIn("read_mailbox_messages", names)
-        self.assertIn("acknowledge_mailbox_message", names)
-        self.assertNotIn("save_task_progress", names)
-        self.assertIsNone(_layered_compactor(app).on_compact)
-        self.assertIsNotNone(app.mailbox)
-        self.assertIsNone(app.progress)
+        assert "send_mailbox_message" in names
+        assert "read_mailbox_messages" in names
+        assert "acknowledge_mailbox_message" in names
+        assert "save_task_progress" not in names
+        assert _layered_compactor(app).on_compact is None
+        assert app.mailbox is not None
+        assert app.progress is None
 
     def test_progress_group_adds_progress_tools_only(self) -> None:
         runtime_config = XcodeRuntimeConfig(
@@ -416,12 +411,12 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             )
 
         names = {tool.name for tool in app.registry}
-        self.assertIn("save_task_progress", names)
-        self.assertIn("resume_task_progress", names)
-        self.assertNotIn("send_mailbox_message", names)
-        self.assertIsNone(_layered_compactor(app).on_compact)
-        self.assertIsNone(app.mailbox)
-        self.assertIsNotNone(app.progress)
+        assert "save_task_progress" in names
+        assert "resume_task_progress" in names
+        assert "send_mailbox_message" not in names
+        assert _layered_compactor(app).on_compact is None
+        assert app.mailbox is None
+        assert app.progress is not None
 
     def test_bash_tool_uses_agent_cancellation_event(self) -> None:
         captured = {}
@@ -451,7 +446,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                     runtime_config=XcodeRuntimeConfig(),
                 )
 
-        self.assertIs(captured["cancel_event"], app.agent.cancellation_token.event)
+        assert captured["cancel_event"] is app.agent.cancellation_token.event
 
     def test_enabling_single_optional_group_adds_only_that_group(self) -> None:
         runtime_config = XcodeRuntimeConfig(
@@ -464,7 +459,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             )
 
         names = {tool.name for tool in app.registry}
-        self.assertIn("create_worktree_task", names)
+        assert "create_worktree_task" in names
 
     def test_build_app_consumes_runtime_config_defaults(self) -> None:
         runtime_config = XcodeRuntimeConfig(
@@ -479,10 +474,10 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 runtime_config=runtime_config,
             )
 
-        self.assertEqual(app.agent.config.max_steps, 7)
-        self.assertEqual(app.agent.config.tool_workers, 2)
-        self.assertEqual(app.agent.config.subagent_workers, 3)
-        self.assertIsNotNone(app.agent.audit_logger)
+        assert app.agent.config.max_steps == 7
+        assert app.agent.config.tool_workers == 2
+        assert app.agent.config.subagent_workers == 3
+        assert app.agent.audit_logger is not None
 
     def test_security_approval_policy_never_allows_high_risk_tools(self) -> None:
         runtime_config = XcodeRuntimeConfig(
@@ -523,8 +518,8 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 app = build_app(project_root=root, runtime_config=runtime_config)
             result = app.agent.run("write")
 
-            self.assertEqual(result.answer, "done")
-            self.assertEqual((root / "ok.txt").read_text(encoding="utf-8"), "ok")
+            assert result.answer == "done"
+            assert (root / "ok.txt").read_text(encoding="utf-8") == "ok"
 
     def test_security_approval_policy_always_blocks_low_risk_without_callback(
         self,
@@ -574,8 +569,8 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 break
 
         assert tool_result is not None
-        self.assertEqual(tool_result["status"], "error")
-        self.assertIn("requires approval", str(tool_result["content"]))
+        assert tool_result["status"] == "error"
+        assert "requires approval" in str(tool_result["content"])
 
     def test_build_app_discovers_project_root_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
@@ -587,8 +582,8 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
             app = build_app(project_root=root)
 
-        self.assertEqual(app.agent.config.max_steps, 6)
-        self.assertEqual(app.agent.config.tool_workers, 1)
+        assert app.agent.config.max_steps == 6
+        assert app.agent.config.tool_workers == 1
 
     def test_tool_execution_records_recent_tool_call_context(self) -> None:
         class ReadingProvider(StreamProvider):
@@ -640,9 +635,9 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             assert contextual_state is not None
             rendered = contextual_state.render()
 
-        self.assertIn("recent_tool_results:", rendered)
-        self.assertIn("- read_file:", rendered)
-        self.assertIn("active_file: a.txt", rendered)
+        assert "recent_tool_results:" in rendered
+        assert "- read_file:" in rendered
+        assert "active_file: a.txt" in rendered
 
     def test_subagent_inherits_only_enabled_core_tools(self) -> None:
         seen_child_tools: list[list[str]] = []
@@ -659,7 +654,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             )
 
         tools = {tool.name: tool for tool in app.registry}
-        self.assertIn("submit_subagent", tools)
+        assert "submit_subagent" in tools
         tools["submit_subagent"].handler({"prompt": "inspect"})
 
         import time
@@ -669,11 +664,11 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 break
             time.sleep(0.01)
 
-        self.assertTrue(seen_child_tools, "child tools should not be empty")
-        self.assertIn("read_file", seen_child_tools[0])
-        self.assertNotIn("update_todo", seen_child_tools[0])
-        self.assertNotIn("submit_subagent", seen_child_tools[0])
-        self.assertNotIn("create_worktree_task", seen_child_tools[0])
+        assert seen_child_tools
+        assert "read_file" in seen_child_tools[0]
+        assert "update_todo" not in seen_child_tools[0]
+        assert "submit_subagent" not in seen_child_tools[0]
+        assert "create_worktree_task" not in seen_child_tools[0]
 
     def test_subagent_can_explicitly_allow_session_todo_tool(self) -> None:
         """subagent 仅在明确 allowlist 时继承 update_todo。"""
@@ -703,8 +698,8 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 break
             time.sleep(0.01)
 
-        self.assertTrue(seen_child_tools)
-        self.assertIn("update_todo", seen_child_tools[0])
+        assert seen_child_tools
+        assert "update_todo" in seen_child_tools[0]
 
     def test_subagent_receives_runtime_prompt_context(self) -> None:
         seen_messages: list[list[Message]] = []
@@ -757,19 +752,19 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
                 time.sleep(0.01)
             else:
-                self.fail("subagent did not finish")
+                pytest.fail("subagent did not finish")
 
-        self.assertTrue(seen_messages)
+        assert seen_messages
         first_msg = seen_messages[0][0]
-        self.assertEqual(first_msg["role"], "system")
+        assert first_msg["role"] == "system"
         combined_system = " ".join(
             str(m.get("content", "") or "")
             for m in seen_messages[0]
             if m.get("role") == "system"
         )
-        self.assertIn("Subagent must follow project rules.", combined_system)
-        self.assertIn("<git-preflight>", combined_system)
-        self.assertIn("<cwd-info>", combined_system)
+        assert "Subagent must follow project rules." in combined_system
+        assert "<git-preflight>" in combined_system
+        assert "<cwd-info>" in combined_system
 
     def test_subagent_tools_are_not_created_when_group_disabled(self) -> None:
         runtime_config = XcodeRuntimeConfig(
@@ -783,8 +778,8 @@ class XcodeAppRuntimeTests(unittest.TestCase):
 
         names = {tool.name for tool in app.registry}
 
-        self.assertNotIn("task", names)
-        self.assertNotIn("submit_subagent", names)
+        assert "task" not in names
+        assert "submit_subagent" not in names
 
     def test_scoped_child_registry_uses_override_for_file_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -804,9 +799,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 )
             }
 
-            self.assertEqual(
-                tools["read_file"].handler({"path": "marker.txt"}), "worktree"
-            )
+            assert tools["read_file"].handler({"path": "marker.txt"}) == "worktree"
 
     def test_scoped_child_registry_uses_override_for_bash(self) -> None:
         seen_cwds: list[Path] = []
@@ -833,7 +826,7 @@ class XcodeAppRuntimeTests(unittest.TestCase):
             }
             tools["bash"].handler({"command": "pwd"})
 
-        self.assertEqual(seen_cwds, [worktree.resolve()])
+        assert seen_cwds == [worktree.resolve()]
 
     def test_worktree_subagent_runs_child_tools_in_worktree(self) -> None:
         seen_reads: list[str] = []
@@ -911,13 +904,11 @@ class XcodeAppRuntimeTests(unittest.TestCase):
                 if "status=done" in checked:
                     break
                 import time
-
                 time.sleep(0.01)
             else:
-                self.fail("subagent did not finish")
+                pytest.fail("subagent did not finish")
 
-        self.assertEqual(seen_reads, ["worktree"])
-
+        assert seen_reads == ["worktree"]
 
 class MockProvider(StreamProvider):
     def __init__(
@@ -945,7 +936,6 @@ class MockProvider(StreamProvider):
     def judge(self, prompt: str) -> str:
         return "ok"
 
-
 def _patched_provider_bundle(
     seen_child_tools: list[list[str]],
     transport: str = "",
@@ -963,12 +953,10 @@ def _patched_provider_bundle(
     )
     return patch("xcode.harness.assembly.build_providers", return_value=bundle)
 
-
 def _layered_compactor(app: XcodeApp) -> LayeredCompactor:
     compactor = app.agent.compactor
     assert isinstance(compactor, LayeredCompactor)
     return compactor
 
-
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

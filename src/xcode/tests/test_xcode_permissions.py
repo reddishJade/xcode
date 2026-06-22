@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 import tempfile
-import unittest
-
 from xcode.harness.observability import (
     HITLResult,
     HookManager,
@@ -25,7 +23,6 @@ from xcode.agent.config import AgentContext, BeforeToolCallContext, BeforeToolCa
 from xcode.agent.messages import AssistantMessage
 from xcode.agent.types import ToolCallContent
 
-
 from xcode.tests.fixtures import FakeProvider
 from xcode.ai.events import (
     TextDelta,
@@ -33,7 +30,7 @@ from xcode.ai.events import (
     ToolCallEvent,
     ToolCall,
 )
-
+import pytest
 
 INPUT_SCHEMA = {
     "type": "object",
@@ -43,7 +40,7 @@ INPUT_SCHEMA = {
 }
 
 
-class XcodePermissionsTests(unittest.TestCase):
+class XcodePermissionsTests:
     def test_permission_policy_denies_tool(self) -> None:
         tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
         engine = PermissionEngine(
@@ -51,11 +48,9 @@ class XcodePermissionsTests(unittest.TestCase):
                 static_policy=PermissionPolicy((StaticPermission("echo", "deny"),)),
             )
         )
-        result = engine.decide(
-            "echo", '{"input": "hello"}', tool_spec=tool, tool_input={"input": "hello"}
-        )
-        self.assertTrue(result.blocked)
-        self.assertIn("deny for echo", result.reason)
+        result = engine.decide("echo", {"input": "hello"}, tool_spec=tool)
+        assert result.blocked
+        assert "deny for echo" in result.reason
 
     def test_handler_exception_reports_error(self) -> None:
         def fail(_value: dict) -> str:
@@ -63,10 +58,10 @@ class XcodePermissionsTests(unittest.TestCase):
 
         tool = ToolSpec("fail", "Fail.", "text", fail)
         result = PermissionEngine(PermissionEngineConfig()).decide(
-            "fail", '{"input": "x"}', tool_spec=tool, tool_input={}
+            "fail", {}, tool_spec=tool
         )
-        self.assertFalse(result.blocked)
-        with self.assertRaises(RuntimeError):
+        assert not (result.blocked)
+        with pytest.raises(RuntimeError):
             tool.handler({})
 
     def test_permission_policy_ask_for_low_risk_tool(self) -> None:
@@ -76,11 +71,9 @@ class XcodePermissionsTests(unittest.TestCase):
                 static_policy=PermissionPolicy((StaticPermission("echo", "ask"),)),
             )
         )
-        result = engine.decide(
-            "echo", '{"input": "hello"}', tool_spec=tool, tool_input={"input": "hello"}
-        )
-        self.assertTrue(result.blocked)
-        self.assertIn("requires approval", result.reason)
+        result = engine.decide("echo", {"input": "hello"}, tool_spec=tool)
+        assert result.blocked
+        assert "requires approval" in result.reason
 
     def test_permission_policy_allow_skips_high_risk_approval(self) -> None:
         tool = ToolSpec(
@@ -94,11 +87,9 @@ class XcodePermissionsTests(unittest.TestCase):
                 static_policy=PermissionPolicy((StaticPermission("danger", "allow"),)),
             )
         )
-        result = engine.decide(
-            "danger", '{"input": "go"}', tool_spec=tool, tool_input={"input": "go"}
-        )
-        self.assertFalse(result.blocked)
-        self.assertEqual(tool.handler({"input": "go"}), "go")
+        result = engine.decide("danger", {"input": "go"}, tool_spec=tool)
+        assert not (result.blocked)
+        assert tool.handler({"input": "go"}) == "go"
 
     def test_static_last_match_wins(self) -> None:
         rules = (
@@ -107,9 +98,9 @@ class XcodePermissionsTests(unittest.TestCase):
         )
         policy = PermissionPolicy(rules)
         engine = PermissionEngine(PermissionEngineConfig(static_policy=policy))
-        result = engine.decide("bash", "anything", tool_input={})
-        self.assertTrue(result.blocked)
-        self.assertEqual(result.decision, "deny")
+        result = engine.decide("bash", {})
+        assert result.blocked
+        assert result.decision == "deny"
 
     def test_permission_engine_restricted_dirs_deny(self) -> None:
         engine = PermissionEngine(
@@ -119,20 +110,18 @@ class XcodePermissionsTests(unittest.TestCase):
         )
         result = engine.decide(
             "read_file",
-            '{"path": "secrets/key.txt"}',
-            tool_input={"path": "secrets/key.txt"},
+            {"path": "secrets/key.txt"},
         )
-        self.assertTrue(result.blocked)
-        self.assertEqual(result.matched_rule, "restricted_dirs")
+        assert result.blocked
+        assert result.matched_rule == "restricted_dirs"
 
     def test_restricted_dirs_does_not_match_plain_text(self) -> None:
         engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
         result = engine.decide(
             "echo",
-            '{"input": "the secrets directory is documented"}',
-            tool_input={"input": "the secrets directory is documented"},
+            {"input": "the secrets directory is documented"},
         )
-        self.assertFalse(result.blocked)
+        assert not (result.blocked)
 
     def test_restricted_dirs_rejects_prefix_collision_only_when_contained(
         self,
@@ -140,30 +129,27 @@ class XcodePermissionsTests(unittest.TestCase):
         engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
         result = engine.decide(
             "read_file",
-            '{"path": "secrets-copy/key.txt"}',
-            tool_input={"path": "secrets-copy/key.txt"},
+            {"path": "secrets-copy/key.txt"},
         )
-        self.assertFalse(result.blocked)
+        assert not (result.blocked)
 
     def test_restricted_dirs_checks_all_patch_targets(self) -> None:
         engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
         result = engine.decide(
             "apply_patch",
-            '{"paths": ["src/app.py", "secrets/key.txt"]}',
-            tool_input={"paths": ["src/app.py", "secrets/key.txt"]},
+            {"paths": ["src/app.py", "secrets/key.txt"]},
         )
-        self.assertTrue(result.blocked)
-        self.assertEqual(result.matched_rule, "restricted_dirs")
+        assert result.blocked
+        assert result.matched_rule == "restricted_dirs"
 
     def test_restricted_dirs_asks_for_unparseable_filesystem_command(self) -> None:
         engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
         result = engine.decide(
             "bash",
-            '{"command": "rm \\"unterminated"}',
-            tool_input={"command": 'rm "unterminated'},
+            {"command": 'rm "unterminated'},
         )
-        self.assertTrue(result.blocked)
-        self.assertEqual(result.decision, "ask")
+        assert result.blocked
+        assert result.decision == "ask"
 
     def test_restricted_dirs_resolves_absolute_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -178,10 +164,9 @@ class XcodePermissionsTests(unittest.TestCase):
             )
             result = engine.decide(
                 "read_file",
-                '{"path": "absolute"}',
-                tool_input={"path": str(restricted / "key.txt")},
+                {"path": str(restricted / "key.txt")},
             )
-        self.assertTrue(result.blocked)
+        assert result.blocked
 
     def test_restricted_dirs_resolves_symlink_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -192,7 +177,7 @@ class XcodePermissionsTests(unittest.TestCase):
             try:
                 link.symlink_to(restricted, target_is_directory=True)
             except OSError:
-                self.skipTest("当前环境不允许创建目录符号链接")
+                pytest.skip("当前环境不允许创建目录符号链接")
             engine = PermissionEngine(
                 PermissionEngineConfig(
                     restricted_dirs=("secrets",),
@@ -201,20 +186,18 @@ class XcodePermissionsTests(unittest.TestCase):
             )
             result = engine.decide(
                 "read_file",
-                '{"path": "public/key.txt"}',
-                tool_input={"path": "public/key.txt"},
+                {"path": "public/key.txt"},
             )
-        self.assertTrue(result.blocked)
+        assert result.blocked
 
     def test_restricted_dirs_checks_shell_path_target(self) -> None:
         engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
         result = engine.decide(
             "bash",
-            '{"command": "cat secrets/key.txt"}',
-            tool_input={"command": "cat secrets/key.txt"},
+            {"command": "cat secrets/key.txt"},
         )
-        self.assertTrue(result.blocked)
-        self.assertEqual(result.decision, "deny")
+        assert result.blocked
+        assert result.decision == "deny"
 
     def test_permission_engine_session_grant_satisfies_ask(self) -> None:
         from xcode.harness.observability import (
@@ -236,11 +219,10 @@ class XcodePermissionsTests(unittest.TestCase):
         )
         result = engine.decide(
             "bash",
-            '{"command": "git status"}',
-            tool_input={"command": "git status"},
+            {"command": "git status"},
         )
-        self.assertFalse(result.blocked)
-        self.assertEqual(result.matched_rule, "session_grant")
+        assert not (result.blocked)
+        assert result.matched_rule == "session_grant"
 
     def test_global_default_ask_applies_when_no_rule_matches(self) -> None:
         engine = PermissionEngine(
@@ -251,33 +233,33 @@ class XcodePermissionsTests(unittest.TestCase):
                 ),
             )
         )
-        allowed = engine.decide(
-            "read_file", '{"path": "a.txt"}', tool_input={"path": "a.txt"}
-        )
-        self.assertFalse(allowed.blocked)
-        unknown = engine.decide(
-            "write_file", '{"path": "b.txt"}', tool_input={"path": "b.txt"}
-        )
-        self.assertTrue(unknown.blocked)
-        self.assertEqual(unknown.decision, "ask")
+        allowed = engine.decide("read_file", {"path": "a.txt"})
+        assert not (allowed.blocked)
+        unknown = engine.decide("write_file", {"path": "b.txt"})
+        assert unknown.blocked
+        assert unknown.decision == "ask"
 
     def test_permission_engine_default_allow(self) -> None:
         engine = PermissionEngine(PermissionEngineConfig())
-        result = engine.decide("any_tool", "anything")
-        self.assertFalse(result.blocked)
-        self.assertEqual(result.matched_rule, "default")
+        result = engine.decide("any_tool", {"input": "anything"})
+        assert not (result.blocked)
+        assert result.matched_rule == "default"
 
     def test_permission_engine_high_risk_approval(self) -> None:
         # High-risk approval path removed (STEP 5). Default allow.
         engine = PermissionEngine(PermissionEngineConfig())
-        result = engine.decide("danger", "hello")
-        self.assertFalse(result.blocked)
+        result = engine.decide("danger", {"input": "hello"})
+        assert not (result.blocked)
 
     def test_permission_engine_execution_mode_deny(self) -> None:
         engine = PermissionEngine(PermissionEngineConfig())
-        result = engine.decide("bash", "rm -rf /", execution_decision="deny")
-        self.assertTrue(result.blocked)
-        self.assertEqual(result.matched_rule, "mode")
+        result = engine.decide(
+            "bash",
+            {"command": "git status"},
+            execution_decision="deny",
+        )
+        assert result.blocked
+        assert result.matched_rule == "mode"
 
     def test_tool_gate_static_deny_preempts_execution_mode(self) -> None:
         called = False
@@ -312,10 +294,10 @@ class XcodePermissionsTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertIn("deny for bash", result.reason)
-        self.assertFalse(called)
+        assert result is not None
+        assert "deny for bash" in result.reason
+        assert not (called)
 
     def test_structured_agent_uses_permission_policy(self) -> None:
         from xcode.ai.events import ProviderEvent
@@ -348,7 +330,7 @@ class XcodePermissionsTests(unittest.TestCase):
 
         result = agent.run("go")
 
-        self.assertIn("deny for echo", result.messages[2]["content"][0]["content"])
+        assert "deny for echo" in result.messages[2]["content"][0]["content"]
 
     def test_structured_agent_approval_callback_setter_updates_gate(self) -> None:
         from xcode.ai.events import ProviderEvent
@@ -379,7 +361,7 @@ class XcodePermissionsTests(unittest.TestCase):
 
         result = agent.run("go")
 
-        self.assertEqual(result.messages[2]["content"][0]["content"], "go")
+        assert result.messages[2]["content"][0]["content"] == "go"
 
     def test_permission_allows_then_handler_raises(self) -> None:
         def fail_handler(_value: dict) -> str:
@@ -393,13 +375,12 @@ class XcodePermissionsTests(unittest.TestCase):
         )
         result = engine.decide(
             "failing",
-            '{"input": "go"}',
+            {"input": "go"},
             tool_spec=tool,
-            tool_input={"input": "go"},
             approval_callback=lambda _t, _i: HITLResult("allow", "once"),
         )
-        self.assertFalse(result.blocked)
-        with self.assertRaises(RuntimeError):
+        assert not (result.blocked)
+        with pytest.raises(RuntimeError):
             tool.handler({"input": "go"})
 
     def test_denied_callback_returns_guidance_message(self) -> None:
@@ -416,13 +397,12 @@ class XcodePermissionsTests(unittest.TestCase):
         )
         result = engine.decide(
             "bash",
-            '{"command": "git add ."}',
+            {"command": "git add ."},
             tool_spec=tool,
-            tool_input={"command": "git add ."},
             approval_callback=lambda _t, _i: HITLResult("deny", "once"),
         )
-        self.assertTrue(result.blocked)
-        self.assertEqual(result.decision, "deny")
+        assert result.blocked
+        assert result.decision == "deny"
 
     def test_denied_callback_metadata(self) -> None:
         tool = ToolSpec(
@@ -438,19 +418,18 @@ class XcodePermissionsTests(unittest.TestCase):
         )
         result = engine.decide(
             "bash",
-            '{"command": "git push"}',
+            {"command": "git push"},
             tool_spec=tool,
-            tool_input={"command": "git push"},
             approval_callback=lambda _t, _i: HITLResult("deny", "session"),
         )
-        self.assertTrue(result.blocked)
-        self.assertEqual(result.decision, "deny")
+        assert result.blocked
+        assert result.decision == "deny"
 
 
 # ── Subagent Permission Boundary Tests ──
 
 
-class SubagentGatePermissionBoundaryTests(unittest.TestCase):
+class SubagentGatePermissionBoundaryTests:
     """验证子代理 ToolGate 的权限边界行为。
 
     子代理 GateConfig 不含 approval_callback，
@@ -481,9 +460,9 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     def test_subagent_bucket_b_blocked_no_approval_callback(self) -> None:
         """Bucket B ask 命令因无 approval_callback 被阻断。"""
@@ -509,9 +488,9 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     def test_subagent_allowed_shell_runs(self) -> None:
         """Bucket C 已知安全命令通过。"""
@@ -537,7 +516,7 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNone(result)
+        assert result is None
 
     def test_subagent_static_deny_inherited(self) -> None:
         """子代理继承静态 deny 规则。"""
@@ -563,9 +542,9 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     def test_subagent_global_default_ask(self) -> None:
         """子代理使用 global_default="ask"，仅显式 allow 的工具可通过。"""
@@ -602,7 +581,7 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNone(allowed)
+        assert allowed is None
 
         # 不在 allowlist 中的 write_file 被阻断
         blocked = hook(
@@ -616,9 +595,9 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNotNone(blocked)
         assert blocked is not None
-        self.assertTrue(blocked.block)
+        assert blocked is not None
+        assert blocked.block
 
     def test_subagent_restricted_dirs_blocks_path(self) -> None:
         """子代理继承 restricted_dirs，匹配路径被阻断。"""
@@ -645,9 +624,9 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     def test_subagent_approval_callback_not_called(self) -> None:
         """子代理无 approval_callback，ask 命令不触发回调。"""
@@ -679,10 +658,10 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
-        self.assertEqual(len(called), 0)
+        assert result is not None
+        assert result.block
+        assert len(called) == 0
 
     def test_subagent_no_session_grant_store(self) -> None:
         """子代理无 session grant store，ask 不能被已存在的 grant 满足。"""
@@ -722,9 +701,9 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     def test_subagent_permanent_grant_ignored(self) -> None:
         """子代理无 permanent grant store，永久授权不生效。"""
@@ -768,9 +747,9 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
                 ),
                 None,
             )
-            self.assertIsNotNone(result)
             assert result is not None
-            self.assertTrue(result.block)
+            assert result is not None
+            assert result.block
         finally:
             Path(f.name).unlink(missing_ok=True)
 
@@ -807,7 +786,7 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
         )
         result = agent.run("go")
-        self.assertIn("deny for echo", result.messages[2]["content"][0]["content"])
+        assert "deny for echo" in result.messages[2]["content"][0]["content"]
 
     def test_subagent_structured_agent_audit_emitted(self) -> None:
         """子代理 StructuredAgent 的 GateConfig 带 audit_logger 时发出审计。"""
@@ -847,7 +826,7 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
         )
         agent.run("go")
-        self.assertGreater(len(audit_records), 0)
+        assert len(audit_records) > 0
 
     def test_subagent_structured_agent_hook_manager_wired(self) -> None:
         """子代理 GateConfig 带 hook_manager 时发出 hook 事件。"""
@@ -890,13 +869,13 @@ class SubagentGatePermissionBoundaryTests(unittest.TestCase):
             ),
         )
         agent.run("go")
-        self.assertGreater(len(hook_records), 0)
+        assert len(hook_records) > 0
 
 
 # ── Project Root / Boundary Resolution Tests ──
 
 
-class ToolGateBoundaryResolutionTests(unittest.TestCase):
+class ToolGateBoundaryResolutionTests:
     """验证 project_root 传送到 StructuredBoundaryPolicyEvaluator 后
     能正确解析工作区相对路径。"""
 
@@ -907,13 +886,13 @@ class ToolGateBoundaryResolutionTests(unittest.TestCase):
         "additionalProperties": False,
     }
 
-    def setUp(self) -> None:
+    def setup_method(self, method) -> None:
         self._tmp = tempfile.mkdtemp()
         self._root = Path(self._tmp).resolve()
         (self._root / "subdir").mkdir()
         (self._root / "secrets").mkdir()
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method) -> None:
         import shutil
 
         shutil.rmtree(self._tmp, ignore_errors=True)
@@ -958,39 +937,39 @@ class ToolGateBoundaryResolutionTests(unittest.TestCase):
         """Parent gate with project_root: 工作区内相对路径通过。"""
         gate, snapshot = self._make_file_gate(project_root=self._root)
         result = self._run_before_hook(gate, snapshot, "subdir/file.txt")
-        self.assertIsNone(result)
+        assert result is None
 
     def test_parent_gate_external_absolute_path_blocked(self) -> None:
         """绝对路径被 StructuredBoundaryPolicyEvaluator 阻断。"""
         gate, snapshot = self._make_file_gate(project_root=self._root)
         result = self._run_before_hook(gate, snapshot, "/etc/passwd")
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     def test_parent_gate_path_traversal_blocked(self) -> None:
         """../ 路径遍历被 _is_external_path 阻断。"""
         gate, snapshot = self._make_file_gate(project_root=self._root)
         result = self._run_before_hook(gate, snapshot, "../../etc/passwd")
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     def test_git_path_denied(self) -> None:
         """.git 路径被阻断。"""
         gate, snapshot = self._make_file_gate(project_root=self._root)
         result = self._run_before_hook(gate, snapshot, ".git/config")
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     def test_sensitive_path_denied(self) -> None:
         """.env 文件路径被阻断。"""
         gate, snapshot = self._make_file_gate(project_root=self._root)
         result = self._run_before_hook(gate, snapshot, ".env")
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     def test_restricted_dirs_still_blocks_with_project_root(self) -> None:
         """restricted_dirs 在 project_root 设置时仍独立生效（Tier 0）。"""
@@ -1010,27 +989,27 @@ class ToolGateBoundaryResolutionTests(unittest.TestCase):
         )
         snapshot = gate.snapshot_for((tool,))
         result = self._run_before_hook(gate, snapshot, "secrets/key.txt")
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     def test_no_project_root_allows_relative_path_no_resolution(self) -> None:
         """project_root 未设置时，相对路径不被解析但仍通过（兼容旧行为）。"""
         gate, snapshot = self._make_file_gate(project_root=None)
         result = self._run_before_hook(gate, snapshot, "subdir/file.txt")
-        self.assertIsNone(result)
+        assert result is None
 
     def test_subagent_gate_uses_child_root(self) -> None:
         """子代理 gate 使用 child_root 进行边界解析，child_root 内路径通过。"""
         gate, snapshot = self._make_file_gate(project_root=self._root)
         result = self._run_before_hook(gate, snapshot, "subdir/file.txt")
-        self.assertIsNone(result)
+        assert result is None
 
     def test_subagent_relative_path_inside_child_root_passes(self) -> None:
         """子代理 gate 使用 child_root，相对路径在 child_root 内可通过。"""
         gate, snapshot = self._make_file_gate(project_root=self._root)
         result = self._run_before_hook(gate, snapshot, "subdir/file.txt")
-        self.assertIsNone(result)
+        assert result is None
 
     def test_subagent_gate_resolves_relative_path(self) -> None:
         """子代理 gate 使用 project_root 后，相对路径能被 StructuredBoundaryPolicyEvaluator 解析。"""
@@ -1039,7 +1018,7 @@ class ToolGateBoundaryResolutionTests(unittest.TestCase):
         inner.mkdir(exist_ok=True)
         (self._root / "outer.txt").write_text("")
         result = self._run_before_hook(gate, snapshot, "inner/new.txt")
-        self.assertIsNone(result)
+        assert result is None
 
     def test_subagent_no_approval_callback_ask_blocked(self) -> None:
         """子代理有 project_root 时，ask 仍因无 approval_callback 阻断。"""
@@ -1066,12 +1045,12 @@ class ToolGateBoundaryResolutionTests(unittest.TestCase):
             ),
             None,
         )
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
 
-class ToolGateGrantFlowTests(unittest.TestCase):
+class ToolGateGrantFlowTests:
     """验证 ToolGate 生产路径中的 canonical ask/grant/callback 流程。"""
 
     INPUT_SCHEMA = {
@@ -1137,8 +1116,8 @@ class ToolGateGrantFlowTests(unittest.TestCase):
         )
         hook = self._make_hook(gate)
         result = self._call_hook(hook)
-        self.assertIsNone(result)  # not blocked
-        self.assertEqual(len(calls), 1)
+        assert result is None  # not blocked
+        assert len(calls) == 1
 
     # ── 2. callback allow/session writes grant ──
 
@@ -1152,9 +1131,9 @@ class ToolGateGrantFlowTests(unittest.TestCase):
         )
         hook = self._make_hook(gate)
         self._call_hook(hook, "git status")
-        self.assertEqual(len(store.records()), 1)
-        self.assertEqual(store.records()[0].decision, "allow")
-        self.assertEqual(store.records()[0].scope, "session")
+        assert len(store.records()) == 1
+        assert store.records()[0].decision == "allow"
+        assert store.records()[0].scope == "session"
 
     # ── 3. same session reuses grant, callback not called again ──
 
@@ -1176,11 +1155,11 @@ class ToolGateGrantFlowTests(unittest.TestCase):
 
         # First call: no grant → callback → grant written
         self._call_hook(hook, "git status")
-        self.assertEqual(len(callback_calls), 1)
+        assert len(callback_calls) == 1
 
         # Second call: grant reused → callback NOT called
         self._call_hook(hook, "git status")
-        self.assertEqual(len(callback_calls), 1)
+        assert len(callback_calls) == 1
 
     # ── 4. different session store does not reuse grant ──
 
@@ -1211,8 +1190,8 @@ class ToolGateGrantFlowTests(unittest.TestCase):
         )
         hook = gate.build_before_tool_hook(gate.snapshot_for((tool,)))
         self._call_hook(hook, "git status")
-        self.assertEqual(len(store_a.records()), 1)
-        self.assertEqual(len(callback_calls), 1)
+        assert len(store_a.records()) == 1
+        assert len(callback_calls) == 1
 
         # Session B: different store, grant must be re-approved
         gate_b = ToolGate(
@@ -1226,8 +1205,8 @@ class ToolGateGrantFlowTests(unittest.TestCase):
         )
         hook_b = gate_b.build_before_tool_hook(gate_b.snapshot_for((tool,)))
         self._call_hook(hook_b, "git status")
-        self.assertEqual(len(store_b.records()), 1)  # new grant written
-        self.assertEqual(len(callback_calls), 2)  # callback called again
+        assert len(store_b.records()) == 1  # new grant written
+        assert len(callback_calls) == 2  # callback called again
 
     # ── 5. callback deny blocks the tool ──
 
@@ -1240,9 +1219,9 @@ class ToolGateGrantFlowTests(unittest.TestCase):
         )
         hook = self._make_hook(gate)
         result = self._call_hook(hook, "rm -rf /")
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
     # ── 6. no store + no callback → ask blocks ──
 
@@ -1263,10 +1242,10 @@ class ToolGateGrantFlowTests(unittest.TestCase):
         )
         hook = gate.build_before_tool_hook(gate.snapshot_for((tool,)))
         result = self._call_hook(hook, "echo hello")
-        self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(result.block)
+        assert result is not None
+        assert result.block
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

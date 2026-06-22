@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-import unittest
-
 from xcode.ai.events import (
     FinalMessage,
     ToolCall,
@@ -16,8 +14,7 @@ from xcode.harness.agent_runtime.fallback import _FallbackSwitchingProvider
 from xcode.harness.config import AgentConfig
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
-
-
+import pytest
 PATH_SCHEMA = {
     "type": "object",
     "properties": {"path": {"type": "string"}},
@@ -25,8 +22,7 @@ PATH_SCHEMA = {
     "additionalProperties": False,
 }
 
-
-class XcodeAgentResiliencyTests(unittest.TestCase):
+class XcodeAgentResiliencyTests:
     def test_diminishing_returns_continuation_circuit_breaker(self) -> None:
         # Mock provider returning max_tokens with small response blocks
         responses = iter(
@@ -62,8 +58,8 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
 
         result = agent.run("test diminishing returns")
 
-        self.assertIn("Diminishing Returns", result.answer)
-        self.assertTrue(result.stopped_by_error)
+        assert "Diminishing Returns" in result.answer
+        assert result.stopped_by_error
 
     def test_semantic_idle_failsafe_triggers_in_act_mode(self) -> None:
         # Define a read-only tool (not productive)
@@ -137,10 +133,10 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
 
         # Act mode should trigger Watchdog after 4 consecutive idle steps
         result = agent.run("test idle act", mode="act")
-        self.assertTrue(result.stopped_by_watchdog)
-        self.assertIsNotNone(result.watchdog_reason)
+        assert result.stopped_by_watchdog
         assert result.watchdog_reason is not None
-        self.assertIn("consecutive steps", result.watchdog_reason.lower())
+        assert result.watchdog_reason is not None
+        assert "consecutive steps" in result.watchdog_reason.lower()
 
     def test_semantic_idle_failsafe_does_not_trigger_in_plan_mode(self) -> None:
         read_tool = ToolSpec(
@@ -212,7 +208,7 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
 
         # Plan mode should NOT trigger Watchdog, allowing exploration
         result = agent.run("test idle plan", mode="plan")
-        self.assertEqual(result.answer, "done")
+        assert result.answer == "done"
 
     def test_endpoint_session_level_fallback(self) -> None:
         primary_calls = 0
@@ -253,14 +249,13 @@ class XcodeAgentResiliencyTests(unittest.TestCase):
         )
 
         result = agent.run("trigger fallback")
-        self.assertEqual(result.answer, "fallback done")
-        self.assertEqual(primary_calls, 3)  # Overloaded failed 3 times
-        self.assertEqual(fallback_calls, 1)  # Fallback succeeded
+        assert result.answer == "fallback done"
+        assert primary_calls == 3  # Overloaded failed 3 times
+        assert fallback_calls == 1  # Fallback succeeded
         # After fallback, the wrapper should be using the fallback provider
         wrapper = agent.provider
-        self.assertIsInstance(wrapper, _FallbackSwitchingProvider)
-        self.assertTrue(wrapper._using_fallback)  # pyright: ignore[reportAttributeAccessIssue]
-
+        assert isinstance(wrapper, _FallbackSwitchingProvider)
+        assert wrapper._using_fallback  # pyright: ignore[reportAttributeAccessIssue]
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

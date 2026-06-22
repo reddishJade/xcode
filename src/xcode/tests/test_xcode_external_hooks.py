@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
-import unittest
 from collections.abc import Callable
 from pathlib import Path
 
@@ -26,7 +25,8 @@ from xcode.harness.observability.external_hooks import (
 from xcode.harness.observability.hooks import HookRecord
 from xcode.harness.skills import ApprovalCallback, ToolSpec
 from xcode.tests.fixtures import FakeProvider
-
+import pytest
+from xcode.tests._helpers import assert_logs, assert_no_logs
 INPUT_SCHEMA = {
     "type": "object",
     "properties": {"input": {"type": "string"}},
@@ -34,13 +34,11 @@ INPUT_SCHEMA = {
     "additionalProperties": False,
 }
 
-
 def _write_hook(root: Path, source: str) -> Path:
     """写入单个临时 hook 脚本。"""
     path = root / "hook.py"
     path.write_text(source, encoding="utf-8")
     return path
-
 
 def _entry(
     script: Path,
@@ -62,8 +60,7 @@ def _entry(
         source="test-config.json",
     )
 
-
-class ExternalHookRunnerTests(unittest.TestCase):
+class ExternalHookRunnerTests:
     """验证 JSON 进程边界、失败策略和诊断状态。"""
 
     def test_executes_json_hook_and_redacts_input(self) -> None:
@@ -91,12 +88,12 @@ class ExternalHookRunnerTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(execution.status, "succeeded")
-        self.assertEqual(execution.response["seen"], "token=[REDACTED]")
+        assert execution.status == "succeeded"
+        assert execution.response["seen"] == "token=[REDACTED]"
         diagnostic = runner.diagnostics()[0]
-        self.assertEqual(diagnostic.run_count, 1)
-        self.assertEqual(diagnostic.last_status, "succeeded")
-        self.assertEqual(diagnostic.source, "test-config.json")
+        assert diagnostic.run_count == 1
+        assert diagnostic.last_status == "succeeded"
+        assert diagnostic.source == "test-config.json"
 
     def test_timeout_is_recorded_and_warned(self) -> None:
         """超时按 warn 策略记录但不抛出。"""
@@ -111,15 +108,15 @@ class ExternalHookRunnerTests(unittest.TestCase):
                 root,
             )
 
-            with self.assertLogs(
+            with assert_logs(
                 "xcode.harness.observability.external_hooks",
                 level="WARNING",
             ):
                 (execution,) = runner.execute(HookRecord("pre_tool", tool="bash"))
 
-        self.assertEqual(execution.status, "failed")
-        self.assertIn("timed out", execution.error)
-        self.assertIn("timed out", runner.diagnostics()[0].last_error)
+        assert execution.status == "failed"
+        assert "timed out" in execution.error
+        assert "timed out" in runner.diagnostics()[0].last_error
 
     def test_nonzero_exit_redacts_diagnostics(self) -> None:
         """非零退出保留状态并脱敏 stderr。"""
@@ -140,10 +137,10 @@ class ExternalHookRunnerTests(unittest.TestCase):
 
             (execution,) = runner.execute(HookRecord("pre_tool", tool="bash"))
 
-        self.assertEqual(execution.status, "failed")
-        self.assertIn("code 7", execution.error)
-        self.assertIn("api_key=[REDACTED]", execution.error)
-        self.assertNotIn("supersecret", execution.error)
+        assert execution.status == "failed"
+        assert "code 7" in execution.error
+        assert "api_key=[REDACTED]" in execution.error
+        assert "supersecret" not in execution.error
 
     def test_invalid_json_obeys_fail_policy(self) -> None:
         """fail 策略把无效 JSON 转换为 ExternalHookFailure。"""
@@ -155,12 +152,12 @@ class ExternalHookRunnerTests(unittest.TestCase):
                 root,
             )
 
-            with self.assertRaisesRegex(ExternalHookFailure, "invalid JSON"):
+            with pytest.raises(ExternalHookFailure, match="invalid JSON"):
                 runner.execute(HookRecord("pre_tool", tool="bash"))
 
         diagnostic = runner.diagnostics()[0]
-        self.assertEqual(diagnostic.last_status, "failed")
-        self.assertIn("invalid JSON", diagnostic.last_error)
+        assert diagnostic.last_status == "failed"
+        assert "invalid JSON" in diagnostic.last_error
 
     def test_matcher_and_subagent_inheritance_filter_execution(self) -> None:
         """matcher 与显式 subagent 继承必须同时满足。"""
@@ -184,12 +181,12 @@ class ExternalHookRunnerTests(unittest.TestCase):
             )
             unmatched = runner.execute(HookRecord("pre_tool", tool="bash"))
 
-        self.assertEqual(len(main_results), 2)
-        self.assertEqual(len(child_results), 1)
-        self.assertEqual(unmatched, ())
+        assert len(main_results) == 2
+        assert len(child_results) == 1
+        assert unmatched == ()
         diagnostics = runner.diagnostics()
-        self.assertEqual(diagnostics[0].run_count, 1)
-        self.assertEqual(diagnostics[1].run_count, 2)
+        assert diagnostics[0].run_count == 1
+        assert diagnostics[1].run_count == 2
 
     def test_pre_tool_transforms_arguments_before_permission_and_execution(
         self,
@@ -218,8 +215,8 @@ class ExternalHookRunnerTests(unittest.TestCase):
 
             result = agent.run("go")
 
-        self.assertEqual(seen, ["changed"])
-        self.assertIn("changed", str(result.messages))
+        assert seen == ["changed"]
+        assert "changed" in str(result.messages)
 
     def test_pre_tool_deny_blocks_handler(self) -> None:
         """外部 deny 只能收紧权限并阻止 handler。"""
@@ -239,8 +236,8 @@ class ExternalHookRunnerTests(unittest.TestCase):
 
             result = _agent_with_tool(runner, handler).run("go")
 
-        self.assertFalse(called)
-        self.assertIn("deny", str(result.messages).lower())
+        assert not (called)
+        assert "deny" in str(result.messages).lower()
 
     def test_pre_tool_allow_cannot_override_static_deny(self) -> None:
         """外部 allow 不覆盖 PermissionEngine 的 deny。"""
@@ -265,8 +262,8 @@ class ExternalHookRunnerTests(unittest.TestCase):
             )
             result = agent.run("go")
 
-        self.assertFalse(called)
-        self.assertIn("deny", str(result.messages).lower())
+        assert not (called)
+        assert "deny" in str(result.messages).lower()
 
     def test_pre_tool_ask_requires_normal_approval(self) -> None:
         """外部 ask 仍通过 PermissionEngine 的正常审批回调。"""
@@ -288,7 +285,7 @@ class ExternalHookRunnerTests(unittest.TestCase):
 
             agent.run("go")
 
-        self.assertEqual(approvals, ["echo"])
+        assert approvals == ["echo"]
 
     def test_hook_manager_wires_all_non_pre_events(self) -> None:
         """装配层把其余五个事件转交给外部 runner。"""
@@ -326,7 +323,7 @@ class ExternalHookRunnerTests(unittest.TestCase):
                 for line in log_path.read_text(encoding="utf-8").splitlines()
             ]
 
-        self.assertEqual(recorded, list(events))
+        assert recorded == list(events)
 
     def test_subagent_hook_manager_runs_only_inherited_entries(self) -> None:
         """subagent manager 默认跳过未显式继承的 command hook。"""
@@ -350,9 +347,8 @@ class ExternalHookRunnerTests(unittest.TestCase):
             manager.emit(HookRecord("before_agent_start"))
 
         diagnostics = runner.diagnostics()
-        self.assertEqual(diagnostics[0].run_count, 0)
-        self.assertEqual(diagnostics[1].run_count, 1)
-
+        assert diagnostics[0].run_count == 0
+        assert diagnostics[1].run_count == 1
 
 def _agent_with_tool(
     runner: ExternalHookRunner,
@@ -398,6 +394,5 @@ def _agent_with_tool(
         ),
     )
 
-
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

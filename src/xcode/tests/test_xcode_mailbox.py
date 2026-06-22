@@ -1,42 +1,40 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 import logging
 
 from xcode.harness.mailbox import AgentMailbox, build_mailbox_tools
 from xcode.harness.task_store import TaskStore
-
-
-class TestTaskStoreAndMailbox(unittest.TestCase):
-    def setUp(self) -> None:
+import pytest
+class TestTaskStoreAndMailbox:
+    def setup_method(self, method) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         # Suppress logging warnings to avoid cluttering test outputs
         logging.getLogger("xcode.harness.mailbox").setLevel(logging.ERROR)
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method) -> None:
         self.temp_dir.cleanup()
 
     def test_task_store_with_filelock(self) -> None:
         store = TaskStore(self.root)
         task1 = store.create("Test Task 1", {"foo": "bar"})
-        self.assertEqual(task1.id, 1)
-        self.assertEqual(task1.title, "Test Task 1")
-        self.assertEqual(task1.status, "pending")
+        assert task1.id == 1
+        assert task1.title == "Test Task 1"
+        assert task1.status == "pending"
 
         # Test claim
         claimed = store.claim(1, "worker1")
-        self.assertIsNotNone(claimed)
         assert claimed is not None
-        self.assertEqual(claimed.status, "claimed")
-        self.assertEqual(claimed.claimed_by, "worker1")
+        assert claimed is not None
+        assert claimed.status == "claimed"
+        assert claimed.claimed_by == "worker1"
 
         # List all
         tasks = store.list()
-        self.assertEqual(len(tasks), 1)
-        self.assertEqual(tasks[0].id, 1)
+        assert len(tasks) == 1
+        assert tasks[0].id == 1
 
     def test_agent_mailbox_basic_flow(self) -> None:
         mailbox = AgentMailbox(self.root)
@@ -49,17 +47,17 @@ class TestTaskStoreAndMailbox(unittest.TestCase):
 
         # Read unread
         unread = mailbox.read_unread_messages("agent_b")
-        self.assertEqual(len(unread), 2)
-        self.assertEqual(unread[0]["message_id"], msg_id1)
-        self.assertEqual(unread[1]["message_id"], msg_id2)
+        assert len(unread) == 2
+        assert unread[0]["message_id"] == msg_id1
+        assert unread[1]["message_id"] == msg_id2
 
         # Acknowledge first message
         mailbox.acknowledge_message(msg_id1, "agent_b")
 
         # Read unread again
         unread_after = mailbox.read_unread_messages("agent_b")
-        self.assertEqual(len(unread_after), 1)
-        self.assertEqual(unread_after[0]["message_id"], msg_id2)
+        assert len(unread_after) == 1
+        assert unread_after[0]["message_id"] == msg_id2
 
     def test_agent_mailbox_idempotence(self) -> None:
         mailbox = AgentMailbox(self.root)
@@ -72,7 +70,7 @@ class TestTaskStoreAndMailbox(unittest.TestCase):
 
         # Verify it is unread-free
         unread = mailbox.read_unread_messages("agent_b")
-        self.assertEqual(len(unread), 0)
+        assert len(unread) == 0
 
     def test_agent_mailbox_corrupt_lines_tolerance(self) -> None:
         mailbox = AgentMailbox(self.root)
@@ -93,9 +91,9 @@ class TestTaskStoreAndMailbox(unittest.TestCase):
 
         # Read unread - should gracefully skip the corrupt lines
         unread = mailbox.read_unread_messages(recipient_id)
-        self.assertEqual(len(unread), 2)
-        self.assertEqual(unread[0]["message_id"], msg_id1)
-        self.assertEqual(unread[1]["message_id"], msg_id2)
+        assert len(unread) == 2
+        assert unread[0]["message_id"] == msg_id1
+        assert unread[1]["message_id"] == msg_id2
 
     def test_mailbox_tools_basic_flow(self) -> None:
         tools = {
@@ -110,23 +108,19 @@ class TestTaskStoreAndMailbox(unittest.TestCase):
                 "payload": {"question": "ping"},
             }
         )
-        self.assertIn("sent message", sent)
+        assert "sent message" in sent
         message_id = sent.split()[2]
 
         unread = tools["read_mailbox_messages"].handler({"recipient_id": "agent_b"})
-        self.assertIn(message_id, unread)
-        self.assertIn('"question": "ping"', unread)
+        assert message_id in unread
+        assert '"question": "ping"' in unread
 
         acked = tools["acknowledge_mailbox_message"].handler(
             {"recipient_id": "agent_b", "message_id": message_id}
         )
-        self.assertIn("acknowledged message", acked)
+        assert "acknowledged message" in acked
 
-        self.assertEqual(
-            tools["read_mailbox_messages"].handler({"recipient_id": "agent_b"}),
-            "[]",
-        )
-
+        assert tools["read_mailbox_messages"].handler({"recipient_id": "agent_b"}) == "[]"
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

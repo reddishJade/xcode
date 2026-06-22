@@ -7,15 +7,13 @@ from io import StringIO
 from pathlib import Path
 import subprocess
 import tempfile
-import unittest
 from unittest.mock import Mock, patch
 
 import xcode.coding_agent.tools.code_search as code_search
 from xcode.coding_agent.tools import build_code_tools
 from xcode.harness.skills import ToolSpec
-
-
-class XcodeCodeToolsTests(unittest.TestCase):
+import pytest
+class XcodeCodeToolsTests:
     """验证代码搜索工具的路径、ignore、排序和诊断契约。"""
 
     def test_glob_files_finds_project_paths(self) -> None:
@@ -31,7 +29,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
                 {"path": "pkg", "pattern": "*.py", "max_results": 10}
             )
 
-            self.assertEqual(output, "pkg/a.py")
+            assert output == "pkg/a.py"
 
     def test_glob_files_rejects_blocked_paths(self) -> None:
         """glob_files 拒绝 blocked path。"""
@@ -40,7 +38,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
             (root / ".env").write_text("TOKEN=x", encoding="utf-8")
             tools = _tools(root)
 
-            with self.assertRaises(ValueError):
+            with pytest.raises(ValueError):
                 tools["glob_files"].handler({"path": ".env", "pattern": "*"})
 
     def test_glob_files_recursive_finds_subdir_files(self) -> None:
@@ -57,8 +55,8 @@ class XcodeCodeToolsTests(unittest.TestCase):
                 {"path": ".", "pattern": "**/*.md", "max_results": 10}
             )
 
-            self.assertIn("docs/a.md", output)
-            self.assertIn("docs/nested/b.md", output)
+            assert "docs/a.md" in output
+            assert "docs/nested/b.md" in output
 
     def test_glob_files_empty_directory_returns_no_files(self) -> None:
         """ripgrep 对空目录返回 1 时仍表示正常无结果。"""
@@ -67,7 +65,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
 
             output = tools["glob_files"].handler({"pattern": "*.py"})
 
-        self.assertEqual(output, "No files found.")
+        assert output == "No files found."
 
     def test_grep_search_finds_project_text(self) -> None:
         """grep_search 返回项目文本匹配。"""
@@ -83,8 +81,8 @@ class XcodeCodeToolsTests(unittest.TestCase):
                 {"pattern": "Agent", "path": ".", "glob": "*.py"}
             )
 
-            self.assertIn("a.py", output)
-            self.assertIn("Agent", output)
+            assert "a.py" in output
+            assert "Agent" in output
 
     def test_grep_search_without_rg_warns_once_then_falls_back(self) -> None:
         """缺少 ripgrep 时只提示一次并使用 Python fallback。"""
@@ -100,9 +98,9 @@ class XcodeCodeToolsTests(unittest.TestCase):
                 first = tools["grep_search"].handler({"pattern": "needle"})
                 second = tools["grep_search"].handler({"pattern": "needle"})
 
-            self.assertIn("ripgrep not found", first)
-            self.assertIn("a.txt", first)
-            self.assertNotIn("ripgrep not found", second)
+            assert "ripgrep not found" in first
+            assert "a.txt" in first
+            assert "ripgrep not found" not in second
 
     def test_grep_search_rejects_blocked_paths(self) -> None:
         """grep_search 拒绝 blocked path。"""
@@ -111,7 +109,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
             (root / ".env").write_text("TOKEN=x", encoding="utf-8")
             tools = _tools(root)
 
-            with self.assertRaises(ValueError):
+            with pytest.raises(ValueError):
                 tools["grep_search"].handler({"pattern": "TOKEN", "path": ".env"})
 
     def test_search_tools_exclude_ignored_and_hidden_files_without_rg(self) -> None:
@@ -142,10 +140,10 @@ class XcodeCodeToolsTests(unittest.TestCase):
                 )
 
         for output in (glob_output, find_output, grep_output):
-            self.assertIn("visible.py", output)
-            self.assertNotIn("ignored.py", output)
-            self.assertNotIn(".hidden.py", output)
-            self.assertNotIn("generated.py", output)
+            assert "visible.py" in output
+            assert "ignored.py" not in output
+            assert ".hidden.py" not in output
+            assert "generated.py" not in output
 
     def test_glob_files_sorts_by_mtime_then_path(self) -> None:
         """glob 结果按修改时间降序，同时间按路径稳定排序。"""
@@ -169,7 +167,7 @@ class XcodeCodeToolsTests(unittest.TestCase):
                     {"pattern": "*.py", "max_results": 10}
                 )
 
-        self.assertEqual(output.splitlines(), ["c.py", "a.py", "b.py"])
+        assert output.splitlines() == ["c.py", "a.py", "b.py"]
 
     def test_python_fallback_works_without_git_repository(self) -> None:
         """无 .git 目录时 Python fallback 仍应用 .gitignore。"""
@@ -194,10 +192,10 @@ class XcodeCodeToolsTests(unittest.TestCase):
                     {"pattern": "*.txt", "max_results": 10}
                 )
 
-        self.assertEqual(primary_output, "visible.txt")
-        self.assertEqual(fallback_output, "visible.txt")
-        self.assertIn("visible.txt", primary_grep)
-        self.assertNotIn("ignored.txt", primary_grep)
+        assert primary_output == "visible.txt"
+        assert fallback_output == "visible.txt"
+        assert "visible.txt" in primary_grep
+        assert "ignored.txt" not in primary_grep
 
     def test_python_fallback_applies_nested_gitignore_scope(self) -> None:
         """嵌套 .gitignore 仅影响其所在目录树。"""
@@ -218,18 +216,18 @@ class XcodeCodeToolsTests(unittest.TestCase):
                     {"pattern": "*.tmp", "max_results": 10}
                 )
 
-        self.assertEqual(output, "other/visible.tmp")
+        assert output == "other/visible.tmp"
 
     def test_search_tools_validate_numeric_bounds(self) -> None:
         """搜索工具拒绝非整数和越界数值参数。"""
         with tempfile.TemporaryDirectory() as temp_dir:
             tools = _tools(Path(temp_dir))
 
-            with self.assertRaisesRegex(ValueError, "max_results must be an integer"):
+            with pytest.raises(ValueError, match="max_results must be an integer"):
                 tools["glob_files"].handler({"max_results": "10"})
-            with self.assertRaisesRegex(ValueError, "max_results must be at least 1"):
+            with pytest.raises(ValueError, match="max_results must be at least 1"):
                 tools["find_files"].handler({"pattern": "*", "max_results": 0})
-            with self.assertRaisesRegex(ValueError, "context must be at least 0"):
+            with pytest.raises(ValueError, match="context must be at least 0"):
                 tools["grep_search"].handler({"pattern": "x", "context": -1})
 
     def test_grep_fallback_reports_invalid_regex(self) -> None:
@@ -246,8 +244,8 @@ class XcodeCodeToolsTests(unittest.TestCase):
             ):
                 output = tools["grep_search"].handler({"pattern": "["})
 
-        self.assertIn("Invalid regex pattern", output)
-        self.assertNotEqual(output, "No matches found.")
+        assert "Invalid regex pattern" in output
+        assert output != "No matches found."
 
     def test_ripgrep_discovery_error_is_not_reported_as_no_files(self) -> None:
         """ripgrep 文件枚举失败时保留 stderr 诊断。"""
@@ -270,9 +268,9 @@ class XcodeCodeToolsTests(unittest.TestCase):
                     return_value=completed,
                 ),
             ):
-                with self.assertRaisesRegex(
+                with pytest.raises(
                     ValueError,
-                    "ripgrep file discovery failed: invalid glob",
+                    match="ripgrep file discovery failed: invalid glob",
                 ):
                     tools["glob_files"].handler({"pattern": "*.py"})
 
@@ -295,17 +293,15 @@ class XcodeCodeToolsTests(unittest.TestCase):
                     return_value=process,
                 ),
             ):
-                with self.assertRaisesRegex(
+                with pytest.raises(
                     ValueError,
-                    "ripgrep failed: regex parse error",
+                    match="ripgrep failed: regex parse error",
                 ):
                     tools["grep_search"].handler({"pattern": "["})
-
 
 def _tools(root: Path) -> dict[str, ToolSpec]:
     """按名称索引项目代码搜索工具。"""
     return {tool.name: tool for tool in build_code_tools(root)}
 
-
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

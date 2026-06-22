@@ -244,7 +244,7 @@ uv run ruff format <modified-files>
 uv run pyright <modified-files>
 
 # 针对性测试
-uv run python -m unittest <targeted-test-module>
+uv run pytest <targeted-test-module> -q --tb=short
 
 # 仅修改文档时
 git diff --check -- <modified-docs>
@@ -267,10 +267,10 @@ Do not run end-to-end suites that require specific external environment variable
 uv pip install -e .
 
 # 针对性测试
-uv run python -m unittest src.xcode.tests.test_xcode_app_runtime
+uv run pytest src/xcode/tests/test_xcode_app_runtime.py -q --tb=short
 
 # 完整测试（仅按需运行）
-uv run python -m unittest discover src\xcode\tests
+uv run pytest src/xcode/tests/ -q --tb=short
 
 # 编译检查
 uv run python -m compileall src

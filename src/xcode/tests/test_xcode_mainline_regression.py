@@ -22,7 +22,6 @@ import sys
 import tempfile
 from pathlib import Path
 from unittest import mock
-import unittest
 
 from xcode.agent.context_collector import (
     ContextCollectionInput,
@@ -44,7 +43,7 @@ from xcode.harness.skills_registry import (
     build_skill_search_dirs,
 )
 from xcode.harness.snapshot import SnapshotService, SnapshotStore
-
+import pytest
 
 FAKE_MCP_SERVER_CODE = r"""
 import sys, json
@@ -74,11 +73,11 @@ if __name__ == "__main__":
 """
 
 
-class TestMainlineRegression(unittest.TestCase):
+class TestMainlineRegression:
     """主回归测试：覆盖所有关键集成路径。"""
 
     @classmethod
-    def setUpClass(cls) -> None:
+    def setup_class(cls) -> None:
         cls._home_tmp = tempfile.TemporaryDirectory()
         cls._home_patcher = mock.patch.object(
             Path, "home", return_value=Path(cls._home_tmp.name)
@@ -86,7 +85,7 @@ class TestMainlineRegression(unittest.TestCase):
         cls._home_patcher.start()
 
     @classmethod
-    def tearDownClass(cls) -> None:
+    def teardown_class(cls) -> None:
         cls._home_patcher.stop()
         cls._home_tmp.cleanup()
 
@@ -102,9 +101,9 @@ class TestMainlineRegression(unittest.TestCase):
             )
             collector = InstructionCollector(project_root=root)
             blocks = collector.collect(ContextCollectionInput(project_root=root))
-            self.assertTrue(blocks)
+            assert blocks
             combined = " ".join(b.content for b in blocks)
-            self.assertIn("Python 3.12", combined)
+            assert "Python 3.12" in combined
 
     # ── 2. 技能发现 + load_skill ──
 
@@ -121,13 +120,13 @@ class TestMainlineRegression(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             summaries = registry.list_summaries()
-            self.assertEqual(len(summaries), 1)
-            self.assertEqual(summaries[0].name, "tester")
+            assert len(summaries) == 1
+            assert summaries[0].name == "tester"
 
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "tester"})
-            self.assertIn("Tester Skill", output)
-            self.assertIn("Run tests.", output)
+            assert "Tester Skill" in output
+            assert "Run tests." in output
 
     # ── 3. MCP 发现（fixture 服务器） ──
 
@@ -149,11 +148,11 @@ class TestMainlineRegression(unittest.TestCase):
             )
             tools = build_mcp_tools(root)
             tool_names = {t.name for t in tools}
-            self.assertIn("mcp__fixture__echo", tool_names)
+            assert "mcp__fixture__echo" in tool_names
 
             echo_tool = next(t for t in tools if t.name == "mcp__fixture__echo")
             result = echo_tool.handler({"text": "hello regression"})
-            self.assertEqual(result, "hello regression")
+            assert result == "hello regression"
 
     # ── 4. 权限审批 ──
 
@@ -171,8 +170,8 @@ class TestMainlineRegression(unittest.TestCase):
                     project_root=root,
                 )
             )
-            result = deny_engine.decide("write_file", '{"path": "x.txt"}')
-            self.assertTrue(result.blocked)
+            result = deny_engine.decide("write_file", {"path": "x.txt"})
+            assert result.blocked
 
             # allow
             allow_engine = PermissionEngine(
@@ -183,13 +182,13 @@ class TestMainlineRegression(unittest.TestCase):
                     project_root=root,
                 )
             )
-            result = allow_engine.decide("read_file", '{"path": "x.txt"}')
-            self.assertFalse(result.blocked)
+            result = allow_engine.decide("read_file", {"path": "x.txt"})
+            assert not (result.blocked)
 
             # no policy → not blocked
             ask_engine = PermissionEngine(PermissionEngineConfig(project_root=root))
-            result = ask_engine.decide("write_file", '{"path": "x.txt"}')
-            self.assertFalse(result.blocked)
+            result = ask_engine.decide("write_file", {"path": "x.txt"})
+            assert not (result.blocked)
 
     # ── 5. 文件编辑快照 ──
 
@@ -232,11 +231,11 @@ class TestMainlineRegression(unittest.TestCase):
             post = svc.track()
 
             changes = svc.diff(pre.snapshot_id, post.snapshot_id)
-            self.assertTrue(any(c.path == "hello.txt" for c in changes))
+            assert any(c.path == "hello.txt" for c in changes)
 
             svc.restore_file(pre.snapshot_id, "hello.txt")
             restored = test_file.read_text(encoding="utf-8")
-            self.assertIn("original content", restored)
+            assert "original content" in restored
 
     # ── 6. 审计记录 ──
 
@@ -258,13 +257,13 @@ class TestMainlineRegression(unittest.TestCase):
             )
             logger.write(record)
 
-            self.assertTrue(log_path.exists())
+            assert log_path.exists()
             lines = log_path.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(lines), 1)
+            assert len(lines) == 1
             data = json.loads(lines[0])
-            self.assertEqual(data["tool"], "read_file")
-            self.assertEqual(data["session_id"], "test-reg-6")
-            self.assertTrue(data["approved"])
+            assert data["tool"] == "read_file"
+            assert data["session_id"] == "test-reg-6"
+            assert data["approved"]
 
     # ── 7. 撤销快照恢复 ──
 
@@ -318,7 +317,7 @@ class TestMainlineRegression(unittest.TestCase):
             )
 
             undoable = store.get_undoable_records("test-reg-7", 1)
-            self.assertEqual(len(undoable), 1)
+            assert len(undoable) == 1
             rec = undoable[0]
             for change in rec.changed_files:
                 svc.restore_file(rec.pre_snapshot_id, change.path)
@@ -326,10 +325,10 @@ class TestMainlineRegression(unittest.TestCase):
             store.update_record("test-reg-7", rec)
 
             restored = test_file.read_text(encoding="utf-8")
-            self.assertIn("v1", restored)
+            assert "v1" in restored
 
             remaining = store.get_undoable_records("test-reg-7", 1)
-            self.assertEqual(len(remaining), 0)
+            assert len(remaining) == 0
 
     # ── 8. 继续会话 ──
 
@@ -348,8 +347,8 @@ class TestMainlineRegression(unittest.TestCase):
             store2.resume(saved_path)
             records = store2.load_records()
             types = [r.type for r in records]
-            self.assertIn("user", types)
-            self.assertIn("assistant", types)
+            assert "user" in types
+            assert "assistant" in types
 
     # ── 9. 跨项目隔离 ──
 
@@ -376,15 +375,15 @@ class TestMainlineRegression(unittest.TestCase):
             reg_a = SkillRegistry()
             reg_a.discover(build_skill_search_dirs(proj_a))
             names_a = {s.name for s in reg_a.list_summaries()}
-            self.assertIn("review", names_a)
-            self.assertNotIn("deploy", names_a)
+            assert "review" in names_a
+            assert "deploy" not in names_a
 
             reg_b = SkillRegistry()
             reg_b.discover(build_skill_search_dirs(proj_b))
             names_b = {s.name for s in reg_b.list_summaries()}
-            self.assertIn("deploy", names_b)
-            self.assertNotIn("review", names_b)
+            assert "deploy" in names_b
+            assert "review" not in names_b
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

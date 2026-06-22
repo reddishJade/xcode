@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 from typing import Any
-import unittest
-
 from xcode.harness.agent_runtime.compaction import (
     CompactController,
     LayeredCompactor,
@@ -18,7 +16,6 @@ from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig
 from xcode.harness.agent_runtime.agent_helpers import budget_messages_for_provider
 
-
 from xcode.tests.fixtures import FakeProvider
 from xcode.ai.events import (
     TextDelta,
@@ -29,9 +26,8 @@ from xcode.ai.events import (
 )
 from xcode.agent.messages import AssistantMessage, ToolResultMessage
 from xcode.agent.types import ToolCallContent
-
-
-class XcodeLayeredCompactionTests(unittest.TestCase):
+import pytest
+class XcodeLayeredCompactionTests:
     def test_old_tool_results_are_micro_compacted(self) -> None:
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": "start"},
@@ -49,8 +45,8 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             messages, keep_recent=1, max_content_chars=10
         )
 
-        self.assertIn("compacted", compacted[1]["content"][0]["content"])
-        self.assertEqual(compacted[2]["content"][0]["content"], "b" * 200)
+        assert "compacted" in compacted[1]["content"][0]["content"]
+        assert compacted[2]["content"][0]["content"] == "b" * 200
 
     def test_layered_compactor_saves_transcript_and_keeps_recent_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -61,9 +57,9 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
 
             compacted = compactor(messages)
 
-            self.assertTrue(list(Path(tmp).glob("transcript_*.jsonl")))
-            self.assertIn("[Compressed]", compacted[1]["content"])
-            self.assertEqual(compacted[-1]["content"], "old 5")
+            assert list(Path(tmp).glob("transcript_*.jsonl"))
+            assert "[Compressed]" in compacted[1]["content"]
+            assert compacted[-1]["content"] == "old 5"
 
     def test_compaction_preserves_activated_skill_tool_pair(self) -> None:
         """压缩保留已激活技能的 tool_use 与完整结果。"""
@@ -109,9 +105,9 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
         compacted = compactor(messages)
         rendered = str(compacted)
 
-        self.assertIn("load_skill", rendered)
-        self.assertIn("skill-1", rendered)
-        self.assertIn("FULL_SKILL_BODY", rendered)
+        assert "load_skill" in rendered
+        assert "skill-1" in rendered
+        assert "FULL_SKILL_BODY" in rendered
 
     def test_summarize_inactive_branches_replaces_branch_run(self) -> None:
         messages: list[dict[str, Any]] = [
@@ -141,12 +137,12 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             summarize_fn=lambda branch_messages: "branch-a summary",
         )
 
-        self.assertEqual(len(compacted), 3)
+        assert len(compacted) == 3
         summary = compacted[1]
-        self.assertEqual(summary["metadata"]["type"], "branch_summary")
-        self.assertEqual(summary["metadata"]["branch_id"], "branch-a")
-        self.assertIn("branch-a summary", summary["content"][0]["text"])
-        self.assertEqual(compacted[2]["content"], "active")
+        assert summary["metadata"]["type"] == "branch_summary"
+        assert summary["metadata"]["branch_id"] == "branch-a"
+        assert "branch-a summary" in summary["content"][0]["text"]
+        assert compacted[2]["content"] == "active"
 
     def test_summarize_inactive_branches_waits_for_token_pressure(self) -> None:
         messages: list[dict[str, Any]] = [
@@ -165,7 +161,7 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             summarize_fn=lambda _branch_messages: "unused",
         )
 
-        self.assertEqual(compacted, messages)
+        assert compacted == messages
 
     def test_manual_compact_tool_triggers_structured_agent_compaction(self) -> None:
         controller = CompactController()
@@ -201,8 +197,8 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
 
         result = agent.run("work")
 
-        self.assertEqual(result.answer, "done")
-        self.assertLessEqual(seen_lengths[-1], 3)
+        assert result.answer == "done"
+        assert seen_lengths[-1] <= 3
 
     def test_structured_agent_compacts_on_token_threshold(self) -> None:
         responses = iter(
@@ -235,8 +231,8 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
 
         result = agent.run("work " + ("long " * 40))
 
-        self.assertEqual(result.answer, "done")
-        self.assertLess(seen_tokens[-1], seen_tokens[0] + 100)
+        assert result.answer == "done"
+        assert seen_tokens[-1] < seen_tokens[0] + 100
 
     def test_structured_agent_sends_compacted_messages_to_provider(self) -> None:
         seen_messages: list[list[Any]] = []
@@ -261,12 +257,9 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
 
         result = agent.run("work " + ("long " * 40))
 
-        self.assertEqual(result.answer, "done")
-        self.assertEqual(len(seen_messages), 1)
-        self.assertEqual(
-            seen_messages[0],
-            [{"role": "user", "content": "[Compressed]\nkept facts"}],
-        )
+        assert result.answer == "done"
+        assert len(seen_messages) == 1
+        assert seen_messages[0] == [{"role": "user", "content": "[Compressed]\nkept facts"}]
 
     def test_structured_agent_applies_request_hygiene_only_to_provider_request(
         self,
@@ -314,17 +307,17 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
 
         result = agent.run("continue")
 
-        self.assertEqual(result.answer, "done")
+        assert result.answer == "done"
         tool_message = next(
             message for message in seen_messages[0] if message.get("role") == "tool"
         )
-        self.assertIn("omitted", tool_message["content"])
-        self.assertLess(len(tool_message["content"].splitlines()), 200)
+        assert "omitted" in tool_message["content"]
+        assert len(tool_message["content"].splitlines()) < 200
 
         history = agent.history_messages()
         history_result = history[1]
         assert isinstance(history_result, ToolResultMessage)
-        self.assertEqual(history_result.content, large_content)
+        assert history_result.content == large_content
 
     def test_structured_agent_compacts_after_high_provider_prompt_tokens(self) -> None:
         seen_messages: list[list[Any]] = []
@@ -360,12 +353,9 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
         first = agent.run("first")
         second = agent.run("second")
 
-        self.assertEqual(first.answer, "first")
-        self.assertEqual(second.answer, "second")
-        self.assertEqual(
-            seen_messages[1],
-            [{"role": "user", "content": "[Compressed]\nfrom real tokens"}],
-        )
+        assert first.answer == "first"
+        assert second.answer == "second"
+        assert seen_messages[1] == [{"role": "user", "content": "[Compressed]\nfrom real tokens"}]
 
     def test_estimate_message_tokens(self) -> None:
         messages = [
@@ -373,17 +363,17 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
             {"role": "user", "content": "foo bar"},
         ]
         tokens = estimate_message_tokens(messages)
-        self.assertGreater(tokens, 0)
+        assert tokens > 0
 
         # Test estimating tokens for empty lists or simple formats
-        self.assertEqual(estimate_message_tokens([]), 0)
+        assert estimate_message_tokens([]) == 0
 
     def test_estimate_text_tokens(self) -> None:
         from xcode.harness.agent_runtime.compaction import estimate_text_tokens
 
         # If tiktoken is installed, empty string produces 0 tokens; fallback produces 1.
-        self.assertIn(estimate_text_tokens(""), (0, 1))
-        self.assertGreater(estimate_text_tokens("hello world"), 0)
+        assert estimate_text_tokens("") in (0, 1)
+        assert estimate_text_tokens("hello world") > 0
 
     def test_provider_budget_truncates_large_non_read_tool_results(self) -> None:
         messages: list[dict[str, Any]] = [
@@ -414,15 +404,14 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
         budgeted = budget_messages_for_provider(messages)
 
         content = budgeted[2]["content"][0]["content"]
-        self.assertLess(len(content), 10_000)
-        self.assertIn("truncated", content)
+        assert len(content) < 10_000
+        assert "truncated" in content
 
     def test_edit_file_works_after_compaction(self) -> None:
         from xcode.coding_agent.tools.file import build_file_tools
         from xcode.harness.agent_runtime.compaction import LayeredCompactor
         import tempfile
         from pathlib import Path
-
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             file_path = root / "test_compact.txt"
@@ -468,9 +457,8 @@ class XcodeLayeredCompactionTests(unittest.TestCase):
                     "new_text": "new",
                 }
             )
-            self.assertIn("replacements=1", edit_res)
-            self.assertEqual(file_path.read_text(encoding="utf-8"), "new for compact")
-
+            assert "replacements=1" in edit_res
+            assert file_path.read_text(encoding="utf-8") == "new for compact"
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

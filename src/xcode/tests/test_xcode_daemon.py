@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import tempfile
 import time
-import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from xcode.harness.daemon import HeartbeatDaemon
 from xcode.harness.mailbox import AgentMailbox
 from xcode.harness.task_store import TaskStore
-
-
-class TestHeartbeatDaemon(unittest.TestCase):
+import pytest
+class TestHeartbeatDaemon:
     """心跳守护进程单元测试。"""
 
-    def setUp(self) -> None:
+    def setup_method(self, method) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         # 用较短的间隔进行快速测试
@@ -22,21 +20,21 @@ class TestHeartbeatDaemon(unittest.TestCase):
             self.root, interval_seconds=1, agent_id="test_agent"
         )
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method) -> None:
         self.daemon.stop()
         self.temp_dir.cleanup()
 
     def test_daemon_start_and_stop(self) -> None:
         """测试守护进程正常启动与停止。"""
-        self.assertFalse(self.daemon._stop_event.is_set())
+        assert not (self.daemon._stop_event.is_set())
         self.daemon.start()
-        self.assertIsNotNone(self.daemon._thread)
         assert self.daemon._thread is not None
-        self.assertTrue(self.daemon._thread.is_alive())
+        assert self.daemon._thread is not None
+        assert self.daemon._thread.is_alive()
 
         self.daemon.stop()
-        self.assertIsNone(self.daemon._thread)
-        self.assertTrue(self.daemon._stop_event.is_set())
+        assert self.daemon._thread is None
+        assert self.daemon._stop_event.is_set()
 
     def test_custom_task_execution(self) -> None:
         """测试注册的定时任务是否能被周期执行并发送消息。"""
@@ -56,9 +54,9 @@ class TestHeartbeatDaemon(unittest.TestCase):
         # 验证消息已被成功追加到邮箱
         mailbox = AgentMailbox(self.root)
         messages = mailbox.read_unread_messages("test_agent")
-        self.assertTrue(len(messages) >= 1)
-        self.assertEqual(messages[0]["type"], "custom_alert")
-        self.assertEqual(messages[0]["payload"]["info"], "test_data")
+        assert len(messages) >= 1
+        assert messages[0]["type"] == "custom_alert"
+        assert messages[0]["payload"]["info"] == "test_data"
 
     def test_callbacks_receive_published_events(self) -> None:
         """测试守护事件回调注册。"""
@@ -69,10 +67,7 @@ class TestHeartbeatDaemon(unittest.TestCase):
             {"type": "custom_alert", "payload": {"info": "callback"}}
         )
 
-        self.assertEqual(
-            seen,
-            [{"type": "custom_alert", "payload": {"info": "callback"}}],
-        )
+        assert seen == [{"type": "custom_alert", "payload": {"info": "callback"}}]
 
     def test_task_failure_updates_health_and_emits_error(self) -> None:
         """测试任务失败会更新健康状态并发出错误事件。"""
@@ -86,9 +81,9 @@ class TestHeartbeatDaemon(unittest.TestCase):
         self.daemon._run_loop_once()
 
         health = self.daemon.health_check()
-        self.assertIn("bad task", health.last_error)
-        self.assertEqual(health.task_failures["bad"], 1)
-        self.assertEqual(seen[0]["type"], "daemon_task_error")
+        assert "bad task" in health.last_error
+        assert health.task_failures["bad"] == 1
+        assert seen[0]["type"] == "daemon_task_error"
 
     def test_ensure_healthy_restarts_dead_thread(self) -> None:
         """测试后台线程异常退出后的显式自愈重启。"""
@@ -96,8 +91,8 @@ class TestHeartbeatDaemon(unittest.TestCase):
 
         health = self.daemon.ensure_healthy()
 
-        self.assertTrue(health.running)
-        self.assertEqual(health.restart_count, 1)
+        assert health.running
+        assert health.restart_count == 1
 
     def test_check_git_status_task(self) -> None:
         """测试脏工作区检查定时任务。"""
@@ -109,11 +104,11 @@ class TestHeartbeatDaemon(unittest.TestCase):
             mock_run.return_value = mock_res
 
             alerts = self.daemon.check_git_status()
-            self.assertIsNotNone(alerts)
             assert alerts is not None
-            self.assertEqual(len(alerts), 1)
-            self.assertEqual(alerts[0]["type"], "git_dirty_alert")
-            self.assertEqual(alerts[0]["payload"]["dirty_files_count"], 2)
+            assert alerts is not None
+            assert len(alerts) == 1
+            assert alerts[0]["type"] == "git_dirty_alert"
+            assert alerts[0]["payload"]["dirty_files_count"] == 2
 
     def test_check_background_tasks_task(self) -> None:
         """测试后台任务状态汇总定时任务。"""
@@ -126,13 +121,12 @@ class TestHeartbeatDaemon(unittest.TestCase):
         store.claim(tasks[0].id, "worker_1")
 
         alerts = self.daemon.check_background_tasks()
-        self.assertIsNotNone(alerts)
         assert alerts is not None
-        self.assertEqual(len(alerts), 1)
-        self.assertEqual(alerts[0]["type"], "tasks_summary")
-        self.assertEqual(alerts[0]["payload"]["pending_count"], 1)
-        self.assertEqual(alerts[0]["payload"]["claimed_count"], 1)
-
+        assert alerts is not None
+        assert len(alerts) == 1
+        assert alerts[0]["type"] == "tasks_summary"
+        assert alerts[0]["payload"]["pending_count"] == 1
+        assert alerts[0]["payload"]["claimed_count"] == 1
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

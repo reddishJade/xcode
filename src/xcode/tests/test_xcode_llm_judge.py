@@ -6,17 +6,14 @@ import asyncio
 import json
 from pathlib import Path
 import tempfile
-import unittest
-
 from xcode.ai.events import FinalMessage, TextDelta
 from xcode.evals import EvalRunner, EvalTask
 from xcode.evals.graders import run_llm_judge
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.app import XcodeApp
 from xcode.tests.fixtures import FakeProvider
-
-
-class XcodeLlmJudgeTests(unittest.TestCase):
+import pytest
+class XcodeLlmJudgeTests:
     """验证 judge 使用 StreamProvider 并显式报告 skipped。"""
 
     def test_run_llm_judge_consumes_stream_provider(self) -> None:
@@ -35,10 +32,10 @@ class XcodeLlmJudgeTests(unittest.TestCase):
 
         graders = asyncio.run(run_llm_judge(task, "answer", [], provider))
 
-        self.assertEqual([grader.passed for grader in graders], [True, False])
-        self.assertFalse(any(grader.skipped for grader in graders))
-        self.assertEqual(provider.last_tools, [])
-        self.assertIn("handles edge cases", str(provider.last_messages))
+        assert [grader.passed for grader in graders] == [True, False]
+        assert not (any(grader.skipped for grader in graders))
+        assert provider.last_tools == []
+        assert "handles edge cases" in str(provider.last_messages)
 
     def test_eval_runner_applies_streaming_judge_failure(self) -> None:
         """runner 将 judge FAIL 纳入 trial success。"""
@@ -69,14 +66,14 @@ class XcodeLlmJudgeTests(unittest.TestCase):
 
             report = runner.run()
 
-        self.assertFalse(report.success)
+        assert not (report.success)
         judge_result = next(
             grader
             for grader in report.trials[0].graders
             if grader.name == "llm_judge:1"
         )
-        self.assertFalse(judge_result.passed)
-        self.assertFalse(judge_result.skipped)
+        assert not (judge_result.passed)
+        assert not (judge_result.skipped)
 
     def test_eval_runner_records_unparseable_judge_as_skipped(self) -> None:
         """judge 未返回可解析结果时 report 显式记录 skipped。"""
@@ -107,14 +104,14 @@ class XcodeLlmJudgeTests(unittest.TestCase):
             report_html = (output_dir / "report.html").read_text(encoding="utf-8")
             report_csv = (output_dir / "report.csv").read_text(encoding="utf-8")
 
-        self.assertTrue(report.success)
+        assert report.success
         skipped = next(grader for grader in report.trials[0].graders if grader.skipped)
-        self.assertEqual(skipped.name, "llm_judge:skipped")
-        self.assertEqual(report.metrics["grader_skipped_count"], 1)
+        assert skipped.name == "llm_judge:skipped"
+        assert report.metrics["grader_skipped_count"] == 1
         serialized = report_data["trials"][0]["graders"]
-        self.assertTrue(any(grader["skipped"] for grader in serialized))
-        self.assertIn("SKIP", report_html)
-        self.assertIn("graders_skipped", report_csv)
+        assert any(grader["skipped"] for grader in serialized)
+        assert "SKIP" in report_html
+        assert "graders_skipped" in report_csv
 
     def test_missing_judge_provider_returns_explicit_skip(self) -> None:
         """未注入 provider 时返回不影响成败的 skipped grader。"""
@@ -126,16 +123,14 @@ class XcodeLlmJudgeTests(unittest.TestCase):
 
         graders = asyncio.run(run_llm_judge(task, "answer", [], None))
 
-        self.assertEqual(len(graders), 1)
-        self.assertTrue(graders[0].passed)
-        self.assertTrue(graders[0].skipped)
-        self.assertIn("unavailable", graders[0].details)
-
+        assert len(graders) == 1
+        assert graders[0].passed
+        assert graders[0].skipped
+        assert "unavailable" in graders[0].details
 
 def _app(provider: FakeProvider) -> XcodeApp:
     """构建仅使用给定 provider 的最小 eval 应用。"""
     return XcodeApp(agent=StructuredAgent(provider=provider, registry=()))
 
-
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

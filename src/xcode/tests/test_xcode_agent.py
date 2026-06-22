@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-import unittest
-
 from xcode.agent.agent_loop import run_agent_loop
 from xcode.agent.message_converter import convert_to_llm
 from xcode.agent.config import AgentContext, AgentLoopConfig
@@ -19,12 +17,11 @@ from xcode.ai.events import (
 )
 from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.agent.types import (
-    TextContent,
+TextContent,
     ThinkingContent,
     ToolCallContent,
 )
-
-
+import pytest
 class TextProvider:
     def __init__(self) -> None:
         self.messages: list[Message] | None = None
@@ -41,7 +38,6 @@ class TextProvider:
         self.tools = tools
         yield TextDelta(chunk="ok")
 
-
 class CancelledSignal:
     """始终处于取消状态的测试信号。"""
 
@@ -50,7 +46,6 @@ class CancelledSignal:
     def is_cancelled(self) -> bool:
         """返回固定取消状态。"""
         return True
-
 
 class ErrorTextProvider:
     def __init__(self) -> None:
@@ -68,7 +63,6 @@ class ErrorTextProvider:
             content="Provider error: boom",
             stop_reason="error",
         )
-
 
 class ToolProvider:
     def __init__(self) -> None:
@@ -91,7 +85,6 @@ class ToolProvider:
             return
         yield TextDelta(chunk="done")
 
-
 class EchoTool:
     name = "echo"
     label = "Echo"
@@ -113,7 +106,6 @@ class EchoTool:
         self.seen_signal = signal
         return AgentToolResult(content=[TextContent(text=str(params["text"]))])
 
-
 class BuiltinShellTool:
     """模拟带 Responses builtin shell 元数据的 AgentTool。"""
 
@@ -134,8 +126,7 @@ class BuiltinShellTool:
     ) -> AgentToolResult:
         return AgentToolResult(content=[TextContent(text="ok")])
 
-
-class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
+class AgentLoopContractTests:
     async def test_streams_text_from_injected_provider(self) -> None:
         provider = TextProvider()
         events: list[AgentEvent] = []
@@ -150,13 +141,13 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
             emit=events.append,
         )
 
-        self.assertEqual(provider.messages, [{"role": "user", "content": "hello"}])
-        self.assertEqual(provider.tools, [])
+        assert provider.messages == [{"role": "user", "content": "hello"}]
+        assert provider.tools == []
         final = result.messages[-1]
-        self.assertIsInstance(final, AssistantMessage)
         assert isinstance(final, AssistantMessage)
-        self.assertEqual(final.content, [TextContent(text="ok")])
-        self.assertEqual(events[-1].type, "agent_end")
+        assert isinstance(final, AssistantMessage)
+        assert final.content == [TextContent(text="ok")]
+        assert events[-1].type == "agent_end"
 
     async def test_provider_error_text_is_preserved(self) -> None:
         provider = ErrorTextProvider()
@@ -173,10 +164,10 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
         )
 
         final = result.messages[-1]
-        self.assertIsInstance(final, AssistantMessage)
         assert isinstance(final, AssistantMessage)
-        self.assertEqual(final.content, [TextContent(text="Provider error: boom")])
-        self.assertEqual(final.error_message, "Provider error: boom")
+        assert isinstance(final, AssistantMessage)
+        assert final.content == [TextContent(text="Provider error: boom")]
+        assert final.error_message == "Provider error: boom"
 
     async def test_builtin_tool_metadata_reaches_provider(self) -> None:
         """AgentTool builtin 元数据会传递到 provider 工具定义。"""
@@ -194,8 +185,8 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
         )
 
         assert provider.tools is not None
-        self.assertEqual(provider.tools[0].name, "shell")
-        self.assertEqual(provider.tools[0].builtin, tool.builtin)
+        assert provider.tools[0].name == "shell"
+        assert provider.tools[0].builtin == tool.builtin
 
     async def test_executes_tools_without_harness_context(self) -> None:
         provider = ToolProvider()
@@ -212,16 +203,14 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
             emit=events.append,
         )
 
-        self.assertEqual(provider.calls, 2)
-        self.assertIsNone(tool.seen_signal)
-        self.assertTrue(
-            any(isinstance(msg, ToolResultMessage) for msg in result.messages)
-        )
-        self.assertEqual(provider.messages[-1][-1]["role"], "tool")
+        assert provider.calls == 2
+        assert tool.seen_signal is None
+        assert any(isinstance(msg, ToolResultMessage) for msg in result.messages)
+        assert provider.messages[-1][-1]["role"] == "tool"
         final = result.messages[-1]
-        self.assertIsInstance(final, AssistantMessage)
         assert isinstance(final, AssistantMessage)
-        self.assertEqual(final.content, [TextContent(text="done")])
+        assert isinstance(final, AssistantMessage)
+        assert final.content == [TextContent(text="done")]
 
     def test_tool_result_converts_to_plain_tool_message(self) -> None:
         """工具结果在 provider 边界使用 OpenAI 兼容消息。"""
@@ -235,16 +224,13 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        self.assertEqual(
-            converted,
-            [
+        assert converted == [
                 {
                     "role": "tool",
                     "tool_call_id": "call-1",
                     "content": "output",
                 }
-            ],
-        )
+            ]
 
     def test_assistant_thinking_content_becomes_reasoning_content(self) -> None:
         """思考块在 provider 边界保留为 reasoning_content。"""
@@ -259,8 +245,8 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        self.assertEqual(converted[0]["content"], "answer")
-        self.assertEqual(converted[0]["reasoning_content"], "think")
+        assert converted[0]["content"] == "answer"
+        assert converted[0]["reasoning_content"] == "think"
 
     def test_tool_call_arguments_convert_to_json_string(self) -> None:
         """工具调用参数在 provider 边界转为 JSON 字符串。"""
@@ -279,12 +265,10 @@ class AgentLoopContractTests(unittest.IsolatedAsyncioTestCase):
         )
 
         arguments = converted[0]["tool_calls"][0]["function"]["arguments"]
-        self.assertIsInstance(arguments, str)
-        self.assertEqual(arguments, '{"text":"hello"}')
-
+        assert isinstance(arguments, str)
+        assert arguments == '{"text":"hello"}'
 
 # ── 新增功能测试 ──
-
 
 class StepLimitProvider:
     """总是返回工具调用，用于测试步数限制。"""
@@ -300,7 +284,6 @@ class StepLimitProvider:
             calls=[ToolCall(id=f"call-{self.calls}", name="noop", input={})]
         )
 
-
 class NoopTool:
     name = "noop"
     label = "Noop"
@@ -311,7 +294,6 @@ class NoopTool:
 
     async def execute(self, tool_call_id, params, signal=None, on_update=None):
         return AgentToolResult(content=[TextContent(text="ok")])
-
 
 class ErrorProvider:
     """前 N 次调用抛异常，之后返回正常文本。"""
@@ -328,7 +310,6 @@ class ErrorProvider:
         if self.calls <= self.fail_count:
             raise self.error
         yield TextDelta(chunk="recovered")
-
 
 class MaxTokensProvider:
     """前 N 次返回 max_tokens，之后返回正常文本。"""
@@ -347,7 +328,6 @@ class MaxTokensProvider:
         else:
             yield TextDelta(chunk="final")
 
-
 class RepeatedToolProvider:
     """始终返回相同的工具调用，用于测试重复工具看门狗。"""
 
@@ -358,8 +338,7 @@ class RepeatedToolProvider:
             calls=[ToolCall(id="same-call", name="echo", input={"text": "hi"})]
         )
 
-
-class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
+class AgentLoopFeatureTests:
     async def test_step_limit_enforced(self) -> None:
         provider = StepLimitProvider()
         tool = NoopTool()
@@ -375,10 +354,10 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
             emit=lambda e: None,
         )
 
-        self.assertIsInstance(result, AgentLoopResult)
-        self.assertTrue(result.stopped_by_limit)
-        self.assertEqual(result.termination_reason, TerminationReason.STEP_LIMIT)
-        self.assertEqual(result.steps, 3)
+        assert isinstance(result, AgentLoopResult)
+        assert result.stopped_by_limit
+        assert result.termination_reason == TerminationReason.STEP_LIMIT
+        assert result.steps == 3
 
     async def test_error_retry_recovers(self) -> None:
         provider = ErrorProvider(fail_count=1)
@@ -395,11 +374,11 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
             emit=lambda e: None,
         )
 
-        self.assertEqual(provider.calls, 2)
+        assert provider.calls == 2
         final = result.messages[-1]
-        self.assertIsInstance(final, AssistantMessage)
         assert isinstance(final, AssistantMessage)
-        self.assertEqual(final.content, [TextContent(text="recovered")])
+        assert isinstance(final, AssistantMessage)
+        assert final.content == [TextContent(text="recovered")]
 
     async def test_error_retry_exhausted(self) -> None:
         provider = ErrorProvider(fail_count=10)
@@ -417,7 +396,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
         )
 
         # 应该重试 max_step_retries 次后放弃
-        self.assertGreater(provider.calls, 1)
+        assert provider.calls > 1
 
     async def test_max_tokens_continuation(self) -> None:
         provider = MaxTokensProvider(max_tokens_count=1)
@@ -436,9 +415,9 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
         )
 
         # 应该续写一次后完成
-        self.assertEqual(provider.calls, 2)
+        assert provider.calls == 2
         final = result.messages[-1]
-        self.assertIsInstance(final, AssistantMessage)
+        assert isinstance(final, AssistantMessage)
 
     async def test_repeated_tool_watchdog(self) -> None:
         provider = RepeatedToolProvider()
@@ -456,11 +435,11 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
             emit=lambda e: None,
         )
 
-        self.assertTrue(result.stopped_by_watchdog)
-        self.assertEqual(result.termination_reason, TerminationReason.WATCHDOG)
-        self.assertIsNotNone(result.watchdog_reason)
+        assert result.stopped_by_watchdog
+        assert result.termination_reason == TerminationReason.WATCHDOG
         assert result.watchdog_reason is not None
-        self.assertIn("repeated", result.watchdog_reason.lower())
+        assert result.watchdog_reason is not None
+        assert "repeated" in result.watchdog_reason.lower()
 
     async def test_idle_step_watchdog(self) -> None:
         """测试空闲步骤看门狗：工具总是抛出异常。"""
@@ -510,11 +489,11 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
             emit=lambda e: None,
         )
 
-        self.assertTrue(result.stopped_by_watchdog)
-        self.assertEqual(result.termination_reason, TerminationReason.WATCHDOG)
-        self.assertIsNotNone(result.watchdog_reason)
+        assert result.stopped_by_watchdog
+        assert result.termination_reason == TerminationReason.WATCHDOG
         assert result.watchdog_reason is not None
-        self.assertIn("consecutive steps", result.watchdog_reason.lower())
+        assert result.watchdog_reason is not None
+        assert "consecutive steps" in result.watchdog_reason.lower()
 
     async def test_cancelled_loop_has_structured_termination_reason(self) -> None:
         result = await run_agent_loop(
@@ -524,8 +503,8 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
             lambda _event: None,
             signal=CancelledSignal(),
         )
-        self.assertEqual(result.termination_reason, TerminationReason.CANCELLED)
-        self.assertEqual(result.error_detail, "user cancelled")
+        assert result.termination_reason == TerminationReason.CANCELLED
+        assert result.error_detail == "user cancelled"
 
     async def test_compaction_hook_called(self) -> None:
         compact_called = False
@@ -553,7 +532,7 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
             emit=lambda e: None,
         )
 
-        self.assertTrue(compact_called)
+        assert compact_called
 
     async def test_metrics_collected(self) -> None:
         provider = ToolProvider()
@@ -569,12 +548,11 @@ class AgentLoopFeatureTests(unittest.IsolatedAsyncioTestCase):
             emit=lambda e: None,
         )
 
-        self.assertIsNotNone(result.metrics)
         assert result.metrics is not None
-        self.assertGreaterEqual(result.metrics.steps, 1)
-        self.assertGreater(result.metrics.llm_calls, 0)
-        self.assertGreater(result.metrics.tool_calls, 0)
-
+        assert result.metrics is not None
+        assert result.metrics.steps >= 1
+        assert result.metrics.llm_calls > 0
+        assert result.metrics.tool_calls > 0
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

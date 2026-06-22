@@ -14,7 +14,6 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 from unittest import mock
-import unittest
 
 import jsonschema
 
@@ -31,6 +30,8 @@ from xcode.harness.observability import (
     PermissionPolicy,
     StaticPermission,
 )
+import pytest
+from xcode.tests._helpers import assert_logs
 
 
 def _make_skill(base: Path, *parts: str, content: str) -> Path:
@@ -42,16 +43,16 @@ def _make_skill(base: Path, *parts: str, content: str) -> Path:
     return path
 
 
-class TestFrontmatterParser(unittest.TestCase):
+class TestFrontmatterParser:
     """测试 YAML frontmatter 解析。"""
 
     def test_basic_parse(self) -> None:
         text = "---\nname: code-review\ndescription: Review code.\n---\n\nBody."
         result = _parse_frontmatter(text)
         assert result is not None
-        self.assertEqual(result["name"], "code-review")
-        self.assertEqual(result["description"], "Review code.")
-        self.assertFalse(result["hidden"])
+        assert result["name"] == "code-review"
+        assert result["description"] == "Review code."
+        assert not (result["hidden"])
 
     def test_hidden_true(self) -> None:
         text = (
@@ -59,40 +60,40 @@ class TestFrontmatterParser(unittest.TestCase):
         )
         result = _parse_frontmatter(text)
         assert result is not None
-        self.assertTrue(result["hidden"])
+        assert result["hidden"]
 
     def test_hidden_false(self) -> None:
         text = "---\nname: visible\ndescription: Visible skill.\nhidden: false\n---\n\nBody."
         result = _parse_frontmatter(text)
         assert result is not None
-        self.assertFalse(result["hidden"])
+        assert not (result["hidden"])
 
     def test_quoted_values(self) -> None:
         text = "---\nname: \"my skill\"\ndescription: 'A skill.'\n---"
         result = _parse_frontmatter(text)
         assert result is not None
-        self.assertEqual(result["name"], "my skill")
-        self.assertEqual(result["description"], "A skill.")
+        assert result["name"] == "my skill"
+        assert result["description"] == "A skill."
 
     def test_missing_required_name(self) -> None:
         text = "---\ndescription: No name here.\n---\n\nBody."
         result = _parse_frontmatter(text)
-        self.assertIsNone(result)
+        assert result is None
 
     def test_missing_required_description(self) -> None:
         text = "---\nname: no-desc\n---\n\nBody."
         result = _parse_frontmatter(text)
-        self.assertIsNone(result)
+        assert result is None
 
     def test_ignores_unknown_keys(self) -> None:
         text = "---\nname: test\ndescription: Test.\ntriggers: code review\nrisk: low\ntools: bash, read_file\n---\n\nBody."
         result = _parse_frontmatter(text)
         assert result is not None
-        self.assertEqual(result["name"], "test")
-        self.assertEqual(result["description"], "Test.")
-        self.assertNotIn("triggers", result)
-        self.assertNotIn("risk", result)
-        self.assertNotIn("tools", result)
+        assert result["name"] == "test"
+        assert result["description"] == "Test."
+        assert "triggers" not in result
+        assert "risk" not in result
+        assert "tools" not in result
 
     def test_preserves_optional_spec_fields(self) -> None:
         """规范可选字段会以稳定类型保留。"""
@@ -112,16 +113,10 @@ class TestFrontmatterParser(unittest.TestCase):
         result = _parse_frontmatter(text)
 
         assert result is not None
-        self.assertEqual(result["license"], "Apache-2.0")
-        self.assertEqual(
-            result["compatibility"],
-            "Requires pdftotext and network access",
-        )
-        self.assertEqual(
-            result["metadata"],
-            {"author": "example-org", "version": "1.0"},
-        )
-        self.assertEqual(result["allowed-tools"], "Bash(pdftotext:*) Read")
+        assert result["license"] == "Apache-2.0"
+        assert result["compatibility"] == "Requires pdftotext and network access"
+        assert result["metadata"] == {"author": "example-org", "version": "1.0"}
+        assert result["allowed-tools"] == "Bash(pdftotext:*) Read"
 
     def test_recovers_common_unquoted_colon_value(self) -> None:
         """description 中未引用的冒号会窄范围修复后解析。"""
@@ -132,14 +127,11 @@ class TestFrontmatterParser(unittest.TestCase):
             "---\n"
         )
 
-        with self.assertLogs("xcode.harness.skills_registry", level="WARNING"):
+        with assert_logs("xcode.harness.skills_registry", level="WARNING"):
             result = _parse_frontmatter(text)
 
         assert result is not None
-        self.assertEqual(
-            result["description"],
-            "Use this skill when: the user asks about PDFs",
-        )
+        assert result["description"] == "Use this skill when: the user asks about PDFs"
 
     def test_overlong_compatibility_warns_but_is_preserved(self) -> None:
         """超过规范长度的 compatibility 仍保留。"""
@@ -152,50 +144,50 @@ class TestFrontmatterParser(unittest.TestCase):
             "---\n"
         )
 
-        with self.assertLogs(
+        with assert_logs(
             "xcode.harness.skills_registry",
             level="WARNING",
         ) as logs:
             result = _parse_frontmatter(text)
 
         assert result is not None
-        self.assertEqual(result["compatibility"], compatibility)
-        self.assertIn("exceeds 500 characters", "\n".join(logs.output))
+        assert result["compatibility"] == compatibility
+        assert "exceeds 500 characters" in "\n".join(logs.output)
 
     def test_malformed_frontmatter_skip(self) -> None:
         """没有闭合 --- 分隔符视为 malformed。"""
         text = "---\nname: test\ndescription: Test.\n"
         result = _parse_frontmatter(text)
-        self.assertIsNone(result)
+        assert result is None
 
     def test_no_frontmatter_returns_none(self) -> None:
         text = "Just a regular markdown file.\n\nNo frontmatter."
         result = _parse_frontmatter(text)
-        self.assertIsNone(result)
+        assert result is None
 
     def test_empty_frontmatter_returns_none(self) -> None:
         text = "---\n---\n\nBody."
         result = _parse_frontmatter(text)
-        self.assertIsNone(result)
+        assert result is None
 
     def test_invalid_yaml_skipped(self) -> None:
         """无效 YAML 内容跳过并记录警告。"""
         text = "---\nname: test\ndescription: Test\nunbalanced: [one, two\n---\n\nBody."
         result = _parse_frontmatter(text)
-        self.assertIsNone(result)
+        assert result is None
 
     def test_non_dict_frontmatter_skipped(self) -> None:
         """标量或列表 frontmatter 跳过。"""
         text = "---\njust a string\n---\n\nBody."
         result = _parse_frontmatter(text)
-        self.assertIsNone(result)
+        assert result is None
 
 
-class TestSkillRegistry(unittest.TestCase):
+class TestSkillRegistry:
     """测试 SkillRegistry 发现、摘要、懒加载。"""
 
     @classmethod
-    def setUpClass(cls) -> None:
+    def setup_class(cls) -> None:
         cls._home_tmp = tempfile.TemporaryDirectory()
         cls._home_patcher = mock.patch.object(
             Path, "home", return_value=Path(cls._home_tmp.name)
@@ -203,7 +195,7 @@ class TestSkillRegistry(unittest.TestCase):
         cls._home_patcher.start()
 
     @classmethod
-    def tearDownClass(cls) -> None:
+    def teardown_class(cls) -> None:
         cls._home_patcher.stop()
         cls._home_tmp.cleanup()
 
@@ -223,9 +215,9 @@ class TestSkillRegistry(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             summaries = registry.list_summaries()
-            self.assertEqual(len(summaries), 1)
-            self.assertEqual(summaries[0].name, "code-review")
-            self.assertEqual(summaries[0].description, "Review code changes.")
+            assert len(summaries) == 1
+            assert summaries[0].name == "code-review"
+            assert summaries[0].description == "Review code changes."
 
     def test_cosmetic_name_issues_warn_but_load(self) -> None:
         """名称格式、连续 hyphen 和目录不一致只产生警告。"""
@@ -246,7 +238,7 @@ class TestSkillRegistry(unittest.TestCase):
             )
             registry = SkillRegistry()
 
-            with self.assertLogs(
+            with assert_logs(
                 "xcode.harness.skills_registry",
                 level="WARNING",
             ) as logs:
@@ -254,9 +246,9 @@ class TestSkillRegistry(unittest.TestCase):
 
             skill = registry.load("PDF--Processing")
 
-        self.assertIsNotNone(skill)
-        self.assertIn("violates", "\n".join(logs.output))
-        self.assertIn("does not match directory", "\n".join(logs.output))
+        assert skill is not None
+        assert "violates" in "\n".join(logs.output)
+        assert "does not match directory" in "\n".join(logs.output)
 
     def test_overlong_name_warns_but_loads(self) -> None:
         """超过 64 字符的名称只产生警告。"""
@@ -274,14 +266,14 @@ class TestSkillRegistry(unittest.TestCase):
             )
             registry = SkillRegistry()
 
-            with self.assertLogs(
+            with assert_logs(
                 "xcode.harness.skills_registry",
                 level="WARNING",
             ) as logs:
                 registry.discover(build_skill_search_dirs(root))
 
-        self.assertIsNotNone(registry.load(long_name))
-        self.assertIn("exceeds 64 characters", "\n".join(logs.output))
+        assert registry.load(long_name) is not None
+        assert "exceeds 64 characters" in "\n".join(logs.output)
 
     def test_missing_name_uses_directory_fallback(self) -> None:
         """缺少 name 时使用技能目录名并继续加载。"""
@@ -298,7 +290,7 @@ class TestSkillRegistry(unittest.TestCase):
             )
             registry = SkillRegistry()
 
-            with self.assertLogs(
+            with assert_logs(
                 "xcode.harness.skills_registry",
                 level="WARNING",
             ) as logs:
@@ -306,8 +298,8 @@ class TestSkillRegistry(unittest.TestCase):
 
             skill = registry.load("directory-name")
 
-        self.assertIsNotNone(skill)
-        self.assertIn("using directory name", "\n".join(logs.output))
+        assert skill is not None
+        assert "using directory name" in "\n".join(logs.output)
 
     def test_optional_fields_are_stored_on_skill_definition(self) -> None:
         """SkillDef 保留规范可选字段和 allowed-tools 提示。"""
@@ -336,10 +328,10 @@ class TestSkillRegistry(unittest.TestCase):
             skill = registry.load("review")
 
         assert skill is not None
-        self.assertEqual(skill.license, "MIT")
-        self.assertEqual(skill.compatibility, "Requires git")
-        self.assertEqual(skill.metadata, {"author": "xcode"})
-        self.assertEqual(skill.allowed_tools, "Bash(git:*) Read")
+        assert skill.license == "MIT"
+        assert skill.compatibility == "Requires git"
+        assert skill.metadata == {"author": "xcode"}
+        assert skill.allowed_tools == "Bash(git:*) Read"
 
     def test_skill_summary_omits_body(self) -> None:
         """list_summaries() 返回的摘要不含正文。"""
@@ -357,9 +349,9 @@ class TestSkillRegistry(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             block_text = self._collect_text(registry)
-            self.assertIn("code-review", block_text)
-            self.assertIn("Review.", block_text)
-            self.assertNotIn("Secret body", block_text)
+            assert "code-review" in block_text
+            assert "Review." in block_text
+            assert "Secret body" not in block_text
 
     def _collect_text(self, registry: SkillRegistry) -> str:
         collector = SkillIndexCollector(registry)
@@ -384,15 +376,15 @@ class TestSkillRegistry(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             skill = registry.load("code-review")
-            self.assertIsNotNone(skill)
             assert skill is not None
-            self.assertIn("Full workflow.", skill.content or "")
+            assert skill is not None
+            assert "Full workflow." in skill.content or ""
 
     def test_skill_not_found(self) -> None:
         """不存在的技能返回 None。"""
         registry = SkillRegistry()
         registry.discover([])
-        self.assertIsNone(registry.load("nonexistent"))
+        assert registry.load("nonexistent") is None
 
     def test_hidden_not_in_summaries(self) -> None:
         """hidden=true 的技能不出现在摘要中。"""
@@ -411,7 +403,7 @@ class TestSkillRegistry(unittest.TestCase):
             registry.discover(build_skill_search_dirs(root))
             summaries = registry.list_summaries()
             names = [s.name for s in summaries]
-            self.assertNotIn("secret-skill", names)
+            assert "secret-skill" not in names
 
     def test_hidden_still_loadable(self) -> None:
         """hidden=true 的技能仍可通过 load() 加载。"""
@@ -429,9 +421,9 @@ class TestSkillRegistry(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             skill = registry.load("secret-skill")
-            self.assertIsNotNone(skill)
             assert skill is not None
-            self.assertEqual(skill.content, "Secret body.")
+            assert skill is not None
+            assert skill.content == "Secret body."
 
     def test_missing_description_skill_is_skipped(self) -> None:
         """缺少 description 的技能被跳过并记录警告。"""
@@ -454,8 +446,8 @@ class TestSkillRegistry(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             summaries = registry.list_summaries()
-            self.assertEqual(len(summaries), 1)
-            self.assertEqual(summaries[0].name, "good-skill")
+            assert len(summaries) == 1
+            assert summaries[0].name == "good-skill"
 
     def test_duplicate_priority(self) -> None:
         """同名技能按搜索路径优先级 first-wins。"""
@@ -484,15 +476,15 @@ class TestSkillRegistry(unittest.TestCase):
                 registry = SkillRegistry()
                 registry.discover(build_skill_search_dirs(root))
                 skill = registry.load("overlap")
-                self.assertIsNotNone(skill)
                 assert skill is not None
-                self.assertEqual(skill.description, "Project version.")
+                assert skill is not None
+                assert skill.description == "Project version."
 
     def test_missing_directory(self) -> None:
         """无搜索目录时返回空。"""
         registry = SkillRegistry()
         registry.discover([])
-        self.assertEqual(len(registry.list_summaries()), 0)
+        assert len(registry.list_summaries()) == 0
 
     def test_untrusted_workspace_excludes_project_skills(self) -> None:
         """未信任工作区时不披露项目级技能目录。"""
@@ -503,8 +495,8 @@ class TestSkillRegistry(unittest.TestCase):
                 trust_project_skills=False,
             )
         paths = {path for path, _priority in search_dirs}
-        self.assertNotIn(root / ".xcode" / "skills", paths)
-        self.assertNotIn(root / ".agents" / "skills", paths)
+        assert root / ".xcode" / "skills" not in paths
+        assert root / ".agents" / "skills" not in paths
 
     def test_trusted_workspace_includes_project_skills(self) -> None:
         """显式信任工作区后加入项目级技能目录。"""
@@ -515,8 +507,8 @@ class TestSkillRegistry(unittest.TestCase):
                 trust_project_skills=True,
             )
         paths = {path for path, _priority in search_dirs}
-        self.assertIn(root / ".xcode" / "skills", paths)
-        self.assertIn(root / ".agents" / "skills", paths)
+        assert root / ".xcode" / "skills" in paths
+        assert root / ".agents" / "skills" in paths
 
     def test_explicit_directory_has_highest_priority(self) -> None:
         """显式技能目录优先于固定项目和用户目录。"""
@@ -530,14 +522,14 @@ class TestSkillRegistry(unittest.TestCase):
                 skills_dir=explicit_dir,
             )
 
-        self.assertEqual(search_dirs[0], (explicit_dir.resolve(), 0))
-        self.assertEqual(search_dirs[1][0], (root / ".xcode" / "skills").resolve())
+        assert search_dirs[0] == (explicit_dir.resolve(), 0)
+        assert search_dirs[1][0] == (root / ".xcode" / "skills").resolve()
 
     def test_missing_explicit_directory_logs_warning(self) -> None:
         """显式技能目录不存在时记录可诊断警告。"""
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "missing"
-            with self.assertLogs(
+            with assert_logs(
                 "xcode.harness.skills_registry",
                 level="WARNING",
             ) as logs:
@@ -547,8 +539,8 @@ class TestSkillRegistry(unittest.TestCase):
                     skills_dir=missing,
                 )
 
-        self.assertEqual(search_dirs[0], (missing.resolve(), 0))
-        self.assertIn("Configured skill directory does not exist", logs.output[0])
+        assert search_dirs[0] == (missing.resolve(), 0)
+        assert "Configured skill directory does not exist" in logs.output[0]
 
     def test_skill_index_collector_summaries_only(self) -> None:
         """SkillIndexCollector 注入摘要块，不含正文。"""
@@ -567,11 +559,11 @@ class TestSkillRegistry(unittest.TestCase):
             registry.discover(build_skill_search_dirs(root))
             collector = SkillIndexCollector(registry)
             blocks = collector.collect(object())
-            self.assertEqual(len(blocks), 1)
+            assert len(blocks) == 1
             content = blocks[0].content
-            self.assertIn("test-skill", content)
-            self.assertIn("Test description.", content)
-            self.assertNotIn("Full body content", content)
+            assert "test-skill" in content
+            assert "Test description." in content
+            assert "Full body content" not in content
 
     def test_skill_index_instructs_model_driven_activation(self) -> None:
         """目录明确要求匹配任务在执行前加载技能。"""
@@ -594,10 +586,10 @@ class TestSkillRegistry(unittest.TestCase):
             registry.discover(build_skill_search_dirs(root))
             content = self._collect_text(registry)
 
-        self.assertIn("<skill-activation>", content)
-        self.assertIn("call load_skill", content)
-        self.assertIn("before performing the task", content)
-        self.assertIn("no description clearly matches", content)
+        assert "<skill-activation>" in content
+        assert "call load_skill" in content
+        assert "before performing the task" in content
+        assert "no description clearly matches" in content
 
     def test_skill_index_lists_multiple_activation_candidates(self) -> None:
         """多个候选技能均保留名称和描述供模型判断。"""
@@ -627,10 +619,10 @@ class TestSkillRegistry(unittest.TestCase):
             registry.discover(build_skill_search_dirs(root))
             content = self._collect_text(registry)
 
-        self.assertIn('name="code-review"', content)
-        self.assertIn("Review code changes.", content)
-        self.assertIn('name="write-docs"', content)
-        self.assertIn("Write technical documentation.", content)
+        assert 'name="code-review"' in content
+        assert "Review code changes." in content
+        assert 'name="write-docs"' in content
+        assert "Write technical documentation." in content
 
     def test_skill_index_collector_escapes_xml_injection(self) -> None:
         """名称和描述不能突破 catalog XML 结构。"""
@@ -651,9 +643,9 @@ class TestSkillRegistry(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             content = self._collect_text(registry)
-        self.assertNotIn("<injected", content)
-        self.assertNotIn("<system>", content)
-        self.assertIn("&lt;system&gt;", content)
+        assert "<injected" not in content
+        assert "<system>" not in content
+        assert "&lt;system&gt;" in content
 
     def test_skill_index_collector_limits_description_length(self) -> None:
         """超长描述在 catalog 中截断，避免无界上下文注入。"""
@@ -672,15 +664,15 @@ class TestSkillRegistry(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             content = self._collect_text(registry)
-        self.assertLess(len(content), 1200)
-        self.assertIn("...", content)
+        assert len(content) < 1200
+        assert "..." in content
 
 
-class TestLoadSkillTool(unittest.TestCase):
+class TestLoadSkillTool:
     """测试 load_skill 工具基本功能。"""
 
     @classmethod
-    def setUpClass(cls) -> None:
+    def setup_class(cls) -> None:
         cls._home_tmp = tempfile.TemporaryDirectory()
         cls._home_patcher = mock.patch.object(
             Path, "home", return_value=Path(cls._home_tmp.name)
@@ -688,7 +680,7 @@ class TestLoadSkillTool(unittest.TestCase):
         cls._home_patcher.start()
 
     @classmethod
-    def tearDownClass(cls) -> None:
+    def teardown_class(cls) -> None:
         cls._home_patcher.stop()
         cls._home_tmp.cleanup()
 
@@ -709,8 +701,8 @@ class TestLoadSkillTool(unittest.TestCase):
             registry.discover(build_skill_search_dirs(root))
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "code-review"})
-            self.assertIn("code-review", output)
-            self.assertIn("Full workflow.", output)
+            assert "code-review" in output
+            assert "Full workflow." in output
 
     def test_activation_exposes_compatibility_and_advisory_allowed_tools(
         self,
@@ -737,15 +729,9 @@ class TestLoadSkillTool(unittest.TestCase):
             registry.discover(build_skill_search_dirs(root))
             output = build_load_skill_tool(registry).handler({"name": "review"})
 
-        self.assertIn(
-            "<compatibility>Requires git &lt; 3</compatibility>",
-            output,
-        )
-        self.assertIn(
-            '<allowed-tools advisory="true" permission-bypass="false">',
-            output,
-        )
-        self.assertIn("Bash(git:*) Read", output)
+        assert "<compatibility>Requires git &lt; 3</compatibility>" in output
+        assert '<allowed-tools advisory="true" permission-bypass="false">' in output
+        assert "Bash(git:*) Read" in output
 
     def test_load_skill_name_schema_uses_discovered_names(self) -> None:
         """name schema 仅允许当前可见的技能名称。"""
@@ -774,8 +760,8 @@ class TestLoadSkillTool(unittest.TestCase):
             tool = build_load_skill_tool(registry)
 
         name_schema = tool.schema["properties"]["name"]
-        self.assertEqual(name_schema["enum"], ["code-review", "write-docs"])
-        with self.assertRaises(jsonschema.ValidationError):
+        assert name_schema["enum"] == ["code-review", "write-docs"]
+        with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"name": "missing"}, tool.schema)
 
     def test_unknown_skill(self) -> None:
@@ -784,8 +770,8 @@ class TestLoadSkillTool(unittest.TestCase):
         registry.discover([])
         tool = build_load_skill_tool(registry)
         output = tool.handler({"name": "missing"})
-        self.assertIn("Unknown", output)
-        self.assertIn("missing", output)
+        assert "Unknown" in output
+        assert "missing" in output
 
     def test_missing_name_parameter(self) -> None:
         """name 参数缺失时返回错误。"""
@@ -793,7 +779,7 @@ class TestLoadSkillTool(unittest.TestCase):
         registry.discover([])
         tool = build_load_skill_tool(registry)
         output = tool.handler({})
-        self.assertIn("Error", output)
+        assert "Error" in output
 
     def test_empty_name_parameter(self) -> None:
         """name 参数为空时返回错误。"""
@@ -801,7 +787,7 @@ class TestLoadSkillTool(unittest.TestCase):
         registry.discover([])
         tool = build_load_skill_tool(registry)
         output = tool.handler({"name": ""})
-        self.assertIn("Error", output)
+        assert "Error" in output
 
     def test_load_skill_is_permissioned(self) -> None:
         """load_skill 走 PermissionPipeline；静态 deny 可阻止加载。"""
@@ -824,12 +810,11 @@ class TestLoadSkillTool(unittest.TestCase):
             engine = PermissionEngine(PermissionEngineConfig(static_policy=policy))
             result = engine.decide(
                 "load_skill",
-                '{"name": "code-review"}',
+                {"name": "code-review"},
                 tool_spec=tool,
-                tool_input={"name": "code-review"},
             )
-            self.assertTrue(result.blocked)
-            self.assertIn("deny", str(result.reason).lower())
+            assert result.blocked
+            assert "deny" in str(result.reason).lower()
 
     def test_load_skill_allowed_without_policy(self) -> None:
         """无 policy 时 load_skill 正常执行。"""
@@ -851,12 +836,11 @@ class TestLoadSkillTool(unittest.TestCase):
             engine = PermissionEngine(PermissionEngineConfig())
             result = engine.decide(
                 "load_skill",
-                '{"name": "code-review"}',
+                {"name": "code-review"},
                 tool_spec=tool,
-                tool_input={"name": "code-review"},
             )
-            self.assertFalse(result.blocked)
+            assert not (result.blocked)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

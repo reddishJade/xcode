@@ -6,7 +6,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -20,6 +19,8 @@ from xcode.harness.mcp.client import (
     SHUTDOWN_GRACE_SECONDS,
     TERMINATE_GRACE_SECONDS,
 )
+import pytest
+from xcode.tests._helpers import assert_logs, assert_no_logs
 
 MOCK_SERVER_CODE = r"""
 import sys
@@ -107,7 +108,6 @@ if __name__ == "__main__":
 INTERLEAVED_SERVER_CODE = r"""
 import sys
 import json
-
 def read_message():
     line = sys.stdin.buffer.readline()
     if not line:
@@ -189,8 +189,7 @@ if __name__ == "__main__":
     main()
 """
 
-
-class XcodeMcpClientTests(unittest.TestCase):
+class XcodeMcpClientTests:
     """验证 MCP 客户端基础生命周期和协商约束。"""
 
     def test_mcp_client_handshake_list_and_call(self) -> None:
@@ -204,23 +203,20 @@ class XcodeMcpClientTests(unittest.TestCase):
 
             # Start and handshake
             client.start()
-            self.assertEqual(client.protocol_version, "2024-11-05")
-            self.assertEqual(
-                client.server_info,
-                {"name": "mock-server", "version": "1.0.0"},
-            )
-            self.assertEqual(client.instructions, "Use tools carefully.")
-            self.assertTrue(client.has_server_capability("tools"))
+            assert client.protocol_version == "2024-11-05"
+            assert client.server_info == {"name": "mock-server", "version": "1.0.0"}
+            assert client.instructions == "Use tools carefully."
+            assert client.has_server_capability("tools")
 
             # List tools
             tools = client.list_tools()
-            self.assertEqual(len(tools), 1)
-            self.assertEqual(tools[0]["name"], "mock_read_tool")
+            assert len(tools) == 1
+            assert tools[0]["name"] == "mock_read_tool"
 
             # Call tool
             result = client.call_tool("mock_read_tool", {"path": "test.txt"})
-            self.assertIn("content", result)
-            self.assertEqual(result["content"][0]["text"], "Content of test.txt")
+            assert "content" in result
+            assert result["content"][0]["text"] == "Content of test.txt"
 
             # Stop client
             client.stop()
@@ -235,14 +231,14 @@ class XcodeMcpClientTests(unittest.TestCase):
             )
             client = McpClient([sys.executable, "-u", str(server_file)])
 
-            with self.assertRaisesRegex(
+            with pytest.raises(
                 RuntimeError,
-                "Unsupported MCP protocol version",
+                match="Unsupported MCP protocol version",
             ):
                 client.start()
 
-            self.assertEqual(client.status, "failed")
-            self.assertIsNone(client.process)
+            assert client.status == "failed"
+            assert client.process is None
 
     def test_mcp_client_sends_latest_supported_protocol_version(self) -> None:
         """initialize 请求发送客户端最新支持的协议版本。"""
@@ -257,7 +253,7 @@ class XcodeMcpClientTests(unittest.TestCase):
 
             client.start()
 
-            self.assertEqual(client.protocol_version, LATEST_PROTOCOL_VERSION)
+            assert client.protocol_version == LATEST_PROTOCOL_VERSION
             client.stop()
 
     def test_mcp_client_rejects_unnegotiated_tools_feature(self) -> None:
@@ -271,9 +267,9 @@ class XcodeMcpClientTests(unittest.TestCase):
             }
         )
 
-        with self.assertRaisesRegex(
+        with pytest.raises(
             RuntimeError,
-            "did not negotiate 'tools'",
+            match="did not negotiate 'tools'",
         ):
             client.list_tools()
 
@@ -294,18 +290,15 @@ class XcodeMcpClientTests(unittest.TestCase):
         with patch.object(client, "send_request", side_effect=responses) as request:
             tools = client.list_tools(timeout=3.0)
 
-        self.assertEqual(tools, [{"name": "first"}, {"name": "second"}])
-        self.assertEqual(
-            request.call_args_list,
-            [
+        assert tools == [{"name": "first"}, {"name": "second"}]
+        assert request.call_args_list == [
                 call("tools/list", {}, timeout=3.0),
                 call(
                     "tools/list",
                     {"cursor": "page-2"},
                     timeout=3.0,
                 ),
-            ],
-        )
+            ]
 
     def test_mcp_client_rejects_repeated_tool_list_cursor(self) -> None:
         """重复 cursor 会终止分页，避免服务器造成无限循环。"""
@@ -318,28 +311,26 @@ class XcodeMcpClientTests(unittest.TestCase):
 
         with (
             patch.object(client, "send_request", side_effect=responses),
-            self.assertRaisesRegex(RuntimeError, "repeated cursor"),
+            pytest.raises(RuntimeError, match="repeated cursor"),
         ):
             client.list_tools()
 
-    def test_mcp_client_rejects_invalid_tool_list_page(self) -> None:
+    @pytest.mark.parametrize("response", [
+        {"tools": "not-a-list"},
+        {"tools": [None]},
+        {"tools": [], "nextCursor": ""},
+        {"tools": [], "nextCursor": 2},
+    ])
+    def test_mcp_client_rejects_invalid_tool_list_page(self, response: dict) -> None:
         """分页响应中的 tools 和 nextCursor 必须具有协议要求的类型。"""
         client = McpClient(["unused"])
         client.server_capabilities = {"tools": {}}
 
-        invalid_responses = (
-            {"tools": "not-a-list"},
-            {"tools": [None]},
-            {"tools": [], "nextCursor": ""},
-            {"tools": [], "nextCursor": 2},
-        )
-        for response in invalid_responses:
-            with self.subTest(response=response):
-                with (
-                    patch.object(client, "send_request", return_value=response),
-                    self.assertRaisesRegex(RuntimeError, "invalid"),
-                ):
-                    client.list_tools()
+        with (
+            patch.object(client, "send_request", return_value=response),
+            pytest.raises(RuntimeError, match="invalid"),
+        ):
+            client.list_tools()
 
     def test_mcp_client_limits_tool_list_pages(self) -> None:
         """分页数量达到保护上限后停止继续请求。"""
@@ -354,25 +345,22 @@ class XcodeMcpClientTests(unittest.TestCase):
         ) -> dict[str, object]:
             """返回持续产生新 cursor 的异常分页响应。"""
             nonlocal page_index
-            self.assertEqual(method, "tools/list")
-            self.assertIsNone(timeout)
+            assert method == "tools/list"
+            assert timeout is None
             if page_index == 0:
-                self.assertEqual(params, {})
+                assert params == {}
             else:
-                self.assertEqual(
-                    params,
-                    {"cursor": f"page-{page_index}"},
-                )
+                assert params == {"cursor": f"page-{page_index}"}
             page_index += 1
             return {"tools": [], "nextCursor": f"page-{page_index}"}
 
         with (
             patch.object(client, "send_request", side_effect=next_page) as request,
-            self.assertRaisesRegex(RuntimeError, "exceeded"),
+            pytest.raises(RuntimeError, match="exceeded"),
         ):
             client.list_tools()
 
-        self.assertEqual(request.call_count, MAX_TOOL_LIST_PAGES)
+        assert request.call_count == MAX_TOOL_LIST_PAGES
 
     def test_lazy_client_ref_reconnects_within_attempt_limit(self) -> None:
         """首次连接失败后会在同次调用内有限重连。"""
@@ -398,9 +386,9 @@ class XcodeMcpClientTests(unittest.TestCase):
         ) as client_class:
             connected = ref.get_or_create()
 
-        self.assertIs(connected, second_client)
-        self.assertIsNone(ref.last_error)
-        self.assertEqual(client_class.call_count, MAX_LAZY_CONNECT_ATTEMPTS)
+        assert connected is second_client
+        assert ref.last_error is None
+        assert client_class.call_count == MAX_LAZY_CONNECT_ATTEMPTS
         client_class.assert_called_with(
             ["python", "server.py"],
             {"TOKEN": "value"},
@@ -426,18 +414,18 @@ class XcodeMcpClientTests(unittest.TestCase):
                 "xcode.harness.mcp.client.McpClient",
                 side_effect=clients,
             ) as client_class,
-            self.assertRaisesRegex(RuntimeError, "after 2 attempts"),
+            pytest.raises(RuntimeError, match="after 2 attempts"),
         ):
             ref.get_or_create()
 
-        self.assertEqual(client_class.call_count, len(clients))
-        self.assertEqual(ref.last_error, "Bearer ****")
+        assert client_class.call_count == len(clients)
+        assert ref.last_error == "Bearer ****"
         for client in clients:
             client.stop.assert_called_once_with()
 
     def test_lazy_client_ref_rejects_empty_attempt_budget(self) -> None:
         """连接尝试次数必须至少允许一次启动。"""
-        with self.assertRaisesRegex(ValueError, "at least 1"):
+        with pytest.raises(ValueError, match="at least 1"):
             LazyClientRef(
                 "fixture",
                 {"command": "server"},
@@ -453,7 +441,7 @@ class XcodeMcpClientTests(unittest.TestCase):
 
         with (
             patch.object(client, "_write_message") as write_message,
-            self.assertRaisesRegex(TimeoutError, "tools/call"),
+            pytest.raises(TimeoutError, match="tools/call"),
         ):
             client.send_request(
                 "tools/call",
@@ -461,9 +449,7 @@ class XcodeMcpClientTests(unittest.TestCase):
                 timeout=0.0,
             )
 
-        self.assertEqual(
-            write_message.call_args_list,
-            [
+        assert write_message.call_args_list == [
                 call(
                     {
                         "jsonrpc": "2.0",
@@ -482,10 +468,9 @@ class XcodeMcpClientTests(unittest.TestCase):
                         },
                     }
                 ),
-            ],
-        )
-        self.assertEqual(client._active_request_ids, set())
-        self.assertEqual(client._pending_responses, {})
+            ]
+        assert client._active_request_ids == set()
+        assert client._pending_responses == {}
 
         client._handle_incoming_message(
             {
@@ -494,7 +479,7 @@ class XcodeMcpClientTests(unittest.TestCase):
                 "result": {"content": []},
             }
         )
-        self.assertEqual(client._pending_responses, {})
+        assert client._pending_responses == {}
 
     def test_mcp_client_preserves_timeout_when_cancellation_write_fails(
         self,
@@ -511,17 +496,15 @@ class XcodeMcpClientTests(unittest.TestCase):
                 "_write_message",
                 side_effect=[None, RuntimeError("closed")],
             ),
-            self.assertLogs(
+            assert_logs(
                 "xcode.harness.mcp.client",
                 level="WARNING",
             ) as logs,
-            self.assertRaises(TimeoutError),
+            pytest.raises(TimeoutError),
         ):
             client.send_request("tools/list", {}, timeout=0.0)
 
-        self.assertTrue(
-            any("request 1 timed out" in message for message in logs.output)
-        )
+        assert any("request 1 timed out" in message for message in logs.output)
 
     def test_mcp_client_stop_allows_server_to_exit_after_stdin_eof(self) -> None:
         """服务器在 stdin EOF 后自行退出时不发送终止信号。"""
@@ -539,8 +522,8 @@ class XcodeMcpClientTests(unittest.TestCase):
         process.kill.assert_not_called()
         process.stdout.close.assert_called_once()
         process.stderr.close.assert_called_once()
-        self.assertIsNone(client.process)
-        self.assertEqual(client.status, "disabled")
+        assert client.process is None
+        assert client.status == "disabled"
 
     def test_mcp_client_stop_kills_server_after_graceful_and_term_timeout(
         self,
@@ -561,14 +544,11 @@ class XcodeMcpClientTests(unittest.TestCase):
         process.stdin.close.assert_called_once()
         process.terminate.assert_called_once()
         process.kill.assert_called_once()
-        self.assertEqual(
-            process.wait.call_args_list,
-            [
+        assert process.wait.call_args_list == [
                 call(timeout=SHUTDOWN_GRACE_SECONDS),
                 call(timeout=TERMINATE_GRACE_SECONDS),
                 call(timeout=KILL_GRACE_SECONDS),
-            ],
-        )
+            ]
         process.stdout.close.assert_called_once()
         process.stderr.close.assert_called_once()
 
@@ -591,7 +571,7 @@ class XcodeMcpClientTests(unittest.TestCase):
             }
         )
 
-        self.assertTrue(callback_called.wait(timeout=1.0))
+        assert callback_called.wait(timeout=1.0)
         client._running = False
 
     def test_mcp_client_ignores_undeclared_tools_changed_notification(
@@ -606,7 +586,7 @@ class XcodeMcpClientTests(unittest.TestCase):
         client.server_capabilities = {"tools": {}}
         client._running = True
 
-        with self.assertLogs(
+        with assert_logs(
             "xcode.harness.mcp.client",
             level="WARNING",
         ) as logs:
@@ -617,15 +597,15 @@ class XcodeMcpClientTests(unittest.TestCase):
                 }
             )
 
-        self.assertFalse(callback_called.wait(timeout=0.05))
-        self.assertTrue(any("without negotiated" in message for message in logs.output))
+        assert not (callback_called.wait(timeout=0.05))
+        assert any("without negotiated" in message for message in logs.output)
         client._running = False
 
     def test_mcp_client_rejects_invalid_server_identity(self) -> None:
         """缺少稳定名称或版本的 serverInfo 无法完成协商。"""
         client = McpClient(["unused"])
 
-        with self.assertRaisesRegex(RuntimeError, "invalid serverInfo"):
+        with pytest.raises(RuntimeError, match="invalid serverInfo"):
             client._apply_initialize_result(
                 {
                     "protocolVersion": "2025-11-25",
@@ -642,7 +622,7 @@ class XcodeMcpClientTests(unittest.TestCase):
             client = McpClient([sys.executable, "-u", str(server_file)])
             client.start()
 
-            with self.assertLogs(
+            with assert_logs(
                 "xcode.harness.mcp.client",
                 level="WARNING",
             ) as logs:
@@ -650,14 +630,8 @@ class XcodeMcpClientTests(unittest.TestCase):
 
             client.stop()
 
-        self.assertEqual(
-            [tool["name"] for tool in tools],
-            ["ping_ok", "method_not_found_ok"],
-        )
-        self.assertTrue(
-            any("notifications/custom" in message for message in logs.output)
-        )
-
+        assert [tool["name"] for tool in tools] == ["ping_ok", "method_not_found_ok"]
+        assert any("notifications/custom" in message for message in logs.output)
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

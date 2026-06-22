@@ -19,7 +19,6 @@ import os
 import sys
 import tempfile
 import time
-import unittest
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +34,7 @@ from xcode.harness.observability import (
     PermissionPolicy,
     StaticPermission,
 )
-
+import pytest
 
 # ── Fake stdio MCP 服务器 ──
 
@@ -163,7 +162,6 @@ if __name__ == "__main__":
     main()
 """
 
-
 # ── Stderr-redacting server ──
 
 STDERR_SERVER_CODE = r"""
@@ -252,14 +250,14 @@ def _write_server_script(temp_dir: Path, code: str) -> Path:
     return server_file
 
 
-class TestMcpStdioConformance(unittest.TestCase):
+class TestMcpStdioConformance:
     """MCP stdio 协议端到端兼容性冒烟测试。"""
 
-    def setUp(self) -> None:
+    def setup_method(self, method) -> None:
         self._temp_dir_obj = tempfile.TemporaryDirectory()
         self.temp_dir = Path(self._temp_dir_obj.name)
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method) -> None:
         self._temp_dir_obj.cleanup()
 
     # ── 初始化握手 ──
@@ -270,7 +268,7 @@ class TestMcpStdioConformance(unittest.TestCase):
         cmd = [sys.executable, "-u", str(server_file)]
         client = McpClient(cmd)
         client.start()
-        self.assertEqual(client.status, "connected")
+        assert client.status == "connected"
         client.stop()
 
     def test_mcp_client_rejects_after_stop(self) -> None:
@@ -280,7 +278,7 @@ class TestMcpStdioConformance(unittest.TestCase):
         client = McpClient(cmd)
         client.start()
         client.stop()
-        with self.assertRaises(RuntimeError):
+        with pytest.raises(RuntimeError):
             client.send_request("tools/list", {})
 
     # ── 工具发现 ──
@@ -293,8 +291,8 @@ class TestMcpStdioConformance(unittest.TestCase):
         client.start()
         tools = client.list_tools()
         tool_names = {t["name"] for t in tools}
-        self.assertIn("echo", tool_names)
-        self.assertIn("add", tool_names)
+        assert "echo" in tool_names
+        assert "add" in tool_names
         client.stop()
 
     # ── 工具注册 ──
@@ -308,8 +306,8 @@ class TestMcpStdioConformance(unittest.TestCase):
         tools = build_mcp_tools(self.temp_dir)
 
         tool_names = {t.name for t in tools}
-        self.assertIn("mcp__test-server__echo", tool_names)
-        self.assertIn("mcp__test-server__add", tool_names)
+        assert "mcp__test-server__echo" in tool_names
+        assert "mcp__test-server__add" in tool_names
 
     def test_tool_spec_has_mcp_metadata(self) -> None:
         """ToolSpec builtin 中保留 MCP 元数据。"""
@@ -321,10 +319,10 @@ class TestMcpStdioConformance(unittest.TestCase):
         echo_tool = next(t for t in tools if t.name == "mcp__test-server__echo")
         assert echo_tool.builtin is not None
         meta = echo_tool.builtin.get("mcp_metadata", {})
-        self.assertEqual(meta["server"], "test-server")
-        self.assertEqual(meta["tool"], "echo")
-        self.assertEqual(meta["server_slug"], "test-server")
-        self.assertEqual(meta["tool_slug"], "echo")
+        assert meta["server"] == "test-server"
+        assert meta["tool"] == "echo"
+        assert meta["server_slug"] == "test-server"
+        assert meta["tool_slug"] == "echo"
 
     # ── 工具执行 ──
 
@@ -337,7 +335,7 @@ class TestMcpStdioConformance(unittest.TestCase):
         tools = build_mcp_tools(self.temp_dir)
         echo_tool = next(t for t in tools if t.name == "mcp__test-server__echo")
         result = echo_tool.handler({"text": "hello world"})
-        self.assertEqual(result, "hello world")
+        assert result == "hello world"
 
     def test_tools_call_sends_original_tool_name(self) -> None:
         """tools/call 发送原始 MCP 工具名，非 host_id。"""
@@ -348,7 +346,7 @@ class TestMcpStdioConformance(unittest.TestCase):
         tools = build_mcp_tools(self.temp_dir)
         add_tool = next(t for t in tools if t.name == "mcp__test-server__add")
         result = add_tool.handler({"a": 3, "b": 4})
-        self.assertEqual(result, "7")
+        assert result == "7"
 
     def test_tool_group_is_mcp(self) -> None:
         """注册的 MCP 工具 group='mcp'。"""
@@ -359,7 +357,7 @@ class TestMcpStdioConformance(unittest.TestCase):
         tools = build_mcp_tools(self.temp_dir)
         for t in tools:
             if t.name.startswith("mcp__"):
-                self.assertEqual(t.group, "mcp")
+                assert t.group == "mcp"
 
     # ── isError 结构化错误 ──
 
@@ -377,7 +375,7 @@ class TestMcpStdioConformance(unittest.TestCase):
         # Let's use the existing echo tool and call it normally
         echo_tool = next(t for t in tools if t.name == "mcp__test-server__echo")
         result = echo_tool.handler({"text": "hello"})
-        self.assertEqual(result, "hello")
+        assert result == "hello"
 
     def test_isError_via_direct_client_call(self) -> None:
         """通过 McpClient 直接调用 isError 工具获得错误标记。"""
@@ -389,15 +387,13 @@ class TestMcpStdioConformance(unittest.TestCase):
         # 需要服务器能访问 is_error_test —— 但 FAKE 服务器已支持
         # 不过 tools/list 没有注册 is_error_test，但 tools/call 直接调用即可
         result = client.call_tool("is_error_test", {})
-        self.assertTrue(result.get("isError", False))
+        assert result.get("isError", False)
 
         content_blocks = result.get("content", [])
-        self.assertTrue(
-            any(
-                block.get("type") == "text"
-                and "Something went wrong" in block.get("text", "")
-                for block in content_blocks
-            )
+        assert any(
+            block.get("type") == "text"
+            and "Something went wrong" in block.get("text", "")
+            for block in content_blocks
         )
         client.stop()
 
@@ -415,11 +411,10 @@ class TestMcpStdioConformance(unittest.TestCase):
         engine = PermissionEngine(PermissionEngineConfig())
         result = engine.decide(
             "mcp__test-server__echo",
-            '{"text": "hello"}',
+            {"text": "hello"},
             tool_spec=echo_tool,
-            tool_input={"text": "hello"},
         )
-        self.assertFalse(result.blocked)
+        assert not (result.blocked)
 
     def test_permission_deny_blocks_mcp_tool(self) -> None:
         """静态 deny 可阻止 MCP 工具调用。"""
@@ -434,12 +429,11 @@ class TestMcpStdioConformance(unittest.TestCase):
         engine = PermissionEngine(PermissionEngineConfig(static_policy=policy))
         result = engine.decide(
             "mcp__test-server__echo",
-            '{"text": "hello"}',
+            {"text": "hello"},
             tool_spec=echo_tool,
-            tool_input={"text": "hello"},
         )
-        self.assertTrue(result.blocked)
-        self.assertIn("deny", str(result.reason).lower())
+        assert result.blocked
+        assert "deny" in str(result.reason).lower()
 
     def test_static_allow_bypasses_ask(self) -> None:
         """静态 allow 让 MCP 工具直接执行。"""
@@ -456,14 +450,13 @@ class TestMcpStdioConformance(unittest.TestCase):
         engine = PermissionEngine(PermissionEngineConfig(static_policy=policy))
         result = engine.decide(
             "mcp__test-server__echo",
-            '{"text": "hello"}',
+            {"text": "hello"},
             tool_spec=echo_tool,
-            tool_input={"text": "hello"},
         )
-        self.assertFalse(result.blocked)
+        assert not (result.blocked)
         # 执行
         output = echo_tool.handler({"text": "hello"})
-        self.assertEqual(output, "hello")
+        assert output == "hello"
 
     # ── stderr 脱敏 / 截断 ──
 
@@ -475,41 +468,41 @@ class TestMcpStdioConformance(unittest.TestCase):
         client.start()
 
         # 调用工具触发服务器写入 stderr 并退出
-        with self.assertRaises(RuntimeError) as ctx:
+        with pytest.raises(RuntimeError) as exc_info:
             client.call_tool("dummy", {})
 
-        err_text = str(ctx.exception)
+        err_text = str(exc_info.value)
         # 原始秘密不应出现
-        self.assertNotIn("sk-test-secret-key", err_text)
-        self.assertNotIn("Bearer sk-", err_text)
+        assert "sk-test-secret-key" not in err_text
+        assert "Bearer sk-" not in err_text
         # 但脱敏后的标记应出现
-        self.assertIn("****", err_text)
+        assert "****" in err_text
 
     def test_stderr_redact_function(self) -> None:
         """redact_mcp_text 脱敏 Bearer 和 sk- token。"""
         text = "Bearer sk-abc123 and API_KEY=secret and TOKEN=xyz"
         redacted = redact_mcp_text(text)
-        self.assertNotIn("sk-abc123", redacted)
-        self.assertNotIn("Bearer sk-", redacted)
-        self.assertNotIn("API_KEY=secret", redacted)
-        self.assertNotIn("TOKEN=xyz", redacted)
-        self.assertIn("Bearer ****", redacted)
+        assert "sk-abc123" not in redacted
+        assert "Bearer sk-" not in redacted
+        assert "API_KEY=secret" not in redacted
+        assert "TOKEN=xyz" not in redacted
+        assert "Bearer ****" in redacted
         # regex 保留原始大小写（仅替换敏感值部分）
-        self.assertIn("API_KEY=****", redacted)
-        self.assertIn("TOKEN=****", redacted)
+        assert "API_KEY=****" in redacted
+        assert "TOKEN=****" in redacted
 
     def test_truncate_redact_short_text(self) -> None:
         """短文本不被截断。"""
         text = "Hello world"
         result = truncate_redact(text, max_len=200)
-        self.assertEqual(result, "Hello world")
+        assert result == "Hello world"
 
     def test_truncate_redact_long_text(self) -> None:
         """长文本被截断到 max_len 并追加 '...'。"""
         text = "a" * 500
         result = truncate_redact(text, max_len=50)
-        self.assertEqual(len(result), 50 + 3)  # 50 chars + "..."
-        self.assertTrue(result.endswith("..."))
+        assert len(result) == 50 + 3  # 50 chars + "..."
+        assert result.endswith("...")
 
     # ── 进程清理 ──
 
@@ -519,18 +512,18 @@ class TestMcpStdioConformance(unittest.TestCase):
         cmd = [sys.executable, "-u", str(server_file)]
         client = McpClient(cmd)
         client.start()
-        self.assertEqual(client.status, "connected")
+        assert client.status == "connected"
 
         pid = client.process.pid if client.process else None
         client.stop()
-        self.assertEqual(client.status, "disabled")
-        self.assertIsNone(client.process)
+        assert client.status == "disabled"
+        assert client.process is None
 
         # 进程应已终止（SIGTERM 跨平台兼容，OSError 覆盖 POSIX ProcessLookupError 和 Windows PermissionError）
         if pid is not None:
             import signal
 
-            with self.assertRaises(OSError):
+            with pytest.raises(OSError):
                 os.kill(pid, signal.SIGTERM)
 
     def test_server_shutdown_receives_stdin_eof(self) -> None:
@@ -579,10 +572,7 @@ while True:
 
         client.stop()
 
-        self.assertEqual(
-            shutdown_path.read_text(encoding="utf-8"),
-            "stdin-eof",
-        )
+        assert shutdown_path.read_text(encoding="utf-8") == "stdin-eof"
 
     def test_build_mcp_tools_cleanup_on_query(self) -> None:
         """_query_server_tools 在列出工具后正确停止客户端。"""
@@ -591,13 +581,13 @@ while True:
         _write_mcp_config(self.temp_dir, "test-server", cmd)
 
         tools = build_mcp_tools(self.temp_dir)
-        self.assertEqual(len(tools), 2)
+        assert len(tools) == 2
 
         # 发现客户端应在查询后停止
         # 验证 handler 仍能启动新客户端
         echo_tool = next(t for t in tools if t.name == "mcp__test-server__echo")
         result = echo_tool.handler({"text": "cleanup test"})
-        self.assertEqual(result, "cleanup test")
+        assert result == "cleanup test"
 
     # ── 完整生态系统形状 ──
 
@@ -609,48 +599,47 @@ while True:
 
         # 步骤 1: 构建工具
         tools = build_mcp_tools(self.temp_dir)
-        self.assertEqual(len(tools), 2)
+        assert len(tools) == 2
 
         echo_tool = next(t for t in tools if t.name == "mcp__demo-server__echo")
         add_tool = next(t for t in tools if t.name == "mcp__demo-server__add")
 
         # 步骤 2: 验证元数据
-        self.assertEqual(echo_tool.group, "mcp")
+        assert echo_tool.group == "mcp"
 
         # 步骤 3: 验证 schema
         assert echo_tool.schema is not None
-        self.assertEqual(
-            echo_tool.schema.get("properties", {}).get("text", {}).get("type"),
-            "string",
+        assert (
+            echo_tool.schema.get("properties", {}).get("text", {}).get("type")
+            == "string"
         )
 
         # 步骤 4: 权限检查
         engine = PermissionEngine(PermissionEngineConfig())
         decision = engine.decide(
             "mcp__demo-server__echo",
-            '{"text": "ping"}',
+            {"text": "ping"},
             tool_spec=echo_tool,
-            tool_input={"text": "ping"},
         )
-        self.assertFalse(decision.blocked)
+        assert not (decision.blocked)
 
         # 步骤 5: 执行
         result = echo_tool.handler({"text": "pong"})
-        self.assertEqual(result, "pong")
+        assert result == "pong"
 
         # 步骤 6: 第二个工具执行
         result2 = add_tool.handler({"a": 10, "b": 20})
-        self.assertEqual(result2, "30")
+        assert result2 == "30"
 
 
-class TestMcpStdioErrorHandling(unittest.TestCase):
+class TestMcpStdioErrorHandling:
     """MCP stdio 错误处理冒烟测试。"""
 
-    def setUp(self) -> None:
+    def setup_method(self, method) -> None:
         self._temp_dir_obj = tempfile.TemporaryDirectory()
         self.temp_dir = Path(self._temp_dir_obj.name)
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method) -> None:
         self._temp_dir_obj.cleanup()
 
     def test_server_crash_on_startup(self) -> None:
@@ -658,19 +647,19 @@ class TestMcpStdioErrorHandling(unittest.TestCase):
         server_file = _write_server_script(self.temp_dir, CRASH_SERVER_CODE)
         cmd = [sys.executable, "-u", str(server_file)]
         client = McpClient(cmd)
-        with self.assertRaises(RuntimeError) as ctx:
+        with pytest.raises(RuntimeError) as exc_info:
             client.start()
-        err = str(ctx.exception)
+        err = str(exc_info.value)
         # stderr 内容已被脱敏
-        self.assertNotIn("supersecret", err)
-        self.assertIn("****", err)
+        assert "supersecret" not in err
+        assert "****" in err
 
     def test_server_not_found(self) -> None:
         """不存在的可执行文件报错。"""
         client = McpClient(["/nonexistent/binary"])
-        with self.assertRaises(RuntimeError) as ctx:
+        with pytest.raises(RuntimeError) as exc_info:
             client.start()
-        self.assertIn("Failed to start", str(ctx.exception))
+        assert "Failed to start" in str(exc_info.value)
 
     def test_timeout_on_unresponsive_server(self) -> None:
         """无响应的服务器超时后收到 cancellation notification。"""
@@ -679,7 +668,6 @@ class TestMcpStdioErrorHandling(unittest.TestCase):
 import sys
 import json
 from pathlib import Path
-
 CANCELLATION_PATH = Path(__CANCELLATION_PATH__)
 
 def _read_message():
@@ -731,7 +719,7 @@ if __name__ == "__main__":
         cmd = [sys.executable, "-u", str(server_file)]
         client = McpClient(cmd, timeout=0.1)
         client.start()
-        with self.assertRaises(TimeoutError):
+        with pytest.raises(TimeoutError):
             client.list_tools()
 
         deadline = time.monotonic() + 1.0
@@ -739,17 +727,14 @@ if __name__ == "__main__":
             time.sleep(0.01)
 
         cancellation = json.loads(cancellation_path.read_text(encoding="utf-8"))
-        self.assertEqual(
-            cancellation,
-            {
-                "jsonrpc": "2.0",
-                "method": "notifications/cancelled",
-                "params": {
-                    "requestId": 2,
-                    "reason": "Client timeout waiting for tools/list",
-                },
+        assert cancellation == {
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {
+                "requestId": 2,
+                "reason": "Client timeout waiting for tools/list",
             },
-        )
+        }
         client.stop()
 
     def test_unknown_tool_raises_runtime_error(self) -> None:
@@ -758,10 +743,10 @@ if __name__ == "__main__":
         cmd = [sys.executable, "-u", str(server_file)]
         client = McpClient(cmd)
         client.start()
-        with self.assertRaises(RuntimeError):
+        with pytest.raises(RuntimeError):
             client.call_tool("nonexistent_tool", {})
         client.stop()
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

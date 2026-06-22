@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import unittest
 from collections.abc import Sequence
 from typing import Any, cast
 
@@ -16,9 +15,8 @@ from xcode.ai.events import ReasoningDelta, TextDelta, ToolCallEvent
 from xcode.ai.providers.codec import to_chat_messages, to_chat_tool
 from xcode.ai.providers.stream_codec import chat_stream_to_events
 from xcode.harness.skills import ToolSpec
-
-
-class OpenAIToolCodecTest(unittest.TestCase):
+import pytest
+class OpenAIToolCodecTest:
     def test_tool_schema_uses_explicit_schema(self) -> None:
         tool = ToolSpec(
             "echo",
@@ -30,7 +28,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
 
         encoded = to_chat_tool(tool.name, tool.description, tool.schema)
 
-        self.assertEqual(encoded["function"]["parameters"], tool.schema)
+        assert encoded["function"]["parameters"] == tool.schema
 
     def test_tool_results_convert_to_openai_tool_messages(self) -> None:
         messages = to_chat_messages(
@@ -55,8 +53,8 @@ class OpenAIToolCodecTest(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(messages[0]["role"], "assistant")
-        self.assertEqual(messages[1]["role"], "tool")
+        assert messages[0]["role"] == "assistant"
+        assert messages[1]["role"] == "tool"
 
     def test_tool_call_arguments_are_serialized_for_chat_api(self) -> None:
         messages = to_chat_messages(
@@ -79,8 +77,8 @@ class OpenAIToolCodecTest(unittest.TestCase):
         )
 
         arguments = messages[0]["tool_calls"][0]["function"]["arguments"]
-        self.assertIsInstance(arguments, str)
-        self.assertEqual(arguments, '{"path":"src/xcode"}')
+        assert isinstance(arguments, str)
+        assert arguments == '{"path":"src/xcode"}'
 
     def test_reasoning_content_is_preserved_for_thinking_mode(self) -> None:
         messages = to_chat_messages(
@@ -101,7 +99,7 @@ class OpenAIToolCodecTest(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(messages[0]["reasoning_content"], "private reasoning")
+        assert messages[0]["reasoning_content"] == "private reasoning"
 
     def test_empty_reasoning_content_is_preserved_for_tool_calls(self) -> None:
         raw_messages = convert_to_llm(
@@ -121,14 +119,14 @@ class OpenAIToolCodecTest(unittest.TestCase):
 
         messages = to_chat_messages(raw_messages)
 
-        self.assertEqual(messages[0]["reasoning_content"], "")
+        assert messages[0]["reasoning_content"] == ""
 
     def test_agent_message_discriminators_are_pythonic_inside_boundary(self) -> None:
         tool_call = ToolCallContent(id="t1", name="grep_search")
-        self.assertEqual(tool_call.type, "tool_call")
-        self.assertEqual(ToolResultMessage().role, "tool_result")
-        self.assertEqual(BranchSummaryMessage().role, "branch_summary")
-        self.assertEqual(CompactionSummaryMessage().role, "compaction_summary")
+        assert tool_call.type == "tool_call"
+        assert ToolResultMessage().role == "tool_result"
+        assert BranchSummaryMessage().role == "branch_summary"
+        assert CompactionSummaryMessage().role == "compaction_summary"
 
         raw_messages = convert_to_llm(
             [
@@ -137,8 +135,8 @@ class OpenAIToolCodecTest(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(raw_messages[0]["tool_calls"][0]["id"], "t1")
-        self.assertEqual(raw_messages[1]["role"], "tool")
+        assert raw_messages[0]["tool_calls"][0]["id"] == "t1"
+        assert raw_messages[1]["role"] == "tool"
 
     def test_typed_tool_results_do_not_inline_binary_data(self) -> None:
         """provider 文本只保留类型摘要，不复制图片或文件数据。"""
@@ -167,17 +165,13 @@ class OpenAIToolCodecTest(unittest.TestCase):
         )
 
         content = raw_messages[0]["content"]
-        self.assertEqual(
-            content,
-            "summary[image result: image/png][file result: audio.wav]",
-        )
-        self.assertNotIn("secret-image-data", content)
-        self.assertNotIn("secret-audio-data", content)
-        self.assertNotIn("secret-image-data", repr(image))
-        self.assertNotIn("secret-audio-data", repr(file))
+        assert content == "summary[image result: image/png][file result: audio.wav]"
+        assert "secret-image-data" not in content
+        assert "secret-audio-data" not in content
+        assert "secret-image-data" not in repr(image)
+        assert "secret-audio-data" not in repr(file)
 
-
-class OpenAIStreamCodecTest(unittest.TestCase):
+class OpenAIStreamCodecTest:
     def test_chat_stream_aggregates_tool_call_arguments(self) -> None:
         events = list(
             chat_stream_to_events(
@@ -194,12 +188,12 @@ class OpenAIStreamCodecTest(unittest.TestCase):
             )
         )
 
-        self.assertIsInstance(events[0], TextDelta)
+        assert isinstance(events[0], TextDelta)
         first_text = cast(TextDelta, events[0])
-        self.assertEqual(first_text.chunk, "he")
-        self.assertIsInstance(events[-1], ToolCallEvent)
+        assert first_text.chunk == "he"
+        assert isinstance(events[-1], ToolCallEvent)
         final_call = cast(ToolCallEvent, events[-1])
-        self.assertEqual(final_call.calls[0].input, {"text": "hi"})
+        assert final_call.calls[0].input == {"text": "hi"}
 
     def test_chat_stream_extracts_reasoning_content(self) -> None:
         events = list(
@@ -211,16 +205,16 @@ class OpenAIStreamCodecTest(unittest.TestCase):
                 ]
             )
         )
-        self.assertEqual(len(events), 3)
-        self.assertIsInstance(events[0], ReasoningDelta)
+        assert len(events) == 3
+        assert isinstance(events[0], ReasoningDelta)
         first_reasoning = cast(ReasoningDelta, events[0])
-        self.assertEqual(first_reasoning.chunk, "I am thinking")
-        self.assertIsInstance(events[1], ReasoningDelta)
+        assert first_reasoning.chunk == "I am thinking"
+        assert isinstance(events[1], ReasoningDelta)
         second_reasoning = cast(ReasoningDelta, events[1])
-        self.assertEqual(second_reasoning.chunk, " deeply")
-        self.assertIsInstance(events[2], TextDelta)
+        assert second_reasoning.chunk == " deeply"
+        assert isinstance(events[2], TextDelta)
         final_text = cast(TextDelta, events[2])
-        self.assertEqual(final_text.chunk, "Hello")
+        assert final_text.chunk == "Hello"
 
     def test_chat_stream_handles_chunks_without_usage_attribute(self) -> None:
         events = list(
@@ -234,10 +228,9 @@ class OpenAIStreamCodecTest(unittest.TestCase):
             )
         )
 
-        self.assertEqual(len(events), 1)
-        self.assertIsInstance(events[0], TextDelta)
-        self.assertEqual(cast(TextDelta, events[0]).chunk, "hello")
-
+        assert len(events) == 1
+        assert isinstance(events[0], TextDelta)
+        assert cast(TextDelta, events[0]).chunk == "hello"
 
 class FakeStreamChunk:
     def __init__(
@@ -257,11 +250,9 @@ class FakeStreamChunk:
     def usage(self) -> None:
         return self._usage
 
-
 class FakeStreamChunkNoUsage:
     def __init__(self, content: str | None = None) -> None:
         self.choices = [FakeStreamChoice(content, None, None)]
-
 
 class FakeStreamChoice:
     def __init__(
@@ -275,7 +266,6 @@ class FakeStreamChoice:
     @property
     def delta(self) -> FakeStreamDelta:
         return self._delta
-
 
 class FakeStreamDelta:
     def __init__(
@@ -297,7 +287,6 @@ class FakeStreamDelta:
     @property
     def tool_calls(self) -> Sequence[FakeStreamToolCall] | None:
         return self._tool_calls
-
 
 class FakeStreamToolCall:
     def __init__(
@@ -323,7 +312,6 @@ class FakeStreamToolCall:
     def function(self) -> FakeStreamFunction | None:
         return self._function
 
-
 class FakeStreamFunction:
     def __init__(self, name: str | None, arguments: str | None) -> None:
         self._name: str | None = name
@@ -337,6 +325,5 @@ class FakeStreamFunction:
     def arguments(self) -> str | None:
         return self._arguments
 
-
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

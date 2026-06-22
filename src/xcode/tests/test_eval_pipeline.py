@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 import sys
 import tempfile
-import unittest
 from unittest.mock import patch
 
 from xcode.harness.agent_runtime import StructuredAgent
@@ -34,8 +33,7 @@ from xcode.evals.sandbox import UnsafeEvalTaskError
 from xcode.evals.tasks import SUITES
 from xcode.tests.fixtures import FakeProvider
 from xcode.evals.schema import TrialResult
-
-
+import pytest
 INPUT_SCHEMA = {
     "type": "object",
     "properties": {"input": {"type": "string"}},
@@ -49,8 +47,7 @@ PATH_SCHEMA = {
     "additionalProperties": False,
 }
 
-
-class EvalPipelineTests(unittest.TestCase):
+class EvalPipelineTests:
     def test_eval_runner_records_trace_and_passes_graders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task = EvalTask(
@@ -67,18 +64,18 @@ class EvalPipelineTests(unittest.TestCase):
 
             report = runner.run()
 
-            self.assertTrue(report.success)
-            self.assertEqual(report.metrics["trial_count"], 1)
+            assert report.success
+            assert report.metrics["trial_count"] == 1
             trial = report.trials[0]
-            self.assertTrue(trial.trace_path.exists())
-            self.assertTrue((Path(tmp) / "report.json").exists())
-            self.assertTrue((Path(tmp) / "report.html").exists())
+            assert trial.trace_path.exists()
+            assert (Path(tmp) / "report.json").exists()
+            assert (Path(tmp) / "report.html").exists()
             records = [
                 json.loads(line)
                 for line in trial.trace_path.read_text(encoding="utf-8").splitlines()
             ]
-            self.assertIn("tool_use", [record["type"] for record in records])
-            self.assertIn("final", [record["type"] for record in records])
+            assert "tool_use" in [record["type"] for record in records]
+            assert "final" in [record["type"] for record in records]
 
     def test_eval_runner_reports_disallowed_tool_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,12 +92,12 @@ class EvalPipelineTests(unittest.TestCase):
 
             report = runner.run()
 
-            self.assertFalse(report.success)
-            self.assertFalse(report.trials[0].success)
+            assert not (report.success)
+            assert not (report.trials[0].success)
             failing = [
                 grader.name for grader in report.trials[0].graders if not grader.passed
             ]
-            self.assertIn("disallowed_tool:echo", failing)
+            assert "disallowed_tool:echo" in failing
 
     def test_eval_runner_arun_works_inside_event_loop(self) -> None:
         async def main():
@@ -119,18 +116,18 @@ class EvalPipelineTests(unittest.TestCase):
 
         report = asyncio.run(main())
 
-        self.assertTrue(report.success)
+        assert report.success
 
     def test_eval_runner_sync_run_rejects_active_event_loop(self) -> None:
         async def main():
             runner = EvalRunner(tasks=(), app_factory=_text_app)
-            with self.assertRaises(RuntimeError) as ctx:
+            with pytest.raises(RuntimeError) as exc_info:
                 runner.run()
-            return str(ctx.exception)
+            return str(exc_info.value)
 
         message = asyncio.run(main())
 
-        self.assertIn("use arun", message)
+        assert "use arun" in message
 
     def test_eval_runner_records_file_change_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -164,16 +161,13 @@ class EvalPipelineTests(unittest.TestCase):
 
             report = runner.run()
 
-            self.assertTrue(report.success)
+            assert report.success
             trial = report.trials[0]
-            self.assertIn("file_evidence", trial.metrics)
-            self.assertEqual(trial.metrics["project_root"], str(root))
+            assert "file_evidence" in trial.metrics
+            assert trial.metrics["project_root"] == str(root)
             grader_names = {grader.name for grader in trial.graders}
-            self.assertIn("file_changed:math_utils.py", grader_names)
-            self.assertIn(
-                "file_contains:math_utils.py:def subtract",
-                grader_names,
-            )
+            assert "file_changed:math_utils.py" in grader_names
+            assert "file_contains:math_utils.py:def subtract" in grader_names
 
     def test_eval_runner_grades_validation_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -189,7 +183,7 @@ class EvalPipelineTests(unittest.TestCase):
                             [
                                 sys.executable,
                                 "-c",
-                                "from pathlib import Path; assert Path('ok.txt').read_text() == 'ok'",
+                                "from pathlib import Path; assert Path('ok.txt').read_text() == 'ok'"
                             ]
                         ],
                         "timeout_seconds": 5,
@@ -204,11 +198,11 @@ class EvalPipelineTests(unittest.TestCase):
 
             report = runner.run()
 
-            self.assertTrue(report.success)
+            assert report.success
             trial = report.trials[0]
-            self.assertIn("validation", trial.metrics)
+            assert "validation" in trial.metrics
             grader_names = {grader.name for grader in trial.graders}
-            self.assertIn("validation_command:1", grader_names)
+            assert "validation_command:1" in grader_names
 
     def test_eval_runner_records_model_patch_from_git_diff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -235,8 +229,8 @@ class EvalPipelineTests(unittest.TestCase):
                 report = runner.run()
 
             trial = report.trials[0]
-            self.assertIn("model_patch", trial.metrics)
-            self.assertIn("math_utils.py", trial.metrics["model_patch"])
+            assert "model_patch" in trial.metrics
+            assert "math_utils.py" in trial.metrics["model_patch"]
 
     def test_trial_project_root_copies_fixture_to_sandbox(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -257,16 +251,14 @@ class EvalPipelineTests(unittest.TestCase):
                 output_dir=Path(tmp) / "runs",
             )
 
-            self.assertEqual(
-                (root / "app.py").read_text(encoding="utf-8"), "VALUE = 1\n"
-            )
-            self.assertIn("fixture-task-1", str(root))
+            assert (root / "app.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+            assert "fixture-task-1" in str(root)
 
     def test_trial_project_root_rejects_unisolated_real_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task = EvalTask(id="unsafe-task", prompt="edit current repo")
 
-            with self.assertRaises(UnsafeEvalTaskError):
+            with pytest.raises(UnsafeEvalTaskError):
                 _trial_project_root(
                     task,
                     0,
@@ -287,7 +279,7 @@ class EvalPipelineTests(unittest.TestCase):
                 allow_project_mutation=True,
             )
 
-            self.assertEqual(root, base.resolve())
+            assert root == base.resolve()
 
     def test_task_from_dict_normalizes_llm_judge_criteria(self) -> None:
         task = _task_from_dict(
@@ -298,24 +290,24 @@ class EvalPipelineTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(task.llm_judge_criteria, ("criteria one", "criteria two"))
+        assert task.llm_judge_criteria == ("criteria one", "criteria two")
 
     def test_coding_fixture_suite_is_sandboxed_and_validated(self) -> None:
         tasks = SUITES["coding-fixture"]
 
-        self.assertGreaterEqual(len(tasks), 1)
+        assert len(tasks) >= 1
         for task in tasks:
-            self.assertIn("fixture_dir", task.metadata)
-            self.assertIn("validation", task.metadata)
-            self.assertTrue(task.metadata["validation"]["commands"])
+            assert "fixture_dir" in task.metadata
+            assert "validation" in task.metadata
+            assert task.metadata["validation"]["commands"]
 
     def test_all_suite_excludes_real_coding_fixtures(self) -> None:
         all_tasks = SUITES["all"]
 
-        self.assertGreaterEqual(len(all_tasks), 1)
+        assert len(all_tasks) >= 1
         for task in all_tasks:
-            self.assertNotIn("fixture_dir", task.metadata)
-            self.assertNotIn("validation", task.metadata)
+            assert "fixture_dir" not in task.metadata
+            assert "validation" not in task.metadata
 
     def test_eval_cli_lists_builtin_suites(self) -> None:
         output = io.StringIO()
@@ -323,10 +315,10 @@ class EvalPipelineTests(unittest.TestCase):
         with redirect_stdout(output):
             exit_code = eval_main(["--list-suites"])
 
-        self.assertEqual(exit_code, 0)
+        assert exit_code == 0
         text = output.getvalue()
-        self.assertIn("coding-fixture", text)
-        self.assertIn("tool-policy", text)
+        assert "coding-fixture" in text
+        assert "tool-policy" in text
 
     def test_eval_cli_shows_suite_tasks(self) -> None:
         output = io.StringIO()
@@ -334,10 +326,10 @@ class EvalPipelineTests(unittest.TestCase):
         with redirect_stdout(output):
             exit_code = eval_main(["--show-suite", "coding-fixture"])
 
-        self.assertEqual(exit_code, 0)
+        assert exit_code == 0
         text = output.getvalue()
-        self.assertIn("tiny-calculator-subtract", text)
-        self.assertIn("validation_commands", text)
+        assert "tiny-calculator-subtract" in text
+        assert "validation_commands" in text
 
     def test_eval_cli_lists_external_benchmarks(self) -> None:
         output = io.StringIO()
@@ -345,10 +337,10 @@ class EvalPipelineTests(unittest.TestCase):
         with redirect_stdout(output):
             exit_code = eval_main(["--list-benchmarks"])
 
-        self.assertEqual(exit_code, 0)
+        assert exit_code == 0
         text = output.getvalue()
-        self.assertIn("swebench-lite", text)
-        self.assertIn("terminal-bench", text)
+        assert "swebench-lite" in text
+        assert "terminal-bench" in text
 
     def test_eval_cli_prints_failed_trial_details(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -369,9 +361,9 @@ class EvalPipelineTests(unittest.TestCase):
                 _print_failed_trials(report)
 
             text = output.getvalue()
-            self.assertIn("Failures:", text)
-            self.assertIn("disallowed_tool:echo", text)
-            self.assertIn("trace:", text)
+            assert "Failures:" in text
+            assert "disallowed_tool:echo" in text
+            assert "trace:" in text
 
     def test_load_benchmark_limit_slices_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -393,10 +385,10 @@ class EvalPipelineTests(unittest.TestCase):
             all_tasks = load_benchmark("humaneval", path)
             limited = load_benchmark("humaneval", path, limit=2)
 
-            self.assertEqual(len(all_tasks), 5)
-            self.assertEqual(len(limited), 2)
-            self.assertEqual(limited[0].id, "humaneval-HumanEval-0")
-            self.assertEqual(limited[1].id, "humaneval-HumanEval-1")
+            assert len(all_tasks) == 5
+            assert len(limited) == 2
+            assert limited[0].id == "humaneval-HumanEval-0"
+            assert limited[1].id == "humaneval-HumanEval-1"
 
     def test_pass_at_k_uses_unbiased_estimator(self) -> None:
         trials = (
@@ -413,9 +405,8 @@ class EvalPipelineTests(unittest.TestCase):
             list(trials),
         )
 
-        self.assertEqual(metrics["pass@k"], "1/2")
-        self.assertEqual(metrics["pass@k_rate"], 0.5)
-
+        assert metrics["pass@k"] == "1/2"
+        assert metrics["pass@k_rate"] == 0.5
 
 def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
     responses: list[list[ProviderEvent]] = [
@@ -442,7 +433,6 @@ def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
         )
     )
 
-
 def _text_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
     responses: list[ProviderEvent] = [
         TextDelta(chunk="async ok"),
@@ -454,7 +444,6 @@ def _text_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
             registry=(),
         )
     )
-
 
 def _editing_app(project_root: Path) -> XcodeApp:
     def edit_file(_value: dict) -> str:
@@ -490,7 +479,6 @@ def _editing_app(project_root: Path) -> XcodeApp:
         registry=(tool,),
     )
 
-
 def _validation_app(project_root: Path) -> XcodeApp:
     def write_ok(_value: dict) -> str:
         (project_root / "ok.txt").write_text("ok", encoding="utf-8")
@@ -524,7 +512,6 @@ def _validation_app(project_root: Path) -> XcodeApp:
         registry=(tool,),
     )
 
-
 def _trial(task_id: str, success: bool) -> TrialResult:
     return TrialResult(
         task_id=task_id,
@@ -535,6 +522,5 @@ def _trial(task_id: str, success: bool) -> TrialResult:
         graders=(),
     )
 
-
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

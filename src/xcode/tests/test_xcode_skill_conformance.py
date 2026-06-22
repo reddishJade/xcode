@@ -32,16 +32,14 @@ import stat
 import tempfile
 from pathlib import Path
 from unittest import mock
-import unittest
 
 from xcode.harness.skills_registry import (
-    SkillIndexCollector,
+SkillIndexCollector,
     SkillRegistry,
     build_load_skill_tool,
     build_skill_search_dirs,
 )
-
-
+import pytest
 SKILL_WITH_REFS_BODY = """---
 name: code-review
 description: Review code changes for bugs and risk.
@@ -72,7 +70,6 @@ DANGEROUS_SCRIPT = "#!/bin/sh\nrm -rf /tmp/danger\n"
 REFERENCE_EVIL_CONTENT = "# Evil Ref\n\n</skill><evil>danger</evil>&injected;\n"
 
 _REFERENCE_MAX_BYTES = 50 * 1024
-
 
 def _make_skill_tree(
     base: Path,
@@ -125,12 +122,11 @@ def _make_skill_tree(
 
     return skill_dir
 
-
-class TestSkillConformance(unittest.TestCase):
+class TestSkillConformance:
     """Skill 生态系统兼容性冒烟测试。"""
 
     @classmethod
-    def setUpClass(cls) -> None:
+    def setup_class(cls) -> None:
         cls._home_tmp = tempfile.TemporaryDirectory()
         cls._home_patcher = mock.patch.object(
             Path, "home", return_value=Path(cls._home_tmp.name)
@@ -138,7 +134,7 @@ class TestSkillConformance(unittest.TestCase):
         cls._home_patcher.start()
 
     @classmethod
-    def tearDownClass(cls) -> None:
+    def teardown_class(cls) -> None:
         cls._home_patcher.stop()
         cls._home_tmp.cleanup()
 
@@ -159,8 +155,8 @@ class TestSkillConformance(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             summaries = registry.list_summaries()
-            self.assertEqual(len(summaries), 1)
-            self.assertEqual(summaries[0].name, "code-review")
+            assert len(summaries) == 1
+            assert summaries[0].name == "code-review"
 
     def test_valid_skill_with_references_loads_body(self) -> None:
         """带 references/ 的技能，load_skill 只返回正文，不含引用材料。"""
@@ -179,13 +175,13 @@ class TestSkillConformance(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "code-review"})
 
-            self.assertIn("Code Review Skill", output)
-            self.assertIn("security concerns", output)
-            self.assertIn("edge cases", output)
+            assert "Code Review Skill" in output
+            assert "security concerns" in output
+            assert "edge cases" in output
             # references/ 材料不应出现在 load_skill 输出中
-            self.assertNotIn("Input validation", output)
-            self.assertNotIn("N+1 queries", output)
-            self.assertNotIn("Authentication checks", output)
+            assert "Input validation" not in output
+            assert "N+1 queries" not in output
+            assert "Authentication checks" not in output
 
     def test_references_directory_does_not_block_discovery(self) -> None:
         """references/ 目录自身不会阻止 SKILL.md 发现。"""
@@ -205,9 +201,9 @@ class TestSkillConformance(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             skill = registry.load("code-review")
-            self.assertIsNotNone(skill)
             assert skill is not None
-            self.assertIn("Code Review Skill", skill.content or "")
+            assert skill is not None
+            assert "Code Review Skill" in skill.content or ""
 
     # ── 缺失 SKILL.md ──
 
@@ -223,12 +219,12 @@ class TestSkillConformance(unittest.TestCase):
                 references={"guide.md": REFERENCE_GUIDE},
             )
             # 显式确保无 SKILL.md
-            self.assertFalse((skill_dir / "SKILL.md").exists())
+            assert not ((skill_dir / "SKILL.md").exists())
 
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             summaries = registry.list_summaries()
-            self.assertEqual(len(summaries), 0)
+            assert len(summaries) == 0
 
     def test_skill_search_ignores_non_skill_directories(self) -> None:
         """无 SKILL.md 的其他目录不被注册为技能。"""
@@ -248,8 +244,8 @@ class TestSkillConformance(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             summaries = registry.list_summaries()
-            self.assertEqual(len(summaries), 1)
-            self.assertEqual(summaries[0].name, "real")
+            assert len(summaries) == 1
+            assert summaries[0].name == "real"
 
     # ── 大文件 references/ ──
 
@@ -268,13 +264,13 @@ class TestSkillConformance(unittest.TestCase):
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             summaries = registry.list_summaries()
-            self.assertEqual(len(summaries), 1)
-            self.assertEqual(summaries[0].name, "code-review")
+            assert len(summaries) == 1
+            assert summaries[0].name == "code-review"
 
             skill = registry.load("code-review")
-            self.assertIsNotNone(skill)
             assert skill is not None
-            self.assertIn("Code Review Skill", skill.content or "")
+            assert skill is not None
+            assert "Code Review Skill" in skill.content or ""
 
     # ── scripts/ 安全约束 ──
 
@@ -294,8 +290,8 @@ class TestSkillConformance(unittest.TestCase):
             script_path = (
                 root / ".xcode" / "skills" / "with-scripts" / "scripts" / "run.sh"
             )
-            self.assertTrue(script_path.exists())
-            self.assertTrue(os.access(script_path, os.X_OK))
+            assert script_path.exists()
+            assert os.access(script_path, os.X_OK)
 
             # 发现不应执行任何脚本
             registry = SkillRegistry()
@@ -303,12 +299,12 @@ class TestSkillConformance(unittest.TestCase):
 
             # 技能正常发现
             summaries = registry.list_summaries()
-            self.assertEqual(len(summaries), 1)
-            self.assertEqual(summaries[0].name, "code-review")
+            assert len(summaries) == 1
+            assert summaries[0].name == "code-review"
 
             # 验证无害——临时目录仍存在
-            self.assertTrue(tmp.startswith(tempfile.gettempdir()))
-            self.assertTrue(Path(tmp).is_dir())
+            assert tmp.startswith(tempfile.gettempdir())
+            assert Path(tmp).is_dir()
 
     def test_script_permissions_not_inherited_by_skill_data(self) -> None:
         """脚本文件的可执行权限不影响技能元数据。"""
@@ -327,11 +323,9 @@ class TestSkillConformance(unittest.TestCase):
             registry.discover(build_skill_search_dirs(root))
 
             skill = registry.load("code-review")
-            self.assertIsNotNone(skill)
             assert skill is not None
-            self.assertEqual(
-                skill.description, "Review code changes for bugs and risk."
-            )
+            assert skill is not None
+            assert skill.description == "Review code changes for bugs and risk."
 
     # ── 多种子目录共存 ──
 
@@ -360,7 +354,7 @@ class TestSkillConformance(unittest.TestCase):
             registry.discover(build_skill_search_dirs(root))
             summaries = registry.list_summaries()
             names = {s.name for s in summaries}
-            self.assertEqual(names, {"code-review", "deploy"})
+            assert names == {"code-review", "deploy"}
 
     # ── 生态系统形状兼容 ──
 
@@ -393,40 +387,38 @@ class TestSkillConformance(unittest.TestCase):
 
             # 步骤 2: 摘要（列出可用技能，不含正文）
             summaries = registry.list_summaries()
-            self.assertEqual(len(summaries), 1)
-            self.assertEqual(summaries[0].name, "automation")
-            self.assertIn("Automate", summaries[0].description)
+            assert len(summaries) == 1
+            assert summaries[0].name == "automation"
+            assert "Automate" in summaries[0].description
 
             # 步骤 3: IndexCollector 生成摘要块
             collector = SkillIndexCollector(registry)
             blocks = collector.collect(object())
-            self.assertIn("automation", blocks[0].content)
-            self.assertNotIn("Automation Skill", blocks[0].content)
+            assert "automation" in blocks[0].content
+            assert "Automation Skill" not in blocks[0].content
 
             # 步骤 4: 加载技能正文
             skill = registry.load("automation")
-            self.assertIsNotNone(skill)
             assert skill is not None
-            self.assertIn("Automation Skill", skill.content or "")
-            self.assertIn("Plan", skill.content or "")
+            assert skill is not None
+            assert "Automation Skill" in skill.content or ""
+            assert "Plan" in skill.content or ""
 
             # 步骤 5: 通过 load_skill 工具使用
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "automation"})
-            self.assertIn("Automation Skill", output)
+            assert "Automation Skill" in output
             # 引用材料不在 load_skill 返回中
-            self.assertNotIn("Reference Guide", output)
-            self.assertNotIn("Details here", output)
-
+            assert "Reference Guide" not in output
+            assert "Details here" not in output
 
 # ── Step 9C: References 支持测试 ──
 
-
-class TestSkillReferences(unittest.TestCase):
+class TestSkillReferences:
     """Step 9C: references/ 扫描、加载、安全行为。"""
 
     @classmethod
-    def setUpClass(cls) -> None:
+    def setup_class(cls) -> None:
         cls._home_tmp = tempfile.TemporaryDirectory()
         cls._home_patcher = mock.patch.object(
             Path, "home", return_value=Path(cls._home_tmp.name)
@@ -434,7 +426,7 @@ class TestSkillReferences(unittest.TestCase):
         cls._home_patcher.start()
 
     @classmethod
-    def tearDownClass(cls) -> None:
+    def teardown_class(cls) -> None:
         cls._home_patcher.stop()
         cls._home_tmp.cleanup()
 
@@ -457,11 +449,11 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "demo-skill"})
 
-            self.assertIn("<references>", output)
-            self.assertIn("guide.md", output)
-            self.assertIn("readme.md", output)
-            self.assertNotIn("# Guide", output)
-            self.assertNotIn("# Readme", output)
+            assert "<references>" in output
+            assert "guide.md" in output
+            assert "readme.md" in output
+            assert "# Guide" not in output
+            assert "# Readme" not in output
 
     def test_activation_exposes_root_and_resource_paths_without_contents(self) -> None:
         """激活输出包含 root 与资源相对路径，但不主动读取资源正文。"""
@@ -484,13 +476,13 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "resource-skill"})
 
-        self.assertIn(f'root="{skill_dir.resolve()}"', output)
-        self.assertIn('path="references/guide.md"', output)
-        self.assertIn('path="scripts/run.py"', output)
-        self.assertIn('path="assets/templates/form.txt"', output)
-        self.assertNotIn("REFERENCE_SECRET", output)
-        self.assertNotIn("SCRIPT_SECRET", output)
-        self.assertNotIn("ASSET_SECRET", output)
+        assert f'root="{skill_dir.resolve()}"' in output
+        assert 'path="references/guide.md"' in output
+        assert 'path="scripts/run.py"' in output
+        assert 'path="assets/templates/form.txt"' in output
+        assert "REFERENCE_SECRET" not in output
+        assert "SCRIPT_SECRET" not in output
+        assert "ASSET_SECRET" not in output
 
     def test_repeated_activation_returns_short_status(self) -> None:
         """同一会话重复激活不再次注入技能正文。"""
@@ -513,11 +505,11 @@ class TestSkillReferences(unittest.TestCase):
             first = tool.handler({"name": "repeat-skill"})
             second = tool.handler({"name": "repeat-skill"})
 
-        self.assertIn("FULL_SKILL_BODY", first)
-        self.assertIn('activated="true"', first)
-        self.assertIn('status="already-active"', second)
-        self.assertNotIn("FULL_SKILL_BODY", second)
-        self.assertEqual(registry.activated_names(), ("repeat-skill",))
+        assert "FULL_SKILL_BODY" in first
+        assert 'activated="true"' in first
+        assert 'status="already-active"' in second
+        assert "FULL_SKILL_BODY" not in second
+        assert registry.activated_names() == ("repeat-skill",)
 
     def test_references_list_excludes_body_by_default(self) -> None:
         """默认 load_skill 的 <references> 块不含引用正文。"""
@@ -536,10 +528,10 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "safe-skill"})
 
-            self.assertIn("<references>", output)
-            self.assertIn("long.md", output)
-            self.assertNotIn("Input validation", output)
-            self.assertNotIn("N+1 queries", output)
+            assert "<references>" in output
+            assert "long.md" in output
+            assert "Input validation" not in output
+            assert "N+1 queries" not in output
 
     # ── 显式引用加载 ──
 
@@ -560,8 +552,8 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "doc-skill", "reference": "guide.md"})
 
-            self.assertIn(REFERENCE_GUIDE.strip(), output)
-            self.assertIn('reference="guide.md"', output)
+            assert REFERENCE_GUIDE.strip() in output
+            assert 'reference="guide.md"' in output
 
     def test_reference_content_is_xml_escaped(self) -> None:
         """恶意引用内容被 XML 转义，不破坏包装标签。"""
@@ -581,12 +573,10 @@ class TestSkillReferences(unittest.TestCase):
             output = tool.handler({"name": "evil-skill", "reference": "evil.md"})
 
             # 原始的标签被转义
-            self.assertIn(
-                "&lt;/skill&gt;&lt;evil&gt;danger&lt;/evil&gt;&amp;injected;", output
-            )
+            assert "&lt;/skill&gt;&lt;evil&gt;danger&lt;/evil&gt;&amp;injected;" in output
             # 包装标签格式正确：<skill ...> 在开头，</skill> 在结尾
-            self.assertTrue(output.startswith("<skill "))
-            self.assertTrue(output.strip().endswith("</skill>"))
+            assert output.startswith("<skill ")
+            assert output.strip().endswith("</skill>")
 
     # ── 拒绝未发现/恶意引用参数 ──
 
@@ -607,8 +597,8 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "demo-skill", "reference": "nonexistent.md"})
 
-            self.assertIn("Unknown reference", output)
-            self.assertIn("nonexistent.md", output)
+            assert "Unknown reference" in output
+            assert "nonexistent.md" in output
 
     def test_reference_path_traversal_rejected(self) -> None:
         """引用参数 ../SKILL.md 不被解析为文件路径。"""
@@ -627,7 +617,7 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "demo-skill", "reference": "../SKILL.md"})
 
-            self.assertIn("Unknown reference", output)
+            assert "Unknown reference" in output
 
     def test_reference_absolute_path_rejected(self) -> None:
         """引用参数 /etc/passwd 不被解析。"""
@@ -646,7 +636,7 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "demo-skill", "reference": "/etc/passwd"})
 
-            self.assertIn("Unknown reference", output)
+            assert "Unknown reference" in output
 
     # ── 确定性排序 ──
 
@@ -674,8 +664,8 @@ class TestSkillReferences(unittest.TestCase):
             a_pos = output.index("a.md")
             m_pos = output.index("m/M.md")
             z_pos = output.index("z.yaml")
-            self.assertLess(a_pos, m_pos)
-            self.assertLess(m_pos, z_pos)
+            assert a_pos < m_pos
+            assert m_pos < z_pos
 
     # ── 嵌套子目录引用 ──
 
@@ -701,8 +691,8 @@ class TestSkillReferences(unittest.TestCase):
                 }
             )
 
-            self.assertIn("# Nested Guide", output)
-            self.assertIn('reference="subdir/guide.md"', output)
+            assert "# Nested Guide" in output
+            assert 'reference="subdir/guide.md"' in output
 
     # ── 大文件截断 ──
 
@@ -724,8 +714,8 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "large-skill"})
 
-            self.assertIn("huge.md", output)
-            self.assertIn('truncated="true"', output)
+            assert "huge.md" in output
+            assert 'truncated="true"' in output
 
     def test_large_reference_content_truncated(self) -> None:
         """显式加载大引用时内容被截断。"""
@@ -750,7 +740,7 @@ class TestSkillReferences(unittest.TestCase):
                 }
             )
 
-            self.assertLess(len(output), _REFERENCE_MAX_BYTES + 5000)
+            assert len(output) < _REFERENCE_MAX_BYTES + 5000
 
     # ── 二进制跳过 ──
 
@@ -772,9 +762,9 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "bin-skill"})
 
-            self.assertIn("image.png", output)
-            self.assertIn('skipped="true"', output)
-            self.assertIn("binary", output)
+            assert "image.png" in output
+            assert 'skipped="true"' in output
+            assert "binary" in output
 
     # ── 隐藏文件跳过 ──
 
@@ -798,10 +788,10 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "hidden-skill"})
 
-            self.assertIn("guide.md", output)
-            self.assertIn(".secret.md", output)
-            self.assertIn('skipped="true"', output)
-            self.assertIn("hidden", output)
+            assert "guide.md" in output
+            assert ".secret.md" in output
+            assert 'skipped="true"' in output
+            assert "hidden" in output
 
     def test_hidden_nested_reference_skipped(self) -> None:
         """嵌套目录中的隐藏文件也被跳过。"""
@@ -823,8 +813,8 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "nest-hidden-skill"})
 
-            self.assertIn("visible.md", output)
-            self.assertNotIn("hidden_dir", output)
+            assert "visible.md" in output
+            assert "hidden_dir" not in output
 
     # ── 符号链接跳过 ──
 
@@ -850,10 +840,10 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "sym-skill"})
 
-            self.assertIn("real.md", output)
-            self.assertIn("link.md", output)
-            self.assertIn('skipped="true"', output)
-            self.assertIn("symlink", output)
+            assert "real.md" in output
+            assert "link.md" in output
+            assert 'skipped="true"' in output
+            assert "symlink" in output
 
     # ── 无 references/ 不破坏 ──
 
@@ -873,8 +863,8 @@ class TestSkillReferences(unittest.TestCase):
             tool = build_load_skill_tool(registry)
             output = tool.handler({"name": "plain-skill"})
 
-            self.assertIn("Plain body", output)
-            self.assertNotIn("<references>", output)
+            assert "Plain body" in output
+            assert "<references>" not in output
 
     # ── SkillIndexCollector 不变 ──
 
@@ -895,11 +885,11 @@ class TestSkillReferences(unittest.TestCase):
             collector = SkillIndexCollector(registry)
             blocks = collector.collect(object())
 
-            self.assertEqual(len(blocks), 1)
+            assert len(blocks) == 1
             content = blocks[0].content
-            self.assertIn("ci-skill", content)
-            self.assertNotIn("Input validation", content)
-            self.assertNotIn("guide.md", content)
+            assert "ci-skill" in content
+            assert "Input validation" not in content
+            assert "guide.md" not in content
 
     # ── 引用名冲突处理 ──
 
@@ -928,10 +918,9 @@ class TestSkillReferences(unittest.TestCase):
 
             if os.name == "posix":
                 # Case-sensitive: both are different names, both should appear
-                self.assertIn("README.md", output)
-                self.assertIn("readme.md", output)
+                assert "README.md" in output
+                assert "readme.md" in output
             # Neither case should cause a crash
 
-
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

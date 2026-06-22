@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import unittest
 from typing import Any
 
 from xcode.harness.observability import HookManager, HookRecord
@@ -10,17 +9,15 @@ from xcode.harness.skills import ToolSpec
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 
-
 from xcode.tests.fixtures import FakeProvider
 from xcode.ai.events import (
-    ProviderEvent,
+ProviderEvent,
     TextDelta,
     FinalMessage,
     ToolCallEvent,
     ToolCall,
 )
-
-
+import pytest
 EMPTY_SCHEMA = {
     "type": "object",
     "properties": {},
@@ -33,18 +30,17 @@ INPUT_SCHEMA = {
     "additionalProperties": False,
 }
 
-
-class XcodeHookTests(unittest.TestCase):
+class XcodeHookTests:
     def test_typed_subscribers_receive_harness_events(self) -> None:
         seen: list[tuple[str, str]] = []
         hooks = HookManager()
 
         def record_pre(event) -> None:
-            self.assertIsInstance(event, PreToolEvent)
+            assert isinstance(event, PreToolEvent)
             seen.append((event.type, event.tool))
 
         def record_post(event) -> None:
-            self.assertIsInstance(event, PostToolEvent)
+            assert isinstance(event, PostToolEvent)
             seen.append((event.type, event.output))
 
         hooks.subscribe("pre_tool", record_pre)
@@ -53,7 +49,7 @@ class XcodeHookTests(unittest.TestCase):
         hooks.emit(HookRecord("pre_tool", tool="echo", input="hi"))
         hooks.emit(HookRecord("post_tool", tool="echo", output="done"))
 
-        self.assertEqual(seen, [("pre_tool", "echo"), ("post_tool", "done")])
+        assert seen == [("pre_tool", "echo"), ("post_tool", "done")]
 
     def test_hooks_fire_around_tool_execution(self) -> None:
         seen = []
@@ -90,7 +86,7 @@ class XcodeHookTests(unittest.TestCase):
 
         agent.run("go")
 
-        self.assertEqual(seen, [("pre_tool", "echo"), ("post_tool", "hi")])
+        assert seen == [("pre_tool", "echo"), ("post_tool", "hi")]
 
     def test_error_hook_fires_and_error_is_observed(self) -> None:
         seen = []
@@ -116,15 +112,15 @@ class XcodeHookTests(unittest.TestCase):
 
         result = agent.run("go")
 
-        self.assertEqual(seen, ["Tool error: bad"])
-        self.assertIn("Tool error: bad", result.messages[2]["content"][0]["content"])
+        assert seen == ["Tool error: bad"]
+        assert "Tool error: bad" in result.messages[2]["content"][0]["content"]
 
     def test_before_provider_request_includes_prompt_audit_metadata(self) -> None:
         seen: list[BeforeProviderRequestEvent] = []
         hooks = HookManager()
 
         def record(event: Any) -> None:
-            self.assertIsInstance(event, BeforeProviderRequestEvent)
+            assert isinstance(event, BeforeProviderRequestEvent)
             seen.append(event)
 
         hooks.subscribe("before_provider_request", record)
@@ -152,17 +148,16 @@ class XcodeHookTests(unittest.TestCase):
 
         agent.run("go")
 
-        self.assertEqual(len(seen), 1)
+        assert len(seen) == 1
         event = seen[0]
-        self.assertEqual(event.messages[0]["role"], "system")
-        self.assertIn("prompt_version", event.metadata)
-        self.assertTrue(str(event.metadata["prompt_version"]).startswith("prompt:"))
-        self.assertIn("prompt_sha256", event.metadata)
+        assert event.messages[0]["role"] == "system"
+        assert "prompt_version" in event.metadata
+        assert str(event.metadata["prompt_version"]).startswith("prompt:")
+        assert "prompt_sha256" in event.metadata
         system_prompt_bytes = event.metadata["system_prompt_bytes"]
         assert isinstance(system_prompt_bytes, int)
-        self.assertGreater(system_prompt_bytes, 0)
-        self.assertEqual(event.tools[0]["name"], "echo")
-
+        assert system_prompt_bytes > 0
+        assert event.tools[0]["name"] == "echo"
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

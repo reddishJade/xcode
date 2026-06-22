@@ -3,12 +3,9 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tempfile
-import unittest
-
 from xcode.harness.task_store import CLAIMED, PENDING, TaskStore
-
-
-class XcodeTaskStoreTests(unittest.TestCase):
+import pytest
+class XcodeTaskStoreTests:
     def test_create_writes_one_json_file_per_task_and_highwatermark(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = TaskStore(Path(temp_dir))
@@ -17,14 +14,12 @@ class XcodeTaskStoreTests(unittest.TestCase):
             second = store.create("second")
 
             tasks_dir = Path(temp_dir) / ".local" / "tasks.json.d"
-            self.assertEqual(first.id, 1)
-            self.assertEqual(second.id, 2)
-            self.assertEqual(first.status, PENDING)
-            self.assertEqual(
-                (tasks_dir / ".highwatermark").read_text(encoding="utf-8").strip(), "2"
-            )
-            self.assertTrue((tasks_dir / "1.json").exists())
-            self.assertTrue((tasks_dir / "2.json").exists())
+            assert first.id == 1
+            assert second.id == 2
+            assert first.status == PENDING
+            assert (tasks_dir / ".highwatermark").read_text(encoding="utf-8").strip() == "2"
+            assert (tasks_dir / "1.json").exists()
+            assert (tasks_dir / "2.json").exists()
 
     def test_read_and_list_return_persisted_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -34,9 +29,9 @@ class XcodeTaskStoreTests(unittest.TestCase):
             reloaded = TaskStore(Path(temp_dir)).get(created.id)
             listed = TaskStore(Path(temp_dir)).list()
 
-            self.assertEqual(reloaded.title, "inspect")
-            self.assertEqual(reloaded.payload, {"path": "core/app.py"})
-            self.assertEqual([task.id for task in listed], [created.id])
+            assert reloaded.title == "inspect"
+            assert reloaded.payload == {"path": "core/app.py"}
+            assert [task.id for task in listed] == [created.id]
 
     def test_update_rewrites_task_and_increments_version(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -48,10 +43,10 @@ class XcodeTaskStoreTests(unittest.TestCase):
             )
             reloaded = store.get(created.id)
 
-            self.assertEqual(updated.version, 2)
-            self.assertEqual(reloaded.title, "new")
-            self.assertEqual(reloaded.status, "done")
-            self.assertEqual(reloaded.payload, {"b": 2})
+            assert updated.version == 2
+            assert reloaded.title == "new"
+            assert reloaded.status == "done"
+            assert reloaded.payload == {"b": 2}
 
     def test_claim_moves_pending_task_to_claimed_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -61,11 +56,11 @@ class XcodeTaskStoreTests(unittest.TestCase):
             claimed = store.claim(created.id, "worker-a")
             second = store.claim(created.id, "worker-b")
 
-            self.assertIsNotNone(claimed)
             assert claimed is not None
-            self.assertEqual(claimed.status, CLAIMED)
-            self.assertEqual(claimed.claimed_by, "worker-a")
-            self.assertIsNone(second)
+            assert claimed is not None
+            assert claimed.status == CLAIMED
+            assert claimed.claimed_by == "worker-a"
+            assert second is None
 
     def test_concurrent_claim_allows_only_one_winner(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -79,14 +74,11 @@ class XcodeTaskStoreTests(unittest.TestCase):
                 results = list(executor.map(claim, ("worker-a", "worker-b")))
 
             winners = [result for result in results if result is not None]
-            self.assertEqual(len(winners), 1)
-            self.assertIn(
-                TaskStore(root).get(task_id).claimed_by, {"worker-a", "worker-b"}
-            )
+            assert len(winners) == 1
+            assert TaskStore(root).get(task_id).claimed_by in {"worker-a", "worker-b"}
 
     def test_task_tool_handlers(self) -> None:
         from xcode.harness.task_store import build_task_tools
-
         with tempfile.TemporaryDirectory() as temp_dir:
             store = TaskStore(Path(temp_dir))
             tools = build_task_tools(store)
@@ -100,23 +92,22 @@ class XcodeTaskStoreTests(unittest.TestCase):
             res_create = create_tool.handler(
                 {"title": "Implement auth", "blocked_by": [10]}
             )
-            self.assertIn("Created task #1: 'Implement auth'", res_create)
+            assert "Created task #1: 'Implement auth'" in res_create
 
             # 2. Test get_task handler
             res_get = get_tool.handler({"id": 1})
-            self.assertIn("Implement auth", res_get)
+            assert "Implement auth" in res_get
 
             # 3. Test list_tasks handler
             res_list = list_tool.handler({"view": "kanban"})
-            self.assertIn("=== TASK KANBAN VIEW ===", res_list)
-            self.assertIn("Implement auth", res_list)
+            assert "=== TASK KANBAN VIEW ===" in res_list
+            assert "Implement auth" in res_list
 
             # 4. Test update_task handler
             res_update = update_tool.handler({"id": 1, "status": "completed"})
-            self.assertIn("Updated task #1: status=completed", res_update)
+            assert "Updated task #1: status=completed" in res_update
 
-            self.assertEqual(store.get(1).status, "completed")
-
+            assert store.get(1).status == "completed"
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

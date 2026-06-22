@@ -45,7 +45,7 @@ from xcode.harness.observability import (
     PermissionEngineConfig,
     PermissionPolicy,
 )
-from xcode.harness.skills import ToolSpec, stringify_tool_input
+from xcode.harness.skills import ToolSpec
 from xcode.harness.session import FORK_TYPES, SessionStore
 from xcode.harness.snapshot import SnapshotStore, TurnSnapshotRecord
 
@@ -659,9 +659,8 @@ def _revert_turn(
             )
             perm_result = engine.decide(
                 tool_name=tool_name,
-                action_input=stringify_tool_input(tool_input),
-                tool_spec=tool_spec,
                 tool_input=tool_input,
+                tool_spec=tool_spec,
                 approval_callback=approval_callback,
             )
             if perm_result.blocked:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 from xcode.harness.agent_runtime.compaction import (
     LayeredCompactor,
@@ -9,9 +8,8 @@ from xcode.harness.agent_runtime.compaction import (
 )
 from xcode.harness.agent_runtime.prompting import PromptContext, SystemPromptBuilder
 from xcode.harness.task_store import TaskStore
-
-
-class XcodeContextRestorationTests(unittest.TestCase):
+import pytest
+class XcodeContextRestorationTests:
     def test_context_collapse_clean_with_summary_tags(self) -> None:
         raw_text = (
             "[Compressed]\n"
@@ -23,9 +21,7 @@ class XcodeContextRestorationTests(unittest.TestCase):
             "</summary>"
         )
         cleaned = context_collapse_clean(raw_text)
-        self.assertEqual(
-            cleaned, "[Compressed]\nDetailed summary of user's task and progress."
-        )
+        assert cleaned == "[Compressed]\nDetailed summary of user's task and progress."
 
     def test_context_collapse_clean_strips_thinking_blocks(self) -> None:
         raw_text = (
@@ -34,7 +30,7 @@ class XcodeContextRestorationTests(unittest.TestCase):
             "This is the actual summary text."
         )
         cleaned = context_collapse_clean(raw_text)
-        self.assertEqual(cleaned, "This is the actual summary text.")
+        assert cleaned == "This is the actual summary text."
 
     def test_layered_compactor_applies_context_collapse_clean(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -55,7 +51,6 @@ class XcodeContextRestorationTests(unittest.TestCase):
 
             # Monkeypatch summarize_messages to return a double-tagged output
             from xcode.harness.agent_runtime import compaction
-
             original_summarize = compaction.summarize_messages
             try:
                 compaction.summarize_messages = lambda msgs, **kwargs: [
@@ -71,12 +66,8 @@ class XcodeContextRestorationTests(unittest.TestCase):
                 compaction.summarize_messages = original_summarize
 
             # Verify that both the history message content and the compact callback received the cleaned content
-            self.assertEqual(
-                compacted[1]["content"], "[Compressed]\nClean dynamic summary"
-            )
-            self.assertEqual(
-                captured_summaries[0], "[Compressed]\nClean dynamic summary"
-            )
+            assert compacted[1]["content"] == "[Compressed]\nClean dynamic summary"
+            assert captured_summaries[0] == "[Compressed]\nClean dynamic summary"
 
     def test_active_metadata_restoration_injections(self) -> None:
         """Task state no longer enters through system prompt (removed dual injection).
@@ -112,9 +103,8 @@ class XcodeContextRestorationTests(unittest.TestCase):
 
             # Task state must NOT appear in system prompt — it enters through
             # TaskStateCollector (USER_CONTEXT) via the context pipeline only.
-            self.assertNotIn("<active-tasks-graph>", prompt)
-            self.assertNotIn("<post-compact-metadata>", prompt)
-
+            assert "<active-tasks-graph>" not in prompt
+            assert "<post-compact-metadata>" not in prompt
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

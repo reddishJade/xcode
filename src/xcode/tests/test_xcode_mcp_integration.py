@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import unittest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 import tempfile
@@ -13,14 +12,13 @@ from xcode.harness.mcp.tools import (
     compute_config_hash,
 )
 from xcode.harness.skills import ToolSpec
-
-
-class XcodeMcpIntegrationTests(unittest.TestCase):
-    def setUp(self) -> None:
+import pytest
+class XcodeMcpIntegrationTests:
+    def setup_method(self, method) -> None:
         self.temp_dir = tempfile.mkdtemp()
         self.project_root = Path(self.temp_dir)
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method) -> None:
         shutil.rmtree(self.temp_dir)
 
     def test_compute_config_hash(self) -> None:
@@ -39,8 +37,8 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
             "args": ["-m", "mcp_server", "--extra"],
             "env": {"DEBUG": "1"},
         }
-        self.assertEqual(compute_config_hash(config1), compute_config_hash(config2))
-        self.assertNotEqual(compute_config_hash(config1), compute_config_hash(config3))
+        assert compute_config_hash(config1) == compute_config_hash(config2)
+        assert compute_config_hash(config1) != compute_config_hash(config3)
 
     @patch("xcode.harness.mcp.client.McpClient")
     def test_build_mcp_tools_cache_hit_and_miss(
@@ -81,10 +79,10 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
 
         # 2. Trigger cache miss: should query client
         tools = build_mcp_tools(self.project_root)
-        self.assertEqual(len(tools), 1)
-        self.assertEqual(tools[0].name, "mcp__fetcher__read_data")
-        self.assertEqual(tools[0].description, "Read remote data [mcp: fetcher]")
-        self.assertEqual(tools[0].group, "mcp")
+        assert len(tools) == 1
+        assert tools[0].name == "mcp__fetcher__read_data"
+        assert tools[0].description == "Read remote data [mcp: fetcher]"
+        assert tools[0].group == "mcp"
 
         # Verify client was instantiated, started, queried, and stopped
         mock_client_class.assert_called_once_with(
@@ -96,17 +94,11 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
 
         # Cache file should be generated
         cache_path = local_dir / "mcp_cache.json"
-        self.assertTrue(cache_path.exists())
+        assert cache_path.exists()
         cache_content = json.loads(cache_path.read_text(encoding="utf-8"))
-        self.assertIn("fetcher", cache_content["servers"])
-        self.assertEqual(
-            cache_content["servers"]["fetcher"]["protocol_version"],
-            "2025-11-25",
-        )
-        self.assertEqual(
-            cache_content["servers"]["fetcher"]["server_info"],
-            {"name": "fetcher", "version": "1.0.0"},
-        )
+        assert "fetcher" in cache_content["servers"]
+        assert cache_content["servers"]["fetcher"]["protocol_version"] == "2025-11-25"
+        assert cache_content["servers"]["fetcher"]["server_info"] == {"name": "fetcher", "version": "1.0.0"}
 
         # Reset mocks
         mock_client_class.reset_mock()
@@ -114,8 +106,8 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
 
         # 3. Trigger cache hit: should NOT query client, just read cache
         tools2 = build_mcp_tools(self.project_root)
-        self.assertEqual(len(tools2), 1)
-        self.assertEqual(tools2[0].name, "mcp__fetcher__read_data")
+        assert len(tools2) == 1
+        assert tools2[0].name == "mcp__fetcher__read_data"
         mock_client_class.assert_not_called()
 
         # 4. Trigger config change -> cache miss again
@@ -171,11 +163,11 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
 
         # build_mcp_tools will trigger handshake to get schema first, then close client
         tools = build_mcp_tools(self.project_root)
-        self.assertEqual(len(tools), 1)
-        self.assertEqual(tools[0].name, "mcp__db_editor__edit_record")
+        assert len(tools) == 1
+        assert tools[0].name == "mcp__db_editor__edit_record"
         tool = tools[0]
-        self.assertEqual(tool.name, "mcp__db_editor__edit_record")
-        self.assertFalse(tool.read_only)
+        assert tool.name == "mcp__db_editor__edit_record"
+        assert not (tool.read_only)
 
         # Reset mocks to verify lazy loading on execution
         mock_client_class.reset_mock()
@@ -187,7 +179,7 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
 
         # Invoke handler
         response = tool.handler({"id": 42, "value": "new_val"})
-        self.assertEqual(response, "Success")
+        assert response == "Success"
 
         # Now connection should be created and started, and call_tool invoked
         mock_client_class.assert_called_once_with(
@@ -254,23 +246,14 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
 
         callback(mock_client)
 
-        self.assertEqual(
-            [tool.name for tool in published[-1]],
-            ["mcp__dynamic__new_tool"],
-        )
-        self.assertEqual(
-            published[-1][0].schema,
-            {
+        assert [tool.name for tool in published[-1]] == ["mcp__dynamic__new_tool"]
+        assert published[-1][0].schema == {
                 "type": "object",
                 "properties": {"value": {"type": "string"}},
                 "required": ["value"],
-            },
-        )
+            }
         cache = json.loads((local_dir / "mcp_cache.json").read_text(encoding="utf-8"))
-        self.assertEqual(
-            cache["servers"]["dynamic"]["tools"][0]["name"],
-            "new_tool",
-        )
+        assert cache["servers"]["dynamic"]["tools"][0]["name"] == "new_tool"
         runtime_registry.close()
         mock_client.stop.assert_called()
 
@@ -319,5 +302,5 @@ class XcodeMcpIntegrationTests(unittest.TestCase):
 
         tools = build_mcp_tools(self.project_root)
 
-        self.assertEqual([tool.name for tool in tools], ["mcp__refresh__fresh_tool"])
+        assert [tool.name for tool in tools] == ["mcp__refresh__fresh_tool"]
         mock_client.list_tools.assert_called_once()

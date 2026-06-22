@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from xcode.coding_agent.tools.worktree import WorktreeTaskRunner
-
-
-class TestWorktreeTaskRunner(unittest.TestCase):
-    def setUp(self) -> None:
+import pytest
+class TestWorktreeTaskRunner:
+    def setup_method(self, method) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.repo_root = Path(self.tmp.name) / "repo"
         self.repo_root.mkdir(parents=True, exist_ok=True)
@@ -28,7 +26,7 @@ class TestWorktreeTaskRunner(unittest.TestCase):
                 return response
         return ""
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method) -> None:
         self.tmp.cleanup()
 
     def test_create_worktree_task(self) -> None:
@@ -40,15 +38,15 @@ class TestWorktreeTaskRunner(unittest.TestCase):
 
         task = runner.create("feature-login")
 
-        self.assertEqual(len(runner.tasks), 1)
-        self.assertEqual(task.branch[:14], "xcode/feature-")
-        self.assertTrue(task.path.is_relative_to(self.worktrees_dir))
+        assert len(runner.tasks) == 1
+        assert task.branch[:14] == "xcode/feature-"
+        assert task.path.is_relative_to(self.worktrees_dir)
 
         # Check command execution
-        self.assertEqual(len(self.commands_run), 1)
+        assert len(self.commands_run) == 1
         cmd, cwd = self.commands_run[0]
-        self.assertEqual(cmd[0:3], ["git", "worktree", "add"])
-        self.assertEqual(cwd, self.repo_root)
+        assert cmd[0:3] == ["git", "worktree", "add"]
+        assert cwd == self.repo_root
 
     def test_remove_clean_happy_path(self) -> None:
         runner = WorktreeTaskRunner(
@@ -71,14 +69,14 @@ class TestWorktreeTaskRunner(unittest.TestCase):
         self.mock_responses["git cherry main"] = ""
 
         res = runner.remove(task.id)
-        self.assertEqual(res, f"removed worktree task {task.id}")
-        self.assertEqual(len(runner.tasks), 0)
+        assert res == f"removed worktree task {task.id}"
+        assert len(runner.tasks) == 0
 
         # Check git worktree remove command was run
         remove_cmd_exists = any(
             "git worktree remove" in " ".join(cmd) for cmd, _ in self.commands_run
         )
-        self.assertTrue(remove_cmd_exists)
+        assert remove_cmd_exists
 
     def test_remove_dirty_blocker(self) -> None:
         runner = WorktreeTaskRunner(
@@ -93,14 +91,14 @@ class TestWorktreeTaskRunner(unittest.TestCase):
         self.mock_responses["git status --porcelain"] = " M file.py\n?? untracked.py\n"
 
         res = runner.remove(task.id)
-        self.assertIn("worktree is dirty (has uncommitted changes)", res)
-        self.assertEqual(len(runner.tasks), 1)
+        assert "worktree is dirty (has uncommitted changes)" in res
+        assert len(runner.tasks) == 1
 
         # Ensure git worktree remove was never run
         remove_cmd_exists = any(
             "git worktree remove" in " ".join(cmd) for cmd, _ in self.commands_run
         )
-        self.assertFalse(remove_cmd_exists)
+        assert not (remove_cmd_exists)
 
     def test_remove_unmerged_cherry_blocker(self) -> None:
         runner = WorktreeTaskRunner(
@@ -118,14 +116,14 @@ class TestWorktreeTaskRunner(unittest.TestCase):
         self.mock_responses["git cherry"] = "+ abc123commitsha\n"
 
         res = runner.remove(task.id)
-        self.assertIn("has unmerged/unpushed commits", res)
-        self.assertEqual(len(runner.tasks), 1)
+        assert "has unmerged/unpushed commits" in res
+        assert len(runner.tasks) == 1
 
         # Ensure git worktree remove was never run
         remove_cmd_exists = any(
             "git worktree remove" in " ".join(cmd) for cmd, _ in self.commands_run
         )
-        self.assertFalse(remove_cmd_exists)
+        assert not (remove_cmd_exists)
 
     def test_remove_force_bypass(self) -> None:
         runner = WorktreeTaskRunner(
@@ -137,16 +135,15 @@ class TestWorktreeTaskRunner(unittest.TestCase):
         self.commands_run.clear()
 
         res = runner.remove(task.id, force=True)
-        self.assertEqual(res, f"removed worktree task {task.id}")
-        self.assertEqual(len(runner.tasks), 0)
+        assert res == f"removed worktree task {task.id}"
+        assert len(runner.tasks) == 0
 
         # Verify only 'git worktree remove --force' command was run
-        self.assertEqual(len(self.commands_run), 1)
+        assert len(self.commands_run) == 1
         cmd, cwd = self.commands_run[0]
-        self.assertIn("remove", cmd)
-        self.assertIn("--force", cmd)
-        self.assertEqual(cwd, self.repo_root)
-
+        assert "remove" in cmd
+        assert "--force" in cmd
+        assert cwd == self.repo_root
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

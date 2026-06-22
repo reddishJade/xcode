@@ -4,7 +4,6 @@ import asyncio
 import json
 import tempfile
 import time
-import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -48,9 +47,8 @@ from xcode.ai.events import ToolCall
 from xcode.agent.messages import AgentMessage, AssistantMessage
 from xcode.harness.skills import ApprovalCallback, ToolSpec
 from xcode.harness.session_todo import TodoItem
-
-
-class XcodeReplTests(unittest.TestCase):
+import pytest
+class XcodeReplTests:
     def test_session_store_writes_jsonl_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))
@@ -58,8 +56,8 @@ class XcodeReplTests(unittest.TestCase):
             store.append("user", "hello")
 
             text = store.current_path.read_text(encoding="utf-8")
-            self.assertIn('"type": "user"', text)
-            self.assertIn('"hello"', text)
+            assert '"type": "user"' in text
+            assert '"hello"' in text
 
     def test_session_store_rewinds_last_user_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -72,9 +70,9 @@ class XcodeReplTests(unittest.TestCase):
             removed = store.rewind_turns()
             records = store.load_records()
 
-            self.assertEqual(removed, 2)
-            self.assertEqual([record.content for record in records], ["first", "one"])
-            self.assertEqual(store.user_turn_count(), 1)
+            assert removed == 2
+            assert [record.content for record in records] == ["first", "one"]
+            assert store.user_turn_count() == 1
 
     def test_session_store_resumes_latest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -85,8 +83,8 @@ class XcodeReplTests(unittest.TestCase):
 
             resumed = store.resume_latest()
 
-            self.assertEqual(resumed, first)
-            self.assertEqual(store.current_path, first)
+            assert resumed == first
+            assert store.current_path == first
 
     def test_resumed_tool_turn_keeps_final_assistant_text(self) -> None:
         """工具轮次恢复时保留最终助手文本。"""
@@ -125,9 +123,9 @@ class XcodeReplTests(unittest.TestCase):
 
         messages = records_to_agent_messages(records)
 
-        self.assertIsInstance(messages[-1], AssistantMessage)
+        assert isinstance(messages[-1], AssistantMessage)
         final_message = cast(AssistantMessage, messages[-1])
-        self.assertEqual(final_message.content[0].text, "Updated hello.py.")
+        assert final_message.content[0].text == "Updated hello.py."
 
     def test_resumed_tool_turn_deduplicates_event_assistant_text(self) -> None:
         """工具事件已包含相同文本时不重复恢复。"""
@@ -170,7 +168,7 @@ class XcodeReplTests(unittest.TestCase):
             message for message in messages if isinstance(message, AssistantMessage)
         ]
 
-        self.assertEqual(len(assistant_messages), 1)
+        assert len(assistant_messages) == 1
 
     def test_session_store_writes_title_summary_index(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -181,22 +179,19 @@ class XcodeReplTests(unittest.TestCase):
             store.append("assistant", "Implemented titled session metadata.")
             metadata = store.update_summary()
 
-            self.assertIsNotNone(metadata)
+            assert metadata is not None
             index = json.loads(
                 (Path(temp_dir) / ".local" / "session_index.json").read_text(
                     encoding="utf-8"
                 )
             )
             item = index["sessions"][0]
-            self.assertEqual(index["version"], 1)
-            self.assertEqual(index["storage"], "jsonl-v1")
-            self.assertEqual(
-                index["recovery_boundary"],
-                "current_transcript_and_session_tree",
-            )
-            self.assertEqual(item["title"], "Refactor session storage and resume flow")
-            self.assertIn("Answer preview", item["summary"])
-            self.assertFalse(Path(item["transcript_path"]).is_absolute())
+            assert index["version"] == 1
+            assert index["storage"] == "jsonl-v1"
+            assert index["recovery_boundary"] == "current_transcript_and_session_tree"
+            assert item["title"] == "Refactor session storage and resume flow"
+            assert "Answer preview" in item["summary"]
+            assert not (Path(item["transcript_path"]).is_absolute())
 
     def test_session_store_loads_legacy_index_without_protocol_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -227,8 +222,8 @@ class XcodeReplTests(unittest.TestCase):
 
             views = store.list_session_infos()
 
-            self.assertEqual(views[0].title, "Legacy")
-            self.assertEqual(store.protocol_info().storage, "jsonl-v1")
+            assert views[0].title == "Legacy"
+            assert store.protocol_info().storage == "jsonl-v1"
 
     def test_run_repl_persists_user_and_answer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -238,12 +233,12 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(StringIO()):
                 code = run_repl(app, Path(temp_dir), prompt)
 
-            self.assertEqual(code, 0)
+            assert code == 0
             session = next(Path(temp_dir).glob("session-*.jsonl"))
             text = session.read_text(encoding="utf-8")
-            self.assertIn('"type": "user"', text)
-            self.assertIn('"type": "assistant"', text)
-            self.assertIn("hello!", text)
+            assert '"type": "user"' in text
+            assert '"type": "assistant"' in text
+            assert "hello!" in text
 
     def test_run_repl_hides_session_path_and_prints_saved_title(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -255,18 +250,18 @@ class XcodeReplTests(unittest.TestCase):
                 code = run_repl(app, Path(temp_dir), prompt)
 
             text = output.getvalue()
-            self.assertEqual(code, 0)
-            self.assertTrue(text.startswith("\033[2J\033[3J\033[H"))
-            self.assertIn("XCode", text)
-            self.assertIn("model:", text)
-            self.assertIn("unknown", text)
-            self.assertIn("thinking: unknown", text)
-            self.assertIn("effort:", text)
-            self.assertIn("not set", text)
-            self.assertIn("cwd:", text)
-            self.assertIn("Conversation saved: hello", text)
-            self.assertNotIn("Session:", text)
-            self.assertNotIn("session-", text.splitlines()[0])
+            assert code == 0
+            assert text.startswith("\033[2J\033[3J\033[H")
+            assert "XCode" in text
+            assert "model:" in text
+            assert "unknown" in text
+            assert "thinking: unknown" in text
+            assert "effort:" in text
+            assert "not set" in text
+            assert "cwd:" in text
+            assert "Conversation saved: hello" in text
+            assert "Session:" not in text
+            assert "session-" not in text.splitlines()[0]
 
     def test_run_repl_streams_markdown_without_changing_transcript(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -278,13 +273,13 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(output):
                 code = run_repl(app, Path(temp_dir), prompt, renderer=renderer)
 
-            self.assertEqual(code, 0)
-            self.assertEqual(renderer.rendered, [])
-            self.assertIn("Title", output.getvalue())
-            self.assertIn("item", output.getvalue())
+            assert code == 0
+            assert renderer.rendered == []
+            assert "Title" in output.getvalue()
+            assert "item" in output.getvalue()
             session = next(Path(temp_dir).glob("session-*.jsonl"))
             text = session.read_text(encoding="utf-8")
-            self.assertIn("# Title", text)
+            assert "# Title" in text
 
     def test_run_repl_streams_text_delta_answer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -295,9 +290,9 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(output):
                 code = run_repl(app, Path(temp_dir), prompt)
 
-            self.assertEqual(code, 0)
-            self.assertIn("hello", output.getvalue())
-            self.assertNotIn("thinking...", output.getvalue())
+            assert code == 0
+            assert "hello" in output.getvalue()
+            assert "thinking..." not in output.getvalue()
 
     def test_run_repl_shows_reasoning_preview_before_answer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -308,10 +303,10 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(output):
                 code = run_repl(app, Path(temp_dir), prompt)
 
-            self.assertEqual(code, 0)
-            self.assertIn("Thought for", output.getvalue())
-            self.assertNotIn("three four five six seven eight", output.getvalue())
-            self.assertIn("done", output.getvalue())
+            assert code == 0
+            assert "Thought for" in output.getvalue()
+            assert "three four five six seven eight" not in output.getvalue()
+            assert "done" in output.getvalue()
 
     def test_run_repl_hides_tiny_reasoning_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -322,9 +317,9 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(output):
                 code = run_repl(app, Path(temp_dir), prompt)
 
-            self.assertEqual(code, 0)
-            self.assertNotIn("thought for", output.getvalue())
-            self.assertIn("done", output.getvalue())
+            assert code == 0
+            assert "thought for" not in output.getvalue()
+            assert "done" in output.getvalue()
 
     def test_run_repl_summarizes_tools_without_success_result(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -336,11 +331,11 @@ class XcodeReplTests(unittest.TestCase):
                 code = run_repl(app, Path(temp_dir), prompt)
 
             text = output.getvalue()
-            self.assertEqual(code, 0)
-            self.assertIn("Explore: Search src/xcode for mcp", text)
-            self.assertIn("done: 1 tools", text)
-            self.assertNotIn("tool result", text)
-            self.assertNotIn("← ok", text)
+            assert code == 0
+            assert "Explore: Search src/xcode for mcp" in text
+            assert "done: 1 tools" in text
+            assert "tool result" not in text
+            assert "← ok" not in text
 
     def test_run_repl_verbose_shows_individual_tool_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -352,9 +347,9 @@ class XcodeReplTests(unittest.TestCase):
                 code = run_repl(app, Path(temp_dir), prompt)
 
             text = output.getvalue()
-            self.assertEqual(code, 0)
-            self.assertIn('grep_search: pattern="mcp", path="src/xcode"', text)
-            self.assertIn("← ok", text)
+            assert code == 0
+            assert 'grep_search: pattern="mcp", path="src/xcode"' in text
+            assert "← ok" in text
 
     def test_run_repl_renders_structured_todo_update(self) -> None:
         """结构化 todo_update 事件显示当前完整清单。"""
@@ -365,17 +360,14 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(StringIO()) as output:
                 code = run_repl(cast(Any, app), Path(temp_dir), prompt)
 
-        self.assertEqual(code, 0)
+        assert code == 0
         rendered = output.getvalue()
-        self.assertIn("Todo (2 items)", rendered)
-        self.assertIn("[/] Implement feature", rendered)
-        self.assertIn("[ ] Run tests", rendered)
+        assert "Todo (2 items)" in rendered
+        assert "[/] Implement feature" in rendered
+        assert "[ ] Run tests" in rendered
 
     def test_reasoning_preview_lines_keep_latest_three_visual_lines(self) -> None:
-        self.assertEqual(
-            reasoning_preview_lines("one\ntwo\nthree\nfour", width=80),
-            ["two", "three", "four"],
-        )
+        assert reasoning_preview_lines("one\ntwo\nthree\nfour", width=80) == ["two", "three", "four"]
 
     def test_run_repl_expands_file_references_but_preserves_user_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -387,13 +379,13 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(StringIO()):
                 code = run_repl(app, root, prompt, project_root=root)
 
-            self.assertEqual(code, 0)
-            self.assertIn('<file-reference path="note.md">', app.seen[0])
-            self.assertIn("file body", app.seen[0])
+            assert code == 0
+            assert '<file-reference path="note.md">' in app.seen[0]
+            assert "file body" in app.seen[0]
             session = next(root.glob("session-*.jsonl"))
             text = session.read_text(encoding="utf-8")
-            self.assertIn("read @note.md", text)
-            self.assertIn("file_references", text)
+            assert "read @note.md" in text
+            assert "file_references" in text
 
     def test_run_repl_plan_build_and_act_toggle_execution_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -410,8 +402,8 @@ class XcodeReplTests(unittest.TestCase):
             ):
                 code = run_repl(app, Path(temp_dir), prompt)
 
-            self.assertEqual(code, 0)
-            self.assertEqual(app.modes, ["plan", "build", "act"])
+            assert code == 0
+            assert app.modes == ["plan", "build", "act"]
 
     def test_run_repl_tool_command_runs_registered_tool(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -424,8 +416,8 @@ class XcodeReplTests(unittest.TestCase):
                     cast(ReplApp, app), Path(temp_dir), prompt, renderer=renderer
                 )
 
-            self.assertEqual(code, 0)
-            self.assertEqual(renderer.rendered, ["hello"])
+            assert code == 0
+            assert renderer.rendered == ["hello"]
 
     def test_run_repl_shell_shortcut_runs_bash_tool(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -439,15 +431,15 @@ class XcodeReplTests(unittest.TestCase):
                     cast(ReplApp, app), Path(temp_dir), prompt, renderer=renderer
                 )
 
-            self.assertEqual(code, 0)
-            self.assertEqual(app.commands, ["echo hello"])
-            self.assertEqual(renderer.rendered, [])
+            assert code == 0
+            assert app.commands == ["echo hello"]
+            assert renderer.rendered == []
             text_output = output.getvalue()
-            self.assertIn("Name    Length\n----    ------\nfile    42\n", text_output)
+            assert "Name    Length\n----    ------\nfile    42\n" in text_output
             session = next(Path(temp_dir).glob("session-*.jsonl"))
             text = session.read_text(encoding="utf-8")
-            self.assertIn("shell_shortcut", text)
-            self.assertNotIn('"type": "user"', text)
+            assert "shell_shortcut" in text
+            assert '"type": "user"' not in text
 
     def test_run_repl_shell_shortcut_rejects_empty_command(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -461,10 +453,10 @@ class XcodeReplTests(unittest.TestCase):
                     cast(ReplApp, app), Path(temp_dir), prompt, renderer=renderer
                 )
 
-            self.assertEqual(code, 0)
-            self.assertEqual(app.commands, [])
-            self.assertEqual(renderer.rendered, [])
-            self.assertIn("usage: !COMMAND\n", output.getvalue())
+            assert code == 0
+            assert app.commands == []
+            assert renderer.rendered == []
+            assert "usage: !COMMAND\n" in output.getvalue()
 
     def test_run_repl_tool_command_preserves_high_risk_approval(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -486,9 +478,9 @@ class XcodeReplTests(unittest.TestCase):
                     cast(ReplApp, app), Path(temp_dir), prompt, renderer=renderer
                 )
 
-            self.assertEqual(code, 0)
+            assert code == 0
             # High-risk approval removed; tool runs by default
-            self.assertEqual(renderer.rendered[0], "now")
+            assert renderer.rendered[0] == "now"
 
     def test_undo_uses_registered_tool_spec_for_approval(self) -> None:
         """撤销写入时使用规范工具描述触发授权并恢复文件。"""
@@ -556,10 +548,10 @@ class XcodeReplTests(unittest.TestCase):
                     snapshot_store=snapshot_store,
                 )
 
-            self.assertFalse(handled)
-            self.assertEqual(approvals, ["write_file"])
-            self.assertEqual(target.read_text(encoding="utf-8"), "before\n")
-            self.assertTrue(snapshot_store.list_records(store.session_id)[0].undone)
+            assert not (handled)
+            assert approvals == ["write_file"]
+            assert target.read_text(encoding="utf-8") == "before\n"
+            assert snapshot_store.list_records(store.session_id)[0].undone
 
     def test_undo_denial_keeps_snapshot_record_active(self) -> None:
         """撤销被拒绝时保留活动记录，允许后续重试。"""
@@ -620,17 +612,17 @@ class XcodeReplTests(unittest.TestCase):
                     snapshot_store=snapshot_store,
                 )
 
-            self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
-            self.assertFalse(snapshot_store.list_records(store.session_id)[0].undone)
-            self.assertIn("record remains active", output.getvalue())
+            assert target.read_text(encoding="utf-8") == "after\n"
+            assert not (snapshot_store.list_records(store.session_id)[0].undone)
+            assert "record remains active" in output.getvalue()
 
     def test_tool_command_uses_static_permission_policy(self) -> None:
         app = DeniedToolApp()
 
         output = run_tool_command("/tool bash git status", app)
 
-        self.assertIn("deny for bash", output)
-        self.assertEqual(app.commands, [])
+        assert "deny for bash" in output
+        assert app.commands == []
 
     def test_run_repl_permissions_show_static_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -640,11 +632,11 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(StringIO()) as output:
                 code = run_repl(cast(Any, app), Path(temp_dir), prompt)
 
-            self.assertEqual(code, 0)
+            assert code == 0
             rendered = output.getvalue()
-            self.assertIn("static:", rendered)
-            self.assertIn("bash = deny", rendered)
-            self.assertNotIn("(none)", rendered)
+            assert "static:" in rendered
+            assert "bash = deny" in rendered
+            assert "(none)" not in rendered
 
     def test_hooks_command_shows_source_state_and_recent_error(self) -> None:
         """`/hooks` 展示配置来源、启用状态和最近脱敏错误。"""
@@ -679,12 +671,12 @@ class XcodeReplTests(unittest.TestCase):
                     FakePrompt([]),
                 )
 
-        self.assertFalse(handled)
+        assert not (handled)
         rendered = output.getvalue()
-        self.assertIn("pre_tool enabled", rendered)
-        self.assertIn("source=.xcode/settings.json", rendered)
-        self.assertIn("runs=2", rendered)
-        self.assertIn("error=api_key=[REDACTED]", rendered)
+        assert "pre_tool enabled" in rendered
+        assert "source=.xcode/settings.json" in rendered
+        assert "runs=2" in rendered
+        assert "error=api_key=[REDACTED]" in rendered
 
     def test_hooks_command_reports_empty_configuration(self) -> None:
         """未配置外部 hook 时给出明确诊断。"""
@@ -702,7 +694,7 @@ class XcodeReplTests(unittest.TestCase):
                     FakePrompt([]),
                 )
 
-        self.assertIn("No external hooks configured.", output.getvalue())
+        assert "No external hooks configured." in output.getvalue()
 
     def test_run_repl_tool_list_shows_visible_and_hidden_groups(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -732,11 +724,11 @@ class XcodeReplTests(unittest.TestCase):
                         cast(ReplApp, app), Path(temp_dir), prompt, renderer=renderer
                     )
 
-            self.assertEqual(code, 0)
-            self.assertIn("<visible tools>", renderer.rendered[0])
-            self.assertIn("read_file", renderer.rendered[0])
-            self.assertIn("<hidden tools", renderer.rendered[0])
-            self.assertIn("submit_subagent", renderer.rendered[0])
+            assert code == 0
+            assert "<visible tools>" in renderer.rendered[0]
+            assert "read_file" in renderer.rendered[0]
+            assert "<hidden tools" in renderer.rendered[0]
+            assert "submit_subagent" in renderer.rendered[0]
 
     def test_run_repl_queue_mode_enqueues_followup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -746,23 +738,17 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(StringIO()):
                 code = run_repl(app, Path(temp_dir), prompt)
 
-            self.assertEqual(code, 0)
-            self.assertEqual(app.agent.followups, ["queued followup"])
+            assert code == 0
+            assert app.agent.followups == ["queued followup"]
 
     def test_brief_input_shows_bash_command_and_file_paths(self) -> None:
-        self.assertEqual(
-            brief_input("bash", {"command": "Remove-Item tmp\\hello.c"}),
-            "bash: Remove-Item tmp\\hello.c",
-        )
+        assert brief_input("bash", {"command": "Remove-Item tmp\\hello.c"}) == "bash: Remove-Item tmp\\hello.c"
         write_summary = brief_input(
             "write_file", {"path": "tmp/hello.py", "content": "x" * 200}
         )
-        self.assertTrue(write_summary.startswith('write_file: path="tmp/hello.py"'))
-        self.assertTrue(write_summary.endswith("…"))
-        self.assertEqual(
-            brief_input("grep_search", {"pattern": "**/*mcp*", "path": "src/xcode"}),
-            'grep_search: pattern="**/*mcp*", path="src/xcode"',
-        )
+        assert write_summary.startswith('write_file: path="tmp/hello.py"')
+        assert write_summary.endswith("…")
+        assert brief_input("grep_search", {"pattern": "**/*mcp*", "path": "src/xcode"}) == 'grep_search: pattern="**/*mcp*", path="src/xcode"'
 
     def test_run_repl_interrupt_is_final_standalone_line(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -773,14 +759,12 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(output):
                 code = run_repl(app, Path(temp_dir), prompt)
 
-            self.assertEqual(code, 0)
+            assert code == 0
             text = _strip_ansi(output.getvalue())
             interrupt_index = text.rfind("[interrupted] current run cancelled")
-            self.assertNotEqual(interrupt_index, -1)
-            self.assertNotIn(
-                "bash: cd .. && git diff .gitignore", text[interrupt_index:]
-            )
-            self.assertTrue(app.agent.cancellation_token.is_cancelled())
+            assert interrupt_index != -1
+            assert "bash: cd .. && git diff .gitignore" not in text[interrupt_index:]
+            assert app.agent.cancellation_token.is_cancelled()
 
     def test_run_repl_second_ctrl_c_uses_blank_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -790,8 +774,8 @@ class XcodeReplTests(unittest.TestCase):
             with redirect_stdout(StringIO()):
                 code = run_repl(app, Path(temp_dir), prompt)
 
-            self.assertEqual(code, 0)
-            self.assertEqual(prompt.prompts[1], "")
+            assert code == 0
+            assert prompt.prompts[1] == ""
 
     def test_run_repl_resume_uses_picker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -813,9 +797,9 @@ class XcodeReplTests(unittest.TestCase):
             ):
                 code = run_repl(app, sessions_dir, prompt)
 
-            self.assertEqual(code, 0)
+            assert code == 0
             text = output.getvalue()
-            self.assertIn("Resumed conversation: first conversation", text)
+            assert "Resumed conversation: first conversation" in text
 
     def test_resume_command_loads_agent_history(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -837,13 +821,10 @@ class XcodeReplTests(unittest.TestCase):
                     FakePrompt([]),
                 )
 
-            self.assertFalse(handled)
-            self.assertEqual(
-                [message.role for message in app.agent.loaded],
-                ["user", "assistant"],
-            )
-            self.assertIn("AGENTS.md", str(app.agent.loaded[0].content))
-            self.assertIn("10000 bytes", str(app.agent.loaded[1].content))
+            assert not (handled)
+            assert [message.role for message in app.agent.loaded] == ["user", "assistant"]
+            assert "AGENTS.md" in str(app.agent.loaded[0].content)
+            assert "10000 bytes" in str(app.agent.loaded[1].content)
 
     def test_resume_command_loads_tool_history(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -899,23 +880,20 @@ class XcodeReplTests(unittest.TestCase):
                     FakePrompt([]),
                 )
 
-            self.assertEqual(
-                [message.role for message in app.agent.loaded],
-                ["user", "assistant", "tool_result"],
-            )
+            assert [message.role for message in app.agent.loaded] == ["user", "assistant", "tool_result"]
             tool_call = app.agent.loaded[1].content[0]
-            self.assertEqual(tool_call.id, "call_1")
-            self.assertEqual(tool_call.name, "bash")
-            self.assertEqual(tool_call.arguments["command"], "wc -c AGENTS.md")
-            self.assertEqual(app.agent.loaded[2].tool_call_id, "call_1")
-            self.assertIn("10000", str(app.agent.loaded[2].content))
+            assert tool_call.id == "call_1"
+            assert tool_call.name == "bash"
+            assert tool_call.arguments["command"] == "wc -c AGENTS.md"
+            assert app.agent.loaded[2].tool_call_id == "call_1"
+            assert "10000" in str(app.agent.loaded[2].content)
 
     def test_repl_completer_suggests_slash_commands(self) -> None:
         completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
         items = completer.complete("/pl")
 
-        self.assertEqual([item.text for item in items], ["/plan"])
+        assert [item.text for item in items] == ["/plan"]
 
     def test_repl_completer_fuzzy_ranks_typo_command_without_dispatching(self) -> None:
         """slash typo 仅提供候选，命令执行仍由精确 dispatch 决定。"""
@@ -923,7 +901,7 @@ class XcodeReplTests(unittest.TestCase):
 
         items = completer.complete("/pln")
 
-        self.assertEqual([item.text for item in items], ["/plan"])
+        assert [item.text for item in items] == ["/plan"]
 
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))
@@ -938,15 +916,15 @@ class XcodeReplTests(unittest.TestCase):
                     FakePrompt([]),
                 )
 
-        self.assertEqual(state.mode, "act")
-        self.assertIn("Unknown command: /pln", output.getvalue())
+        assert state.mode == "act"
+        assert "Unknown command: /pln" in output.getvalue()
 
     def test_repl_completer_suggests_new_command(self) -> None:
         completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
         items = completer.complete("/ne")
 
-        self.assertEqual(items[0].text, "/new")
+        assert items[0].text == "/new"
 
     def test_repl_completer_suggests_skill_names(self) -> None:
         """`/skill` 和 `$` 入口共享技能名称补全。"""
@@ -959,23 +937,14 @@ class XcodeReplTests(unittest.TestCase):
         command_items = completer.complete("/skill co")
         reference_items = completer.complete("$")
 
-        self.assertEqual([item.text for item in command_items], ["code-review"])
-        self.assertEqual(
-            [item.text for item in reference_items],
-            ["$code-review", "$pdf"],
-        )
+        assert [item.text for item in command_items] == ["code-review"]
+        assert [item.text for item in reference_items] == ["$code-review", "$pdf"]
 
     def test_parse_skill_invocation_preserves_follow_up_task(self) -> None:
         """`$skill-name` 只消费激活前缀，保留后续任务。"""
-        self.assertEqual(
-            parse_skill_invocation("$code-review inspect this patch"),
-            ("code-review", "inspect this patch"),
-        )
-        self.assertEqual(
-            parse_skill_invocation("$code-review"),
-            ("code-review", ""),
-        )
-        self.assertIsNone(parse_skill_invocation("price is $5"))
+        assert parse_skill_invocation("$code-review inspect this patch") == ("code-review", "inspect this patch")
+        assert parse_skill_invocation("$code-review") == ("code-review", "")
+        assert parse_skill_invocation("price is $5") is None
 
     def test_skill_command_records_activation_events(self) -> None:
         """`/skill` 调用运行时并写入可恢复的工具事件。"""
@@ -996,16 +965,10 @@ class XcodeReplTests(unittest.TestCase):
 
             records = store.load_records()
 
-        self.assertIn("Activated skill: code-review", output.getvalue())
-        self.assertEqual(
-            [record.content["type"] for record in records],
-            ["tool_use", "tool_result"],
-        )
+        assert "Activated skill: code-review" in output.getvalue()
+        assert [record.content["type"] for record in records] == ["tool_use", "tool_result"]
         restored = records_to_agent_messages(records)
-        self.assertEqual(
-            [message.role for message in restored],
-            ["assistant", "tool_result"],
-        )
+        assert [message.role for message in restored] == ["assistant", "tool_result"]
 
     def test_repl_dollar_skill_activates_before_follow_up(self) -> None:
         """`$skill task` 激活技能后仅把剩余任务发送给 agent。"""
@@ -1025,16 +988,16 @@ class XcodeReplTests(unittest.TestCase):
                     project_root=root,
                 )
 
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(app.questions, ["inspect this patch"])
-        self.assertEqual(app.agent.activated, ["code-review"])
+        assert exit_code == 0
+        assert app.questions == ["inspect this patch"]
+        assert app.agent.activated == ["code-review"]
 
     def test_repl_completer_hides_quit_alias(self) -> None:
         completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
         items = completer.complete("/q")
 
-        self.assertEqual([item.text for item in items], ["/queue"])
+        assert [item.text for item in items] == ["/queue"]
 
     def test_repl_completer_suggests_effort_levels(self) -> None:
         completer = ReplCompleter(
@@ -1045,17 +1008,14 @@ class XcodeReplTests(unittest.TestCase):
 
         items = completer.complete("/effort me")
 
-        self.assertEqual(
-            [item.text for item in items],
-            ["medium"],
-        )
+        assert [item.text for item in items] == ["medium"]
 
     def test_repl_effort_options_use_active_provider_transport(self) -> None:
         app = _ActiveProviderApp("deepseek_chat")
 
         options = current_effort_options(app)
 
-        self.assertEqual(options, ("off", "high", "max"))
+        assert options == ("off", "high", "max")
 
     def test_handle_command_keeps_quit_alias(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1070,7 +1030,7 @@ class XcodeReplTests(unittest.TestCase):
                 FakePrompt([]),
             )
 
-            self.assertTrue(handled)
+            assert handled
 
     def test_queue_command_toggles_without_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1096,9 +1056,9 @@ class XcodeReplTests(unittest.TestCase):
                     FakePrompt([]),
                 )
 
-            self.assertFalse(state.queue_mode)
-            self.assertIn("Queue mode enabled.", output.getvalue())
-            self.assertIn("Queue mode disabled.", output.getvalue())
+            assert not (state.queue_mode)
+            assert "Queue mode enabled." in output.getvalue()
+            assert "Queue mode disabled." in output.getvalue()
 
     def test_handle_command_rejects_unexpected_args(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1116,9 +1076,9 @@ class XcodeReplTests(unittest.TestCase):
                     FakePrompt([]),
                 )
 
-            self.assertFalse(handled)
-            self.assertIn("Unknown command: /clear now", output.getvalue())
-            self.assertEqual(len(store.load_records()), 1)
+            assert not (handled)
+            assert "Unknown command: /clear now" in output.getvalue()
+            assert len(store.load_records()) == 1
 
     def test_rewind_command_reports_user_turns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1139,14 +1099,9 @@ class XcodeReplTests(unittest.TestCase):
                     FakePrompt([]),
                 )
 
-            self.assertFalse(handled)
-            self.assertEqual(
-                [record.content for record in store.load_records()], ["first", "one"]
-            )
-            self.assertIn(
-                "Rewound 1 user turn (2 transcript records removed).",
-                output.getvalue(),
-            )
+            assert not (handled)
+            assert [record.content for record in store.load_records()] == ["first", "one"]
+            assert "Rewound 1 user turn (2 transcript records removed)." in output.getvalue()
 
     def test_handle_new_command_starts_new_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1165,13 +1120,13 @@ class XcodeReplTests(unittest.TestCase):
                     FakePrompt([]),
                 )
 
-            self.assertFalse(handled)
-            self.assertEqual(store.load_records(), [])
-            self.assertEqual(app.agent.loaded, [])
+            assert not (handled)
+            assert store.load_records() == []
+            assert app.agent.loaded == []
             text = output.getvalue()
-            self.assertIn("\033[2J\033[3J\033[H", text)
-            self.assertIn("XCode", text)
-            self.assertIn("Type /help for commands.", text)
+            assert "\033[2J\033[3J\033[H" in text
+            assert "XCode" in text
+            assert "Type /help for commands." in text
 
     def test_repl_completer_suggests_tool_names(self) -> None:
         completer = ReplCompleter(
@@ -1181,10 +1136,7 @@ class XcodeReplTests(unittest.TestCase):
 
         items = completer.complete("/tool r")
 
-        self.assertEqual(
-            [item.text for item in items],
-            ["read_file"],
-        )
+        assert [item.text for item in items] == ["read_file"]
 
     def test_repl_completer_fuzzy_ranks_tool_names(self) -> None:
         completer = ReplCompleter(
@@ -1197,14 +1149,14 @@ class XcodeReplTests(unittest.TestCase):
 
         items = completer.complete("/tool rdf")
 
-        self.assertEqual([item.text for item in items], ["read_file"])
+        assert [item.text for item in items] == ["read_file"]
 
     def test_repl_completer_does_not_suggest_shell_commands(self) -> None:
         completer = ReplCompleter(Path.cwd())
 
         items = completer.complete("!g")
 
-        self.assertEqual(items, [])
+        assert items == []
 
     def test_repl_completer_suggests_shell_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1218,9 +1170,9 @@ class XcodeReplTests(unittest.TestCase):
             items = completer.complete("!ls sr")
             spaced_items = completer.complete("!cat space\\ d")
 
-        self.assertEqual([item.text for item in items], ["src/"])
-        self.assertEqual(items[0].start_position, -2)
-        self.assertEqual([item.text for item in spaced_items], ["space\\ dir/"])
+        assert [item.text for item in items] == ["src/"]
+        assert items[0].start_position == -2
+        assert [item.text for item in spaced_items] == ["space\\ dir/"]
 
     def test_repl_completer_filters_shell_sensitive_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1231,7 +1183,7 @@ class XcodeReplTests(unittest.TestCase):
 
             items = completer.complete("!cat ")
 
-        self.assertEqual([item.text for item in items], ["public.txt"])
+        assert [item.text for item in items] == ["public.txt"]
 
     def test_repl_completer_suggests_file_references(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1243,7 +1195,7 @@ class XcodeReplTests(unittest.TestCase):
 
             items = completer.complete("read @do")
 
-            self.assertEqual([item.text for item in items], ["docs/note.md"])
+            assert [item.text for item in items] == ["docs/note.md"]
 
     def test_repl_completer_lists_project_files_for_empty_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1254,7 +1206,7 @@ class XcodeReplTests(unittest.TestCase):
 
             items = completer.complete("@")
 
-        self.assertEqual([item.text for item in items], ["a.txt", "b.txt"])
+        assert [item.text for item in items] == ["a.txt", "b.txt"]
 
     def test_repl_completer_searches_deep_project_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1267,10 +1219,7 @@ class XcodeReplTests(unittest.TestCase):
 
             items = completer.complete("read @docs/")
 
-            self.assertEqual(
-                [item.text for item in items],
-                ["docs/note.md", "docs/nested/deep.md"],
-            )
+            assert [item.text for item in items] == ["docs/note.md", "docs/nested/deep.md"]
 
     def test_repl_completer_filters_sensitive_file_references(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1284,8 +1233,8 @@ class XcodeReplTests(unittest.TestCase):
             items = completer.complete("read @")
             public_items = completer.complete("read @p")
 
-            self.assertEqual([item.text for item in items], ["public.txt"])
-            self.assertEqual([item.text for item in public_items], ["public.txt"])
+            assert [item.text for item in items] == ["public.txt"]
+            assert [item.text for item in public_items] == ["public.txt"]
 
     def test_repl_completer_filters_gitignored_and_hidden_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1306,7 +1255,7 @@ class XcodeReplTests(unittest.TestCase):
 
             items = completer.complete("@")
 
-        self.assertEqual([item.text for item in items], ["visible.txt"])
+        assert [item.text for item in items] == ["visible.txt"]
 
     def test_repl_completer_handles_duplicate_basenames_and_windows_separators(
         self,
@@ -1328,14 +1277,8 @@ class XcodeReplTests(unittest.TestCase):
             duplicate_items = completer.complete("@helper")
             windows_items = completer.complete(r"@src\utl")
 
-        self.assertEqual(
-            [item.text for item in duplicate_items],
-            ["src/utils/helper.py", "tests/utils/helper.py"],
-        )
-        self.assertEqual(
-            [item.text for item in windows_items],
-            ["src/utils/helper.py"],
-        )
+        assert [item.text for item in duplicate_items] == ["src/utils/helper.py", "tests/utils/helper.py"]
+        assert [item.text for item in windows_items] == ["src/utils/helper.py"]
 
     def test_repl_completer_file_index_cache_expires_quickly(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1349,17 +1292,14 @@ class XcodeReplTests(unittest.TestCase):
             time.sleep(0.3)
             refreshed = completer.complete("@")
 
-        self.assertEqual([item.text for item in cached], ["first.txt"])
-        self.assertEqual(
-            [item.text for item in refreshed],
-            ["first.txt", "second.txt"],
-        )
+        assert [item.text for item in cached] == ["first.txt"]
+        assert [item.text for item in refreshed] == ["first.txt", "second.txt"]
 
     def test_repl_completer_supports_prompt_toolkit_async_api(self) -> None:
         try:
             from prompt_toolkit.document import Document
         except ImportError:
-            self.skipTest("prompt_toolkit is not installed")
+            pytest.skip("prompt_toolkit is not installed")
 
         completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
@@ -1372,7 +1312,7 @@ class XcodeReplTests(unittest.TestCase):
                 )
             ]
 
-        self.assertEqual(asyncio.run(collect()), ["/plan"])
+        assert asyncio.run(collect()) == ["/plan"]
 
     def test_repl_completion_menu_style_uses_default_background(self) -> None:
         completion_styles = {
@@ -1381,20 +1321,17 @@ class XcodeReplTests(unittest.TestCase):
             if name.startswith("completion-menu") or name.startswith("scrollbar.")
         }
 
-        self.assertTrue(completion_styles)
-        self.assertTrue(
-            all("bg:default" in style for style in completion_styles.values())
-        )
+        assert completion_styles
+        assert all("bg:default" in style for style in completion_styles.values())
 
-
-class XcodeReplForkTests(unittest.TestCase):
+class XcodeReplForkTests:
     def test_fork_into_switches_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))
             original = store.current_path
             store.append("user", "hello")
             store.fork_into()
-            self.assertNotEqual(store.current_path, original)
+            assert store.current_path != original
 
     def test_fork_into_has_parent_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1404,9 +1341,9 @@ class XcodeReplForkTests(unittest.TestCase):
             assert parent is not None
             store.fork_into()
             fork_meta = store.current_metadata()
-            self.assertIsNotNone(fork_meta)
             assert fork_meta is not None
-            self.assertEqual(fork_meta.parent_id, parent.id)
+            assert fork_meta is not None
+            assert fork_meta.parent_id == parent.id
 
     def test_fork_into_copies_transcript(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1415,9 +1352,9 @@ class XcodeReplForkTests(unittest.TestCase):
             store.append("assistant", "first answer")
             store.fork_into()
             records = store.load_records()
-            self.assertEqual(len(records), 2)
-            self.assertEqual(records[0].content, "first message")
-            self.assertEqual(records[1].content, "first answer")
+            assert len(records) == 2
+            assert records[0].content == "first message"
+            assert records[1].content == "first answer"
 
     def test_fork_into_independent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1426,12 +1363,12 @@ class XcodeReplForkTests(unittest.TestCase):
             store.fork_into()
             store.append("user", "fork msg")
             fork_records = store.load_records()
-            self.assertIn("fork msg", [r.content for r in fork_records])
+            assert "fork msg" in [r.content for r in fork_records]
 
     def test_fork_into_validates_type(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))
-            with self.assertRaises(ValueError):
+            with pytest.raises(ValueError):
                 store.fork_into("invalid")
 
     def test_fork_into_all_fork_types(self) -> None:
@@ -1442,7 +1379,7 @@ class XcodeReplForkTests(unittest.TestCase):
                 store.fork_into(ft)
                 meta = store.current_metadata()
                 assert meta is not None
-                self.assertEqual(meta.fork_type, ft)
+                assert meta.fork_type == ft
 
     def test_fork_preserves_parent_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1454,8 +1391,8 @@ class XcodeReplForkTests(unittest.TestCase):
             store.fork_into()
             fork_meta = store.current_metadata()
             assert fork_meta is not None
-            self.assertEqual(fork_meta.title, f"Fork of {parent_meta.title}")
-            self.assertEqual(fork_meta.summary, parent_meta.summary)
+            assert fork_meta.title == f"Fork of {parent_meta.title}"
+            assert fork_meta.summary == parent_meta.summary
 
     def test_fork_sessions_shows_fork_relationship(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1470,8 +1407,8 @@ class XcodeReplForkTests(unittest.TestCase):
             # 执行 fork 后 list_session_infos 应显示 parent_id
             views = store.list_session_infos(limit=10)
             fork_view = next(v for v in views if v.id != parent_id)
-            self.assertEqual(fork_view.parent_id, parent_id)
-            self.assertEqual(fork_view.fork_type, "verify")
+            assert fork_view.parent_id == parent_id
+            assert fork_view.fork_type == "verify"
 
     def test_fork_into_default_type_is_none(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1480,7 +1417,7 @@ class XcodeReplForkTests(unittest.TestCase):
             store.fork_into()
             meta = store.current_metadata()
             assert meta is not None
-            self.assertIsNone(meta.fork_type)
+            assert meta.fork_type is None
 
     def test_switch_branch_resumes_branch_by_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1495,8 +1432,8 @@ class XcodeReplForkTests(unittest.TestCase):
 
             view = store.switch_branch(branch.id)
 
-            self.assertEqual(view.id, branch.id)
-            self.assertEqual(store.current_metadata(), branch)
+            assert view.id == branch.id
+            assert store.current_metadata() == branch
 
     def test_branch_command_switches_and_prints_history(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1523,9 +1460,9 @@ class XcodeReplForkTests(unittest.TestCase):
                     prompt,
                 )
 
-            self.assertFalse(handled)
-            self.assertIn("Resumed conversation:", output.getvalue())
-            self.assertEqual(store.current_metadata(), branch)
+            assert not (handled)
+            assert "Resumed conversation:" in output.getvalue()
+            assert store.current_metadata() == branch
 
     def test_run_repl_compact_command(self) -> None:
         class FakeCompactor:
@@ -1607,12 +1544,9 @@ class XcodeReplForkTests(unittest.TestCase):
                     prompt,
                 )
 
-            self.assertFalse(handled)
-            self.assertTrue(app.agent.compact_requested)
-            self.assertIn(
-                "Active context compaction requested for the next agent run",
-                output.getvalue(),
-            )
+            assert not (handled)
+            assert app.agent.compact_requested
+            assert "Active context compaction requested for the next agent run" in output.getvalue()
             records = store.load_records()
             tool_results = [
                 record.content
@@ -1621,15 +1555,15 @@ class XcodeReplForkTests(unittest.TestCase):
                 and isinstance(record.content, dict)
                 and record.content.get("type") == "tool_result"
             ]
-            self.assertEqual(len(tool_results), 1)
+            assert len(tool_results) == 1
             event_data = tool_results[0].get("data")
-            self.assertIsInstance(event_data, dict)
+            assert isinstance(event_data, dict)
             assert isinstance(event_data, dict)
             content = event_data.get("content")
-            self.assertIsInstance(content, str)
             assert isinstance(content, str)
-            self.assertIn("compacted", content)
-            self.assertIn("300 chars removed", content)
+            assert isinstance(content, str)
+            assert "compacted" in content
+            assert "300 chars removed" in content
 
     def test_run_repl_compact_command_skips_short_clean_session(self) -> None:
         class FakeAgent:
@@ -1693,10 +1627,9 @@ class XcodeReplForkTests(unittest.TestCase):
                     prompt,
                 )
 
-            self.assertFalse(handled)
-            self.assertFalse(app.agent.compact_requested)
-            self.assertIn("No context compaction needed", output.getvalue())
-
+            assert not (handled)
+            assert not (app.agent.compact_requested)
+            assert "No context compaction needed" in output.getvalue()
 
 class FakePrompt:
     def __init__(self, values: list[str]) -> None:
@@ -1704,7 +1637,6 @@ class FakePrompt:
 
     def prompt(self, prompt_text: PromptText) -> str:
         return next(self.values)
-
 
 class InterruptingPrompt:
     def __init__(self, values: list[str | BaseException]) -> None:
@@ -1717,7 +1649,6 @@ class InterruptingPrompt:
         if isinstance(value, BaseException):
             raise value
         return value
-
 
 class _StubAgent:
     approval_callback: ApprovalCallback | None = None
@@ -1742,7 +1673,6 @@ class _StubAgent:
             status="disabled",
             message="Skills are disabled for this runtime.",
         )
-
 
 class FakeApp:
     agent = _StubAgent()
@@ -1777,7 +1707,6 @@ class FakeApp:
             ),
         )
 
-
 class ExplicitSkillAgent(_StubAgent):
     """记录 REPL 显式技能激活调用。"""
 
@@ -1801,7 +1730,6 @@ class ExplicitSkillAgent(_StubAgent):
             tool_call_id=f"explicit-skill-{len(self.activated)}",
         )
 
-
 class ExplicitSkillApp(FakeApp):
     """支持显式技能激活的最小 REPL app。"""
 
@@ -1812,7 +1740,6 @@ class ExplicitSkillApp(FakeApp):
     def ask_stream(self, question: str, mode: str | None = None):
         self.questions.append(question)
         yield from super().ask_stream(question, mode)
-
 
 class StaticPermissionAgent:
     """提供 REPL 权限命令读取的静态策略字段。"""
@@ -1828,7 +1755,6 @@ class StaticPermissionAgent:
     def load_history(self, messages: list[AgentMessage]) -> None: ...
 
     def request_compaction(self) -> None: ...
-
 
 class StaticPermissionApp:
     """最小 REPL app，仅用于 /permissions 静态策略展示测试。"""
@@ -1865,7 +1791,6 @@ class StaticPermissionApp:
             ),
         )
 
-
 class HistoryLoadingAgent:
     """记录 REPL 恢复时同步进来的会话历史。"""
 
@@ -1881,7 +1806,6 @@ class HistoryLoadingAgent:
         self.loaded = messages
 
     def request_compaction(self) -> None: ...
-
 
 class HistoryLoadingApp:
     """暴露带 load_history 接口的测试 agent。"""
@@ -1917,7 +1841,6 @@ class HistoryLoadingApp:
             ),
         )
 
-
 class QueueModeAgent:
     def __init__(self) -> None:
         self.followups: list[str] = []
@@ -1934,7 +1857,6 @@ class QueueModeAgent:
     def set_session_grant_store_provider(self, provider: object) -> None: ...
 
     def set_permanent_grant_store(self, store: object) -> None: ...
-
 
 class QueueModeApp:
     def __init__(self) -> None:
@@ -1970,7 +1892,6 @@ class QueueModeApp:
             ),
         )
 
-
 class FakeMarkdownApp:
     agent = _StubAgent()
     registry: tuple[ToolSpec, ...] = ()
@@ -2003,7 +1924,6 @@ class FakeMarkdownApp:
                 tool_calls=[],
             ),
         )
-
 
 class MultiDeltaApp:
     agent = _StubAgent()
@@ -2038,7 +1958,6 @@ class MultiDeltaApp:
                 tool_calls=[],
             ),
         )
-
 
 class ReasoningApp:
     agent = _StubAgent()
@@ -2076,7 +1995,6 @@ class ReasoningApp:
             ),
         )
 
-
 class TinyReasoningApp:
     agent = _StubAgent()
     registry: tuple[ToolSpec, ...] = ()
@@ -2109,7 +2027,6 @@ class TinyReasoningApp:
                 tool_calls=[],
             ),
         )
-
 
 class ToolEventApp:
     agent = _StubAgent()
@@ -2156,7 +2073,6 @@ class ToolEventApp:
             ),
         )
 
-
 class TodoEventApp:
     agent = _StubAgent()
     registry: tuple[ToolSpec, ...] = ()
@@ -2196,7 +2112,6 @@ class TodoEventApp:
             ),
         )
 
-
 class CapturingApp:
     registry: tuple[ToolSpec, ...] = ()
     agent = _StubAgent()
@@ -2234,7 +2149,6 @@ class CapturingApp:
             ),
         )
 
-
 class ToolApp:
     def __init__(
         self,
@@ -2271,7 +2185,6 @@ class ToolApp:
             ),
         )
 
-
 class DeniedToolAgent:
     """提供 /tool 直连执行读取的静态权限策略。"""
 
@@ -2279,7 +2192,6 @@ class DeniedToolAgent:
         self.permission_policy = PermissionPolicy((StaticPermission("bash", "deny"),))
         self.restricted_dirs: tuple[str, ...] = ()
         self.approval_callback = None
-
 
 class DeniedToolApp(ToolApp):
     def __init__(self) -> None:
@@ -2307,7 +2219,6 @@ class DeniedToolApp(ToolApp):
             )
         )
 
-
 class ShellShortcutApp(ToolApp):
     def __init__(self, output: str | None = None) -> None:
         self.commands: list[str] = []
@@ -2333,7 +2244,6 @@ class ShellShortcutApp(ToolApp):
                 ),
             )
         )
-
 
 class InterruptingToolApp:
     class Agent:
@@ -2378,28 +2288,23 @@ class InterruptingToolApp:
         )
         raise KeyboardInterrupt()
 
-
 class _ActiveProvider:
     def __init__(self, transport: str) -> None:
         self.transport = transport
-
 
 class _ActiveProviderWrapper:
     def __init__(self, active_provider: _ActiveProvider) -> None:
         self.active_provider = active_provider
 
-
 class _ActiveProviderAgent:
     def __init__(self, provider: _ActiveProviderWrapper) -> None:
         self.provider = provider
-
 
 class _ActiveProviderApp:
     def __init__(self, transport: str) -> None:
         self.agent = _ActiveProviderAgent(
             _ActiveProviderWrapper(_ActiveProvider(transport))
         )
-
 
 class FakeRenderer:
     def __init__(self) -> None:
@@ -2408,14 +2313,12 @@ class FakeRenderer:
     def render(self, text: str) -> None:
         self.rendered.append(text)
 
-
 def _strip_ansi(text: str) -> str:
     import re
 
     return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
 
-
-class XcodeReplContinueTests(unittest.TestCase):
+class XcodeReplContinueTests:
     """Step 8: CLI flags and /continue — session lifecycle helpers and commands."""
 
     # ── _validate_session_id ──────────────────────────────────────────────
@@ -2423,49 +2326,46 @@ class XcodeReplContinueTests(unittest.TestCase):
     def test_validate_session_id_rejects_empty(self) -> None:
         from xcode.harness.session import SessionStore
 
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             SessionStore._validate_session_id("")
 
-    def test_validate_session_id_rejects_path_separators(self) -> None:
+    @pytest.mark.parametrize("bad", ["a/b", "a\\b", "../etc", "C:foo", ".", "~user", "a b", "a\tb"])
+    def test_validate_session_id_rejects_path_separators(self, bad: str) -> None:
         from xcode.harness.session import SessionStore
 
-        for bad in ["a/b", "a\\b", "../etc", "C:foo", ".", "~user", "a b", "a\tb"]:
-            with self.subTest(bad=bad):
-                with self.assertRaises(ValueError):
-                    SessionStore._validate_session_id(bad)
+        with pytest.raises(ValueError):
+            SessionStore._validate_session_id(bad)
 
-    def test_validate_session_id_rejects_asterisk(self) -> None:
+    @pytest.mark.parametrize("bad", ["a*b", "abc*", "*abc"])
+    def test_validate_session_id_rejects_asterisk(self, bad: str) -> None:
         from xcode.harness.session import SessionStore
 
-        for bad in ["a*b", "abc*", "*abc"]:
-            with self.subTest(bad=bad):
-                with self.assertRaises(ValueError):
-                    SessionStore._validate_session_id(bad)
+        with pytest.raises(ValueError):
+            SessionStore._validate_session_id(bad)
 
-    def test_validate_session_id_accepts_valid(self) -> None:
+    @pytest.mark.parametrize("good", ["abc123", "ABC-123", "20260616-120000", "a_b", "z"])
+    def test_validate_session_id_accepts_valid(self, good: str) -> None:
         from xcode.harness.session import SessionStore
 
-        for good in ["abc123", "ABC-123", "20260616-120000", "a_b", "z"]:
-            with self.subTest(good=good):
-                self.assertEqual(SessionStore._validate_session_id(good), good)
+        assert SessionStore._validate_session_id(good) == good
 
     def test_find_by_id_rejects_asterisk(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             store = SessionStore(Path(td))
-            self.assertIsNone(store.find_by_id("session-with*"))
+            assert store.find_by_id("session-with*") is None
 
     # ── is_meaningful_session ─────────────────────────────────────────────
 
     def test_is_meaningful_session_false_for_nonexistent(self) -> None:
         from xcode.harness.session import SessionStore
 
-        self.assertFalse(SessionStore.is_meaningful_session(Path("/nonexistent")))
+        assert not (SessionStore.is_meaningful_session(Path("/nonexistent")))
 
     def test_is_meaningful_session_false_for_empty(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "empty.jsonl"
             p.write_text("")
-            self.assertFalse(SessionStore.is_meaningful_session(p))
+            assert not (SessionStore.is_meaningful_session(p))
 
     def test_is_meaningful_session_false_for_metadata_only(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2481,7 +2381,7 @@ class XcodeReplContinueTests(unittest.TestCase):
                 )
                 + "\n"
             )
-            self.assertFalse(SessionStore.is_meaningful_session(p))
+            assert not (SessionStore.is_meaningful_session(p))
 
     def test_is_meaningful_session_true_for_user_message(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2496,7 +2396,7 @@ class XcodeReplContinueTests(unittest.TestCase):
                 )
                 + "\n"
             )
-            self.assertTrue(SessionStore.is_meaningful_session(p))
+            assert SessionStore.is_meaningful_session(p)
 
     def test_is_meaningful_session_true_for_assistant(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2511,7 +2411,7 @@ class XcodeReplContinueTests(unittest.TestCase):
                 )
                 + "\n"
             )
-            self.assertTrue(SessionStore.is_meaningful_session(p))
+            assert SessionStore.is_meaningful_session(p)
 
     def test_is_meaningful_session_true_for_event(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2526,7 +2426,7 @@ class XcodeReplContinueTests(unittest.TestCase):
                 )
                 + "\n"
             )
-            self.assertTrue(SessionStore.is_meaningful_session(p))
+            assert SessionStore.is_meaningful_session(p)
 
     # ── find_latest_for_project ───────────────────────────────────────────
 
@@ -2544,18 +2444,18 @@ class XcodeReplContinueTests(unittest.TestCase):
             store_b = SessionStore(sessions_dir, project_root=sub)
             store_b.append("user", "project B message")
             # Both session files exist in the same sessions_dir
-            self.assertEqual(len(list(sessions_dir.glob("session-*.jsonl"))), 2)
+            assert len(list(sessions_dir.glob("session-*.jsonl"))) == 2
             # find for root project only
             result_a = store_a.find_latest_for_project(root)
-            self.assertIsNotNone(result_a)
             assert result_a is not None
-            self.assertEqual(result_a.id, store_a.session_id)
+            assert result_a is not None
+            assert result_a.id == store_a.session_id
             # find for sub-proj using a fresh store (no cached metadata)
             fresh = SessionStore(sessions_dir, project_root=root)
             result_b = fresh.find_latest_for_project(sub)
-            self.assertIsNotNone(result_b)
             assert result_b is not None
-            self.assertEqual(result_b.id, store_b.session_id)
+            assert result_b is not None
+            assert result_b.id == store_b.session_id
 
     def test_find_latest_for_project_scans_beyond_100(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2571,9 +2471,9 @@ class XcodeReplContinueTests(unittest.TestCase):
             st_curr.append("user", "my session")
             # should find my session even though 150 others precede it
             result = st_curr.find_latest_for_project(Path(td))
-            self.assertIsNotNone(result)
             assert result is not None
-            self.assertEqual(result.id, st_curr.session_id)
+            assert result is not None
+            assert result.id == st_curr.session_id
 
     def test_find_latest_for_project_returns_current_when_latest_and_meaningful(
         self,
@@ -2583,9 +2483,9 @@ class XcodeReplContinueTests(unittest.TestCase):
             store.append("user", "hello")
             # current session is the only meaningful session
             result = store.find_latest_for_project(Path(td))
-            self.assertIsNotNone(result)
             assert result is not None
-            self.assertEqual(result.id, store.session_id)
+            assert result is not None
+            assert result.id == store.session_id
 
     def test_find_latest_for_project_skips_empty_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2596,41 +2496,40 @@ class XcodeReplContinueTests(unittest.TestCase):
             store.clear()
             # now current_path is a new placeholder; the real session exists
             result = store.find_latest_for_project(Path(td))
-            self.assertIsNotNone(result)
             assert result is not None
-            self.assertNotEqual(result.id, store.session_id)
-            self.assertTrue(SessionStore.is_meaningful_session(result.path))
+            assert result is not None
+            assert result.id != store.session_id
+            assert SessionStore.is_meaningful_session(result.path)
 
     def test_find_latest_for_project_returns_none_when_no_meaningful(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             store = SessionStore(Path(td))
             # only empty placeholder, no meaningful session
             result = store.find_latest_for_project(Path(td))
-            self.assertIsNone(result)
+            assert result is None
 
     # ── find_by_id ────────────────────────────────────────────────────────
 
     def test_find_by_id_returns_none_for_missing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             store = SessionStore(Path(td))
-            self.assertIsNone(store.find_by_id("nonexistent"))
+            assert store.find_by_id("nonexistent") is None
 
-    def test_find_by_id_rejects_malicious_ids(self) -> None:
+    @pytest.mark.parametrize("bad", [
+        "../etc",
+        "/etc/passwd",
+        "a/b",
+        "a\\b",
+        "C:foo",
+        ".",
+        "~root",
+        "a b",
+        "",
+    ])
+    def test_find_by_id_rejects_malicious_ids(self, bad: str) -> None:
         with tempfile.TemporaryDirectory() as td:
             store = SessionStore(Path(td))
-            for bad in [
-                "../etc",
-                "/etc/passwd",
-                "a/b",
-                "a\\b",
-                "C:foo",
-                ".",
-                "~root",
-                "a b",
-                "",
-            ]:
-                with self.subTest(bad=bad):
-                    self.assertIsNone(store.find_by_id(bad))
+            assert store.find_by_id(bad) is None
 
     def test_find_by_id_direct_path_lookup(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2638,9 +2537,9 @@ class XcodeReplContinueTests(unittest.TestCase):
             store.append("user", "hello")
             sid = store.session_id
             result = store.find_by_id(sid)
-            self.assertIsNotNone(result)
             assert result is not None
-            self.assertEqual(result.id, sid)
+            assert result is not None
+            assert result.id == sid
 
     def test_find_by_id_metadata_fallback_rejects_escaped_path(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2661,7 +2560,7 @@ class XcodeReplContinueTests(unittest.TestCase):
             )
             store._upsert_metadata(escaped)
             result = store.find_by_id("escape-session")
-            self.assertIsNone(result)
+            assert result is None
 
     # ── /continue command ─────────────────────────────────────────────────
 
@@ -2676,7 +2575,7 @@ class XcodeReplContinueTests(unittest.TestCase):
             newer_id = store.session_id
             # switch back to older session
             store.resume(older_id)
-            self.assertEqual(store.session_id, older_id)
+            assert store.session_id == older_id
             state = ReplState()
             app = HistoryLoadingApp()
             renderer = FakeRenderer()
@@ -2689,9 +2588,9 @@ class XcodeReplContinueTests(unittest.TestCase):
                     state,
                     FakePrompt([]),
                 )
-            self.assertFalse(handled)
+            assert not (handled)
             # Should have switched to the newer session
-            self.assertEqual(store.session_id, newer_id)
+            assert store.session_id == newer_id
 
     def test_continue_command_already_on_latest_noop(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2709,9 +2608,9 @@ class XcodeReplContinueTests(unittest.TestCase):
                     state,
                     FakePrompt([]),
                 )
-            self.assertFalse(handled)
-            self.assertEqual(store.session_id, store.session_id)  # unchanged
-            self.assertIn("Already on the latest session", output.getvalue())
+            assert not (handled)
+            assert store.session_id == store.session_id  # unchanged
+            assert "Already on the latest session" in output.getvalue()
 
     def test_continue_command_no_prior_stays_current(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2730,9 +2629,9 @@ class XcodeReplContinueTests(unittest.TestCase):
                     state,
                     FakePrompt([]),
                 )
-            self.assertFalse(handled)
-            self.assertEqual(store.session_id, orig_id)  # unchanged
-            self.assertIn("No prior session found", output.getvalue())
+            assert not (handled)
+            assert store.session_id == orig_id  # unchanged
+            assert "No prior session found" in output.getvalue()
 
     def test_continue_does_not_change_session_id(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2743,7 +2642,7 @@ class XcodeReplContinueTests(unittest.TestCase):
             store.append("user", "session B")
             latest_id = store.session_id
             store.resume(target_id)
-            self.assertEqual(store.session_id, target_id)
+            assert store.session_id == target_id
             # /continue should switch to latest
             state = ReplState()
             app = HistoryLoadingApp()
@@ -2756,7 +2655,7 @@ class XcodeReplContinueTests(unittest.TestCase):
                     state,
                     FakePrompt([]),
                 )
-            self.assertEqual(store.session_id, latest_id)
+            assert store.session_id == latest_id
 
     def test_continue_does_not_mutate_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2778,7 +2677,7 @@ class XcodeReplContinueTests(unittest.TestCase):
                     FakePrompt([]),
                 )
             # old session file should not be modified
-            self.assertEqual(old_path.stat().st_mtime, old_mtime)
+            assert old_path.stat().st_mtime == old_mtime
 
     def test_continue_does_not_rewrite_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2797,9 +2696,7 @@ class XcodeReplContinueTests(unittest.TestCase):
                     state,
                     FakePrompt([]),
                 )
-            self.assertEqual(
-                store.current_path.read_text(encoding="utf-8"), old_contents
-            )
+            assert store.current_path.read_text(encoding="utf-8") == old_contents
 
     def test_continue_syncs_agent_history(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2818,17 +2715,14 @@ class XcodeReplContinueTests(unittest.TestCase):
                     state,
                     FakePrompt([]),
                 )
-            self.assertEqual(
-                [m.role for m in app.agent.loaded],
-                ["user", "assistant"],
-            )
+            assert [m.role for m in app.agent.loaded] == ["user", "assistant"]
 
     def test_continue_completer_suggests_continue(self) -> None:
         from xcode.cli.completion import ReplCompleter
 
         completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
         items = completer.complete("/con")
-        self.assertTrue(any(item.text == "/continue" for item in items))
+        assert any(item.text == "/continue" for item in items)
 
     # ── CLI flags via run_repl ────────────────────────────────────────────
 
@@ -2842,10 +2736,10 @@ class XcodeReplContinueTests(unittest.TestCase):
             prompt = FakePrompt(["/exit"])
             with redirect_stdout(StringIO()):
                 code = run_repl(app, sessions_dir, prompt, auto_continue=True)
-            self.assertEqual(code, 0)
+            assert code == 0
             # after --continue, session should be the prior one
             store = SessionStore(sessions_dir)
-            self.assertIsNotNone(store.find_by_id(prior_id))
+            assert store.find_by_id(prior_id) is not None
 
     def test_run_repl_auto_continue_no_prior_proceeds_with_new(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2854,8 +2748,8 @@ class XcodeReplContinueTests(unittest.TestCase):
             output = StringIO()
             with redirect_stdout(output):
                 code = run_repl(app, Path(td), prompt, auto_continue=True)
-            self.assertEqual(code, 0)
-            self.assertIn("No prior session found", output.getvalue())
+            assert code == 0
+            assert "No prior session found" in output.getvalue()
 
     def test_run_repl_session_id_resumes_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2867,7 +2761,7 @@ class XcodeReplContinueTests(unittest.TestCase):
             prompt = FakePrompt(["/exit"])
             with redirect_stdout(StringIO()):
                 code = run_repl(app, sessions_dir, prompt, session_id=target_id)
-            self.assertEqual(code, 0)
+            assert code == 0
 
     def test_run_repl_session_id_rejects_missing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2877,8 +2771,8 @@ class XcodeReplContinueTests(unittest.TestCase):
             err = StringIO()
             with redirect_stdout(output), redirect_stderr(err):
                 code = run_repl(app, Path(td), prompt, session_id="nonexistent")
-            self.assertEqual(code, 1)
-            self.assertIn("Session not found", err.getvalue())
+            assert code == 1
+            assert "Session not found" in err.getvalue()
 
     def test_run_repl_session_id_rejects_wrong_project(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2894,8 +2788,8 @@ class XcodeReplContinueTests(unittest.TestCase):
             err = StringIO()
             with redirect_stdout(output), redirect_stderr(err):
                 code = run_repl(app, sessions_dir, prompt, session_id=target_id)
-            self.assertEqual(code, 1)
-            self.assertIn("belongs to another project", err.getvalue())
+            assert code == 1
+            assert "belongs to another project" in err.getvalue()
 
     def test_run_repl_session_id_rejects_malicious_id(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2903,7 +2797,7 @@ class XcodeReplContinueTests(unittest.TestCase):
             prompt = FakePrompt(["/exit"])
             with redirect_stdout(StringIO()):
                 code = run_repl(app, Path(td), prompt, session_id="../etc/passwd")
-            self.assertEqual(code, 1)
+            assert code == 1
 
     # ── Step 6/7 follow continued session_id ──────────────────────────────
 
@@ -2937,10 +2831,10 @@ class XcodeReplContinueTests(unittest.TestCase):
             view = store.find_latest_for_project(Path(td))
             assert view is not None
             store.resume(view.id)
-            self.assertEqual(store.session_id, sid_a)
+            assert store.session_id == sid_a
             # grant store for this session should still have the grant
             current_store = manager.get_for_session(store.session_id)
-            self.assertGreater(len(current_store.records()), 0)
+            assert len(current_store.records()) > 0
 
     def test_continue_snapshot_store_follows_session_id(self) -> None:
         """Step 7 invariant: SnapshotStore.service keys by session_id."""
@@ -2949,7 +2843,6 @@ class XcodeReplContinueTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             # need a git repo for SnapshotStore
             import subprocess
-
             subprocess.run(["git", "init"], cwd=td, capture_output=True)
             subprocess.run(
                 ["git", "config", "user.name", "test"], cwd=td, capture_output=True
@@ -2974,23 +2867,22 @@ class XcodeReplContinueTests(unittest.TestCase):
             post = svc.track()
             changes = svc.diff(pre.snapshot_id, post.snapshot_id)
             snap.record_turn(sid_a, "001", pre.snapshot_id, post.snapshot_id, changes)
-            self.assertEqual(len(snap.list_records(sid_a)), 1)
+            assert len(snap.list_records(sid_a)) == 1
 
             store.clear()
             # continue to session A
             view = store.find_latest_for_project(Path(td))
             assert view is not None
             store.resume(view.id)
-            self.assertEqual(store.session_id, sid_a)
+            assert store.session_id == sid_a
             # snapshot records for session A should still be available
-            self.assertEqual(len(snap.list_records(store.session_id)), 1)
+            assert len(snap.list_records(store.session_id)) == 1
 
     # ── help text ─────────────────────────────────────────────────────────
 
     def test_help_text_includes_continue(self) -> None:
-        self.assertIn("/continue", HELP_TEXT)
-        self.assertIn("Resume the latest session", HELP_TEXT)
-
+        assert "/continue" in HELP_TEXT
+        assert "Resume the latest session" in HELP_TEXT
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

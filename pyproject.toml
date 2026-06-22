@@ -31,7 +31,15 @@ dependencies = [
 dev = [
     "pyright>=1.1.410",
     "ruff>=0.15.15",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["src/xcode/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*", "*Test", "*Tests"]
+asyncio_mode = "auto"
 
 [project.scripts]
 xcode = "xcode.main:main"

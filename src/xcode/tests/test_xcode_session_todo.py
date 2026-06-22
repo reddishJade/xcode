@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -22,33 +21,35 @@ from xcode.harness.session_todo import (
     TodoItem,
 )
 from xcode.tests.fixtures import FakeProvider
+import pytest
+
+INVALID_TODO_PAYLOADS: tuple[list[dict[str, str]], ...] = (
+    [
+        {"id": "a", "content": "one", "status": "pending"},
+        {"id": "a", "content": "two", "status": "completed"},
+    ],
+    [{"id": "a", "content": " ", "status": "pending"}],
+    [{"id": "a", "content": "one", "status": "unknown"}],
+    [
+        {"id": "a", "content": "one", "status": "in_progress"},
+        {"id": "b", "content": "two", "status": "in_progress"},
+    ],
+)
 
 
-class SessionTodoTests(unittest.TestCase):
+class SessionTodoTests:
     """验证完整替换、不变量、持久化和上下文保护。"""
 
-    def test_replace_validates_ids_content_status_and_active_count(self) -> None:
+    @pytest.mark.parametrize("payload", INVALID_TODO_PAYLOADS)
+    def test_replace_validates_ids_content_status_and_active_count(
+        self, payload: list[dict[str, str]]
+    ) -> None:
         """拒绝重复 id、空内容、无效状态和多个进行中项。"""
         state = SessionTodoState()
-        invalid_payloads = (
-            [
-                {"id": "a", "content": "one", "status": "pending"},
-                {"id": "a", "content": "two", "status": "completed"},
-            ],
-            [{"id": "a", "content": " ", "status": "pending"}],
-            [{"id": "a", "content": "one", "status": "unknown"}],
-            [
-                {"id": "a", "content": "one", "status": "in_progress"},
-                {"id": "b", "content": "two", "status": "in_progress"},
-            ],
-        )
+        with pytest.raises(ValueError):
+            state.replace(payload)
 
-        for payload in invalid_payloads:
-            with self.subTest(payload=payload):
-                with self.assertRaises(ValueError):
-                    state.replace(payload)
-
-        self.assertEqual(state.snapshot(), ())
+        assert state.snapshot() == ()
 
     def test_update_tool_replaces_complete_list(self) -> None:
         """update_todo 每次以完整列表替换旧状态。"""
@@ -78,10 +79,7 @@ class SessionTodoTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(
-            state.snapshot(),
-            (TodoItem("second", "Second task", "completed"),),
-        )
+        assert state.snapshot() == (TodoItem("second", "Second task", "completed"),)
 
     def test_structured_agent_emits_todo_event_and_run_state(self) -> None:
         """成功工具调用发射结构化事件并进入 RunState。"""
@@ -125,10 +123,10 @@ class SessionTodoTests(unittest.TestCase):
         todo_event = next(
             event for event in events if isinstance(event, TodoUpdateStructuredEvent)
         )
-        self.assertEqual(todo_event.data[0].id, "implement")
+        assert todo_event.data[0].id == "implement"
         final = events[-1]
         run_state = cast(Any, final).data.run_state
-        self.assertEqual(run_state.todos, state.snapshot())
+        assert run_state.todos == state.snapshot()
 
     def test_run_state_round_trip_restores_todos(self) -> None:
         """RunState JSON 往返保留当前清单。"""
@@ -139,7 +137,7 @@ class SessionTodoTests(unittest.TestCase):
 
         restored = RunState.from_dict(state.to_dict())
 
-        self.assertEqual(restored.todos, state.todos)
+        assert restored.todos == state.todos
 
         target_state = SessionTodoState()
         agent = StructuredAgent(
@@ -148,7 +146,7 @@ class SessionTodoTests(unittest.TestCase):
             runtime=AgentRuntimeConfig(todo_state=target_state),
         )
         agent.load_run_state(restored)
-        self.assertEqual(target_state.snapshot(), state.todos)
+        assert target_state.snapshot() == state.todos
 
     def test_runtime_context_reinjects_current_todos(self) -> None:
         """待办状态不依赖历史消息，压缩后仍由动态上下文重新注入。"""
@@ -172,8 +170,8 @@ class SessionTodoTests(unittest.TestCase):
 
             rendered = "\n".join(provider("continue"))
 
-        self.assertIn("<session-todo>", rendered)
-        self.assertIn("Run targeted tests", rendered)
+        assert "<session-todo>" in rendered
+        assert "Run targeted tests" in rendered
 
     def test_resume_restores_latest_todo_event(self) -> None:
         """REPL resume 从 transcript 中最后一次完整替换恢复清单。"""
@@ -217,8 +215,8 @@ class SessionTodoTests(unittest.TestCase):
 
             sync_agent_history(cast(Any, app), store)
 
-        self.assertEqual(restored[-1][0]["id"], "current")
+        assert restored[-1][0]["id"] == "current"
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

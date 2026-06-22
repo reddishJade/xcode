@@ -5,7 +5,6 @@ from pathlib import Path
 import sys
 import threading
 import time
-import unittest
 from unittest.mock import patch
 
 from xcode.harness.agent_runtime.async_worker import IsolatedAsyncWorker
@@ -16,9 +15,8 @@ from xcode.harness.agent_runtime import (
     build_managed_subagent_tools,
 )
 from xcode.harness.agent_runtime.subagent import SubagentBusyError
-
-
-class XcodeSubagentToolTests(unittest.TestCase):
+import pytest
+class XcodeSubagentToolTests:
     def test_active_job_limit_returns_busy_and_releases_on_finish(self) -> None:
         """完成的 job 自动释放独立 subagent 额度。"""
         release = threading.Event()
@@ -37,8 +35,8 @@ class XcodeSubagentToolTests(unittest.TestCase):
         )
         try:
             first = runner.submit("hold")
-            self.assertEqual(runner.active_job_count, 1)
-            with self.assertRaisesRegex(SubagentBusyError, "1/1 active"):
+            assert runner.active_job_count == 1
+            with pytest.raises(SubagentBusyError, match="1/1 active"):
                 runner.submit("blocked")
 
             release.set()
@@ -47,7 +45,7 @@ class XcodeSubagentToolTests(unittest.TestCase):
 
             second = runner.submit("next")
             self._wait_status(runner, second, "done")
-            self.assertEqual(runner.result(second), "next")
+            assert runner.result(second) == "next"
         finally:
             runner.shutdown()
 
@@ -72,7 +70,7 @@ class XcodeSubagentToolTests(unittest.TestCase):
 
             output = tools["submit_subagent"].handler({"prompt": "second"})
 
-            self.assertIn("subagent busy", output)
+            assert "subagent busy" in output
         finally:
             release.set()
             runner.shutdown()
@@ -102,7 +100,7 @@ class XcodeSubagentToolTests(unittest.TestCase):
 
             second = runner.submit("fast")
             self._wait_status(runner, second, "done")
-            self.assertEqual(runner.result(second), "done")
+            assert runner.result(second) == "done"
         finally:
             runner.shutdown()
 
@@ -123,12 +121,12 @@ class XcodeSubagentToolTests(unittest.TestCase):
         )
         try:
             first = runner.submit("slow")
-            self.assertEqual(runner.cancel(first), "cancel requested")
+            assert runner.cancel(first) == "cancel requested"
             self._wait_active_count(runner, 0)
 
             second = runner.submit("fast")
             self._wait_status(runner, second, "done")
-            self.assertEqual(runner.result(second), "done")
+            assert runner.result(second) == "done"
         finally:
             runner.shutdown()
 
@@ -143,10 +141,10 @@ class XcodeSubagentToolTests(unittest.TestCase):
         try:
             job_id = runner.submit("work")
 
-            self.assertEqual(runner.status(job_id), "running")
+            assert runner.status(job_id) == "running"
             self._wait_status(runner, job_id, "done")
-            self.assertEqual(runner.result(job_id), "subagent:work:None")
-            self.assertEqual(runner.status(job_id), "unknown")
+            assert runner.result(job_id) == "subagent:work:None"
+            assert runner.status(job_id) == "unknown"
         finally:
             runner.shutdown()
 
@@ -165,9 +163,9 @@ class XcodeSubagentToolTests(unittest.TestCase):
             self._wait_status(runner, job_id, "done")
             checked = tools["check_subagent"].handler({"job_id": job_id})
 
-            self.assertIn("status=done", checked)
-            self.assertIn("done work", checked)
-            self.assertEqual(runner.status(job_id), "unknown")
+            assert "status=done" in checked
+            assert "done work" in checked
+            assert runner.status(job_id) == "unknown"
         finally:
             runner.shutdown()
 
@@ -188,22 +186,20 @@ class XcodeSubagentToolTests(unittest.TestCase):
             job_id = runner.submit("work")
             self._wait_status(runner, job_id, "done")
 
-            self.assertEqual(runner.result(job_id), "subagent:work:None")
+            assert runner.result(job_id) == "subagent:work:None"
 
-            self.assertEqual(
-                [event.type for event in events], ["subagent_start", "subagent_end"]
-            )
+            assert [event.type for event in events] == ["subagent_start", "subagent_end"]
             start = events[0]
             end = events[1]
-            self.assertIsInstance(start, SubagentStartEvent)
-            self.assertIsInstance(end, SubagentEndEvent)
             assert isinstance(start, SubagentStartEvent)
             assert isinstance(end, SubagentEndEvent)
-            self.assertEqual(start.job_id, job_id)
-            self.assertEqual(start.model_profile, "subagent")
-            self.assertEqual(start.isolation, "context")
-            self.assertEqual(end.job_id, job_id)
-            self.assertEqual(end.status, "done")
+            assert isinstance(start, SubagentStartEvent)
+            assert isinstance(end, SubagentEndEvent)
+            assert start.job_id == job_id
+            assert start.model_profile == "subagent"
+            assert start.isolation == "context"
+            assert end.job_id == job_id
+            assert end.status == "done"
         finally:
             runner.shutdown()
 
@@ -225,8 +221,8 @@ class XcodeSubagentToolTests(unittest.TestCase):
             job_id = runner.submit("work", "main")
             self._wait_status(runner, job_id, "done")
 
-            self.assertEqual(runner.result(job_id), "main:work")
-            self.assertEqual(seen, [("work", "main")])
+            assert runner.result(job_id) == "main:work"
+            assert seen == [("work", "main")]
         finally:
             runner.shutdown()
 
@@ -248,7 +244,7 @@ class XcodeSubagentToolTests(unittest.TestCase):
                 {"prompt": "work", "model_profile": "missing"}
             )
 
-            self.assertIn("unknown model_profile: missing", output)
+            assert "unknown model_profile: missing" in output
         finally:
             runner.shutdown()
 
@@ -283,10 +279,8 @@ class XcodeSubagentToolTests(unittest.TestCase):
             job_id = runner.submit("work on files", isolation="worktree")
             self._wait_status(runner, job_id, "done")
 
-            self.assertEqual(runner.result(job_id), "done")
-            self.assertEqual(
-                seen, [("work on files", "subagent", Path("sandbox").resolve())]
-            )
+            assert runner.result(job_id) == "done"
+            assert seen == [("work on files", "subagent", Path("sandbox").resolve())]
         finally:
             runner.shutdown()
 
@@ -308,9 +302,9 @@ class XcodeSubagentToolTests(unittest.TestCase):
             job_id = runner.submit("slow")
             self._wait_status(runner, job_id, "failed")
 
-            with self.assertRaises(TimeoutError):
+            with pytest.raises(TimeoutError):
                 runner.result(job_id)
-            self.assertEqual(cancelled, [True])
+            assert cancelled == [True]
         finally:
             runner.shutdown()
 
@@ -323,18 +317,18 @@ class XcodeSubagentToolTests(unittest.TestCase):
 
         runner = ManagedSubagentRunner(run_child, timeout_seconds=None)
         job_id = runner.submit("slow")
-        self.assertEqual(runner.status(job_id), "running")
+        assert runner.status(job_id) == "running"
 
         started = time.perf_counter()
         runner.shutdown(drain_timeout=0.1)
 
-        self.assertLess(time.perf_counter() - started, 2.0)
-        self.assertEqual(runner.status(job_id), "unknown")
-        self.assertEqual(runner.active_job_count, 0)
+        assert time.perf_counter() - started < 2.0
+        assert runner.status(job_id) == "unknown"
+        assert runner.active_job_count == 0
 
     def test_windows_worker_uses_selector_event_loop(self) -> None:
         if not hasattr(asyncio, "SelectorEventLoop"):
-            self.skipTest("SelectorEventLoop is unavailable")
+            pytest.skip("SelectorEventLoop is unavailable")
 
         worker = IsolatedAsyncWorker()
         with (
@@ -346,11 +340,11 @@ class XcodeSubagentToolTests(unittest.TestCase):
         ):
             try:
                 future = worker.submit(_immediate("ok"))
-                self.assertEqual(future.result(timeout=1), "ok")
+                assert future.result(timeout=1) == "ok"
             finally:
                 worker.close()
 
-        self.assertTrue(selector_loop.called)
+        assert selector_loop.called
 
     def _wait_status(
         self, runner: ManagedSubagentRunner, job_id: str, expected: str
@@ -359,7 +353,7 @@ class XcodeSubagentToolTests(unittest.TestCase):
             if runner.status(job_id) == expected:
                 return
             time.sleep(0.01)
-        self.fail(f"subagent did not reach {expected}: {runner.status(job_id)}")
+        pytest.fail(f"subagent did not reach {expected}: {runner.status(job_id)}")
 
     def _wait_active_count(self, runner: ManagedSubagentRunner, expected: int) -> None:
         """等待 active job 额度释放。"""
@@ -367,14 +361,12 @@ class XcodeSubagentToolTests(unittest.TestCase):
             if runner.active_job_count == expected:
                 return
             time.sleep(0.01)
-        self.fail(
+        pytest.fail(
             f"active subagent count did not reach {expected}: {runner.active_job_count}"
         )
-
 
 async def _immediate(value: str) -> str:
     return value
 
-
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

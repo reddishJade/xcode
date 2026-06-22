@@ -427,10 +427,9 @@ class ToolGate:
         )
         result = engine.decide(
             tool_name,
-            stringify_tool_input(args),
+            args,
             execution_decision=execution_decision,
             tool_spec=snapshot.tool_map.get(tool_name),
-            tool_input=args,
             approval_callback=snapshot.approval_callback,
         )
         self._last_perm_results[tool_call_id] = result

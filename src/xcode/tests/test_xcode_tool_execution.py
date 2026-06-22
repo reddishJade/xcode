@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-import unittest
 from typing import cast
 from unittest.mock import patch
 
@@ -43,7 +42,7 @@ from xcode.harness.skills import (
     ToolOutput,
     ToolSpec,
 )
-
+import pytest
 
 EMPTY_SCHEMA = {
     "type": "object",
@@ -52,7 +51,7 @@ EMPTY_SCHEMA = {
 }
 
 
-class AgentToolExecutionTests(unittest.TestCase):
+class AgentToolExecutionTests:
     def test_parallel_tools_respect_worker_limit(self) -> None:
         """parallel batch 的活跃 handler 数不超过 tool_workers。"""
         lock = threading.Lock()
@@ -98,8 +97,8 @@ class AgentToolExecutionTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(len(result.results), 6)
-        self.assertEqual(max_active, 2)
+        assert len(result.results) == 6
+        assert max_active == 2
 
     def test_cancelled_waiting_parallel_tool_does_not_start_handler(self) -> None:
         """等待并发额度的工具在取消后不进入 handler。"""
@@ -151,9 +150,9 @@ class AgentToolExecutionTests(unittest.TestCase):
 
         result = asyncio.run(run_cancelled_batch())
 
-        self.assertEqual(calls_started, 1)
-        self.assertEqual(len(result.results), 2)
-        self.assertIn("cancelled in test", str(result.results[1].content))
+        assert calls_started == 1
+        assert len(result.results) == 2
+        assert "cancelled in test" in str(result.results[1].content)
 
     def test_parallel_worker_limit_collects_handler_errors(self) -> None:
         """受限并发仍收集每个工具结果，包括 handler 异常。"""
@@ -198,10 +197,10 @@ class AgentToolExecutionTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(len(result.results), 3)
-        self.assertFalse(result.results[0].is_error)
-        self.assertTrue(result.results[1].is_error)
-        self.assertFalse(result.results[2].is_error)
+        assert len(result.results) == 3
+        assert not (result.results[0].is_error)
+        assert result.results[1].is_error
+        assert not (result.results[2].is_error)
 
     def test_toolspec_adapter_derives_execution_mode_from_metadata(self) -> None:
         read_tool, write_tool, explicit_parallel = adapt_tool_specs(
@@ -233,9 +232,9 @@ class AgentToolExecutionTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(read_tool.execution_mode, "parallel")
-        self.assertEqual(write_tool.execution_mode, "sequential")
-        self.assertEqual(explicit_parallel.execution_mode, "parallel")
+        assert read_tool.execution_mode == "parallel"
+        assert write_tool.execution_mode == "sequential"
+        assert explicit_parallel.execution_mode == "parallel"
 
     def test_toolspec_adapter_preserves_builtin_metadata(self) -> None:
         """ToolSpec builtin 元数据会传递给 AgentTool。"""
@@ -253,7 +252,7 @@ class AgentToolExecutionTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(tool.builtin, builtin)
+        assert tool.builtin == builtin
 
     def test_toolspec_adapter_preserves_shell_output_content(self) -> None:
         """ToolOutput 元数据中的 shell 输出块会保留给 agent loop。"""
@@ -287,11 +286,11 @@ class AgentToolExecutionTests(unittest.TestCase):
 
         result = asyncio.run(tool.execute("call-1", {}))
 
-        self.assertIsInstance(result.content[1], ShellCallOutputContent)
+        assert isinstance(result.content[1], ShellCallOutputContent)
         block = result.content[1]
         assert isinstance(block, ShellCallOutputContent)
-        self.assertEqual(block.call_id, "call-1")
-        self.assertEqual(block.output[0]["stdout"], "ok")
+        assert block.call_id == "call-1"
+        assert block.output[0]["stdout"] == "ok"
 
     def test_toolspec_adapter_preserves_typed_result_and_details(self) -> None:
         """ToolOutput 的类型块、详情和错误状态会进入 AgentToolResult。"""
@@ -325,10 +324,10 @@ class AgentToolExecutionTests(unittest.TestCase):
 
         result = asyncio.run(tool.execute("call-1", {}))
 
-        self.assertTrue(result.is_error)
-        self.assertEqual(result.details["provider_result"], {"status": "invalid"})
-        self.assertIs(result.content[1], image)
-        self.assertIs(result.content[2], file)
+        assert result.is_error
+        assert result.details["provider_result"] == {"status": "invalid"}
+        assert result.content[1] is image
+        assert result.content[2] is file
 
     def test_tool_execution_message_preserves_non_text_blocks(self) -> None:
         """工具执行消息不会在存在非文本块时只保留文本。"""
@@ -363,9 +362,9 @@ class AgentToolExecutionTests(unittest.TestCase):
         )
 
         message_content = batch.results[0].content
-        self.assertIsInstance(message_content, list)
         assert isinstance(message_content, list)
-        self.assertIs(message_content[1], image)
+        assert isinstance(message_content, list)
+        assert message_content[1] is image
 
     def test_toolspec_adapter_default_allow(self) -> None:
         """无风险审批后，工具默认 allow。"""
@@ -389,8 +388,8 @@ class AgentToolExecutionTests(unittest.TestCase):
         )
 
         result = asyncio.run(tool.execute("call-1", {}))
-        self.assertTrue(called)
-        self.assertFalse(result.is_error)
+        assert called
+        assert not (result.is_error)
 
     def test_toolspec_adapter_execute_runs_handler_directly(self) -> None:
         """ToolSpecAdapter 直接执行 handler，不检查权限（权限由 ToolGate 门控）。"""
@@ -415,12 +414,12 @@ class AgentToolExecutionTests(unittest.TestCase):
 
         result = asyncio.run(tool.execute("call-1", {}))
 
-        self.assertTrue(called)
-        self.assertFalse(result.is_error)
+        assert called
+        assert not (result.is_error)
         block = result.content[0]
-        self.assertIsInstance(block, TextContent)
         assert isinstance(block, TextContent)
-        self.assertEqual(block.text, "changed")
+        assert isinstance(block, TextContent)
+        assert block.text == "changed"
 
     def test_partition_tool_calls_for_execution_keeps_sequential_barriers(self) -> None:
         tools = adapt_tool_specs(
@@ -463,10 +462,12 @@ class AgentToolExecutionTests(unittest.TestCase):
 
         batches = partition_tool_calls_for_execution(context, tool_calls)
 
-        self.assertEqual(
-            [[tool_call.id for tool_call in batch] for batch in batches],
-            [["c1", "c2"], ["c3"], ["c4"], ["c5"]],
-        )
+        assert [[tool_call.id for tool_call in batch] for batch in batches] == [
+            ["c1", "c2"],
+            ["c3"],
+            ["c4"],
+            ["c5"],
+        ]
 
     def test_unknown_tool_emits_end_event(self) -> None:
         events: list[AgentEvent] = []
@@ -483,15 +484,15 @@ class AgentToolExecutionTests(unittest.TestCase):
             )
         )
 
-        self.assertTrue(result.results[0].is_error)
-        self.assertEqual(
-            [event.type for event in events],
-            ["tool_execution_start", "tool_execution_end"],
-        )
+        assert result.results[0].is_error
+        assert [event.type for event in events] == [
+            "tool_execution_start",
+            "tool_execution_end",
+        ]
         end_event = events[-1]
-        self.assertIsInstance(end_event, ToolExecutionEndEvent)
         assert isinstance(end_event, ToolExecutionEndEvent)
-        self.assertTrue(end_event.is_error)
+        assert isinstance(end_event, ToolExecutionEndEvent)
+        assert end_event.is_error
 
     def test_before_tool_block_emits_end_event(self) -> None:
         events: list[AgentEvent] = []
@@ -525,19 +526,19 @@ class AgentToolExecutionTests(unittest.TestCase):
             )
         )
 
-        self.assertTrue(result.results[0].is_error)
-        self.assertEqual(result.results[0].content, "blocked")
-        self.assertEqual(
-            [event.type for event in events],
-            ["tool_execution_start", "tool_execution_end"],
-        )
+        assert result.results[0].is_error
+        assert result.results[0].content == "blocked"
+        assert [event.type for event in events] == [
+            "tool_execution_start",
+            "tool_execution_end",
+        ]
         end_event = events[-1]
-        self.assertIsInstance(end_event, ToolExecutionEndEvent)
         assert isinstance(end_event, ToolExecutionEndEvent)
-        self.assertTrue(end_event.is_error)
+        assert isinstance(end_event, ToolExecutionEndEvent)
+        assert end_event.is_error
 
 
-class TestPermissionSingleGate(unittest.TestCase):
+class TestPermissionSingleGate:
     """验证 PermissionEngine.decide() 在完整的工具执行路径中恰好调用一次。
 
     ToolGate 是唯一的权限门控点。ToolSpecAdapter 不执行任何权限检查。
@@ -551,7 +552,7 @@ class TestPermissionSingleGate(unittest.TestCase):
         return "ok"
 
     def _handler_never(self, _data: object) -> str:
-        self.fail("handler should not be called when tool is denied")
+        pytest.fail("handler should not be called when tool is denied")
 
     def _make_spec(self, handler):
         return ToolSpec(
@@ -605,16 +606,16 @@ class TestPermissionSingleGate(unittest.TestCase):
         decide_count: list[int] = [0]
         orig_decide = PermissionEngine.decide
 
-        def counting_decide(self, tool_name, action_input, **kwargs):
+        def counting_decide(self, tool_name, tool_input, **kwargs):
             decide_count[0] += 1
-            return orig_decide(self, tool_name, action_input, **kwargs)
+            return orig_decide(self, tool_name, tool_input, **kwargs)
 
         with patch.object(PermissionEngine, "decide", counting_decide):
             result = self._run_execution(gate, spec)
 
-        self.assertEqual(decide_count[0], 1, msg="decide 必须恰好调用一次")
-        self.assertTrue(self._handler_called, msg="handler 必须在 allow 时执行")
-        self.assertFalse(result.results[0].is_error)
+        assert decide_count[0] == 1, "decide 必须恰好调用一次"
+        assert self._handler_called
+        assert not (result.results[0].is_error)
 
     # ── deny path ──
 
@@ -628,15 +629,15 @@ class TestPermissionSingleGate(unittest.TestCase):
         decide_count: list[int] = [0]
         orig_decide = PermissionEngine.decide
 
-        def counting_decide(self, tool_name, action_input, **kwargs):
+        def counting_decide(self, tool_name, tool_input, **kwargs):
             decide_count[0] += 1
-            return orig_decide(self, tool_name, action_input, **kwargs)
+            return orig_decide(self, tool_name, tool_input, **kwargs)
 
         with patch.object(PermissionEngine, "decide", counting_decide):
             result = self._run_execution(gate, spec)
 
-        self.assertEqual(decide_count[0], 1, msg="decide 必须恰好调用一次")
-        self.assertTrue(result.results[0].is_error, msg="deny 工具必须返回 error")
+        assert decide_count[0] == 1, "decide 必须恰好调用一次"
+        assert result.results[0].is_error
 
     # ── ask/defer path ──
 
@@ -656,15 +657,15 @@ class TestPermissionSingleGate(unittest.TestCase):
         decide_count: list[int] = [0]
         orig_decide = PermissionEngine.decide
 
-        def counting_decide(self, tool_name, action_input, **kwargs):
+        def counting_decide(self, tool_name, tool_input, **kwargs):
             decide_count[0] += 1
-            return orig_decide(self, tool_name, action_input, **kwargs)
+            return orig_decide(self, tool_name, tool_input, **kwargs)
 
         with patch.object(PermissionEngine, "decide", counting_decide):
             result = self._run_execution(gate, spec)
 
-        self.assertEqual(decide_count[0], 1, msg="decide 必须恰好调用一次")
-        self.assertTrue(result.results[0].is_error, msg="ask defer 必须返回 error")
+        assert decide_count[0] == 1, "decide 必须恰好调用一次"
+        assert result.results[0].is_error
 
     # ── ToolSpecAdapter direct (no PermissionEngine) ──
 
@@ -681,16 +682,16 @@ class TestPermissionSingleGate(unittest.TestCase):
             (ToolSpec("direct", "test", "{}", handler, schema=EMPTY_SCHEMA),)
         )
         result = asyncio.run(tool.execute("call-1", {}))
-        self.assertTrue(called)
-        self.assertFalse(result.is_error)
-        self.assertIn("direct", str(result.content))
+        assert called
+        assert not (result.is_error)
+        assert "direct" in str(result.content)
 
     def test_adapter_has_no_engine_attribute(self) -> None:
         """ToolSpecAdapter 实例不包含 _engine 属性（PermissionEngine 已剥离）。"""
         (tool,) = adapt_tool_specs(
             (ToolSpec("x", "test", "{}", lambda _: "", schema=EMPTY_SCHEMA),)
         )
-        self.assertFalse(hasattr(tool, "_engine"), msg="adapter 不应持有 _engine")
+        assert not (hasattr(tool, "_engine"))
 
     # ── production execution routes through ToolGate ──
 
@@ -705,17 +706,17 @@ class TestPermissionSingleGate(unittest.TestCase):
         decide_count: list[int] = [0]
         orig_decide = PermissionEngine.decide
 
-        def counting_decide(self, tool_name, action_input, **kwargs):
+        def counting_decide(self, tool_name, tool_input, **kwargs):
             decide_count[0] += 1
-            return orig_decide(self, tool_name, action_input, **kwargs)
+            return orig_decide(self, tool_name, tool_input, **kwargs)
 
         with patch.object(PermissionEngine, "decide", counting_decide):
             result = self._run_execution(gate, spec)
 
-        self.assertEqual(decide_count[0], 1, msg="生产路径必须经过 ToolGate")
-        self.assertTrue(self._handler_called)
-        self.assertFalse(result.results[0].is_error)
+        assert decide_count[0] == 1, "生产路径必须经过 ToolGate"
+        assert self._handler_called
+        assert not (result.results[0].is_error)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

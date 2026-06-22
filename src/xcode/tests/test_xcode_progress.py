@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from xcode.harness.task_store import TaskStore
 from xcode.harness.task_progress import (
-    build_progress_tools,
+build_progress_tools,
     expire_stale_runs,
     resume_run,
     resume_task,
@@ -14,21 +13,20 @@ from xcode.harness.task_progress import (
     save_progress,
     start_run,
 )
-
-
-class TestTaskProgress(unittest.TestCase):
-    def setUp(self) -> None:
+import pytest
+class TestTaskProgress:
+    def setup_method(self, method) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.store = TaskStore(self.root)
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method) -> None:
         self.temp_dir.cleanup()
 
     def test_save_and_resume_progress_basic(self) -> None:
         # 1. Create a task in the TaskStore
         task = self.store.create("Implement login feature")
-        self.assertEqual(task.id, 1)
+        assert task.id == 1
 
         # 2. Define the sub-tasks (feature list)
         checklist = [
@@ -43,32 +41,32 @@ class TestTaskProgress(unittest.TestCase):
         # 4. Assert SoT (payload in TaskStore) has been updated under lock protection
         updated_task = self.store.get(task.id)
         saved_checklist = updated_task.payload.get("feature_list")
-        self.assertEqual(saved_checklist, checklist)
+        assert saved_checklist == checklist
 
         # 5. Assert derived read-only view 'claude-progress.txt' was written to root
         progress_txt = self.root / "claude-progress.txt"
-        self.assertTrue(progress_txt.exists())
+        assert progress_txt.exists()
 
         content = progress_txt.read_text(encoding="utf-8")
-        self.assertIn("Progress: 33.3%", content)
-        self.assertIn("Step 1: Design schema", content)
-        self.assertIn("- [/] Step 2: Implement API", content)
-        self.assertIn("- [ ] Step 3: Write unit tests", content)
-        self.assertIn("Current Active Step:\n- Implement API", content)
+        assert "Progress: 33.3%" in content
+        assert "Step 1: Design schema" in content
+        assert "- [/] Step 2: Implement API" in content
+        assert "- [ ] Step 3: Write unit tests" in content
+        assert "Current Active Step:\n- Implement API" in content
 
         # 6. Assert resume_task fetches SoT checklist perfectly
         resumed_checklist = resume_task(self.store, task.id)
-        self.assertEqual(resumed_checklist, checklist)
+        assert resumed_checklist == checklist
 
     def test_resume_missing_or_unknown_task(self) -> None:
         # Resuming a non-existent task ID should return an empty list and not crash
         resumed = resume_task(self.store, 999)
-        self.assertEqual(resumed, [])
+        assert resumed == []
 
         # Resuming a task that exists but has no feature_list should return an empty list
         task = self.store.create("Some other task")
         resumed_empty = resume_task(self.store, task.id)
-        self.assertEqual(resumed_empty, [])
+        assert resumed_empty == []
 
     def test_progress_tools_basic_flow(self) -> None:
         task = self.store.create("Implement search")
@@ -82,12 +80,12 @@ class TestTaskProgress(unittest.TestCase):
                 ],
             }
         )
-        self.assertEqual(saved, f"saved progress for task {task.id}")
+        assert saved == f"saved progress for task {task.id}"
 
         resumed = tools["resume_task_progress"].handler({"task_id": 1})
-        self.assertIn('"title": "Index files"', resumed)
-        self.assertIn('"status": "completed"', resumed)
-        self.assertTrue((self.root / "claude-progress.txt").exists())
+        assert '"title": "Index files"' in resumed
+        assert '"status": "completed"' in resumed
+        assert (self.root / "claude-progress.txt").exists()
 
     def test_start_run_dispatches_subtasks_and_can_resume(self) -> None:
         task = self.store.create("Implement orchestration")
@@ -102,11 +100,11 @@ class TestTaskProgress(unittest.TestCase):
         resumed = resume_run(self.store, task.id)
         child_titles = [self.store.get(task_id).title for task_id in state.subtask_ids]
 
-        self.assertEqual(state.status, "running")
-        self.assertEqual(state.attempt, 1)
-        self.assertEqual(resumed, state)
-        self.assertEqual(child_titles, ["Write tests", "Update docs"])
-        self.assertEqual(self.store.get(task.id).status, "claimed")
+        assert state.status == "running"
+        assert state.attempt == 1
+        assert resumed == state
+        assert child_titles == ["Write tests", "Update docs"]
+        assert self.store.get(task.id).status == "claimed"
 
     def test_expire_stale_runs_releases_claimed_task(self) -> None:
         task = self.store.create("Long task")
@@ -120,9 +118,9 @@ class TestTaskProgress(unittest.TestCase):
 
         expired = expire_stale_runs(self.store)
 
-        self.assertEqual(len(expired), 1)
-        self.assertEqual(expired[0].status, "timed_out")
-        self.assertEqual(self.store.get(task.id).status, "pending")
+        assert len(expired) == 1
+        assert expired[0].status == "timed_out"
+        assert self.store.get(task.id).status == "pending"
 
     def test_retry_run_respects_retry_limit(self) -> None:
         task = self.store.create("Retry task")
@@ -130,8 +128,8 @@ class TestTaskProgress(unittest.TestCase):
 
         retried = retry_run(self.store, task.id)
 
-        self.assertEqual(retried.attempt, 2)
-        with self.assertRaises(ValueError):
+        assert retried.attempt == 2
+        with pytest.raises(ValueError):
             retry_run(self.store, task.id)
 
     def test_progress_tools_expose_orchestration_flow(self) -> None:
@@ -148,10 +146,9 @@ class TestTaskProgress(unittest.TestCase):
         )
         resumed = tools["resume_task_run"].handler({"task_id": task.id})
 
-        self.assertIn('"status": "running"', started)
-        self.assertIn('"subtask_ids"', resumed)
-        self.assertIn("expire_task_runs", tools)
-
+        assert '"status": "running"' in started
+        assert '"subtask_ids"' in resumed
+        assert "expire_task_runs" in tools
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

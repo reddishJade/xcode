@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import unittest
 from dataclasses import dataclass
 from typing import Any
 
 from xcode.ai.providers.factory import _build_llm_profile
 from xcode.ai.providers.deepseek import DeepSeekProvider
 from xcode.ai.providers.runtime import ProviderRuntime
-
-
+import pytest
 @dataclass(frozen=True)
 class MockProfile:
     """模拟 ModelProfileProto 用于测试。"""
@@ -23,8 +21,7 @@ class MockProfile:
     tool_stream: bool = True
     response_format: dict[str, Any] | None = None
 
-
-class XcodeDeepSeekFactoryTests(unittest.TestCase):
+class XcodeDeepSeekFactoryTests:
     def test_factory_preserves_response_format_for_deepseek(self) -> None:
         """验证 factory 构建 DeepSeek profile 时保留 response_format。"""
         profile = MockProfile(
@@ -40,7 +37,7 @@ class XcodeDeepSeekFactoryTests(unittest.TestCase):
         )
 
         assert isinstance(provider, DeepSeekProvider)
-        self.assertEqual(provider.response_format, {"type": "json_object"})
+        assert provider.response_format == {"type": "json_object"}
 
     def test_factory_passes_reasoning_effort_to_deepseek(self) -> None:
         """验证 factory 传递 reasoning_effort 到 DeepSeek。"""
@@ -55,8 +52,7 @@ class XcodeDeepSeekFactoryTests(unittest.TestCase):
         )
 
         assert isinstance(provider, DeepSeekProvider)
-        self.assertEqual(provider.reasoning_effort, "medium")
-
+        assert provider.reasoning_effort == "medium"
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

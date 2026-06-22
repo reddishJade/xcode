@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-import unittest
 from datetime import datetime
 
 from xcode.ai.events import FinalMessage, TextDelta, ToolCall, ToolCallEvent
@@ -23,15 +22,14 @@ from xcode.harness.observability import (
 )
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
-
+import pytest
 EMPTY_SCHEMA = {
     "type": "object",
     "properties": {},
     "additionalProperties": False,
 }
 
-
-class ObservabilityCorrelationTests(unittest.TestCase):
+class ObservabilityCorrelationTests:
     """验证同一轮 hook、事件和结果可以稳定关联。"""
 
     def test_typed_hook_subscriber_receives_correlation(self) -> None:
@@ -51,10 +49,10 @@ class ObservabilityCorrelationTests(unittest.TestCase):
         )
 
         event = events[0]
-        self.assertIsInstance(event, PreToolEvent)
         assert isinstance(event, PreToolEvent)
-        self.assertEqual(event.correlation.session_id, "session-1")
-        self.assertEqual(event.correlation.tool_call_id, "call-1")
+        assert isinstance(event, PreToolEvent)
+        assert event.correlation.session_id == "session-1"
+        assert event.correlation.tool_call_id == "call-1"
 
     def test_tool_run_shares_correlation_and_reports_timing_totals(self) -> None:
         """provider/tool hook 与结构化事件共享 session、turn、request、call id。"""
@@ -108,20 +106,20 @@ class ObservabilityCorrelationTests(unittest.TestCase):
         events = list(agent.run_stream("go"))
 
         for record in records:
-            self.assertEqual(record.session_id, "session-123")
-            self.assertIsNotNone(datetime.fromisoformat(record.timestamp))
+            assert record.session_id == "session-123"
+            assert datetime.fromisoformat(record.timestamp) is not None
         provider_record = next(
             record for record in records if record.event == "before_provider_request"
         )
         pre_record = next(record for record in records if record.event == "pre_tool")
         post_record = next(record for record in records if record.event == "post_tool")
-        self.assertEqual(pre_record.turn_id, provider_record.turn_id)
-        self.assertEqual(pre_record.request_id, provider_record.request_id)
-        self.assertEqual(pre_record.tool_call_id, "call-1")
-        self.assertEqual(post_record.tool_call_id, "call-1")
-        self.assertEqual(audits[0].turn_id, pre_record.turn_id)
-        self.assertEqual(audits[0].request_id, pre_record.request_id)
-        self.assertEqual(audits[0].tool_call_id, "call-1")
+        assert pre_record.turn_id == provider_record.turn_id
+        assert pre_record.request_id == provider_record.request_id
+        assert pre_record.tool_call_id == "call-1"
+        assert post_record.tool_call_id == "call-1"
+        assert audits[0].turn_id == pre_record.turn_id
+        assert audits[0].request_id == pre_record.request_id
+        assert audits[0].tool_call_id == "call-1"
 
         tool_use = next(
             event for event in events if isinstance(event, ToolUseStructuredEvent)
@@ -129,29 +127,22 @@ class ObservabilityCorrelationTests(unittest.TestCase):
         tool_result = next(
             event for event in events if isinstance(event, ToolResultStructuredEvent)
         )
-        self.assertEqual(tool_use.correlation.turn_id, pre_record.turn_id)
-        self.assertEqual(tool_use.correlation.request_id, pre_record.request_id)
-        self.assertEqual(tool_use.correlation.tool_call_id, "call-1")
-        self.assertEqual(
-            tool_result.correlation.request_id,
-            tool_use.correlation.request_id,
-        )
+        assert tool_use.correlation.turn_id == pre_record.turn_id
+        assert tool_use.correlation.request_id == pre_record.request_id
+        assert tool_use.correlation.tool_call_id == "call-1"
+        assert tool_result.correlation.request_id == tool_use.correlation.request_id
 
         final = events[-1]
-        self.assertIsInstance(final, FinalStructuredEvent)
+        assert isinstance(final, FinalStructuredEvent)
         assert isinstance(final, FinalStructuredEvent)
         metrics = final.data.metrics
         assert metrics is not None
-        self.assertGreater(metrics["model_time_ms"], 0)
-        self.assertGreater(metrics["tool_time_ms"], 0)
-        self.assertEqual(final.correlation.session_id, "session-123")
+        assert metrics["model_time_ms"] > 0
+        assert metrics["tool_time_ms"] > 0
+        assert final.correlation.session_id == "session-123"
 
         serialized = event_to_dict(tool_use)
-        self.assertEqual(
-            serialized["correlation"]["tool_call_id"],
-            "call-1",
-        )
-
+        assert serialized["correlation"]["tool_call_id"] == "call-1"
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

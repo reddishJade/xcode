@@ -4,19 +4,18 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
-import unittest
 from unittest.mock import patch
 from typing import Any
 
 from xcode.harness.config import (
-    DEFAULT_PROMPT_MODULES,
+DEFAULT_PROMPT_MODULES,
     discover_runtime_config,
     load_runtime_config,
     resolve_config_path,
 )
+import pytest
 
-
-class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
+class XcodeRuntimeConfigMergeSemanticsTests:
     """验证配置合并语义：显式设置的默认值不会被静默丢弃。"""
 
     def test_global_overridden_by_project_with_default_value(self) -> None:
@@ -43,7 +42,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
 
             # Project explicitly set max_steps=20 (same as default of 20),
             # but it must override global's 10.
-            self.assertEqual(config.agent.max_steps, 20)
+            assert config.agent.max_steps == 20
         finally:
             import shutil
 
@@ -67,8 +66,8 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             config = discover_runtime_config(root)
 
             # thinking=true 是默认值，但用户显式设置了它，不应被丢弃
-            self.assertTrue(config.provider.model_profiles["main"].thinking)
-            self.assertEqual(config.agent.max_steps, 20)
+            assert config.provider.model_profiles["main"].thinking
+            assert config.agent.max_steps == 20
         finally:
             import shutil
 
@@ -93,10 +92,8 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             config = discover_runtime_config(root)
 
             # agent.max_steps 不在 local 中出现，应从 project 继承
-            self.assertEqual(config.agent.max_steps, 15)
-            self.assertEqual(
-                config.provider.model_profiles["main"].transport, "deepseek_chat"
-            )
+            assert config.agent.max_steps == 15
+            assert config.provider.model_profiles["main"].transport == "deepseek_chat"
         finally:
             import shutil
 
@@ -113,7 +110,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             )
             with patch.dict("os.environ", {"XCODE_SANDBOX_MODE": "true"}):
                 config = discover_runtime_config(root)
-            self.assertTrue(config.security.sandbox_mode)
+            assert config.security.sandbox_mode
         finally:
             import shutil
 
@@ -130,7 +127,7 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             )
             config = discover_runtime_config(root)
             # 不抛出异常即为通过
-            self.assertIsNotNone(config)
+            assert config is not None
         finally:
             import shutil
 
@@ -150,8 +147,8 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             config = discover_runtime_config(root)
             profile = config.provider.model_profiles["main"]
 
-            self.assertEqual(profile.transport, "deepseek_chat")
-            self.assertIsNone(profile.reasoning_effort)
+            assert profile.transport == "deepseek_chat"
+            assert profile.reasoning_effort is None
         finally:
             import shutil
 
@@ -182,46 +179,35 @@ class XcodeRuntimeConfigMergeSemanticsTests(unittest.TestCase):
             with patch.object(Path, "home", return_value=global_home):
                 config = discover_runtime_config(root)
 
-            self.assertEqual(len(config.hooks.entries), 1)
+            assert len(config.hooks.entries) == 1
             hook = config.hooks.entries[0]
-            self.assertEqual(hook.event, "pre_tool")
-            self.assertEqual(hook.command, ("project-hook",))
-            self.assertEqual(hook.matcher, "bash")
-            self.assertEqual(hook.timeout, 2.5)
-            self.assertFalse(hook.enabled)
-            self.assertEqual(hook.failure_policy, "fail")
-            self.assertTrue(hook.inherit_to_subagents)
-            self.assertEqual(hook.source, str(project_path))
+            assert hook.event == "pre_tool"
+            assert hook.command == ("project-hook",)
+            assert hook.matcher == "bash"
+            assert hook.timeout == 2.5
+            assert not (hook.enabled)
+            assert hook.failure_policy == "fail"
+            assert hook.inherit_to_subagents
+            assert hook.source == str(project_path)
         finally:
             import shutil
 
             shutil.rmtree(root, ignore_errors=True)
 
-
-class XcodeRuntimeConfigTests(unittest.TestCase):
+class XcodeRuntimeConfigTests:
     def test_missing_config_uses_defaults(self) -> None:
         config = load_runtime_config(None)
 
-        self.assertEqual(
-            config.provider.model_profiles["main"].transport, "openai_chat"
-        )
-        self.assertEqual(
-            config.provider.model_profiles["main"].chat_model, "deepseek-v4-flash"
-        )
-        self.assertEqual(
-            config.provider.model_profiles["main"].base_url,
-            "https://api.deepseek.com",
-        )
-        self.assertEqual(
-            config.provider.model_profiles["subagent"],
-            config.provider.model_profiles["main"],
-        )
-        self.assertEqual(config.agent.max_steps, 20)
-        self.assertEqual(config.prompt.modules, DEFAULT_PROMPT_MODULES)
-        self.assertIsNone(config.paths.sessions_dir)
-        self.assertFalse(config.daemon.enabled)
-        self.assertEqual(config.daemon.interval_seconds, 30)
-        self.assertEqual(config.hooks.entries, ())
+        assert config.provider.model_profiles["main"].transport == "openai_chat"
+        assert config.provider.model_profiles["main"].chat_model == "deepseek-v4-flash"
+        assert config.provider.model_profiles["main"].base_url == "https://api.deepseek.com"
+        assert config.provider.model_profiles["subagent"] == config.provider.model_profiles["main"]
+        assert config.agent.max_steps == 20
+        assert config.prompt.modules == DEFAULT_PROMPT_MODULES
+        assert config.paths.sessions_dir is None
+        assert not (config.daemon.enabled)
+        assert config.daemon.interval_seconds == 30
+        assert config.hooks.entries == ()
 
     def test_loads_runtime_config_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -247,29 +233,19 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
 
             config = load_runtime_config(path)
 
-            self.assertEqual(
-                config.provider.model_profiles["main"].transport, "openai_chat"
-            )
-            self.assertEqual(
-                config.provider.model_profiles["main"].chat_model, "main-test"
-            )
-            self.assertEqual(
-                config.provider.model_profiles["main"].base_url,
-                "https://main.test",
-            )
-            self.assertEqual(
-                config.provider.model_profiles["subagent"].chat_model,
-                "subagent-test",
-            )
-            self.assertEqual(config.prompt.modules, ("identity", "tools"))
-            self.assertEqual(config.agent.max_steps, 9)
-            self.assertEqual(config.agent.tool_workers, 2)
-            self.assertEqual(config.agent.subagent_workers, 3)
-            self.assertEqual(config.paths.sessions_dir, Path("sessions"))
-            self.assertEqual(config.paths.skills_dir, Path("skills"))
-            self.assertEqual(config.observability.audit_path, Path("audit.jsonl"))
-            self.assertTrue(config.daemon.enabled)
-            self.assertEqual(config.daemon.interval_seconds, 15)
+            assert config.provider.model_profiles["main"].transport == "openai_chat"
+            assert config.provider.model_profiles["main"].chat_model == "main-test"
+            assert config.provider.model_profiles["main"].base_url == "https://main.test"
+            assert config.provider.model_profiles["subagent"].chat_model == "subagent-test"
+            assert config.prompt.modules == ("identity", "tools")
+            assert config.agent.max_steps == 9
+            assert config.agent.tool_workers == 2
+            assert config.agent.subagent_workers == 3
+            assert config.paths.sessions_dir == Path("sessions")
+            assert config.paths.skills_dir == Path("skills")
+            assert config.observability.audit_path == Path("audit.jsonl")
+            assert config.daemon.enabled
+            assert config.daemon.interval_seconds == 15
 
     def test_loads_external_hook_config(self) -> None:
         """外部 hook 声明转换为类型化 argv 配置。"""
@@ -287,15 +263,15 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
 
             config = load_runtime_config(path)
 
-        self.assertEqual(len(config.hooks.entries), 1)
+        assert len(config.hooks.entries) == 1
         hook = config.hooks.entries[0]
-        self.assertEqual(hook.command, ("python", "hook.py"))
-        self.assertEqual(hook.timeout, 3)
-        self.assertEqual(hook.source, str(path))
+        assert hook.command == ("python", "hook.py")
+        assert hook.timeout == 3
+        assert hook.source == str(path)
 
-    def test_rejects_invalid_external_hook_entries(self) -> None:
-        """无效 event、argv、timeout 和策略会 fail-fast。"""
-        invalid_entries = (
+    @pytest.mark.parametrize(
+        "entry",
+        [
             {"event": "unknown", "command": ["hook"]},
             {"event": "pre_tool", "command": "hook"},
             {"event": "pre_tool", "command": []},
@@ -313,23 +289,25 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
                 "command": ["hook"],
                 "inherit_to_subagents": "yes",
             },
-        )
-        for entry in invalid_entries:
-            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as tmp:
-                path = Path(tmp) / "xcode.config.json"
-                path.write_text(
-                    json.dumps({"hooks": {"entries": [entry]}}),
-                    encoding="utf-8",
-                )
-                with self.assertRaises(ValueError):
-                    load_runtime_config(path)
+        ],
+    )
+    def test_rejects_invalid_external_hook_entries(self, entry: dict) -> None:
+        """无效 event、argv、timeout 和策略会 fail-fast。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "xcode.config.json"
+            path.write_text(
+                json.dumps({"hooks": {"entries": [entry]}}),
+                encoding="utf-8",
+            )
+            with pytest.raises(ValueError):
+                load_runtime_config(path)
 
     def test_loads_chatglm_profile_options(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "xcode.config.json"
             path.write_text(
                 '{"provider":{"model_profiles":{"main":{'
-                '"transport":"chatglm_chat",'
+                '"transport":"chatglm_chat", '
                 '"chat_model":"glm-4.7",'
                 '"base_url":"https://open.bigmodel.cn/api/paas/v4/",'
                 '"thinking":false,'
@@ -344,13 +322,13 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             config = load_runtime_config(path)
             profile = config.provider.model_profiles["main"]
 
-            self.assertEqual(profile.transport, "chatglm_chat")
-            self.assertEqual(profile.chat_model, "glm-4.7")
-            self.assertFalse(profile.thinking)
-            self.assertIsNone(profile.reasoning_effort)
-            self.assertTrue(profile.clear_thinking)
-            self.assertFalse(profile.tool_stream)
-            self.assertEqual(profile.response_format, {"type": "json_object"})
+            assert profile.transport == "chatglm_chat"
+            assert profile.chat_model == "glm-4.7"
+            assert not (profile.thinking)
+            assert profile.reasoning_effort is None
+            assert profile.clear_thinking
+            assert not (profile.tool_stream)
+            assert profile.response_format == {"type": "json_object"}
 
     def test_discovers_project_root_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -362,7 +340,7 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
 
             config = discover_runtime_config(root)
 
-            self.assertEqual(config.agent.max_steps, 13)
+            assert config.agent.max_steps == 13
 
     def test_runtime_config_converts_to_core_configs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -375,17 +353,17 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             config = load_runtime_config(path)
             agent = config.agent
 
-            self.assertEqual(agent.max_steps, 8)
-            self.assertEqual(agent.tool_workers, 1)
-            self.assertEqual(agent.execution_mode, "act")
+            assert agent.max_steps == 8
+            assert agent.tool_workers == 1
+            assert agent.execution_mode == "act"
 
     def test_resolve_config_path_keeps_absolute_and_roots_relative(self) -> None:
         root = Path("project").resolve()
         absolute = root / "absolute"
 
-        self.assertEqual(resolve_config_path(root, None), None)
-        self.assertEqual(resolve_config_path(root, absolute), absolute)
-        self.assertEqual(resolve_config_path(root, Path("docs")), root / "docs")
+        assert resolve_config_path(root, None) == None
+        assert resolve_config_path(root, absolute) == absolute
+        assert resolve_config_path(root, Path("docs")) == root / "docs"
 
     def test_repl_entry_consumes_explicit_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -432,14 +410,14 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             ):
                 import xcode.main as main_module
 
-                self.assertEqual(main_module.main(), 0)
+                assert main_module.main() == 0
 
             runtime: Any = captured["runtime_config"]
-            self.assertEqual(runtime.agent.max_steps, 11)
-            self.assertEqual(runtime.agent.tool_workers, 3)
-            self.assertEqual(runtime.paths.skills_dir, Path("skills"))
-            self.assertEqual(runtime.observability.audit_path, Path("audit.jsonl"))
-            self.assertEqual(captured["sessions_dir"], root / "sessions")
+            assert runtime.agent.max_steps == 11
+            assert runtime.agent.tool_workers == 3
+            assert runtime.paths.skills_dir == Path("skills")
+            assert runtime.observability.audit_path == Path("audit.jsonl")
+            assert captured["sessions_dir"] == root / "sessions"
 
     def test_repl_entry_discovers_project_root_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -481,11 +459,11 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             ):
                 import xcode.main as main_module
 
-                self.assertEqual(main_module.main(), 0)
+                assert main_module.main() == 0
 
             runtime: Any = captured["runtime_config"]
-            self.assertEqual(runtime.agent.max_steps, 12)
-            self.assertEqual(captured["sessions_dir"], root / "sessions")
+            assert runtime.agent.max_steps == 12
+            assert captured["sessions_dir"] == root / "sessions"
 
     def test_prompt_entry_uses_project_root_and_streams(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -518,9 +496,9 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
             ):
                 import xcode.main as main_module
 
-                self.assertEqual(main_module.main(), 0)
+                assert main_module.main() == 0
 
-            self.assertEqual(captured["project_root"], root)
+            assert captured["project_root"] == root
 
     def test_resume_flag_opens_repl_picker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -558,13 +536,11 @@ class XcodeRuntimeConfigTests(unittest.TestCase):
                 patch("xcode.main.has_valid_config", return_value=True),
             ):
                 import xcode.main as main_module
+                assert main_module.main() == 0
 
-                self.assertEqual(main_module.main(), 0)
-
-            self.assertEqual(captured["project_root"], root)
-            self.assertEqual(captured["sessions_dir"], root / ".local" / "sessions")
-            self.assertTrue(captured["resume_latest"])
-
+            assert captured["project_root"] == root
+            assert captured["sessions_dir"] == root / ".local" / "sessions"
+            assert captured["resume_latest"]
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

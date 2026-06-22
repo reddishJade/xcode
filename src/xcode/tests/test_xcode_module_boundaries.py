@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-import unittest
-
-
-class XcodeModuleBoundaryTests(unittest.TestCase):
+import pytest
+class XcodeModuleBoundaryTests:
     """验证已删除的模块边界不会被重新引入。"""
 
     def test_experimental_package_is_absent(self) -> None:
         """禁止恢复 experimental package 或对应 import。"""
         package_root = Path(__file__).resolve().parents[1]
         experimental_name = "experimental"
-        self.assertFalse((package_root / experimental_name).exists())
+        assert not ((package_root / experimental_name).exists())
 
         import_name = "xcode." + experimental_name
         imported_by: list[Path] = []
@@ -24,8 +22,7 @@ class XcodeModuleBoundaryTests(unittest.TestCase):
             if import_name in source:
                 imported_by.append(source_path.relative_to(package_root))
 
-        self.assertEqual(imported_by, [])
-
+        assert imported_by == []
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

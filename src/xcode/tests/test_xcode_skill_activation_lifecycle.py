@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
-import unittest
 from types import SimpleNamespace
 
 from xcode.agent.messages import AssistantMessage, ToolResultMessage
@@ -20,8 +19,7 @@ from xcode.harness.skills_registry import (
     build_skill_search_dirs,
 )
 from xcode.tests.fixtures import FakeProvider
-
-
+import pytest
 class _ResettableFakeProvider(FakeProvider):
     """记录显式激活后的 provider 会话重置。"""
 
@@ -32,7 +30,6 @@ class _ResettableFakeProvider(FakeProvider):
     def reset_conversation_state(self) -> None:
         """记录 provider 会话状态重置次数。"""
         self.reset_count += 1
-
 
 def _skill_registry(root: Path) -> SkillRegistry:
     """创建包含单一可激活技能的测试注册表。"""
@@ -46,8 +43,7 @@ def _skill_registry(root: Path) -> SkillRegistry:
     registry.discover(build_skill_search_dirs(root))
     return registry
 
-
-class XcodeSkillActivationLifecycleTests(unittest.TestCase):
+class XcodeSkillActivationLifecycleTests:
     """验证 Skill 激活状态可恢复且不会被 transcript 压缩破坏。"""
 
     def test_explicit_activation_uses_canonical_history_pair(self) -> None:
@@ -66,17 +62,17 @@ class XcodeSkillActivationLifecycleTests(unittest.TestCase):
             repeated = agent.activate_skill("code-review")
             history = agent.history_messages()
 
-        self.assertEqual(result.status, "activated")
-        self.assertIsNotNone(result.tool_call_id)
-        self.assertIn("FULL_SKILL_BODY", result.content)
-        self.assertEqual(repeated.status, "already_active")
-        self.assertEqual(provider.reset_count, 1)
-        self.assertEqual(len(history), 2)
-        self.assertIsInstance(history[0], AssistantMessage)
-        self.assertIsInstance(history[1], ToolResultMessage)
+        assert result.status == "activated"
+        assert result.tool_call_id is not None
+        assert "FULL_SKILL_BODY" in result.content
+        assert repeated.status == "already_active"
+        assert provider.reset_count == 1
+        assert len(history) == 2
+        assert isinstance(history[0], AssistantMessage)
         assert isinstance(history[1], ToolResultMessage)
-        self.assertEqual(history[1].tool_call_id, result.tool_call_id)
-        self.assertIn("<skill-activation-state>", str(history[1].content))
+        assert isinstance(history[1], ToolResultMessage)
+        assert history[1].tool_call_id == result.tool_call_id
+        assert "<skill-activation-state>" in str(history[1].content)
 
     def test_explicit_activation_reports_unknown_disabled_and_blocked(self) -> None:
         """未知、禁用和权限阻止状态会返回明确诊断。"""
@@ -103,10 +99,10 @@ class XcodeSkillActivationLifecycleTests(unittest.TestCase):
             unknown = agent.activate_skill("missing")
             blocked = agent.activate_skill("code-review")
 
-        self.assertEqual(disabled.status, "disabled")
-        self.assertEqual(unknown.status, "unknown")
-        self.assertEqual(blocked.status, "blocked")
-        self.assertIn("Unknown skill", unknown.message)
+        assert disabled.status == "disabled"
+        assert unknown.status == "unknown"
+        assert blocked.status == "blocked"
+        assert "Unknown skill" in unknown.message
 
     def test_explicit_activation_round_trips_through_repl_session(self) -> None:
         """显式激活事件可从 transcript 恢复到同一 activation 状态。"""
@@ -136,13 +132,10 @@ class XcodeSkillActivationLifecycleTests(unittest.TestCase):
             )
             resumed_agent.load_history(restored_messages)
 
-        self.assertEqual(result.status, "activated")
-        self.assertEqual(compacted, 0)
-        self.assertEqual(resumed_registry.activated_names(), ("code-review",))
-        self.assertEqual(
-            resumed_agent.activate_skill("code-review").status,
-            "already_active",
-        )
+        assert result.status == "activated"
+        assert compacted == 0
+        assert resumed_registry.activated_names() == ("code-review",)
+        assert resumed_agent.activate_skill("code-review").status == "already_active"
 
     def test_registry_restores_activation_from_history(self) -> None:
         """恢复历史后重复加载返回 already-active。"""
@@ -172,9 +165,9 @@ class XcodeSkillActivationLifecycleTests(unittest.TestCase):
                 {"name": "code-review"}
             )
 
-        self.assertEqual(resumed_registry.activated_names(), ("code-review",))
-        self.assertIn('status="already-active"', repeated)
-        self.assertNotIn("BODY", repeated)
+        assert resumed_registry.activated_names() == ("code-review",)
+        assert 'status="already-active"' in repeated
+        assert "BODY" not in repeated
 
     def test_session_compaction_preserves_activation_result(self) -> None:
         """会话 transcript 压缩不截断技能激活正文。"""
@@ -202,9 +195,8 @@ class XcodeSkillActivationLifecycleTests(unittest.TestCase):
             compacted = store.compact_current_session(max_tool_result_chars=10)
             records = store.load_records()
 
-        self.assertEqual(compacted, 0)
-        self.assertIn("FULL_SKILL_BODY", str(records[1].content))
-
+        assert compacted == 0
+        assert "FULL_SKILL_BODY" in str(records[1].content)
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

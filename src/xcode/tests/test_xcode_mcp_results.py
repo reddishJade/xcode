@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import unittest
-
 from xcode.agent.types import FileContent, ImageContent
 from xcode.harness.mcp.results import (
     MCP_RESULT_METADATA_KEY,
     convert_mcp_tool_result,
 )
 from xcode.harness.skills import AGENT_CONTENT_BLOCKS_METADATA_KEY
-
-
-class McpToolResultTests(unittest.TestCase):
+import pytest
+class McpToolResultTests:
     """验证 MCP result 到宿主结果模型的转换。"""
 
     def test_validates_and_preserves_structured_content(self) -> None:
@@ -36,16 +33,13 @@ class McpToolResultTests(unittest.TestCase):
             },
         )
 
-        self.assertFalse(output.is_error)
-        self.assertIn("[MCP structuredContent]", output)
+        assert not (output.is_error)
+        assert "[MCP structuredContent]" in output
         details = output.metadata[MCP_RESULT_METADATA_KEY]
-        self.assertIsInstance(details, dict)
         assert isinstance(details, dict)
-        self.assertEqual(
-            details["structuredContent"],
-            {"temperature": 22.5, "conditions": "clear"},
-        )
-        self.assertEqual(details["validation"]["status"], "valid")
+        assert isinstance(details, dict)
+        assert details["structuredContent"] == {"temperature": 22.5, "conditions": "clear"}
+        assert details["validation"]["status"] == "valid"
 
     def test_invalid_structured_content_is_a_tool_error(self) -> None:
         """不符合 outputSchema 的结果保留内容并标记为错误。"""
@@ -61,12 +55,12 @@ class McpToolResultTests(unittest.TestCase):
             },
         )
 
-        self.assertTrue(output.is_error)
-        self.assertIn("server text", output)
-        self.assertIn("violates outputSchema", output)
+        assert output.is_error
+        assert "server text" in output
+        assert "violates outputSchema" in output
         details = output.metadata[MCP_RESULT_METADATA_KEY]
         assert isinstance(details, dict)
-        self.assertEqual(details["validation"]["status"], "invalid")
+        assert details["validation"]["status"] == "invalid"
 
     def test_maps_all_supported_non_text_blocks_and_continues(self) -> None:
         """非文本块进入宿主类型，未知块不丢失后续内容。"""
@@ -106,24 +100,24 @@ class McpToolResultTests(unittest.TestCase):
             None,
         )
 
-        self.assertTrue(output.is_error)
-        self.assertIn("before", output)
-        self.assertIn("after", output)
-        self.assertIn("future_content", output)
+        assert output.is_error
+        assert "before" in output
+        assert "after" in output
+        assert "future_content" in output
         blocks = output.metadata[AGENT_CONTENT_BLOCKS_METADATA_KEY]
-        self.assertIsInstance(blocks, list)
         assert isinstance(blocks, list)
-        self.assertEqual(len(blocks), 4)
-        self.assertIsInstance(blocks[0], ImageContent)
-        self.assertTrue(all(isinstance(block, FileContent) for block in blocks[1:]))
+        assert isinstance(blocks, list)
+        assert len(blocks) == 4
+        assert isinstance(blocks[0], ImageContent)
+        assert all(isinstance(block, FileContent) for block in blocks[1:])
 
         image = blocks[0]
         assert isinstance(image, ImageContent)
-        self.assertEqual(image.source["annotations"], {"audience": ["user"]})
+        assert image.source["annotations"] == {"audience": ["user"]}
         resource = blocks[3]
         assert isinstance(resource, FileContent)
-        self.assertEqual(resource.filename, "readme.txt")
-        self.assertEqual(resource.file_data, "embedded")
+        assert resource.filename == "readme.txt"
+        assert resource.file_data == "embedded"
 
     def test_reports_complete_redacted_unsupported_block(self) -> None:
         """unsupported 诊断保留完整块，同时脱敏凭据。"""
@@ -140,9 +134,9 @@ class McpToolResultTests(unittest.TestCase):
             None,
         )
 
-        self.assertIn('"nested": {"value": 7}', output)
-        self.assertIn("Bearer ****", output)
-        self.assertNotIn("secret-value", output)
+        assert '"nested": {"value": 7}' in output
+        assert "Bearer ****" in output
+        assert "secret-value" not in output
 
     def test_requires_structured_content_when_output_schema_exists(self) -> None:
         """声明 outputSchema 后缺少 structuredContent 会标记协议错误。"""
@@ -151,8 +145,8 @@ class McpToolResultTests(unittest.TestCase):
             {"type": "object"},
         )
 
-        self.assertTrue(output.is_error)
-        self.assertIn("returned no structuredContent", output)
+        assert output.is_error
+        assert "returned no structuredContent" in output
 
     def test_preserves_server_error_status(self) -> None:
         """MCP isError 会直接进入宿主错误状态。"""
@@ -164,12 +158,11 @@ class McpToolResultTests(unittest.TestCase):
             {"type": "object"},
         )
 
-        self.assertTrue(output.is_error)
-        self.assertEqual(output, "request rejected")
+        assert output.is_error
+        assert output == "request rejected"
         details = output.metadata[MCP_RESULT_METADATA_KEY]
         assert isinstance(details, dict)
-        self.assertEqual(details["validation"]["status"], "not_applicable")
-
+        assert details["validation"]["status"] == "not_applicable"
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

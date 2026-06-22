@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import tempfile
-import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -23,14 +22,13 @@ from xcode.ai.providers import PROVIDER_REGISTRY
 from xcode.ai.providers.openai import OpenAIChatProvider
 from xcode.ai.providers.chatglm import ChatGLMProvider
 from xcode.harness.config import (
-    ModelProfileRuntimeConfig,
+ModelProfileRuntimeConfig,
     ProviderTransport,
     load_runtime_config,
 )
-
+import pytest
 
 # ── 测试辅助：创建 mock OpenAI 客户端 ──
-
 
 def _make_mock_client(chunks: list | None = None) -> MagicMock:
     """创建 mock openai.OpenAI 客户端，捕获请求参数。"""
@@ -38,20 +36,16 @@ def _make_mock_client(chunks: list | None = None) -> MagicMock:
     client.chat.completions.create.return_value = iter(chunks or [])
     return client
 
-
 # ── 流式 chunk 模拟对象 ──
-
 
 class FakeStreamChunk:
     def __init__(self, content=None, tool_call=None, reasoning=None) -> None:
         self.choices = [FakeStreamChoice(content, tool_call, reasoning)]
         self.usage = None
 
-
 class FakeStreamChoice:
     def __init__(self, content, tool_call, reasoning=None) -> None:
         self.delta = FakeStreamDelta(content, tool_call, reasoning)
-
 
 class FakeStreamDelta:
     def __init__(self, content, tool_call, reasoning=None) -> None:
@@ -59,30 +53,26 @@ class FakeStreamDelta:
         self.tool_calls = [tool_call] if tool_call is not None else []
         self.reasoning_content = reasoning
 
-
 class FakeStreamToolCall:
     def __init__(self, index, call_id=None, name=None, arguments=None) -> None:
         self.index = index
         self.id = call_id
         self.function = FakeStreamFunction(name, arguments)
 
-
 class FakeStreamFunction:
     def __init__(self, name, arguments) -> None:
         self.name = name
         self.arguments = arguments
 
-
 # ── Env / Factory 测试 ──
 
-
-class XcodeProviderEnvTests(unittest.TestCase):
+class XcodeProviderEnvTests:
     def test_all_declared_runtime_transports_are_registered(self) -> None:
         """每个配置 transport 都必须有可构造 provider。"""
         declared = set(get_args(ProviderTransport))
         registered = set(PROVIDER_REGISTRY) - {"faux_chat"}
 
-        self.assertEqual(declared, registered)
+        assert declared == registered
 
     def test_unsupported_anthropic_transport_fails_fast(self) -> None:
         """未实现的 Anthropic transport 不再静默回退为 OpenAI。"""
@@ -101,7 +91,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaisesRegex(ValueError, "Unsupported provider transport"):
+            with pytest.raises(ValueError, match="Unsupported provider transport"):
                 load_runtime_config(config_path)
 
     def test_env_file_loading_and_precedence(self) -> None:
@@ -109,8 +99,8 @@ class XcodeProviderEnvTests(unittest.TestCase):
             env_file = Path(temp_dir) / ".env"
             env_file.write_text("A=from_file\nQUOTED='value'\n", encoding="utf-8")
 
-            self.assertEqual(dotenv_values(env_file)["A"], "from_file")
-            self.assertEqual(get_config_value("QUOTED", (env_file,)), "value")
+            assert dotenv_values(env_file)["A"] == "from_file"
+            assert get_config_value("QUOTED", (env_file,)) == "value"
 
     def test_provider_factory_reads_env_and_builds_providers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -138,17 +128,17 @@ class XcodeProviderEnvTests(unittest.TestCase):
                     )
                 )
 
-                self.assertIsInstance(bundle.llm, OpenAIChatProvider)
+                assert isinstance(bundle.llm, OpenAIChatProvider)
                 llm = bundle.llm
                 assert isinstance(llm, OpenAIChatProvider)
                 subagent = bundle.llms["subagent"]
                 assert isinstance(subagent, OpenAIChatProvider)
                 judge = bundle.llms["judge"]
                 assert isinstance(judge, OpenAIChatProvider)
-                self.assertEqual(llm.transport, "openai_chat")
-                self.assertEqual(llm.model, "main-model")
-                self.assertEqual(subagent.model, "small-model")
-                self.assertEqual(judge.model, "main-model")
+                assert llm.transport == "openai_chat"
+                assert llm.model == "main-model"
+                assert subagent.model == "small-model"
+                assert judge.model == "main-model"
 
     def test_api_key_resolution_follows_documented_order(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -159,7 +149,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
             )
 
             with patch.dict("os.environ", {}, clear=True):
-                self.assertEqual(_resolve_api_key("", "main", (env_file,)), "profile")
+                assert _resolve_api_key("", "main", (env_file,)) == "profile"
 
             env_file.write_text(
                 "DEEPSEEK_API_KEY=legacy\nOPENAI_API_KEY=openai\nAPI_KEY=generic\n",
@@ -167,14 +157,14 @@ class XcodeProviderEnvTests(unittest.TestCase):
             )
 
             with patch.dict("os.environ", {}, clear=True):
-                self.assertEqual(_resolve_api_key("", "main", (env_file,)), "openai")
+                assert _resolve_api_key("", "main", (env_file,)) == "openai"
 
             env_file.write_text(
                 "DEEPSEEK_API_KEY=legacy\nAPI_KEY=generic\n", encoding="utf-8"
             )
 
             with patch.dict("os.environ", {}, clear=True):
-                self.assertEqual(_resolve_api_key("", "main", (env_file,)), "generic")
+                assert _resolve_api_key("", "main", (env_file,)) == "generic"
 
     def test_provider_factory_builds_chatglm_from_provider_env(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -200,13 +190,13 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 )
 
                 provider = bundle.llm
-                self.assertIsInstance(provider, ChatGLMProvider)
                 assert isinstance(provider, ChatGLMProvider)
-                self.assertEqual(provider.client.api_key, "glm-key")
-                self.assertEqual(provider.model, "glm-4.7")
-                self.assertTrue(provider.clear_thinking)
-                self.assertFalse(provider.tool_stream)
-                self.assertEqual(provider.response_format, {"type": "json_object"})
+                assert isinstance(provider, ChatGLMProvider)
+                assert provider.client.api_key == "glm-key"
+                assert provider.model == "glm-4.7"
+                assert provider.clear_thinking
+                assert not (provider.tool_stream)
+                assert provider.response_format == {"type": "json_object"}
 
     def test_explicit_profile_api_key_overrides_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -232,7 +222,7 @@ class XcodeProviderEnvTests(unittest.TestCase):
 
                 llm = bundle.llm
                 assert isinstance(llm, OpenAIChatProvider)
-                self.assertEqual(llm.client.api_key, "configured")
+                assert llm.client.api_key == "configured"
 
     def test_profile_api_key_overrides_openai_api_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -263,14 +253,12 @@ class XcodeProviderEnvTests(unittest.TestCase):
                 assert isinstance(main, OpenAIChatProvider)
                 subagent = bundle.llms["subagent"]
                 assert isinstance(subagent, OpenAIChatProvider)
-                self.assertEqual(main.client.api_key, "openai")
-                self.assertEqual(subagent.client.api_key, "subagent")
-
+                assert main.client.api_key == "openai"
+                assert subagent.client.api_key == "subagent"
 
 # ── Runtime 测试 ──
 
-
-class XcodeProviderRuntimeTests(unittest.TestCase):
+class XcodeProviderRuntimeTests:
     def test_retry_succeeds_after_transient_failure(self) -> None:
         calls = []
         runtime = ProviderRuntime(
@@ -284,8 +272,8 @@ class XcodeProviderRuntimeTests(unittest.TestCase):
                 raise RuntimeError("temporary")
             return "ok"
 
-        self.assertEqual(runtime.run(flaky), "ok")
-        self.assertEqual(len(calls), 2)
+        assert runtime.run(flaky) == "ok"
+        assert len(calls) == 2
 
     def test_rate_limit_waits_between_calls(self) -> None:
         current = [10.0]
@@ -300,13 +288,11 @@ class XcodeProviderRuntimeTests(unittest.TestCase):
         current[0] = 10.2
         runtime.run(lambda: "second")
 
-        self.assertEqual(sleeps, [0.8000000000000007])
-
+        assert sleeps == [0.8000000000000007]
 
 # ── OpenAI Chat 测试 ──
 
-
-class XcodeStructuredProviderTests(unittest.TestCase):
+class XcodeStructuredProviderTests:
     def test_stream_converts_tool_schema_and_tool_calls(self) -> None:
         client = _make_mock_client(
             [
@@ -346,12 +332,12 @@ class XcodeStructuredProviderTests(unittest.TestCase):
             )
         )
         tool_call = events[-1]
-        self.assertIsInstance(tool_call, ToolCallEvent)
         assert isinstance(tool_call, ToolCallEvent)
-        self.assertEqual(tool_call.calls[0].name, "echo")
-        self.assertEqual(tool_call.calls[0].input, {"text": "hello"})
+        assert isinstance(tool_call, ToolCallEvent)
+        assert tool_call.calls[0].name == "echo"
+        assert tool_call.calls[0].input == {"text": "hello"}
         sent_tool = client.chat.completions.create.call_args.kwargs["tools"][0]
-        self.assertEqual(sent_tool["function"]["parameters"], tool.parameters)
+        assert sent_tool["function"]["parameters"] == tool.parameters
 
     def test_stream_converts_tool_results_to_openai_messages(self) -> None:
         client = _make_mock_client([FakeStreamChunk(content="done")])
@@ -395,11 +381,9 @@ class XcodeStructuredProviderTests(unittest.TestCase):
         )
 
         sent_messages = client.chat.completions.create.call_args.kwargs["messages"]
-        self.assertEqual(sent_messages[0]["role"], "assistant")
-        self.assertEqual(sent_messages[1]["role"], "tool")
-        self.assertEqual(
-            [e for e in events if isinstance(e, TextDelta)][0].chunk, "done"
-        )
+        assert sent_messages[0]["role"] == "assistant"
+        assert sent_messages[1]["role"] == "tool"
+        assert [e for e in events if isinstance(e, TextDelta)][0].chunk == "done"
 
     def test_stream_yields_text_and_tool_call_deltas(self) -> None:
         client = _make_mock_client(
@@ -434,22 +418,20 @@ class XcodeStructuredProviderTests(unittest.TestCase):
 
         events = list(llm._stream_sync([{"role": "user", "content": "go"}], ()))
 
-        self.assertIsInstance(events[0], TextDelta)
         assert isinstance(events[0], TextDelta)
-        self.assertEqual(events[0].chunk, "he")
-        self.assertIsInstance(events[1], TextDelta)
+        assert isinstance(events[0], TextDelta)
+        assert events[0].chunk == "he"
         assert isinstance(events[1], TextDelta)
-        self.assertEqual(events[1].chunk, "llo")
-        self.assertIsInstance(events[-1], ToolCallEvent)
+        assert isinstance(events[1], TextDelta)
+        assert events[1].chunk == "llo"
         assert isinstance(events[-1], ToolCallEvent)
-        self.assertEqual(events[-1].calls[0].id, "call-1")
-        self.assertEqual(events[-1].calls[0].name, "echo")
-        self.assertEqual(events[-1].calls[0].input, {"text": "hi"})
-        self.assertTrue(client.chat.completions.create.call_args.kwargs["stream"])
-
+        assert isinstance(events[-1], ToolCallEvent)
+        assert events[-1].calls[0].id == "call-1"
+        assert events[-1].calls[0].name == "echo"
+        assert events[-1].calls[0].input == {"text": "hi"}
+        assert client.chat.completions.create.call_args.kwargs["stream"]
 
 # ── ChatGLM 测试 ──
-
 
 def _make_glm_provider(client: Any = None, **overrides: Any) -> ChatGLMProvider:
     kwargs: dict[str, Any] = dict(
@@ -464,8 +446,7 @@ def _make_glm_provider(client: Any = None, **overrides: Any) -> ChatGLMProvider:
     kwargs.update(overrides)
     return ChatGLMProvider(**kwargs)
 
-
-class XcodeChatGLMProviderTests(unittest.TestCase):
+class XcodeChatGLMProviderTests:
     """ChatGLM provider 边界测试：thinking 清理、tool_stream、参数组合。"""
 
     def test_thinking_disabled_sets_extra_body(self) -> None:
@@ -474,7 +455,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         provider = _make_glm_provider(client=client, thinking=False)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
-        self.assertEqual(extra.get("thinking", {}).get("type"), "disabled")
+        assert extra.get("thinking", {}).get("type") == "disabled"
 
     def test_uses_openai_compatible_model_and_credentials(self) -> None:
         """ChatGLM 参数正确传递到 OpenAI 客户端。"""
@@ -488,7 +469,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
 
         kwargs = client.chat.completions.create.call_args.kwargs
-        self.assertEqual(kwargs["model"], "glm-4-flash")
+        assert kwargs["model"] == "glm-4-flash"
 
     def test_thinking_enabled_clear_false(self) -> None:
         """clear_thinking=False 时 extra_body 包含 clear_thinking=false。"""
@@ -497,8 +478,8 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
         thinking = extra.get("thinking", {})
-        self.assertEqual(thinking.get("type"), "enabled")
-        self.assertIs(thinking.get("clear_thinking"), False)
+        assert thinking.get("type") == "enabled"
+        assert thinking.get("clear_thinking") is False
 
     def test_thinking_enabled_clear_true(self) -> None:
         """clear_thinking=True 时 extra_body 包含 clear_thinking=true。"""
@@ -507,8 +488,8 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
         thinking = extra.get("thinking", {})
-        self.assertEqual(thinking.get("type"), "enabled")
-        self.assertIs(thinking.get("clear_thinking"), True)
+        assert thinking.get("type") == "enabled"
+        assert thinking.get("clear_thinking") is True
 
     def test_turn_level_thinking_override_is_per_request(self) -> None:
         """单次请求可覆盖 thinking，不改变 provider 默认值。"""
@@ -525,14 +506,14 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         first = client.chat.completions.create.call_args.kwargs["extra_body"][
             "thinking"
         ]
-        self.assertEqual(first["type"], "disabled")
-        self.assertTrue(provider.thinking)
+        assert first["type"] == "disabled"
+        assert provider.thinking
 
         list(provider._stream_sync([{"role": "user", "content": "hard"}], ()))
         second = client.chat.completions.create.call_args.kwargs["extra_body"][
             "thinking"
         ]
-        self.assertEqual(second["type"], "enabled")
+        assert second["type"] == "enabled"
 
     def test_structured_output_response_format_is_sent(self) -> None:
         """结构化输出透传 response_format。"""
@@ -543,7 +524,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         list(provider._stream_sync([{"role": "user", "content": "json"}], ()))
 
         kwargs = client.chat.completions.create.call_args.kwargs
-        self.assertEqual(kwargs["response_format"], {"type": "json_object"})
+        assert kwargs["response_format"] == {"type": "json_object"}
 
     def test_tool_stream_disabled(self) -> None:
         """tool_stream=False 时不传 tool_stream 参数。"""
@@ -551,7 +532,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         provider = _make_glm_provider(client=client, tool_stream=False)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
-        self.assertNotIn("tool_stream", extra)
+        assert "tool_stream" not in extra
 
     def test_tool_stream_enabled_for_supported_model(self) -> None:
         """支持的模型开启 tool_stream 时传 tool_stream=true。"""
@@ -559,7 +540,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         provider = _make_glm_provider(client=client, model="glm-4.7", tool_stream=True)
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
-        self.assertIs(extra.get("tool_stream"), True)
+        assert extra.get("tool_stream") is True
 
     def test_tool_stream_omitted_for_unsupported_model(self) -> None:
         """不支持的模型不传 tool_stream 参数。"""
@@ -569,7 +550,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         )
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
-        self.assertNotIn("tool_stream", extra)
+        assert "tool_stream" not in extra
 
     def test_clean_reasoning_no_tool_loop(self) -> None:
         """clear_thinking=True 时清除所有历史 reasoning_content。"""
@@ -581,7 +562,7 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         ]
         cleaned = provider._clean_reasoning_content(messages)
         for msg in cleaned:
-            self.assertNotIn("reasoning_content", msg)
+            assert "reasoning_content" not in msg
 
     def test_clean_reasoning_retains_all_when_clear_false(self) -> None:
         """clear_thinking=False 时保留所有 reasoning_content。"""
@@ -599,8 +580,8 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             {"role": "tool", "tool_call_id": "t1", "content": "result"},
         ]
         cleaned = provider._clean_reasoning_content(messages)
-        self.assertEqual(cleaned[1]["reasoning_content"], "think1")
-        self.assertEqual(cleaned[3]["reasoning_content"], "think2")
+        assert cleaned[1]["reasoning_content"] == "think1"
+        assert cleaned[3]["reasoning_content"] == "think2"
 
     def test_clean_reasoning_clear_true_removes_tool_loop_reasoning(self) -> None:
         """clear_thinking=True 时工具循环也清除 reasoning_content。"""
@@ -620,8 +601,8 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
             {"role": "tool", "tool_call_id": "t1", "content": "result"},
         ]
         cleaned = provider._clean_reasoning_content(messages)
-        self.assertNotIn("reasoning_content", cleaned[1])
-        self.assertNotIn("reasoning_content", cleaned[3])
+        assert "reasoning_content" not in cleaned[1]
+        assert "reasoning_content" not in cleaned[3]
 
     def test_thinking_true_streams_reasoning(self) -> None:
         """thinking=True 时流包含 reasoning delta。"""
@@ -636,8 +617,8 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         provider = _make_glm_provider(client=client)
         events = list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         reasoning_events = [e for e in events if isinstance(e, ReasoningDelta)]
-        self.assertEqual(len(reasoning_events), 1)
-        self.assertEqual(reasoning_events[0].chunk, "thinking...")
+        assert len(reasoning_events) == 1
+        assert reasoning_events[0].chunk == "thinking..."
 
     def test_combo_tool_stream_plus_clear_thinking(self) -> None:
         """tool_stream=True + clear_thinking=True 组合参数正确传递。"""
@@ -650,8 +631,8 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
         )
         list(provider._stream_sync([{"role": "user", "content": "hi"}], ()))
         extra = client.chat.completions.create.call_args.kwargs.get("extra_body", {})
-        self.assertIs(extra["tool_stream"], True)
-        self.assertIs(extra["thinking"]["clear_thinking"], True)
+        assert extra["tool_stream"] is True
+        assert extra["thinking"]["clear_thinking"] is True
 
     def test_record_usage_cached_and_reasoning_tokens(self) -> None:
         """usage 统计记录 cached_tokens 和 reasoning_tokens。"""
@@ -681,18 +662,17 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
 
         provider = _make_glm_provider()
         provider._record_usage(FakeUsageResponse(), sent_messages=2)
-        self.assertEqual(provider.metrics["prompt_tokens"], 100)
-        self.assertEqual(provider.metrics["completion_tokens"], 50)
-        self.assertEqual(provider.metrics["total_tokens"], 150)
-        self.assertEqual(provider.metrics["cached_tokens"], 20)
-        self.assertEqual(provider.metrics["cache_hit_rate"], 0.2)
-        self.assertEqual(provider.metrics["reasoning_tokens"], 10)
-        self.assertEqual(provider.metrics["sent_messages"], 2)
+        assert provider.metrics["prompt_tokens"] == 100
+        assert provider.metrics["completion_tokens"] == 50
+        assert provider.metrics["total_tokens"] == 150
+        assert provider.metrics["cached_tokens"] == 20
+        assert provider.metrics["cache_hit_rate"] == 0.2
+        assert provider.metrics["reasoning_tokens"] == 10
+        assert provider.metrics["sent_messages"] == 2
 
     def test_record_usage_none_details_degradation(self) -> None:
         """prompt_tokens_details / completion_tokens_details 为 None 时降级为 0。"""
         from collections import namedtuple
-
         FakeUsage = namedtuple(
             "FakeUsage",
             [
@@ -713,13 +693,12 @@ class XcodeChatGLMProviderTests(unittest.TestCase):
 
         provider = _make_glm_provider()
         provider._record_usage(FakeUsageNoDetails(), sent_messages=1)
-        self.assertEqual(provider.metrics["cached_tokens"], 0)
-        self.assertEqual(provider.metrics["reasoning_tokens"], 0)
+        assert provider.metrics["cached_tokens"] == 0
+        assert provider.metrics["reasoning_tokens"] == 0
 
     def test_transport_is_chatglm(self) -> None:
         provider = _make_glm_provider()
-        self.assertEqual(provider.transport, "chatglm_chat")
-
+        assert provider.transport == "chatglm_chat"
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

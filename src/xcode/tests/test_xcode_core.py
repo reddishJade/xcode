@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import unittest
-
 from xcode.harness.skills import ToolSpec, build_tool_prompt
 from xcode.harness.observability import (
     HITLResult,
@@ -10,9 +8,10 @@ from xcode.harness.observability import (
     PermissionPolicy,
     StaticPermission,
 )
+import pytest
 
 
-class XcodeSkillCoreTests(unittest.TestCase):
+class XcodeSkillCoreTests:
     def test_high_risk_tool_requires_approval(self) -> None:
         """高风险审批已移除 (STEP 5)；工具默认 allow。"""
         tool = ToolSpec(
@@ -24,11 +23,9 @@ class XcodeSkillCoreTests(unittest.TestCase):
 
         # 默认 allow
         engine = PermissionEngine(PermissionEngineConfig())
-        result = engine.decide(
-            "danger", '{"input": "x"}', tool_spec=tool, tool_input={"input": "x"}
-        )
-        self.assertFalse(result.blocked)
-        self.assertEqual(tool.handler({"input": "x"}), "ran x")
+        result = engine.decide("danger", {"input": "x"}, tool_spec=tool)
+        assert not (result.blocked)
+        assert tool.handler({"input": "x"}) == "ran x"
 
         # 静态 ask + deny callback
         def deny_cb(_tool: object, _input: dict) -> HITLResult:
@@ -41,13 +38,12 @@ class XcodeSkillCoreTests(unittest.TestCase):
         )
         result2 = engine2.decide(
             "danger",
-            '{"input": "x"}',
+            {"input": "x"},
             tool_spec=tool,
-            tool_input={"input": "x"},
             approval_callback=deny_cb,
         )
-        self.assertTrue(result2.blocked)
-        self.assertIn("denied by user", str(result2.reason))
+        assert result2.blocked
+        assert "denied by user" in str(result2.reason)
 
         # 静态 ask + allow callback
         engine3 = PermissionEngine(
@@ -57,18 +53,17 @@ class XcodeSkillCoreTests(unittest.TestCase):
         )
         result3 = engine3.decide(
             "danger",
-            '{"input": "x"}',
+            {"input": "x"},
             tool_spec=tool,
-            tool_input={"input": "x"},
             approval_callback=lambda _t, _i: HITLResult("allow", "once"),
         )
-        self.assertFalse(result3.blocked)
-        self.assertEqual(tool.handler({"input": "x"}), "ran x")
+        assert not (result3.blocked)
+        assert tool.handler({"input": "x"}) == "ran x"
 
     def test_tool_prompt_handles_empty_registry(self) -> None:
         prompt = build_tool_prompt(())
-        self.assertEqual(prompt, "(none)")
+        assert prompt == "(none)"
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

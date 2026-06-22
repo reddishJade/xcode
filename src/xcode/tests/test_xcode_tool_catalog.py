@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import ast
-import unittest
 from pathlib import Path
 
 from xcode.cli.tool_catalog import (
-    build_tool_catalog,
+build_tool_catalog,
     CATALOG_COVERED_BUILDERS,
 )
-
-
-class ToolCatalogConsistencyTests(unittest.TestCase):
+import pytest
+class ToolCatalogConsistencyTests:
     """防止新增生产工具 builder 后遗漏 CLI catalog。"""
 
     def test_catalog_covers_production_tool_builders(self) -> None:
@@ -27,23 +25,16 @@ class ToolCatalogConsistencyTests(unittest.TestCase):
             tree = ast.parse(source)
             production_builders.update(_tool_builder_calls(tree))
 
-        self.assertEqual(
-            production_builders - CATALOG_COVERED_BUILDERS,
-            set(),
-        )
+        assert production_builders - CATALOG_COVERED_BUILDERS == set()
 
     def test_catalog_contains_runtime_composed_tools(self) -> None:
         """assembly 直接组合的 session、search、skill、subagent 工具可见。"""
         catalog = build_tool_catalog()
 
-        self.assertIn("update_todo", catalog["session"])
-        self.assertIn("search_tools", catalog["core"])
-        self.assertIn("load_skill", catalog["skills"])
-        self.assertEqual(
-            catalog["subagent"],
-            {"submit_subagent", "check_subagent", "cancel_subagent"},
-        )
-
+        assert "update_todo" in catalog["session"]
+        assert "search_tools" in catalog["core"]
+        assert "load_skill" in catalog["skills"]
+        assert catalog["subagent"] == {"submit_subagent", "check_subagent", "cancel_subagent"}
 
 def _tool_builder_calls(tree: ast.AST) -> set[str]:
     """收集生产装配源码中的工具 builder 调用。"""
@@ -60,7 +51,6 @@ def _tool_builder_calls(tree: ast.AST) -> set[str]:
             names.add(name)
     return names
 
-
 def _called_name(node: ast.expr) -> str | None:
     """返回直接或属性调用的函数名。"""
     if isinstance(node, ast.Name):
@@ -69,6 +59,5 @@ def _called_name(node: ast.expr) -> str | None:
         return node.attr
     return None
 
-
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

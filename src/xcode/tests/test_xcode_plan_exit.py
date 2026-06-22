@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 import io
 from contextlib import redirect_stdout
@@ -9,9 +8,8 @@ from contextlib import redirect_stdout
 from xcode.cli.repl import run_repl
 from xcode.harness.session import SessionStore
 from xcode.tests.test_xcode_repl import FakePrompt
-
-
-class XcodePlanExitTests(unittest.TestCase):
+import pytest
+class XcodePlanExitTests:
     def test_fork_clean_into_creates_empty_session_with_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))
@@ -19,18 +17,18 @@ class XcodePlanExitTests(unittest.TestCase):
             store.append("assistant", "test plan")
 
             parent_meta = store.current_metadata()
-            self.assertIsNotNone(parent_meta)
+            assert parent_meta is not None
             assert parent_meta is not None
 
             fork_meta = store.fork_clean_into("isolate", title="Act continuation")
             assert fork_meta is not None
-            self.assertEqual(fork_meta.parent_id, parent_meta.id)
-            self.assertEqual(fork_meta.fork_type, "isolate")
-            self.assertEqual(fork_meta.title, "Act continuation")
+            assert fork_meta.parent_id == parent_meta.id
+            assert fork_meta.fork_type == "isolate"
+            assert fork_meta.title == "Act continuation"
 
             # The records in the new session should be completely empty (since it's a clean fork)
             records = store.load_records()
-            self.assertEqual(len(records), 0)
+            assert len(records) == 0
 
     def test_repl_full_plan_exit_flow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -45,7 +43,6 @@ class XcodePlanExitTests(unittest.TestCase):
                     from xcode.harness.agent_runtime.events import (
                         FinalStructuredEvent,
                     )
-
                     yield FinalStructuredEvent(
                         "final",
                         1,
@@ -69,15 +66,12 @@ class XcodePlanExitTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 code = run_repl(app, Path(temp_dir), prompt)
 
-            self.assertEqual(code, 0)
+            assert code == 0
             # The first prompt sent to app: "generate plan"
             # The second prompt sent to app: should have <approved-plan>... prepended to "execute plan"
-            self.assertEqual(len(app.prompts), 2)
-            self.assertEqual(app.prompts[0], "generate plan")
-            self.assertIn(
-                "<approved-plan>\nThis is the generated plan.\n</approved-plan>\nexecute plan",
-                app.prompts[1],
-            )
+            assert len(app.prompts) == 2
+            assert app.prompts[0] == "generate plan"
+            assert "<approved-plan>\nThis is the generated plan.\n</approved-plan>\nexecute plan" in app.prompts[1]
 
             inspector = SessionStore(Path(temp_dir))
             clean_session = next(
@@ -88,9 +82,8 @@ class XcodePlanExitTests(unittest.TestCase):
             inspector.resume(clean_session.id)
             records = inspector.load_records()
             user_records = [record for record in records if record.type == "user"]
-            self.assertEqual(user_records[-1].content, "execute plan")
-            self.assertNotIn("<approved-plan>", str(user_records[-1].content))
-
+            assert user_records[-1].content == "execute plan"
+            assert "<approved-plan>" not in str(user_records[-1].content)
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import unittest
 from typing import Any
 from xcode.harness.agent_runtime.compaction import (
-    budget_large_tool_outputs,
+budget_large_tool_outputs,
     LayeredCompactor,
 )
-
-
-class TestXcodeCompactionBudget(unittest.TestCase):
+import pytest
+class TestXcodeCompactionBudget:
     def test_budget_no_truncation_when_under_threshold(self) -> None:
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": "hello"},
@@ -30,7 +28,7 @@ class TestXcodeCompactionBudget(unittest.TestCase):
             budget_trigger_token_ratio=0.5,
         )
 
-        self.assertEqual(compacted[1]["content"][0]["content"], "a" * 100)
+        assert compacted[1]["content"][0]["content"] == "a" * 100
 
     def test_budget_truncation_when_over_threshold(self) -> None:
         messages: list[dict[str, Any]] = [
@@ -58,9 +56,9 @@ class TestXcodeCompactionBudget(unittest.TestCase):
         )
 
         content = compacted[1]["content"][0]["content"]
-        self.assertTrue(content.startswith("abcde"))
-        self.assertTrue(content.endswith("vwxyz"))
-        self.assertIn("truncated 16 characters due to token budget", content)
+        assert content.startswith("abcde")
+        assert content.endswith("vwxyz")
+        assert "truncated 16 characters due to token budget" in content
 
     def test_layered_compactor_integration(self) -> None:
         # Verify that LayeredCompactor applies both stale snip and budgeting
@@ -111,14 +109,11 @@ class TestXcodeCompactionBudget(unittest.TestCase):
         compacted = compactor(messages)
 
         # The first tool result u1 should be snipped by stale_snip
-        self.assertEqual(
-            compacted[1]["content"][0]["content"],
-            "[Content snipped - re-read if needed]",
-        )
+        assert compacted[1]["content"][0]["content"] == "[Content snipped - re-read if needed]"
 
         # 最新一次 read_file 结果应保持完整，避免后续 Act 阶段基于陈旧内容执行。
         u2_content = compacted[1]["content"][1]["content"]
-        self.assertEqual(u2_content, "123456789012345")
+        assert u2_content == "123456789012345"
 
     def test_layered_compactor_budgets_non_preserved_tool_results(self) -> None:
         compactor = LayeredCompactor(
@@ -157,10 +152,9 @@ class TestXcodeCompactionBudget(unittest.TestCase):
         compacted = compactor(messages)
         content = compacted[1]["content"][0]["content"]
 
-        self.assertTrue(content.startswith("abcde"))
-        self.assertTrue(content.endswith("vwxyz"))
-        self.assertIn("truncated 16 characters due to token budget", content)
-
+        assert content.startswith("abcde")
+        assert content.endswith("vwxyz")
+        assert "truncated 16 characters due to token budget" in content
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

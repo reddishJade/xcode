@@ -3,7 +3,6 @@
 测试缓存统计口径、工具 schema 规范化和 fingerprint 生成。
 """
 
-import unittest
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,8 +13,7 @@ from xcode.ai.providers.codec import (
     tool_catalog_fingerprint,
 )
 from xcode.ai.types import ToolDefinition
-
-
+import pytest
 @dataclass
 class MockUsage:
     """模拟 provider usage 对象。"""
@@ -28,13 +26,11 @@ class MockUsage:
     prompt_tokens_details: Any | None = None
     completion_tokens_details: Any | None = None
 
-
 @dataclass
 class MockResponse:
     """模拟 provider 响应对象。"""
 
     usage: MockUsage | None = None
-
 
 @dataclass
 class MockPromptTokensDetails:
@@ -42,34 +38,32 @@ class MockPromptTokensDetails:
 
     cached_tokens: int = 0
 
-
-class TestCacheUsage(unittest.TestCase):
+class TestCacheUsage:
     """测试 CacheUsage 统计计算。"""
 
     def test_cache_usage_properties(self):
         """测试基本属性计算。"""
         usage = CacheUsage(hit_tokens=800, miss_tokens=200)
-        self.assertEqual(usage.total_tokens, 1000)
-        self.assertEqual(usage.hit_rate, 0.8)
+        assert usage.total_tokens == 1000
+        assert usage.hit_rate == 0.8
 
     def test_cache_usage_zero_tokens(self):
         """测试零 token 情况。"""
         usage = CacheUsage()
-        self.assertEqual(usage.total_tokens, 0)
-        self.assertEqual(usage.hit_rate, 0.0)
+        assert usage.total_tokens == 0
+        assert usage.hit_rate == 0.0
 
     def test_cache_usage_perfect_hit(self):
         """测试 100% 命中。"""
         usage = CacheUsage(hit_tokens=1000, miss_tokens=0)
-        self.assertEqual(usage.hit_rate, 1.0)
+        assert usage.hit_rate == 1.0
 
     def test_cache_usage_no_hit(self):
         """测试 0% 命中。"""
         usage = CacheUsage(hit_tokens=0, miss_tokens=1000)
-        self.assertEqual(usage.hit_rate, 0.0)
+        assert usage.hit_rate == 0.0
 
-
-class TestExtractCacheUsage(unittest.TestCase):
+class TestExtractCacheUsage:
     """测试从 provider 响应提取缓存统计。"""
 
     def test_extract_deepseek_native_fields(self):
@@ -81,9 +75,9 @@ class TestExtractCacheUsage(unittest.TestCase):
         )
         response = MockResponse(usage=usage)
         result = extract_cache_usage(response)
-        self.assertEqual(result.hit_tokens, 800)
-        self.assertEqual(result.miss_tokens, 200)
-        self.assertEqual(result.hit_rate, 0.8)
+        assert result.hit_tokens == 800
+        assert result.miss_tokens == 200
+        assert result.hit_rate == 0.8
 
     def test_extract_deepseek_native_hit_only(self):
         """测试只有原生 hit 时从 prompt_tokens 推算 miss。"""
@@ -94,9 +88,9 @@ class TestExtractCacheUsage(unittest.TestCase):
         )
         response = MockResponse(usage=usage)
         result = extract_cache_usage(response)
-        self.assertEqual(result.hit_tokens, 800)
-        self.assertEqual(result.miss_tokens, 200)
-        self.assertEqual(result.hit_rate, 0.8)
+        assert result.hit_tokens == 800
+        assert result.miss_tokens == 200
+        assert result.hit_rate == 0.8
 
     def test_extract_compat_cached_tokens(self):
         """测试兼容字段回退（ChatGLM/MiMo）。"""
@@ -107,28 +101,27 @@ class TestExtractCacheUsage(unittest.TestCase):
         )
         response = MockResponse(usage=usage)
         result = extract_cache_usage(response)
-        self.assertEqual(result.hit_tokens, 600)
-        self.assertEqual(result.miss_tokens, 400)
-        self.assertEqual(result.hit_rate, 0.6)
+        assert result.hit_tokens == 600
+        assert result.miss_tokens == 400
+        assert result.hit_rate == 0.6
 
     def test_extract_no_cache_fields(self):
         """测试无缓存字段时返回空统计。"""
         usage = MockUsage(prompt_tokens=1000)
         response = MockResponse(usage=usage)
         result = extract_cache_usage(response)
-        self.assertEqual(result.hit_tokens, 0)
-        self.assertEqual(result.miss_tokens, 0)
-        self.assertEqual(result.hit_rate, 0.0)
+        assert result.hit_tokens == 0
+        assert result.miss_tokens == 0
+        assert result.hit_rate == 0.0
 
     def test_extract_no_usage(self):
         """测试无 usage 对象时返回空统计。"""
         response = MockResponse(usage=None)
         result = extract_cache_usage(response)
-        self.assertEqual(result.hit_tokens, 0)
-        self.assertEqual(result.miss_tokens, 0)
+        assert result.hit_tokens == 0
+        assert result.miss_tokens == 0
 
-
-class TestToolSchemaCanonical(unittest.TestCase):
+class TestToolSchemaCanonical:
     """测试工具 schema 规范化。"""
 
     def test_canonical_tool_schema_sorts_keys(self):
@@ -146,12 +139,12 @@ class TestToolSchemaCanonical(unittest.TestCase):
         )
         result = canonical_tool_schema(tool)
         # 检查顶级键顺序（按字母排序）
-        self.assertEqual(list(result.keys()), ["description", "name", "schema"])
+        assert list(result.keys()) == ["description", "name", "schema"]
         # 检查 properties 键顺序
         props = result["schema"]["properties"]
-        self.assertEqual(list(props.keys()), ["a_param", "z_param"])
+        assert list(props.keys()) == ["a_param", "z_param"]
         # 验证 schema 内部也排序
-        self.assertEqual(list(result["schema"].keys()), ["properties", "type"])
+        assert list(result["schema"].keys()) == ["properties", "type"]
 
     def test_canonical_tool_schema_nested(self):
         """测试嵌套字典递归排序。"""
@@ -168,8 +161,8 @@ class TestToolSchemaCanonical(unittest.TestCase):
         )
         result = canonical_tool_schema(tool)
         schema = result["schema"]
-        self.assertEqual(list(schema.keys()), ["a_top", "z_top"])
-        self.assertEqual(list(schema["z_top"].keys()), ["a_nested", "z_nested"])
+        assert list(schema.keys()) == ["a_top", "z_top"]
+        assert list(schema["z_top"].keys()) == ["a_nested", "z_nested"]
 
     def test_canonical_tools_sorts_by_name(self):
         """测试工具列表按 name 排序。"""
@@ -179,10 +172,9 @@ class TestToolSchemaCanonical(unittest.TestCase):
             ToolDefinition(name="middle", description="M", parameters={}),
         ]
         result = canonical_tools(tools)
-        self.assertEqual([t["name"] for t in result], ["apple", "middle", "zebra"])
+        assert [t["name"] for t in result] == ["apple", "middle", "zebra"]
 
-
-class TestToolCatalogFingerprint(unittest.TestCase):
+class TestToolCatalogFingerprint:
     """测试工具集合指纹生成。"""
 
     def test_fingerprint_stable_same_tools(self):
@@ -205,8 +197,8 @@ class TestToolCatalogFingerprint(unittest.TestCase):
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
-        self.assertEqual(fp1, fp2)
-        self.assertEqual(len(fp1), 16)  # SHA256 前 16 字符
+        assert fp1 == fp2
+        assert len(fp1) == 16  # SHA256 前 16 字符
 
     def test_fingerprint_stable_different_order(self):
         """测试不同顺序生成相同指纹（排序后稳定）。"""
@@ -228,7 +220,7 @@ class TestToolCatalogFingerprint(unittest.TestCase):
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
-        self.assertEqual(fp1, fp2)
+        assert fp1 == fp2
 
     def test_fingerprint_different_tools(self):
         """测试不同工具生成不同指纹。"""
@@ -244,7 +236,7 @@ class TestToolCatalogFingerprint(unittest.TestCase):
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
-        self.assertNotEqual(fp1, fp2)
+        assert fp1 != fp2
 
     def test_fingerprint_schema_key_order_stable(self):
         """测试 schema 键顺序不影响指纹。"""
@@ -264,7 +256,7 @@ class TestToolCatalogFingerprint(unittest.TestCase):
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
-        self.assertEqual(fp1, fp2)
+        assert fp1 == fp2
 
     def test_fingerprint_includes_builtin_tool_metadata(self) -> None:
         """测试内建工具元数据变化会改变指纹。"""
@@ -286,8 +278,7 @@ class TestToolCatalogFingerprint(unittest.TestCase):
         ]
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
-        self.assertNotEqual(fp1, fp2)
-
+        assert fp1 != fp2
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()
