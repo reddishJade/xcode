@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import os
 from pathlib import Path
 from typing import Any, Literal
@@ -132,6 +132,7 @@ class PermissionEngineConfig:
     session_grant_store: GrantStore | None = None
     permanent_grant_store: GrantStore | None = None
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
+    tool_action_profiles: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
 class PermissionEngine:
@@ -160,7 +161,10 @@ class PermissionEngine:
         tool_spec: PermissionToolSpec | None = None,
         approval_callback: PermissionApprovalCallback | None = None,
     ) -> PermissionEngineResult:
-        action = ActionExtractor().extract(tool_name, tool_input)
+        profile = self._config.tool_action_profiles.get(tool_name)
+        action = ActionExtractor().extract(
+            tool_name, tool_input, action_profile=profile
+        )
 
         # Tier 0: restricted_dirs 硬阻断
         dir_result = self._check_restricted_dirs(action)
@@ -595,13 +599,13 @@ class PermissionEngine:
         effective_scope = hitl.scope
         metadata: PermissionMetadata = _approval_metadata("allow", hitl.scope)
 
-        # Step 9: MCP/unknown-tool tools are session/once only — downgrade permanent
-        if action.capability in ("mcp", "unknown") and hitl.scope == "permanent":
+        # unknown-tool tools are session/once only — downgrade permanent
+        if action.capability == "unknown" and hitl.scope == "permanent":
             effective_scope = "session"
             metadata = dict(metadata)
             metadata["requested_scope"] = "permanent"
             metadata["effective_scope"] = "session"
-            metadata["mcp_scope_restriction"] = True
+            metadata["capability_scope_restriction"] = True
 
         if is_multi_target and hitl.scope in ("session", "permanent"):
             effective_scope = "once"

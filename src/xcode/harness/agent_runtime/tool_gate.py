@@ -42,7 +42,12 @@ from ..observability.permission_model import (
     PolicyEvaluator,
 )
 from ..observability import redact_text
-from ..skills import ApprovalCallback, ToolSpec, stringify_tool_input
+from ..skills import (
+    CORE_TOOL_ACTION_PROFILES,
+    ApprovalCallback,
+    ToolSpec,
+    stringify_tool_input,
+)
 
 
 @dataclass(frozen=True)
@@ -414,6 +419,14 @@ class ToolGate:
         snapshot: ToolGateSnapshot,
         tool_call_id: str,
     ) -> BeforeToolCallResult | None:
+        action_profiles: dict[str, tuple[str, str]] = {}
+        for spec in snapshot.tool_map.values():
+            profile = CORE_TOOL_ACTION_PROFILES.get(spec.name)
+            if profile is not None:
+                action_profiles[spec.name] = (
+                    profile.capability,
+                    profile.target_resolver,
+                )
         engine = PermissionEngine(
             PermissionEngineConfig(
                 static_policy=snapshot.permission_policy,
@@ -423,6 +436,7 @@ class ToolGate:
                 external_directories=snapshot.external_directories,
                 session_grant_store=snapshot.session_grant_store,
                 permanent_grant_store=snapshot.permanent_grant_store,
+                tool_action_profiles=action_profiles,
             )
         )
         result = engine.decide(

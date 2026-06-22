@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
+
 PermissionAccess = Literal["read", "write", "execute", "network"]
 DirAccess = Literal["read", "write", "read_write"]
 GrantDecision = Literal["allow", "deny"]
@@ -968,8 +969,33 @@ def evaluate_policy_constraints(
 class ActionExtractor:
     """把工具调用保守归一化为 Action。"""
 
-    def extract(self, tool_name: str, tool_input: Mapping[str, object]) -> Action:
-        """根据工具名和结构化输入提取 action。"""
+    def extract(
+        self,
+        tool_name: str,
+        tool_input: Mapping[str, object],
+        action_profile: tuple[str, str] | None = None,
+    ) -> Action:
+        """根据工具名和结构化输入提取 action。
+
+        当提供 action_profile 时，使用其 capability 覆盖硬编码映射，
+        但保留已有的 target 提取逻辑。
+        """
+        action = self._extract_inner(tool_name, tool_input)
+        if action_profile is not None:
+            capability_name, _ = action_profile
+            action = Action(
+                tool=action.tool,
+                capability=capability_name,
+                operation=action.operation,
+                targets=action.targets,
+                input=action.input,
+            )
+        return action
+
+    def _extract_inner(
+        self, tool_name: str, tool_input: Mapping[str, object]
+    ) -> Action:
+        """原始工具名→Action 映射，不含 action_profile 覆盖。"""
         if tool_name == "read_file":
             return self._path_action(tool_name, tool_input, "read", "read_file", "read")
         if tool_name == "write_file":

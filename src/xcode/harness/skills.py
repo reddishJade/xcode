@@ -130,16 +130,16 @@ CORE_TOOL_ACTION_PROFILES: dict[str, ToolActionProfile] = {
         capability="write", target_resolver="path", side_effecting=True
     ),
     "edit_file": ToolActionProfile(
-        capability="write", target_resolver="path", side_effecting=True
+        capability="edit", target_resolver="path", side_effecting=True
     ),
     "apply_patch": ToolActionProfile(
-        capability="write", target_resolver="path", side_effecting=True
+        capability="patch", target_resolver="path", side_effecting=True
     ),
     "bash": ToolActionProfile(
-        capability="execute", target_resolver="none", side_effecting=True
+        capability="shell", target_resolver="none", side_effecting=True
     ),
     "shell": ToolActionProfile(
-        capability="execute", target_resolver="none", side_effecting=True
+        capability="shell", target_resolver="none", side_effecting=True
     ),
     "load_skill": ToolActionProfile(
         capability="execute", target_resolver="none", side_effecting=True
