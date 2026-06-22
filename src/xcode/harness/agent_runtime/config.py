@@ -23,7 +23,8 @@ from ...agent.context_collector import (
     TaskStateCollector,
 )
 from ...agent.history import apply_request_hygiene
-from ...agent.message_converter import convert_to_llm
+from ...agent.message_converter import convert_to_llm as _convert_to_llm
+from .prompting.citations import decorate_citable_messages
 from ...agent.messages import (
     AgentMessage,
     AssistantMessage,
@@ -51,6 +52,14 @@ from .compaction import CompactController, estimate_message_tokens
 from .execution_modes import ExecutionModeState, mode_notice
 from .message_codec import messages_from_compacted_dicts
 from .tool_gate import ToolGate
+
+
+def _convert_to_llm_with_citations(
+    messages: list[AgentMessage],
+) -> list[dict[str, Any]]:
+    decorated = decorate_citable_messages(messages)
+    return _convert_to_llm(decorated)
+
 
 StructuredCompactor = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
 RuntimeContextProvider = Callable[[str], list[str]]
@@ -340,7 +349,7 @@ def build_loop_config(
 
     return AgentLoopConfig(
         provider=snapshot.provider,
-        convert_to_llm=convert_to_llm,
+        convert_to_llm=_convert_to_llm_with_citations,
         context_collectors=registry_,
         context_assembler=assembler,
         max_steps=snapshot.config.max_steps,
