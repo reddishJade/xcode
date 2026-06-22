@@ -22,7 +22,11 @@ def assert_logs(
     logger = logging.getLogger(logger_name)
     records: list[logging.LogRecord] = []
     handler = logging.Handler()
-    handler.emit = lambda r: records.append(r)  # type: ignore[assignment]
+
+    def _emit(record: logging.LogRecord) -> None:
+        records.append(record)
+
+    handler.emit = _emit
     logger.addHandler(handler)
     old_level = logger.level
     logger.setLevel(getattr(logging, level.upper()))
@@ -45,7 +49,11 @@ def assert_no_logs(
     logger = logging.getLogger(logger_name)
     records: list[logging.LogRecord] = []
     handler = logging.Handler()
-    handler.emit = lambda r: records.append(r)  # type: ignore[assignment]
+
+    def _emit(record: logging.LogRecord) -> None:
+        records.append(record)
+
+    handler.emit = _emit
     logger.addHandler(handler)
     old_level = logger.level
     logger.setLevel(getattr(logging, level.upper()))

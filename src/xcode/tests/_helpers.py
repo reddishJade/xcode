@@ -8,4 +8,4 @@ assert_logs = _TestCase().assertLogs
 
 # assertNoLogs (Python 3.10+)
 _inst = _TestCase()
-assert_no_logs = _inst.assertNoLogs  # type: ignore[attr-defined]
+assert_no_logs = _inst.assertNoLogs  # type: ignore[attr-defined]  # assertNoLogs 在 typeshed 3.9 以下不存在，运行时需要 Python 3.10+

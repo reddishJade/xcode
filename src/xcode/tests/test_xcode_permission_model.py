@@ -2101,8 +2101,8 @@ class SessionGrantIsolationTests:
             ),
         )
         snap = gate.snapshot()
-        assert snap.session_grant_store is not None
-        assert snap.session_grant_store._session_id == "provider-test"  # type: ignore[attr-defined]
+        assert isinstance(snap.session_grant_store, InMemoryGrantStore)
+        assert snap.session_grant_store._session_id == "provider-test"
 
     def test_toolgate_provider_resolves_after_session_change(self) -> None:
         """Provider resolves new store after session_id changes."""
@@ -2129,13 +2129,15 @@ class SessionGrantIsolationTests:
         )
 
         snap_a = gate.snapshot()
-        snap_a.session_grant_store.add(_grant("src/a.py"))  # type: ignore[union-attr]
+        assert snap_a.session_grant_store is not None
+        snap_a.session_grant_store.add(_grant("src/a.py"))
 
         # "Switch" to session B
         current_id[0] = "session-B"
         snap_b = gate.snapshot()
+        assert snap_b.session_grant_store is not None
         assert snap_a.session_grant_store is not snap_b.session_grant_store
-        assert len(snap_b.session_grant_store.records()) == 0  # type: ignore[union-attr]
+        assert len(snap_b.session_grant_store.records()) == 0
 
         # Switch back to A — store with grant is reused
         current_id[0] = "session-A"

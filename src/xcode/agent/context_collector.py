@@ -201,14 +201,16 @@ class InstructionCollector:
         # 1. 配置源（按解析路径去重，首个配置源优先）
         for source in self._sources:
             if source.type == "file":
-                path = root / source.path  # type: ignore[arg-type]
+                assert source.path is not None
+                path = root / source.path
                 resolved = path.resolve()
                 if resolved in configured_paths:
                     continue
                 configured_paths.add(resolved)
                 blocks.extend(self._collect_file(path, source.priority))
             else:
-                blocks.extend(self._collect_inline(source.content, source.priority))  # type: ignore[arg-type]
+                assert source.content is not None
+                blocks.extend(self._collect_inline(source.content, source.priority))
 
         # 2. 回退 AGENTS.md
         agents_path = root / "AGENTS.md"
@@ -473,8 +475,8 @@ class ActiveDiffCollector:
 
         stat_unstaged = _run_git(root, "diff", "--stat")
         stat_staged = _run_git(root, "diff", "--cached", "--stat")
-        has_staged = bool(stat_staged and stat_staged.strip())
-        has_unstaged = bool(stat_unstaged and stat_unstaged.strip())
+        has_staged = stat_staged is not None and bool(stat_staged.strip())
+        has_unstaged = stat_unstaged is not None and bool(stat_unstaged.strip())
 
         if not has_staged and not has_unstaged:
             return []
@@ -482,13 +484,15 @@ class ActiveDiffCollector:
         # 构建统计摘要
         stat_parts: list[str] = []
         if has_staged:
+            assert stat_staged is not None
             stat_parts.append("[staged]")
-            stat_parts.append(stat_staged.strip())  # type: ignore[union-attr]
+            stat_parts.append(stat_staged.strip())
         if has_unstaged:
+            assert stat_unstaged is not None
             if stat_parts:
                 stat_parts.append("")
             stat_parts.append("[unstaged]")
-            stat_parts.append(stat_unstaged.strip())  # type: ignore[union-attr]
+            stat_parts.append(stat_unstaged.strip())
         stat_summary = "\n".join(stat_parts)
 
         # 构建理想正文（统计 + 摘录）

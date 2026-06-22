@@ -32,12 +32,13 @@ from xcode.harness.observability.permission_model import (
     Target,
 )
 from xcode.harness.skills import ToolOutput
-import pytest
 # ── 辅助 ──
+
 
 def _write_config(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
 
 def _minimal_mcp_tool(name: str = "test_tool") -> dict[str, Any]:
     return {
@@ -50,9 +51,11 @@ def _minimal_mcp_tool(name: str = "test_tool") -> dict[str, Any]:
         },
     }
 
+
 # ════════════════════════════════════════════
 # 1. 配置校验
 # ════════════════════════════════════════════
+
 
 class TestMcpConfigValidation:
     """Config schema validation tests."""
@@ -102,7 +105,7 @@ class TestMcpConfigValidation:
         assert cfg is None
 
     def test_non_dict_config_skips(self) -> None:
-        cfg = _validate_server_config("bad", "not_a_dict")  # type: ignore[arg-type]
+        cfg = _validate_server_config("bad", "not_a_dict")  # type: ignore[arg-type]  # 故意传非 dict 测试校验函数
         assert cfg is None
 
     def test_enabled_false(self) -> None:
@@ -165,9 +168,11 @@ class TestMcpConfigValidation:
         assert cfg is not None
         assert cfg.args == ()
 
+
 # ════════════════════════════════════════════
 # 2. 配置路径
 # ════════════════════════════════════════════
+
 
 class TestMcpConfigPath:
     """Config path canonicalization tests."""
@@ -208,9 +213,11 @@ class TestMcpConfigPath:
             result = _mcp_config_path(root)
             assert result == local / "mcp_config.json"
 
+
 # ════════════════════════════════════════════
 # 3. 名称清理
 # ════════════════════════════════════════════
+
 
 class TestMcpSanitize:
     """Name sanitization tests."""
@@ -242,9 +249,11 @@ class TestMcpSanitize:
     def test_leading_trailing_spaces(self) -> None:
         assert _sanitize("  tool  ") == "__tool__"
 
+
 # ════════════════════════════════════════════
 # 4. 碰撞检测
 # ════════════════════════════════════════════
+
 
 class TestMcpCollisionDetection:
     """Collision detection tests."""
@@ -309,14 +318,16 @@ class TestMcpCollisionDetection:
         disabled = _detect_collisions(tools, servers)
         # All produce mcp__my_srv__get_data
         assert disabled == {
-                "my srv:get data",
-                "my srv:get_data",
-                "my_srv:get data",
-            }
+            "my srv:get data",
+            "my srv:get_data",
+            "my_srv:get data",
+        }
+
 
 # ════════════════════════════════════════════
 # 5. 权限 - ActionExtractor MCP 分支
 # ════════════════════════════════════════════
+
 
 class TestMcpActionExtractor:
     """ActionExtractor MCP branch tests."""
@@ -355,9 +366,11 @@ class TestMcpActionExtractor:
         assert action.capability == "unknown"
         assert action.targets == ()
 
+
 # ════════════════════════════════════════════
 # 6. 权限 - PermissionEngine 决策路径
 # ════════════════════════════════════════════
+
 
 class TestMcpPermissionDecisions:
     """PermissionEngine behavior for MCP tools.
@@ -392,6 +405,7 @@ class TestMcpPermissionDecisions:
         from xcode.harness.observability.permission_model import (
             create_grant_record,
         )
+
         action = Action(
             tool="mcp__srv__tool",
             capability="mcp",
@@ -410,9 +424,11 @@ class TestMcpPermissionDecisions:
         assert grant.target_pattern == "mcp__srv__tool"
         assert grant.access == "execute"
 
+
 # ════════════════════════════════════════════
 # 7. 错误处理与脱敏
 # ════════════════════════════════════════════
+
 
 class TestMcpRedaction:
     """Stderr redaction and truncation tests."""
@@ -466,9 +482,11 @@ class TestMcpRedaction:
         result = redact_mcp_text(msg)
         assert result == msg
 
+
 # ════════════════════════════════════════════
 # 9. MCP 工具构建（集成）
 # ════════════════════════════════════════════
+
 
 @patch("xcode.harness.mcp.client.McpClient")
 class TestMcpBuildIntegration:
@@ -681,9 +699,11 @@ class TestMcpBuildIntegration:
             # Both tools produce mcp__srv__my_tool → collision → both disabled
             assert len(tools) == 0
 
+
 # ════════════════════════════════════════════
 # 10. MCP 红action/脱敏 — McpClient 集成
 # ════════════════════════════════════════════
+
 
 class TestMcpClientRedaction:
     """McpClient stderr redaction in error messages."""
