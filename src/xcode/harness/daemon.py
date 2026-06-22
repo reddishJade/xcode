@@ -1,19 +1,50 @@
-"""后台服务生命周期与心跳任务。"""
+"""后台服务生命周期与心跳任务。
+
+回声防护：daemon 自身产生的事件类型集合在 ``DAEMON_EVENT_TYPES`` 中声明，
+``check_mailbox`` 通过 ``exclude_senders`` + ``exclude_types`` 组合过滤，
+避免 daemon 事件被转发回 daemon 触发循环处理。所有 daemon 事件的 payload
+携带 ``source="heartbeat_daemon"`` 元数据。
+
+自愈恢复：``register_task(persistent=True)`` 将任务名持久化到
+``.local/daemon_tasks.json``，进程重启后 ``__init__`` 恢复启用状态；
+builtin 任务总是自动注册。
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+import json
 import logging
+import os
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
+import filelock
+
 from xcode.harness.mailbox import AgentMailbox
-from xcode.harness.task_store import TaskStore
+from xcode.harness.task_store import PENDING, CLAIMED, TaskStore
 
 logger = logging.getLogger("xcode.harness.daemon")
+
+DAEMON_SOURCE = "heartbeat_daemon"
+DAEMON_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "daemon_task_error",
+        "mailbox_summary",
+        "git_dirty_alert",
+        "tasks_summary",
+        "worktree_prune_report",
+    }
+)
+_BUILTIN_TASKS: tuple[str, ...] = (
+    "check_mailbox",
+    "check_git_status",
+    "check_background_tasks",
+)
 
 
 @dataclass(frozen=True)
@@ -27,12 +58,18 @@ class DaemonHealth:
     task_failures: dict[str, int] = field(default_factory=dict)
 
 
-class HeartbeatDaemon:
-    """会话级后台心跳守护进程。
+@dataclass(frozen=True)
+class DaemonTaskInfo:
+    """单个已注册任务的信息。"""
 
-    支持定期轮询（例如每 30 秒），运行注册的定时任务（Cron Tasks），
-    并将结果写入 AgentMailbox 邮箱，提供主动的后台助手姿态。
-    """
+    name: str
+    registered: bool
+    persistent: bool
+    builtin: bool
+
+
+class HeartbeatDaemon:
+    """会话级后台心跳守护进程。"""
 
     def __init__(
         self,
@@ -49,6 +86,7 @@ class HeartbeatDaemon:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._tasks: dict[str, Callable[[], list[dict[str, Any]] | None]] = {}
+        self._persistent_names: set[str] = set()
         self._callbacks: dict[str, list[Callable[[dict[str, Any]], None]]] = {}
         self._restart_count = 0
         self._last_heartbeat_at = 0.0
@@ -56,17 +94,59 @@ class HeartbeatDaemon:
         self._task_failures: dict[str, int] = {}
         self.mailbox = mailbox
         self.task_store = task_store
+        self._tasks_file = project_root / ".local" / "daemon_tasks.json"
+        self._tasks_lock = filelock.FileLock(
+            project_root / ".local" / ".daemon_tasks.lock", timeout=10.0
+        )
 
-        # 注册默认定时任务
+        # 注册 builtin 定时任务
         self.register_task("check_mailbox", self.check_mailbox)
         self.register_task("check_git_status", self.check_git_status)
         self.register_task("check_background_tasks", self.check_background_tasks)
+        # 恢复持久化的自定义任务名（callable 需外部重新注册）
+        self._restore_persistent_tasks()
 
     def register_task(
-        self, name: str, func: Callable[[], list[dict[str, Any]] | None]
+        self,
+        name: str,
+        func: Callable[[], list[dict[str, Any]] | None],
+        *,
+        persistent: bool = False,
     ) -> None:
-        """注册定时轮询任务。"""
+        """注册定时轮询任务。
+
+        persistent=True 时将任务名写入 .local/daemon_tasks.json，
+        进程重启后 __init__ 会恢复其启用状态（callable 需重新注册）。
+        """
         self._tasks[name] = func
+        if persistent:
+            self._persistent_names.add(name)
+            self._persist_task_names()
+        elif name in self._persistent_names:
+            # 重新注册同一名字仍保持持久化
+            self._persistent_names.add(name)
+
+    def unregister_task(self, name: str) -> bool:
+        """移除已注册任务。返回是否移除成功。"""
+        if name not in self._tasks:
+            return False
+        del self._tasks[name]
+        if name in self._persistent_names:
+            self._persistent_names.discard(name)
+            self._persist_task_names()
+        return True
+
+    def list_daemon_tasks(self) -> list[DaemonTaskInfo]:
+        """返回当前注册的任务清单。"""
+        return [
+            DaemonTaskInfo(
+                name=name,
+                registered=True,
+                persistent=name in self._persistent_names,
+                builtin=name in _BUILTIN_TASKS,
+            )
+            for name in self._tasks
+        ]
 
     def register_callback(
         self,
@@ -107,10 +187,18 @@ class HeartbeatDaemon:
         )
 
     def ensure_healthy(self) -> DaemonHealth:
-        """如果后台线程异常退出，则自动重启。"""
+        """如果后台线程异常退出，则自动重启并补齐 builtin 任务。"""
         health = self.health_check()
         if health.running or self._stop_event.is_set():
             return health
+        # 补齐 builtin 任务（防止被 unregister 后重启丢失）
+        for name, func in (
+            ("check_mailbox", self.check_mailbox),
+            ("check_git_status", self.check_git_status),
+            ("check_background_tasks", self.check_background_tasks),
+        ):
+            if name not in self._tasks:
+                self._tasks[name] = func
         self._restart_count += 1
         self.start()
         return self.health_check()
@@ -120,7 +208,6 @@ class HeartbeatDaemon:
         while not self._stop_event.is_set():
             self._run_loop_once()
 
-            # 以小刻度休眠，以便快速响应 stop 信号
             sleep_step = 0.5
             elapsed = 0.0
             while elapsed < self.interval_seconds and not self._stop_event.is_set():
@@ -154,14 +241,22 @@ class HeartbeatDaemon:
                 )
 
     def _publish_event(self, event: dict[str, Any]) -> None:
-        """发送守护事件到 mailbox 并通知回调。"""
+        """发送守护事件到 mailbox 并通知回调。
+
+        所有 daemon 事件 payload 自动添加 source 元数据（不覆盖已有值）。
+        """
         event_type = str(event.get("type", "system_alert"))
-        payload = event.get("payload", {})
-        if not isinstance(payload, dict):
-            payload = {"value": payload}
+        raw_payload = event.get("payload", {})
+        payload: dict[str, Any] = (
+            dict(raw_payload)
+            if isinstance(raw_payload, dict)
+            else {"value": raw_payload}
+        )
+        payload.setdefault("source", DAEMON_SOURCE)
+        payload.setdefault("origin", self.agent_id)
         normalized = {"type": event_type, "payload": payload}
         self.mailbox.send_message(
-            sender_id="heartbeat_daemon",
+            sender_id=DAEMON_SOURCE,
             recipient_id=self.agent_id,
             type_name=event_type,
             payload=payload,
@@ -175,13 +270,13 @@ class HeartbeatDaemon:
                 logger.debug("daemon callback failed", exc_info=True)
 
     def check_mailbox(self) -> list[dict[str, Any]] | None:
-        """检查未读邮件，如果有未读消息则产生通知事件。"""
+        """检查未读邮件，过滤 daemon 自身事件，避免回声循环。"""
         try:
             unread = self.mailbox.read_unread_messages(
                 self.agent_id,
-                exclude_senders={"heartbeat_daemon"},
+                exclude_senders={DAEMON_SOURCE},
+                exclude_types=set(DAEMON_EVENT_TYPES),
             )
-            # 顺带清理过期消息，避免 mailbox 文件无限膨胀
             try:
                 self.mailbox.cleanup_expired_messages(self.agent_id)
             except Exception:
@@ -231,8 +326,8 @@ class HeartbeatDaemon:
         """检查任务存储中的待办或已被领取的任务。"""
         try:
             tasks = self.task_store.list()
-            pending = [t for t in tasks if t.status == "pending"]
-            claimed = [t for t in tasks if t.status == "claimed"]
+            pending = [t for t in tasks if t.status == PENDING]
+            claimed = [t for t in tasks if t.status == CLAIMED]
             if pending or claimed:
                 return [
                     {
@@ -246,3 +341,40 @@ class HeartbeatDaemon:
         except Exception:
             logger.warning("background task check failed", exc_info=True)
         return None
+
+    def _persist_task_names(self) -> None:
+        """持久化自定义任务名清单到 .local/daemon_tasks.json。"""
+        custom_names = sorted(
+            n for n in self._persistent_names if n not in _BUILTIN_TASKS
+        )
+        payload = {"tasks": [{"name": n, "type": "custom"} for n in custom_names]}
+        self._tasks_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self._tasks_file.with_name(
+            f".{self._tasks_file.name}.{uuid.uuid4().hex}.tmp"
+        )
+        tmp_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        with self._tasks_lock:
+            os.replace(tmp_path, self._tasks_file)
+
+    def _restore_persistent_tasks(self) -> None:
+        """从 .local/daemon_tasks.json 恢复持久化任务名。
+
+        builtin 任务已在 __init__ 显式注册；此处仅恢复自定义任务名，
+        但 callable 需外部重新 register_task 传入函数后才会真正执行。
+        """
+        if not self._tasks_file.exists():
+            return
+        try:
+            data = json.loads(self._tasks_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            logger.warning("failed to load daemon_tasks.json")
+            return
+        for entry in data.get("tasks", []):
+            name = str(entry.get("name", ""))
+            if name and name not in _BUILTIN_TASKS:
+                self._persistent_names.add(name)
+                logger.info(
+                    "restored persistent daemon task name %s (callable pending)", name
+                )

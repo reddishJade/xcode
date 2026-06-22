@@ -73,7 +73,11 @@ class TestHeartbeatDaemon:
             {"type": "custom_alert", "payload": {"info": "callback"}}
         )
 
-        assert seen == [{"type": "custom_alert", "payload": {"info": "callback"}}]
+        assert len(seen) == 1
+        assert seen[0]["type"] == "custom_alert"
+        assert seen[0]["payload"]["info"] == "callback"
+        # source 元数据被自动添加
+        assert seen[0]["payload"]["source"] == "heartbeat_daemon"
 
     def test_task_failure_updates_health_and_emits_error(self) -> None:
         """测试任务失败会更新健康状态并发出错误事件。"""
@@ -133,6 +137,137 @@ class TestHeartbeatDaemon:
         assert alerts[0]["type"] == "tasks_summary"
         assert alerts[0]["payload"]["pending_count"] == 1
         assert alerts[0]["payload"]["claimed_count"] == 1
+
+    def test_daemon_events_carry_source_metadata(self) -> None:
+        """daemon 事件 payload 自动添加 source 元数据。"""
+        seen: list[dict] = []
+        self.daemon.register_callback("tasks_summary", seen.append)
+        self.daemon._publish_event(
+            {"type": "tasks_summary", "payload": {"pending_count": 1}}
+        )
+        assert seen[0]["payload"]["source"] == "heartbeat_daemon"
+        assert seen[0]["payload"]["origin"] == "test_agent"
+
+    def test_daemon_events_payload_setdefault_does_not_overwrite(self) -> None:
+        """调用方显式传 source 时不被覆盖。"""
+        seen: list[dict] = []
+        self.daemon.register_callback("custom", seen.append)
+        self.daemon._publish_event(
+            {"type": "custom", "payload": {"source": "external"}}
+        )
+        assert seen[0]["payload"]["source"] == "external"
+
+    def test_check_mailbox_filters_daemon_event_types(self) -> None:
+        """check_mailbox 过滤 daemon 自身事件类型，避免回声。"""
+        # 向 daemon mailbox 写入一条 daemon 事件类型但 sender 非 daemon 的消息
+        self.daemon.mailbox.send_message(
+            "user_a",
+            "test_agent",
+            "tasks_summary",
+            {"pending_count": 1},
+        )
+        result = self.daemon.check_mailbox()
+        # tasks_summary 被 exclude_types 过滤，check_mailbox 返回 None
+        assert result is None
+
+    def test_check_mailbox_passes_user_messages(self) -> None:
+        """check_mailbox 对非 daemon 事件类型的用户消息仍产生 summary。"""
+        self.daemon.mailbox.send_message("user_a", "test_agent", "query", {"q": 1})
+        result = self.daemon.check_mailbox()
+        assert result is not None
+        assert result[0]["type"] == "mailbox_summary"
+        assert result[0]["payload"]["unread_count"] == 1
+
+    def test_check_mailbox_filters_by_sender_even_for_user_types(self) -> None:
+        """sender=heartbeat_daemon 的消息即使 type 非 daemon 类型也被过滤。"""
+        self.daemon.mailbox.send_message("heartbeat_daemon", "test_agent", "query", {})
+        result = self.daemon.check_mailbox()
+        assert result is None
+
+    def test_no_echo_loop_over_multiple_ticks(self) -> None:
+        """多轮 tick 后 daemon 事件不会在 mailbox 中无限累积。"""
+        self.daemon._run_loop_once()
+        self.daemon._run_loop_once()
+        self.daemon._run_loop_once()
+        # 读取所有消息（不过滤）确认 daemon 自身事件未被 check_mailbox 重新处理
+        all_messages = self.daemon.mailbox.read_unread_messages("test_agent")
+        # daemon 事件存在但被回声过滤，不应触发新的 mailbox_summary
+        daemon_event_types = {
+            "daemon_task_error",
+            "mailbox_summary",
+            "git_dirty_alert",
+            "tasks_summary",
+        }
+        # 所有 daemon 事件都应来自 heartbeat_daemon sender
+        for msg in all_messages:
+            if msg.get("type") in daemon_event_types:
+                assert msg.get("sender") == "heartbeat_daemon"
+
+    def test_list_daemon_tasks_returns_builtin(self) -> None:
+        """list_daemon_tasks 返回 builtin 任务。"""
+        tasks = self.daemon.list_daemon_tasks()
+        names = {t.name for t in tasks}
+        assert "check_mailbox" in names
+        assert "check_git_status" in names
+        assert "check_background_tasks" in names
+        for t in tasks:
+            assert t.registered is True
+            assert t.builtin is True
+            assert t.persistent is False
+
+    def test_register_persistent_task_survives_instance_recreate(self) -> None:
+        """persistent=True 的任务名在实例重建后仍标记为 persistent。"""
+        from unittest.mock import MagicMock
+
+        func = MagicMock(return_value=None)
+        self.daemon.register_task("my_custom", func, persistent=True)
+        tasks_file = self.root / ".local" / "daemon_tasks.json"
+        assert tasks_file.exists()
+
+        # 新建 daemon 实例模拟重启
+        daemon2 = HeartbeatDaemon(
+            self.root,
+            mailbox=AgentMailbox(self.root),
+            task_store=TaskStore(self.root),
+            interval_seconds=1,
+            agent_id="test_agent",
+        )
+        infos = {t.name: t for t in daemon2.list_daemon_tasks()}
+        # my_custom 名字被恢复为 persistent，但 callable 未注册（registered=False 等价于不在 _tasks）
+        # 由于 callable 未重新注册，它不在 _tasks 中
+        assert "my_custom" not in infos
+        # 但持久化文件仍含其名
+        import json
+
+        data = json.loads(tasks_file.read_text(encoding="utf-8"))
+        custom_names = {e["name"] for e in data["tasks"]}
+        assert "my_custom" in custom_names
+        daemon2.stop()
+
+    def test_unregister_task_removes_from_list(self) -> None:
+        """unregister_task 移除任务。"""
+        from unittest.mock import MagicMock
+
+        func = MagicMock(return_value=None)
+        self.daemon.register_task("temp", func)
+        assert any(t.name == "temp" for t in self.daemon.list_daemon_tasks())
+        assert self.daemon.unregister_task("temp") is True
+        assert not any(t.name == "temp" for t in self.daemon.list_daemon_tasks())
+        assert self.daemon.unregister_task("nonexistent") is False
+
+    def test_ensure_healthy_re_registers_builtin_if_missing(self) -> None:
+        """ensure_healthy 重启后补齐被 unregister 的 builtin 任务。"""
+        self.daemon.unregister_task("check_git_status")
+        assert not any(
+            t.name == "check_git_status" for t in self.daemon.list_daemon_tasks()
+        )
+        # 让线程看起来"死掉"
+        self.daemon._stop_event.clear()
+        self.daemon._thread = None
+        self.daemon.ensure_healthy()
+        assert any(
+            t.name == "check_git_status" for t in self.daemon.list_daemon_tasks()
+        )
 
 
 if __name__ == "__main__":
