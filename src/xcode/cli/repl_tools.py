@@ -39,10 +39,23 @@ from xcode.harness.agent_runtime.events import (
 from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
 from xcode.harness.agent_runtime.tool_gate import ToolGate
-from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.harness.skills import (
+    ToolInput,
+    ToolRegistryState,
+    ToolSpec,
+)
 from xcode.agent.config import AgentContext, BeforeToolCallContext
 from xcode.agent.messages import AssistantMessage
 from xcode.agent.types import TextContent, ToolCallContent
+
+
+def _registry_and_state(
+    app: object,
+) -> tuple[tuple[ToolSpec, ...], ToolRegistryState | None]:
+    raw = getattr(app, "registry", ())
+    if isinstance(raw, ToolRegistryState):
+        return raw.snapshot(), raw
+    return tuple(raw) if raw else (), None
 
 
 def run_tool_command(command: str, app: object) -> str:
@@ -50,62 +63,108 @@ def run_tool_command(command: str, app: object) -> str:
     if len(parts) < 2:
         return "usage: /tool NAME INPUT\n/tool list - show enabled tools by group"
     tool_name = parts[1]
-    registry: tuple[ToolSpec, ...] = tuple(getattr(app, "registry", ()) or ())
+    registry, state = _registry_and_state(app)
+
     if tool_name == "list":
-        catalog = build_tool_catalog()
-        enabled_names = {t.name for t in registry}
+        if state is not None:
+            return _tool_list_governance(state)
+        return _tool_list_legacy(registry)
 
-        lines = ["<visible tools>"]
-        core_names = sorted(t.name for t in registry if t.group == "core")
-        if core_names:
-            lines.append("  core:")
-            lines.extend(f"    {n}" for n in core_names)
+    # ── Direct execution ──
+    if state is not None:
+        selected = _resolve_tool_governance(tool_name, state)
+    else:
+        selected = _resolve_tool_legacy(tool_name, registry)
 
-        noncore_groups = sorted({t.group for t in registry if t.group != "core"})
-        for group in noncore_groups:
-            lines.append(f"  {group}:")
-            tools_in_group = sorted(
-                (t for t in registry if t.group == group), key=lambda item: item.name
-            )
-            for tool in tools_in_group:
-                suffix = ""
-                if tool.group == "mcp" and "[mcp: " in tool.description:
-                    server_name = tool.description.split("[mcp: ")[-1].split("]")[0]
-                    suffix = f" [mcp: {server_name}]"
-                lines.append(f"    {tool.name}{suffix}")
-        lines.append("</visible tools>")
-
-        all_known = set()
-        for group_names in catalog.values():
-            all_known.update(group_names)
-        hidden = sorted(all_known - enabled_names)
-        if hidden:
-            lines.append("<hidden tools (enable via tools.enabled_groups)>")
-            for group in sorted(catalog):
-                group_hidden = sorted(catalog[group] & set(hidden))
-                if group_hidden:
-                    lines.append(f"  {group}:")
-                    lines.extend(f"    {name}" for name in group_hidden)
-            lines.append("</hidden tools>")
-
-        available_groups = sorted(catalog.keys() - {tool.group for tool in registry})
-        if available_groups:
-            lines.append("<available groups>")
-            lines.extend(f"  {group}" for group in available_groups)
-            lines.append("</available groups>")
-        return "\n".join(lines)
-
-    tool_map: dict[str, ToolSpec] = {tool.name: tool for tool in registry}
-    selected_tool = tool_map.get(tool_name)
-    if selected_tool is None:
+    if selected is None:
         return f"unknown tool: {tool_name}"
     raw_input = parts[2] if len(parts) == 3 else ""
     try:
-        action_input = parse_tool_input(selected_tool, raw_input)
+        action_input = parse_tool_input(selected, raw_input)
     except ValueError as exc:
         return str(exc)
     agent = getattr(app, "agent", None)
-    return _execute_tool_via_gate(selected_tool, action_input, agent)
+    return _execute_tool_via_gate(selected, action_input, agent)
+
+
+def _tool_list_governance(state: ToolRegistryState) -> str:
+    lines = ["<visible tools>"]
+    root_tools = state.tools_visible_to_root()
+    groups: dict[str, list[str]] = {}
+    for rt in root_tools:
+        g = rt.spec.group
+        groups.setdefault(g, []).append(rt.public_selector.selector)
+
+    for group in sorted(groups):
+        names = sorted(groups[group])
+        lines.append(f"  {group}:")
+        for name in names:
+            lines.append(f"    {name}")
+
+    lines.append("</visible tools>")
+    return "\n".join(lines)
+
+
+def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:
+    catalog = build_tool_catalog()
+    enabled_names = {t.name for t in registry}
+
+    lines = ["<visible tools>"]
+    core_names = sorted(t.name for t in registry if t.group == "core")
+    if core_names:
+        lines.append("  core:")
+        lines.extend(f"    {n}" for n in core_names)
+
+    noncore_groups = sorted({t.group for t in registry if t.group != "core"})
+    for group in noncore_groups:
+        lines.append(f"  {group}:")
+        tools_in_group = sorted(
+            (t for t in registry if t.group == group), key=lambda item: item.name
+        )
+        for tool in tools_in_group:
+            suffix = ""
+            if tool.group == "mcp" and "[mcp: " in tool.description:
+                server_name = tool.description.split("[mcp: ")[-1].split("]")[0]
+                suffix = f" [mcp: {server_name}]"
+            lines.append(f"    {tool.name}{suffix}")
+    lines.append("</visible tools>")
+
+    all_known = set()
+    for group_names in catalog.values():
+        all_known.update(group_names)
+    hidden = sorted(all_known - enabled_names)
+    if hidden:
+        lines.append("<hidden tools (enable via tools.enabled_groups)>")
+        for group in sorted(catalog):
+            group_hidden = sorted(catalog[group] & set(hidden))
+            if group_hidden:
+                lines.append(f"  {group}:")
+                lines.extend(f"    {name}" for name in group_hidden)
+        lines.append("</hidden tools>")
+
+    available_groups = sorted(catalog.keys() - {tool.group for tool in registry})
+    if available_groups:
+        lines.append("<available groups>")
+        lines.extend(f"  {group}" for group in available_groups)
+        lines.append("</available groups>")
+    return "\n".join(lines)
+
+
+def _resolve_tool_governance(name: str, state: ToolRegistryState) -> ToolSpec | None:
+    available = state.tools_user_invocable()
+    for rt in available:
+        if rt.public_selector.selector == name:
+            return rt.spec
+    canonical = state.resolve_selector(name)
+    if canonical:
+        for rt in available:
+            if rt.canonical_id == canonical:
+                return rt.spec
+    return None
+
+
+def _resolve_tool_legacy(name: str, registry: tuple[ToolSpec, ...]) -> ToolSpec | None:
+    return next((t for t in registry if t.name == name), None)
 
 
 def run_shell_shortcut(command: str, app: object) -> str:

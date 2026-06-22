@@ -6,7 +6,7 @@ from pathlib import Path
 import time
 from typing import TYPE_CHECKING, Callable
 
-from xcode.harness.skills import ToolSpec
+from xcode.harness.skills import ToolRegistryState, ToolSpec
 from xcode.coding_agent.tools.file_index import build_project_file_index
 
 from .commands import COMMAND_GROUP_ORDER, CommandEntry
@@ -69,7 +69,7 @@ class ReplCompleter(Completer):
     def __init__(
         self,
         project_root: Path,
-        registry: Iterable[ToolSpec] = (),
+        registry: Iterable[ToolSpec] | ToolRegistryState = (),
         command_names: Iterable[str] = (),
         command_registry: dict[str, CommandEntry] | None = None,
         effort_options: Iterable[str] | Callable[[], Iterable[str]] = (),
@@ -77,7 +77,15 @@ class ReplCompleter(Completer):
         skill_options: Iterable[str] | Callable[[], Iterable[str]] = (),
     ) -> None:
         self.project_root = project_root.resolve()
-        self.tool_names = tuple(sorted(tool.name for tool in registry))
+        if isinstance(registry, ToolRegistryState):
+            self.tool_names = tuple(
+                sorted(
+                    rt.public_selector.selector
+                    for rt in registry.tools_for_completion()
+                )
+            )
+        else:
+            self.tool_names = tuple(sorted(tool.name for tool in registry))
         self.command_names = tuple(command_names)
         self._command_meta: dict[str, str] = {}
         self._command_args: dict[str, str] = {}

@@ -229,6 +229,7 @@ class ToolsRuntimeConfig:
     enabled_groups: tuple[str, ...] = ("core", "skills")
     subagent_tool_allowlist: tuple[str, ...] = ()
     shell: str = "auto"
+    use_registered_tool_governance: bool = False
 
 
 @dataclass
