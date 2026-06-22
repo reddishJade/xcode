@@ -54,18 +54,22 @@ class CommandContext:
 CommandHandler = Callable[[str, CommandContext], bool]
 
 
-COMMAND_GROUP_SESSION = "会话管理"
+COMMAND_GROUP_SESSION_LIFECYCLE = "会话生命周期"
+COMMAND_GROUP_SESSION_BRANCH = "会话分支"
+COMMAND_GROUP_SESSION_ROLLBACK = "会话回滚"
 COMMAND_GROUP_MODE = "模式控制"
 COMMAND_GROUP_MODEL = "模型配置"
 COMMAND_GROUP_INFO = "信息工具"
 COMMAND_GROUP_EXIT = "退出"
 
 COMMAND_GROUP_ORDER: dict[str, int] = {
-    COMMAND_GROUP_SESSION: 1,
-    COMMAND_GROUP_MODE: 2,
-    COMMAND_GROUP_MODEL: 3,
-    COMMAND_GROUP_INFO: 4,
-    COMMAND_GROUP_EXIT: 5,
+    COMMAND_GROUP_SESSION_LIFECYCLE: 1,
+    COMMAND_GROUP_SESSION_BRANCH: 2,
+    COMMAND_GROUP_SESSION_ROLLBACK: 3,
+    COMMAND_GROUP_MODE: 4,
+    COMMAND_GROUP_MODEL: 5,
+    COMMAND_GROUP_INFO: 6,
+    COMMAND_GROUP_EXIT: 7,
 }
 
 
@@ -85,16 +89,24 @@ def command_names(registry: dict[str, CommandEntry]) -> tuple[str, ...]:
 
 
 def generate_help_text(registry: dict[str, CommandEntry]) -> str:
-    """从注册表生成 HELP_TEXT。"""
+    """从注册表按分组生成 HELP_TEXT。"""
     lines = ["Commands:"]
+    groups: dict[str, list[tuple[str, CommandEntry]]] = {}
     for name, entry in registry.items():
         if not entry.visible:
             continue
-        lines.append(f"  {name:<11} {entry.desc}")
-        if entry.args_desc:
-            lines.append(f"  {name} {entry.args_desc}")
+        g = entry.group or ""
+        groups.setdefault(g, []).append((name, entry))
+    sorted_groups = sorted(groups, key=lambda g: COMMAND_GROUP_ORDER.get(g, 99))
+    for group in sorted_groups:
+        lines.append(f"\n  {group}:")
+        for name, entry in groups[group]:
+            lines.append(f"    {name:<11} {entry.desc}")
+            if entry.args_desc:
+                lines.append(f"    {name} {entry.args_desc}")
     lines.extend(
         [
+            "",
             "",
             "Prefix a line with ! to run it through the registered bash tool.",
             "Press Shift+Enter for a newline. If your terminal does not send Shift+Enter,",
