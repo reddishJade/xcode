@@ -278,6 +278,7 @@ def build_tool_registry(
         registry,
         project_root,
         mcp_runtime_registry,
+        runtime_config,
     )
 
     registry_state = ToolRegistryState(registry)
@@ -322,6 +323,7 @@ def _extend_registry_with_features(
     registry: tuple[ToolSpec, ...],
     project_root: Path,
     mcp_runtime_registry: McpRuntimeRegistry,
+    runtime_config: XcodeRuntimeConfig,
 ) -> tuple[ToolSpec, ...]:
     """添加可选功能工具到注册表。"""
     from xcode.harness.mcp import build_mcp_tools
@@ -342,8 +344,13 @@ def _extend_registry_with_features(
     from xcode.harness.task_progress import build_progress_tools
     from xcode.harness.orchestration_store import OrchestrationStore
 
+    progress_summary = resolve_config_path(
+        project_root, runtime_config.paths.progress_summary
+    )
     registry += build_progress_tools(
-        TaskStore(project_root), OrchestrationStore(project_root)
+        TaskStore(project_root),
+        OrchestrationStore(project_root),
+        summary_path=progress_summary,
     )
     from xcode.harness.memory import MemoryManager, build_memory_tools
 

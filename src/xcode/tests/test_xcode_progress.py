@@ -78,6 +78,23 @@ class TestTaskProgress:
         assert custom.exists()
         assert (self.root / "claude-progress.txt").exists() is False
 
+    def test_build_progress_tools_uses_configured_summary_path(self) -> None:
+        """build_progress_tools 的 summary_path 参数透传到 save_progress handler。"""
+        task = self.store.create("task")
+        custom = self.root / "configured" / "progress.md"
+        tools = build_progress_tools(
+            self.store, self.orchestration, summary_path=custom
+        )
+        save_tool = next(t for t in tools if t.name == "save_task_progress")
+        save_tool.handler(
+            {
+                "task_id": task.id,
+                "feature_list": [{"title": "x", "status": "completed"}],
+            }
+        )
+        assert custom.exists()
+        assert (self.root / "claude-progress.txt").exists() is False
+
     def test_resume_missing_or_unknown_task(self) -> None:
         resumed = resume_task(self.store, 999)
         assert resumed == []

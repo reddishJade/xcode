@@ -252,7 +252,11 @@ def _parse_timestamp(value: str) -> float:
 def build_progress_tools(
     task_store: TaskStore,
     orchestration_store: OrchestrationStore,
+    *,
+    summary_path: Path | None = None,
 ) -> tuple[ToolSpec, ...]:
+    resolved_summary_path = summary_path
+
     def save_task_progress(args: ToolInput) -> str:
         task_id = args.get("task_id", args.get("id"))
         feature_list = args.get("feature_list", args.get("checklist"))
@@ -265,7 +269,9 @@ def build_progress_tools(
             if not isinstance(item, dict):
                 raise ValueError("feature_list items must be objects")
             checklist.append(item)
-        save_progress(task_store, task_id, checklist)
+        save_progress(
+            task_store, task_id, checklist, summary_path=resolved_summary_path
+        )
         return f"saved progress for task {task_id}"
 
     def resume_task_progress(args: ToolInput) -> str:
