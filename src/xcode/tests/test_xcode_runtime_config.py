@@ -8,12 +8,13 @@ from unittest.mock import patch
 from typing import Any
 
 from xcode.harness.config import (
-DEFAULT_PROMPT_MODULES,
+    DEFAULT_PROMPT_MODULES,
     discover_runtime_config,
     load_runtime_config,
     resolve_config_path,
 )
 import pytest
+
 
 class XcodeRuntimeConfigMergeSemanticsTests:
     """验证配置合并语义：显式设置的默认值不会被静默丢弃。"""
@@ -194,14 +195,21 @@ class XcodeRuntimeConfigMergeSemanticsTests:
 
             shutil.rmtree(root, ignore_errors=True)
 
+
 class XcodeRuntimeConfigTests:
     def test_missing_config_uses_defaults(self) -> None:
         config = load_runtime_config(None)
 
         assert config.provider.model_profiles["main"].transport == "openai_chat"
         assert config.provider.model_profiles["main"].chat_model == "deepseek-v4-flash"
-        assert config.provider.model_profiles["main"].base_url == "https://api.deepseek.com"
-        assert config.provider.model_profiles["subagent"] == config.provider.model_profiles["main"]
+        assert (
+            config.provider.model_profiles["main"].base_url
+            == "https://api.deepseek.com"
+        )
+        assert (
+            config.provider.model_profiles["subagent"]
+            == config.provider.model_profiles["main"]
+        )
         assert config.agent.max_steps == 20
         assert config.prompt.modules == DEFAULT_PROMPT_MODULES
         assert config.paths.sessions_dir is None
@@ -235,8 +243,12 @@ class XcodeRuntimeConfigTests:
 
             assert config.provider.model_profiles["main"].transport == "openai_chat"
             assert config.provider.model_profiles["main"].chat_model == "main-test"
-            assert config.provider.model_profiles["main"].base_url == "https://main.test"
-            assert config.provider.model_profiles["subagent"].chat_model == "subagent-test"
+            assert (
+                config.provider.model_profiles["main"].base_url == "https://main.test"
+            )
+            assert (
+                config.provider.model_profiles["subagent"].chat_model == "subagent-test"
+            )
             assert config.prompt.modules == ("identity", "tools")
             assert config.agent.max_steps == 9
             assert config.agent.tool_workers == 2
@@ -361,7 +373,7 @@ class XcodeRuntimeConfigTests:
         root = Path("project").resolve()
         absolute = root / "absolute"
 
-        assert resolve_config_path(root, None) == None
+        assert resolve_config_path(root, None) is None
         assert resolve_config_path(root, absolute) == absolute
         assert resolve_config_path(root, Path("docs")) == root / "docs"
 
@@ -536,11 +548,13 @@ class XcodeRuntimeConfigTests:
                 patch("xcode.main.has_valid_config", return_value=True),
             ):
                 import xcode.main as main_module
+
                 assert main_module.main() == 0
 
             assert captured["project_root"] == root
             assert captured["sessions_dir"] == root / ".local" / "sessions"
             assert captured["resume_latest"]
+
 
 if __name__ == "__main__":
     pytest.main()

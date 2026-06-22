@@ -18,10 +18,13 @@ from xcode.ai.events import (
 from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.harness.skills import ToolSpec
 import pytest
+
+
 def _make_mock_client(chunks: list | None = None) -> MagicMock:
     client = MagicMock()
     client.chat.completions.create.return_value = iter(chunks or [])
     return client
+
 
 class XcodeDeepSeekEnhancementsTests:
     def test_reasoning_content_and_usage_are_extracted_in_streaming(self) -> None:
@@ -105,7 +108,7 @@ class XcodeDeepSeekEnhancementsTests:
         func = encoded["function"]
         assert func["strict"]
         params = func["parameters"]
-        assert params["additionalProperties"] == False
+        assert not params["additionalProperties"]
         assert sorted(params["required"]) == ["items", "text"]
         assert "minLength" not in params["properties"]["text"]
         assert "maxLength" not in params["properties"]["text"]
@@ -242,6 +245,7 @@ class XcodeDeepSeekEnhancementsTests:
         assert "json" in content.lower()
         assert len(events) > 0
 
+
 class FakeStreamChunk:
     def __init__(
         self, content=None, reasoning_content=None, usage=None, tool_call=None
@@ -253,9 +257,11 @@ class FakeStreamChunk:
         )
         self.usage = usage
 
+
 class FakeStreamChoice:
     def __init__(self, content, reasoning_content, tool_call=None) -> None:
         self.delta = FakeStreamDelta(content, reasoning_content, tool_call)
+
 
 class FakeStreamDelta:
     def __init__(self, content, reasoning_content, tool_call=None) -> None:
@@ -263,10 +269,12 @@ class FakeStreamDelta:
         self.reasoning_content = reasoning_content
         self.tool_calls = [tool_call] if tool_call is not None else []
 
+
 class FakeFunction:
     def __init__(self, name, arguments) -> None:
         self.name = name
         self.arguments = arguments
+
 
 class FakeStreamToolCall:
     def __init__(self, index, call_id=None, name=None, arguments=None) -> None:
@@ -274,12 +282,14 @@ class FakeStreamToolCall:
         self.id = call_id
         self.function = FakeFunction(name, arguments)
 
+
 class FakeUsage:
     def __init__(self, prompt_cache_hit_tokens, prompt_cache_miss_tokens) -> None:
         self.prompt_cache_hit_tokens = prompt_cache_hit_tokens
         self.prompt_cache_miss_tokens = prompt_cache_miss_tokens
         self.prompt_tokens = prompt_cache_hit_tokens + prompt_cache_miss_tokens
         self.completion_tokens = 0
+
 
 if __name__ == "__main__":
     pytest.main()
