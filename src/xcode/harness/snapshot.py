@@ -152,6 +152,7 @@ class SnapshotService:
         args: list[str],
         check: bool = True,
         timeout: int = 30,
+        input_text: str | None = None,
     ) -> subprocess.CompletedProcess:
         cmd = [
             "git",
@@ -168,6 +169,7 @@ class SnapshotService:
             text=True,
             timeout=timeout,
             check=check,
+            input=input_text,
         )
 
     def _init_repo(self) -> None:
@@ -233,8 +235,18 @@ class SnapshotService:
     def track(self) -> SnapshotResult:
         with self._lock:
             self._git(["read-tree", "--empty"])
-            for rel_path in self._enumerate_files():
-                self._git(["add", rel_path])
+            paths = self._enumerate_files()
+            if paths:
+                pathspec = "\0".join(paths) + "\0"
+                self._git(
+                    [
+                        "--literal-pathspecs",
+                        "add",
+                        "--pathspec-from-file=-",
+                        "--pathspec-file-nul",
+                    ],
+                    input_text=pathspec,
+                )
             result = self._git(["write-tree"])
             snapshot_id = result.stdout.strip()
             skipped = self._pop_skipped()

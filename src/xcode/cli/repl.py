@@ -249,9 +249,13 @@ def run_repl(
         snapshot_turn_id: str | None = None
         pre_result: SnapshotResult | None = None
         if snapshot_store is not None:
-            snapshot_turn_id = snapshot_store.next_turn_id(store.session_id)
-            svc = snapshot_store.service(store.session_id)
-            pre_result = svc.track()
+            try:
+                snapshot_turn_id = snapshot_store.next_turn_id(store.session_id)
+                svc = snapshot_store.service(store.session_id)
+                pre_result = svc.track()
+            except KeyboardInterrupt:
+                print("[interrupted] current run cancelled; session is still active.")
+                continue
 
         expanded_text, references = expand_file_references(text, root)
         if references:
@@ -276,20 +280,26 @@ def run_repl(
             tool_names = _run_agent_turn(ctx)
         finally:
             if snapshot_store is not None and pre_result is not None:
-                svc = snapshot_store.service(store.session_id)
-                post_result = svc.track()
-                changes = svc.diff(pre_result.snapshot_id, post_result.snapshot_id)
-                all_skipped = list(pre_result.skipped_files)
-                all_skipped.extend(post_result.skipped_files)
-                snapshot_store.record_turn(
-                    session_id=store.session_id,
-                    turn_id=snapshot_turn_id or "000",
-                    pre_snapshot_id=pre_result.snapshot_id,
-                    post_snapshot_id=post_result.snapshot_id,
-                    changed_files=changes,
-                    skipped_files=all_skipped,
-                    tool_names=tool_names,
-                )
+                try:
+                    svc = snapshot_store.service(store.session_id)
+                    post_result = svc.track()
+                    changes = svc.diff(
+                        pre_result.snapshot_id,
+                        post_result.snapshot_id,
+                    )
+                    all_skipped = list(pre_result.skipped_files)
+                    all_skipped.extend(post_result.skipped_files)
+                    snapshot_store.record_turn(
+                        session_id=store.session_id,
+                        turn_id=snapshot_turn_id or "000",
+                        pre_snapshot_id=pre_result.snapshot_id,
+                        post_snapshot_id=post_result.snapshot_id,
+                        changed_files=changes,
+                        skipped_files=all_skipped,
+                        tool_names=tool_names,
+                    )
+                except KeyboardInterrupt:
+                    print("[interrupted] snapshot cancelled; session is still active.")
 
 
 @dataclass

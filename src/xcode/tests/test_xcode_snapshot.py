@@ -4,6 +4,7 @@ import hashlib
 import subprocess
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from xcode.harness.snapshot import (
 MAX_SNAPSHOT_FILE_BYTES,
@@ -81,6 +82,18 @@ class TestSnapshotService:
         svc.track()
         post_hash = self._user_index_hash()
         assert pre_hash == post_hash
+
+    def test_track_adds_all_files_with_one_git_process(self) -> None:
+        (self.root / "first.txt").write_text("first")
+        (self.root / "second.txt").write_text("second")
+        svc = SnapshotService(self.root, "test-batch-add")
+
+        with patch.object(svc, "_git", wraps=svc._git) as git:
+            svc.track()
+
+        add_calls = [call for call in git.call_args_list if "add" in call.args[0]]
+        assert len(add_calls) == 1
+        assert add_calls[0].kwargs["input_text"].endswith("\0")
 
     def test_undo_restore_does_not_mutate_user_git_index(self) -> None:
         (self.root / "hello.txt").write_text("world")

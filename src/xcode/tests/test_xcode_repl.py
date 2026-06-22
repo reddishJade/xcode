@@ -23,7 +23,7 @@ from xcode.cli.repl_skills import parse_skill_invocation
 from xcode.cli.repl_tools import brief_input, run_tool_command
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
 from xcode.harness.session import SessionRecord, SessionStore
-from xcode.harness.snapshot import SnapshotStore
+from xcode.harness.snapshot import SnapshotResult, SnapshotStore
 from xcode.harness.agent_runtime import (
     CancellationToken,
     StructuredAgentResult,
@@ -48,6 +48,7 @@ from xcode.agent.messages import AgentMessage, AssistantMessage
 from xcode.harness.skills import ApprovalCallback, ToolSpec
 from xcode.harness.session_todo import TodoItem
 import pytest
+
 class XcodeReplTests:
     def test_session_store_writes_jsonl_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -765,6 +766,64 @@ class XcodeReplTests:
             assert interrupt_index != -1
             assert "bash: cd .. && git diff .gitignore" not in text[interrupt_index:]
             assert app.agent.cancellation_token.is_cancelled()
+
+    def test_run_repl_pre_snapshot_interrupt_cancels_turn(self) -> None:
+        def interrupt_track() -> SnapshotResult:
+            raise KeyboardInterrupt
+
+        service = SimpleNamespace(track=interrupt_track)
+        snapshot_store = SimpleNamespace(
+            next_turn_id=lambda session_id: "001",
+            service=lambda session_id: service,
+        )
+        app = ExplicitSkillApp()
+        prompt = FakePrompt(["hello", "/exit"])
+        output = StringIO()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("xcode.cli.repl.SnapshotStore", return_value=snapshot_store),
+                redirect_stdout(output),
+            ):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+        assert code == 0
+        assert app.questions == []
+        assert "current run cancelled; session is still active" in output.getvalue()
+
+    def test_run_repl_post_snapshot_interrupt_keeps_session_active(self) -> None:
+        track_results = iter(
+            [
+                SnapshotResult(snapshot_id="pre", skipped_files=[]),
+                KeyboardInterrupt(),
+            ]
+        )
+
+        def track() -> SnapshotResult:
+            result = next(track_results)
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        service = SimpleNamespace(track=track)
+        snapshot_store = SimpleNamespace(
+            next_turn_id=lambda session_id: "001",
+            service=lambda session_id: service,
+        )
+        app = ExplicitSkillApp()
+        prompt = FakePrompt(["hello", "/exit"])
+        output = StringIO()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("xcode.cli.repl.SnapshotStore", return_value=snapshot_store),
+                redirect_stdout(output),
+            ):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+        assert code == 0
+        assert app.questions == ["hello"]
+        assert "snapshot cancelled; session is still active" in output.getvalue()
 
     def test_run_repl_second_ctrl_c_uses_blank_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
