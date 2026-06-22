@@ -651,6 +651,20 @@ def _format_token(n: int) -> str:
     return str(n)
 
 
+def _count_output_tokens(messages: list[object]) -> int:
+    """Sum output tokens from AssistantMessage.usage across history."""
+    total = 0
+    for msg in messages:
+        usage = getattr(msg, "usage", None) or {}
+        if isinstance(usage, dict):
+            ct = usage.get("completion_tokens") or usage.get("output_tokens", 0)
+            total += ct if isinstance(ct, int) else 0
+        elif hasattr(usage, "output"):
+            ct = getattr(usage, "output", 0)
+            total += ct if isinstance(ct, int) else 0
+    return total
+
+
 def _get_context_window(model_name: str) -> int:
     from xcode.ai.registry import get_providers, get_models
 
@@ -737,8 +751,16 @@ def _compute_context_summary(
 
     total = sum(t for _, t in categories)
     free = max(0, context_window - total) if context_window > 0 else 0
-    cost_input = getattr(cost, "input", 0) if cost else 0
-    spent = (total / 1_000_000) * cost_input if cost_input else 0
+    cost_input_rate = getattr(cost, "input", 0) if cost else 0
+    cost_output_rate = getattr(cost, "output", 0) if cost else 0
+
+    input_cost = (total / 1_000_000) * cost_input_rate if cost_input_rate else 0
+    history = getattr(agent, "history_messages", lambda: [])()
+    output_tokens = _count_output_tokens(history)
+    output_cost = (
+        (output_tokens / 1_000_000) * cost_output_rate if cost_output_rate else 0
+    )
+    spent = input_cost + output_cost
 
     context_str = (
         f"{_format_token(total)}/{_format_token(context_window)}"
