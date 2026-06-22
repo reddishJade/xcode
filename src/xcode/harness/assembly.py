@@ -340,8 +340,11 @@ def _extend_registry_with_features(
 
     registry += build_mailbox_tools(AgentMailbox(project_root))
     from xcode.harness.task_progress import build_progress_tools
+    from xcode.harness.orchestration_store import OrchestrationStore
 
-    registry += build_progress_tools(TaskStore(project_root))
+    registry += build_progress_tools(
+        TaskStore(project_root), OrchestrationStore(project_root)
+    )
     from xcode.harness.memory import MemoryManager, build_memory_tools
 
     registry += build_memory_tools(MemoryManager(project_root))

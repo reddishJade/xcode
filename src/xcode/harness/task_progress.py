@@ -1,4 +1,9 @@
-"""任务进度断点和长任务租约状态。"""
+"""任务进度断点和长任务租约状态。
+
+orchestration state 由独立的 ``OrchestrationStore`` 管理，不再混入
+``TaskStore.payload``。``save_progress`` 仅 merge ``feature_list``，
+不会覆盖运行时控制面。所有函数显式要求 ``orchestration_store`` 参数。
+"""
 
 from __future__ import annotations
 
@@ -6,32 +11,31 @@ import calendar
 import json
 import logging
 import time
-from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
+from xcode.harness.orchestration_store import OrchestrationStore, TaskRunState
 from xcode.harness.skills import ToolInput, ToolSpec
 from xcode.harness.task_store import CLAIMED, PENDING, TaskStore
 
 logger = logging.getLogger("xcode.harness.task_progress")
 
 
-@dataclass(frozen=True)
-class TaskRunState:
-    """长任务运行编排状态。"""
-
-    task_id: int
-    status: str
-    attempt: int
-    retry_limit: int
-    lease_expires_at: str
-    subtask_ids: list[int]
-
-
 def save_progress(
-    task_store: TaskStore, task_id: int | str, feature_list: list[dict[str, Any]]
+    task_store: TaskStore,
+    task_id: int | str,
+    feature_list: list[dict[str, Any]],
+    *,
+    summary_path: Path | None = None,
 ) -> None:
-    """原子性地更新 TaskStore 中的真值源（payload），并生成派生的只读 summary 视图文件。"""
-    task_store.update(task_id, payload={"feature_list": feature_list})
+    """merge feature_list 进 task payload 并写只读 summary 文件。
+
+    不再覆盖整个 payload——保留 blocked_by、parent_id 等其他字段。
+    """
+    current = task_store.get(task_id)
+    new_payload = dict(current.payload)
+    new_payload["feature_list"] = feature_list
+    task_store.update(task_id, payload=new_payload)
 
     total = len(feature_list)
     completed = sum(1 for item in feature_list if item.get("status") == "completed")
@@ -65,13 +69,13 @@ def save_progress(
         lines.extend(["", "## Current Active Step:", f"- {in_progress_steps[0]}"])
 
     summary_content = "\n".join(lines) + "\n"
-
-    progress_txt_path = task_store.root / "claude-progress.txt"
-    progress_txt_path.write_text(summary_content, encoding="utf-8")
+    target = summary_path or (task_store.root / "claude-progress.txt")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(summary_content, encoding="utf-8")
 
 
 def resume_task(task_store: TaskStore, task_id: int | str) -> list[dict[str, Any]]:
-    """从 TaskStore 物理 JSON 文件（SoT）中精确读取并恢复特征列表现场。"""
+    """从 TaskStore payload 读取 feature_list。"""
     try:
         task = task_store.get(task_id)
         return task.payload.get("feature_list") or []
@@ -82,19 +86,23 @@ def resume_task(task_store: TaskStore, task_id: int | str) -> list[dict[str, Any
 
 def start_run(
     task_store: TaskStore,
+    orchestration_store: OrchestrationStore,
     task_id: int | str,
     timeout_seconds: int = 3600,
     retry_limit: int = 0,
     subtasks: list[str] | None = None,
 ) -> TaskRunState:
-    """启动或恢复一个带租约的长任务运行。"""
+    """启动或恢复一个带租约的长任务运行。
+
+    orchestration 状态写入独立文件，不混入 task.payload。
+    """
     task = task_store.get(task_id)
-    orchestration = dict(task.payload.get("orchestration") or {})
-    attempt = int(orchestration.get("attempt", 0)) + 1
+    prev_state = orchestration_store.get(task.id)
+    attempt = (prev_state.attempt if prev_state else 0) + 1
     if attempt > retry_limit + 1:
         raise ValueError("retry limit exceeded")
 
-    subtask_ids = _existing_subtask_ids(orchestration)
+    subtask_ids = list(prev_state.subtask_ids) if prev_state else []
     for title in subtasks or []:
         clean_title = title.strip()
         if not clean_title:
@@ -113,64 +121,109 @@ def start_run(
         lease_expires_at=_future_timestamp(timeout_seconds),
         subtask_ids=subtask_ids,
     )
-    payload = dict(task.payload)
-    payload["orchestration"] = asdict(state)
-    task_store.update(task.id, status=CLAIMED, payload=payload)
+    orchestration_store.set(state)
+    task_store.update(task.id, status=CLAIMED)
     return state
 
 
-def resume_run(task_store: TaskStore, task_id: int | str) -> TaskRunState:
-    """恢复长任务运行状态。"""
-    task = task_store.get(task_id)
-    orchestration = dict(task.payload.get("orchestration") or {})
-    return TaskRunState(
-        task_id=task.id,
-        status=str(orchestration.get("status", task.status)),
-        attempt=int(orchestration.get("attempt", 0)),
-        retry_limit=int(orchestration.get("retry_limit", 0)),
-        lease_expires_at=str(orchestration.get("lease_expires_at", "")),
-        subtask_ids=_existing_subtask_ids(orchestration),
-    )
+def resume_run(
+    task_store: TaskStore,
+    orchestration_store: OrchestrationStore,
+    task_id: int | str,
+) -> TaskRunState:
+    """恢复长任务运行状态。
+
+    独立文件缺失或字段不全时记录 warning 并返回 default state，
+    不再静默用零值掩盖数据损坏。
+    """
+    tid = int(task_id)
+    try:
+        task = task_store.get(task_id)
+    except KeyError:
+        logger.warning("resume_run: unknown task %s", task_id)
+        return _default_state(tid)
+
+    state = orchestration_store.get(tid)
+    if state is None:
+        logger.warning("resume_run: no orchestration state for task %s", task_id)
+        return _default_state(tid, fallback_status=task.status)
+
+    missing = [
+        field for field in ("status", "lease_expires_at") if not getattr(state, field)
+    ]
+    if missing:
+        logger.warning(
+            "resume_run: task %s orchestration missing fields %s", task_id, missing
+        )
+    return state
 
 
-def retry_run(task_store: TaskStore, task_id: int | str) -> TaskRunState:
+def retry_run(
+    task_store: TaskStore,
+    orchestration_store: OrchestrationStore,
+    task_id: int | str,
+) -> TaskRunState:
     """在未超过 retry_limit 时重试长任务。"""
     task = task_store.get(task_id)
-    orchestration = dict(task.payload.get("orchestration") or {})
-    attempt = int(orchestration.get("attempt", 0))
-    retry_limit = int(orchestration.get("retry_limit", 0))
-    if attempt >= retry_limit + 1:
+    state = orchestration_store.get(task.id)
+    if state is None:
+        raise ValueError("no orchestration state; call start_run first")
+    if state.attempt >= state.retry_limit + 1:
         raise ValueError("retry limit exceeded")
     return start_run(
         task_store,
+        orchestration_store,
         task.id,
-        timeout_seconds=_remaining_timeout(orchestration),
-        retry_limit=retry_limit,
+        timeout_seconds=_remaining_timeout_from_state(state),
+        retry_limit=state.retry_limit,
     )
 
 
-def expire_stale_runs(task_store: TaskStore) -> list[TaskRunState]:
-    """将租约过期的运行标记为 timed_out 并释放为可重试任务。"""
-    expired: list[TaskRunState] = []
+def expire_stale_runs(
+    task_store: TaskStore,
+    orchestration_store: OrchestrationStore,
+) -> list[TaskRunState]:
+    """将租约过期的运行标记为 timed_out 并释放为可重试任务。
+
+    使用 lease 索引避免全表扫描 task 文件。
+    """
     now = time.time()
-    for task in task_store.list():
-        orchestration = dict(task.payload.get("orchestration") or {})
-        expires_at = _parse_timestamp(str(orchestration.get("lease_expires_at", "")))
-        if task.status != CLAIMED or expires_at <= 0 or expires_at >= now:
+    expired_task_ids = orchestration_store.list_expired(now)
+    result: list[TaskRunState] = []
+    for tid in expired_task_ids:
+        state = orchestration_store.get(tid)
+        if state is None:
             continue
-        orchestration["status"] = "timed_out"
-        payload = dict(task.payload)
-        payload["orchestration"] = orchestration
-        updated = task_store.update(task.id, status=PENDING, payload=payload)
-        expired.append(resume_run(task_store, updated.id))
-    return expired
+        try:
+            task = task_store.get(tid)
+        except KeyError:
+            orchestration_store.delete(tid)
+            continue
+        if task.status != CLAIMED:
+            continue
+        task_store.update(tid, status=PENDING)
+        new_state = TaskRunState(
+            task_id=state.task_id,
+            status="timed_out",
+            attempt=state.attempt,
+            retry_limit=state.retry_limit,
+            lease_expires_at=state.lease_expires_at,
+            subtask_ids=list(state.subtask_ids),
+        )
+        orchestration_store.set(new_state)
+        result.append(new_state)
+    return result
 
 
-def _existing_subtask_ids(orchestration: dict[str, Any]) -> list[int]:
-    values = orchestration.get("subtask_ids") or []
-    if not isinstance(values, list):
-        return []
-    return [int(value) for value in values if str(value).isdigit()]
+def _default_state(task_id: int, *, fallback_status: str = "unknown") -> TaskRunState:
+    return TaskRunState(
+        task_id=task_id,
+        status=fallback_status,
+        attempt=0,
+        retry_limit=0,
+        lease_expires_at="",
+        subtask_ids=[],
+    )
 
 
 def _future_timestamp(timeout_seconds: int) -> str:
@@ -178,6 +231,13 @@ def _future_timestamp(timeout_seconds: int) -> str:
         "%Y-%m-%dT%H:%M:%SZ",
         time.gmtime(time.time() + max(1, timeout_seconds)),
     )
+
+
+def _remaining_timeout_from_state(state: TaskRunState) -> int:
+    expires_epoch = _parse_timestamp(state.lease_expires_at)
+    if expires_epoch <= 0:
+        return 3600
+    return max(1, int(expires_epoch - time.time()))
 
 
 def _parse_timestamp(value: str) -> float:
@@ -189,14 +249,10 @@ def _parse_timestamp(value: str) -> float:
         return 0.0
 
 
-def _remaining_timeout(orchestration: dict[str, Any]) -> int:
-    expires_at = _parse_timestamp(str(orchestration.get("lease_expires_at", "")))
-    if expires_at <= 0:
-        return 3600
-    return max(1, int(expires_at - time.time()))
-
-
-def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
+def build_progress_tools(
+    task_store: TaskStore,
+    orchestration_store: OrchestrationStore,
+) -> tuple[ToolSpec, ...]:
     def save_task_progress(args: ToolInput) -> str:
         task_id = args.get("task_id", args.get("id"))
         feature_list = args.get("feature_list", args.get("checklist"))
@@ -228,31 +284,32 @@ def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
             raise ValueError("subtasks must be an array")
         state = start_run(
             task_store,
+            orchestration_store,
             task_id,
             timeout_seconds=int(args.get("timeout_seconds", 3600)),
             retry_limit=int(args.get("retry_limit", 0)),
             subtasks=[str(item) for item in subtasks_raw],
         )
-        return json.dumps(asdict(state), ensure_ascii=False, indent=2)
+        return json.dumps(_state_to_dict(state), ensure_ascii=False, indent=2)
 
     def resume_task_run(args: ToolInput) -> str:
         task_id = args.get("task_id", args.get("id"))
         if task_id is None:
             raise ValueError("task_id is required")
-        state = resume_run(task_store, task_id)
-        return json.dumps(asdict(state), ensure_ascii=False, indent=2)
+        state = resume_run(task_store, orchestration_store, task_id)
+        return json.dumps(_state_to_dict(state), ensure_ascii=False, indent=2)
 
     def retry_task_run(args: ToolInput) -> str:
         task_id = args.get("task_id", args.get("id"))
         if task_id is None:
             raise ValueError("task_id is required")
-        state = retry_run(task_store, task_id)
-        return json.dumps(asdict(state), ensure_ascii=False, indent=2)
+        state = retry_run(task_store, orchestration_store, task_id)
+        return json.dumps(_state_to_dict(state), ensure_ascii=False, indent=2)
 
     def expire_task_runs(_args: ToolInput) -> str:
-        expired = expire_stale_runs(task_store)
+        expired = expire_stale_runs(task_store, orchestration_store)
         return json.dumps(
-            [asdict(state) for state in expired],
+            [_state_to_dict(state) for state in expired],
             ensure_ascii=False,
             indent=2,
         )
@@ -357,3 +414,9 @@ def build_progress_tools(task_store: TaskStore) -> tuple[ToolSpec, ...]:
             group="progress",
         ),
     )
+
+
+def _state_to_dict(state: TaskRunState) -> dict[str, Any]:
+    from dataclasses import asdict
+
+    return asdict(state)

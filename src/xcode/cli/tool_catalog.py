@@ -86,10 +86,11 @@ def _build_mailbox_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
 
 
 def _build_progress_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
+    from xcode.harness.orchestration_store import OrchestrationStore
     from xcode.harness.task_progress import build_progress_tools
     from xcode.harness.task_store import TaskStore
 
-    return build_progress_tools(TaskStore(base_tmp))
+    return build_progress_tools(TaskStore(base_tmp), OrchestrationStore(base_tmp))
 
 
 def build_tool_catalog() -> dict[str, set[str]]:
