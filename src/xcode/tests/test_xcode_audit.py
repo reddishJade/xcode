@@ -6,25 +6,17 @@ import tempfile
 import unittest
 
 from xcode.harness.observability import (
-    Action,
-    ApprovalResult,
     AuditRecord,
     JsonlAuditLogger,
     PermissionEngine,
     PermissionEngineConfig,
-    PermissionEngineResult,
     PermissionPolicy,
     StaticPermission,
     redact_text,
 )
-from xcode.harness.observability.permissions import (
-    PermissionMetadata,
-    _approval_metadata,
-)
 from xcode.harness.skills import ToolSpec
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.config import GateConfig
-from xcode.harness.agent_runtime.tool_audit import emit_audit
 
 
 from xcode.tests.fixtures import FakeProvider
