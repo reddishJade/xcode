@@ -25,6 +25,19 @@ type ToolMetadata = dict[str, ToolMetadataValue]
 ActionHandler = Callable[[ToolInput], str]
 ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
 AGENT_CONTENT_BLOCKS_METADATA_KEY = "agent_content_blocks"
+CITATION_SOURCES_METADATA_KEY = "citation_sources"
+
+
+@dataclass(frozen=True)
+class CitationSource:
+    """模型可引用的本地证据来源。"""
+
+    kind: Literal["file", "search"]
+    path: str
+    start_line: int
+    end_line: int
+    text: str
+
 
 # ── Governance metadata ──
 
