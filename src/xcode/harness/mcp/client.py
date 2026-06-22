@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -107,6 +108,18 @@ class McpClient:
         self.server_info: dict[str, Any] = {}
         self.instructions: str | None = None
 
+    @staticmethod
+    def _resolve_command(command: list[str]) -> list[str]:
+        """解析命令路径，Windows 上通过 cmd.exe 启动 .cmd/.bat 脚本。"""
+        if os.name != "nt":
+            return command
+        resolved = shutil.which(command[0])
+        if resolved and resolved.lower().endswith((".cmd", ".bat")):
+            return ["cmd.exe", "/c", *command]
+        if resolved:
+            return [resolved, *command[1:]]
+        return command
+
     @property
     def status(self) -> str:
         """返回当前连接状态。"""
@@ -117,8 +130,9 @@ class McpClient:
         if self.process is not None:
             return
         try:
+            cmd = self._resolve_command(self.command)
             self.process = subprocess.Popen(
-                self.command,
+                cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
