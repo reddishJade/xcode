@@ -9,6 +9,8 @@ from xcode.harness.daemon import HeartbeatDaemon
 from xcode.harness.mailbox import AgentMailbox
 from xcode.harness.task_store import TaskStore
 import pytest
+
+
 class TestHeartbeatDaemon:
     """心跳守护进程单元测试。"""
 
@@ -17,7 +19,11 @@ class TestHeartbeatDaemon:
         self.root = Path(self.temp_dir.name)
         # 用较短的间隔进行快速测试
         self.daemon = HeartbeatDaemon(
-            self.root, interval_seconds=1, agent_id="test_agent"
+            self.root,
+            mailbox=AgentMailbox(self.root),
+            task_store=TaskStore(self.root),
+            interval_seconds=1,
+            agent_id="test_agent",
         )
 
     def teardown_method(self, method) -> None:
@@ -127,6 +133,7 @@ class TestHeartbeatDaemon:
         assert alerts[0]["type"] == "tasks_summary"
         assert alerts[0]["payload"]["pending_count"] == 1
         assert alerts[0]["payload"]["claimed_count"] == 1
+
 
 if __name__ == "__main__":
     pytest.main()

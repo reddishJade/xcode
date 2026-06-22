@@ -520,8 +520,15 @@ class TestMailboxExpiryAndAckSeparation:
     def test_daemon_check_mailbox_triggers_cleanup(self) -> None:
         """daemon.check_mailbox 顺带清理过期消息。"""
         from xcode.harness.daemon import HeartbeatDaemon
+        from xcode.harness.mailbox import AgentMailbox as _AgentMailbox
+        from xcode.harness.task_store import TaskStore as _TaskStore
 
-        daemon = HeartbeatDaemon(self.root, agent_id="test_agent")
+        daemon = HeartbeatDaemon(
+            self.root,
+            mailbox=_AgentMailbox(self.root),
+            task_store=_TaskStore(self.root),
+            agent_id="test_agent",
+        )
         mailbox = daemon.mailbox
         # 写入一条过期消息
         mailbox.send_message(

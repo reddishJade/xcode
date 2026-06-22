@@ -37,6 +37,9 @@ class HeartbeatDaemon:
     def __init__(
         self,
         project_root: Path,
+        mailbox: AgentMailbox,
+        task_store: TaskStore,
+        *,
         interval_seconds: int = 30,
         agent_id: str = "xcode_agent",
     ) -> None:
@@ -51,8 +54,8 @@ class HeartbeatDaemon:
         self._last_heartbeat_at = 0.0
         self._last_error = ""
         self._task_failures: dict[str, int] = {}
-        self.mailbox = AgentMailbox(project_root)
-        self.task_store = TaskStore(project_root)
+        self.mailbox = mailbox
+        self.task_store = task_store
 
         # 注册默认定时任务
         self.register_task("check_mailbox", self.check_mailbox)

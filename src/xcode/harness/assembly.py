@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from xcode.harness.execution_env import ExecutionEnv
 
@@ -69,6 +69,31 @@ if TYPE_CHECKING:
     from xcode.harness.mailbox import AgentMailbox
     from xcode.harness.mcp import McpRuntimeRegistry
     from xcode.harness.skills_registry import SkillRegistry
+
+
+@dataclass(frozen=True)
+class SharedServices:
+    """进程级共享基础设施实例，贯穿 tool registry 与 daemon。"""
+
+    task_store: Any
+    mailbox: Any
+    worktree_runner: Any
+    orchestration_store: Any
+
+
+def build_shared_services(project_root: Path) -> SharedServices:
+    """创建共享的单例 TaskStore / AgentMailbox / WorktreeTaskRunner / OrchestrationStore。"""
+    from xcode.coding_agent.tools.worktree import WorktreeTaskRunner
+    from xcode.harness.mailbox import AgentMailbox
+    from xcode.harness.orchestration_store import OrchestrationStore
+    from xcode.harness.task_store import TaskStore
+
+    return SharedServices(
+        task_store=TaskStore(project_root),
+        mailbox=AgentMailbox(project_root),
+        worktree_runner=WorktreeTaskRunner(project_root),
+        orchestration_store=OrchestrationStore(project_root),
+    )
 
 
 @dataclass(frozen=True)
@@ -229,6 +254,7 @@ def build_tool_registry(
     llm_profiles: Mapping[str, ModelProvider] | None,
     config: AgentConfig,
     runtime_config: XcodeRuntimeConfig,
+    shared_services: SharedServices,
     contextual_state: ContextualRetrievalState | None = None,
     compact_controller: CompactController | None = None,
     cancel_event: threading.Event | None = None,
@@ -279,6 +305,7 @@ def build_tool_registry(
         project_root,
         mcp_runtime_registry,
         runtime_config,
+        shared_services,
     )
 
     registry_state = ToolRegistryState(registry)
@@ -296,6 +323,7 @@ def build_tool_registry(
         llm_profiles=llm_profiles,
         config=config,
         runtime_config=runtime_config,
+        shared_services=shared_services,
         child_registry=child_registry,
         contextual_state=contextual_state,
         shell_spec=shell_spec,
@@ -324,32 +352,29 @@ def _extend_registry_with_features(
     project_root: Path,
     mcp_runtime_registry: McpRuntimeRegistry,
     runtime_config: XcodeRuntimeConfig,
+    shared_services: SharedServices,
 ) -> tuple[ToolSpec, ...]:
-    """添加可选功能工具到注册表。"""
+    """添加可选功能工具到注册表，复用共享实例。"""
     from xcode.harness.mcp import build_mcp_tools
 
     registry += build_mcp_tools(project_root, mcp_runtime_registry)
-    from xcode.coding_agent.tools.worktree import (
-        WorktreeTaskRunner,
-        build_worktree_tools,
-    )
+    from xcode.coding_agent.tools.worktree import build_worktree_tools
 
-    registry += build_worktree_tools(WorktreeTaskRunner(project_root))
-    from xcode.harness.task_store import TaskStore, build_task_tools
+    registry += build_worktree_tools(shared_services.worktree_runner)
+    from xcode.harness.task_store import build_task_tools
 
-    registry += build_task_tools(TaskStore(project_root))
-    from xcode.harness.mailbox import AgentMailbox, build_mailbox_tools
+    registry += build_task_tools(shared_services.task_store)
+    from xcode.harness.mailbox import build_mailbox_tools
 
-    registry += build_mailbox_tools(AgentMailbox(project_root))
+    registry += build_mailbox_tools(shared_services.mailbox)
     from xcode.harness.task_progress import build_progress_tools
-    from xcode.harness.orchestration_store import OrchestrationStore
 
     progress_summary = resolve_config_path(
         project_root, runtime_config.paths.progress_summary
     )
     registry += build_progress_tools(
-        TaskStore(project_root),
-        OrchestrationStore(project_root),
+        shared_services.task_store,
+        shared_services.orchestration_store,
         summary_path=progress_summary,
     )
     from xcode.harness.memory import MemoryManager, build_memory_tools
@@ -364,6 +389,7 @@ def _build_subagent_integration(
     llm_profiles: Mapping[str, ModelProvider] | None,
     config: AgentConfig,
     runtime_config: XcodeRuntimeConfig,
+    shared_services: SharedServices,
     child_registry: tuple[ToolSpec, ...],
     contextual_state: ContextualRetrievalState | None,
     shell_spec: ShellSpec,
@@ -459,14 +485,11 @@ def _build_subagent_integration(
         ).run_async(prompt)
         return result.answer
 
-    from xcode.coding_agent.tools.worktree import WorktreeTaskRunner
-
-    worktree_runner = WorktreeTaskRunner(project_root)
     managed_runner = ManagedSubagentRunner(
         run_child,
         available_profiles=tuple(child_llms),
         default_profile=PROFILE_SUBAGENT,
-        worktree_runner=worktree_runner,
+        worktree_runner=shared_services.worktree_runner,
         max_active_jobs=config.subagent_workers,
     )
     return [managed_runner.shutdown], build_managed_subagent_tools(managed_runner)
@@ -478,6 +501,7 @@ def _build_subagent_integration(
 def load_opt_in_services(
     project_root: Path,
     runtime_config: XcodeRuntimeConfig,
+    shared_services: SharedServices,
 ) -> OptInServices:
     daemon = None
     if runtime_config.daemon.enabled:
@@ -485,12 +509,15 @@ def load_opt_in_services(
 
         daemon = HeartbeatDaemon(
             project_root=project_root,
+            mailbox=shared_services.mailbox,
+            task_store=shared_services.task_store,
             interval_seconds=runtime_config.daemon.interval_seconds,
         )
-    from xcode.harness.mailbox import AgentMailbox
-
-    mailbox = AgentMailbox(project_root)
-    return OptInServices(daemon=daemon, mailbox=mailbox, progress=True)
+    return OptInServices(
+        daemon=daemon,
+        mailbox=shared_services.mailbox,
+        progress=True,
+    )
 
 
 # ── Agent 构建 ──

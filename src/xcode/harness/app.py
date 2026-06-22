@@ -161,6 +161,7 @@ def build_app(
         project_root, env_files, agent_config, skills_dir, audit_path, runtime_config
     )
     infra = build_shared_infra(project_root, cfg.runtime_config)
+    shared_services = _assembly.build_shared_services(project_root)
 
     providers = _assembly.build_providers(cfg.runtime_config, cfg.env_files)
     external_hook_runner = (
@@ -176,6 +177,7 @@ def build_app(
         llm_profiles=providers.llms,
         config=cfg.agent_config,
         runtime_config=cfg.runtime_config,
+        shared_services=shared_services,
         contextual_state=infra.contextual_state,
         compact_controller=infra.compact_controller,
         cancel_event=infra.cancellation_token.event,
@@ -204,7 +206,7 @@ def build_app(
     )
 
     opt_in_services = _assembly.load_opt_in_services(
-        project_root, cfg.runtime_config
+        project_root, cfg.runtime_config, shared_services
     )
 
     return XcodeApp(

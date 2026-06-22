@@ -34,6 +34,8 @@ from xcode.coding_agent.tools.shell_adapter import detect_shell
 from xcode.harness.mcp import McpRuntimeRegistry
 from xcode.harness.skills import ToolSpec
 import pytest
+
+
 def _write_skill(directory: Path, name: str, description: str, body: str) -> None:
     """在指定技能目录写入最小 SKILL.md。"""
     directory.mkdir(parents=True)
@@ -41,6 +43,7 @@ def _write_skill(directory: Path, name: str, description: str, body: str) -> Non
         f"---\nname: {name}\ndescription: {description}\n---\n\n{body}",
         encoding="utf-8",
     )
+
 
 class XcodeAppRuntimeTests:
     def test_app_async_ask_uses_native_async_agent(self) -> None:
@@ -815,11 +818,13 @@ class XcodeAppRuntimeTests:
                 if "status=done" in checked:
                     break
                 import time
+
                 time.sleep(0.01)
             else:
                 pytest.fail("subagent did not finish")
 
         assert seen_reads == ["worktree"]
+
 
 class MockProvider(StreamProvider):
     def __init__(
@@ -847,6 +852,7 @@ class MockProvider(StreamProvider):
     def judge(self, prompt: str) -> str:
         return "ok"
 
+
 def _patched_provider_bundle(
     seen_child_tools: list[list[str]],
     transport: str = "",
@@ -864,10 +870,128 @@ def _patched_provider_bundle(
     )
     return patch("xcode.harness.assembly.build_providers", return_value=bundle)
 
+
 def _layered_compactor(app: XcodeApp) -> LayeredCompactor:
     compactor = app.agent.compactor
     assert isinstance(compactor, LayeredCompactor)
     return compactor
+
+
+class TestSharedServicesInjection:
+    """PR8/C.1: build_app 统一共享实例。"""
+
+    def test_build_app_shares_task_store_across_tools_and_daemon(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from typing import cast
+
+        from xcode.harness.config import (
+            AgentConfig,
+            XcodeRuntimeConfig,
+            DaemonRuntimeConfig,
+        )
+        from xcode.harness.skills import ToolRegistryState
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_config = XcodeRuntimeConfig(
+                agent=AgentConfig(),
+                daemon=DaemonRuntimeConfig(enabled=True, interval_seconds=999),
+            )
+            with _patched_provider_bundle([]):
+                app = build_app(project_root=root, runtime_config=runtime_config)
+
+            registry_state = cast(ToolRegistryState, app.registry)
+            tasks_tools = [
+                spec for spec in registry_state.snapshot() if spec.group == "tasks"
+            ]
+            # 进程 tools 的 handler 通过 partial 绑定 store
+            from functools import partial
+
+            task_stores = set()
+            for spec in tasks_tools:
+                handler = spec.handler
+                if isinstance(handler, partial):
+                    for arg in handler.args:
+                        if arg.__class__.__name__ == "TaskStore":
+                            task_stores.add(id(arg))
+            # daemon.task_store 也应来自同一实例
+            assert app.daemon is not None
+            daemon_store_id = id(app.daemon.task_store)
+            assert daemon_store_id in task_stores
+
+    def test_build_app_shares_mailbox_across_tools_and_daemon(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from typing import cast
+
+        from xcode.harness.config import (
+            AgentConfig,
+            XcodeRuntimeConfig,
+            DaemonRuntimeConfig,
+        )
+        from xcode.harness.skills import ToolRegistryState
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_config = XcodeRuntimeConfig(
+                agent=AgentConfig(),
+                daemon=DaemonRuntimeConfig(enabled=True, interval_seconds=999),
+            )
+            with _patched_provider_bundle([]):
+                app = build_app(project_root=root, runtime_config=runtime_config)
+
+            registry_state = cast(ToolRegistryState, app.registry)
+            mailbox_tools = [
+                spec for spec in registry_state.snapshot() if spec.group == "mailbox"
+            ]
+
+            mailbox_ids = set()
+            for spec in mailbox_tools:
+                handler = spec.handler
+                # mailbox tools 用闭包，handler.__closure__ 捕获 mailbox
+                closure = getattr(handler, "__closure__", None) or []
+                for cell in closure:
+                    obj = cell.cell_contents
+                    if obj.__class__.__name__ == "AgentMailbox":
+                        mailbox_ids.add(id(obj))
+            assert app.daemon is not None
+            assert id(app.daemon.mailbox) in mailbox_ids
+
+    def test_build_app_shares_worktree_runner_across_tools_and_subagent(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from typing import cast
+
+        from xcode.harness.config import XcodeRuntimeConfig
+        from xcode.harness.skills import ToolRegistryState
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with _patched_provider_bundle([]):
+                app = build_app(project_root=root, runtime_config=XcodeRuntimeConfig())
+
+            registry_state = cast(ToolRegistryState, app.registry)
+            worktree_tools = [
+                spec for spec in registry_state.snapshot() if spec.group == "worktree"
+            ]
+            from functools import partial
+
+            runner_ids = set()
+            for spec in worktree_tools:
+                handler = spec.handler
+                if isinstance(handler, partial):
+                    for arg in handler.args:
+                        if arg.__class__.__name__ == "WorktreeTaskRunner":
+                            runner_ids.add(id(arg))
+                else:
+                    closure = getattr(handler, "__closure__", None) or []
+                    for cell in closure:
+                        obj = cell.cell_contents
+                        if obj.__class__.__name__ == "WorktreeTaskRunner":
+                            runner_ids.add(id(obj))
+            assert len(runner_ids) == 1  # 所有 worktree tool 共享一个 runner
+
 
 if __name__ == "__main__":
     pytest.main()
