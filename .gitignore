@@ -1,6 +1,7 @@
 .agent/
 .antigravitycli/
 .claude/
+.xcode/
 .crush/
 .codex/
 .env
