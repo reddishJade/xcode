@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
-from xcode.harness.skills import ToolInput, ToolOutput, resolve_project_path
+from xcode.harness.skills import (
+    CITATION_SOURCES_METADATA_KEY,
+    CitationSource,
+    ToolInput,
+    ToolOutput,
+    resolve_project_path,
+)
 from .edit_diff import (
     apply_edits_fuzzy,
     detect_line_ending,
@@ -160,7 +166,9 @@ def _parse_read_file_request(
 def _read_full(text: str, display_path: str) -> str:
     tr = truncate_head(text)
     if not tr.truncated:
-        return tr.content
+        return _tool_output_with_citation(
+            display_path, 1, len(text.splitlines()) or 1, tr.content
+        )
 
     if tr.first_line_exceeds_limit:
         return (
@@ -174,12 +182,13 @@ def _read_full(text: str, display_path: str) -> str:
     reason = (
         "lines" if tr.truncated_by == "lines" else format_size(tr.max_bytes) + " limit"
     )
-    return (
+    content = (
         f"{tr.content}\n\n"
         f"[Showing lines 1-{end_line} of {tr.total_lines} "
         f"({reason}). "
         f"Use read_file with {continuation} to continue.]"
     )
+    return _tool_output_with_citation(display_path, 1, end_line, content)
 
 
 def _read_with_offset_limit(
@@ -215,7 +224,9 @@ def _read_with_offset_limit(
             f"Use read_file with {json.dumps(continuation, ensure_ascii=False)} "
             "to continue.]"
         )
-    return selected_truncated
+    return _tool_output_with_citation(
+        display_path, read_range.offset, end, selected_truncated
+    )
 
 
 def _write_file(
@@ -468,6 +479,36 @@ def _first_changed_line(before: str, after: str) -> int | None:
     if len(before_lines) != len(after_lines):
         return min(len(before_lines), len(after_lines)) + 1
     return None
+
+
+def _tool_output_with_citation(
+    path: str,
+    start_line: int,
+    end_line: int,
+    text: str,
+) -> ToolOutput:
+    """创建带 file citation source 的 ToolOutput。"""
+    source = CitationSource(
+        kind="file",
+        path=path,
+        start_line=start_line,
+        end_line=end_line,
+        text=text,
+    )
+    return ToolOutput(
+        text,
+        metadata={
+            CITATION_SOURCES_METADATA_KEY: [
+                {
+                    "kind": source.kind,
+                    "path": source.path,
+                    "start_line": source.start_line,
+                    "end_line": source.end_line,
+                    "text": source.text,
+                }
+            ],
+        },
+    )
 
 
 def _display(root: Path, path: Path) -> str:
