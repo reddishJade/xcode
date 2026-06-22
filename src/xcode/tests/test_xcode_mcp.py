@@ -375,25 +375,23 @@ class TestMcpPermissionDecisions:
     test_xcode_permissions.py.
     """
 
-    def test_mcp_action_has_non_empty_targets(self) -> None:
-        """Grant lookup and storage now work because targets are non-empty."""
+    def test_mcp_action_has_empty_targets(self) -> None:
+        """Without mcp__ prefix branch, MCP tools have no targets."""
         extractor = ActionExtractor()
         action = extractor.extract("mcp__srv__tool", {"arg": "val"})
-        assert len(action.targets) > 0
+        assert len(action.targets) == 0
 
     def test_mcp_target_enables_grant_lookup(self) -> None:
-        """compute_shadow_approval_candidate no longer returns None."""
+        """compute_shadow_approval_candidate handles unknown tools."""
         from xcode.harness.observability.permission_model import (
             compute_shadow_approval_candidate,
         )
 
         extractor = ActionExtractor()
         action = extractor.extract("mcp__srv__tool", {})
-        # Without targets, this returned None; now it should proceed
         candidate = compute_shadow_approval_candidate(action)
-        # Candidate may still be None if no grants exist, but not because
-        # targets is empty
-        assert candidate is not None
+        # Without targets, candidate is None
+        assert candidate is None
 
     def test_mcp_grant_written(self) -> None:
         """Grant records for MCP tools are created correctly."""
