@@ -53,11 +53,11 @@ def load_humaneval(path: Path) -> tuple[EvalTask, ...]:
         canonical = str(item.get("canonical_solution") or "").strip()
         tests = str(item.get("test") or "").strip()
         criteria = [
-            "最终回答包含可直接用于补全的 Python 代码。",
-            "实现符合题目描述的函数签名和行为。",
+            "Final answer contains runnable Python code for completion.",
+            "Implementation matches the specified function signature and behavior.",
         ]
         if tests:
-            criteria.append("实现应能通过 benchmark 提供的测试断言。")
+            criteria.append("Implementation passes the benchmark's provided test assertions.")
         tasks.append(
             EvalTask(
                 id=_normalize_task_id("humaneval", task_id),
@@ -107,9 +107,9 @@ def load_swebench_lite(path: Path) -> tuple[EvalTask, ...]:
                     }
                 },
                 llm_judge_criteria=(
-                    "修改应直接解决问题陈述中的缺陷。",
-                    "实现应保持补丁范围集中，避免无关重构。",
-                    "实现应满足 benchmark 附带的测试意图。",
+                    "Changes directly address the defect described in the problem statement.",
+                    "Implementation keeps the patch scope focused, avoiding unrelated refactoring.",
+                    "Implementation fulfills the intent of the benchmark's tests.",
                 ),
             )
         )
@@ -376,14 +376,14 @@ def _write_evalplus_fixture(
 
 
 def _solution_template(prompt: str) -> str:
-    return f'"""{prompt}"""\n\n# 在下方实现要求的函数。\n'
+    return f'"""{prompt}"""\n\n# Implement the required function below.\n'
 
 
 def _reference_template(prompt: str, canonical_solution: str) -> str:
     """生成公开 benchmark 的参考实现文件。"""
     return "\n".join(
         [
-            '"""公开 benchmark 参考解。"""',
+            '"""Public benchmark reference solution."""',
             "",
             prompt.rstrip(),
             "",

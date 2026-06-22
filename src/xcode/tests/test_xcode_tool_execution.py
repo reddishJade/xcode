@@ -613,14 +613,14 @@ class TestPermissionSingleGate:
         with patch.object(PermissionEngine, "decide", counting_decide):
             result = self._run_execution(gate, spec)
 
-        assert decide_count[0] == 1, "decide 必须恰好调用一次"
+        assert decide_count[0] == 1, "decide must be called exactly once"
         assert self._handler_called
         assert not (result.results[0].is_error)
 
     # ── deny path ──
 
     def test_deny_path_calls_permission_once_handler_skipped(self) -> None:
-        """deny 路径：PermissionEngine.decide() 调用 1 次，handler 不运行。"""
+        """deny path: PermissionEngine.decide() called once, handler not executed."""
         spec = self._make_spec(self._handler_never)
         gate = self._make_gate(
             PermissionPolicy((StaticPermission(self.TOOL_NAME, "deny"),))
@@ -636,17 +636,17 @@ class TestPermissionSingleGate:
         with patch.object(PermissionEngine, "decide", counting_decide):
             result = self._run_execution(gate, spec)
 
-        assert decide_count[0] == 1, "decide 必须恰好调用一次"
+        assert decide_count[0] == 1, "decide must be called exactly once"
         assert result.results[0].is_error
 
     # ── ask/defer path ──
 
     def test_ask_defer_path_calls_permission_once_blocked(self) -> None:
-        """ask 路径：PermissionEngine.decide() 调用 1 次，工具被 block。
+        """ask path: PermissionEngine.decide() called once, tool blocked.
 
         ask blocks when no approval mechanism exists.
-        handler 不执行；grant 在后续调用中满足。
-        *ask/grant 的完整周期测试见 test_xcode_permissions.py。
+        handler not executed; grant is satisfied on subsequent calls.
+        Full ask/grant cycle is tested in test_xcode_permissions.py.
         """
         spec = self._make_spec(self._handler_never)
         gate = self._make_gate(
@@ -664,7 +664,7 @@ class TestPermissionSingleGate:
         with patch.object(PermissionEngine, "decide", counting_decide):
             result = self._run_execution(gate, spec)
 
-        assert decide_count[0] == 1, "decide 必须恰好调用一次"
+        assert decide_count[0] == 1, "decide must be called exactly once"
         assert result.results[0].is_error
 
     # ── ToolSpecAdapter direct (no PermissionEngine) ──
@@ -713,7 +713,7 @@ class TestPermissionSingleGate:
         with patch.object(PermissionEngine, "decide", counting_decide):
             result = self._run_execution(gate, spec)
 
-        assert decide_count[0] == 1, "生产路径必须经过 ToolGate"
+        assert decide_count[0] == 1, "Production path must go through ToolGate"
         assert self._handler_called
         assert not (result.results[0].is_error)
 

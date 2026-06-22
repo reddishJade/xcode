@@ -87,7 +87,7 @@ class XcodeStructuredAgentTests:
             assert messages[0]["role"] == "system"
             assert "<git-preflight>" in messages[0]["content"]
             return [
-                TextDelta(chunk="你好，我是 Xcode。"),
+                TextDelta(chunk="Hello, I am Xcode."),
                 FinalMessage(content="", stop_reason="end_turn"),
             ]
 
@@ -110,7 +110,7 @@ class XcodeStructuredAgentTests:
 
         result = agent.run("hello, who are you?")
 
-        assert result.answer == "你好，我是 Xcode。"
+        assert result.answer == "Hello, I am Xcode."
         assert seen_tools == [["read_file"]]
         assert result.tool_calls == []
 
@@ -142,7 +142,7 @@ class XcodeStructuredAgentTests:
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
                 [
-                    TextDelta(chunk="是，正好 10000 字节。"),
+                    TextDelta(chunk="Yes, exactly 10000 bytes."),
                     FinalMessage(content="", stop_reason="end_turn"),
                 ],
             ]
@@ -158,13 +158,13 @@ class XcodeStructuredAgentTests:
 
         agent = StructuredAgent(provider=FakeProvider(factory), registry=())
 
-        list(agent.run_stream("AGENTS.md的字节数是多少？"))
-        second_events = list(agent.run_stream("正好是10000？"))
+        list(agent.run_stream("How many bytes is AGENTS.md?"))
+        second_events = list(agent.run_stream("Exactly 10000?"))
 
         assert [message["role"] for message in seen_messages[1]] == ["user", "assistant", "user"]
-        assert "AGENTS.md的字节数" in str(seen_messages[1][0]["content"])
+        assert "How many bytes is AGENTS.md" in str(seen_messages[1][0]["content"])
         assert "10000 bytes" in str(seen_messages[1][1]["content"])
-        assert "正好是10000" in str(seen_messages[1][2]["content"])
+        assert "Exactly 10000" in str(seen_messages[1][2]["content"])
         assert [event.type for event in second_events] == ["message_start", "text_delta", "assistant", "turn_end", "final"]
 
     def test_load_run_state_restores_history_messages(self) -> None:

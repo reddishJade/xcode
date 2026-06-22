@@ -21,7 +21,7 @@ from .repl_hitl import ReplHITLHandler
 from .repl_rendering import (
     LiveMarkdownStream,
     CLI_COLOR_INFO,
-    clear_terminal_display,
+    # clear_terminal_display,
     create_prompt_session,
     input_prompt,
     print_startup_banner,
@@ -137,7 +137,7 @@ def run_repl(
             )
         if hasattr(agent, "set_permanent_grant_store"):
             agent.set_permanent_grant_store(permanent_grant_store)
-    clear_terminal_display()
+    # clear_terminal_display()  # 在打印启动横幅前清理屏幕，保持界面整洁
     print_startup_banner(app, root)
 
     # session selection phase — exactly one path executes

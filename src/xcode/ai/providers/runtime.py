@@ -12,16 +12,16 @@ import tenacity
 T = TypeVar("T")
 
 API_ERROR_MESSAGES: dict[int, str] = {
-    400: "请求格式错误，请检查 JSON 格式、必需参数、模型名称及多模态文件是否符合要求",
-    401: "API Key 无效或已过期，请检查配置",
-    402: "API 余额不足，请充值后重试",
-    403: "拒绝访问，请新建 API Key 并注意输入内容安全",
-    404: "资源未找到，请确认使用的模型/接口是否支持该能力",
-    421: "内容被拦截，请避免输入不安全或敏感内容",
-    429: "请求过于频繁，请稍后重试",
-    500: "服务端暂时不可用，请稍后重试",
-    502: "服务端暂时不可用（网关错误），请稍后重试",
-    503: "服务暂时不可用（维护中），请稍后重试",
+    400: "Bad request: check JSON format, required parameters, model name, and multimodal file validity",
+    401: "Invalid or expired API key, check your configuration",
+    402: "Insufficient API balance, please top up and retry",
+    403: "Access denied, create a new API key and ensure input safety",
+    404: "Resource not found, verify the model/endpoint supports this capability",
+    421: "Content blocked, avoid unsafe or sensitive input",
+    429: "Too many requests, please retry later",
+    500: "Server temporarily unavailable, please retry later",
+    502: "Server temporarily unavailable (gateway error), please retry later",
+    503: "Service temporarily unavailable (maintenance), please retry later",
 }
 
 
@@ -32,9 +32,9 @@ def classify_api_error(exc: BaseException) -> str:
         code = exc.status_code
         msg = API_ERROR_MESSAGES.get(code)
         if msg:
-            return f"{msg}（HTTP {code}）：{exc.message}"
-        return f"API 返回异常状态（HTTP {code}）：{exc.message}"
-    return f"请求失败：{exc}"
+            return f"{msg} (HTTP {code}): {exc.message}"
+        return f"API returned abnormal status (HTTP {code}): {exc.message}"
+    return f"Request failed: {exc}"
 
 
 def is_transient_provider_error(exc: BaseException) -> bool:

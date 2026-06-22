@@ -863,7 +863,7 @@ class XcodeReplTests:
     def test_resume_command_loads_agent_history(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))
-            store.append("user", "AGENTS.md的字节数是多少？")
+            store.append("user", "How many bytes is AGENTS.md?")
             store.append("assistant", "AGENTS.md is 10000 bytes.")
             session_id = store.current_path.stem.removeprefix("session-")
             store.clear()
@@ -888,7 +888,7 @@ class XcodeReplTests:
     def test_resume_command_loads_tool_history(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))
-            store.append("user", "检查文件大小")
+            store.append("user", "Check file size")
             store.append(
                 "event",
                 {

@@ -44,22 +44,22 @@ class ReplHITLHandlerTests:
         self.tool = ToolSpec("bash", "Bash.", "text", lambda _data: "")
 
     def test_handler_allow_once(self) -> None:
-        result = self.handler._apply_choice("允许（仅本次）")
+        result = self.handler._apply_choice("Allow (once)")
         assert result.decision == "allow"
         assert result.scope == "once"
 
     def test_handler_session_scope(self) -> None:
-        result = self.handler._apply_choice("此次对话中允许")
+        result = self.handler._apply_choice("Allow this session")
         assert result.decision == "allow"
         assert result.scope == "session"
 
     def test_handler_permanent_scope(self) -> None:
-        result = self.handler._apply_choice("始终允许")
+        result = self.handler._apply_choice("Always allow")
         assert result.decision == "allow"
         assert result.scope == "permanent"
 
     def test_handler_deny(self) -> None:
-        result = self.handler._apply_choice("拒绝")
+        result = self.handler._apply_choice("Deny")
         assert result.decision == "deny"
         assert result.scope == "once"
 
@@ -69,7 +69,7 @@ class ReplHITLHandlerTests:
 
     def test_interactive_prompt_works_inside_running_event_loop(self) -> None:
         question = Mock()
-        question.ask.return_value = "允许（仅本次）"
+        question.ask.return_value = "Allow (once)"
 
         with patch("questionary.select", return_value=question):
             result = self.handler(self.tool, {"command": "rm -rf /tmp/xcode-demo"})

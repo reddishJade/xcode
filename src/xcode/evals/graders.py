@@ -96,29 +96,29 @@ def grade_events(
 # ── LLM-as-judge grader ──
 
 
-JUDGE_PROMPT_TEMPLATE = """你是一个严格的评测员。你需要根据以下标准评判一个 AI Agent 的输出。
+JUDGE_PROMPT_TEMPLATE = """You are a strict judge. Evaluate an AI Agent's output against the following criteria.
 
-## 任务描述
+## Task Description
 {task_prompt}
 
-## 评判标准
+## Evaluation Criteria
 {criteria_list}
 
-## Agent 的最终回答
+## Agent's Final Answer
 {answer}
 
-## Agent 调用过的工具
+## Tools Called by the Agent
 {tool_calls_text}
 
-## 评测要求
-对每条评判标准，输出一行，格式如下（PASS|FAIL 表示二者选一）：
-PASS|FAIL: <编号>: <理由>
+## Requirements
+For each criterion, output one line in the following format (PASS|FAIL means pick one):
+PASS|FAIL: <number>: <reason>
 
-例如：
-PASS: 1: 代码编译通过
-FAIL: 2: 代码存在未定义变量
+Example:
+PASS: 1: Code compiles successfully
+FAIL: 2: Code contains undefined variables
 
-仅输出评测行，不要输出其他内容。"""
+Output only the evaluation lines, nothing else."""
 
 
 async def run_llm_judge(
@@ -139,18 +139,18 @@ async def run_llm_judge(
         for event in events
         if event.type == "tool_use" and hasattr(event.data, "name")
     ]
-    tool_calls_text = "\n".join(tool_calls) if tool_calls else "（无工具调用）"
+    tool_calls_text = "\n".join(tool_calls) if tool_calls else "(no tool calls)"
 
     criteria_list = "\n".join(
         f"{i + 1}. {criterion}" for i, criterion in enumerate(task.llm_judge_criteria)
     )
 
     prompt = JUDGE_PROMPT_TEMPLATE.format(
-        task_prompt=task.prompt,
-        criteria_list=criteria_list,
-        answer=answer or "（Agent 未输出最终回答）",
-        tool_calls_text=tool_calls_text,
-    )
+            task_prompt=task.prompt,
+            criteria_list=criteria_list,
+            answer=answer or "(Agent did not produce a final answer)",
+            tool_calls_text=tool_calls_text,
+        )
 
     response_parts: list[str] = []
     final_content = ""

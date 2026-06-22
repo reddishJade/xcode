@@ -177,7 +177,7 @@ class XcodePermissionsTests:
             try:
                 link.symlink_to(restricted, target_is_directory=True)
             except OSError:
-                pytest.skip("当前环境不允许创建目录符号链接")
+                pytest.skip("Cannot create directory symlink in this environment")
             engine = PermissionEngine(
                 PermissionEngineConfig(
                     restricted_dirs=("secrets",),

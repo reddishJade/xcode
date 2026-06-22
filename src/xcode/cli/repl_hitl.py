@@ -29,11 +29,11 @@ class ReplHITLHandler:
         return self._apply_choice(choice)
 
     def _apply_choice(self, choice: str | None) -> HITLResult:
-        if choice == "允许（仅本次）":
+        if choice == "Allow (once)":
             return HITLResult("allow", "once")
-        if choice == "此次对话中允许":
+        if choice == "Allow this session":
             return HITLResult("allow", "session")
-        if choice == "始终允许":
+        if choice == "Always allow":
             return HITLResult("allow", "permanent")
         return HITLResult("deny", "once")
 
@@ -51,12 +51,12 @@ def _ask_hitl_choice_directly(tool: ToolSpec, action_input: ToolInput) -> str | 
 
     brief = brief_input(tool.name, action_input)
     return questionary.select(
-        f"需要授权：{tool.name}\n指令：{brief}",
+        f"Authorization required: {tool.name}\nInput: {brief}",
         choices=[
-            "允许（仅本次）",
-            "此次对话中允许",
-            "始终允许",
-            "拒绝",
+            "Allow (once)",
+            "Allow this session",
+            "Always allow",
+            "Deny",
         ],
     ).ask()
 

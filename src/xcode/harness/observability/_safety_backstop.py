@@ -226,7 +226,7 @@ class SafetyBackstopPolicyEvaluator:
         return Constraint(
             decision="ask",
             source="safety_backstop",
-            reason=f"未识别的命令，安全默认 ask: {stripped[:200]}",
+            reason=f"Unrecognized command, safe default ask: {stripped[:200]}",
         )
 
     def _check_bucket_a(self, command: str) -> Constraint | None:
@@ -234,45 +234,45 @@ class SafetyBackstopPolicyEvaluator:
         normalized = command.strip().lower()
 
         if _is_root_recursive_deletion(command):
-            return self._deny_constraint("根目录递归删除操作", non_bypassable=True)
+            return self._deny_constraint("Root directory recursive deletion", non_bypassable=True)
 
         if _is_system_path_recursive_mutation(command):
-            return self._deny_constraint("系统关键路径递归破坏", non_bypassable=True)
+            return self._deny_constraint("System critical path recursive destruction", non_bypassable=True)
 
         if _is_dd_device_write(command):
-            return self._deny_constraint("dd 直接设备写入", non_bypassable=True)
+            return self._deny_constraint("dd direct device write", non_bypassable=True)
 
         for pattern in self.BUCKET_A_DEVICE_PATTERNS:
             if pattern in normalized:
                 return self._deny_constraint(
-                    f"裸设备写入: {pattern}", non_bypassable=True
+                    f"Raw device write: {pattern}", non_bypassable=True
                 )
 
         if _is_root_recursive_permission_change(command):
-            return self._deny_constraint("根目录递归权限修改", non_bypassable=True)
+            return self._deny_constraint("Root directory recursive permission change", non_bypassable=True)
 
         for pattern in self.BUCKET_A_CREDENTIAL_SUBSTRINGS:
             if pattern in command:
                 return self._deny_constraint(
-                    f"凭据路径访问: {pattern}", non_bypassable=True
+                    f"Credential path access: {pattern}", non_bypassable=True
                 )
 
         for pattern in self.BUCKET_A_GIT_CREDENTIAL_PATTERNS:
             if pattern in normalized:
                 return self._deny_constraint(
-                    f"git 凭据 helper 调用: {pattern}", non_bypassable=True
+                    f"Git credential helper invocation: {pattern}", non_bypassable=True
                 )
 
         for pattern in self.BUCKET_A_PACKAGE_PATTERNS:
             if normalized.startswith(pattern) or f" {pattern}" in normalized:
                 return self._deny_constraint(
-                    f"系统包管理器安装: {pattern}", non_bypassable=True
+                    f"System package manager install: {pattern}", non_bypassable=True
                 )
 
         for pattern in self.BUCKET_A_SERVICE_PATTERNS:
             if normalized.startswith(pattern) or f" {pattern}" in normalized:
                 return self._deny_constraint(
-                    f"系统服务控制: {pattern}", non_bypassable=True
+                    f"System service control: {pattern}", non_bypassable=True
                 )
 
         return None
@@ -289,23 +289,23 @@ class SafetyBackstopPolicyEvaluator:
         first = tokens[0].lower()
 
         if first in self.BUCKET_B_ASK_COMMANDS:
-            return self._ask_constraint(f"高风险命令: {first}")
+            return self._ask_constraint(f"High-risk command: {first}")
 
         if first == "git" and len(tokens) > 1:
             git_cmd = " ".join(tokens).lower()
             for prefix in self.BUCKET_B_GIT_PREFIXES:
                 if git_cmd.startswith(prefix):
-                    return self._ask_constraint(f"强制 git 操作: {prefix}")
+                    return self._ask_constraint(f"Force git operation: {prefix}")
 
         for opname in ("chmod", "chown"):
             if first == opname and _has_recursive_flag(tokens[1:]):
-                return self._ask_constraint(f"递归权限修改: {opname}")
+                return self._ask_constraint(f"Recursive permission change: {opname}")
 
         if first == "docker":
             docker_cmd = " ".join(tokens).lower()
             for prefix in self.BUCKET_B_DOCKER_PREFIXES:
                 if docker_cmd.startswith(prefix):
-                    return self._ask_constraint(f"Docker 变异操作: {prefix}")
+                    return self._ask_constraint(f"Docker mutation operation: {prefix}")
 
         return None
 
@@ -327,21 +327,21 @@ class SafetyBackstopPolicyEvaluator:
             git_cmd = " ".join(tokens).lower()
             for prefix in self.BUCKET_C_GIT_PREFIXES:
                 if git_cmd.startswith(prefix):
-                    return self._allow_constraint(f"git 只读操作: {prefix}")
+                    return self._allow_constraint(f"Git read-only operation: {prefix}")
 
         check_cmd = command.strip().lower()
         for prefix in self.BUCKET_C_CHECK_PREFIXES:
             if check_cmd.startswith(prefix):
-                return self._allow_constraint(f"已知安全命令: {prefix}")
+                return self._allow_constraint(f"Known safe command: {prefix}")
 
         if first in self.BUCKET_C_ALLOW_COMMANDS:
-            return self._allow_constraint(f"已知安全命令: {first}")
+            return self._allow_constraint(f"Known safe command: {first}")
 
         if first == "command" and len(tokens) > 1 and tokens[1] == "-v":
-            return self._allow_constraint("已知安全命令: command -v")
+            return self._allow_constraint("Known safe command: command -v")
 
         if first == "git" and len(tokens) == 1:
-            return self._allow_constraint("已知安全命令: git")
+            return self._allow_constraint("Known safe command: git")
 
         return None
 

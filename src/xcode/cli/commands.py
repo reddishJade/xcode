@@ -54,13 +54,13 @@ class CommandContext:
 CommandHandler = Callable[[str, CommandContext], bool]
 
 
-COMMAND_GROUP_SESSION_LIFECYCLE = "会话生命周期"
-COMMAND_GROUP_SESSION_BRANCH = "会话分支"
-COMMAND_GROUP_SESSION_ROLLBACK = "会话回滚"
-COMMAND_GROUP_MODE = "模式控制"
-COMMAND_GROUP_MODEL = "模型配置"
-COMMAND_GROUP_INFO = "信息工具"
-COMMAND_GROUP_EXIT = "退出"
+COMMAND_GROUP_SESSION_LIFECYCLE = "Session Lifecycle"
+COMMAND_GROUP_SESSION_BRANCH = "Session Branches"
+COMMAND_GROUP_SESSION_ROLLBACK = "Session Rollback"
+COMMAND_GROUP_MODE = "Mode Control"
+COMMAND_GROUP_MODEL = "Model Configuration"
+COMMAND_GROUP_INFO = "Info Tools"
+COMMAND_GROUP_EXIT = "Exit"
 
 COMMAND_GROUP_ORDER: dict[str, int] = {
     COMMAND_GROUP_SESSION_LIFECYCLE: 1,
