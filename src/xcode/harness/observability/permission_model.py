@@ -1016,6 +1016,14 @@ class ActionExtractor:
             return self._path_action(
                 tool_name, tool_input, "write", "delete_file", "write"
             )
+        if tool_name.startswith("mcp__"):
+            return Action(
+                tool=tool_name,
+                capability="mcp",
+                operation=tool_name,
+                targets=(Target("mcp", tool_name, "execute"),),
+                input=tool_input,
+            )
         return Action(
             tool=tool_name,
             capability="unknown",

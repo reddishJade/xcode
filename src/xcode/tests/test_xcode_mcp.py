@@ -340,16 +340,20 @@ class TestMcpActionExtractor:
             "mcp__my_server__read_file",
             {"path": "/tmp/test.txt"},
         )
-        assert action.capability == "unknown"
-        assert len(action.targets) == 0
+        assert action.capability == "mcp"
+        assert len(action.targets) == 1
+        assert action.targets[0].kind == "mcp"
+        assert action.targets[0].value == "mcp__my_server__read_file"
 
     def test_mcp_tool_empty_input(self) -> None:
         action = self.extractor.extract(
             "mcp__server__fetch",
             {},
         )
-        assert action.capability == "unknown"
-        assert len(action.targets) == 0
+        assert action.capability == "mcp"
+        assert len(action.targets) == 1
+        assert action.targets[0].kind == "mcp"
+        assert action.targets[0].value == "mcp__server__fetch"
 
     def test_non_mcp_tool_unchanged(self) -> None:
         action = self.extractor.extract("bash", {"command": "ls"})
@@ -375,14 +379,16 @@ class TestMcpPermissionDecisions:
     test_xcode_permissions.py.
     """
 
-    def test_mcp_action_has_empty_targets(self) -> None:
-        """Without mcp__ prefix branch, MCP tools have no targets."""
+    def test_mcp_action_has_mcp_target(self) -> None:
+        """MCP tools get an mcp target for permission matching."""
         extractor = ActionExtractor()
         action = extractor.extract("mcp__srv__tool", {"arg": "val"})
-        assert len(action.targets) == 0
+        assert len(action.targets) == 1
+        assert action.targets[0].kind == "mcp"
+        assert action.targets[0].value == "mcp__srv__tool"
 
     def test_mcp_target_enables_grant_lookup(self) -> None:
-        """compute_shadow_approval_candidate handles unknown tools."""
+        """MCP targets enable grant candidate lookup."""
         from xcode.harness.observability.permission_model import (
             compute_shadow_approval_candidate,
         )
@@ -390,8 +396,8 @@ class TestMcpPermissionDecisions:
         extractor = ActionExtractor()
         action = extractor.extract("mcp__srv__tool", {})
         candidate = compute_shadow_approval_candidate(action)
-        # Without targets, candidate is None
-        assert candidate is None
+        assert candidate is not None
+        assert any(f.fingerprint.target_kind == "mcp" for f in candidate.fingerprints)
 
     def test_mcp_grant_written(self) -> None:
         """Grant records for MCP tools are created correctly."""

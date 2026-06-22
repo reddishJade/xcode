@@ -10,7 +10,10 @@ class _LogCapture:
 
     def __init__(self, records: list[logging.LogRecord]) -> None:
         self.records = records
-        self.output = [r.getMessage() for r in records]
+
+    @property
+    def output(self) -> list[str]:
+        return [r.getMessage() for r in self.records]
 
 
 @contextmanager
