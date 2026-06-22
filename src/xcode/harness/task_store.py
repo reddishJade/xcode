@@ -22,6 +22,13 @@ from xcode.harness.skills import ToolInput, ToolSpec
 
 PENDING = "pending"
 CLAIMED = "claimed"
+COMPLETED = "completed"
+VALID_STATUSES = (PENDING, CLAIMED, COMPLETED)
+
+
+class ConcurrentModificationError(RuntimeError):
+    """乐观锁版本冲突：尝试写入的版本不是最新版本。"""
+
 
 CREATE_TASK_SCHEMA = {
     "type": "object",
@@ -34,7 +41,7 @@ CREATE_TASK_SCHEMA = {
         },
     },
     "required": ["title"],
-    "additionalProperties": True,
+    "additionalProperties": False,
 }
 
 UPDATE_TASK_SCHEMA = {
@@ -46,6 +53,7 @@ UPDATE_TASK_SCHEMA = {
         },
         "status": {
             "type": "string",
+            "enum": [PENDING, CLAIMED, COMPLETED],
             "description": "New status of the task",
         },
         "title": {"type": "string", "description": "New title of the task"},
@@ -54,9 +62,29 @@ UPDATE_TASK_SCHEMA = {
             "items": {"type": "integer"},
             "description": "IDs of tasks that this task is blocked by",
         },
+        "expected_version": {
+            "type": "integer",
+            "description": "Optimistic lock: fail if current version does not match",
+        },
     },
     "required": ["id"],
-    "additionalProperties": True,
+    "additionalProperties": False,
+}
+
+CLAIM_TASK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "task_id": {
+            "type": "integer",
+            "description": "ID of the task to claim",
+        },
+        "claimant": {
+            "type": "string",
+            "description": "Identifier of the agent claiming the task",
+        },
+    },
+    "required": ["task_id", "claimant"],
+    "additionalProperties": False,
 }
 
 LIST_TASKS_SCHEMA = {
@@ -141,25 +169,55 @@ class TaskStore:
         title: str | None = None,
         status: str | None = None,
         payload: dict[str, Any] | None = None,
+        expected_version: int | None = None,
     ) -> TaskRecord:
         with self.locked():
-            task = self.get(task_id)
-            new_title = task.title if title is None else title.strip()
-            if not new_title:
-                raise ValueError("title is required")
-            updated = TaskRecord(
-                id=task.id,
-                title=new_title,
-                status=task.status if status is None else status.strip(),
-                payload=task.payload if payload is None else dict(payload),
-                created_at=task.created_at,
-                updated_at=_timestamp(),
-                version=task.version + 1,
-                claimed_by=task.claimed_by,
-                claimed_at=task.claimed_at,
+            return self._apply_update(
+                task_id,
+                title=title,
+                status=status,
+                payload=payload,
+                expected_version=expected_version,
             )
-            self._write(updated)
-            return updated
+
+    def _apply_update(
+        self,
+        task_id: int | str,
+        *,
+        title: str | None = None,
+        status: str | None = None,
+        payload: dict[str, Any] | None = None,
+        expected_version: int | None = None,
+    ) -> TaskRecord:
+        """不加锁的内部更新，调用方必须已持有 self.locked()。"""
+        task = self.get(task_id)
+        if expected_version is not None and task.version != expected_version:
+            raise ConcurrentModificationError(
+                f"task #{task.id} version mismatch: expected {expected_version}, got {task.version}"
+            )
+        new_title = task.title if title is None else title.strip()
+        if not new_title:
+            raise ValueError("title is required")
+        if status is not None:
+            clean_status = status.strip()
+            if clean_status not in VALID_STATUSES:
+                raise ValueError(
+                    f"invalid status: {clean_status!r}; expected one of {VALID_STATUSES}"
+                )
+            status = clean_status
+        updated = TaskRecord(
+            id=task.id,
+            title=new_title,
+            status=task.status if status is None else status,
+            payload=task.payload if payload is None else dict(payload),
+            created_at=task.created_at,
+            updated_at=_timestamp(),
+            version=task.version + 1,
+            claimed_by=task.claimed_by,
+            claimed_at=task.claimed_at,
+        )
+        self._write(updated)
+        return updated
 
     def claim(self, task_id: int | str, claimant: str) -> TaskRecord | None:
         clean_claimant = claimant.strip()
@@ -288,10 +346,10 @@ def resolve_task_dependencies(tasks: list[TaskRecord]) -> list[TaskRecord]:
 def resolve_blocked(tasks: list[TaskRecord]) -> list[dict[str, Any]]:
     """找出所有被阻塞的任务及其阻塞依赖。"""
     task_map = {t.id: t for t in tasks}
-    completed_ids = {t.id for t in tasks if t.status == "completed"}
+    completed_ids = {t.id for t in tasks if t.status == COMPLETED}
     blocked: list[dict[str, Any]] = []
     for t in tasks:
-        if t.status == "completed":
+        if t.status == COMPLETED:
             continue
         blocked_by = _parse_blocked_by(t)
         blocking = [dep for dep in blocked_by if dep not in completed_ids]
@@ -318,24 +376,22 @@ def advance_task(store: TaskStore, task_id: int | str) -> list[TaskRecord]:
     返回所有受影响的任务列表。
     """
     with store.locked():
-        updated = store.update(task_id, status="completed")
+        updated = store._apply_update(task_id, status=COMPLETED)
         affected = [updated]
 
         all_tasks = store.list()
         for t in all_tasks:
-            if t.status == "completed" or t.id == int(task_id):
+            if t.status == COMPLETED or t.id == int(task_id):
                 continue
             blocked_by = _parse_blocked_by(t)
             if int(task_id) in blocked_by:
                 remaining = [d for d in blocked_by if d != int(task_id)]
+                new_payload = dict(t.payload)
                 if remaining:
-                    new_payload = dict(t.payload)
                     new_payload["blocked_by"] = remaining
-                    store.update(t.id, payload=new_payload)
                 else:
-                    new_payload = dict(t.payload)
                     new_payload.pop("blocked_by", None)
-                    store.update(t.id, payload=new_payload)
+                store._apply_update(t.id, payload=new_payload)
                 affected.append(store.get(t.id))
 
     return affected
@@ -356,16 +412,19 @@ def _parse_blocked_by(task: TaskRecord) -> list[int]:
 def render_kanban_view(tasks: list[TaskRecord]) -> str:
     """输出美化的终端看板视图。"""
     categories: dict[str, list[TaskRecord]] = {
-        "pending": [],
-        "claimed": [],
-        "completed": [],
+        PENDING: [],
+        CLAIMED: [],
+        COMPLETED: [],
+        "[unknown]": [],
     }
     for t in tasks:
-        cat = t.status if t.status in categories else "pending"
+        cat = t.status if t.status in (PENDING, CLAIMED, COMPLETED) else "[unknown]"
         categories[cat].append(t)
 
     lines = ["=== TASK KANBAN VIEW ==="]
     for status, list_tasks in categories.items():
+        if status == "[unknown]" and not list_tasks:
+            continue
         lines.append(f"\n[{status.upper()}] ({len(list_tasks)})")
         if not list_tasks:
             lines.append("  (No tasks)")
@@ -377,12 +436,16 @@ def render_kanban_view(tasks: list[TaskRecord]) -> str:
                 completed = sum(
                     1
                     for item in fl
-                    if isinstance(item, dict) and item.get("status") == "completed"
+                    if isinstance(item, dict) and item.get("status") == COMPLETED
                 )
                 fl_info = f" ({completed}/{len(fl)} subtasks)"
             blocked_by = t.payload.get("blocked_by")
             block_info = f" [Blocked by: {blocked_by}]" if blocked_by else ""
             lines.append(f"  - #{t.id}: {t.title}{fl_info}{block_info}")
+    if categories["[unknown]"]:
+        lines.append(
+            f"\n[WARNING] {len(categories['[unknown]'])} task(s) have unrecognized status."
+        )
     return "\n".join(lines)
 
 
@@ -390,12 +453,10 @@ def _create_task(store: TaskStore, args: ToolInput) -> str:
     title = str(args.get("title", "")).strip()
     if not title:
         raise ValueError("title is required")
-    blocked_by = args.get("blocked_by") or args.get("dependencies")
-    payload = {}
+    blocked_by = args.get("blocked_by")
+    payload: dict[str, Any] = {}
     if blocked_by:
         payload["blocked_by"] = blocked_by
-    if "payload" in args and isinstance(args["payload"], dict):
-        payload.update(args["payload"])
     task = store.create(title, payload)
     return f"Created task #{task.id}: '{task.title}' (status: {task.status})"
 
@@ -406,17 +467,44 @@ def _update_task(store: TaskStore, args: ToolInput) -> str:
         raise ValueError("id is required")
     title = args.get("title")
     status = args.get("status")
-    payload_update = args.get("payload")
+    expected_version = args.get("expected_version")
 
     current = store.get(task_id)
     payload = dict(current.payload)
     if args.get("blocked_by"):
         payload["blocked_by"] = args.get("blocked_by")
-    if isinstance(payload_update, dict):
-        payload.update(payload_update)
 
-    task = store.update(task_id, title=title, status=status, payload=payload)
+    try:
+        task = store.update(
+            task_id,
+            title=title,
+            status=status,
+            payload=payload,
+            expected_version=int(expected_version)
+            if expected_version is not None
+            else None,
+        )
+    except ConcurrentModificationError:
+        latest = store.get(task_id)
+        return (
+            f"Concurrent modification: task #{latest.id} current version is "
+            f"{latest.version}, you expected {expected_version}. "
+            f"Please re-read and retry."
+        )
     return f"Updated task #{task.id}: status={task.status}, version={task.version}"
+
+
+def _claim_task(store: TaskStore, args: ToolInput) -> str:
+    task_id = args.get("task_id")
+    claimant = str(args.get("claimant", "")).strip()
+    if task_id is None:
+        raise ValueError("task_id is required")
+    if not claimant:
+        raise ValueError("claimant is required")
+    claimed = store.claim(task_id, claimant)
+    if claimed is None:
+        return f"Task #{task_id} is not pending (already claimed or completed)"
+    return f"Claimed task #{claimed.id} for {claimant} (version={claimed.version})"
 
 
 def _list_tasks(store: TaskStore, args: ToolInput) -> str:
@@ -501,7 +589,7 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
     return (
         ToolSpec(
             name="create_task",
-            description="Create a durable task graph node. Expose title, description, and dependencies/blocked_by.",
+            description="Create a durable task graph node. Expose title and blocked_by dependencies.",
             input_hint='{"title": "Implement X", "blocked_by": [1]}',
             handler=partial(_create_task, store),
             schema=CREATE_TASK_SCHEMA,
@@ -509,15 +597,23 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
         ),
         ToolSpec(
             name="update_task",
-            description="Update task attributes, status (pending/claimed/completed), title, or dependencies.",
-            input_hint='{"id": 1, "status": "completed"}',
+            description="Update task attributes, status (pending/claimed/completed), title, or blocked_by. Pass expected_version for optimistic locking.",
+            input_hint='{"id": 1, "status": "completed", "expected_version": 2}',
             handler=partial(_update_task, store),
             schema=UPDATE_TASK_SCHEMA,
             group="tasks",
         ),
         ToolSpec(
+            name="claim_task",
+            description="Atomically claim a pending task for an agent. Returns failure message if task is already claimed or completed.",
+            input_hint='{"task_id": 1, "claimant": "agent_a"}',
+            handler=partial(_claim_task, store),
+            schema=CLAIM_TASK_SCHEMA,
+            group="tasks",
+        ),
+        ToolSpec(
             name="advance_task",
-            description="Mark a task as completed and auto-unblock its dependents. Use instead of update_task for completing tasks with dependencies.",
+            description="Mark a task as completed and auto-unblock its dependents. Use instead of update_task for completing tasks with blocked_by dependencies.",
             input_hint='{"id": 1}',
             handler=partial(_advance_task, store),
             schema=ADVANCE_TASK_SCHEMA,
