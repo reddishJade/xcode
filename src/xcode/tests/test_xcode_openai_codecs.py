@@ -16,6 +16,8 @@ from xcode.ai.providers.codec import to_chat_messages, to_chat_tool
 from xcode.ai.providers.stream_codec import chat_stream_to_events
 from xcode.harness.skills import ToolSpec
 import pytest
+
+
 class OpenAIToolCodecTest:
     def test_tool_schema_uses_explicit_schema(self) -> None:
         tool = ToolSpec(
@@ -171,6 +173,7 @@ class OpenAIToolCodecTest:
         assert "secret-image-data" not in repr(image)
         assert "secret-audio-data" not in repr(file)
 
+
 class OpenAIStreamCodecTest:
     def test_chat_stream_aggregates_tool_call_arguments(self) -> None:
         events = list(
@@ -232,6 +235,7 @@ class OpenAIStreamCodecTest:
         assert isinstance(events[0], TextDelta)
         assert cast(TextDelta, events[0]).chunk == "hello"
 
+
 class FakeStreamChunk:
     def __init__(
         self,
@@ -250,9 +254,11 @@ class FakeStreamChunk:
     def usage(self) -> None:
         return self._usage
 
+
 class FakeStreamChunkNoUsage:
     def __init__(self, content: str | None = None) -> None:
         self.choices = [FakeStreamChoice(content, None, None)]
+
 
 class FakeStreamChoice:
     def __init__(
@@ -266,6 +272,7 @@ class FakeStreamChoice:
     @property
     def delta(self) -> FakeStreamDelta:
         return self._delta
+
 
 class FakeStreamDelta:
     def __init__(
@@ -287,6 +294,7 @@ class FakeStreamDelta:
     @property
     def tool_calls(self) -> Sequence[FakeStreamToolCall] | None:
         return self._tool_calls
+
 
 class FakeStreamToolCall:
     def __init__(
@@ -312,6 +320,7 @@ class FakeStreamToolCall:
     def function(self) -> FakeStreamFunction | None:
         return self._function
 
+
 class FakeStreamFunction:
     def __init__(self, name: str | None, arguments: str | None) -> None:
         self._name: str | None = name
@@ -324,6 +333,7 @@ class FakeStreamFunction:
     @property
     def arguments(self) -> str | None:
         return self._arguments
+
 
 if __name__ == "__main__":
     pytest.main()

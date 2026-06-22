@@ -57,7 +57,9 @@ def load_humaneval(path: Path) -> tuple[EvalTask, ...]:
             "Implementation matches the specified function signature and behavior.",
         ]
         if tests:
-            criteria.append("Implementation passes the benchmark's provided test assertions.")
+            criteria.append(
+                "Implementation passes the benchmark's provided test assertions."
+            )
         tasks.append(
             EvalTask(
                 id=_normalize_task_id("humaneval", task_id),
@@ -443,7 +445,7 @@ def _evalplus_test_file(
             "",
             "",
             "class TestEvalPlus:",
-            "    @pytest.mark.parametrize(\"args\", BASE_INPUTS + PLUS_INPUTS)",
+            '    @pytest.mark.parametrize("args", BASE_INPUTS + PLUS_INPUTS)',
             "    def test_benchmark(self, args: tuple[Any, ...]) -> None:",
             "        candidate = globals()[ENTRY_POINT]",
             "        reference_fn = getattr(reference, ENTRY_POINT)",

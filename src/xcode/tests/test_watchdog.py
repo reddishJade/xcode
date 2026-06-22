@@ -5,13 +5,15 @@
 
 from xcode.agent.types import ToolCallContent
 from xcode.agent.watchdog import (
-is_file_mutation_tool,
+    is_file_mutation_tool,
     is_file_read_tool,
     should_clear_read_history,
     tool_call_signature,
     tool_calls_signature,
 )
 import pytest
+
+
 class TestToolSignature:
     """测试工具签名生成。"""
 
@@ -52,6 +54,7 @@ class TestToolSignature:
         ]
         assert tool_calls_signature(calls1) == tool_calls_signature(calls2)
 
+
 class TestToolClassification:
     """测试工具分类。"""
 
@@ -81,6 +84,7 @@ class TestToolClassification:
         assert not (should_clear_read_history(read_calls, []))
         # 写入调用清除历史
         assert should_clear_read_history(write_calls, [])
+
 
 if __name__ == "__main__":
     pytest.main()

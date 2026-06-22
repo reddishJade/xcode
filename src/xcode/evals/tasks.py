@@ -179,7 +179,9 @@ def smoke() -> tuple[EvalTask, ...]:
             prompt="Return the confirmation phrase: smoke-test-ok",
             expected_answer_contains=("smoke-test-ok",),
             tags=("core", "smoke"),
-            llm_judge_criteria=("Final answer contains the required confirmation phrase.",),
+            llm_judge_criteria=(
+                "Final answer contains the required confirmation phrase.",
+            ),
         ),
     )
 

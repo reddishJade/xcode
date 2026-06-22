@@ -20,7 +20,7 @@ from xcode.harness.mcp.client import (
     TERMINATE_GRACE_SECONDS,
 )
 import pytest
-from xcode.tests._helpers import assert_logs, assert_no_logs
+from xcode.tests._helpers import assert_logs
 
 MOCK_SERVER_CODE = r"""
 import sys
@@ -189,6 +189,7 @@ if __name__ == "__main__":
     main()
 """
 
+
 class XcodeMcpClientTests:
     """验证 MCP 客户端基础生命周期和协商约束。"""
 
@@ -292,13 +293,13 @@ class XcodeMcpClientTests:
 
         assert tools == [{"name": "first"}, {"name": "second"}]
         assert request.call_args_list == [
-                call("tools/list", {}, timeout=3.0),
-                call(
-                    "tools/list",
-                    {"cursor": "page-2"},
-                    timeout=3.0,
-                ),
-            ]
+            call("tools/list", {}, timeout=3.0),
+            call(
+                "tools/list",
+                {"cursor": "page-2"},
+                timeout=3.0,
+            ),
+        ]
 
     def test_mcp_client_rejects_repeated_tool_list_cursor(self) -> None:
         """重复 cursor 会终止分页，避免服务器造成无限循环。"""
@@ -315,12 +316,15 @@ class XcodeMcpClientTests:
         ):
             client.list_tools()
 
-    @pytest.mark.parametrize("response", [
-        {"tools": "not-a-list"},
-        {"tools": [None]},
-        {"tools": [], "nextCursor": ""},
-        {"tools": [], "nextCursor": 2},
-    ])
+    @pytest.mark.parametrize(
+        "response",
+        [
+            {"tools": "not-a-list"},
+            {"tools": [None]},
+            {"tools": [], "nextCursor": ""},
+            {"tools": [], "nextCursor": 2},
+        ],
+    )
     def test_mcp_client_rejects_invalid_tool_list_page(self, response: dict) -> None:
         """分页响应中的 tools 和 nextCursor 必须具有协议要求的类型。"""
         client = McpClient(["unused"])
@@ -450,25 +454,25 @@ class XcodeMcpClientTests:
             )
 
         assert write_message.call_args_list == [
-                call(
-                    {
-                        "jsonrpc": "2.0",
-                        "method": "tools/call",
-                        "id": 1,
-                        "params": {"name": "slow", "arguments": {}},
-                    }
-                ),
-                call(
-                    {
-                        "jsonrpc": "2.0",
-                        "method": "notifications/cancelled",
-                        "params": {
-                            "requestId": 1,
-                            "reason": "Client timeout waiting for tools/call",
-                        },
-                    }
-                ),
-            ]
+            call(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "id": 1,
+                    "params": {"name": "slow", "arguments": {}},
+                }
+            ),
+            call(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/cancelled",
+                    "params": {
+                        "requestId": 1,
+                        "reason": "Client timeout waiting for tools/call",
+                    },
+                }
+            ),
+        ]
         assert client._active_request_ids == set()
         assert client._pending_responses == {}
 
@@ -545,10 +549,10 @@ class XcodeMcpClientTests:
         process.terminate.assert_called_once()
         process.kill.assert_called_once()
         assert process.wait.call_args_list == [
-                call(timeout=SHUTDOWN_GRACE_SECONDS),
-                call(timeout=TERMINATE_GRACE_SECONDS),
-                call(timeout=KILL_GRACE_SECONDS),
-            ]
+            call(timeout=SHUTDOWN_GRACE_SECONDS),
+            call(timeout=TERMINATE_GRACE_SECONDS),
+            call(timeout=KILL_GRACE_SECONDS),
+        ]
         process.stdout.close.assert_called_once()
         process.stderr.close.assert_called_once()
 
@@ -632,6 +636,7 @@ class XcodeMcpClientTests:
 
         assert [tool["name"] for tool in tools] == ["ping_ok", "method_not_found_ok"]
         assert any("notifications/custom" in message for message in logs.output)
+
 
 if __name__ == "__main__":
     pytest.main()

@@ -6,12 +6,14 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from xcode.harness.mcp.tools import (
-McpServerConfig,
+    McpServerConfig,
     build_mcp_tools,
     build_mcp_tool_search,
     build_fetch_tools_tool,
 )
 import pytest
+
+
 class TestXcodeMcpDeferredLoading:
     """MCP 延迟加载 (defer_loading) 单元测试。"""
 
@@ -78,7 +80,11 @@ class TestXcodeMcpDeferredLoading:
             t for t in tools if t.name == "mcp__heavy_service__heavy_calculate"
         )
         assert "Parameters unknown until searched" in stub_tool.description
-        assert stub_tool.schema == {"type": "object", "properties": {}, "additionalProperties": True}
+        assert stub_tool.schema == {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": True,
+        }
 
     def test_mcp_tool_search_cache_only(self) -> None:
         """测试 mcp_tool_search 仅从缓存中检索，不触发 lazy connection 物理连接。"""
@@ -223,6 +229,7 @@ class TestXcodeMcpDeferredLoading:
             assert entry["tools"][0]["name"] == "calc"
             assert entry["protocol_version"] == "2025-11-25"
             assert entry["server_info"] == {"name": "heavy", "version": "1.0.0"}
+
 
 if __name__ == "__main__":
     pytest.main()

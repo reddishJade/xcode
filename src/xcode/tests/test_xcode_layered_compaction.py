@@ -27,6 +27,8 @@ from xcode.ai.events import (
 from xcode.agent.messages import AssistantMessage, ToolResultMessage
 from xcode.agent.types import ToolCallContent
 import pytest
+
+
 class XcodeLayeredCompactionTests:
     def test_old_tool_results_are_micro_compacted(self) -> None:
         messages: list[dict[str, Any]] = [
@@ -259,7 +261,9 @@ class XcodeLayeredCompactionTests:
 
         assert result.answer == "done"
         assert len(seen_messages) == 1
-        assert seen_messages[0] == [{"role": "user", "content": "[Compressed]\nkept facts"}]
+        assert seen_messages[0] == [
+            {"role": "user", "content": "[Compressed]\nkept facts"}
+        ]
 
     def test_structured_agent_applies_request_hygiene_only_to_provider_request(
         self,
@@ -355,7 +359,9 @@ class XcodeLayeredCompactionTests:
 
         assert first.answer == "first"
         assert second.answer == "second"
-        assert seen_messages[1] == [{"role": "user", "content": "[Compressed]\nfrom real tokens"}]
+        assert seen_messages[1] == [
+            {"role": "user", "content": "[Compressed]\nfrom real tokens"}
+        ]
 
     def test_estimate_message_tokens(self) -> None:
         messages = [
@@ -412,6 +418,7 @@ class XcodeLayeredCompactionTests:
         from xcode.harness.agent_runtime.compaction import LayeredCompactor
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             file_path = root / "test_compact.txt"
@@ -459,6 +466,7 @@ class XcodeLayeredCompactionTests:
             )
             assert "replacements=1" in edit_res
             assert file_path.read_text(encoding="utf-8") == "new for compact"
+
 
 if __name__ == "__main__":
     pytest.main()

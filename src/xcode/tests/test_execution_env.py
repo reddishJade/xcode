@@ -8,6 +8,8 @@ from xcode.harness.execution_env import ExecutionResult, SubprocessExecutionEnv
 from xcode.tests.fixtures import MockExecutionEnv
 from xcode.coding_agent.tools import build_bash_tool
 import pytest
+
+
 class TestSubprocessExecutionEnv:
     def test_runs_command_and_returns_output(self) -> None:
         env = SubprocessExecutionEnv()
@@ -55,6 +57,7 @@ class TestSubprocessExecutionEnv:
         finally:
             timer.cancel()
 
+
 class TestMockExecutionEnv:
     def test_records_calls(self) -> None:
         env = MockExecutionEnv()
@@ -78,6 +81,7 @@ class TestMockExecutionEnv:
         r2 = env.run(["cmd2"], cwd=Path("/"))
         assert r1.stdout == "first"
         assert r2.stdout == "second"
+
 
 class TestBashWithMockEnv:
     def test_bash_uses_injected_env(self) -> None:
@@ -119,6 +123,7 @@ class TestBashWithMockEnv:
             tool = build_bash_tool(Path(tmp), env=env)
             output = tool.handler({"command": "exit 42"})
             assert "exit code: 42" in output
+
 
 if __name__ == "__main__":
     pytest.main()

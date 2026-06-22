@@ -23,11 +23,13 @@ from xcode.harness.observability import (
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
 import pytest
+
 EMPTY_SCHEMA = {
     "type": "object",
     "properties": {},
     "additionalProperties": False,
 }
+
 
 class ObservabilityCorrelationTests:
     """验证同一轮 hook、事件和结果可以稳定关联。"""
@@ -143,6 +145,7 @@ class ObservabilityCorrelationTests:
 
         serialized = event_to_dict(tool_use)
         assert serialized["correlation"]["tool_call_id"] == "call-1"
+
 
 if __name__ == "__main__":
     pytest.main()

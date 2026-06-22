@@ -10,6 +10,8 @@ from xcode.harness.agent_runtime.prompting import (
 )
 from xcode.harness.skills import ToolSpec
 import pytest
+
+
 class TestXcodePromptCacheMemoization:
     """系统提示词三级缓存 (Memoization Cache) 单元测试。"""
 
@@ -119,6 +121,7 @@ class TestXcodePromptCacheMemoization:
 
         assert "Notice 2" in second_prompt
         assert "Notice 1" not in second_prompt
+
 
 if __name__ == "__main__":
     pytest.main()

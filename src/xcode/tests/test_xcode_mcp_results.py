@@ -9,6 +9,8 @@ from xcode.harness.mcp.results import (
 )
 from xcode.harness.skills import AGENT_CONTENT_BLOCKS_METADATA_KEY
 import pytest
+
+
 class McpToolResultTests:
     """验证 MCP result 到宿主结果模型的转换。"""
 
@@ -38,7 +40,10 @@ class McpToolResultTests:
         details = output.metadata[MCP_RESULT_METADATA_KEY]
         assert isinstance(details, dict)
         assert isinstance(details, dict)
-        assert details["structuredContent"] == {"temperature": 22.5, "conditions": "clear"}
+        assert details["structuredContent"] == {
+            "temperature": 22.5,
+            "conditions": "clear",
+        }
         assert details["validation"]["status"] == "valid"
 
     def test_invalid_structured_content_is_a_tool_error(self) -> None:
@@ -163,6 +168,7 @@ class McpToolResultTests:
         details = output.metadata[MCP_RESULT_METADATA_KEY]
         assert isinstance(details, dict)
         assert details["validation"]["status"] == "not_applicable"
+
 
 if __name__ == "__main__":
     pytest.main()

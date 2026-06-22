@@ -44,13 +44,14 @@ from xcode.agent.types import TextContent
 from xcode.ai.events import Message, TextDelta, ToolCall, ToolCallEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.harness.skills_registry import (
-SkillIndexCollector,
+    SkillIndexCollector,
     SkillRegistry,
     build_skill_search_dirs,
 )
 import pytest
 
 # ── 辅助 Provider ──
+
 
 class CaptureProvider:
     """捕获发送给 provider 的消息。"""
@@ -67,6 +68,7 @@ class CaptureProvider:
     ) -> Any:
         self.captured_messages.append(messages)
         yield TextDelta(chunk="done")
+
 
 class ToolCaptureProvider:
     """带工具调用的 capture provider。"""
@@ -89,7 +91,9 @@ class ToolCaptureProvider:
                 calls=[ToolCall(id="tc-1", name="echo", input={"text": "hi"})]
             )
 
+
 # ── Data Model Tests ──
+
 
 class TestContextBlock:
     """测试 ContextBlock 数据模型。"""
@@ -135,6 +139,7 @@ class TestContextBlock:
         assert block.created_turn == 5
         assert block.created_step == 3
 
+
 class TestContextExpiry:
     """测试 ContextExpiry 过期策略。"""
 
@@ -158,6 +163,7 @@ class TestContextExpiry:
         assert ContextExpiry(max_steps=0).never
         assert not (ContextExpiry(max_steps=1).never)
 
+
 class TestContextPriority:
     """测试 ContextPriority 排序语义。"""
 
@@ -168,7 +174,9 @@ class TestContextPriority:
         assert ContextPriority.MEDIUM < ContextPriority.LOW
         assert ContextPriority.LOW < ContextPriority.BACKGROUND
 
+
 # ── trim_to_budget 纯函数测试 ──
+
 
 class TestTrimToBudget:
     """测试 trim_to_budget 纯函数。"""
@@ -306,7 +314,9 @@ class TestTrimToBudget:
         assert len(dropped) == 1
         assert dropped[0].content == "c"
 
+
 # ── DefaultContextAssembler 单元测试 ──
+
 
 class TestDefaultContextAssemblerNoOp:
     """未配置 context_blocks 时行为不变。"""
@@ -329,6 +339,7 @@ class TestDefaultContextAssemblerNoOp:
         assert len(result.blocks_used) == 0
         assert len(result.blocks_dropped) == 0
         assert result.total_tokens == 1
+
 
 class TestDefaultContextAssemblerPriority:
     """测试优先级排序。"""
@@ -388,6 +399,7 @@ class TestDefaultContextAssemblerPriority:
         )
         ids = [b.block_id for b in result.blocks_used]
         assert ids == ["a", "b", "c"]
+
 
 class TestDefaultContextAssemblerBudget:
     """测试预算裁剪。"""
@@ -494,7 +506,10 @@ class TestDefaultContextAssemblerBudget:
         r2 = self.assembler.assemble(inp)
 
         assert len(r1.blocks_used) == len(r2.blocks_used)
-        assert [b.block_id for b in r1.blocks_used] == [b.block_id for b in r2.blocks_used]
+        assert [b.block_id for b in r1.blocks_used] == [
+            b.block_id for b in r2.blocks_used
+        ]
+
 
 class TestDefaultContextAssemblerExpiry:
     """测试过期过滤（相对期限）。"""
@@ -649,6 +664,7 @@ class TestDefaultContextAssemblerExpiry:
         assert len(result.blocks_used) == 0
         assert len(result.blocks_dropped) == 1
 
+
 class TestDefaultContextAssemblerMessageInjection:
     """测试消息注入位置。"""
 
@@ -715,7 +731,9 @@ class TestDefaultContextAssemblerMessageInjection:
         assert len(result.messages) == 4
         assert len(result.blocks_used) == 3
 
+
 # ── Agent 循环集成测试 ──
+
 
 class TestContextAssemblerAgentLoopIntegration:
     """通过 agent 循环测试 context_assembler hook。"""
@@ -898,6 +916,7 @@ class TestContextAssemblerAgentLoopIntegration:
         # 第一个 step 应为 1
         assert captured_steps[0] == 1
 
+
 class TestContextAssemblyInputConstruction:
     """测试 ContextAssemblyInput 的 provider 侧构造。"""
 
@@ -917,7 +936,9 @@ class TestContextAssemblyInputConstruction:
         inp = ContextAssemblyInput(system_prompt="you are a helpful agent")
         assert inp.system_prompt == "you are a helpful agent"
 
+
 # ── ContextCollector 注册表测试 ──
+
 
 class FakeCollector:
     """测试用 fake collector，返回预设的块列表。"""
@@ -929,12 +950,14 @@ class FakeCollector:
     def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
         return list(self._blocks)
 
+
 class ErrorCollector:
     """测试用 fake collector，collect 时抛出异常。"""
 
     def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
         msg = "collector error"
         raise RuntimeError(msg)
+
 
 class TestContextCollectorRegistry:
     """测试 ContextCollectorRegistry 基本行为。"""
@@ -1018,6 +1041,7 @@ class TestContextCollectorRegistry:
         # 不需要 try/except，因为 collect 内部已捕获
         result = registry.collect(ContextCollectionInput())
         assert len(result) == 0
+
 
 class TestContextCollectorWithAssembler:
     """测试 collector → assembler 集成。"""
@@ -1244,7 +1268,9 @@ class TestContextCollectorWithAssembler:
         assert "[active_diff]" in combined
         assert "M src/main.py" in combined
 
+
 # ── ContextBlockTarget 测试 ──
+
 
 class TestContextBlockTarget:
     """测试 ContextBlockTarget 枚举。"""
@@ -1273,7 +1299,9 @@ class TestContextBlockTarget:
         assert ContextBlockTarget.SYSTEM.value == "system"
         assert ContextBlockTarget.USER_CONTEXT.value == "user_context"
 
+
 # ── SYSTEM 块组装测试 ──
+
 
 class TestDefaultContextAssemblerSystemBlocks:
     """测试 SYSTEM 目标块的组装行为。"""
@@ -1406,7 +1434,9 @@ class TestDefaultContextAssemblerSystemBlocks:
         assert result.messages[0].content == "identity prompt"
         assert result.messages[1].content == "project rules"
 
+
 # ── InstructionCollector 测试 ──
+
 
 class TestInstructionCollector:
     """测试 InstructionCollector（空配置时回退到 AGENTS.md / CLAUDE.md）。"""
@@ -1584,6 +1614,7 @@ class TestInstructionCollector:
             assert len(blocks[0].content.encode("utf-8")) <= 32 * 1024
             assert "<manifest-truncated>" in blocks[0].content
 
+
 class TestInstructionCollectorSizeGovernance:
     """测试指令大小治理（与 InstructionCollector 配合）。"""
 
@@ -1726,7 +1757,9 @@ class TestInstructionCollectorSizeGovernance:
             assert output.strip().endswith("</manifest-truncated>")
             assert len(output.encode("utf-8")) <= 32 * 1024
 
+
 # ── 配置验证测试 ──
+
 
 class TestInstructionSourceValidation:
     """测试 prompt.instructions 配置验证。"""
@@ -1818,7 +1851,9 @@ class TestInstructionSourceValidation:
             _validate_instruction_sources(raw)
         assert "prompt.instructions[0]" in str(exc_info.value)
 
+
 # ── ActiveDiffCollector 测试 ──
+
 
 class TestActiveDiffCollector:
     """测试 ActiveDiffCollector。"""
@@ -1965,7 +2000,9 @@ class TestActiveDiffCollector:
         blocks = collector.collect(ContextCollectionInput())
         assert len(blocks) == 0
 
+
 # ── RecentValidationCollector 测试 ──
+
 
 class TestRecentValidationCollector:
     """测试 RecentValidationCollector。"""
@@ -2045,9 +2082,13 @@ class TestRecentValidationCollector:
         assert len(blocks) == 1
         assert "<validation-truncated>" in blocks[0].content
         assert "</validation-truncated>" in blocks[0].content
-        assert len(blocks[0].content.encode("utf-8")) <= RECENT_VALIDATION_MAX_BYTES + 200  # +200 for "Command: bash\n" prefix
+        assert (
+            len(blocks[0].content.encode("utf-8")) <= RECENT_VALIDATION_MAX_BYTES + 200
+        )  # +200 for "Command: bash\n" prefix
+
 
 # ── TaskStateCollector 测试 ──
+
 
 class TestTaskStateCollector:
     """测试 TaskStateCollector。"""
@@ -2087,7 +2128,9 @@ class TestTaskStateCollector:
 
         assert len(content.encode("utf-8")) <= TASK_STATE_MAX_BYTES
 
+
 # ── NotesCollector 测试 ──
+
 
 class TestNotesCollector:
     """测试 NotesCollector。"""
@@ -2179,6 +2222,7 @@ class TestNotesCollector:
     def test_oversized_file_skipped(self) -> None:
         """超大文件被跳过。"""
         from xcode.agent.context_collector import NOTES_MAX_FILE_BYTES
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             notes_dir = root / ".local" / "notes"
@@ -2192,6 +2236,7 @@ class TestNotesCollector:
             assert len(blocks) == 1
             assert "small note" in blocks[0].content
             assert "huge" not in blocks[0].content
+
 
 class TestSkillIndexCollector:
     """Test SkillIndexCollector summary injection."""
@@ -2325,6 +2370,7 @@ class TestSkillIndexCollector:
             assert ContextBlockSource.SKILL in sources
             assert ContextBlockSource.NOTES in sources
 
+
 def _git_init(root: Path) -> None:
     subprocess.run(["git", "init"], cwd=root, capture_output=True, check=True)
     subprocess.run(
@@ -2339,6 +2385,7 @@ def _git_init(root: Path) -> None:
         capture_output=True,
         check=True,
     )
+
 
 def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)

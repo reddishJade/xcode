@@ -12,7 +12,8 @@ from xcode.harness.mcp.tools import (
     compute_config_hash,
 )
 from xcode.harness.skills import ToolSpec
-import pytest
+
+
 class XcodeMcpIntegrationTests:
     def setup_method(self, method) -> None:
         self.temp_dir = tempfile.mkdtemp()
@@ -98,7 +99,10 @@ class XcodeMcpIntegrationTests:
         cache_content = json.loads(cache_path.read_text(encoding="utf-8"))
         assert "fetcher" in cache_content["servers"]
         assert cache_content["servers"]["fetcher"]["protocol_version"] == "2025-11-25"
-        assert cache_content["servers"]["fetcher"]["server_info"] == {"name": "fetcher", "version": "1.0.0"}
+        assert cache_content["servers"]["fetcher"]["server_info"] == {
+            "name": "fetcher",
+            "version": "1.0.0",
+        }
 
         # Reset mocks
         mock_client_class.reset_mock()
@@ -248,10 +252,10 @@ class XcodeMcpIntegrationTests:
 
         assert [tool.name for tool in published[-1]] == ["mcp__dynamic__new_tool"]
         assert published[-1][0].schema == {
-                "type": "object",
-                "properties": {"value": {"type": "string"}},
-                "required": ["value"],
-            }
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"],
+        }
         cache = json.loads((local_dir / "mcp_cache.json").read_text(encoding="utf-8"))
         assert cache["servers"]["dynamic"]["tools"][0]["name"] == "new_tool"
         runtime_registry.close()

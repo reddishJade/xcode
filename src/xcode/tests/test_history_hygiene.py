@@ -10,6 +10,8 @@ from xcode.agent.history import (
 from xcode.agent.messages import AssistantMessage, ToolResultMessage, UserMessage
 from xcode.agent.types import TextContent, ToolCallContent
 import pytest
+
+
 class TestRepairToolPairing:
     """测试工具调用配对修复。"""
 
@@ -99,6 +101,7 @@ class TestRepairToolPairing:
         assert len(assistant.content) == 2
         assert isinstance(assistant.content[0], TextContent)
         assert isinstance(assistant.content[1], ToolCallContent)
+
 
 class TestApplyRequestHygiene:
     """测试请求 hygiene 压缩。"""
@@ -256,6 +259,7 @@ class TestApplyRequestHygiene:
         assert isinstance(call, ToolCallContent)
         assert call.arguments is not None
         assert call.arguments.get("param") == "short"
+
 
 if __name__ == "__main__":
     pytest.main()

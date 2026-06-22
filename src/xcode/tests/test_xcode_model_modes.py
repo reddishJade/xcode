@@ -8,6 +8,8 @@ from xcode.cli.repl_settings import handle_effort_command, handle_model_command
 from xcode.harness.app import XcodeApp
 from xcode.harness.agent_runtime import StructuredAgent
 import pytest
+
+
 class XcodeModelModeTests:
     def test_parse_model_mode_plain_model(self) -> None:
         parsed = parse_model_mode("deepseek-v4")
@@ -68,6 +70,7 @@ class XcodeModelModeTests:
         assert info["transport"] == "deepseek_chat"
         assert info["reasoning_effort"] == "high"
 
+
 class _ModelApp:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -96,6 +99,7 @@ class _ModelApp:
             }
         )
         return model
+
 
 class _EffortApp:
     def __init__(self, transport: str) -> None:
@@ -131,6 +135,7 @@ class _EffortApp:
         )
         return model
 
+
 class _Provider:
     def __init__(self, transport: str) -> None:
         self.transport = transport
@@ -139,13 +144,16 @@ class _Provider:
         self.thinking = True
         self.reasoning_effort = "high"
 
+
 class _ProviderWrapper:
     def __init__(self, active_provider: _Provider) -> None:
         self.active_provider = active_provider
 
+
 class _Agent:
     def __init__(self, provider: _ProviderWrapper) -> None:
         self.provider = provider
+
 
 if __name__ == "__main__":
     pytest.main()

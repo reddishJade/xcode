@@ -22,7 +22,7 @@ from xcode.ai.providers import PROVIDER_REGISTRY
 from xcode.ai.providers.openai import OpenAIChatProvider
 from xcode.ai.providers.chatglm import ChatGLMProvider
 from xcode.harness.config import (
-ModelProfileRuntimeConfig,
+    ModelProfileRuntimeConfig,
     ProviderTransport,
     load_runtime_config,
 )
@@ -30,22 +30,27 @@ import pytest
 
 # ── 测试辅助：创建 mock OpenAI 客户端 ──
 
+
 def _make_mock_client(chunks: list | None = None) -> MagicMock:
     """创建 mock openai.OpenAI 客户端，捕获请求参数。"""
     client = MagicMock()
     client.chat.completions.create.return_value = iter(chunks or [])
     return client
 
+
 # ── 流式 chunk 模拟对象 ──
+
 
 class FakeStreamChunk:
     def __init__(self, content=None, tool_call=None, reasoning=None) -> None:
         self.choices = [FakeStreamChoice(content, tool_call, reasoning)]
         self.usage = None
 
+
 class FakeStreamChoice:
     def __init__(self, content, tool_call, reasoning=None) -> None:
         self.delta = FakeStreamDelta(content, tool_call, reasoning)
+
 
 class FakeStreamDelta:
     def __init__(self, content, tool_call, reasoning=None) -> None:
@@ -53,18 +58,22 @@ class FakeStreamDelta:
         self.tool_calls = [tool_call] if tool_call is not None else []
         self.reasoning_content = reasoning
 
+
 class FakeStreamToolCall:
     def __init__(self, index, call_id=None, name=None, arguments=None) -> None:
         self.index = index
         self.id = call_id
         self.function = FakeStreamFunction(name, arguments)
 
+
 class FakeStreamFunction:
     def __init__(self, name, arguments) -> None:
         self.name = name
         self.arguments = arguments
 
+
 # ── Env / Factory 测试 ──
+
 
 class XcodeProviderEnvTests:
     def test_all_declared_runtime_transports_are_registered(self) -> None:
@@ -256,7 +265,9 @@ class XcodeProviderEnvTests:
                 assert main.client.api_key == "openai"
                 assert subagent.client.api_key == "subagent"
 
+
 # ── Runtime 测试 ──
+
 
 class XcodeProviderRuntimeTests:
     def test_retry_succeeds_after_transient_failure(self) -> None:
@@ -290,7 +301,9 @@ class XcodeProviderRuntimeTests:
 
         assert sleeps == [0.8000000000000007]
 
+
 # ── OpenAI Chat 测试 ──
+
 
 class XcodeStructuredProviderTests:
     def test_stream_converts_tool_schema_and_tool_calls(self) -> None:
@@ -431,7 +444,9 @@ class XcodeStructuredProviderTests:
         assert events[-1].calls[0].input == {"text": "hi"}
         assert client.chat.completions.create.call_args.kwargs["stream"]
 
+
 # ── ChatGLM 测试 ──
+
 
 def _make_glm_provider(client: Any = None, **overrides: Any) -> ChatGLMProvider:
     kwargs: dict[str, Any] = dict(
@@ -445,6 +460,7 @@ def _make_glm_provider(client: Any = None, **overrides: Any) -> ChatGLMProvider:
         kwargs["client"] = client
     kwargs.update(overrides)
     return ChatGLMProvider(**kwargs)
+
 
 class XcodeChatGLMProviderTests:
     """ChatGLM provider 边界测试：thinking 清理、tool_stream、参数组合。"""
@@ -673,6 +689,7 @@ class XcodeChatGLMProviderTests:
     def test_record_usage_none_details_degradation(self) -> None:
         """prompt_tokens_details / completion_tokens_details 为 None 时降级为 0。"""
         from collections import namedtuple
+
         FakeUsage = namedtuple(
             "FakeUsage",
             [
@@ -699,6 +716,7 @@ class XcodeChatGLMProviderTests:
     def test_transport_is_chatglm(self) -> None:
         provider = _make_glm_provider()
         assert provider.transport == "chatglm_chat"
+
 
 if __name__ == "__main__":
     pytest.main()

@@ -8,6 +8,8 @@ from xcode.coding_agent.tools.bash import OutputAccumulator
 from xcode.harness.observability._safety_backstop import SafetyBackstopPolicyEvaluator
 from xcode.harness.observability.permission_model import ActionExtractor
 import pytest
+
+
 class XcodeBashToolTests:
     def test_bash_safe_command_does_not_require_hitl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -118,6 +120,7 @@ class XcodeBashToolTests:
         for cmd in ["chmod -R 777 ./tmp", "chown -R root ~/xcode/tmp"]:
             constraints = evaluator.evaluate(_action(cmd))
             assert constraints[0].decision == "ask", cmd
+
 
 if __name__ == "__main__":
     pytest.main()

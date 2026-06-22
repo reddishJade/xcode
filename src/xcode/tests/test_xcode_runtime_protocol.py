@@ -5,6 +5,8 @@ from typing import get_type_hints
 from xcode.ai import events
 from xcode.ai.providers.protocol import ModelProvider
 import pytest
+
+
 class RuntimeProtocolTest:
     def test_provider_events_are_ai_owned(self) -> None:
         names = {
@@ -23,6 +25,7 @@ class RuntimeProtocolTest:
         ret = hints.get("return")
         assert ret is not None
         assert ret.__name__ == "AsyncIterator"
+
 
 if __name__ == "__main__":
     pytest.main()

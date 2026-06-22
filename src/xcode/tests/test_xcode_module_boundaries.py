@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import pytest
+
+
 class XcodeModuleBoundaryTests:
     """验证已删除的模块边界不会被重新引入。"""
 
@@ -23,6 +25,7 @@ class XcodeModuleBoundaryTests:
                 imported_by.append(source_path.relative_to(package_root))
 
         assert imported_by == []
+
 
 if __name__ == "__main__":
     pytest.main()

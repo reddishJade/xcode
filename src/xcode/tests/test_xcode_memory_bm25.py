@@ -6,6 +6,8 @@ from pathlib import Path
 from rank_bm25 import BM25Okapi
 from xcode.harness.memory import MemoryManager, MemorySearchEvalCase
 import pytest
+
+
 class TestBM25AndMemory:
     def setup_method(self, method) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -92,6 +94,7 @@ class TestBM25AndMemory:
 
     def test_memory_search_demotes_deprecated_records(self) -> None:
         from xcode.harness.memory.parsing import adjust_score, parse_memory_record
+
         base = 1.0
         old = parse_memory_record(
             "## Old\n- Context/Query: test\n- Status: deprecated\n- Confidence: 0.80\n"
@@ -193,6 +196,7 @@ class TestBM25AndMemory:
         archive_files = list(manager.archive_dir.glob("*.md"))
         assert len(archive_files) == 1
         assert "Incident 4" in archive_files[0].read_text(encoding="utf-8")
+
 
 if __name__ == "__main__":
     pytest.main()

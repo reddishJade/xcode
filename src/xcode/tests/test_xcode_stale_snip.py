@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 from xcode.harness.agent_runtime.compaction import stale_snip_file_reads
 import pytest
+
+
 class TestXcodeStaleSnip:
     def test_stale_snip_only_keeps_latest_read_file(self) -> None:
         messages: list[dict[str, Any]] = [
@@ -133,6 +135,7 @@ class TestXcodeStaleSnip:
         # Should execute successfully without throwing errors
         compacted = stale_snip_file_reads(messages)
         assert len(compacted) == 5
+
 
 if __name__ == "__main__":
     pytest.main()

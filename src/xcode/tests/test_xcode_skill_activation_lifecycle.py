@@ -20,6 +20,8 @@ from xcode.harness.skills_registry import (
 )
 from xcode.tests.fixtures import FakeProvider
 import pytest
+
+
 class _ResettableFakeProvider(FakeProvider):
     """记录显式激活后的 provider 会话重置。"""
 
@@ -30,6 +32,7 @@ class _ResettableFakeProvider(FakeProvider):
     def reset_conversation_state(self) -> None:
         """记录 provider 会话状态重置次数。"""
         self.reset_count += 1
+
 
 def _skill_registry(root: Path) -> SkillRegistry:
     """创建包含单一可激活技能的测试注册表。"""
@@ -42,6 +45,7 @@ def _skill_registry(root: Path) -> SkillRegistry:
     registry = SkillRegistry()
     registry.discover(build_skill_search_dirs(root))
     return registry
+
 
 class XcodeSkillActivationLifecycleTests:
     """验证 Skill 激活状态可恢复且不会被 transcript 压缩破坏。"""
@@ -197,6 +201,7 @@ class XcodeSkillActivationLifecycleTests:
 
         assert compacted == 0
         assert "FULL_SKILL_BODY" in str(records[1].content)
+
 
 if __name__ == "__main__":
     pytest.main()

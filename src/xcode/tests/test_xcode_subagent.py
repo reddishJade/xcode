@@ -16,6 +16,8 @@ from xcode.harness.agent_runtime import (
 )
 from xcode.harness.agent_runtime.subagent import SubagentBusyError
 import pytest
+
+
 class XcodeSubagentToolTests:
     def test_active_job_limit_returns_busy_and_releases_on_finish(self) -> None:
         """完成的 job 自动释放独立 subagent 额度。"""
@@ -188,7 +190,10 @@ class XcodeSubagentToolTests:
 
             assert runner.result(job_id) == "subagent:work:None"
 
-            assert [event.type for event in events] == ["subagent_start", "subagent_end"]
+            assert [event.type for event in events] == [
+                "subagent_start",
+                "subagent_end",
+            ]
             start = events[0]
             end = events[1]
             assert isinstance(start, SubagentStartEvent)
@@ -365,8 +370,10 @@ class XcodeSubagentToolTests:
             f"active subagent count did not reach {expected}: {runner.active_job_count}"
         )
 
+
 async def _immediate(value: str) -> str:
     return value
+
 
 if __name__ == "__main__":
     pytest.main()

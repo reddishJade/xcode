@@ -49,6 +49,7 @@ from xcode.harness.skills import ApprovalCallback, ToolSpec
 from xcode.harness.session_todo import TodoItem
 import pytest
 
+
 class XcodeReplTests:
     def test_session_store_writes_jsonl_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -368,7 +369,11 @@ class XcodeReplTests:
         assert "[ ] Run tests" in rendered
 
     def test_reasoning_preview_lines_keep_latest_three_visual_lines(self) -> None:
-        assert reasoning_preview_lines("one\ntwo\nthree\nfour", width=80) == ["two", "three", "four"]
+        assert reasoning_preview_lines("one\ntwo\nthree\nfour", width=80) == [
+            "two",
+            "three",
+            "four",
+        ]
 
     def test_run_repl_expands_file_references_but_preserves_user_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -743,13 +748,19 @@ class XcodeReplTests:
             assert app.agent.followups == ["queued followup"]
 
     def test_brief_input_shows_bash_command_and_file_paths(self) -> None:
-        assert brief_input("bash", {"command": "Remove-Item tmp\\hello.c"}) == "bash: Remove-Item tmp\\hello.c"
+        assert (
+            brief_input("bash", {"command": "Remove-Item tmp\\hello.c"})
+            == "bash: Remove-Item tmp\\hello.c"
+        )
         write_summary = brief_input(
             "write_file", {"path": "tmp/hello.py", "content": "x" * 200}
         )
         assert write_summary.startswith('write_file: path="tmp/hello.py"')
         assert write_summary.endswith("…")
-        assert brief_input("grep_search", {"pattern": "**/*mcp*", "path": "src/xcode"}) == 'grep_search: pattern="**/*mcp*", path="src/xcode"'
+        assert (
+            brief_input("grep_search", {"pattern": "**/*mcp*", "path": "src/xcode"})
+            == 'grep_search: pattern="**/*mcp*", path="src/xcode"'
+        )
 
     def test_run_repl_interrupt_is_final_standalone_line(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -881,7 +892,10 @@ class XcodeReplTests:
                 )
 
             assert not (handled)
-            assert [message.role for message in app.agent.loaded] == ["user", "assistant"]
+            assert [message.role for message in app.agent.loaded] == [
+                "user",
+                "assistant",
+            ]
             assert "AGENTS.md" in str(app.agent.loaded[0].content)
             assert "10000 bytes" in str(app.agent.loaded[1].content)
 
@@ -939,7 +953,11 @@ class XcodeReplTests:
                     FakePrompt([]),
                 )
 
-            assert [message.role for message in app.agent.loaded] == ["user", "assistant", "tool_result"]
+            assert [message.role for message in app.agent.loaded] == [
+                "user",
+                "assistant",
+                "tool_result",
+            ]
             tool_call = app.agent.loaded[1].content[0]
             assert tool_call.id == "call_1"
             assert tool_call.name == "bash"
@@ -1001,7 +1019,10 @@ class XcodeReplTests:
 
     def test_parse_skill_invocation_preserves_follow_up_task(self) -> None:
         """`$skill-name` 只消费激活前缀，保留后续任务。"""
-        assert parse_skill_invocation("$code-review inspect this patch") == ("code-review", "inspect this patch")
+        assert parse_skill_invocation("$code-review inspect this patch") == (
+            "code-review",
+            "inspect this patch",
+        )
         assert parse_skill_invocation("$code-review") == ("code-review", "")
         assert parse_skill_invocation("price is $5") is None
 
@@ -1025,7 +1046,10 @@ class XcodeReplTests:
             records = store.load_records()
 
         assert "Activated skill: code-review" in output.getvalue()
-        assert [record.content["type"] for record in records] == ["tool_use", "tool_result"]
+        assert [record.content["type"] for record in records] == [
+            "tool_use",
+            "tool_result",
+        ]
         restored = records_to_agent_messages(records)
         assert [message.role for message in restored] == ["assistant", "tool_result"]
 
@@ -1159,8 +1183,14 @@ class XcodeReplTests:
                 )
 
             assert not (handled)
-            assert [record.content for record in store.load_records()] == ["first", "one"]
-            assert "Rewound 1 user turn (2 transcript records removed)." in output.getvalue()
+            assert [record.content for record in store.load_records()] == [
+                "first",
+                "one",
+            ]
+            assert (
+                "Rewound 1 user turn (2 transcript records removed)."
+                in output.getvalue()
+            )
 
     def test_handle_new_command_starts_new_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1278,7 +1308,10 @@ class XcodeReplTests:
 
             items = completer.complete("read @docs/")
 
-            assert [item.text for item in items] == ["docs/note.md", "docs/nested/deep.md"]
+            assert [item.text for item in items] == [
+                "docs/note.md",
+                "docs/nested/deep.md",
+            ]
 
     def test_repl_completer_filters_sensitive_file_references(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1336,7 +1369,10 @@ class XcodeReplTests:
             duplicate_items = completer.complete("@helper")
             windows_items = completer.complete(r"@src\utl")
 
-        assert [item.text for item in duplicate_items] == ["src/utils/helper.py", "tests/utils/helper.py"]
+        assert [item.text for item in duplicate_items] == [
+            "src/utils/helper.py",
+            "tests/utils/helper.py",
+        ]
         assert [item.text for item in windows_items] == ["src/utils/helper.py"]
 
     def test_repl_completer_file_index_cache_expires_quickly(self) -> None:
@@ -1382,6 +1418,7 @@ class XcodeReplTests:
 
         assert completion_styles
         assert all("bg:default" in style for style in completion_styles.values())
+
 
 class XcodeReplForkTests:
     def test_fork_into_switches_path(self) -> None:
@@ -1605,7 +1642,10 @@ class XcodeReplForkTests:
 
             assert not (handled)
             assert app.agent.compact_requested
-            assert "Active context compaction requested for the next agent run" in output.getvalue()
+            assert (
+                "Active context compaction requested for the next agent run"
+                in output.getvalue()
+            )
             records = store.load_records()
             tool_results = [
                 record.content
@@ -1690,12 +1730,14 @@ class XcodeReplForkTests:
             assert not (app.agent.compact_requested)
             assert "No context compaction needed" in output.getvalue()
 
+
 class FakePrompt:
     def __init__(self, values: list[str]) -> None:
         self.values = iter(values)
 
     def prompt(self, prompt_text: PromptText) -> str:
         return next(self.values)
+
 
 class InterruptingPrompt:
     def __init__(self, values: list[str | BaseException]) -> None:
@@ -1708,6 +1750,7 @@ class InterruptingPrompt:
         if isinstance(value, BaseException):
             raise value
         return value
+
 
 class _StubAgent:
     approval_callback: ApprovalCallback | None = None
@@ -1732,6 +1775,7 @@ class _StubAgent:
             status="disabled",
             message="Skills are disabled for this runtime.",
         )
+
 
 class FakeApp:
     agent = _StubAgent()
@@ -1766,6 +1810,7 @@ class FakeApp:
             ),
         )
 
+
 class ExplicitSkillAgent(_StubAgent):
     """记录 REPL 显式技能激活调用。"""
 
@@ -1789,6 +1834,7 @@ class ExplicitSkillAgent(_StubAgent):
             tool_call_id=f"explicit-skill-{len(self.activated)}",
         )
 
+
 class ExplicitSkillApp(FakeApp):
     """支持显式技能激活的最小 REPL app。"""
 
@@ -1799,6 +1845,7 @@ class ExplicitSkillApp(FakeApp):
     def ask_stream(self, question: str, mode: str | None = None):
         self.questions.append(question)
         yield from super().ask_stream(question, mode)
+
 
 class StaticPermissionAgent:
     """提供 REPL 权限命令读取的静态策略字段。"""
@@ -1814,6 +1861,7 @@ class StaticPermissionAgent:
     def load_history(self, messages: list[AgentMessage]) -> None: ...
 
     def request_compaction(self) -> None: ...
+
 
 class StaticPermissionApp:
     """最小 REPL app，仅用于 /permissions 静态策略展示测试。"""
@@ -1850,6 +1898,7 @@ class StaticPermissionApp:
             ),
         )
 
+
 class HistoryLoadingAgent:
     """记录 REPL 恢复时同步进来的会话历史。"""
 
@@ -1865,6 +1914,7 @@ class HistoryLoadingAgent:
         self.loaded = messages
 
     def request_compaction(self) -> None: ...
+
 
 class HistoryLoadingApp:
     """暴露带 load_history 接口的测试 agent。"""
@@ -1900,6 +1950,7 @@ class HistoryLoadingApp:
             ),
         )
 
+
 class QueueModeAgent:
     def __init__(self) -> None:
         self.followups: list[str] = []
@@ -1916,6 +1967,7 @@ class QueueModeAgent:
     def set_session_grant_store_provider(self, provider: object) -> None: ...
 
     def set_permanent_grant_store(self, store: object) -> None: ...
+
 
 class QueueModeApp:
     def __init__(self) -> None:
@@ -1951,6 +2003,7 @@ class QueueModeApp:
             ),
         )
 
+
 class FakeMarkdownApp:
     agent = _StubAgent()
     registry: tuple[ToolSpec, ...] = ()
@@ -1983,6 +2036,7 @@ class FakeMarkdownApp:
                 tool_calls=[],
             ),
         )
+
 
 class MultiDeltaApp:
     agent = _StubAgent()
@@ -2017,6 +2071,7 @@ class MultiDeltaApp:
                 tool_calls=[],
             ),
         )
+
 
 class ReasoningApp:
     agent = _StubAgent()
@@ -2054,6 +2109,7 @@ class ReasoningApp:
             ),
         )
 
+
 class TinyReasoningApp:
     agent = _StubAgent()
     registry: tuple[ToolSpec, ...] = ()
@@ -2086,6 +2142,7 @@ class TinyReasoningApp:
                 tool_calls=[],
             ),
         )
+
 
 class ToolEventApp:
     agent = _StubAgent()
@@ -2132,6 +2189,7 @@ class ToolEventApp:
             ),
         )
 
+
 class TodoEventApp:
     agent = _StubAgent()
     registry: tuple[ToolSpec, ...] = ()
@@ -2171,6 +2229,7 @@ class TodoEventApp:
             ),
         )
 
+
 class CapturingApp:
     registry: tuple[ToolSpec, ...] = ()
     agent = _StubAgent()
@@ -2208,6 +2267,7 @@ class CapturingApp:
             ),
         )
 
+
 class ToolApp:
     def __init__(
         self,
@@ -2244,6 +2304,7 @@ class ToolApp:
             ),
         )
 
+
 class DeniedToolAgent:
     """提供 /tool 直连执行读取的静态权限策略。"""
 
@@ -2251,6 +2312,7 @@ class DeniedToolAgent:
         self.permission_policy = PermissionPolicy((StaticPermission("bash", "deny"),))
         self.restricted_dirs: tuple[str, ...] = ()
         self.approval_callback = None
+
 
 class DeniedToolApp(ToolApp):
     def __init__(self) -> None:
@@ -2278,6 +2340,7 @@ class DeniedToolApp(ToolApp):
             )
         )
 
+
 class ShellShortcutApp(ToolApp):
     def __init__(self, output: str | None = None) -> None:
         self.commands: list[str] = []
@@ -2303,6 +2366,7 @@ class ShellShortcutApp(ToolApp):
                 ),
             )
         )
+
 
 class InterruptingToolApp:
     class Agent:
@@ -2347,23 +2411,28 @@ class InterruptingToolApp:
         )
         raise KeyboardInterrupt()
 
+
 class _ActiveProvider:
     def __init__(self, transport: str) -> None:
         self.transport = transport
+
 
 class _ActiveProviderWrapper:
     def __init__(self, active_provider: _ActiveProvider) -> None:
         self.active_provider = active_provider
 
+
 class _ActiveProviderAgent:
     def __init__(self, provider: _ActiveProviderWrapper) -> None:
         self.provider = provider
+
 
 class _ActiveProviderApp:
     def __init__(self, transport: str) -> None:
         self.agent = _ActiveProviderAgent(
             _ActiveProviderWrapper(_ActiveProvider(transport))
         )
+
 
 class FakeRenderer:
     def __init__(self) -> None:
@@ -2372,10 +2441,12 @@ class FakeRenderer:
     def render(self, text: str) -> None:
         self.rendered.append(text)
 
+
 def _strip_ansi(text: str) -> str:
     import re
 
     return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+
 
 class XcodeReplContinueTests:
     """Step 8: CLI flags and /continue — session lifecycle helpers and commands."""
@@ -2388,7 +2459,9 @@ class XcodeReplContinueTests:
         with pytest.raises(ValueError):
             SessionStore._validate_session_id("")
 
-    @pytest.mark.parametrize("bad", ["a/b", "a\\b", "../etc", "C:foo", ".", "~user", "a b", "a\tb"])
+    @pytest.mark.parametrize(
+        "bad", ["a/b", "a\\b", "../etc", "C:foo", ".", "~user", "a b", "a\tb"]
+    )
     def test_validate_session_id_rejects_path_separators(self, bad: str) -> None:
         from xcode.harness.session import SessionStore
 
@@ -2402,7 +2475,9 @@ class XcodeReplContinueTests:
         with pytest.raises(ValueError):
             SessionStore._validate_session_id(bad)
 
-    @pytest.mark.parametrize("good", ["abc123", "ABC-123", "20260616-120000", "a_b", "z"])
+    @pytest.mark.parametrize(
+        "good", ["abc123", "ABC-123", "20260616-120000", "a_b", "z"]
+    )
     def test_validate_session_id_accepts_valid(self, good: str) -> None:
         from xcode.harness.session import SessionStore
 
@@ -2574,17 +2649,20 @@ class XcodeReplContinueTests:
             store = SessionStore(Path(td))
             assert store.find_by_id("nonexistent") is None
 
-    @pytest.mark.parametrize("bad", [
-        "../etc",
-        "/etc/passwd",
-        "a/b",
-        "a\\b",
-        "C:foo",
-        ".",
-        "~root",
-        "a b",
-        "",
-    ])
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "../etc",
+            "/etc/passwd",
+            "a/b",
+            "a\\b",
+            "C:foo",
+            ".",
+            "~root",
+            "a b",
+            "",
+        ],
+    )
     def test_find_by_id_rejects_malicious_ids(self, bad: str) -> None:
         with tempfile.TemporaryDirectory() as td:
             store = SessionStore(Path(td))
@@ -2902,6 +2980,7 @@ class XcodeReplContinueTests:
         with tempfile.TemporaryDirectory() as td:
             # need a git repo for SnapshotStore
             import subprocess
+
             subprocess.run(["git", "init"], cwd=td, capture_output=True)
             subprocess.run(
                 ["git", "config", "user.name", "test"], cwd=td, capture_output=True
@@ -2942,6 +3021,7 @@ class XcodeReplContinueTests:
     def test_help_text_includes_continue(self) -> None:
         assert "/continue" in HELP_TEXT
         assert "Resume the latest session" in HELP_TEXT
+
 
 if __name__ == "__main__":
     pytest.main()

@@ -26,7 +26,8 @@ from xcode.harness.observability.hooks import HookRecord
 from xcode.harness.skills import ApprovalCallback, ToolSpec
 from xcode.tests.fixtures import FakeProvider
 import pytest
-from xcode.tests._helpers import assert_logs, assert_no_logs
+from xcode.tests._helpers import assert_logs
+
 INPUT_SCHEMA = {
     "type": "object",
     "properties": {"input": {"type": "string"}},
@@ -34,11 +35,13 @@ INPUT_SCHEMA = {
     "additionalProperties": False,
 }
 
+
 def _write_hook(root: Path, source: str) -> Path:
     """写入单个临时 hook 脚本。"""
     path = root / "hook.py"
     path.write_text(source, encoding="utf-8")
     return path
+
 
 def _entry(
     script: Path,
@@ -59,6 +62,7 @@ def _entry(
         inherit_to_subagents=inherit_to_subagents,
         source="test-config.json",
     )
+
 
 class ExternalHookRunnerTests:
     """验证 JSON 进程边界、失败策略和诊断状态。"""
@@ -350,6 +354,7 @@ class ExternalHookRunnerTests:
         assert diagnostics[0].run_count == 0
         assert diagnostics[1].run_count == 1
 
+
 def _agent_with_tool(
     runner: ExternalHookRunner,
     handler: Callable[[dict[str, object]], str],
@@ -393,6 +398,7 @@ def _agent_with_tool(
             external_hook_runner=runner,
         ),
     )
+
 
 if __name__ == "__main__":
     pytest.main()

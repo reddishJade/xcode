@@ -11,13 +11,14 @@ from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 
 from xcode.tests.fixtures import FakeProvider
 from xcode.ai.events import (
-ProviderEvent,
+    ProviderEvent,
     TextDelta,
     FinalMessage,
     ToolCallEvent,
     ToolCall,
 )
 import pytest
+
 EMPTY_SCHEMA = {
     "type": "object",
     "properties": {},
@@ -29,6 +30,7 @@ INPUT_SCHEMA = {
     "required": ["input"],
     "additionalProperties": False,
 }
+
 
 class XcodeHookTests:
     def test_typed_subscribers_receive_harness_events(self) -> None:
@@ -158,6 +160,7 @@ class XcodeHookTests:
         assert isinstance(system_prompt_bytes, int)
         assert system_prompt_bytes > 0
         assert event.tools[0]["name"] == "echo"
+
 
 if __name__ == "__main__":
     pytest.main()

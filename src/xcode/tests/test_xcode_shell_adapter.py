@@ -13,13 +13,17 @@ from xcode.coding_agent.tools.shell_adapter import (
 )
 from xcode.coding_agent.tools import build_bash_tool
 import pytest
+
+
 class XcodeShellAdapterTests:
     def test_known_shells_have_valid_prefixes(self) -> None:
         for name, spec in _KNOWN_SHELLS.items():
             assert isinstance(spec, ShellSpec), f"{name} is not a ShellSpec"
             assert isinstance(spec.command_prefix, tuple)
             assert len(spec.command_prefix) > 0, f"{name} has empty prefix"
-            assert spec.syntax in ("powershell", "cmd", "posix"), f"{name} has invalid syntax" 
+            assert spec.syntax in ("powershell", "cmd", "posix"), (
+                f"{name} has invalid syntax"
+            )
 
     def test_build_shell_argv_bash(self) -> None:
         spec = _KNOWN_SHELLS["bash"]
@@ -30,13 +34,13 @@ class XcodeShellAdapterTests:
         spec = _KNOWN_SHELLS["pwsh"]
         argv = build_shell_argv(spec, "Write-Output hello")
         assert argv == [
-                "pwsh",
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "Write-Output hello",
-            ]
+            "pwsh",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Write-Output hello",
+        ]
 
     def test_build_shell_argv_cmd(self) -> None:
         spec = _KNOWN_SHELLS["cmd"]
@@ -115,6 +119,7 @@ class XcodeShellAdapterTests:
     def test_bash_tool_passes_shell_false_and_argv(self) -> None:
         """验证显式 shell_spec 时 argv 和 cwd 正确传递。"""
         from xcode.tests.fixtures import MockExecutionEnv
+
         env = MockExecutionEnv()
         spec = _KNOWN_SHELLS["bash"]
         with tempfile.TemporaryDirectory() as tmp:

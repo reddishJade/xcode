@@ -7,6 +7,8 @@ from xcode.cli.repl_hitl import ReplHITLHandler
 from xcode.harness.agent_runtime.execution_modes import ActPolicy, BuildPolicy
 from xcode.harness.skills import ToolSpec
 import pytest
+
+
 class ExecutionModeTests:
     def test_act_bash_still_allowed(self) -> None:
         policy = ActPolicy()
@@ -37,6 +39,7 @@ class ExecutionModeTests:
             ToolCall(id="t1", name="curl", input={"url": "http://example.com"})
         )
         assert result == "deny"
+
 
 class ReplHITLHandlerTests:
     def setup_method(self, method) -> None:
@@ -77,6 +80,7 @@ class ReplHITLHandlerTests:
         assert result.decision == "allow"
         assert result.scope == "once"
         question.ask.assert_called_once()
+
 
 if __name__ == "__main__":
     pytest.main()

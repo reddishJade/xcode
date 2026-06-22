@@ -7,6 +7,8 @@ from xcode.ai.providers.factory import _build_llm_profile
 from xcode.ai.providers.deepseek import DeepSeekProvider
 from xcode.ai.providers.runtime import ProviderRuntime
 import pytest
+
+
 @dataclass(frozen=True)
 class MockProfile:
     """模拟 ModelProfileProto 用于测试。"""
@@ -20,6 +22,7 @@ class MockProfile:
     clear_thinking: bool = False
     tool_stream: bool = True
     response_format: dict[str, Any] | None = None
+
 
 class XcodeDeepSeekFactoryTests:
     def test_factory_preserves_response_format_for_deepseek(self) -> None:
@@ -53,6 +56,7 @@ class XcodeDeepSeekFactoryTests:
 
         assert isinstance(provider, DeepSeekProvider)
         assert provider.reasoning_effort == "medium"
+
 
 if __name__ == "__main__":
     pytest.main()

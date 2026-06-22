@@ -29,6 +29,7 @@ from xcode.agent.messages import UserMessage
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
 import pytest
+
 EMPTY_SCHEMA = {
     "type": "object",
     "properties": {},
@@ -57,6 +58,7 @@ ANY_OBJECT_SCHEMA = {
     "additionalProperties": True,
 }
 
+
 class ResettableFakeProvider(FakeProvider):
     """记录会话状态重置次数的测试 provider。"""
 
@@ -71,6 +73,7 @@ class ResettableFakeProvider(FakeProvider):
     def reset_conversation_state(self) -> None:
         """记录重置调用。"""
         self.reset_count += 1
+
 
 class XcodeStructuredAgentTests:
     def _assert_final_answer(self, event: StructuredAgentEvent, expected: str) -> None:
@@ -161,11 +164,21 @@ class XcodeStructuredAgentTests:
         list(agent.run_stream("How many bytes is AGENTS.md?"))
         second_events = list(agent.run_stream("Exactly 10000?"))
 
-        assert [message["role"] for message in seen_messages[1]] == ["user", "assistant", "user"]
+        assert [message["role"] for message in seen_messages[1]] == [
+            "user",
+            "assistant",
+            "user",
+        ]
         assert "How many bytes is AGENTS.md" in str(seen_messages[1][0]["content"])
         assert "10000 bytes" in str(seen_messages[1][1]["content"])
         assert "Exactly 10000" in str(seen_messages[1][2]["content"])
-        assert [event.type for event in second_events] == ["message_start", "text_delta", "assistant", "turn_end", "final"]
+        assert [event.type for event in second_events] == [
+            "message_start",
+            "text_delta",
+            "assistant",
+            "turn_end",
+            "final",
+        ]
 
     def test_load_run_state_restores_history_messages(self) -> None:
         seen_messages: list[list[dict[str, Any]]] = []
@@ -196,7 +209,11 @@ class XcodeStructuredAgentTests:
         assert result.run_state is not None
         assert result.run_state is not None
         assert result.run_state.current_mode == "act"
-        assert [message["role"] for message in seen_messages[0]] == ["user", "assistant", "user"]
+        assert [message["role"] for message in seen_messages[0]] == [
+            "user",
+            "assistant",
+            "user",
+        ]
 
     def test_history_replacement_resets_provider_conversation_state(self) -> None:
         provider = ResettableFakeProvider()
@@ -517,16 +534,16 @@ class XcodeStructuredAgentTests:
         events = list(agent.run_stream("go"))
 
         assert [event.type for event in events] == [
-                "message_start",
-                "assistant",
-                "tool_use",
-                "tool_result",
-                "turn_end",
-                "text_delta",
-                "assistant",
-                "turn_end",
-                "final",
-            ]
+            "message_start",
+            "assistant",
+            "tool_use",
+            "tool_result",
+            "turn_end",
+            "text_delta",
+            "assistant",
+            "turn_end",
+            "final",
+        ]
         self._assert_final_answer(events[-1], "done")
 
     def test_run_stream_yields_text_delta_events(self) -> None:
@@ -543,13 +560,13 @@ class XcodeStructuredAgentTests:
         events = list(agent.run_stream("go"))
 
         assert [event.type for event in events] == [
-                "message_start",
-                "text_delta",
-                "text_delta",
-                "assistant",
-                "turn_end",
-                "final",
-            ]
+            "message_start",
+            "text_delta",
+            "text_delta",
+            "assistant",
+            "turn_end",
+            "final",
+        ]
         assert events[1].data == "he"
         self._assert_final_answer(events[-1], "hello")
 
@@ -647,13 +664,13 @@ class XcodeStructuredAgentTests:
         events = asyncio.run(main())
 
         assert [event.type for event in events] == [
-                "message_start",
-                "text_delta",
-                "text_delta",
-                "assistant",
-                "turn_end",
-                "final",
-            ]
+            "message_start",
+            "text_delta",
+            "text_delta",
+            "assistant",
+            "turn_end",
+            "final",
+        ]
         self._assert_final_answer(events[-1], "hello")
 
     def test_sync_api_rejects_active_event_loop(self) -> None:
@@ -860,6 +877,7 @@ class XcodeStructuredAgentTests:
 
     def test_provider_error_retry_exhaustion_returns_fallback_message(self) -> None:
         import unittest.mock as mock
+
         def factory(_messages, _tools) -> list[ProviderEvent]:
             raise RuntimeError("provider down")
 
@@ -873,6 +891,7 @@ class XcodeStructuredAgentTests:
 
         assert result.stopped_by_error
         assert "I encountered an error." in result.answer
+
 
 if __name__ == "__main__":
     pytest.main()

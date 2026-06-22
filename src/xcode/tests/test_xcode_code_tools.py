@@ -13,6 +13,8 @@ import xcode.coding_agent.tools.code_search as code_search
 from xcode.coding_agent.tools import build_code_tools
 from xcode.harness.skills import ToolSpec
 import pytest
+
+
 class XcodeCodeToolsTests:
     """验证代码搜索工具的路径、ignore、排序和诊断契约。"""
 
@@ -299,9 +301,11 @@ class XcodeCodeToolsTests:
                 ):
                     tools["grep_search"].handler({"pattern": "["})
 
+
 def _tools(root: Path) -> dict[str, ToolSpec]:
     """按名称索引项目代码搜索工具。"""
     return {tool.name: tool for tool in build_code_tools(root)}
+
 
 if __name__ == "__main__":
     pytest.main()

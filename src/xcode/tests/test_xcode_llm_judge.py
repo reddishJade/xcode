@@ -13,6 +13,8 @@ from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.app import XcodeApp
 from xcode.tests.fixtures import FakeProvider
 import pytest
+
+
 class XcodeLlmJudgeTests:
     """验证 judge 使用 StreamProvider 并显式报告 skipped。"""
 
@@ -128,9 +130,11 @@ class XcodeLlmJudgeTests:
         assert graders[0].skipped
         assert "unavailable" in graders[0].details
 
+
 def _app(provider: FakeProvider) -> XcodeApp:
     """构建仅使用给定 provider 的最小 eval 应用。"""
     return XcodeApp(agent=StructuredAgent(provider=provider, registry=()))
+
 
 if __name__ == "__main__":
     pytest.main()

@@ -6,6 +6,8 @@ from xcode.cli.repl_tools import parse_tool_input
 from xcode.coding_agent.tools import build_file_tools
 from xcode.coding_agent.tools.file_handlers import LocalFileOperations
 import pytest
+
+
 class RecordingFileOperations(LocalFileOperations):
     def __init__(self) -> None:
         self.reads: list[Path] = []
@@ -23,6 +25,7 @@ class RecordingFileOperations(LocalFileOperations):
     def mkdir(self, path: Path) -> None:
         self.mkdirs.append(path)
         super().mkdir(path)
+
 
 class XcodeSandboxedFileToolsTests:
     def _tools(self, root: Path):
@@ -294,16 +297,19 @@ class XcodeSandboxedFileToolsTests:
             assert write_snippet is not None
             assert edit_snippet is not None
             assert "replace entire files" in write_snippet
-            assert "Use write_file only for new files" in tools["write_file"].prompt_guidelines[0]
+            assert (
+                "Use write_file only for new files"
+                in tools["write_file"].prompt_guidelines[0]
+            )
             assert "precise file edits" in edit_snippet
             assert any(
-                    "multiple entries in edits" in guideline
-                    for guideline in tools["edit_file"].prompt_guidelines
-                )
+                "multiple entries in edits" in guideline
+                for guideline in tools["edit_file"].prompt_guidelines
+            )
             assert any(
-                    "offset and limit" in guideline
-                    for guideline in tools["read_file"].prompt_guidelines
-                )
+                "offset and limit" in guideline
+                for guideline in tools["read_file"].prompt_guidelines
+            )
 
     def test_file_tool_invalid_json_is_clear_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -382,6 +388,7 @@ class XcodeSandboxedFileToolsTests:
 
             assert "replacements=1" in deleted
             assert path.read_text(encoding="utf-8") == ""
+
 
 if __name__ == "__main__":
     pytest.main()

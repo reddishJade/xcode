@@ -14,6 +14,8 @@ from xcode.ai.providers.codec import (
 )
 from xcode.ai.types import ToolDefinition
 import pytest
+
+
 @dataclass
 class MockUsage:
     """模拟 provider usage 对象。"""
@@ -26,17 +28,20 @@ class MockUsage:
     prompt_tokens_details: Any | None = None
     completion_tokens_details: Any | None = None
 
+
 @dataclass
 class MockResponse:
     """模拟 provider 响应对象。"""
 
     usage: MockUsage | None = None
 
+
 @dataclass
 class MockPromptTokensDetails:
     """模拟 prompt_tokens_details。"""
 
     cached_tokens: int = 0
+
 
 class TestCacheUsage:
     """测试 CacheUsage 统计计算。"""
@@ -62,6 +67,7 @@ class TestCacheUsage:
         """测试 0% 命中。"""
         usage = CacheUsage(hit_tokens=0, miss_tokens=1000)
         assert usage.hit_rate == 0.0
+
 
 class TestExtractCacheUsage:
     """测试从 provider 响应提取缓存统计。"""
@@ -121,6 +127,7 @@ class TestExtractCacheUsage:
         assert result.hit_tokens == 0
         assert result.miss_tokens == 0
 
+
 class TestToolSchemaCanonical:
     """测试工具 schema 规范化。"""
 
@@ -173,6 +180,7 @@ class TestToolSchemaCanonical:
         ]
         result = canonical_tools(tools)
         assert [t["name"] for t in result] == ["apple", "middle", "zebra"]
+
 
 class TestToolCatalogFingerprint:
     """测试工具集合指纹生成。"""
@@ -279,6 +287,7 @@ class TestToolCatalogFingerprint:
         fp1 = tool_catalog_fingerprint(tools1)
         fp2 = tool_catalog_fingerprint(tools2)
         assert fp1 != fp2
+
 
 if __name__ == "__main__":
     pytest.main()

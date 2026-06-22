@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 from xcode.harness.agent_runtime.compaction import (
-budget_large_tool_outputs,
+    budget_large_tool_outputs,
     LayeredCompactor,
 )
 import pytest
+
+
 class TestXcodeCompactionBudget:
     def test_budget_no_truncation_when_under_threshold(self) -> None:
         messages: list[dict[str, Any]] = [
@@ -109,7 +111,10 @@ class TestXcodeCompactionBudget:
         compacted = compactor(messages)
 
         # The first tool result u1 should be snipped by stale_snip
-        assert compacted[1]["content"][0]["content"] == "[Content snipped - re-read if needed]"
+        assert (
+            compacted[1]["content"][0]["content"]
+            == "[Content snipped - re-read if needed]"
+        )
 
         # 最新一次 read_file 结果应保持完整，避免后续 Act 阶段基于陈旧内容执行。
         u2_content = compacted[1]["content"][1]["content"]
@@ -155,6 +160,7 @@ class TestXcodeCompactionBudget:
         assert content.startswith("abcde")
         assert content.endswith("vwxyz")
         assert "truncated 16 characters due to token budget" in content
+
 
 if __name__ == "__main__":
     pytest.main()

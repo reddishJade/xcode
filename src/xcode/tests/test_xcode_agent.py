@@ -17,11 +17,13 @@ from xcode.ai.events import (
 )
 from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.agent.types import (
-TextContent,
+    TextContent,
     ThinkingContent,
     ToolCallContent,
 )
 import pytest
+
+
 class TextProvider:
     def __init__(self) -> None:
         self.messages: list[Message] | None = None
@@ -38,6 +40,7 @@ class TextProvider:
         self.tools = tools
         yield TextDelta(chunk="ok")
 
+
 class CancelledSignal:
     """始终处于取消状态的测试信号。"""
 
@@ -46,6 +49,7 @@ class CancelledSignal:
     def is_cancelled(self) -> bool:
         """返回固定取消状态。"""
         return True
+
 
 class ErrorTextProvider:
     def __init__(self) -> None:
@@ -63,6 +67,7 @@ class ErrorTextProvider:
             content="Provider error: boom",
             stop_reason="error",
         )
+
 
 class ToolProvider:
     def __init__(self) -> None:
@@ -85,6 +90,7 @@ class ToolProvider:
             return
         yield TextDelta(chunk="done")
 
+
 class EchoTool:
     name = "echo"
     label = "Echo"
@@ -106,6 +112,7 @@ class EchoTool:
         self.seen_signal = signal
         return AgentToolResult(content=[TextContent(text=str(params["text"]))])
 
+
 class BuiltinShellTool:
     """模拟带 Responses builtin shell 元数据的 AgentTool。"""
 
@@ -125,6 +132,7 @@ class BuiltinShellTool:
         on_update=None,
     ) -> AgentToolResult:
         return AgentToolResult(content=[TextContent(text="ok")])
+
 
 class AgentLoopContractTests:
     async def test_streams_text_from_injected_provider(self) -> None:
@@ -225,12 +233,12 @@ class AgentLoopContractTests:
         )
 
         assert converted == [
-                {
-                    "role": "tool",
-                    "tool_call_id": "call-1",
-                    "content": "output",
-                }
-            ]
+            {
+                "role": "tool",
+                "tool_call_id": "call-1",
+                "content": "output",
+            }
+        ]
 
     def test_assistant_thinking_content_becomes_reasoning_content(self) -> None:
         """思考块在 provider 边界保留为 reasoning_content。"""
@@ -268,7 +276,9 @@ class AgentLoopContractTests:
         assert isinstance(arguments, str)
         assert arguments == '{"text":"hello"}'
 
+
 # ── 新增功能测试 ──
+
 
 class StepLimitProvider:
     """总是返回工具调用，用于测试步数限制。"""
@@ -284,6 +294,7 @@ class StepLimitProvider:
             calls=[ToolCall(id=f"call-{self.calls}", name="noop", input={})]
         )
 
+
 class NoopTool:
     name = "noop"
     label = "Noop"
@@ -294,6 +305,7 @@ class NoopTool:
 
     async def execute(self, tool_call_id, params, signal=None, on_update=None):
         return AgentToolResult(content=[TextContent(text="ok")])
+
 
 class ErrorProvider:
     """前 N 次调用抛异常，之后返回正常文本。"""
@@ -310,6 +322,7 @@ class ErrorProvider:
         if self.calls <= self.fail_count:
             raise self.error
         yield TextDelta(chunk="recovered")
+
 
 class MaxTokensProvider:
     """前 N 次返回 max_tokens，之后返回正常文本。"""
@@ -328,6 +341,7 @@ class MaxTokensProvider:
         else:
             yield TextDelta(chunk="final")
 
+
 class RepeatedToolProvider:
     """始终返回相同的工具调用，用于测试重复工具看门狗。"""
 
@@ -337,6 +351,7 @@ class RepeatedToolProvider:
         yield ToolCallEvent(
             calls=[ToolCall(id="same-call", name="echo", input={"text": "hi"})]
         )
+
 
 class AgentLoopFeatureTests:
     async def test_step_limit_enforced(self) -> None:
@@ -553,6 +568,7 @@ class AgentLoopFeatureTests:
         assert result.metrics.steps >= 1
         assert result.metrics.llm_calls > 0
         assert result.metrics.tool_calls > 0
+
 
 if __name__ == "__main__":
     pytest.main()

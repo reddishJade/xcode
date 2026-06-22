@@ -9,6 +9,8 @@ from xcode.cli.repl import run_repl
 from xcode.harness.session import SessionStore
 from xcode.tests.test_xcode_repl import FakePrompt
 import pytest
+
+
 class XcodePlanExitTests:
     def test_fork_clean_into_creates_empty_session_with_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -43,6 +45,7 @@ class XcodePlanExitTests:
                     from xcode.harness.agent_runtime.events import (
                         FinalStructuredEvent,
                     )
+
                     yield FinalStructuredEvent(
                         "final",
                         1,
@@ -71,7 +74,10 @@ class XcodePlanExitTests:
             # The second prompt sent to app: should have <approved-plan>... prepended to "execute plan"
             assert len(app.prompts) == 2
             assert app.prompts[0] == "generate plan"
-            assert "<approved-plan>\nThis is the generated plan.\n</approved-plan>\nexecute plan" in app.prompts[1]
+            assert (
+                "<approved-plan>\nThis is the generated plan.\n</approved-plan>\nexecute plan"
+                in app.prompts[1]
+            )
 
             inspector = SessionStore(Path(temp_dir))
             clean_session = next(
@@ -84,6 +90,7 @@ class XcodePlanExitTests:
             user_records = [record for record in records if record.type == "user"]
             assert user_records[-1].content == "execute plan"
             assert "<approved-plan>" not in str(user_records[-1].content)
+
 
 if __name__ == "__main__":
     pytest.main()

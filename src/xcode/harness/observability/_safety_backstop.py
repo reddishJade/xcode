@@ -233,10 +233,14 @@ class SafetyBackstopPolicyEvaluator:
         normalized = command.strip().lower()
 
         if _is_root_recursive_deletion(command):
-            return self._deny_constraint("Root directory recursive deletion", non_bypassable=True)
+            return self._deny_constraint(
+                "Root directory recursive deletion", non_bypassable=True
+            )
 
         if _is_system_path_recursive_mutation(command):
-            return self._deny_constraint("System critical path recursive destruction", non_bypassable=True)
+            return self._deny_constraint(
+                "System critical path recursive destruction", non_bypassable=True
+            )
 
         if _is_dd_device_write(command):
             return self._deny_constraint("dd direct device write", non_bypassable=True)
@@ -248,7 +252,9 @@ class SafetyBackstopPolicyEvaluator:
                 )
 
         if _is_root_recursive_permission_change(command):
-            return self._deny_constraint("Root directory recursive permission change", non_bypassable=True)
+            return self._deny_constraint(
+                "Root directory recursive permission change", non_bypassable=True
+            )
 
         for pattern in self.BUCKET_A_CREDENTIAL_SUBSTRINGS:
             if pattern in command:

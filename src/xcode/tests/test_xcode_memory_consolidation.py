@@ -6,6 +6,8 @@ from pathlib import Path
 from xcode.harness.agent_runtime.compaction import LayeredCompactor
 from xcode.harness.memory import MemoryManager
 import pytest
+
+
 class TestMemoryConsolidationHook:
     def setup_method(self, method) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -80,13 +82,16 @@ class TestMemoryConsolidationHook:
 
         # Verify that MEMORY.md does not contain the invalid block
         if self.manager.memory_file.exists():
-            assert "Incident 100" not in self.manager.memory_file.read_text(encoding="utf-8")
+            assert "Incident 100" not in self.manager.memory_file.read_text(
+                encoding="utf-8"
+            )
 
         # Verify that the invalid block was safely archived to the archive directory
         archive_files = list(self.manager.archive_dir.glob("*.md"))
         assert len(archive_files) == 1
         archive_text = archive_files[0].read_text(encoding="utf-8")
         assert "Incident 100: Corrupt compaction" in archive_text
+
 
 if __name__ == "__main__":
     pytest.main()

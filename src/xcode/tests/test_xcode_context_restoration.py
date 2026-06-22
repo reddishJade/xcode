@@ -9,6 +9,8 @@ from xcode.harness.agent_runtime.compaction import (
 from xcode.harness.agent_runtime.prompting import PromptContext, SystemPromptBuilder
 from xcode.harness.task_store import TaskStore
 import pytest
+
+
 class XcodeContextRestorationTests:
     def test_context_collapse_clean_with_summary_tags(self) -> None:
         raw_text = (
@@ -51,6 +53,7 @@ class XcodeContextRestorationTests:
 
             # Monkeypatch summarize_messages to return a double-tagged output
             from xcode.harness.agent_runtime import compaction
+
             original_summarize = compaction.summarize_messages
             try:
                 compaction.summarize_messages = lambda msgs, **kwargs: [
@@ -105,6 +108,7 @@ class XcodeContextRestorationTests:
             # TaskStateCollector (USER_CONTEXT) via the context pipeline only.
             assert "<active-tasks-graph>" not in prompt
             assert "<post-compact-metadata>" not in prompt
+
 
 if __name__ == "__main__":
     pytest.main()

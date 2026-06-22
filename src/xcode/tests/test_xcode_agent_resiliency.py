@@ -15,12 +15,14 @@ from xcode.harness.config import AgentConfig
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
 import pytest
+
 PATH_SCHEMA = {
     "type": "object",
     "properties": {"path": {"type": "string"}},
     "required": ["path"],
     "additionalProperties": False,
 }
+
 
 class XcodeAgentResiliencyTests:
     def test_diminishing_returns_continuation_circuit_breaker(self) -> None:
@@ -256,6 +258,7 @@ class XcodeAgentResiliencyTests:
         wrapper = agent.provider
         assert isinstance(wrapper, _FallbackSwitchingProvider)
         assert wrapper._using_fallback  # pyright: ignore[reportAttributeAccessIssue]
+
 
 if __name__ == "__main__":
     pytest.main()

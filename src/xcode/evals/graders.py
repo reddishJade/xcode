@@ -146,11 +146,11 @@ async def run_llm_judge(
     )
 
     prompt = JUDGE_PROMPT_TEMPLATE.format(
-            task_prompt=task.prompt,
-            criteria_list=criteria_list,
-            answer=answer or "(Agent did not produce a final answer)",
-            tool_calls_text=tool_calls_text,
-        )
+        task_prompt=task.prompt,
+        criteria_list=criteria_list,
+        answer=answer or "(Agent did not produce a final answer)",
+        tool_calls_text=tool_calls_text,
+    )
 
     response_parts: list[str] = []
     final_content = ""

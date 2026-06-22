@@ -18,8 +18,11 @@ from xcode.harness.agent_runtime.prompting.identity import (
 )
 from xcode.harness.skills import ToolSpec
 import pytest
+
+
 def _echo_handler(text: dict[str, object]) -> str:
     return str(text)
+
 
 class XcodePromptingTests:
     def test_builder_includes_stable_modules_in_order(self) -> None:
@@ -67,7 +70,9 @@ class XcodePromptingTests:
             assert prompt.index("<search-strategy>") < boundary_index
             assert boundary_index < prompt.index("<environment>")
             assert prompt.index("<environment>") < prompt.index("<cwd-info>")
-            assert prompt.index("<cwd-info>") < prompt.index("<git-preflight>", boundary_index)
+            assert prompt.index("<cwd-info>") < prompt.index(
+                "<git-preflight>", boundary_index
+            )
 
     def test_volatile_context_changes_do_not_rewrite_stable_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -231,6 +236,7 @@ class XcodePromptingTests:
             _git(root, "commit", "-m", "initial")
 
             from xcode.harness.agent_runtime import git_preflight
+
             git_preflight._ttl_cache.clear()
             git_preflight._snapshot_cache.clear()
             calls: list[tuple[str, ...]] = []
@@ -253,6 +259,7 @@ class XcodePromptingTests:
             assert calls.count(("status", "--short")) == 2
             assert calls.count(("show", "--stat", "--oneline", "-1")) == 1
 
+
 def _git(root: Path, *args: str) -> None:
     subprocess.run(
         ["git", *args],
@@ -261,6 +268,7 @@ def _git(root: Path, *args: str) -> None:
         capture_output=True,
         text=True,
     )
+
 
 if __name__ == "__main__":
     pytest.main()

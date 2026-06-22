@@ -34,6 +34,7 @@ from xcode.evals.tasks import SUITES
 from xcode.tests.fixtures import FakeProvider
 from xcode.evals.schema import TrialResult
 import pytest
+
 INPUT_SCHEMA = {
     "type": "object",
     "properties": {"input": {"type": "string"}},
@@ -46,6 +47,7 @@ PATH_SCHEMA = {
     "required": ["path"],
     "additionalProperties": False,
 }
+
 
 class EvalPipelineTests:
     def test_eval_runner_records_trace_and_passes_graders(self) -> None:
@@ -183,7 +185,7 @@ class EvalPipelineTests:
                             [
                                 sys.executable,
                                 "-c",
-                                "from pathlib import Path; assert Path('ok.txt').read_text() == 'ok'"
+                                "from pathlib import Path; assert Path('ok.txt').read_text() == 'ok'",
                             ]
                         ],
                         "timeout_seconds": 5,
@@ -408,6 +410,7 @@ class EvalPipelineTests:
         assert metrics["pass@k"] == "1/2"
         assert metrics["pass@k_rate"] == 0.5
 
+
 def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
     responses: list[list[ProviderEvent]] = [
         [
@@ -433,6 +436,7 @@ def _tool_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
         )
     )
 
+
 def _text_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
     responses: list[ProviderEvent] = [
         TextDelta(chunk="async ok"),
@@ -444,6 +448,7 @@ def _text_app(_task: EvalTask, _trial_index: int) -> XcodeApp:
             registry=(),
         )
     )
+
 
 def _editing_app(project_root: Path) -> XcodeApp:
     def edit_file(_value: dict) -> str:
@@ -479,6 +484,7 @@ def _editing_app(project_root: Path) -> XcodeApp:
         registry=(tool,),
     )
 
+
 def _validation_app(project_root: Path) -> XcodeApp:
     def write_ok(_value: dict) -> str:
         (project_root / "ok.txt").write_text("ok", encoding="utf-8")
@@ -512,6 +518,7 @@ def _validation_app(project_root: Path) -> XcodeApp:
         registry=(tool,),
     )
 
+
 def _trial(task_id: str, success: bool) -> TrialResult:
     return TrialResult(
         task_id=task_id,
@@ -521,6 +528,7 @@ def _trial(task_id: str, success: bool) -> TrialResult:
         trace_path=Path("trace.jsonl"),
         graders=(),
     )
+
 
 if __name__ == "__main__":
     pytest.main()

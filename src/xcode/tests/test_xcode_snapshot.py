@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from xcode.harness.snapshot import (
-MAX_SNAPSHOT_FILE_BYTES,
+    MAX_SNAPSHOT_FILE_BYTES,
     ChangeEntry,
     SkippedFileInfo,
     SnapshotService,
@@ -17,11 +17,13 @@ MAX_SNAPSHOT_FILE_BYTES,
 )
 import pytest
 
+
 def _git(cmd: list[str], cwd: Path) -> str:
     result = subprocess.run(
         ["git", *cmd], cwd=cwd, capture_output=True, text=True, check=True
     )
     return result.stdout.strip()
+
 
 def _hidden_git(project_root: Path, session_id: str, cmd: list[str]) -> str:
     git_dir = project_root / ".local" / "snapshots" / session_id / ".git"
@@ -34,6 +36,7 @@ def _hidden_git(project_root: Path, session_id: str, cmd: list[str]) -> str:
     )
     return result.stdout.strip()
 
+
 def _init_git_project(root: Path) -> None:
     _git(["init"], root)
     _git(["config", "user.name", "test"], root)
@@ -41,6 +44,7 @@ def _init_git_project(root: Path) -> None:
     (root / ".gitignore").write_text("*.log\n")
     _git(["add", ".gitignore"], root)
     _git(["commit", "-m", "init"], root)
+
 
 class TestSnapshotService:
     def setup_method(self, method) -> None:
@@ -115,7 +119,10 @@ class TestSnapshotService:
             # Only flag if it appears without --git-dir override
             lines = [line for line in code.splitlines() if forbidden in line.lower()]
             for line in lines:
-                assert "--git-dir" in line, f"forbidden git command without --git-dir: {line}"
+                assert "--git-dir" in line, (
+                    f"forbidden git command without --git-dir: {line}"
+                )
+
     def test_pre_post_snapshots_around_turn(self) -> None:
         (self.root / "a.txt").write_text("initial")
         svc = SnapshotService(self.root, "test-5")
@@ -269,6 +276,7 @@ class TestSnapshotService:
         with pytest.raises(SnapshotUnsupportedError):
             SnapshotStore(non_git)
 
+
 class TestSnapshotStore:
     def setup_method(self, method) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -418,9 +426,13 @@ class TestSnapshotStore:
         removed = store.rewind_to_turn_count("sess-rewind", 1)
 
         assert removed == 2
-        assert [record.turn_id for record in store.list_records("sess-rewind")] == ["001"]
+        assert [record.turn_id for record in store.list_records("sess-rewind")] == [
+            "001"
+        ]
         assert store.next_turn_id("sess-rewind") == "002"
-        assert [record.turn_id for record in store.get_undoable_records("sess-rewind", 5)] == ["001"]
+        assert [
+            record.turn_id for record in store.get_undoable_records("sess-rewind", 5)
+        ] == ["001"]
 
     def test_repeated_rewind_and_undone_records_are_consistent(self) -> None:
         store = SnapshotStore(self.root)
@@ -463,6 +475,7 @@ class TestSnapshotStore:
         child_service = store.service("child")
         assert child_service.track().snapshot_id == snapshot.snapshot_id
 
+
 class TestSnapshotDeletedFile:
     def setup_method(self, method) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -484,11 +497,13 @@ class TestSnapshotDeletedFile:
         assert changes[0].kind == "deleted"
         assert changes[0].path == "new.txt"
 
+
 class TestActionExtractorDeleteFile:
     def test_delete_file_extracts_write_action(self) -> None:
         from xcode.harness.observability.permission_model import (
             ActionExtractor,
         )
+
         action = ActionExtractor().extract("delete_file", {"path": "test.txt"})
         assert action.tool == "delete_file"
         assert action.capability == "write"
@@ -497,6 +512,7 @@ class TestActionExtractorDeleteFile:
         assert action.targets[0].kind == "path"
         assert action.targets[0].access == "write"
         assert action.targets[0].value == "test.txt"
+
 
 if __name__ == "__main__":
     pytest.main()

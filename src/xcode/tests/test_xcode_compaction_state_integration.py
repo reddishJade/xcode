@@ -19,6 +19,7 @@ from xcode.harness.agent_runtime.compaction import LayeredCompactor
 import pytest
 # ── 编译辅助 ──
 
+
 def _compacted_summary(messages: list[dict[str, Any]]) -> str | None:
     """从压实后的消息列表中提取 [Compressed] 摘要文本（如果存在）。"""
     if len(messages) > 1:
@@ -26,6 +27,7 @@ def _compacted_summary(messages: list[dict[str, Any]]) -> str | None:
         if isinstance(content, str) and content.startswith("[Compressed]"):
             return content
     return None
+
 
 class TestCompactedHistoryPath:
     """验证 [Compressed] 保留在消息列表中作为唯一的压实对话历史路径。"""
@@ -61,7 +63,10 @@ class TestCompactedHistoryPath:
             )
             result1 = compactor(messages)
             result2 = compactor(messages)
-            assert [m.get("content") for m in result1] == [m.get("content") for m in result2]
+            assert [m.get("content") for m in result1] == [
+                m.get("content") for m in result2
+            ]
+
 
 class TestTaskStateCollectorNoDuplicate:
     """验证 TaskStateCollector 不注入与 [Compressed] 重复的内容。"""
@@ -109,6 +114,7 @@ class TestTaskStateCollectorNoDuplicate:
             store.create("my task", payload={"blocked_by": "Task #5"})
 
             from xcode.harness.agent_runtime.config import _build_task_state_provider
+
             provider = _build_task_state_provider(root)
             assert provider is not None
             state_text = provider()
@@ -135,6 +141,7 @@ class TestTaskStateCollectorNoDuplicate:
             assert summary is not None
             assert "pending" not in (summary or "").lower()
             assert "#1" not in summary or ""
+
 
 class TestCompactionDoesNotDuplicateCollectors:
     """验证压实不复制其他 collector 处理的内容。"""
@@ -198,6 +205,7 @@ class TestCompactionDoesNotDuplicateCollectors:
             compacted = compactor(messages)
             summary = _compacted_summary(compacted)
             assert summary is not None
+
 
 if __name__ == "__main__":
     pytest.main()
