@@ -31,7 +31,7 @@ Read on demand, not all upfront.
 2. Follow this file for repository-specific agent behavior.
 3. Follow other docs linked above for implementation, validation, and Git workflow.
 
-When the user's latest instruction and a rule in this file conflict on the same dimension (e.g. commit granularity, import style), ask for explicit confirmation before proceeding. Otherwise, the user's instruction takes precedence.
+If the user's instruction directly overrides a rule in this document, ask for explicit confirmation before proceeding. Once confirmed, follow the user's instruction.
 
 ---
 
@@ -51,7 +51,7 @@ Every principle below applies to every line of Python written or reviewed in thi
 ### 0. Quality Over Convention
 
 - Good code does not need to explain *what* it does — the code itself is the explanation.
-- Do not plan in phases. Do it right the first time in one pass: complete, correct, and clean.
+- Do not plan in phases during implementation. Do it right the first time in one pass: complete, correct, and clean. Debugging is exempt from this rule (see Debugging Approach below).
 - Code must be clear, complete, and extensible — not merely functional.
 
 ### 1. Readability Counts
@@ -205,6 +205,8 @@ All other operations that rewrite history, discard changes, or move HEAD are for
 - `git stash`
 - `git commit --no-verify`
 
+If the user requests a forbidden Git operation, politely refuse and explain the repository rules. Only execute the command if the user subsequently acknowledges the risk and forces the action.
+
 Before every commit:
 
 ```powershell
@@ -237,6 +239,8 @@ When architecture is awkward or boundaries are unclear, clean it up directly. Do
 
 Run only for modified files or related functionality.
 
+If a static check, lint, or test command fails, analyze the error output and attempt to fix the code in a new commit. Do not ask for user intervention unless the error is related to missing external dependencies or unmocked external services.
+
 ```powershell
 # 静态检查与格式化
 uv run ruff check <modified-files> --fix
@@ -253,7 +257,7 @@ git diff --check -- <modified-docs>
 Run the full test suite only when:
 
 - the user asks for it, or
-- the touched code is broad or shared enough to justify it, or
+- the touched code is a core utility imported by more than 3 modules, or
 - targeted tests do not cover the modified behavior.
 
 Do not run end-to-end suites that require specific external environment variables unless explicitly requested. Use mocks or fake providers for external services. Do not call real paid APIs in tests.
@@ -281,7 +285,7 @@ uv run python -m compileall src
 ## Working Rules
 
 - Read complete files before large changes, audits, or edits to files not yet reviewed.
-- Prefer small, precise changes that match existing style.
+- Prefer changes isolated to the specific function or class being modified, matching existing style.
 - Do not remove intentional behavior unless the user confirms.
 - Check local types in the virtual environment or `site-packages` before guessing external APIs.
 - Inline single-line helper functions when they have only one call site.
