@@ -31,6 +31,7 @@ PROFILE_FALLBACK = "fallback"
 DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
     "identity",
     "tool_discipline",
+    "citations",
     "tools",
     "search_strategy",
     "environment",
@@ -471,9 +472,7 @@ def _validate_external_hook_entry(entry: object, index: int) -> None:
         raise ValueError(f"{prefix}.command: argv items must be non-empty strings")
 
     matcher = entry.get("matcher")
-    if matcher is not None and (
-        not isinstance(matcher, str) or not matcher.strip()
-    ):
+    if matcher is not None and (not isinstance(matcher, str) or not matcher.strip()):
         raise ValueError(f"{prefix}.matcher: must be a non-empty string")
 
     timeout = entry.get("timeout", 10.0)

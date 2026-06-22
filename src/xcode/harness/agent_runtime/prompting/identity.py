@@ -134,6 +134,14 @@ repeat git status/diff commands unless the user asks or the task specifically
 requires a fresh check.
 </tool-discipline>"""
 
+CITATION_INSTRUCTION = """<citation-instruction>
+When tool output is marked with \ue200cite marker headers and \ue200cite\ue202<source_id>\ue201 markers,
+use the provided source IDs in your response citations.
+Cite evidence by inserting \ue200cite\ue202<source_id>\ue202Lx-Ly\ue201 where <source_id> is
+the marker's source identifier, and Lx-Ly specifies the line range.
+Do not cite tool output that lacks a citation marker.
+</citation-instruction>"""
+
 SEARCH_STRATEGY = """<search-strategy>
 Code tasks use the following retrieval layers in order:
 1. lexical search: use glob_files for file/path discovery, grep_search for exact text, and read_file for known files.
@@ -146,6 +154,7 @@ SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "<system-prompt-dynamic-boundary />"
 STABLE_PROMPT_MODULE_ORDER: tuple[str, ...] = (
     "identity",
     "tool_discipline",
+    "citations",
     "tools",
     "search_strategy",
 )
@@ -162,6 +171,7 @@ def _build_prompt_version() -> str:
         (
             CORE_IDENTITY,
             TOOL_DISCIPLINE,
+            CITATION_INSTRUCTION,
             SEARCH_STRATEGY,
             SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
             STABLE_PROMPT_MODULE_ORDER,

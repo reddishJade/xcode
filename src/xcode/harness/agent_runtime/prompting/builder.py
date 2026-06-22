@@ -42,6 +42,7 @@ from xcode.coding_agent.tools.shell_adapter import ShellSpec
 from ..contextual import ContextualRetrievalState
 from ..git_preflight import build_git_preflight
 from .identity import (
+    CITATION_INSTRUCTION,
     CORE_IDENTITY,
     DYNAMIC_PROMPT_MODULE_ORDER,
     SEARCH_STRATEGY,
@@ -126,6 +127,8 @@ class StableRegionBuilder:
                     stable_parts.append(
                         self._tool_prompt_section(context.registry, registry_key)
                     )
+                case "citations":
+                    stable_parts.append(CITATION_INSTRUCTION)
                 case "search_strategy":
                     stable_parts.append(SEARCH_STRATEGY)
 
