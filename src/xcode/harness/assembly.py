@@ -47,7 +47,12 @@ from xcode.harness.observability import (
 from xcode.harness.observability.permission_model import ExternalDirectory
 from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
-from xcode.harness.skills import ToolInput, ToolRegistryState, ToolSpec
+from xcode.harness.skills import (
+    ToolInput,
+    ToolRegistryState,
+    ToolSpec,
+    filter_for_subagent,
+)
 from xcode.harness.session_todo import (
     build_session_todo_tools,
     SessionTodoState,
@@ -288,15 +293,13 @@ def build_tool_registry(
         mcp_runtime_registry,
     )
 
-    # Step 9 host policy: MCP tools are always excluded from subagents
+    registry_state = ToolRegistryState(registry)
     subagent_allowlist = set(runtime_config.tools.subagent_tool_allowlist)
     child_registry = tuple(
-        tool
-        for tool in registry
-        if tool.group != "mcp"
-        and (tool.name != "update_todo" or tool.name in subagent_allowlist)
+        rt.spec
+        for rt in filter_for_subagent(registry_state.registered_snapshot())
+        if rt.spec.name != "update_todo" or rt.spec.name in subagent_allowlist
     )
-    registry_state = ToolRegistryState(registry)
     registry += (build_search_tools_tool(registry_state.snapshot),)
 
     subagent_closers, subagent_tools = _build_subagent_integration(
