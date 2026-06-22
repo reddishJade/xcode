@@ -6,7 +6,7 @@ from typing import Iterator
 
 
 class _LogCapture:
-    """Mimics unittest result's assertLogs output interface."""
+    """Captured log records with an ``output`` attribute for assertion."""
 
     def __init__(self, records: list[logging.LogRecord]) -> None:
         self.records = records
@@ -18,7 +18,7 @@ def assert_logs(
     logger_name: str | None = None,
     level: str = "WARNING",
 ) -> Iterator[_LogCapture]:
-    """Drop-in replacement for unittest.TestCase.assertLogs."""
+    """Assert that at least one log message is emitted at or above *level*."""
     logger = logging.getLogger(logger_name)
     records: list[logging.LogRecord] = []
     handler = logging.Handler()
@@ -45,7 +45,7 @@ def assert_no_logs(
     logger_name: str | None = None,
     level: str = "WARNING",
 ) -> Iterator[None]:
-    """Drop-in replacement for unittest.TestCase.assertNoLogs."""
+    """Assert that no log message is emitted at or above *level*."""
     logger = logging.getLogger(logger_name)
     records: list[logging.LogRecord] = []
     handler = logging.Handler()

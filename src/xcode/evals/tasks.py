@@ -17,7 +17,7 @@ from .schema import EvalTask
 def coding_fixture() -> tuple[EvalTask, ...]:
     """真实 provider 小型编码回归：复制 fixture 到 sandbox 后运行验证命令。"""
     validation = {
-        "commands": ((sys.executable, "-m", "unittest", "discover", "tests"),),
+        "commands": ((sys.executable, "-m", "pytest", "tests"),),
         "timeout_seconds": 60,
     }
     return (
@@ -25,9 +25,9 @@ def coding_fixture() -> tuple[EvalTask, ...]:
             id="tiny-calculator-subtract",
             prompt=(
                 "Update the tiny calculator project so it supports subtract(left, right). "
-                "Keep the existing add behavior, add a focused unittest for subtract, "
-                "run the unit validation, and finish with a concise summary of the changed "
-                "file and validation result."
+                "Keep the existing add behavior, add a focused test for subtract, "
+                "run the tests, and finish with a concise summary of the changed "
+                "file and test result."
             ),
             expected_answer_contains=("subtract",),
             expected_tool_calls=("read_file", "bash"),
@@ -81,7 +81,7 @@ def coding_fixture() -> tuple[EvalTask, ...]:
                 "Add a capitalize_words(s) function to string_utils.py that capitalizes "
                 "the first letter of each word in a string. For example, "
                 "capitalize_words('hello world') should return 'Hello World'. "
-                "Add a unittest for it in the test file, then run the tests to verify."
+                "Add a test for it in the test file, then run the tests to verify."
             ),
             expected_answer_contains=("capitalize_words",),
             expected_tool_calls=("read_file", "bash"),
@@ -109,8 +109,8 @@ def coding_fixture() -> tuple[EvalTask, ...]:
             id="add-multiply",
             prompt=(
                 "Extend the tiny calculator to support multiply(left, right). Keep the "
-                "existing add behavior. Add a focused unittest for multiply, run the unit "
-                "validation, and finish with a concise summary."
+                "existing add behavior. Add a focused test for multiply, run the tests, "
+                "and finish with a concise summary."
             ),
             expected_answer_contains=("multiply",),
             expected_tool_calls=("read_file", "bash"),

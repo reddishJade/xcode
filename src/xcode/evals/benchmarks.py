@@ -398,22 +398,15 @@ def _legacy_evalplus_test_file(entry_point: str, tests: str) -> str:
         [
             "from __future__ import annotations",
             "",
-            "import unittest",
-            "",
             "from solution import *",
             "",
             tests,
             "",
             "",
-            "class EvalPlusTests(unittest.TestCase):",
-            "    def test_benchmark(self) -> None:",
-            "        check_fn = globals().get('check')",
-            "        if check_fn is not None:",
-            f"            check_fn({entry_point})",
-            "",
-            "",
-            "if __name__ == '__main__':",
-            "    unittest.main()",
+            "def test_benchmark() -> None:",
+            "    check_fn = globals().get('check')",
+            "    if check_fn is not None:",
+            f"        check_fn({entry_point})",
             "",
         ]
     )
@@ -432,8 +425,8 @@ def _evalplus_test_file(
         "from __future__ import annotations",
         "",
         "import json",
-        "import unittest",
         "",
+        "import pytest",
         "import reference",
         "from solution import *",
         "",
@@ -447,20 +440,14 @@ def _evalplus_test_file(
         lines.extend([tests, ""])
     lines.extend(
         [
-            "class EvalPlusTests(unittest.TestCase):",
-            "    def test_benchmark(self) -> None:",
+            "",
+            "",
+            "class TestEvalPlus:",
+            "    @pytest.mark.parametrize(\"args\", BASE_INPUTS + PLUS_INPUTS)",
+            "    def test_benchmark(self, args: tuple[Any, ...]) -> None:",
             "        candidate = globals()[ENTRY_POINT]",
             "        reference_fn = getattr(reference, ENTRY_POINT)",
-            "        for args in BASE_INPUTS:",
-            "            with self.subTest(args=args):",
-            "                self.assertEqual(reference_fn(*args), candidate(*args))",
-            "        for args in PLUS_INPUTS:",
-            "            with self.subTest(args=args):",
-            "                self.assertEqual(reference_fn(*args), candidate(*args))",
-            "",
-            "",
-            "if __name__ == '__main__':",
-            "    unittest.main()",
+            "        assert reference_fn(*args) == candidate(*args)",
             "",
         ]
     )
@@ -493,7 +480,7 @@ def _evalplus_task(
         metadata={
             "fixture_dir": str(fixture_dir),
             "validation": {
-                "commands": ((sys.executable, "-m", "unittest", "discover", "tests"),),
+                "commands": ((sys.executable, "-m", "pytest", "tests"),),
                 "timeout_seconds": 30,
             },
             "evidence": {
@@ -521,7 +508,7 @@ def _evalplus_prompt(prompt: str, entry_point: str) -> str:
     return "\n".join(
         [
             "Edit solution.py to implement the requested Python function.",
-            "Run the unit tests with python -m unittest discover tests.",
+            "Run the tests with pytest.",
             f"Entry point: {entry_point}",
             "",
             prompt,

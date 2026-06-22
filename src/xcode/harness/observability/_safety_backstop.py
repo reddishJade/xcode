@@ -99,7 +99,6 @@ class SafetyBackstopPolicyEvaluator:
         "flake8",
         "eslint",
         "pytest",
-        "unittest",
         "make",
         "uname",
         "env",

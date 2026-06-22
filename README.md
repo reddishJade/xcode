@@ -153,10 +153,6 @@ REPL 支持以下会话命令：
 ### 单元测试
 
 ```powershell
-# 运行全部测试
-uv run python -m unittest discover src\xcode\tests
-
-# 或使用 pytest
 uv run pytest src/xcode/tests -q --tb=short
 ```
 

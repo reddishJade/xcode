@@ -837,7 +837,7 @@ class InstructionCollector:
 
 **Verification:**
 ```bash
-uv run python -m unittest src.xcode.tests.test_execution_modes -v
+uv run pytest src/xcode/tests/test_xcode_execution_modes.py -q --tb=short
 # Must have zero references to ReviewPolicy
 rg "ReviewPolicy|ReviewCommand|REVIEW_BASH_PREFIXES" src/xcode/
 # Expected: no matches
@@ -862,7 +862,7 @@ rg "ReviewPolicy|ReviewCommand|REVIEW_BASH_PREFIXES" src/xcode/
 
 **Verification:**
 ```bash
-uv run python -m unittest src.xcode.tests.test_skills -v
+uv run pytest src/xcode/tests/test_xcode_skills_registry.py -q --tb=short
 rg "SkillCollector|SKILLS_MAX_BYTES|_walk_skill_files" src/xcode/
 # Expected: no matches (SkillIndexCollector replaces SkillCollector)
 ```
@@ -882,8 +882,8 @@ rg "SkillCollector|SKILLS_MAX_BYTES|_walk_skill_files" src/xcode/
 
 **Verification:**
 ```bash
-uv run python -m unittest src.xcode.tests.test_permission_model -v
-uv run python -m unittest src.xcode.tests.test_permissions -v
+uv run pytest src/xcode/tests/test_xcode_permission_model.py -q --tb=short
+uv run pytest src/xcode/tests/test_xcode_permissions.py -q --tb=short
 rg "_decide_current|approval_cutover_enabled|shell_cutover_enabled" src/xcode/
 # Expected: no matches
 ```
@@ -905,7 +905,7 @@ rg "_decide_current|approval_cutover_enabled|shell_cutover_enabled" src/xcode/
 
 **Verification:**
 ```bash
-uv run python -m unittest src.xcode.tests.test_boundary -v
+uv run pytest src/xcode/tests/test_xcode_permission_model.py -q --tb=short -k boundary
 # Test: read_file .env.example → allow
 # Test: write_file .env.example → deny
 # Test: read_file /home/user/reference/doc.md → allow (if in external_directories)
@@ -925,7 +925,7 @@ uv run python -m unittest src.xcode.tests.test_boundary -v
 
 **Verification:**
 ```bash
-uv run python -m unittest src.xcode.tests.test_context_collector -v
+uv run pytest src/xcode/tests -q --tb=short -k context_collector
 rg "ProjectManifestCollector" src/xcode/
 # Expected: no matches
 ```
@@ -944,7 +944,7 @@ rg "ProjectManifestCollector" src/xcode/
 
 **Verification:**
 ```bash
-uv run python -m unittest src.xcode.tests.test_session -v
+uv run pytest src/xcode/tests/test_xcode_repl.py -q --tb=short -k session
 # Test: fork creates isolated grant store
 # Test: /clear clears session grants, preserves permanent
 ```
@@ -965,7 +965,7 @@ uv run python -m unittest src.xcode.tests.test_session -v
 
 **Verification:**
 ```bash
-uv run python -m unittest src.xcode.tests.test_undo -v
+uv run pytest src/xcode/tests/test_xcode_repl.py -q --tb=short -k undo
 # Test: write_file then /undo → content restored
 # Test: /undo denied if PermissionPipeline blocks inverse
 # Test: /undo not implemented as JSONL deletion
@@ -982,7 +982,7 @@ uv run python -m unittest src.xcode.tests.test_undo -v
 
 **Verification:**
 ```bash
-uv run python -m unittest src.xcode.tests.test_repl -v
+uv run pytest src/xcode/tests/test_xcode_repl.py -q --tb=short
 # Test: --continue resumes last session
 # Test: --session <id> resumes specific session
 ```
@@ -1001,7 +1001,7 @@ uv run python -m unittest src.xcode.tests.test_repl -v
 
 **Verification:**
 ```bash
-uv run python -m unittest src.xcode.tests.test_mcp -v
+uv run pytest src/xcode/tests/test_xcode_mcp.py -q --tb=short
 # No references to MCP in experimental/ (except removal commit)
 ```
 
@@ -1019,7 +1019,7 @@ uv run python -m unittest src.xcode.tests.test_mcp -v
 **Verification:**
 ```bash
 uv run python -m compileall src/xcode
-uv run python -m unittest discover src/xcode/tests -v
+uv run pytest src/xcode/tests -q --tb=short
 ```
 
 ---
@@ -1108,13 +1108,13 @@ uv run python -m unittest discover src/xcode/tests -v
 
 ```bash
 # Full suite
-uv run python -m unittest discover src/xcode/tests -v
+uv run pytest src/xcode/tests -q --tb=short
 
 # Targeted
-uv run python -m unittest src.xcode.tests.test_permission_model -v
-uv run python -m unittest src.xcode.tests.test_execution_modes -v
-uv run python -m unittest src.xcode.tests.test_session -v
-uv run python -m unittest src.xcode.tests.test_context_collector -v
+uv run pytest src/xcode/tests/test_xcode_permission_model.py -q --tb=short
+uv run pytest src/xcode/tests/test_xcode_execution_modes.py -q --tb=short
+uv run pytest src/xcode/tests/test_xcode_repl.py -q --tb=short -k session
+uv run pytest src/xcode/tests -q --tb=short -k context_collector
 
 # Lint + type check
 uv run ruff check src/xcode --fix && uv run ruff format src/xcode
@@ -1137,7 +1137,7 @@ uv run ruff format <modified-files>
 uv run pyright <modified-files>
 
 # 2. Targeted tests pass
-uv run python -m unittest <targeted-test-module> -v
+uv run pytest <targeted-test-file> -q --tb=short
 
 # 3. No stale references to removed APIs
 rg "<removed-function-name>" src/xcode/  # Must be zero
@@ -1146,7 +1146,7 @@ rg "<removed-function-name>" src/xcode/  # Must be zero
 uv run python -c "from xcode.harness.config import discover_runtime_config; print('OK')"
 
 # 5. Full test suite
-uv run python -m unittest discover src/xcode/tests -v
+uv run pytest src/xcode/tests -q --tb=short
 ```
 
 ### Documentation Updates

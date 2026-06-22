@@ -83,7 +83,7 @@ uv run pyright <modified-files>
 After modifying tests:
 
 ```powershell
-uv run python -m unittest <targeted-test-module>
+uv run pytest <targeted-test-file> -q --tb=short
 ```
 
 After modifying documentation only:

@@ -1,25 +1,24 @@
-import unittest
+import pytest
 
-from math_utils import add, subtract, multiply, divide
-
-
-class TestMathUtils(unittest.TestCase):
-    def test_add(self):
-        self.assertEqual(add(2, 3), 5)
-
-    def test_subtract(self):
-        self.assertEqual(subtract(10, 4), 6)
-
-    def test_multiply(self):
-        self.assertEqual(multiply(3, 4), 12)
-
-    def test_divide(self):
-        self.assertEqual(divide(10, 2), 5)
-
-    def test_divide_by_zero(self):
-        with self.assertRaises(ZeroDivisionError):
-            divide(1, 0)
+from math_utils import add, divide, multiply, subtract
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_add() -> None:
+    assert add(2, 3) == 5
+
+
+def test_subtract() -> None:
+    assert subtract(10, 4) == 6
+
+
+def test_multiply() -> None:
+    assert multiply(3, 4) == 12
+
+
+def test_divide() -> None:
+    assert divide(10, 2) == 5
+
+
+def test_divide_by_zero() -> None:
+    with pytest.raises(ZeroDivisionError):
+        divide(1, 0)
