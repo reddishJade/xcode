@@ -65,6 +65,7 @@ class ToolResultMessage:
     tool_name: str = ""
     content: ToolResultMessageContent = ""
     is_error: bool = False
+    metadata: dict[str, object] | None = None
     timestamp: int = 0
 
 

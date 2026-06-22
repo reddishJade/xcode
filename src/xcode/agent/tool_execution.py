@@ -274,7 +274,7 @@ async def _execute_one_impl(
         signal,
     )
 
-    result_msg = _tool_result_message(tool_call, content, is_error)
+    result_msg = _tool_result_message(tool_call, content, is_error, tool_result.details)
     return result_msg, terminate
 
 
@@ -381,6 +381,7 @@ def _tool_result_message(
     tool_call: ToolCallContent,
     content: list[ToolResultContentBlock],
     is_error: bool,
+    metadata: object = None,
 ) -> ToolResultMessage:
     result_content: ToolResultMessageContent
     if not content:
@@ -396,6 +397,7 @@ def _tool_result_message(
         tool_name=tool_call.name,
         content=result_content,
         is_error=is_error,
+        metadata=metadata if isinstance(metadata, dict) else None,
     )
 
 
