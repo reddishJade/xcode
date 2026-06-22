@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 from collections.abc import Sequence
+from pathlib import Path
+from typing import Literal
 
 from rank_bm25 import BM25Okapi
+
 from .parsing import (
     MemoryRecord,
     MemorySearchEvalCase,
@@ -30,24 +32,68 @@ from .parsing import (
     with_metadata,
 )
 
+type MemoryLayer = Literal["project", "user"]
+type MemoryLayerFilter = Literal["all", "project", "user"]
+
 
 class MemoryManager:
     """基于 H2 契约校验、BM25 召回和元数据重排的 MEMORY.md 记忆系统。"""
 
-    def __init__(self, root: Path, max_blocks: int = _DEFAULT_MAX_BLOCKS) -> None:
+    def __init__(
+        self,
+        root: Path,
+        max_blocks: int = _DEFAULT_MAX_BLOCKS,
+        user_memory_file: Path | None = None,
+    ) -> None:
+        """创建项目级与用户级并行的记忆管理器。"""
         self.root = root
         self.memory_file = root / "MEMORY.md"
+        self.user_memory_file = user_memory_file or (
+            Path.home() / ".xcode" / "memory" / "MEMORY.md"
+        )
         self.archive_dir = root / ".local" / "memory_archive"
         self.lru_file = root / ".local" / "memory_lru.json"
         self.max_blocks = max_blocks
 
     # ── 读取 ──
 
-    def read_memory_blocks(self) -> list[str]:
-        if not self.memory_file.exists():
+    def read_memory_blocks(
+        self,
+        layer: MemoryLayerFilter = "all",
+    ) -> list[str]:
+        """读取指定层级的记忆块；默认合并项目级与用户级。"""
+        blocks: list[str] = []
+        for current_layer in self._selected_layers(layer):
+            blocks.extend(self._read_blocks_from_file(self._memory_file(current_layer)))
+        return blocks
+
+    def read_memory_records(
+        self,
+        layer: MemoryLayerFilter = "all",
+    ) -> list[MemoryRecord]:
+        """读取指定层级并保留来源信息。"""
+        records: list[MemoryRecord] = []
+        for current_layer in self._selected_layers(layer):
+            memory_file = self._memory_file(current_layer)
+            for block in self._read_blocks_from_file(memory_file):
+                record = parse_memory_record(block)
+                records.append(
+                    MemoryRecord(
+                        block=record.block,
+                        title=record.title,
+                        fields=record.fields,
+                        score=record.score,
+                        layer=current_layer,
+                    )
+                )
+        return records
+
+    def _read_blocks_from_file(self, memory_file: Path) -> list[str]:
+        """从单个 MEMORY.md 文件解析 H2 记忆块。"""
+        if not memory_file.exists():
             return []
-        content = self.memory_file.read_text(encoding="utf-8")
-        blocks = []
+        content = memory_file.read_text(encoding="utf-8")
+        blocks: list[str] = []
         current_block: list[str] = []
         for line in content.splitlines():
             if line.startswith("## "):
@@ -59,17 +105,24 @@ class MemoryManager:
                     current_block.append(line)
         if current_block:
             blocks.append("\n".join(current_block) + "\n")
-        return [b for b in blocks if b.strip()]
-
-    def read_memory_records(self) -> list[MemoryRecord]:
-        return [parse_memory_record(block) for block in self.read_memory_blocks()]
+        return [block for block in blocks if block.strip()]
 
     # ── 检索 ──
 
     def search_memory(
-        self, query: str, limit: int = 3, scope: str | None = None
+        self,
+        query: str,
+        limit: int = 3,
+        scope: str | None = None,
+        layer: MemoryLayerFilter = "all",
     ) -> list[str]:
-        records = self.search_memory_records(query, limit=limit, scope=scope)
+        """跨项目级与用户级记忆检索匹配块。"""
+        records = self.search_memory_records(
+            query,
+            limit=limit,
+            scope=scope,
+            layer=layer,
+        )
         self._touch_lru(records)
         return [record.block for record in records]
 
@@ -78,10 +131,12 @@ class MemoryManager:
         query: str,
         limit: int = 3,
         scope: str | None = None,
+        layer: MemoryLayerFilter = "all",
     ) -> list[MemoryRecord]:
-        records = self.read_memory_records()
+        """跨层级执行 BM25 检索并返回带来源的记录。"""
+        records = self.read_memory_records(layer=layer)
         blocks = [record.block for record in records]
-        if not blocks:
+        if not blocks or not query.strip() or limit <= 0:
             return []
 
         corpus = [tokenize(block) for block in blocks]
@@ -114,6 +169,7 @@ class MemoryManager:
                         title=record.title,
                         fields=record.fields,
                         score=round(adjusted, 6),
+                        layer=record.layer,
                     )
                 )
         ranked.sort(key=lambda r: (-r.score, r.title))
@@ -201,38 +257,47 @@ class MemoryManager:
         source: str | None = None,
         scope: str | None = None,
         confidence: float | None = None,
+        layer: MemoryLayer = "project",
     ) -> bool:
+        """校验并写入指定记忆层级。"""
         if not self.validate_memory_block(block):
-            self._archive_block(block)
+            self._archive_block(block, layer)
             return False
 
         block = with_metadata(block, source=source, scope=scope, confidence=confidence)
-        existing_records = self.read_memory_records()
+        existing_records = self.read_memory_records(layer=layer)
         new_title = extract_title(block)
 
         if new_title and existing_records:
             merged_block = self._merge_with_existing(block, new_title, existing_records)
             if merged_block is not None:
                 if not self._content_quality_check(merged_block):
-                    self._archive_block(merged_block)
+                    self._archive_block(merged_block, layer)
                     return False
-                self._replace_block_by_title(new_title, merged_block)
-                self._enforce_lru()
+                self._replace_block_by_title(new_title, merged_block, layer)
+                self._enforce_lru(layer)
                 return True
 
         if not self._quality_check(block, existing_records):
-            self._archive_block(block)
+            self._archive_block(block, layer)
             return False
 
-        self.memory_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.memory_file, "a", encoding="utf-8") as f:
-            f.write("\n" + block.strip() + "\n")
-        self._enforce_lru()
+        memory_file = self._memory_file(layer)
+        memory_file.parent.mkdir(parents=True, exist_ok=True)
+        with memory_file.open("a", encoding="utf-8") as file:
+            file.write("\n" + block.strip() + "\n")
+        self._enforce_lru(layer)
         return True
 
-    def _replace_block_by_title(self, title: str, new_block: str) -> None:
-        blocks = self.read_memory_blocks()
-        updated = []
+    def _replace_block_by_title(
+        self,
+        title: str,
+        new_block: str,
+        layer: MemoryLayer,
+    ) -> None:
+        """按标题替换指定层级中的现有记忆块。"""
+        blocks = self.read_memory_blocks(layer=layer)
+        updated: list[str] = []
         found = False
         for existing_block in blocks:
             existing_title = extract_title(existing_block)
@@ -243,7 +308,7 @@ class MemoryManager:
                 updated.append(existing_block.rstrip() + "\n")
         if not found:
             updated.append(new_block.strip() + "\n")
-        self.memory_file.write_text("".join(updated), encoding="utf-8")
+        self._memory_file(layer).write_text("".join(updated), encoding="utf-8")
 
     def _merge_with_existing(
         self,
@@ -278,6 +343,7 @@ class MemoryManager:
         return None
 
     def consolidate(self, summary: str) -> None:
+        """从压缩摘要中提取结构化块并写入项目级记忆。"""
         parts = summary.split("## ")
         if len(parts) <= 1:
             return
@@ -291,7 +357,7 @@ class MemoryManager:
                 line.strip() for line in block.splitlines() if line.strip()
             )
             if self._is_memory_attempt(block):
-                self.add_memory_block(block)
+                self.add_memory_block(block, layer="project")
 
     def _is_memory_attempt(self, block: str) -> bool:
         has_field = any(
@@ -301,10 +367,12 @@ class MemoryManager:
             has_field or "incident" in block.lower()
         )
 
-    def _archive_block(self, block: str) -> None:
-        self.archive_dir.mkdir(parents=True, exist_ok=True)
+    def _archive_block(self, block: str, layer: MemoryLayer) -> None:
+        """将无效或淘汰块归档到对应层级。"""
+        archive_dir = self._archive_dir(layer)
+        archive_dir.mkdir(parents=True, exist_ok=True)
         timestamp = int(time.time() * 1000)
-        archive_file = self.archive_dir / f"corrupt_{timestamp}.md"
+        archive_file = archive_dir / f"corrupt_{timestamp}.md"
         archive_file.write_text(block, encoding="utf-8")
 
     # ── LRU 遗忘策略 ──
@@ -313,18 +381,28 @@ class MemoryManager:
         lru = self._read_lru()
         now = time.time()
         for record in records:
-            lru[record.title] = now
+            lru[self._lru_key(record.layer, record.title)] = now
         self._write_lru(lru)
 
-    def _enforce_lru(self) -> None:
+    def _enforce_lru(self, layer: MemoryLayer) -> None:
         if self.max_blocks <= 0:
             return
-        blocks = self.read_memory_blocks()
+        blocks = self.read_memory_blocks(layer=layer)
         block_titles = [extract_title(b) for b in blocks]
-        block_title_set = set(t for t in block_titles if t)
+        block_title_set = {
+            self._lru_key(layer, title) for title in block_titles if title
+        }
 
         lru = self._read_lru()
-        cleaned = {title: ts for title, ts in lru.items() if title in block_title_set}
+        other_layer_lru = {
+            key: timestamp
+            for key, timestamp in lru.items()
+            if not key.startswith(f"{layer}:")
+        }
+        layer_lru = {
+            key: timestamp for key, timestamp in lru.items() if key in block_title_set
+        }
+        cleaned = other_layer_lru | layer_lru
         if cleaned != lru:
             self._write_lru(cleaned)
             lru = cleaned
@@ -333,24 +411,29 @@ class MemoryManager:
             return
         now = time.time()
         for title in block_titles:
-            if title and title not in lru:
-                lru[title] = now
+            key = self._lru_key(layer, title)
+            if title and key not in lru:
+                lru[key] = now
 
-        sorted_titles = sorted(lru.keys(), key=lambda t: lru.get(t, 0.0))
-        titles_to_evict = set(sorted_titles[: len(blocks) - self.max_blocks])
+        sorted_keys = sorted(
+            (key for key in lru if key.startswith(f"{layer}:")),
+            key=lambda key: lru.get(key, 0.0),
+        )
+        keys_to_evict = set(sorted_keys[: len(blocks) - self.max_blocks])
+        titles_to_evict = {key.split(":", 1)[1] for key in keys_to_evict}
 
-        kept_blocks = []
+        kept_blocks: list[str] = []
         for block in blocks:
             title = extract_title(block)
             if title in titles_to_evict:
-                self._archive_block(block)
+                self._archive_block(block, layer)
             else:
                 kept_blocks.append(block)
 
         if len(kept_blocks) < len(blocks):
-            self._write_blocks(kept_blocks)
-            for title in titles_to_evict:
-                lru.pop(title, None)
+            self._write_blocks(kept_blocks, layer)
+            for key in keys_to_evict:
+                lru.pop(key, None)
             self._write_lru(lru)
 
     def _read_lru(self) -> dict[str, float]:
@@ -371,6 +454,32 @@ class MemoryManager:
             encoding="utf-8",
         )
 
-    def _write_blocks(self, blocks: list[str]) -> None:
+    def _write_blocks(self, blocks: list[str], layer: MemoryLayer) -> None:
+        """覆盖写入指定层级的全部记忆块。"""
         content = "\n".join(b.rstrip() for b in blocks if b.strip())
-        self.memory_file.write_text(content + "\n", encoding="utf-8")
+        self._memory_file(layer).write_text(content + "\n", encoding="utf-8")
+
+    def _memory_file(self, layer: MemoryLayer) -> Path:
+        """返回指定层级的 MEMORY.md 路径。"""
+        if layer == "project":
+            return self.memory_file
+        return self.user_memory_file
+
+    def _archive_dir(self, layer: MemoryLayer) -> Path:
+        """返回指定层级的归档目录。"""
+        if layer == "project":
+            return self.archive_dir
+        return self.user_memory_file.parent / "archive"
+
+    def _selected_layers(
+        self,
+        layer: MemoryLayerFilter,
+    ) -> tuple[MemoryLayer, ...]:
+        """将读取过滤器转换为确定的层级顺序。"""
+        if layer == "all":
+            return ("project", "user")
+        return (layer,)
+
+    def _lru_key(self, layer: str, title: str) -> str:
+        """生成跨层级无冲突的 LRU 键。"""
+        return f"{layer}:{title}"

@@ -86,6 +86,7 @@ REPL 支持以下会话命令：
 | `/queue` | 查看消息队列 |
 | `/model` | 切换当前模型 |
 | `/tool` | 查看/切换工具组 |
+| `/memory` | 检索、列出或添加项目级与用户级记忆 |
 | `!COMMAND` | 执行 shell 命令 |
 | `@file` | 引用并读取文件内容 |
 
@@ -137,8 +138,13 @@ REPL 支持以下会话命令：
 | `tasks` | 可选 | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
 | `mailbox` | 可选 | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
 | `progress` | 可选 | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
-| `memory` | 可选 | 启用 `MemoryManager` 压缩摘要 consolidation |
+| `memory` | 可选 | `search_memory`；启用主动召回、压缩摘要 consolidation |
 | `daemon` | 可选 | 构造 `HeartbeatDaemon` |
+
+启用 `memory` 后，每轮会按用户问题检索项目根 `MEMORY.md` 与用户级
+`~/.xcode/memory/MEMORY.md`，将最多 3 条匹配记录注入 `<memory>` 上下文。
+`search_memory` 是只读、低风险工具；schema 支持 `query`、`limit`、`scope`
+和 `layer`。显式 `/memory list|search|add` 命令不依赖工具组启用状态。
 
 ---
 
@@ -216,4 +222,3 @@ uv run pyright src/
 ## 许可
 
 [MIT](LICENSE) © 2026 Xcode Contributors
-

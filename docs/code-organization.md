@@ -110,8 +110,9 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `mcp/tools.py` | MCP 配置、schema cache 和动态 ToolSpec 构建 |
 | `mcp/results.py` | MCP structuredContent 校验和 typed content 宿主映射 |
 | `memory/` | 正式 opt-in Memory 管理与解析 |
-| `memory/manager.py` | `MEMORY.md`、BM25 召回、consolidation 和 LRU |
+| `memory/manager.py` | 项目/用户 `MEMORY.md`、BM25 召回、consolidation 和 LRU |
 | `memory/parsing.py` | 记忆块数据类型、解析和评分辅助 |
+| `memory/tools.py` | `memory` group 的只读 `search_memory` ToolSpec |
 | `agent_runtime/` | StructuredAgent 运行时 |
 | `agent_runtime/structured.py` | `StructuredAgent`（harness 对 agent loop 的适配器） |
 | `agent_runtime/subagent.py` | `ManagedSubagentRunner`、subagent 工具 |
@@ -213,7 +214,7 @@ Core/session tools（默认）：
 `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`、`update_todo`
 
 扩展组：
-`skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `memory`（仅 hook）→ `daemon`（仅服务）
+`skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `memory`（search_memory + 主动召回 + consolidation）→ `daemon`（仅服务）
 
 MCP 不使用 enabled group；存在 `.local/mcp_config.json` 时由核心 runtime 自动
 注册。Memory 使用独立的 `memory` group。
@@ -222,7 +223,7 @@ MCP 不使用 enabled group；存在 `.local/mcp_config.json` 时由核心 runti
 
 ## 本地状态路径
 
-`.local/sessions/`、`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`、`.local/team/inbox/`（mailbox）。
+`.local/sessions/`、`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`、`.local/team/inbox/`（mailbox）、项目根 `MEMORY.md`、用户级 `~/.xcode/memory/MEMORY.md`。
 
 ---
 

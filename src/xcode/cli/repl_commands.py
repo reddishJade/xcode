@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 import subprocess
+from typing import cast
 
 from .app_contract import ReplApp
 from .commands import (
@@ -47,6 +48,7 @@ from xcode.harness.observability import (
     PermissionEngineConfig,
     PermissionPolicy,
 )
+from xcode.harness.memory import MemoryLayer, MemoryLayerFilter, MemoryManager
 from xcode.harness.skills import ToolSpec
 from xcode.harness.session import FORK_TYPES, SessionStore
 from xcode.harness.snapshot import SnapshotStore, TurnSnapshotRecord
@@ -525,6 +527,103 @@ def cmd_skill(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
+def cmd_memory(cmd: str, ctx: CommandContext) -> bool:
+    """检索、列出或显式添加项目级与用户级记忆。"""
+    manager = MemoryManager(ctx.project_root)
+    parts = cmd.split(maxsplit=2)
+    action = parts[1].lower() if len(parts) >= 2 else "list"
+    payload = parts[2].strip() if len(parts) >= 3 else ""
+
+    if action == "list":
+        return _list_memory(manager, payload)
+    if action == "search":
+        return _search_memory(manager, payload)
+    if action == "add":
+        return _add_memory(manager, payload)
+
+    print("Usage: /memory list [all|project|user]")
+    print("       /memory search <query>")
+    print(
+        "       /memory add [project|user] "
+        "<title> | <context> | <solution> | <files> | <takeaways>"
+    )
+    return False
+
+
+def _list_memory(manager: MemoryManager, raw_layer: str) -> bool:
+    """列出指定记忆层级中的标题。"""
+    layer = raw_layer.lower() or "all"
+    if layer not in {"all", "project", "user"}:
+        print("Memory layer must be one of: all, project, user.")
+        return False
+
+    records = manager.read_memory_records(layer=cast(MemoryLayerFilter, layer))
+    if not records:
+        print("No memory records found.")
+        return False
+
+    print(f"Memory records ({len(records)}):")
+    for record in records:
+        print(f"  [{record.layer}] {record.title}")
+    return False
+
+
+def _search_memory(manager: MemoryManager, query: str) -> bool:
+    """打印跨层级记忆检索结果。"""
+    if not query:
+        print("Usage: /memory search <query>")
+        return False
+
+    records = manager.search_memory_records(query, limit=5)
+    if not records:
+        print(f"No memory matching {query!r}.")
+        return False
+
+    for record in records:
+        print(f"[{record.layer}] score={record.score:.3f}")
+        print(record.block.strip())
+        print()
+    return False
+
+
+def _add_memory(manager: MemoryManager, payload: str) -> bool:
+    """解析单行结构化输入并写入指定记忆层级。"""
+    layer = "project"
+    value = payload
+    first, separator, remainder = payload.partition(" ")
+    if separator and first.lower() in {"project", "user"}:
+        layer = first.lower()
+        value = remainder.strip()
+
+    fields = [field.strip() for field in value.split("|")]
+    if len(fields) != 5 or any(not field for field in fields):
+        print(
+            "Usage: /memory add [project|user] "
+            "<title> | <context> | <solution> | <files> | <takeaways>"
+        )
+        return False
+
+    title, context, solution, files, takeaways = fields
+    block = (
+        f"## {title}\n"
+        f"- Context/Query: {context}\n"
+        f"- Solution: {solution}\n"
+        f"- Files: {files}\n"
+        f"- Takeaways: {takeaways}\n"
+    )
+    memory_layer = cast(MemoryLayer, layer)
+    if not manager.add_memory_block(block, source="repl", layer=memory_layer):
+        print("Memory was rejected by validation or duplicate detection.")
+        return False
+
+    memory_file = (
+        manager.memory_file if layer == "project" else manager.user_memory_file
+    )
+    print(f"Added {layer} memory: {title}")
+    print(f"Path: {memory_file}")
+    return False
+
+
 def cmd_exit(cmd: str, ctx: CommandContext) -> bool:
     """退出 REPL。"""
     return True
@@ -863,6 +962,13 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         handler=cmd_skill,
         desc="Activate a discovered skill for this session.",
         args_desc="NAME",
+        accepts_args=True,
+        group=COMMAND_GROUP_INFO,
+    ),
+    "/memory": CommandEntry(
+        handler=cmd_memory,
+        desc="List, search, or add project and user memory.",
+        args_desc="list [all|project|user] | search <query> | add ...",
         accepts_args=True,
         group=COMMAND_GROUP_INFO,
     ),

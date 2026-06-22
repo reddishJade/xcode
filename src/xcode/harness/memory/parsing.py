@@ -18,10 +18,13 @@ _DEFAULT_MAX_BLOCKS = 0
 
 @dataclass(frozen=True)
 class MemoryRecord:
+    """表示一个可检索的结构化记忆块。"""
+
     block: str
     title: str
     fields: dict[str, str]
     score: float = 0.0
+    layer: str = "project"
 
 
 @dataclass(frozen=True)

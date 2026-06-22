@@ -220,10 +220,14 @@ Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
 | `tasks` | 可选 | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
 | `mailbox` | 可选 | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
 | `progress` | 可选 | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
-| `memory` | 可选 | 启用 `MemoryManager` 压缩摘要 consolidation |
+| `memory` | 可选 | `search_memory`；启用主动召回、压缩摘要 consolidation |
 | `daemon` | 可选 | 构造 `HeartbeatDaemon` |
 
 `shell` 工具是 OpenAI Responses builtin 的本地执行桥，接收 `commands` 数组。`search_tools` 工具按关键字搜索已注册工具。
+`memory` 组启用后，运行时按每轮用户问题合并检索项目根 `MEMORY.md` 与
+`~/.xcode/memory/MEMORY.md`，并将匹配记录注入 `<memory>` 上下文。
+`search_memory` 的 schema 接受必填 `query`，以及可选 `limit`（1-10）、
+`scope` 和 `layer`（`all` / `project` / `user`）；工具标记为只读。
 MCP 属于核心运行时：存在 `.local/mcp_config.json` 时自动注册动态
 `mcp__{server}__{tool}` 和 `mcp_tool_search`，无配置时不增加工具。
 MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺少这些

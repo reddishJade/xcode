@@ -367,6 +367,10 @@ def _extend_registry_with_features(
         from xcode.harness.task_store import TaskStore
 
         registry += build_progress_tools(TaskStore(project_root))
+    if "memory" in enabled:
+        from xcode.harness.memory import MemoryManager, build_memory_tools
+
+        registry += build_memory_tools(MemoryManager(project_root))
     return registry
 
 
@@ -432,6 +436,11 @@ def _build_subagent_integration(
         child_audit_path = resolve_config_path(
             project_root, runtime_config.observability.audit_path
         )
+        memory_manager = None
+        if "memory" in enabled:
+            from xcode.harness.memory import MemoryManager
+
+            memory_manager = MemoryManager(child_root)
 
         subagent_session_id = f"subagent-{uuid4().hex[:8]}"
         result = await StructuredAgent(
@@ -463,6 +472,7 @@ def _build_subagent_integration(
                     contextual_state=child_contextual_state,
                     modules=runtime_config.prompt.modules,
                     todo_state=child_todo_state,
+                    memory_manager=memory_manager,
                 ),
                 project_root=child_root,
                 prompt_instructions=runtime_config.prompt.instructions,
@@ -535,6 +545,13 @@ def build_agent(
     external_hook_runner: ExternalHookRunner | None = None,
     todo_state: SessionTodoState | None = None,
 ) -> StructuredAgent:
+    enabled = effective_enabled_groups(runtime_config.tools.enabled_groups)
+    memory_manager = None
+    if "memory" in enabled:
+        from xcode.harness.memory import MemoryManager
+
+        memory_manager = MemoryManager(project_root)
+
     hook_manager = _build_hook_manager(
         contextual_state,
         external_hook_runner,
@@ -568,6 +585,7 @@ def build_agent(
                 contextual_state=contextual_state,
                 modules=runtime_config.prompt.modules,
                 todo_state=todo_state,
+                memory_manager=memory_manager,
             ),
             fallback_provider=fallback_provider,
             project_root=project_root,
