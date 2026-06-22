@@ -12,7 +12,13 @@ from typing import Protocol
 
 import pathspec
 
-from xcode.harness.skills import ToolInput, ToolSpec, resolve_project_path
+from xcode.harness.skills import (
+    CITATION_SOURCES_METADATA_KEY,
+    ToolInput,
+    ToolOutput,
+    ToolSpec,
+    resolve_project_path,
+)
 from .path_utils import display_path, is_path_blocked, truncate_output
 from .tools_manager import ensure_tool
 from .truncate import GREP_MAX_LINE_LENGTH, truncate_line, truncate_tail
@@ -106,7 +112,7 @@ def build_code_tools(
         literal = bool(data.get("literal", False))
         context = _validated_int(data, "context", 0, minimum=0)
         _cancel_check()
-        return _grep(
+        result = _grep(
             root,
             base,
             pattern,
@@ -118,6 +124,10 @@ def build_code_tools(
             context=context,
             cancel_event=cancel_event,
         )
+        sources = _citation_sources_from_grep_output(result)
+        if sources:
+            return ToolOutput(result, metadata={CITATION_SOURCES_METADATA_KEY: sources})
+        return result
 
     def glob_files(data: ToolInput) -> str:
         """按项目相对 glob 搜索文件。"""
@@ -759,6 +769,50 @@ def _is_blocked(root: Path, path: Path) -> bool:
 def _truncate(text: str) -> str:
     """按工具输出预算截断文本。"""
     return truncate_output(text)
+
+
+def _citation_sources_from_grep_output(
+    text: str,
+) -> list[dict[str, object]]:
+    """从 grep 输出文本解析行级引用来源。
+
+    每行格式: path:line_num:content。
+    最多 30 个 per-line 来源，超出后聚合为一个 range source。
+    """
+    pattern = re.compile(r"^(.+?):(\d+):(.*)")
+    sources: list[dict[str, object]] = []
+    range_start: int | None = None
+    lines = text.splitlines()
+    for line in lines:
+        m = pattern.match(line)
+        if not m:
+            continue
+        path = m.group(1)
+        line_num = int(m.group(2))
+        if len(sources) < 30:
+            sources.append(
+                {
+                    "kind": "search",
+                    "path": path,
+                    "start_line": line_num,
+                    "end_line": line_num,
+                    "text": line,
+                }
+            )
+        else:
+            if range_start is None:
+                range_start = line_num
+    if range_start is not None:
+        sources.append(
+            {
+                "kind": "search",
+                "path": "",
+                "start_line": range_start,
+                "end_line": len(lines),
+                "text": f"[{len(sources) - 30}+ more lines]",
+            }
+        )
+    return sources
 
 
 def _display(root: Path, path: Path) -> str:
