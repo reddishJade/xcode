@@ -75,7 +75,7 @@ xcode
 REPL 支持以下会话命令：
 
 | 命令 | 功能 |
-|---|---|---|
+|---|---|
 | `/plan` | 进入 Plan 模式（只读检查，禁止写入） |
 | `/build` | 进入 Build 模式（允许写入，高风险需审批） |
 | `/act` | 进入 Act 模式（完整权限） |
@@ -129,14 +129,8 @@ REPL 支持以下会话命令：
 
 ## 配置
 
-运行时配置来自项目根 `xcode.config.json`，没有配置文件时使用默认配置：
-
-```json
-{}
-```
-
 配置发现栈：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地
-`.local/settings.json` → 环境变量覆盖。完整配置说明见 [CONFIG.md](CONFIG.md)。
+`.local/settings.json` → 环境变量覆盖。所有字段默认值见 [CONFIG.md](CONFIG.md)。
 
 ---
 
