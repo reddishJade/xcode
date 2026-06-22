@@ -128,6 +128,23 @@ def _nullable_schema(schema: Any) -> Any:
     return result
 
 
+def provider_function_name(canonical_id: str) -> str:
+    """Convert canonical internal id to a provider-valid function name.
+
+    Canonical format: kind://source/tool  (e.g., mcp://everything/echo)
+    Core tools keep their simple name (e.g., read_file, grep_search).
+
+    Provider rules (OpenAI Chat Completions):
+    - Must match ^[a-zA-Z0-9_-]{1,64}$
+    - No dots, colons, slashes, or special chars except underscore and dash
+    """
+    if "://" not in canonical_id:
+        return canonical_id
+    kind, _, remainder = canonical_id.partition("://")
+    safe = remainder.replace("/", "__")
+    return f"{kind}__{safe}"
+
+
 def to_chat_tool(
     name: str, description: str, schema: dict | None, strict: bool = False
 ) -> dict[str, Any]:

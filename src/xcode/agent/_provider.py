@@ -25,6 +25,7 @@ from xcode.ai.events import (
     UsageUpdate,
 )
 from xcode.ai.providers.protocol import StreamProvider
+from xcode.ai.providers.codec import provider_function_name
 from xcode.ai.types import ToolDefinition
 from xcode.agent.context_assembly import ContextAssemblyInput, ContextBlock
 from xcode.agent.context_collector import ContextCollectionInput
@@ -224,9 +225,10 @@ def _tools_to_definitions(tools: list[AgentTool] | None) -> list[ToolDefinition]
                 )
             desc += "\n".join(example_lines)
         builtin = getattr(t, "builtin", None)
+        provider_name = provider_function_name(t.name)
         result.append(
             ToolDefinition(
-                name=t.name,
+                name=provider_name,
                 description=desc,
                 parameters=dict(t.parameters),
                 builtin=builtin if isinstance(builtin, dict) else None,
