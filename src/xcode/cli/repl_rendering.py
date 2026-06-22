@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import shutil
 import sys
 import textwrap
@@ -17,6 +18,10 @@ from rich.text import Text
 from .commands import CommandEntry, PromptLike, PromptText, ReplState
 from .completion import CommandArgsSuggester, ReplCompleter
 from xcode.harness.skills import ToolSpec
+
+CITE_START = "\ue200"
+CITE_SEP = "\ue202"
+CITE_END = "\ue201"
 
 
 _MIN_REASONING_SUMMARY_SECONDS = 0.5
@@ -98,11 +103,30 @@ def should_print_reasoning_summary(text: str, elapsed: float) -> bool:
     )
 
 
+def _render_citations(text: str) -> str:
+    """将 \ue200cite\ue202...\ue201 标记替换为终端可见的引用样式。"""
+    pattern = (
+        re.escape(CITE_START)
+        + r"cite"
+        + re.escape(CITE_SEP)
+        + r"([^"
+        + re.escape(CITE_END)
+        + r"]+)"
+        + re.escape(CITE_END)
+    )
+    return re.sub(pattern, _citation_replacement, text)
+
+
+def _citation_replacement(match: re.Match[str]) -> str:
+    return f"【{match.group(1)}】"
+
+
 def answer_renderable(text: str) -> Table:
+    rendered = _render_citations(text or "")
     layout = Table.grid(padding=(0, 1), expand=True)
     layout.add_column(width=1)
     layout.add_column(ratio=1)
-    layout.add_row(Text("●", style=CLI_COLOR_ASSISTANT), Markdown(text or ""))
+    layout.add_row(Text("●", style=CLI_COLOR_ASSISTANT), Markdown(rendered))
     return layout
 
 
