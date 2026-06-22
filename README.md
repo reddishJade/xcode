@@ -11,7 +11,7 @@
   <br/>
 </div>
 
-围绕结构化事件流、路径安全、工具审批、审计脱敏、上下文压缩和 REPL 会话管理构建的可测试 Agent 运行骨架。默认配置只启用 `core` 工具组；扩展能力必须显式 opt-in。
+围绕结构化事件流、路径安全、工具审批、审计脱敏、上下文压缩和 REPL 会话管理构建的可测试 Agent 运行骨架。零配置即可运行。
 
 ---
 
@@ -121,9 +121,9 @@ REPL 支持以下会话命令：
   `/thinking`、`/tool`、`/skill`、`/memory`、`/permissions`、`/hooks`、`/undo`、
   `$skill-name` 快捷入口、`!COMMAND` shell 快捷入口、`@file` 引用、
   `/context`、`/btw` 和 session transcript 落盘。
-- **MCP 工具集成** — 核心运行时自动读取 `.local/mcp_config.json`；无配置时
-  不注册额外工具。
-- **可选扩展** — subagent、worktree、tasks、mailbox、progress、memory、daemon。
+- **Subagent 委托** — `ManagedSubagentRunner` 并行子任务调度，支持 worktree 沙箱隔离和模型 profile 切换。
+- **MCP 协议** — 自动发现 `.local/mcp_config.json`，注册 `mcp__{server}__{tool}` 动态工具。
+- **任务与协作** — tasks 任务图、mailbox 跨 agent 消息、progress 断点续传、daemon 后台心跳。
 
 ---
 
@@ -132,7 +132,7 @@ REPL 支持以下会话命令：
 运行时配置来自项目根 `xcode.config.json`，没有配置文件时使用默认配置：
 
 ```json
-{"tools": {"enabled_groups": ["core", "skills"]}}
+{}
 ```
 
 配置发现栈：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地
@@ -142,24 +142,23 @@ REPL 支持以下会话命令：
 
 ## 工具组
 
-默认 `enabled_groups=["core", "skills"]`。可用 group：
+| group | 工具 |
+|---|---|
+| `core` | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools` |
+| `skills` | `load_skill`（发现 skill 时自动注册） |
+| `subagent` | `submit_subagent`、`check_subagent`、`cancel_subagent` |
+| `worktree` | `create_worktree_task`、`remove_worktree_task` |
+| `tasks` | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
+| `mailbox` | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
+| `progress` | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
+| `memory` | `search_memory`；主动召回、压缩摘要 consolidation |
+| `daemon` | `HeartbeatDaemon`（由 `daemon.enabled` 配置项控制） |
+| `mcp` | `mcp__{server}__{tool}`、`mcp_tool_search`（存在 `.local/mcp_config.json` 时自动注册） |
 
-| group | 状态 | 工具 |
-|---|---|---|
-| `core` | 默认 | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools` |
-| `skills` | 可选 | `load_skill` |
-| `subagent` | 可选 | `submit_subagent`、`check_subagent`、`cancel_subagent` |
-| `worktree` | 可选 | `create_worktree_task`、`remove_worktree_task` |
-| `tasks` | 可选 | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
-| `mailbox` | 可选 | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
-| `progress` | 可选 | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
-| `memory` | 可选 | `search_memory`；启用主动召回、压缩摘要 consolidation |
-| `daemon` | 可选 | 构造 `HeartbeatDaemon` |
-
-启用 `memory` 后，每轮会按用户问题检索项目根 `MEMORY.md` 与用户级
+每轮会按用户问题检索项目根 `MEMORY.md` 与用户级
 `~/.xcode/memory/MEMORY.md`，将最多 3 条匹配记录注入 `<memory>` 上下文。
 `search_memory` 是只读、低风险工具；schema 支持 `query`、`limit`、`scope`
-和 `layer`。显式 `/memory list|search|add` 命令不依赖工具组启用状态。
+和 `layer`。
 
 ---
 

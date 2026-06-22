@@ -135,7 +135,7 @@ def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:
         all_known.update(group_names)
     hidden = sorted(all_known - enabled_names)
     if hidden:
-        lines.append("<hidden tools (enable via tools.enabled_groups)>")
+        lines.append("<hidden tools>")
         for group in sorted(catalog):
             group_hidden = sorted(catalog[group] & set(hidden))
             if group_hidden:

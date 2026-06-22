@@ -92,7 +92,6 @@ def test_memory_group_registers_search_tool(tmp_path: Path) -> None:
         tools = _extend_registry_with_features(
             (),
             tmp_path,
-            {"memory"},
             runtime_registry,
         )
     finally:

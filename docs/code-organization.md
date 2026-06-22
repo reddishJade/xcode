@@ -96,7 +96,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | 模块 | 职责 |
 |---|---|
 | `app.py` | `XcodeApp` dataclass、`build_app()` 入口 |
-| `assembly.py` | 装配：config 解析、shared infra、provider bundle、tool registry、agent 构建、opt-in services |
+| `assembly.py` | 装配：config 解析、shared infra、provider bundle、tool registry、agent 构建、services |
 | `config.py` | 9 个 dataclass、配置发现/序列化/合并/环境变量覆盖 |
 | `skills.py` | `ToolSpec`、`ToolOutput` dataclass |
 | `session.py` | JSONL 会话存储、索引、resume、fork、rewind |
@@ -113,7 +113,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `mcp/client.py` | MCP stdio JSON-RPC 客户端 |
 | `mcp/tools.py` | MCP 配置、schema cache 和动态 ToolSpec 构建 |
 | `mcp/results.py` | MCP structuredContent 校验和 typed content 宿主映射 |
-| `memory/` | 正式 opt-in Memory 管理与解析 |
+| `memory/` | Memory 管理与解析 |
 | `memory/manager.py` | 项目/用户 `MEMORY.md`、BM25 召回、consolidation 和 LRU |
 | `memory/parsing.py` | 记忆块数据类型、解析和评分辅助 |
 | `memory/tools.py` | `memory` group 的只读 `search_memory` ToolSpec |
@@ -155,7 +155,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | 模块 | 职责 |
 |---|---|
 | `__init__.py` | 导出 `build_project_scoped_registry` |
-| `registry.py` | `build_project_scoped_registry()` — 按 enabled groups 构建 registry |
+| `registry.py` | `build_project_scoped_registry()` — 构建项目级工具注册表 |
 | `tools/` | 内置工具实现 |
 | `tools/file.py` | `build_file_tools` → `read_file`、`write_file`、`edit_file` |
 | `tools/code_search.py` | `build_code_tools` → `glob_files`、`find_files`、`grep_search`、`ls` |
@@ -212,19 +212,19 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `adapters/registry.py` | 外部 benchmark adapter registry |
 | `adapters/swebench.py` | SWE-bench predictions helper |
 
-## 工具组与默认可见工具
+## 工具组
 
-Core tools（默认，`group="core"`）：
-`read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`
-
-Session tools（默认，`group="session"`）：
-`update_todo`
-
-扩展组：
-`skills`（load_skill）→ `subagent`（submit/check/cancel）→ `worktree`（create/remove）→ `tasks`（6 个工具）→ `mailbox`（3 个工具）→ `progress`（6 个工具）→ `memory`（search_memory + 主动召回 + consolidation）→ `daemon`（仅服务）
-
-MCP 不使用 enabled group；存在 `.local/mcp_config.json` 时由核心 runtime 自动
-注册。Memory 使用独立的 `memory` group。
+`core`（`read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`）
+→ `session`（`update_todo`）
+→ `skills`（`load_skill`）
+→ `subagent`（`submit_subagent`、`check_subagent`、`cancel_subagent`）
+→ `worktree`（`create_worktree_task`、`remove_worktree_task`）
+→ `tasks`（`create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked`）
+→ `mailbox`（`send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message`）
+→ `progress`（`save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs`）
+→ `memory`（`search_memory`、主动召回、consolidation）
+→ `daemon`（`HeartbeatDaemon`）
+→ `mcp`（`mcp__{server}__{tool}`、`mcp_tool_search`，由 `.local/mcp_config.json` 自动发现）
 
 ---
 
@@ -236,4 +236,4 @@ MCP 不使用 enabled group；存在 `.local/mcp_config.json` 时由核心 runti
 
 ## 测试目录
 
-`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和扩展组件（71 个测试文件 + fixtures.py + conftest.py）。
+`src/xcode/tests/` 覆盖核心装配、provider、runtime、coding tools、observability、REPL、evals 和全部工具组（71 个测试文件 + fixtures.py + conftest.py）。

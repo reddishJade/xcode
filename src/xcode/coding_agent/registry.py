@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
 def build_project_scoped_registry(
     project_root: Path,
-    enabled: set[str],
     contextual_state: ContextualRetrievalState | None,
     shell_spec: ShellSpec,
     cancel_event: threading.Event | None = None,
@@ -47,12 +46,8 @@ def build_project_scoped_registry(
             env=env,
         ),
     )
-    if (
-        "skills" in enabled
-        and skill_registry is not None
-        and skill_registry.available_names()
-    ):
+    if skill_registry is not None and skill_registry.available_names():
         from xcode.harness.skills_registry import build_load_skill_tool
 
         registry += (build_load_skill_tool(skill_registry),)
-    return tuple(t for t in registry if t.group in enabled)
+    return registry

@@ -60,11 +60,9 @@ uv run python -m xcode.evals.cli --list-benchmarks       # 列出 benchmark
 
 ## 架构约束
 
-- 无 `experimental` 包或聚合开关；扩展能力使用独立 tool group，必须显式 opt-in
 - 新工具必须声明 group、risk、schema、read-only 和 concurrency 属性
-- MCP 由核心运行时自动发现 `.local/mcp_config.json`；无配置时不注册工具
+- MCP 工具由 `.local/mcp_config.json` 自动发现并注册
 - `edit_file` 依赖 read-before-edit 指纹校验
-- tool group 默认：`["core", "skills"]`
 
 ## Git 规则
 

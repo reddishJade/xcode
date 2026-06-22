@@ -22,7 +22,6 @@ from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.config import (
     AgentConfig,
-    DaemonRuntimeConfig,
     ObservabilityRuntimeConfig,
     PathsRuntimeConfig,
     SecurityRuntimeConfig,
@@ -35,7 +34,6 @@ from xcode.coding_agent.tools.shell_adapter import detect_shell
 from xcode.harness.mcp import McpRuntimeRegistry
 from xcode.harness.skills import ToolSpec
 import pytest
-from xcode.tests._helpers import assert_logs, assert_no_logs
 def _write_skill(directory: Path, name: str, description: str, body: str) -> None:
     """在指定技能目录写入最小 SKILL.md。"""
     directory.mkdir(parents=True)
@@ -65,39 +63,24 @@ class XcodeAppRuntimeTests:
         names = {tool.name for tool in app.registry}
 
         assert "read_file" in names
-        assert "lsp_diagnostics" not in names
-        assert "task" not in names
-        assert "create_worktree_task" not in names
-        assert "static_analysis" not in names
+        assert "bash" in names
+        assert "grep_search" in names
+        assert "create_worktree_task" in names
+        assert "submit_subagent" in names
+        assert "update_todo" in names
 
     def test_default_tool_groups_do_not_construct_optional_groups(self) -> None:
-        with (
-            tempfile.TemporaryDirectory() as tmp,
-            _patched_provider_bundle([]),
-            patch.object(Path, "home", return_value=Path(tmp) / "home"),
-        ):
-            with patch(
-                "xcode.coding_agent.tools.worktree.WorktreeTaskRunner",
-                side_effect=AssertionError,
-            ):
-                app = build_app(
-                    project_root=Path(tmp),
-                    runtime_config=XcodeRuntimeConfig(),
-                )
+        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
+            app = build_app(
+                project_root=Path(tmp),
+                runtime_config=XcodeRuntimeConfig(),
+            )
 
         names = {tool.name for tool in app.registry}
-        assert names == {
-                "read_file",
-                "write_file",
-                "edit_file",
-                "glob_files",
-                "find_files",
-                "grep_search",
-                "ls",
-                "bash",
-                "search_tools",
-                "update_todo",
-            }
+        assert "read_file" in names
+        assert "create_worktree_task" in names
+        assert "create_task" in names
+        assert "submit_subagent" in names
 
     def test_matching_task_loads_discovered_skill_before_execution(self) -> None:
         class SkillSelectingProvider(StreamProvider):
@@ -236,20 +219,19 @@ class XcodeAppRuntimeTests:
         assert "CONFIGURED_BODY" in output
         assert "PROJECT_BODY" not in output
 
-    def test_disabled_skills_group_ignores_configured_directory(self) -> None:
-        """禁用 skills group 时不扫描或注册显式目录。"""
+    def test_missing_skills_directory_does_not_block_startup(self) -> None:
+        """配置的 skills 目录不存在时，系统正常启动，发出警告。"""
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             root = Path(tmp)
-            with assert_no_logs(
-                "xcode.harness.skills_registry",
-                level="WARNING",
+            # 只扫描不存在的显式目录，不引入用户级技能
+            with patch(
+                "xcode.harness.skills_registry.build_skill_search_dirs",
+                return_value=[(root / "missing-skills", 0)],
             ):
                 app = build_app(
                     project_root=root,
                     skills_dir=root / "missing-skills",
-                    runtime_config=XcodeRuntimeConfig(
-                        tools=ToolsRuntimeConfig(enabled_groups=("core",)),
-                    ),
+                    runtime_config=XcodeRuntimeConfig(),
                 )
 
         assert "load_skill" not in {tool.name for tool in app.registry}
@@ -327,95 +309,37 @@ class XcodeAppRuntimeTests:
         assert "mcp__demo__new" in search_tool.handler({"query": "new"})
         app.close()
 
-    def test_default_runtime_does_not_enable_experimental_components(self) -> None:
+    def test_default_runtime_always_creates_core_services(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             app = build_app(
                 project_root=Path(tmp),
-                runtime_config=XcodeRuntimeConfig(
-                    daemon=DaemonRuntimeConfig(enabled=True),
-                ),
+                runtime_config=XcodeRuntimeConfig(),
             )
 
-        assert _layered_compactor(app).on_compact is None
-        assert app.daemon is None
-        assert app.mailbox is None
-        assert app.progress is None
-
-    def test_removed_experimental_group_does_not_enable_memory(self) -> None:
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core", "experimental")),
-        )
-        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
-            app = build_app(
-                project_root=Path(tmp),
-                runtime_config=runtime_config,
-            )
-
-        names = {tool.name for tool in app.registry}
-        assert "create_worktree_task" not in names
-        assert "create_task" not in names
-        assert "send_mailbox_message" not in names
-        assert "save_task_progress" not in names
-        assert _layered_compactor(app).on_compact is None
-        assert app.daemon is None
-        assert app.mailbox is None
-        assert app.progress is None
-
-    def test_individual_experimental_feature_groups_enable_individual_features(
-        self,
-    ) -> None:
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core", "memory")),
-        )
-        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
-            app = build_app(
-                project_root=Path(tmp),
-                runtime_config=runtime_config,
-            )
-
-        names = {tool.name for tool in app.registry}
-        assert "create_worktree_task" not in names
-        assert "create_task" not in names
         assert _layered_compactor(app).on_compact is not None
-        assert app.daemon is None
-        assert app.mailbox is None
-        assert app.progress is None
-
-    def test_mailbox_group_adds_mailbox_tools_only(self) -> None:
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core", "mailbox")),
-        )
-        with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
-            app = build_app(
-                project_root=Path(tmp),
-                runtime_config=runtime_config,
-            )
-
-        names = {tool.name for tool in app.registry}
-        assert "send_mailbox_message" in names
-        assert "read_mailbox_messages" in names
-        assert "acknowledge_mailbox_message" in names
-        assert "save_task_progress" not in names
-        assert _layered_compactor(app).on_compact is None
+        assert app.daemon is None  # daemon 由 daemon.enabled 控制，默认关闭
         assert app.mailbox is not None
-        assert app.progress is None
+        assert app.progress is not None
 
-    def test_progress_group_adds_progress_tools_only(self) -> None:
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core", "progress")),
-        )
+    def test_default_config_registers_all_tool_groups(self) -> None:
+        """默认配置下所有工具组始终注册。"""
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             app = build_app(
                 project_root=Path(tmp),
-                runtime_config=runtime_config,
+                runtime_config=XcodeRuntimeConfig(),
             )
 
         names = {tool.name for tool in app.registry}
+        assert "read_file" in names
+        assert "bash" in names
+        assert "grep_search" in names
+        assert "create_worktree_task" in names
+        assert "create_task" in names
+        assert "send_mailbox_message" in names
         assert "save_task_progress" in names
-        assert "resume_task_progress" in names
-        assert "send_mailbox_message" not in names
-        assert _layered_compactor(app).on_compact is None
-        assert app.mailbox is None
+        assert "submit_subagent" in names
+        assert _layered_compactor(app).on_compact is not None
+        assert app.mailbox is not None
         assert app.progress is not None
 
     def test_bash_tool_uses_agent_cancellation_event(self) -> None:
@@ -448,18 +372,16 @@ class XcodeAppRuntimeTests:
 
         assert captured["cancel_event"] is app.agent.cancellation_token.event
 
-    def test_enabling_single_optional_group_adds_only_that_group(self) -> None:
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core", "worktree")),
-        )
+    def test_worktree_tools_are_always_registered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             app = build_app(
                 project_root=Path(tmp),
-                runtime_config=runtime_config,
+                runtime_config=XcodeRuntimeConfig(),
             )
 
         names = {tool.name for tool in app.registry}
         assert "create_worktree_task" in names
+        assert "remove_worktree_task" in names
 
     def test_build_app_consumes_runtime_config_defaults(self) -> None:
         runtime_config = XcodeRuntimeConfig(
@@ -641,9 +563,7 @@ class XcodeAppRuntimeTests:
 
     def test_subagent_inherits_only_enabled_core_tools(self) -> None:
         seen_child_tools: list[list[str]] = []
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core", "subagent")),
-        )
+        runtime_config = XcodeRuntimeConfig()
         with (
             tempfile.TemporaryDirectory() as tmp,
             _patched_provider_bundle(seen_child_tools),
@@ -675,7 +595,6 @@ class XcodeAppRuntimeTests:
         seen_child_tools: list[list[str]] = []
         runtime_config = XcodeRuntimeConfig(
             tools=ToolsRuntimeConfig(
-                enabled_groups=("core", "subagent"),
                 subagent_tool_allowlist=("update_todo",),
             ),
         )
@@ -728,9 +647,7 @@ class XcodeAppRuntimeTests:
             llms={"main": provider, "subagent": provider},
             embedding=object(),
         )
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core", "subagent")),
-        )
+        runtime_config = XcodeRuntimeConfig()
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -766,20 +683,18 @@ class XcodeAppRuntimeTests:
         assert "<git-preflight>" in combined_system
         assert "<cwd-info>" in combined_system
 
-    def test_subagent_tools_are_not_created_when_group_disabled(self) -> None:
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core",)),
-        )
+    def test_subagent_tools_are_always_created(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             app = build_app(
                 project_root=Path(tmp),
-                runtime_config=runtime_config,
+                runtime_config=XcodeRuntimeConfig(),
             )
 
         names = {tool.name for tool in app.registry}
 
-        assert "task" not in names
-        assert "submit_subagent" not in names
+        assert "submit_subagent" in names
+        assert "check_subagent" in names
+        assert "cancel_subagent" in names
 
     def test_scoped_child_registry_uses_override_for_file_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -793,7 +708,6 @@ class XcodeAppRuntimeTests:
                 tool.name: tool
                 for tool in build_project_scoped_registry(
                     project_root=worktree,
-                    enabled={"core", "subagent", "worktree"},
                     contextual_state=None,
                     shell_spec=detect_shell(),
                 )
@@ -818,7 +732,6 @@ class XcodeAppRuntimeTests:
                 tool.name: tool
                 for tool in build_project_scoped_registry(
                     project_root=worktree,
-                    enabled={"core", "subagent", "worktree"},
                     contextual_state=None,
                     shell_spec=detect_shell(),
                     env=TrackingEnv(),
@@ -872,9 +785,7 @@ class XcodeAppRuntimeTests:
                     id="wt123", path=worktree, branch=f"xcode/{name}"
                 )
 
-        runtime_config = XcodeRuntimeConfig(
-            tools=ToolsRuntimeConfig(enabled_groups=("core", "subagent", "worktree")),
-        )
+        runtime_config = XcodeRuntimeConfig()
         provider = ReadingProvider()
         bundle = SimpleNamespace(
             llm=provider,

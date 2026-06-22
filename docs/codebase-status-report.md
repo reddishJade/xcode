@@ -509,7 +509,7 @@ ExecutionModeState
 
 ## L10 · UI / HITL / Command System
 
-状态：本地 REPL 完整，扩展能力有限。
+状态：本地 REPL 完整。
 
 ### 核心文件
 
@@ -568,7 +568,7 @@ ExecutionModeState
 - 父 agent 为 child 构造独立 StructuredAgent、ToolGate、HookManager 和
   ContextualRetrievalState。
 - child registry 排除 MCP 工具。
-- worktree 模式要求启用 worktree group。
+- worktree 隔离模式。
 - `result()` 和 `cancel()` 会在任务完成后移除对应 job；`shutdown()` 清空全部
   job。
 
@@ -730,7 +730,6 @@ Skill 和 MCP 的基础范式兼容属于产品核心方向，但具体范围需
 
 ### Skill
 
-- 保持默认启用和核心 group。
 - 完成 Agent Skills 的 discovery → activation → context retention 基础闭环。
 - 不要求 marketplace，也不要求专用脚本运行时。
 

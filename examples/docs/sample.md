@@ -15,7 +15,7 @@ CLI / REPL -> StructuredAgent -> short prompt -> core tools -> permission/risk/a
 The core tool set is deliberately small: `read_file`, `write_file`,
 `edit_file`, `glob_files`, `grep_search`, guarded `bash`, and
 `run_validation`. Optional groups such as `skills`, `subagent`, `worktree`,
-`tasks`, and `mcp` are enabled through `tools.enabled_groups`.
+`tasks`, and `mcp` are always available by default.
 
 ## Planning And Acting
 

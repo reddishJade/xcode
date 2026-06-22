@@ -129,17 +129,12 @@ def resolve_config(
     )
 
 
-def effective_enabled_groups(configured_groups: tuple[str, ...]) -> set[str]:
-    return set(configured_groups)
-
-
 # ── 共享基础设施 ──
 
 
 def build_shared_infra(
     project_root: Path,
     runtime_config: XcodeRuntimeConfig,
-    enabled: set[str],
 ) -> SharedInfra:
     contextual_state = ContextualRetrievalState(project_root)
     cancellation_token = CancellationToken()
@@ -150,11 +145,9 @@ def build_shared_infra(
         if runtime_config.paths.sessions_dir
         else project_root / ".local" / "sessions"
     )
-    on_compact = None
-    if "memory" in enabled:
-        from xcode.harness.memory import MemoryManager
+    from xcode.harness.memory import MemoryManager
 
-        on_compact = MemoryManager(project_root).consolidate
+    on_compact = MemoryManager(project_root).consolidate
 
     compactor = LayeredCompactor(
         transcript_dir=transcript_dir,
@@ -253,30 +246,25 @@ def build_tool_registry(
     from xcode.coding_agent.tools import detect_shell
     from xcode.harness.mcp import McpRuntimeRegistry
 
-    enabled = effective_enabled_groups(runtime_config.tools.enabled_groups)
     closers: list[Callable[[], None]] = []
     shell_spec = detect_shell(runtime_config.tools.shell)
 
-    if "skills" in enabled:
-        from xcode.harness.skills_registry import (
-            SkillRegistry,
-            build_skill_search_dirs,
-        )
+    from xcode.harness.skills_registry import (
+        SkillRegistry,
+        build_skill_search_dirs,
+    )
 
-        skill_registry: SkillRegistry | None = SkillRegistry()
-        skill_registry.discover(
-            build_skill_search_dirs(
-                project_root,
-                trust_project_skills=runtime_config.skills.trust_project_skills,
-                skills_dir=skills_dir,
-            )
+    skill_registry: SkillRegistry | None = SkillRegistry()
+    skill_registry.discover(
+        build_skill_search_dirs(
+            project_root,
+            trust_project_skills=runtime_config.skills.trust_project_skills,
+            skills_dir=skills_dir,
         )
-    else:
-        skill_registry = None
+    )
 
     registry = build_project_scoped_registry(
         project_root=project_root,
-        enabled=enabled,
         contextual_state=contextual_state,
         shell_spec=shell_spec,
         cancel_event=cancel_event,
@@ -289,7 +277,6 @@ def build_tool_registry(
     registry = _extend_registry_with_features(
         registry,
         project_root,
-        enabled,
         mcp_runtime_registry,
     )
 
@@ -308,7 +295,6 @@ def build_tool_registry(
         llm_profiles=llm_profiles,
         config=config,
         runtime_config=runtime_config,
-        enabled=enabled,
         child_registry=child_registry,
         contextual_state=contextual_state,
         shell_spec=shell_spec,
@@ -335,37 +321,30 @@ def build_tool_registry(
 def _extend_registry_with_features(
     registry: tuple[ToolSpec, ...],
     project_root: Path,
-    enabled: set[str],
     mcp_runtime_registry: McpRuntimeRegistry,
 ) -> tuple[ToolSpec, ...]:
     """添加可选功能工具到注册表。"""
     from xcode.harness.mcp import build_mcp_tools
 
     registry += build_mcp_tools(project_root, mcp_runtime_registry)
-    if "worktree" in enabled:
-        from xcode.coding_agent.tools.worktree import (
-            WorktreeTaskRunner,
-            build_worktree_tools,
-        )
+    from xcode.coding_agent.tools.worktree import (
+        WorktreeTaskRunner,
+        build_worktree_tools,
+    )
 
-        registry += build_worktree_tools(WorktreeTaskRunner(project_root))
-    if "tasks" in enabled:
-        from xcode.harness.task_store import TaskStore, build_task_tools
+    registry += build_worktree_tools(WorktreeTaskRunner(project_root))
+    from xcode.harness.task_store import TaskStore, build_task_tools
 
-        registry += build_task_tools(TaskStore(project_root))
-    if "mailbox" in enabled:
-        from xcode.harness.mailbox import AgentMailbox, build_mailbox_tools
+    registry += build_task_tools(TaskStore(project_root))
+    from xcode.harness.mailbox import AgentMailbox, build_mailbox_tools
 
-        registry += build_mailbox_tools(AgentMailbox(project_root))
-    if "progress" in enabled:
-        from xcode.harness.task_progress import build_progress_tools
-        from xcode.harness.task_store import TaskStore
+    registry += build_mailbox_tools(AgentMailbox(project_root))
+    from xcode.harness.task_progress import build_progress_tools
 
-        registry += build_progress_tools(TaskStore(project_root))
-    if "memory" in enabled:
-        from xcode.harness.memory import MemoryManager, build_memory_tools
+    registry += build_progress_tools(TaskStore(project_root))
+    from xcode.harness.memory import MemoryManager, build_memory_tools
 
-        registry += build_memory_tools(MemoryManager(project_root))
+    registry += build_memory_tools(MemoryManager(project_root))
     return registry
 
 
@@ -375,7 +354,6 @@ def _build_subagent_integration(
     llm_profiles: Mapping[str, ModelProvider] | None,
     config: AgentConfig,
     runtime_config: XcodeRuntimeConfig,
-    enabled: set[str],
     child_registry: tuple[ToolSpec, ...],
     contextual_state: ContextualRetrievalState | None,
     shell_spec: ShellSpec,
@@ -386,9 +364,6 @@ def _build_subagent_integration(
     todo_state: SessionTodoState | None = None,
 ) -> tuple[list[Callable[[], None]], tuple[ToolSpec, ...]]:
     """构建子代理运行器和工具，返回 (closers, subagent_tools)。"""
-    if "subagent" not in enabled:
-        return [], ()
-
     child_llms = dict(llm_profiles or {})
     if not child_llms:
         child_llms[PROFILE_MAIN] = llm
@@ -408,7 +383,6 @@ def _build_subagent_integration(
             child_contextual_state = ContextualRetrievalState(child_root)
             effective_registry = build_project_scoped_registry(
                 project_root=child_root,
-                enabled=enabled,
                 contextual_state=child_contextual_state,
                 shell_spec=shell_spec,
                 cancel_event=cancel_event,
@@ -431,11 +405,9 @@ def _build_subagent_integration(
         child_audit_path = resolve_config_path(
             project_root, runtime_config.observability.audit_path
         )
-        memory_manager = None
-        if "memory" in enabled:
-            from xcode.harness.memory import MemoryManager
+        from xcode.harness.memory import MemoryManager
 
-            memory_manager = MemoryManager(child_root)
+        memory_manager = MemoryManager(child_root)
 
         subagent_session_id = f"subagent-{uuid4().hex[:8]}"
         result = await StructuredAgent(
@@ -477,12 +449,9 @@ def _build_subagent_integration(
         ).run_async(prompt)
         return result.answer
 
-    if "worktree" in enabled:
-        from xcode.coding_agent.tools.worktree import WorktreeTaskRunner
+    from xcode.coding_agent.tools.worktree import WorktreeTaskRunner
 
-        worktree_runner = WorktreeTaskRunner(project_root)
-    else:
-        worktree_runner = None
+    worktree_runner = WorktreeTaskRunner(project_root)
     managed_runner = ManagedSubagentRunner(
         run_child,
         available_profiles=tuple(child_llms),
@@ -499,25 +468,19 @@ def _build_subagent_integration(
 def load_opt_in_services(
     project_root: Path,
     runtime_config: XcodeRuntimeConfig,
-    enabled: set[str],
 ) -> OptInServices:
     daemon = None
-    if "daemon" in enabled:
+    if runtime_config.daemon.enabled:
         from xcode.harness.daemon import HeartbeatDaemon
 
         daemon = HeartbeatDaemon(
             project_root=project_root,
             interval_seconds=runtime_config.daemon.interval_seconds,
         )
-    mailbox = None
-    if "mailbox" in enabled:
-        from xcode.harness.mailbox import AgentMailbox
+    from xcode.harness.mailbox import AgentMailbox
 
-        mailbox = AgentMailbox(project_root)
-    progress: bool | None = None
-    if "progress" in enabled:
-        progress = True
-    return OptInServices(daemon=daemon, mailbox=mailbox, progress=progress)
+    mailbox = AgentMailbox(project_root)
+    return OptInServices(daemon=daemon, mailbox=mailbox, progress=True)
 
 
 # ── Agent 构建 ──
@@ -541,12 +504,9 @@ def build_agent(
     external_hook_runner: ExternalHookRunner | None = None,
     todo_state: SessionTodoState | None = None,
 ) -> StructuredAgent:
-    enabled = effective_enabled_groups(runtime_config.tools.enabled_groups)
-    memory_manager = None
-    if "memory" in enabled:
-        from xcode.harness.memory import MemoryManager
+    from xcode.harness.memory import MemoryManager
 
-        memory_manager = MemoryManager(project_root)
+    memory_manager = MemoryManager(project_root)
 
     hook_manager = _build_hook_manager(
         contextual_state,

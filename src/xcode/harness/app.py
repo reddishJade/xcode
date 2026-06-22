@@ -160,10 +160,7 @@ def build_app(
     cfg = _assembly.resolve_config(
         project_root, env_files, agent_config, skills_dir, audit_path, runtime_config
     )
-    enabled = _assembly.effective_enabled_groups(
-        cfg.runtime_config.tools.enabled_groups
-    )
-    infra = build_shared_infra(project_root, cfg.runtime_config, enabled)
+    infra = build_shared_infra(project_root, cfg.runtime_config)
 
     providers = _assembly.build_providers(cfg.runtime_config, cfg.env_files)
     external_hook_runner = (
@@ -207,7 +204,7 @@ def build_app(
     )
 
     opt_in_services = _assembly.load_opt_in_services(
-        project_root, cfg.runtime_config, enabled
+        project_root, cfg.runtime_config
     )
 
     return XcodeApp(

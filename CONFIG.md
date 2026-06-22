@@ -148,7 +148,7 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 | `network_access` | bool | `true` | 网络访问 |
 | `writable_roots` | array | `[]` | 可写目录白名单 |
 | `restricted_dirs` | array | `[]` | 禁止访问目录列表 |
-| `rules` | array | `[]` | 静态权限规则列表（替换已移除的 deny_tools/ask_tools/allow_tools） |
+| `rules` | array | `[]` | 静态权限规则列表 |
 | `global_default` | string/null | `null` | 无规则匹配时的默认决策：`allow`、`ask`、`deny` |
 | `external_directories` | array | `[]` | 外部目录白名单，每条包含 `path`（必填）和 `access`（可选，默认 `"read"`；可选值 `read`/`write`/`read_write`） |
 
@@ -181,7 +181,6 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `enabled_groups` | array | `["core", "skills"]` | 启用的工具组 |
 | `subagent_tool_allowlist` | string[] | `[]` | 额外允许 subagent 继承的主 agent 工具名；`update_todo` 默认不继承 |
 | `shell` | string | `"auto"` | `auto`、`pwsh`、`powershell`、`cmd`、`bash`、`zsh`、`sh`、`fish` |
 
@@ -211,25 +210,24 @@ Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
 
 ### 工具组
 
-| group | 状态 | 工具 |
+| group | 注册条件 | 工具 |
 |---|---|---|
-| `core` | 默认 | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`shell`、`search_tools` |
-| `skills` | 可选 | `load_skill` |
-| `subagent` | 可选 | `submit_subagent`、`check_subagent`、`cancel_subagent` |
-| `worktree` | 可选 | `create_worktree_task`、`remove_worktree_task` |
-| `tasks` | 可选 | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
-| `mailbox` | 可选 | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
-| `progress` | 可选 | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
-| `memory` | 可选 | `search_memory`；启用主动召回、压缩摘要 consolidation |
-| `daemon` | 可选 | 构造 `HeartbeatDaemon` |
+| `core` | 始终 | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`shell`、`search_tools` |
+| `skills` | 发现 skill 时 | `load_skill` |
+| `subagent` | 始终 | `submit_subagent`、`check_subagent`、`cancel_subagent` |
+| `worktree` | 始终 | `create_worktree_task`、`remove_worktree_task` |
+| `tasks` | 始终 | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
+| `mailbox` | 始终 | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
+| `progress` | 始终 | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
+| `memory` | 始终 | `search_memory`；主动召回、压缩摘要 consolidation |
+| `daemon` | `daemon.enabled` | 构造 `HeartbeatDaemon` |
+| `mcp` | 存在 `.local/mcp_config.json` 时 | `mcp__{server}__{tool}`、`mcp_tool_search` |
 
 `shell` 工具是 OpenAI Responses builtin 的本地执行桥，接收 `commands` 数组。`search_tools` 工具按关键字搜索已注册工具。
-`memory` 组启用后，运行时按每轮用户问题合并检索项目根 `MEMORY.md` 与
+运行时按每轮用户问题合并检索项目根 `MEMORY.md` 与
 `~/.xcode/memory/MEMORY.md`，并将匹配记录注入 `<memory>` 上下文。
 `search_memory` 的 schema 接受必填 `query`，以及可选 `limit`（1-10）、
 `scope` 和 `layer`（`all` / `project` / `user`）；工具标记为只读。
-MCP 属于核心运行时：存在 `.local/mcp_config.json` 时自动注册动态
-`mcp__{server}__{tool}` 和 `mcp_tool_search`，无配置时不增加工具。
 MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺少这些
 协商元数据的旧缓存会自动重新发现。
 
@@ -276,7 +274,7 @@ MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `enabled` | bool | `false` | 是否构造 `HeartbeatDaemon`（还需启用 `daemon` group） |
+| `enabled` | bool | `false` | 是否构造 `HeartbeatDaemon` |
 | `interval_seconds` | int | `30` | 心跳轮询间隔 |
 
 ---
