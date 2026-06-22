@@ -174,9 +174,15 @@ class HeartbeatDaemon:
     def check_mailbox(self) -> list[dict[str, Any]] | None:
         """检查未读邮件，如果有未读消息则产生通知事件。"""
         try:
-            unread = self.mailbox.read_unread_messages(self.agent_id)
-            # 过滤掉来自 heartbeat_daemon 自身的消息，避免死循环
-            unread = [m for m in unread if m.get("sender") != "heartbeat_daemon"]
+            unread = self.mailbox.read_unread_messages(
+                self.agent_id,
+                exclude_senders={"heartbeat_daemon"},
+            )
+            # 顺带清理过期消息，避免 mailbox 文件无限膨胀
+            try:
+                self.mailbox.cleanup_expired_messages(self.agent_id)
+            except Exception:
+                logger.debug("mailbox cleanup failed", exc_info=True)
             if unread:
                 return [
                     {
