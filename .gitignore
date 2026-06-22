@@ -15,10 +15,7 @@
 *.py[cod]
 __pycache__/
 diff.log
-docs/agent.md
-docs/claude.md
-docs/llm.md
-docs/rag.md
+docs/notes/
 opencode.json*
 packages/
 pi/
