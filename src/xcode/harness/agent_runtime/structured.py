@@ -52,6 +52,7 @@ from ..skill_activation import (
     is_skill_activation_content,
 )
 from ..skills import ApprovalCallback, ToolRegistryState, ToolSpec
+from .execution_modes import governance_registry_for_mode
 
 _PROMPT_VERSION_CACHE: str | None = None
 
@@ -430,7 +431,15 @@ class StructuredAgent:
         )
         effective_mode = mode or snapshot.config.execution_mode
         self._mode.set_mode(effective_mode)
-        active_registry = self._mode.filter_tools(snapshot.registry)
+        registry_snapshot = snapshot.registry
+        governance_reg = self._registry_state.registered_snapshot()
+        if governance_reg:
+            active_registry = tuple(
+                rt.spec
+                for rt in governance_registry_for_mode(governance_reg, effective_mode)
+            )
+        else:
+            active_registry = self._mode.filter_tools(registry_snapshot)
         self.cancellation_token.reset()
         self._correlation.reset(self.session_id)
 
@@ -446,6 +455,9 @@ class StructuredAgent:
         def tools_for_mode_fn(
             reg: tuple[ToolSpec, ...], m: ExecutionMode
         ) -> list[AgentTool]:
+            if governance_reg:
+                filtered_regs = governance_registry_for_mode(governance_reg, m)
+                return self._gate.adapt_tools(tuple(rt.spec for rt in filtered_regs))
             filtered = policy_for_mode(m).filter_tools(reg)
             return self._gate.adapt_tools(filtered)
 
