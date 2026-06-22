@@ -60,6 +60,41 @@ SURFACE_POLICY_CORE = ToolSurfacePolicy(
     subagent_policy="policy_derived",
 )
 
+SURFACE_POLICY_CORE_READONLY = ToolSurfacePolicy(
+    exposure="root",
+    user_invocable=True,
+    primary_agent_invocable=True,
+    subagent_policy="policy_derived",
+)
+
+SURFACE_POLICY_CORE_WRITE = ToolSurfacePolicy(
+    exposure="root",
+    user_invocable=True,
+    primary_agent_invocable=True,
+    subagent_policy="policy_derived",
+)
+
+SURFACE_POLICY_CORE_EXECUTE = ToolSurfacePolicy(
+    exposure="root",
+    user_invocable=True,
+    primary_agent_invocable=True,
+    subagent_policy="policy_derived",
+)
+
+SURFACE_POLICY_SESSION = ToolSurfacePolicy(
+    exposure="grouped",
+    user_invocable=False,
+    primary_agent_invocable=True,
+    subagent_policy="explicit_grant",
+)
+
+SURFACE_POLICY_SUBAGENT = ToolSurfacePolicy(
+    exposure="grouped",
+    user_invocable=False,
+    primary_agent_invocable=True,
+    subagent_policy="deny",
+)
+
 
 @dataclass(frozen=True)
 class ToolOrigin:
@@ -81,6 +116,38 @@ class ToolActionProfile:
     target_resolver: str
     side_effecting: bool = False
     credentialed: bool = False
+
+
+# 核心工具的 action profile 映射
+CORE_TOOL_ACTION_PROFILES: dict[str, ToolActionProfile] = {
+    "read_file": ToolActionProfile(capability="read", target_resolver="path"),
+    "glob_files": ToolActionProfile(capability="read", target_resolver="path"),
+    "grep_search": ToolActionProfile(capability="read", target_resolver="path"),
+    "find_files": ToolActionProfile(capability="read", target_resolver="path"),
+    "ls": ToolActionProfile(capability="read", target_resolver="path"),
+    "search_tools": ToolActionProfile(capability="read", target_resolver="none"),
+    "write_file": ToolActionProfile(
+        capability="write", target_resolver="path", side_effecting=True
+    ),
+    "edit_file": ToolActionProfile(
+        capability="write", target_resolver="path", side_effecting=True
+    ),
+    "apply_patch": ToolActionProfile(
+        capability="write", target_resolver="path", side_effecting=True
+    ),
+    "bash": ToolActionProfile(
+        capability="execute", target_resolver="none", side_effecting=True
+    ),
+    "shell": ToolActionProfile(
+        capability="execute", target_resolver="none", side_effecting=True
+    ),
+    "load_skill": ToolActionProfile(
+        capability="execute", target_resolver="none", side_effecting=True
+    ),
+    "update_todo": ToolActionProfile(
+        capability="write", target_resolver="none", side_effecting=True
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -144,23 +211,61 @@ class ToolSpec:
     builtin: dict[str, Any] | None = None
 
 
+def make_canonical_id(kind: str, source: str | None, tool_name: str) -> str:
+    """Build canonical id from origin metadata and tool name.
+
+    Core tools keep their simple name; MCP/skill tools use kind://source/tool format.
+    """
+    if kind == "core" and source is None:
+        return tool_name
+    safe_source = source.replace("/", "__") if source else "default"
+    return f"{kind}://{safe_source}/{tool_name}"
+
+
+def _tool_surface(spec: ToolSpec, origin_kind: str) -> ToolSurfacePolicy:
+    """Select surface policy based on tool group and origin."""
+    if spec.group == "core":
+        name = spec.name
+        if name in ("bash", "shell", "write_file", "edit_file", "apply_patch"):
+            return SURFACE_POLICY_CORE_WRITE
+        return SURFACE_POLICY_CORE
+    if spec.group == "session":
+        return SURFACE_POLICY_SESSION
+    if spec.group == "subagent":
+        return SURFACE_POLICY_SUBAGENT
+    return ToolSurfacePolicy()
+
+
+def _detect_origin_kind(spec: ToolSpec) -> str:
+    """Auto-detect origin kind from tool group when not explicitly provided."""
+    if spec.group == "mcp":
+        return "mcp"
+    if spec.group == "skills":
+        return "skill"
+    return "core"
+
+
 def _wrap_spec_as_registered(
     spec: ToolSpec,
-    origin_kind: str = "core",
+    origin_kind: str | None = None,
     origin_source: str | None = None,
 ) -> RegisteredTool:
     """将裸 ToolSpec 包装为带 closed default 策略的 RegisteredTool。
 
     迁移期间使用：所有现有构建站点产生 ToolSpec，通过此函数包装。
+    可按 origin_kind 区分 core / mcp / skill 并设置对应策略。
     """
-    surface = SURFACE_POLICY_CORE if spec.group == "core" else ToolSurfacePolicy()
+    origin_kind = origin_kind or _detect_origin_kind(spec)
+    surface = _tool_surface(spec, origin_kind)
+    canonical_id = make_canonical_id(origin_kind, origin_source, spec.name)
+    profile = CORE_TOOL_ACTION_PROFILES.get(spec.name)
     return RegisteredTool(
-        canonical_id=spec.name,
+        canonical_id=canonical_id,
         public_selector=ToolSelector(spec.name),
         spec=spec,
         surface_policy=surface,
         origin=ToolOrigin(kind=origin_kind, source=origin_source),  # type: ignore[arg-type]
-        action_profile=None,
+        action_profile=profile,
     )
 
 

@@ -480,6 +480,7 @@ def _build_subagent_integration(
                 project_root=child_root,
                 prompt_instructions=runtime_config.prompt.instructions,
                 todo_state=child_todo_state,
+                use_registered_tool_governance=runtime_config.tools.use_registered_tool_governance,
             ),
         ).run_async(prompt)
         return result.answer
@@ -596,6 +597,7 @@ def build_agent(
             skill_registry=skill_registry,
             prompt_instructions=runtime_config.prompt.instructions,
             todo_state=todo_state,
+            use_registered_tool_governance=runtime_config.tools.use_registered_tool_governance,
         ),
     )
 

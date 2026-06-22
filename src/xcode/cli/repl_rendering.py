@@ -250,6 +250,7 @@ def create_prompt_session(
     model_options: Iterable[str] | Callable[[], Iterable[str]] = (),
     skill_options: Iterable[str] | Callable[[], Iterable[str]] = (),
     state: ReplState | None = None,
+    use_registered_tool_governance: bool = False,
 ) -> PromptLike:
     try:
         from prompt_toolkit import PromptSession
@@ -292,6 +293,7 @@ def create_prompt_session(
         effort_options,
         model_options,
         skill_options,
+        use_registered_tool_governance=use_registered_tool_governance,
     )
 
     suggester = CommandArgsSuggester(completer.command_args)

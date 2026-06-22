@@ -101,6 +101,7 @@ class AgentRuntimeConfig:
     skill_registry: SkillRegistry | None = None
     todo_state: SessionTodoState | None = None
     prompt_instructions: tuple[dict, ...] = ()
+    use_registered_tool_governance: bool = False
 
 
 @dataclass(frozen=True)

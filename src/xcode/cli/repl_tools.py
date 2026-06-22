@@ -64,14 +64,15 @@ def run_tool_command(command: str, app: object) -> str:
         return "usage: /tool NAME INPUT\n/tool list - show enabled tools by group"
     tool_name = parts[1]
     registry, state = _registry_and_state(app)
+    use_governance = bool(getattr(getattr(app, "agent", None), "use_governance", False))
 
     if tool_name == "list":
-        if state is not None:
+        if use_governance and state is not None:
             return _tool_list_governance(state)
         return _tool_list_legacy(registry)
 
     # ── Direct execution ──
-    if state is not None:
+    if use_governance and state is not None:
         selected = _resolve_tool_governance(tool_name, state)
     else:
         selected = _resolve_tool_legacy(tool_name, registry)

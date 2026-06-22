@@ -142,6 +142,11 @@ class StructuredAgent:
         return self._registry_state.snapshot()
 
     @property
+    def use_governance(self) -> bool:
+        """当前是否启用了 RegisteredTool 治理。"""
+        return self._runtime.use_registered_tool_governance
+
+    @property
     def tool_map(self) -> dict[str, ToolSpec]:
         """按名称返回当前工具映射。"""
         return {tool.name: tool for tool in self.registry}
@@ -433,7 +438,7 @@ class StructuredAgent:
         self._mode.set_mode(effective_mode)
         registry_snapshot = snapshot.registry
         governance_reg = self._registry_state.registered_snapshot()
-        if governance_reg:
+        if self._runtime.use_registered_tool_governance and governance_reg:
             active_registry = tuple(
                 rt.spec
                 for rt in governance_registry_for_mode(governance_reg, effective_mode)
@@ -455,7 +460,7 @@ class StructuredAgent:
         def tools_for_mode_fn(
             reg: tuple[ToolSpec, ...], m: ExecutionMode
         ) -> list[AgentTool]:
-            if governance_reg:
+            if self._runtime.use_registered_tool_governance and governance_reg:
                 filtered_regs = governance_registry_for_mode(governance_reg, m)
                 return self._gate.adapt_tools(tuple(rt.spec for rt in filtered_regs))
             filtered = policy_for_mode(m).filter_tools(reg)

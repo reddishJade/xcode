@@ -75,9 +75,10 @@ class ReplCompleter(Completer):
         effort_options: Iterable[str] | Callable[[], Iterable[str]] = (),
         model_options: Iterable[str] | Callable[[], Iterable[str]] = (),
         skill_options: Iterable[str] | Callable[[], Iterable[str]] = (),
+        use_registered_tool_governance: bool = False,
     ) -> None:
         self.project_root = project_root.resolve()
-        if isinstance(registry, ToolRegistryState):
+        if use_registered_tool_governance and isinstance(registry, ToolRegistryState):
             self.tool_names = tuple(
                 sorted(
                     rt.public_selector.selector
