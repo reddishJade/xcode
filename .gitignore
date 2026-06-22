@@ -8,7 +8,6 @@
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
-.team/
 .uv-cache/
 .venv/
 *.egg-info/

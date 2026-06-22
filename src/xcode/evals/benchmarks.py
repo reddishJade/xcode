@@ -302,7 +302,7 @@ def _benchmark_fixture_root(
     benchmark_name: str,
 ) -> Path:
     source_path = Path(path)
-    root = fixture_root or source_path.parent / ".xcode_eval_fixtures"
+    root = fixture_root or source_path.parent / ".local" / "eval_fixtures"
     return root / benchmark_name
 
 

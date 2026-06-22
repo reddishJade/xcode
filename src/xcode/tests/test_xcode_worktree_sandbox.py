@@ -12,7 +12,7 @@ class TestWorktreeTaskRunner(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.repo_root = Path(self.tmp.name) / "repo"
         self.repo_root.mkdir(parents=True, exist_ok=True)
-        self.worktrees_dir = self.repo_root / ".xcode-worktrees"
+        self.worktrees_dir = self.repo_root / ".local" / "worktrees"
         self.worktrees_dir.mkdir(parents=True, exist_ok=True)
         self.commands_run: list[tuple[list[str], Path]] = []
         self.mock_responses: dict[str, str | Exception] = {}

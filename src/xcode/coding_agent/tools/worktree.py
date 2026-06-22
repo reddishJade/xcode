@@ -30,7 +30,7 @@ class WorktreeTaskRunner:
         command_runner: CommandRunner | None = None,
     ) -> None:
         self.repo_root = repo_root.resolve()
-        self.worktrees_dir = worktrees_dir or self.repo_root / ".xcode-worktrees"
+        self.worktrees_dir = worktrees_dir or self.repo_root / ".local" / "worktrees"
         self.command_runner = command_runner or _run_command
         self.tasks: dict[str, WorktreeTask] = {}
 

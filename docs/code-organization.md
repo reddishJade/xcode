@@ -222,7 +222,7 @@ MCP 不使用 enabled group；存在 `.local/mcp_config.json` 时由核心 runti
 
 ## 本地状态路径
 
-`.local/sessions/`、`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`、`.team/inbox/`（mailbox）。
+`.local/sessions/`、`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`、`.local/team/inbox/`（mailbox）。
 
 ---
 

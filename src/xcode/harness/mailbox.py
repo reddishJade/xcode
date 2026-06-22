@@ -34,7 +34,7 @@ class LocalFileMailboxTransport:
 
     def __init__(self, root: Path, lock_timeout_seconds: float = 5.0) -> None:
         self.root = root
-        self.inbox_dir = root / ".team" / "inbox"
+        self.inbox_dir = root / ".local" / "team" / "inbox"
         self.lock_timeout_seconds = lock_timeout_seconds
 
     def _mailbox_path(self, agent_id: str) -> Path:
@@ -149,7 +149,7 @@ class AgentMailbox:
     def inbox_dir(self) -> Path:
         if isinstance(self._transport, LocalFileMailboxTransport):
             return self._transport.inbox_dir
-        return self.root / ".team" / "inbox"
+        return self.root / ".local" / "team" / "inbox"
 
     def send_message(
         self, sender_id: str, recipient_id: str, type_name: str, payload: dict[str, Any]
