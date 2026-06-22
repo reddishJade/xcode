@@ -87,7 +87,7 @@ def test_runtime_context_provider_injects_relevant_memory(tmp_path: Path) -> Non
 
 def test_memory_group_registers_search_tool(tmp_path: Path) -> None:
     """memory 组只注册显式只读检索工具。"""
-    from xcode.harness.assembly import SharedServices, build_shared_services
+    from xcode.harness.assembly import build_shared_services
     from xcode.harness.config import XcodeRuntimeConfig
 
     runtime_registry = McpRuntimeRegistry()
