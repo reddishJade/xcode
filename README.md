@@ -1,62 +1,113 @@
-# Xcode Coding Agent Harness
+<div align="center">
+  <br/>
+  <h1>Xcode Coding Agent</h1>
+  <p><strong>轻量级 Python Agent 运行骨架</strong></p>
+  <p>
+    <img src="https://img.shields.io/badge/python-3.12-%23141413?style=flat-square" alt="Python 3.12"/>&nbsp;
+    <img src="https://img.shields.io/badge/version-0.1.1-%23d97757?style=flat-square" alt="Version 0.1.1"/>&nbsp;
+    <img src="https://img.shields.io/badge/license-MIT-%23788c5d?style=flat-square" alt="License MIT"/>&nbsp;
+    <img src="https://img.shields.io/badge/status-active-%236a9bcc?style=flat-square" alt="Status Active"/>
+  </p>
+  <br/>
+</div>
 
-Xcode 是一个轻量级 Python coding agent harness。围绕结构化事件流、路径安全、工具审批、审计脱敏、上下文压缩和 REPL 会话管理提供一个可测试的 Agent 运行骨架。
-
-默认配置只启用 `core` 工具组。扩展能力必须显式 opt-in。
-
----
-
-## 核心能力
-
-- **结构化 Agent 循环**：`StructuredAgent` 消费 provider 流式事件，统一处理 text、reasoning、tool_use、tool_result 和 final answer。
-- **核心工具闭环**：默认提供文件读写编辑、词法搜索和受控 bash。`edit_file` 依赖 read-before-edit 指纹校验。
-- **工具并发分区**：只读且并发安全的工具并行执行；写操作、高风险命令保持串行。
-- **权限与审计**：`PermissionEngine` 统一执行工具权限判定、HITL 审批和输出脱敏；`JsonlAuditLogger` 记录审计日志。
-- **上下文压缩与恢复**：`LayeredCompactor` 裁剪过期读取、大输出和旧工具结果，支持压缩后重建文件指纹。
-- **REPL 会话管理**：支持 `/plan`、`/build`、`/act`、`/compact`、`/sessions`、`/resume`、`/branch`、`/queue`、`/model`、`/tool`、`!COMMAND` shell 快捷入口、`@file` 引用和 session transcript 落盘。
-- **MCP 工具集成**：核心运行时自动读取 `.local/mcp_config.json`；无配置时不注册额外工具。
-- **可选扩展**：subagent、worktree、tasks、mailbox、progress、memory、daemon。
+围绕结构化事件流、路径安全、工具审批、审计脱敏、上下文压缩和 REPL 会话管理构建的可测试 Agent 运行骨架。默认配置只启用 `core` 工具组；扩展能力必须显式 opt-in。
 
 ---
 
-## 目录结构
+## 安装
 
-```text
-.
-├── pyproject.toml
-├── AGENTS.md
-├── CONFIG.md
-├── README.md
-├── docs/
-├── examples/
-├── skills/
-└── src/xcode/
-    ├── main.py
-    ├── cli/            → REPL、命令、渲染、补全
-    ├── coding_agent/   → 产品工具（file/search/bash/shell）
-    ├── harness/        → 应用装配、config、安全、观测、session
-    │   ├── agent_runtime/ → StructuredAgent、subagent、prompting
-    │   ├── mcp/           → stdio client、动态 MCP 工具集成
-    │   ├── memory/        → MEMORY.md 管理、BM25 召回
-    │   └── observability/ → audit、hooks、permissions
-    ├── agent/          → Agent 循环、消息/事件类型、工具执行调度
-    ├── ai/             → LLM provider 抽象、流事件协议
-    │   └── providers/  → DeepSeek、ChatGLM、MiMo、OpenAI 等适配
-    ├── evals/
-    └── tests/
+### 前置条件
+
+- Python **3.12** 或更高
+- [uv](https://docs.astral.sh/uv/)（推荐）或 pip
+
+### 从源码安装
+
+```powershell
+git clone https://github.com/your-org/xcode.git
+cd xcode
+uv pip install -e .
 ```
+
+仅安装运行时依赖，不含开发工具。
+
+### 安装开发环境
+
+```powershell
+uv pip install -e ".[dev]"
+```
+
+开发依赖包括：ruff（格式化/lint）、pyright（类型检查）、pytest（测试框架）。
 
 ---
 
 ## 快速开始
 
-```powershell
-uv pip install -e .
-uv run python -m unittest discover src\xcode\tests
-uv run xcode
-uv run xcode --prompt "说明项目的核心工具。"
-uv run xcode --resume
+### 编程式调用
+
+```python
+from pathlib import Path
+from xcode.harness.app import build_app
+
+app = build_app(project_root=Path.cwd())
+
+answer = app.ask("列出当前目录所有 Python 文件。")
+print(answer)
+
+answer = await app.aask("列出当前目录所有 Python 文件。")
+
+app.close()
 ```
+
+### REPL 交互
+
+```powershell
+uv run python -m xcode
+```
+
+或通过安装后的命令入口：
+
+```powershell
+xcode
+```
+
+REPL 支持以下会话命令：
+
+| 命令 | 功能 |
+|---|---|
+| `/plan` | 查看/编辑当前计划 |
+| `/build` | 执行当前计划 |
+| `/act` | 切换至执行模式 |
+| `/compact` | 手动触发上下文压缩 |
+| `/sessions` | 列出所有历史会话 |
+| `/resume` | 恢复历史会话 |
+| `/branch` | 基于已有会话创建分支 |
+| `/queue` | 查看消息队列 |
+| `/model` | 切换当前模型 |
+| `/tool` | 查看/切换工具组 |
+| `!COMMAND` | 执行 shell 命令 |
+| `@file` | 引用并读取文件内容 |
+
+---
+
+## 核心能力
+
+- **结构化 Agent 循环** — `StructuredAgent` 消费 provider 流式事件，统一处理
+  text、reasoning、tool_use、tool_result 和 final answer。
+- **核心工具闭环** — 默认提供文件读写编辑、词法搜索和受控 bash。`edit_file`
+  依赖 read-before-edit 指纹校验。
+- **工具并发分区** — 只读且并发安全的工具并行执行；写操作、高风险命令保持串行。
+- **权限与审计** — `PermissionEngine` 统一执行工具权限判定、HITL 审批和输出
+  脱敏；`JsonlAuditLogger` 记录审计日志。
+- **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果，
+  支持压缩后重建文件指纹。
+- **REPL 会话管理** — `/plan`、`/build`、`/act`、`/compact`、`/sessions`、
+  `/resume`、`/branch`、`/queue`、`/model`、`/tool`、`!COMMAND` shell 快捷入口、
+  `@file` 引用和 session transcript 落盘。
+- **MCP 工具集成** — 核心运行时自动读取 `.local/mcp_config.json`；无配置时
+  不注册额外工具。
+- **可选扩展** — subagent、worktree、tasks、mailbox、progress、memory、daemon。
 
 ---
 
@@ -68,7 +119,8 @@ uv run xcode --resume
 {"tools": {"enabled_groups": ["core"]}}
 ```
 
-配置发现栈：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地 `.local/settings.json` → 环境变量覆盖。完整配置说明见 [CONFIG.md](CONFIG.md)。
+配置发现栈：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地
+`.local/settings.json` → 环境变量覆盖。完整配置说明见 [CONFIG.md](CONFIG.md)。
 
 ---
 
@@ -90,49 +142,60 @@ uv run xcode --resume
 
 ---
 
-## MCP
-
-MCP server 配置放在 `.local/mcp_config.json`：
-
-```json
-{"mcpServers": {"demo": {"command": "python", "args": ["path/to/server.py"], "defer_loading": true}}}
-```
-
-核心运行时会自动读取该配置；无配置时不注册 MCP 工具。schema 缓存在
-`.local/mcp_cache.json`。
-
----
-
-## 编程式使用
-
-```python
-from pathlib import Path
-from xcode.harness.app import build_app
-
-app = build_app(project_root=Path.cwd())
-answer = app.ask("Find all Python test files.")
-print(answer)
-
-answer = await app.aask("Find all Python test files.")
-app.close()
-```
-
----
-
 ## 评估与验证
 
+### 单元测试
+
 ```powershell
+# 运行全部测试
 uv run python -m unittest discover src\xcode\tests
-uv run python -m compileall src
+
+# 或使用 pytest
+uv run pytest src/xcode/tests -q --tb=short
+```
+
+### Eval 工作流
+
+```powershell
+# 列出可用 eval 套件
 uv run python -m xcode.evals.cli --list-suites
+
+# 运行 pipeline 套件
 uv run python -m xcode.evals.cli --suite pipeline
+
+# 运行工具策略套件
 uv run python -m xcode.evals.cli --suite tool-policy
+
+# 运行真实模型 eval（需要配置 API key）
 uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3
+
+# 基准测试
 uv run python -m xcode.evals.cli --list-benchmarks
 uv run python -m xcode.evals.cli --real --benchmark evalplus-humaneval --benchmark-path <url> --trials 1
 ```
 
 更多说明见 [docs/evaluation-guide.md](docs/evaluation-guide.md)。
+
+---
+
+## 开发指南
+
+### 静态检查
+
+```powershell
+uv run ruff check src/ --fix
+uv run ruff format src/
+uv run pyright src/
+```
+
+### 代码规范
+
+- Python 3.12+，完整类型注解
+- ruff 格式化（行宽 88），零 `# noqa`
+- 纯函数优先，职责分离（IO / 计算 / 展示）
+- 异常捕获明确具体类型，禁止 bare `except:`
+
+详细规范见 [docs/code-standards.md](docs/code-standards.md)。
 
 ---
 
@@ -146,3 +209,11 @@ uv run python -m xcode.evals.cli --real --benchmark evalplus-humaneval --benchma
 | [docs/source-review.md](docs/source-review.md) | 源码级架构审查 |
 | [docs/evaluation-guide.md](docs/evaluation-guide.md) | 测试和 eval 工作流 |
 | [docs/api-reference.md](docs/api-reference.md) | 公开 API 参考 |
+| [docs/code-standards.md](docs/code-standards.md) | Python 编码规范 |
+
+---
+
+## 许可
+
+[MIT](LICENSE) © 2026 Xcode Contributors
+
