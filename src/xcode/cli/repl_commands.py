@@ -193,6 +193,24 @@ def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
+def cmd_rename(cmd: str, ctx: CommandContext) -> bool:
+    """重命名当前会话。"""
+    parts = cmd.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        current = ctx.store.current_metadata()
+        if current:
+            print(f'Current title: "{current.title}"')
+        print("Usage: /rename <title>")
+        return False
+    new_title = parts[1].strip()
+    meta = ctx.store.rename_session(new_title)
+    if meta is None:
+        print("No active session to rename.")
+        return False
+    print(f'Session renamed to: "{meta.title}"')
+    return False
+
+
 def cmd_model(cmd: str, ctx: CommandContext) -> bool:
     """显示或切换当前模型。"""
     handle_model_command(cmd, ctx.app)
@@ -848,18 +866,25 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         accepts_args=True,
         group=COMMAND_GROUP_INFO,
     ),
+    "/rename": CommandEntry(
+        handler=cmd_rename,
+        desc="Rename the current session.",
+        args_desc="<title>",
+        accepts_args=True,
+        group=COMMAND_GROUP_SESSION_LIFECYCLE,
+    ),
     "/undo": CommandEntry(
         handler=cmd_undo,
-        desc="回退最近 N 轮用户轮次的文件变更（基于快照恢复）。",
+        desc="Undo file changes from the last N user turns (via snapshot restore).",
         args_desc="[N|--list]",
         accepts_args=True,
         group=COMMAND_GROUP_SESSION_ROLLBACK,
     ),
     "/exit": CommandEntry(
-        handler=cmd_exit, desc="退出 REPL.", group=COMMAND_GROUP_EXIT
+        handler=cmd_exit, desc="Exit the REPL.", group=COMMAND_GROUP_EXIT
     ),
     "/quit": CommandEntry(
-        handler=cmd_exit, desc="退出 REPL.", visible=False, group=COMMAND_GROUP_EXIT
+        handler=cmd_exit, desc="Exit the REPL.", visible=False, group=COMMAND_GROUP_EXIT
     ),
 }
 

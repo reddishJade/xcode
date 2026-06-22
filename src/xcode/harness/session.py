@@ -365,6 +365,25 @@ class SessionStore:
         self._upsert_metadata(metadata)
         return metadata
 
+    def rename_session(self, title: str) -> SessionMetadata | None:
+        """重命名当前会话。"""
+        current = self.current_metadata()
+        if current is None:
+            return None
+        metadata = SessionMetadata(
+            id=current.id,
+            title=title,
+            summary=current.summary,
+            project_path=current.project_path,
+            transcript_path=current.transcript_path,
+            created_at=current.created_at,
+            updated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            parent_id=current.parent_id,
+            fork_type=current.fork_type,
+        )
+        self._upsert_metadata(metadata)
+        return metadata
+
     def current_metadata(self) -> SessionMetadata | None:
         return self._metadata_for_path(self.current_path)
 
