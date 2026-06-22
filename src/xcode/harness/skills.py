@@ -216,6 +216,110 @@ class ToolRegistryState:
             )
             return tuple(rt.spec for rt in self._registered)
 
+    # ── Governance filter API ──
+
+    def tools_visible_to_root(self) -> tuple[RegisteredTool, ...]:
+        """Return tools with exposure == 'root' and user_invocable and action_profile present."""
+        return tuple(
+            rt
+            for rt in self.registered_snapshot()
+            if rt.surface_policy.exposure == "root"
+            and rt.surface_policy.user_invocable
+            and rt.action_profile is not None
+        )
+
+    def tools_user_invocable(self) -> tuple[RegisteredTool, ...]:
+        """Return tools meeting the three /tool selector conditions."""
+        return tuple(
+            rt
+            for rt in self.registered_snapshot()
+            if rt.surface_policy.exposure != "hidden"
+            and rt.surface_policy.user_invocable
+            and rt.action_profile is not None
+        )
+
+    def tools_for_completion(self) -> tuple[RegisteredTool, ...]:
+        """Return tools visible to tab completion (exposure != 'hidden')."""
+        return tuple(
+            rt
+            for rt in self.registered_snapshot()
+            if rt.surface_policy.exposure != "hidden"
+        )
+
+    def tools_primary_agent_invocable(self) -> tuple[RegisteredTool, ...]:
+        """Return tools eligible for the primary-agent capability envelope."""
+        return tuple(
+            rt
+            for rt in self.registered_snapshot()
+            if rt.surface_policy.primary_agent_invocable
+            and rt.action_profile is not None
+        )
+
+    def tools_for_subagent(self) -> tuple[RegisteredTool, ...]:
+        """Return tools with subagent_policy != 'deny' (delegation eligibility ceiling)."""
+        return tuple(
+            rt
+            for rt in self.registered_snapshot()
+            if rt.surface_policy.subagent_policy != "deny"
+        )
+
+    def resolve_selector(self, selector: str) -> str | None:
+        """Map a public selector to canonical id. Returns None if not found."""
+        for rt in self.registered_snapshot():
+            if rt.public_selector.selector == selector:
+                return rt.canonical_id
+        return None
+
+
+def filter_root_visible(
+    tools: tuple[RegisteredTool, ...],
+) -> tuple[RegisteredTool, ...]:
+    return tuple(
+        t
+        for t in tools
+        if t.surface_policy.exposure == "root"
+        and t.surface_policy.user_invocable
+        and t.action_profile is not None
+    )
+
+
+def filter_user_invocable(
+    tools: tuple[RegisteredTool, ...],
+) -> tuple[RegisteredTool, ...]:
+    return tuple(
+        t
+        for t in tools
+        if t.surface_policy.exposure != "hidden"
+        and t.surface_policy.user_invocable
+        and t.action_profile is not None
+    )
+
+
+def filter_primary_agent_invocable(
+    tools: tuple[RegisteredTool, ...],
+) -> tuple[RegisteredTool, ...]:
+    return tuple(
+        t
+        for t in tools
+        if t.surface_policy.primary_agent_invocable and t.action_profile is not None
+    )
+
+
+def filter_for_subagent(
+    tools: tuple[RegisteredTool, ...],
+) -> tuple[RegisteredTool, ...]:
+    return tuple(t for t in tools if t.surface_policy.subagent_policy != "deny")
+
+
+def resolve_public_selector(
+    tools: tuple[RegisteredTool, ...],
+    selector: str,
+) -> str | None:
+    for rt in tools:
+        if rt.public_selector.selector == selector:
+            return rt.canonical_id
+    return None
+
 
 def resolve_project_path(project_root: Path, raw_path: str) -> Path:
     relative_path = Path(raw_path.strip().strip("\"'") or ".")
