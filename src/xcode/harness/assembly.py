@@ -329,12 +329,12 @@ def build_tool_registry(
     mcp_runtime_registry.subscribe(replace_mcp_tools)
     closers.append(mcp_runtime_registry.close)
 
-    # Step 9 invariant: only group="mcp" ToolSpecs may use mcp__ prefix
-    for spec in registry:
-        if spec.name.startswith("mcp__") and spec.group != "mcp":
+    # Step 9 invariant: only MCP tools may use mcp__ prefix
+    for rt in registry_state.registered_snapshot():
+        if rt.spec.name.startswith("mcp__") and rt.origin.kind != "mcp":
             raise ValueError(
-                f"Tool {spec.name!r} uses reserved prefix 'mcp__' "
-                f"but group is {spec.group!r}, not 'mcp'"
+                f"Tool {rt.spec.name!r} uses reserved prefix 'mcp__' "
+                f"but origin is {rt.origin.kind!r}, not 'mcp'"
             )
 
     return registry_state, shell_spec, tuple(closers), skill_registry
