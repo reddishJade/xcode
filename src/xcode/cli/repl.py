@@ -109,6 +109,8 @@ def run_repl(
     markdown_renderer = renderer or TerminalMarkdownRenderer()
     registry = tuple(getattr(app, "registry", ()) or ())
 
+    state = ReplState()
+
     session = prompt_session or create_prompt_session(
         root,
         registry,
@@ -117,8 +119,8 @@ def run_repl(
         lambda: current_effort_options(app),
         lambda: current_model_options(app),
         lambda: available_skill_names(app),
+        state=state,
     )
-    state = ReplState()
     grant_store_manager = SessionGrantStoreManager()
     permanent_grant_store = FileGrantStore.for_project_root(root)
     hitl_handler = ReplHITLHandler(session)
@@ -139,6 +141,12 @@ def run_repl(
             agent.set_permanent_grant_store(permanent_grant_store)
     # clear_terminal_display()  # 在打印启动横幅前清理屏幕，保持界面整洁
     print_startup_banner(app, root)
+
+    # 初始化底栏上下文摘要
+    if agent is not None:
+        from .repl_commands import _compute_context_summary
+
+        _compute_context_summary(agent, root, state)
 
     # session selection phase — exactly one path executes
     selected_view: SessionMetadataView | None = None

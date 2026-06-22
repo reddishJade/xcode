@@ -14,7 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .commands import CommandEntry, PromptLike, PromptText
+from .commands import CommandEntry, PromptLike, PromptText, ReplState
 from .completion import CommandArgsSuggester, ReplCompleter
 from xcode.harness.skills import ToolSpec
 
@@ -49,7 +49,8 @@ REPL_PROMPT_STYLE = {
     ),
     "completion-menu.multi-column-meta": "bg:default fg:ansibrightblack",
     "scrollbar.background": "bg:default",
-    "scrollbar.button": "bg:default",
+    "scrollbar.foreground": "bg:default",
+    "bottom-toolbar": "",
 }
 
 
@@ -199,6 +200,23 @@ def format_thinking(value: object) -> str:
     return "unknown"
 
 
+def make_bottom_toolbar(state: ReplState) -> Callable[[], str]:
+    """返回 prompt_toolkit bottom_toolbar 可调用对象。"""
+
+    def toolbar() -> str:
+        parts = [f"cwd: {state.last_dir}"] if state.last_dir else []
+        if state.model_name:
+            parts.append(f"model: {state.model_name}")
+        parts.append(f"mode: {state.mode}")
+        if state.context_usage:
+            parts.append(f"context: {state.context_usage}")
+        if state.context_cost:
+            parts.append(f"cost: {state.context_cost}")
+        return "  ".join(parts)
+
+    return toolbar
+
+
 def create_prompt_session(
     project_root: Path | None = None,
     registry: tuple[ToolSpec, ...] = (),
@@ -207,6 +225,7 @@ def create_prompt_session(
     effort_options: Iterable[str] | Callable[[], Iterable[str]] = (),
     model_options: Iterable[str] | Callable[[], Iterable[str]] = (),
     skill_options: Iterable[str] | Callable[[], Iterable[str]] = (),
+    state: ReplState | None = None,
 ) -> PromptLike:
     try:
         from prompt_toolkit import PromptSession
@@ -264,6 +283,10 @@ def create_prompt_session(
         pass
     style = Style.from_dict(REPL_PROMPT_STYLE)
 
+    bottom_toolbar = None
+    if state is not None:
+        bottom_toolbar = make_bottom_toolbar(state)
+
     return PromptSessionAdapter(
         PromptSession(  # type: ignore[arg-type]  # 与 prompt_toolkit PromptSession 参数名不对齐，运行时无影响
             multiline=True,
@@ -273,5 +296,6 @@ def create_prompt_session(
             history=history,
             style=style,
             auto_suggest=suggester,
+            bottom_toolbar=bottom_toolbar,
         )
     )

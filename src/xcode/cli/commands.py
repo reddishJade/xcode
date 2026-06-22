@@ -34,6 +34,10 @@ class ReplState:
     pending_partial: tuple[str, str] | None = None
     pending_inject: str | None = None
     queue_mode: bool = False
+    context_usage: str = ""
+    context_cost: str = ""
+    last_dir: str = ""
+    model_name: str = ""
 
 
 @dataclass

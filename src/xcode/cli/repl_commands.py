@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 import subprocess
+import sys
 from typing import cast
 
 from .app_contract import ReplApp
@@ -629,6 +631,214 @@ def cmd_exit(cmd: str, ctx: CommandContext) -> bool:
     return True
 
 
+@dataclass
+class _ContextSummary:
+    categories: list[tuple[str, int]]
+    total: int
+    context_window: int
+    model_name: str
+    spent: float
+    free: int
+    memory_text: str
+    skill_count: int
+
+
+def _format_token(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(n)
+
+
+def _get_context_window(model_name: str) -> int:
+    from xcode.ai.registry import get_providers, get_models
+
+    for provider in get_providers():
+        for model in get_models(provider):
+            if model.id == model_name:
+                return model.context_window
+    return 0
+
+
+def _get_model_cost(model_name: str) -> object | None:
+    from xcode.ai.registry import get_providers, get_models
+
+    for provider in get_providers():
+        for model in get_models(provider):
+            if model.id == model_name:
+                return model.cost
+    return None
+
+
+def _compute_context_summary(
+    agent: object, project_root: Path, state: ReplState
+) -> _ContextSummary:
+    """计算分类 token 用量，并更新 state 供底栏使用。"""
+    from xcode.agent.compaction import estimate_tokens, estimate_message_tokens
+    from xcode.harness.agent_runtime.prompting.identity import (
+        CORE_IDENTITY,
+        TOOL_DISCIPLINE,
+        SEARCH_STRATEGY,
+    )
+
+    categories: list[tuple[str, int]] = []
+
+    system_text = f"{CORE_IDENTITY}\n\n{TOOL_DISCIPLINE}\n\n{SEARCH_STRATEGY}"
+    categories.append(("System prompt", estimate_tokens(system_text)))
+
+    registry = getattr(agent, "registry", None)
+    if registry is not None:
+        snap = registry.snapshot() if hasattr(registry, "snapshot") else registry
+        from xcode.harness.skills import build_tool_prompt, build_tool_guidelines
+
+        parts = ["Available tools:\n" + build_tool_prompt(snap)]
+        guidelines = build_tool_guidelines(snap)
+        if guidelines:
+            parts.append("Guidelines:\n" + guidelines)
+        categories.append(("System tools", estimate_tokens("\n\n".join(parts))))
+
+    messages = agent.history_messages() if hasattr(agent, "history_messages") else []  # type: ignore[union-attr]
+    categories.append(("Messages", estimate_message_tokens(messages)))
+
+    memory_manager = MemoryManager(project_root)
+    memory_text = "\n".join(memory_manager.read_memory_blocks())
+    if memory_text:
+        categories.append(("Memory files", estimate_tokens(memory_text)))
+
+    skill_count = 0
+    runtime = getattr(agent, "_runtime", None)
+    skill_registry = getattr(runtime, "skill_registry", None) if runtime else None
+    if skill_registry is not None and hasattr(skill_registry, "list_summaries"):
+        summaries = skill_registry.list_summaries()
+        if summaries:
+            skill_count = len(summaries)
+            lines = [
+                "<skill-activation>\n"
+                "When the user task clearly matches a skill description below, "
+                "call load_skill with that exact name before performing the task. "
+                "Do not load a skill when no description clearly matches.\n"
+                "</skill-activation>",
+                "<available-skills>",
+            ]
+            for s in summaries:
+                desc = s.description
+                if len(desc) > 768:
+                    desc = desc[:765] + "..."
+                lines.append(f"  <skill name={s.name}>{desc}</skill>")
+            lines.append("</available-skills>")
+            categories.append(("Skills", estimate_tokens("\n".join(lines))))
+
+    provider = getattr(agent, "provider", None)
+    inner = getattr(provider, "active_provider", provider)
+    model_name = getattr(inner, "model", "unknown") if inner else "unknown"
+    context_window = _get_context_window(model_name)
+    cost = _get_model_cost(model_name)
+
+    total = sum(t for _, t in categories)
+    free = max(0, context_window - total) if context_window > 0 else 0
+    cost_input = getattr(cost, "input", 0) if cost else 0
+    spent = (total / 1_000_000) * cost_input if cost_input else 0
+
+    context_str = (
+        f"{_format_token(total)}/{_format_token(context_window)}"
+        f" ({total / context_window * 100:.1f}%)"
+        if context_window > 0
+        else f"{_format_token(total)} tokens"
+    )
+    cost_str = f"${spent:.2f}" if spent > 0 else ""
+
+    state.last_dir = str(project_root)
+    state.model_name = model_name
+    state.context_usage = context_str
+    state.context_cost = cost_str
+
+    return _ContextSummary(
+        categories=categories,
+        total=total,
+        context_window=context_window,
+        model_name=model_name,
+        spent=spent,
+        free=free,
+        memory_text=memory_text,
+        skill_count=skill_count,
+    )
+
+
+def cmd_context(cmd: str, ctx: CommandContext) -> bool:
+    """显示当前会话上下文使用情况，按分类展示 token 用量。"""
+    agent = getattr(ctx.app, "agent", None)
+    if agent is None:
+        print("No agent available.")
+        return False
+
+    summary = _compute_context_summary(agent, ctx.project_root, ctx.state)
+
+    cost_str = f"${summary.spent:.2f}" if summary.spent > 0 else ""
+    parts = [f"cwd: {ctx.project_root}"]
+    parts.append(f"model: {summary.model_name}")
+    parts.append(f"mode: {ctx.state.mode}")
+    parts.append(f"context: {ctx.state.context_usage}")
+    if cost_str:
+        parts.append(f"cost: {cost_str}")
+    print("  ".join(parts))
+
+    print(" Estimated usage by category")
+    for name, tokens in summary.categories:
+        pct = (
+            (tokens / summary.context_window * 100) if summary.context_window > 0 else 0
+        )
+        print(f"   \u26c1 {name}: {_format_token(tokens)} tokens ({pct:.1f}%)")
+
+    if summary.context_window > 0:
+        free_pct = summary.free / summary.context_window * 100
+        print(f"   \u26f6 Free space: {_format_token(summary.free)} ({free_pct:.1f}%)")
+
+    if summary.memory_text:
+        block_count = max(1, summary.memory_text.count("## "))
+        print("\n Memory files \u00b7 /memory")
+        print(
+            f" \u2514 {block_count} blocks"
+            f" \u00b7 {_format_token(len(summary.memory_text))} chars"
+        )
+
+    if summary.skill_count > 0:
+        skill_token = next((t for n, t in summary.categories if n == "Skills"), 0)
+        print("\n Skills \u00b7 /skills")
+        print(
+            f" \u2514 {summary.skill_count} skills"
+            f" \u00b7 {_format_token(skill_token)} tokens"
+        )
+
+    return False
+
+
+def cmd_btw(cmd: str, ctx: CommandContext) -> bool:
+    """Ask a quick side question without interrupting the main conversation."""
+    parts = cmd.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        print("Usage: /btw <question>")
+        return False
+
+    question = parts[1].strip()
+
+    from xcode.harness.agent_runtime.events import TextDeltaStructuredEvent
+
+    sys.stdout.write("\033[90m[side question]\033[0m\n")
+    sys.stdout.flush()
+
+    for event in ctx.app.ask_stream(question, mode=ctx.state.mode):
+        if isinstance(event, TextDeltaStructuredEvent):
+            sys.stdout.write(event.data)
+            sys.stdout.flush()
+
+    print()
+
+    sync_agent_history(ctx.app, ctx.store)
+
+    return False
+
+
 def _parse_undo_count(cmd: str) -> int:
     parts = cmd.split()
     if len(parts) <= 1:
@@ -988,6 +1198,18 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     ),
     "/exit": CommandEntry(
         handler=cmd_exit, desc="Exit the REPL.", group=COMMAND_GROUP_EXIT
+    ),
+    "/context": CommandEntry(
+        handler=cmd_context,
+        desc="Show context usage (token count, messages, etc.).",
+        group=COMMAND_GROUP_INFO,
+    ),
+    "/btw": CommandEntry(
+        handler=cmd_btw,
+        desc="Ask a quick side question without interrupting the main conversation.",
+        args_desc="<question>",
+        accepts_args=True,
+        group=COMMAND_GROUP_INFO,
     ),
     "/quit": CommandEntry(
         handler=cmd_exit, desc="Exit the REPL.", visible=False, group=COMMAND_GROUP_EXIT
