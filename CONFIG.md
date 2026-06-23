@@ -45,6 +45,53 @@
 - **tool_stream**: 仅 `glm-4.6`/`glm-4.7` 支持
 - **缓存统计**: 兼容字段 `prompt_tokens_details.cached_tokens`
 
+### 运行时模型切换
+
+REPL 中可通过 `/model` 命令动态切换模型而无需重启：
+
+```
+/model                                    # 查看当前模型信息
+/model <provider>/<model>[:thinking_level]  # 切换模型
+/model <profile>/<model>[:thinking_level]   # 按 profile 切换
+```
+
+| 部分 | 说明 |
+|---|---|
+| `provider` | transport 名：`openai_chat`、`deepseek_chat`、`mimo_chat`、`chatglm_chat`；省略时使用当前 profile |
+| `profile` | 配置中的 profile 名：`main`、`subagent`、`fallback` |
+| `model` | 模型 ID，如 `gpt-5.4-mini`、`deepseek-v4-flash` |
+| `:thinking_level` | 可选后缀，覆盖 reasoning_effort。值：`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max` |
+
+示例：
+```
+/model openai_chat/gpt-5.4-mini:high
+/model subagent/deepseek-v4-flash
+/model deepseek_chat/deepseek-v4-pro:max
+```
+
+### CLI 配置管理
+
+`xcode config` 子命令提供多 provider profile 的管理能力，无需手写 JSON：
+
+```
+xcode config list                                     # 列出所有 profile
+xcode config --project-root <path> list               # 指定项目目录
+xcode config add <name>                               # 交互式添加 profile（如 fallback）
+xcode config delete <name>                            # 删除 profile
+xcode config set <name> <field> <value>               # 修改单个字段
+```
+
+示例：
+```
+xcode config add fallback                             # 交互式配置 fallback provider
+xcode config set fallback transport openai_chat       # 设置 transport
+xcode config set main thinking false                  # 关闭 thinking
+xcode config set main reasoning_effort null            # 删除 reasoning_effort（置空）
+xcode config delete subagent                          # 删除 subagent profile
+```
+
+支持 set 的字段：`transport`、`chat_model`、`base_url`、`api_key`、`thinking`（true/false）、`clear_thinking`（true/false）、`tool_stream`（true/false）、`reasoning_effort`（字符串或 `null`）。
+
 ---
 
 ## agent

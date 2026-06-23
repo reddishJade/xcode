@@ -127,7 +127,7 @@ REPL 支持以下会话命令：
 | `/sessions` | 列出所有历史会话 |
 | `/branch [list\|tree\|id]` | 切换分支 |
 | `/tree` | 查看会话树 |
-| `/model [name]` | 切换当前模型 |
+| `/model [provider/model[:thinking_level]]` | 切换模型。`provider` 可选：`deepseek_chat`/`openai_chat`/`mimo_chat`/`chatglm_chat` 或 profile 名（`main`/`subagent`/`fallback`）。`:thinking_level` 可选：`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`。示例：`/model openai_chat/gpt-5.4-mini:high` |
 | `/effort <level>` | 设置推理 effort |
 | `/thinking on/off` | 切换 thinking 显示 |
 | `/tool [list\|NAME INPUT]` | 查看/调用工具 |

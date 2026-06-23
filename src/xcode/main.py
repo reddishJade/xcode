@@ -5,13 +5,41 @@ from pathlib import Path
 
 import sys
 
+from .cli.config_cmd import handle_config_command
 from .cli.repl import run_repl
 from .cli.setup_wizard import has_valid_config, run_setup_wizard
 from .harness.config import discover_runtime_config, resolve_config_path
 from .harness.app import build_app
 
 
-def parse_args() -> argparse.Namespace:
+def _build_config_parser(subparsers) -> None:
+    config_parser = subparsers.add_parser(
+        "config", help="Manage provider configurations"
+    )
+    config_parser.add_argument(
+        "--project-root", type=Path, default=Path.cwd(), help="Project root directory."
+    )
+    config_sub = config_parser.add_subparsers(dest="config_action")
+
+    list_p = config_sub.add_parser("list", help="List all provider profiles")
+    list_p.set_defaults(config_action="list")
+
+    add_p = config_sub.add_parser("add", help="Add a provider profile interactively")
+    add_p.add_argument("name", help="Profile name (e.g. main, subagent, fallback)")
+    add_p.set_defaults(config_action="add")
+
+    delete_p = config_sub.add_parser("delete", help="Delete a provider profile")
+    delete_p.add_argument("name", help="Profile name to delete")
+    delete_p.set_defaults(config_action="delete")
+
+    set_p = config_sub.add_parser("set", help="Set a field value in a profile")
+    set_p.add_argument("name", help="Profile name")
+    set_p.add_argument("field", help="Field name")
+    set_p.add_argument("value", help="Field value")
+    set_p.set_defaults(config_action="set")
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Xcode coding agent.")
     parser.add_argument(
         "-p", "--prompt", help="Run one prompt and exit (single-shot mode)."
@@ -42,12 +70,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--setup", action="store_true", help="Force-run the provider setup wizard."
     )
-    return parser.parse_args()
+    _build_config_parser(parser.add_subparsers(dest="command"))
+    return parser.parse_args(argv)
 
 
 def main() -> int:
     args = parse_args()
     project_root = args.project_root
+
+    if args.command == "config":
+        handle_config_command(args, project_root)
+        return 0
+
     temp_config: Path | None = None
 
     if args.setup or not has_valid_config(project_root):

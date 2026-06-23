@@ -398,6 +398,7 @@ class XcodeRuntimeConfigTests:
                 continue_=False,
                 session=None,
                 setup=False,
+                command=None,
             )
 
             captured: dict[str, object] = {}
@@ -447,6 +448,7 @@ class XcodeRuntimeConfigTests:
                 continue_=False,
                 session=None,
                 setup=False,
+                command=None,
             )
             captured: dict[str, object] = {}
 
@@ -489,6 +491,7 @@ class XcodeRuntimeConfigTests:
                 continue_=False,
                 session=None,
                 setup=False,
+                command=None,
             )
             captured: dict[str, object] = {}
 
@@ -524,6 +527,7 @@ class XcodeRuntimeConfigTests:
                 continue_=False,
                 session=None,
                 setup=False,
+                command=None,
             )
             captured: dict[str, object] = {}
 
