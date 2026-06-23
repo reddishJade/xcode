@@ -4,8 +4,8 @@ import json
 import tempfile
 from pathlib import Path
 
-from xcode.harness.orchestration_store import OrchestrationStore
-from xcode.harness.task_progress import (
+from xcode.experimental.orchestration_store import OrchestrationStore
+from xcode.experimental.task_progress import (
     build_progress_tools,
     expire_stale_runs,
     resume_run,
@@ -14,7 +14,7 @@ from xcode.harness.task_progress import (
     save_progress,
     start_run,
 )
-from xcode.harness.task_store import TaskStore
+from xcode.experimental.task_store import TaskStore
 import pytest
 
 
@@ -248,7 +248,7 @@ class TestTaskProgress:
         import logging
 
         task = self.store.create("task")
-        with caplog.at_level(logging.WARNING, logger="xcode.harness.task_progress"):
+        with caplog.at_level(logging.WARNING, logger="xcode.experimental.task_progress"):
             state = resume_run(self.store, self.orchestration, task.id)
         assert state.status == "pending"  # 回退到 task.status
         assert state.attempt == 0
@@ -275,7 +275,7 @@ class TestTaskProgress:
             ),
             encoding="utf-8",
         )
-        with caplog.at_level(logging.WARNING, logger="xcode.harness.task_progress"):
+        with caplog.at_level(logging.WARNING, logger="xcode.experimental.task_progress"):
             state = resume_run(self.store, self.orchestration, task.id)
         assert state.status == "running"
         assert any("missing fields" in r.message for r in caplog.records)
@@ -302,7 +302,7 @@ class TestTaskProgress:
         index_path.write_text("{invalid json", encoding="utf-8")
 
         with caplog.at_level(
-            logging.WARNING, logger="xcode.harness.orchestration_store"
+            logging.WARNING, logger="xcode.experimental.orchestration_store"
         ):
             expired_ids = self.orchestration.list_expired()
         assert task.id in expired_ids

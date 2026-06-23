@@ -5,14 +5,12 @@
 
 from .chatglm import ChatGLMProvider
 from .deepseek import DeepSeekProvider
-from .faux import FauxProvider
 from .mimo import MiMoProvider
 from .openai import OpenAIChatProvider
 
 __all__ = [
     "ChatGLMProvider",
     "DeepSeekProvider",
-    "FauxProvider",
     "MiMoProvider",
     "OpenAIChatProvider",
     "PROVIDER_REGISTRY",
@@ -23,5 +21,4 @@ PROVIDER_REGISTRY: dict[str, type] = {
     "chatglm_chat": ChatGLMProvider,
     "deepseek_chat": DeepSeekProvider,
     "mimo_chat": MiMoProvider,
-    "faux_chat": FauxProvider,
 }

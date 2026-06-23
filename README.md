@@ -161,9 +161,10 @@ REPL 支持以下会话命令：
   `/thinking`、`/tool`、`/skill`、`/memory`、`/permissions`、`/hooks`、`/undo`、
   `$skill-name` 快捷入口、`!COMMAND` shell 快捷入口、`@file` 引用、
   `/context`、`/btw` 和 session transcript 落盘。
-- **Subagent 委托** — `ManagedSubagentRunner` 并行子任务调度，支持 worktree 沙箱隔离和模型 profile 切换。
+- **Subagent 委托** — `ManagedSubagentRunner` 并行子任务调度；实验开关可启用 worktree 隔离。
 - **MCP 协议** — 自动发现 `.local/mcp_config.json`，注册 `mcp__{server}__{tool}` 动态工具。
-- **任务与协作** — tasks 任务图、mailbox 跨 agent 消息、progress 断点续传、daemon 后台心跳。
+- **实验能力** — 可显式启用 tasks、基于共享本地文件系统的 mailbox、
+  progress 断点续传和 worktree 隔离；默认全部关闭。
 
 ---
 
@@ -181,10 +182,10 @@ REPL 支持以下会话命令：
 | `core` | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools` |
 | `skills` | `load_skill`（发现 skill 时自动注册） |
 | `subagent` | `submit_subagent`、`check_subagent`、`cancel_subagent` |
-| `worktree` | `create_worktree_task`、`remove_worktree_task` |
-| `tasks` | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
-| `mailbox` | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
-| `progress` | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
+| `worktree` | 实验：`experimental.worktree=true` |
+| `tasks` | 实验：`experimental.tasks=true` |
+| `mailbox` | 实验：`experimental.mailbox=true` |
+| `progress` | 实验：`experimental.progress=true`，且要求 `tasks=true` |
 | `memory` | `search_memory`；主动召回、压缩摘要 consolidation |
 | `daemon` | `HeartbeatDaemon`（由 `daemon.enabled` 配置项控制） |
 | `mcp` | `mcp__{server}__{tool}`、`mcp_tool_search`（存在 `.local/mcp_config.json` 时自动注册） |

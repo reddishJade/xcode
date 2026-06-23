@@ -31,6 +31,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
     ├── __main__.py → `python -m xcode` 入口
     ├── cli/
     ├── coding_agent/
+    ├── experimental/
     ├── harness/
     ├── agent/
     ├── ai/
@@ -103,10 +104,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `snapshot.py` | Git tree 文件快照、每轮 pre/post snapshot、undo |
 | `skill_activation.py` | Skill activation 内容解析 |
 | `skills_registry.py` | Skill 发现、索引、懒加载 |
-| `task_store.py` | `tasks` group：任务存储、依赖排序、Kanban |
-| `task_progress.py` | `progress` group：长任务 checklist |
 | `session_todo.py` | 主 agent 会话级 `update_todo` 工具与内存状态 |
-| `mailbox.py` | `mailbox` group：append-only JSONL mailbox |
 | `mcp/` | 核心 MCP stdio client、schema cache 和动态工具集成 |
 | `mcp/client.py` | MCP stdio JSON-RPC 客户端 |
 | `mcp/tools.py` | MCP 配置、schema cache 和动态 ToolSpec 构建 |
@@ -157,7 +155,6 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `tools/file.py` | `build_file_tools` → `read_file`、`write_file`、`edit_file` |
 | `tools/code_search.py` | `build_code_tools` → `glob_files`、`find_files`、`grep_search`、`ls` |
 | `tools/bash.py` | `build_bash_tool` → `bash` |
-| `tools/worktree.py` | `build_worktree_tools` → `create_worktree_task`、`remove_worktree_task` |
 | `tools/shell_adapter.py` | `ShellSpec`、`detect_shell`、`build_shell_argv` |
 | `tools/path_utils.py` | 路径解析、`is_path_blocked` |
 | `tools/file_index.py` | 有时间和数量预算的 `.gitignore` 感知项目文件索引 |
@@ -169,6 +166,18 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `tools/file_mutation_queue.py` | 文件变更队列 |
 | `tools/edit_diff.py` | diff 编辑 |
 | `tools/_constants.py` | 工具常量、风险评估 |
+
+### `src/xcode/experimental/` — 实验能力
+
+该目录下能力默认关闭，由 `experimental.*` 配置显式启用。
+
+| 模块 | 职责 |
+|---|---|
+| `task_store.py` | `tasks` group：任务存储、依赖排序、Kanban |
+| `task_progress.py` | `progress` group：长任务 checklist 和 lease |
+| `orchestration_store.py` | progress 运行编排状态 |
+| `mailbox.py` | 基于共享本地文件系统的跨进程 mailbox |
+| `worktree.py` | Git worktree 工具和 subagent 隔离 |
 
 ### `src/xcode/cli/` — UI 层
 
@@ -215,10 +224,10 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 → `session`（`update_todo`）
 → `skills`（`load_skill`）
 → `subagent`（`submit_subagent`、`check_subagent`、`cancel_subagent`）
-→ `worktree`（`create_worktree_task`、`remove_worktree_task`）
-→ `tasks`（`create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked`）
-→ `mailbox`（`send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message`）
-→ `progress`（`save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs`）
+→ `worktree`（实验，`experimental.worktree`）
+→ `tasks`（实验，`experimental.tasks`）
+→ `mailbox`（实验，`experimental.mailbox`）
+→ `progress`（实验，`experimental.progress`，依赖 tasks）
 → `memory`（`search_memory`、主动召回、consolidation）
 → `daemon`（`HeartbeatDaemon`）
 → `mcp`（`mcp__{server}__{tool}`、`mcp_tool_search`，由 `.local/mcp_config.json` 自动发现）

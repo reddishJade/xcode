@@ -22,8 +22,8 @@ from xcode.coding_agent.tools import (
     build_code_tools,
     build_file_tools,
 )
-from xcode.coding_agent.tools.worktree import WorktreeTaskRunner, build_worktree_tools
-from xcode.harness.task_store import TaskStore, build_task_tools
+from xcode.experimental.task_store import TaskStore, build_task_tools
+from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
 from xcode.harness.session_todo import build_session_todo_tools, SessionTodoState
 from xcode.harness.assembly import build_search_tools_tool
 from xcode.harness.memory import MemoryManager, build_memory_tools
@@ -80,15 +80,15 @@ def _build_mcp_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
 
 
 def _build_mailbox_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    from xcode.harness.mailbox import AgentMailbox, build_mailbox_tools
+    from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
 
     return build_mailbox_tools(AgentMailbox(base_tmp))
 
 
 def _build_progress_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    from xcode.harness.orchestration_store import OrchestrationStore
-    from xcode.harness.task_progress import build_progress_tools
-    from xcode.harness.task_store import TaskStore
+    from xcode.experimental.orchestration_store import OrchestrationStore
+    from xcode.experimental.task_progress import build_progress_tools
+    from xcode.experimental.task_store import TaskStore
 
     return build_progress_tools(TaskStore(base_tmp), OrchestrationStore(base_tmp))
 

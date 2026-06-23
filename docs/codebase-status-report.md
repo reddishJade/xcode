@@ -250,7 +250,7 @@ cli → coding_agent → harness → agent → ai
 - `src/xcode/harness/skills.py`
 - `src/xcode/harness/skills_registry.py`
 - `src/xcode/cli/repl_skills.py`
-- `src/xcode/coding_agent/tools/worktree.py`
+- `src/xcode/experimental/worktree.py`
 
 ### 已实现
 

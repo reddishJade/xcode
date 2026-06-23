@@ -22,7 +22,7 @@ from typing import Any
 
 import filelock
 
-logger = logging.getLogger("xcode.harness.orchestration_store")
+logger = logging.getLogger("xcode.experimental.orchestration_store")
 
 
 @dataclass(frozen=True)

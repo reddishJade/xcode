@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from xcode.harness.daemon import HeartbeatDaemon
-from xcode.harness.mailbox import AgentMailbox
-from xcode.harness.task_store import TaskStore
+from xcode.experimental.mailbox import AgentMailbox
+from xcode.experimental.task_store import TaskStore
 import pytest
 
 
@@ -104,6 +104,23 @@ class TestHeartbeatDaemon:
         assert health.running
         assert health.restart_count == 1
 
+    def test_run_loop_recovers_from_unexpected_iteration_failure(self) -> None:
+        """主循环单轮意外失败后无需外部调用即可继续运行。"""
+        calls = 0
+
+        def run_once() -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("loop crashed")
+            self.daemon._stop_event.set()
+
+        with patch.object(self.daemon, "_run_loop_once", side_effect=run_once):
+            self.daemon._run_loop()
+
+        assert calls == 2
+        assert self.daemon.health_check().restart_count == 1
+
     def test_check_git_status_task(self) -> None:
         """测试脏工作区检查定时任务。"""
         with patch("subprocess.run") as mock_run:
@@ -137,6 +154,29 @@ class TestHeartbeatDaemon:
         assert alerts[0]["type"] == "tasks_summary"
         assert alerts[0]["payload"]["pending_count"] == 1
         assert alerts[0]["payload"]["claimed_count"] == 1
+
+    def test_check_worktree_prune_reports_cleaned_paths(self) -> None:
+        """worktree 清理任务发布实际清理结果。"""
+        cleaned = [self.root / ".local" / "worktrees" / "orphan"]
+        runner = MagicMock()
+        runner.prune_stale.return_value = cleaned
+        daemon = HeartbeatDaemon(self.root, worktree_runner=runner)
+
+        alerts = daemon.check_worktree_prune()
+
+        assert alerts == [
+            {
+                "type": "worktree_prune_report",
+                "payload": {
+                    "pruned_count": 1,
+                    "paths": [str(cleaned[0])],
+                },
+            }
+        ]
+        assert any(
+            task.name == "check_worktree_prune"
+            for task in daemon.list_daemon_tasks()
+        )
 
     def test_daemon_events_carry_source_metadata(self) -> None:
         """daemon 事件 payload 自动添加 source 元数据。"""

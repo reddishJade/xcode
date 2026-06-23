@@ -262,10 +262,10 @@ Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
 | `core` | 始终 | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`shell`、`search_tools` |
 | `skills` | 发现 skill 时 | `load_skill` |
 | `subagent` | 始终 | `submit_subagent`、`check_subagent`、`cancel_subagent` |
-| `worktree` | 始终 | `create_worktree_task`、`remove_worktree_task` |
-| `tasks` | 始终 | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
-| `mailbox` | 始终 | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
-| `progress` | 始终 | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
+| `worktree` | `experimental.worktree` | `create_worktree_task`、`remove_worktree_task` |
+| `tasks` | `experimental.tasks` | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
+| `mailbox` | `experimental.mailbox` | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
+| `progress` | `experimental.progress` 且 `experimental.tasks` | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
 | `memory` | 始终 | `search_memory`；主动召回、压缩摘要 consolidation |
 | `daemon` | `daemon.enabled` | 构造 `HeartbeatDaemon` |
 | `mcp` | 存在 `.local/mcp_config.json` 时 | `mcp__{server}__{tool}`、`mcp_tool_search` |
@@ -277,6 +277,30 @@ Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
 `scope` 和 `layer`（`all` / `project` / `user`）；工具标记为只读。
 MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺少这些
 协商元数据的旧缓存会自动重新发现。
+
+---
+
+## experimental
+
+以下能力默认关闭，实现在 `xcode.experimental` 包内：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `tasks` | bool | `false` | 持久化任务图和 Kanban 工具 |
+| `mailbox` | bool | `false` | 基于共享本地文件系统的跨进程 mailbox |
+| `progress` | bool | `false` | 长任务进度和 lease；要求同时启用 `tasks` |
+| `worktree` | bool | `false` | Git worktree 工具和 subagent worktree 隔离 |
+
+```json
+{
+  "experimental": {
+    "tasks": true,
+    "mailbox": true,
+    "progress": true,
+    "worktree": true
+  }
+}
+```
 
 ---
 
@@ -323,6 +347,9 @@ MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺
 |---|---|---|---|
 | `enabled` | bool | `false` | 是否构造 `HeartbeatDaemon` |
 | `interval_seconds` | int | `30` | 心跳轮询间隔 |
+
+Daemon 始终检查 Git 状态；仅在对应实验能力启用时检查 mailbox、tasks 和
+worktree prune。主循环单轮意外失败后会自动恢复。
 
 ---
 

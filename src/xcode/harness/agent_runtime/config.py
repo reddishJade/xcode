@@ -210,7 +210,7 @@ def _build_before_provider_request_closure(
 def _build_task_state_provider(project_root: Path) -> Callable[[], str] | None:
     """返回一个可调用对象，每次调用时从 TaskStore 读取当前任务状态。"""
     try:
-        from xcode.harness.task_store import TaskStore
+        from xcode.experimental.task_store import TaskStore
 
         store = TaskStore(project_root)
         tasks = store.list()
@@ -331,9 +331,10 @@ def build_loop_config(
         )
         registry_.register(ActiveDiffCollector(project_root))
         registry_.register(RecentValidationCollector())
-        task_provider = _build_task_state_provider(project_root)
-        if task_provider is not None:
-            registry_.register(TaskStateCollector(task_provider))
+        if any(tool.group == "tasks" for tool in registry):
+            task_provider = _build_task_state_provider(project_root)
+            if task_provider is not None:
+                registry_.register(TaskStateCollector(task_provider))
         registry_.register(NotesCollector(project_root))
         sr = skill_registry
         if sr is None:

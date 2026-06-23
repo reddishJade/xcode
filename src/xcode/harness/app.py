@@ -27,8 +27,8 @@ from .assembly import (
 )
 
 if TYPE_CHECKING:
+    from xcode.experimental.mailbox import AgentMailbox
     from xcode.harness.daemon import HeartbeatDaemon
-    from xcode.harness.mailbox import AgentMailbox
 
 
 @dataclass
@@ -162,7 +162,7 @@ def build_app(
         project_root, env_files, agent_config, skills_dir, audit_path, runtime_config
     )
     infra = build_shared_infra(project_root, cfg.runtime_config)
-    shared_services = _assembly.build_shared_services(project_root)
+    shared_services = _assembly.build_shared_services(project_root, cfg.runtime_config)
 
     providers = build_provider_bundle(
         ProviderSettings(

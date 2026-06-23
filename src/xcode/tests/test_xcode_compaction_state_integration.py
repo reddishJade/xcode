@@ -76,7 +76,7 @@ class TestTaskStateCollectorNoDuplicate:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             store = None
-            from xcode.harness.task_store import TaskStore
+            from xcode.experimental.task_store import TaskStore
 
             store = TaskStore(root)
             store.create("active task")
@@ -108,7 +108,7 @@ class TestTaskStateCollectorNoDuplicate:
         """验证 TaskStateCollector 仅注入结构化任务元数据，而非对话摘要。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            from xcode.harness.task_store import TaskStore
+            from xcode.experimental.task_store import TaskStore
 
             store = TaskStore(root)
             store.create("my task", payload={"blocked_by": [5]})

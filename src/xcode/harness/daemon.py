@@ -25,8 +25,9 @@ from typing import Any
 
 import filelock
 
-from xcode.harness.mailbox import AgentMailbox
-from xcode.harness.task_store import PENDING, CLAIMED, TaskStore
+from xcode.experimental.mailbox import AgentMailbox
+from xcode.experimental.task_store import CLAIMED, PENDING, TaskStore
+from xcode.experimental.worktree import WorktreeTaskRunner
 
 logger = logging.getLogger("xcode.harness.daemon")
 
@@ -44,6 +45,7 @@ _BUILTIN_TASKS: tuple[str, ...] = (
     "check_mailbox",
     "check_git_status",
     "check_background_tasks",
+    "check_worktree_prune",
 )
 
 
@@ -74,8 +76,9 @@ class HeartbeatDaemon:
     def __init__(
         self,
         project_root: Path,
-        mailbox: AgentMailbox,
-        task_store: TaskStore,
+        mailbox: AgentMailbox | None = None,
+        task_store: TaskStore | None = None,
+        worktree_runner: WorktreeTaskRunner | None = None,
         *,
         interval_seconds: int = 30,
         agent_id: str = "xcode_agent",
@@ -94,15 +97,20 @@ class HeartbeatDaemon:
         self._task_failures: dict[str, int] = {}
         self.mailbox = mailbox
         self.task_store = task_store
+        self.worktree_runner = worktree_runner
         self._tasks_file = project_root / ".local" / "daemon_tasks.json"
         self._tasks_lock = filelock.FileLock(
             project_root / ".local" / ".daemon_tasks.lock", timeout=10.0
         )
 
         # 注册 builtin 定时任务
-        self.register_task("check_mailbox", self.check_mailbox)
+        if self.mailbox is not None:
+            self.register_task("check_mailbox", self.check_mailbox)
         self.register_task("check_git_status", self.check_git_status)
-        self.register_task("check_background_tasks", self.check_background_tasks)
+        if self.task_store is not None:
+            self.register_task("check_background_tasks", self.check_background_tasks)
+        if self.worktree_runner is not None:
+            self.register_task("check_worktree_prune", self.check_worktree_prune)
         # 恢复持久化的自定义任务名（callable 需外部重新注册）
         self._restore_persistent_tasks()
 
@@ -192,11 +200,14 @@ class HeartbeatDaemon:
         if health.running or self._stop_event.is_set():
             return health
         # 补齐 builtin 任务（防止被 unregister 后重启丢失）
-        for name, func in (
-            ("check_mailbox", self.check_mailbox),
-            ("check_git_status", self.check_git_status),
-            ("check_background_tasks", self.check_background_tasks),
-        ):
+        builtins = [("check_git_status", self.check_git_status)]
+        if self.mailbox is not None:
+            builtins.append(("check_mailbox", self.check_mailbox))
+        if self.task_store is not None:
+            builtins.append(("check_background_tasks", self.check_background_tasks))
+        if self.worktree_runner is not None:
+            builtins.append(("check_worktree_prune", self.check_worktree_prune))
+        for name, func in builtins:
             if name not in self._tasks:
                 self._tasks[name] = func
         self._restart_count += 1
@@ -204,9 +215,14 @@ class HeartbeatDaemon:
         return self.health_check()
 
     def _run_loop(self) -> None:
-        """心跳轮询主循环。"""
+        """心跳轮询主循环；意外退出单轮时原地恢复。"""
         while not self._stop_event.is_set():
-            self._run_loop_once()
+            try:
+                self._run_loop_once()
+            except Exception as exc:
+                self._restart_count += 1
+                self._last_error = f"daemon loop: {exc}"
+                logger.exception("heartbeat loop failed; restarting")
 
             sleep_step = 0.5
             elapsed = 0.0
@@ -255,12 +271,13 @@ class HeartbeatDaemon:
         payload.setdefault("source", DAEMON_SOURCE)
         payload.setdefault("origin", self.agent_id)
         normalized = {"type": event_type, "payload": payload}
-        self.mailbox.send_message(
-            sender_id=DAEMON_SOURCE,
-            recipient_id=self.agent_id,
-            type_name=event_type,
-            payload=payload,
-        )
+        if self.mailbox is not None:
+            self.mailbox.send_message(
+                sender_id=DAEMON_SOURCE,
+                recipient_id=self.agent_id,
+                type_name=event_type,
+                payload=payload,
+            )
         for callback in self._callbacks.get(event_type, []) + self._callbacks.get(
             "*", []
         ):
@@ -271,6 +288,8 @@ class HeartbeatDaemon:
 
     def check_mailbox(self) -> list[dict[str, Any]] | None:
         """检查未读邮件，过滤 daemon 自身事件，避免回声循环。"""
+        if self.mailbox is None:
+            return None
         try:
             unread = self.mailbox.read_unread_messages(
                 self.agent_id,
@@ -324,6 +343,8 @@ class HeartbeatDaemon:
 
     def check_background_tasks(self) -> list[dict[str, Any]] | None:
         """检查任务存储中的待办或已被领取的任务。"""
+        if self.task_store is None:
+            return None
         try:
             tasks = self.task_store.list()
             pending = [t for t in tasks if t.status == PENDING]
@@ -341,6 +362,23 @@ class HeartbeatDaemon:
         except Exception:
             logger.warning("background task check failed", exc_info=True)
         return None
+
+    def check_worktree_prune(self) -> list[dict[str, Any]] | None:
+        """清理孤儿 worktree，并在发生清理时发布报告。"""
+        if self.worktree_runner is None:
+            return None
+        cleaned = self.worktree_runner.prune_stale()
+        if not cleaned:
+            return None
+        return [
+            {
+                "type": "worktree_prune_report",
+                "payload": {
+                    "pruned_count": len(cleaned),
+                    "paths": [str(path) for path in cleaned],
+                },
+            }
+        ]
 
     def _persist_task_names(self) -> None:
         """持久化自定义任务名清单到 .local/daemon_tasks.json。"""

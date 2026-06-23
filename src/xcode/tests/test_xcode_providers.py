@@ -79,7 +79,7 @@ class XcodeProviderEnvTests:
     def test_all_declared_runtime_transports_are_registered(self) -> None:
         """每个配置 transport 都必须有可构造 provider。"""
         declared = set(get_args(ProviderTransport))
-        registered = set(PROVIDER_REGISTRY) - {"faux_chat"}
+        registered = set(PROVIDER_REGISTRY)
 
         assert declared == registered
 

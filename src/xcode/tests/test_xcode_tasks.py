@@ -4,7 +4,7 @@ import jsonschema
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tempfile
-from xcode.harness.task_store import (
+from xcode.experimental.task_store import (
     CLAIMED,
     COMPLETED,
     ConcurrentModificationError,
@@ -91,7 +91,7 @@ class XcodeTaskStoreTests:
             assert TaskStore(root).get(task_id).claimed_by in {"worker-a", "worker-b"}
 
     def test_task_tool_handlers(self) -> None:
-        from xcode.harness.task_store import build_task_tools
+        from xcode.experimental.task_store import build_task_tools
 
         with tempfile.TemporaryDirectory() as temp_dir:
             store = TaskStore(Path(temp_dir))
@@ -152,7 +152,7 @@ class XcodeTaskStoreTests:
 
     def test_create_schema_rejects_dependencies_alias(self) -> None:
         """CREATE_TASK_SCHEMA additionalProperties=False 拒绝 dependencies 别名。"""
-        from xcode.harness.task_store import CREATE_TASK_SCHEMA
+        from xcode.experimental.task_store import CREATE_TASK_SCHEMA
 
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"title": "x", "dependencies": [1]}, CREATE_TASK_SCHEMA)
@@ -194,7 +194,7 @@ class XcodeTaskStoreTests:
 
     def test_create_task_handler_rejects_dependencies_alias(self) -> None:
         """_create_task handler 不再接受 dependencies 别名。"""
-        from xcode.harness.task_store import build_task_tools
+        from xcode.experimental.task_store import build_task_tools
 
         with tempfile.TemporaryDirectory() as temp_dir:
             store = TaskStore(Path(temp_dir))
@@ -214,7 +214,7 @@ class XcodeTaskStoreTests:
             t1 = store.create("setup")
             t2 = store.create("build", payload={"blocked_by": [t1.id]})
 
-            from xcode.harness.task_store import advance_task
+            from xcode.experimental.task_store import advance_task
 
             affected = advance_task(store, t1.id)
             assert store.get(t1.id).status == COMPLETED
@@ -256,7 +256,7 @@ class XcodeTaskStoreTests:
 
     def test_update_task_handler_returns_conflict_message(self) -> None:
         """_update_task handler 捕获冲突并返回友好字符串而非抛错。"""
-        from xcode.harness.task_store import build_task_tools
+        from xcode.experimental.task_store import build_task_tools
 
         with tempfile.TemporaryDirectory() as temp_dir:
             store = TaskStore(Path(temp_dir))
@@ -276,7 +276,7 @@ class XcodeTaskStoreTests:
 
     def test_claim_task_tool_success(self) -> None:
         """claim_task 工具成功认领 pending 任务。"""
-        from xcode.harness.task_store import build_task_tools
+        from xcode.experimental.task_store import build_task_tools
 
         with tempfile.TemporaryDirectory() as temp_dir:
             store = TaskStore(Path(temp_dir))
@@ -292,7 +292,7 @@ class XcodeTaskStoreTests:
 
     def test_claim_task_already_claimed_returns_message(self) -> None:
         """claim_task 对已认领任务返回提示而非抛错。"""
-        from xcode.harness.task_store import build_task_tools
+        from xcode.experimental.task_store import build_task_tools
 
         with tempfile.TemporaryDirectory() as temp_dir:
             store = TaskStore(Path(temp_dir))
@@ -306,7 +306,7 @@ class XcodeTaskStoreTests:
 
     def test_claim_task_rejects_empty_claimant(self) -> None:
         """claim_task 拒绝空 claimant。"""
-        from xcode.harness.task_store import build_task_tools
+        from xcode.experimental.task_store import build_task_tools
 
         with tempfile.TemporaryDirectory() as temp_dir:
             store = TaskStore(Path(temp_dir))
@@ -318,7 +318,7 @@ class XcodeTaskStoreTests:
 
     def test_claim_task_concurrent_only_one_wins(self) -> None:
         """并发 claim_task 恰好一个成功。"""
-        from xcode.harness.task_store import build_task_tools
+        from xcode.experimental.task_store import build_task_tools
 
         with tempfile.TemporaryDirectory() as temp_dir:
             store = TaskStore(Path(temp_dir))

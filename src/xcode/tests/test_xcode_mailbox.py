@@ -5,12 +5,12 @@ import tempfile
 from pathlib import Path
 import logging
 
-from xcode.harness.mailbox import (
+from xcode.experimental.mailbox import (
     AgentMailbox,
     LocalFileMailboxTransport,
     build_mailbox_tools,
 )
-from xcode.harness.task_store import TaskStore
+from xcode.experimental.task_store import TaskStore
 import pytest
 
 
@@ -19,7 +19,7 @@ class TestTaskStoreAndMailbox:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         # Suppress logging warnings to avoid cluttering test outputs
-        logging.getLogger("xcode.harness.mailbox").setLevel(logging.ERROR)
+        logging.getLogger("xcode.experimental.mailbox").setLevel(logging.ERROR)
 
     def teardown_method(self, method) -> None:
         self.temp_dir.cleanup()
@@ -301,7 +301,7 @@ class TestMailboxExpiryAndAckSeparation:
     def setup_method(self, method) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
-        logging.getLogger("xcode.harness.mailbox").setLevel(logging.ERROR)
+        logging.getLogger("xcode.experimental.mailbox").setLevel(logging.ERROR)
 
     def teardown_method(self, method) -> None:
         self.temp_dir.cleanup()
@@ -447,8 +447,8 @@ class TestMailboxExpiryAndAckSeparation:
     def test_daemon_check_mailbox_triggers_cleanup(self) -> None:
         """daemon.check_mailbox 顺带清理过期消息。"""
         from xcode.harness.daemon import HeartbeatDaemon
-        from xcode.harness.mailbox import AgentMailbox as _AgentMailbox
-        from xcode.harness.task_store import TaskStore as _TaskStore
+        from xcode.experimental.mailbox import AgentMailbox as _AgentMailbox
+        from xcode.experimental.task_store import TaskStore as _TaskStore
 
         daemon = HeartbeatDaemon(
             self.root,

@@ -215,6 +215,10 @@ class XcodeRuntimeConfigTests:
         assert config.paths.sessions_dir is None
         assert not (config.daemon.enabled)
         assert config.daemon.interval_seconds == 30
+        assert not config.experimental.tasks
+        assert not config.experimental.mailbox
+        assert not config.experimental.progress
+        assert not config.experimental.worktree
         assert config.hooks.entries == ()
 
     def test_loads_runtime_config_file(self) -> None:
@@ -235,7 +239,9 @@ class XcodeRuntimeConfigTests:
                 '"tools":{"network_commands":"deny"},'
                 '"skills":{},'
                 '"prompt":{"modules":["identity","tools"]},'
-                '"daemon":{"enabled":true,"interval_seconds":15}}',
+                '"daemon":{"enabled":true,"interval_seconds":15},'
+                '"experimental":{"tasks":true,"mailbox":true,'
+                '"progress":true,"worktree":true}}',
                 encoding="utf-8",
             )
 
@@ -258,6 +264,10 @@ class XcodeRuntimeConfigTests:
             assert config.observability.audit_path == Path("audit.jsonl")
             assert config.daemon.enabled
             assert config.daemon.interval_seconds == 15
+            assert config.experimental.tasks
+            assert config.experimental.mailbox
+            assert config.experimental.progress
+            assert config.experimental.worktree
 
     def test_loads_external_hook_config(self) -> None:
         """外部 hook 声明转换为类型化 argv 配置。"""

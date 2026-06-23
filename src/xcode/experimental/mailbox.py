@@ -1,4 +1,4 @@
-"""本地 append-only Agent mailbox。"""
+"""基于共享本地文件系统的跨进程 Agent mailbox。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ _DEFAULT_RETENTION_DAYS = 30
 
 
 class MailboxTransport(Protocol):
-    """跨进程/跨机器 Agent 通信的传输层协议。"""
+    """基于共享本地文件系统的跨进程 Agent 通信协议。"""
 
     def send_message(
         self,
@@ -47,7 +47,7 @@ class MailboxTransport(Protocol):
     def acknowledge_message(self, message_id: str, recipient_id: str) -> None: ...
 
 
-logger = logging.getLogger("xcode.harness.mailbox")
+logger = logging.getLogger("xcode.experimental.mailbox")
 
 
 def _parse_iso_timestamp(value: str) -> float:

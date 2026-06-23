@@ -7,24 +7,26 @@ import pytest
 
 
 class XcodeModuleBoundaryTests:
-    """验证已删除的模块边界不会被重新引入。"""
+    """验证实验能力与稳定模块边界。"""
 
-    def test_experimental_package_is_absent(self) -> None:
-        """禁止恢复 experimental package 或对应 import。"""
+    def test_experimental_package_owns_optional_features(self) -> None:
+        """实验能力必须位于 experimental package，旧路径不得恢复。"""
         package_root = Path(__file__).resolve().parents[1]
-        experimental_name = "experimental"
-        assert not ((package_root / experimental_name).exists())
+        experimental_root = package_root / "experimental"
+        assert experimental_root.is_dir()
+        assert {
+            "mailbox.py",
+            "orchestration_store.py",
+            "task_progress.py",
+            "task_store.py",
+            "worktree.py",
+        } <= {path.name for path in experimental_root.glob("*.py")}
 
-        import_name = "xcode." + experimental_name
-        imported_by: list[Path] = []
-        for source_path in package_root.rglob("*.py"):
-            if source_path == Path(__file__).resolve():
-                continue
-            source = source_path.read_text(encoding="utf-8")
-            if import_name in source:
-                imported_by.append(source_path.relative_to(package_root))
-
-        assert imported_by == []
+        assert not (package_root / "harness" / "mailbox.py").exists()
+        assert not (package_root / "harness" / "task_store.py").exists()
+        assert not (package_root / "harness" / "task_progress.py").exists()
+        assert not (package_root / "harness" / "orchestration_store.py").exists()
+        assert not (package_root / "coding_agent" / "tools" / "worktree.py").exists()
 
 
 if __name__ == "__main__":

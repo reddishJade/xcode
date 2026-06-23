@@ -258,6 +258,16 @@ class DaemonRuntimeConfig:
 
 
 @dataclass
+class ExperimentalRuntimeConfig:
+    """默认关闭的实验性能力开关。"""
+
+    tasks: bool = False
+    mailbox: bool = False
+    progress: bool = False
+    worktree: bool = False
+
+
+@dataclass
 class XcodeRuntimeConfig:
     provider: ProviderRuntimeConfig = field(default_factory=ProviderRuntimeConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
@@ -270,6 +280,9 @@ class XcodeRuntimeConfig:
     )
     hooks: HooksRuntimeConfig = field(default_factory=HooksRuntimeConfig)
     daemon: DaemonRuntimeConfig = field(default_factory=DaemonRuntimeConfig)
+    experimental: ExperimentalRuntimeConfig = field(
+        default_factory=ExperimentalRuntimeConfig
+    )
     request_hygiene: RequestHygieneConfig = field(default_factory=RequestHygieneConfig)
     security: SecurityRuntimeConfig = field(default_factory=SecurityRuntimeConfig)
 

@@ -20,7 +20,7 @@ import filelock
 
 from xcode.harness.skills import ToolInput, ToolSpec
 
-logger = logging.getLogger("xcode.coding_agent.tools.worktree")
+logger = logging.getLogger("xcode.experimental.worktree")
 
 CommandRunner = Callable[[list[str], Path], str]
 

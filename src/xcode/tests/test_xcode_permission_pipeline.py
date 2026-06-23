@@ -9,7 +9,7 @@ from xcode.harness.observability.permissions import (
     PermissionPolicy,
     StaticPermission,
 )
-from xcode.harness.task_store import (
+from xcode.experimental.task_store import (
     TaskStore,
     resolve_task_dependencies,
     render_kanban_view,

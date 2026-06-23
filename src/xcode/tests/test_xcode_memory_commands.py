@@ -97,7 +97,7 @@ def test_memory_group_registers_search_tool(tmp_path: Path) -> None:
             tmp_path,
             runtime_registry,
             XcodeRuntimeConfig(),
-            build_shared_services(tmp_path),
+            build_shared_services(tmp_path, XcodeRuntimeConfig()),
         )
     finally:
         runtime_registry.close()

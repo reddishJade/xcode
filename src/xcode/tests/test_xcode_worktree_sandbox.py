@@ -5,7 +5,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from xcode.coding_agent.tools.worktree import WorktreeTaskRunner
+from xcode.experimental.worktree import WorktreeTaskRunner
 import pytest
 
 

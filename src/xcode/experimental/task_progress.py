@@ -14,11 +14,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from xcode.harness.orchestration_store import OrchestrationStore, TaskRunState
+from xcode.experimental.orchestration_store import OrchestrationStore, TaskRunState
 from xcode.harness.skills import ToolInput, ToolSpec
-from xcode.harness.task_store import CLAIMED, PENDING, TaskStore
+from xcode.experimental.task_store import CLAIMED, PENDING, TaskStore
 
-logger = logging.getLogger("xcode.harness.task_progress")
+logger = logging.getLogger("xcode.experimental.task_progress")
 
 
 def save_progress(

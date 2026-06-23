@@ -7,7 +7,7 @@ from xcode.harness.agent_runtime.compaction import (
     context_collapse_clean,
 )
 from xcode.harness.agent_runtime.prompting import PromptContext, SystemPromptBuilder
-from xcode.harness.task_store import TaskStore
+from xcode.experimental.task_store import TaskStore
 import pytest
 
 
