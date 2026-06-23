@@ -1,7 +1,11 @@
 <div align="center">
   <br/>
-  <h1>Xcode Coding Agent</h1>
-  <p><strong>轻量级 Python Agent 运行骨架</strong></p>
+  <h1>
+    <code style="color:#141413; background:#e8e6dc; padding:0 12px; border-radius:4px;">xcode</code>
+  </h1>
+  <p style="font-size:1.2em; color:#141413;">
+    <strong>轻量级 Python Agent 运行骨架</strong>
+  </p>
   <p>
     <img src="https://img.shields.io/badge/python-3.12-%23141413?style=flat-square" alt="Python 3.12"/>&nbsp;
     <img src="https://img.shields.io/badge/version-0.1.1-%23d97757?style=flat-square" alt="Version 0.1.1"/>&nbsp;
@@ -11,7 +15,7 @@
   <br/>
 </div>
 
-围绕结构化事件流、路径安全、工具审批、审计脱敏、上下文压缩和 REPL 会话管理构建的可测试 Agent 运行骨架。零配置即可运行。
+围绕结构化事件流、路径安全、工具审批、审计脱敏、上下文压缩和 REPL 会话管理构建的可测试 Agent 运行骨架。**零配置即可运行。**
 
 ---
 
@@ -74,8 +78,8 @@ uv run pyinstaller --onedir --name xcode --paths src src/xcode/__main__.py
 
 | 模式 | 产出 | 启动速度 | 适用场景 |
 |---|---|---|---|
-| `--onedir`（默认）| `dist\xcode\` 目录（exe + 依赖）| 无延迟 | 开发/调试、频繁更新 |
-| `--onefile` | 单个 `dist\xcode.exe` | 慢 1-3 秒（需解压）| 分发给终端用户 |
+| `--onedir`（默认） | `dist\xcode\` 目录（exe + 依赖） | 无延迟 | 开发/调试、频繁更新 |
+| `--onefile` | 单个 `dist\xcode.exe` | 慢 1-3 秒（需解压） | 分发给终端用户 |
 
 `onedir` 模式下，依赖层不变时只需重新打包主 exe，`_internal\` 目录可复用。
 
@@ -93,46 +97,43 @@ app = build_app(project_root=Path.cwd())
 
 answer = app.ask("列出当前目录所有 Python 文件。")
 print(answer)
-
-answer = await app.aask("列出当前目录所有 Python 文件。")
-
-app.close()
 ```
 
-### REPL 交互
+应用配置通过 `build_app()` 参数、配置文件或环境变量注入。详细配置见 [CONFIG.md](CONFIG.md)。
+
+### CLI 交互
 
 ```powershell
-# 项目内运行（开发模式）
-uv run xcode
+# 直接提问（单轮，自动退出）
+xcode "列出当前目录所有 Python 文件。"
 
-# 或通过 python -m
-uv run python -m xcode
-
-# 全局安装后直接运行
+# REPL 模式（多轮对话，支持 /slash 命令）
 xcode
+
+# 自定义配置
+xcode --config .local/settings.json
 ```
 
-REPL 支持以下会话命令：
+### REPL 命令概览
 
 | 命令 | 功能 |
 |---|---|
-| `/plan` | 进入 Plan 模式（只读检查，禁止写入） |
-| `/build` | 进入 Build 模式（允许写入，高风险需审批） |
-| `/act` | 进入 Act 模式（完整权限） |
+| `/plan [目标]` | 制定执行计划 |
+| `/build` | 执行当前 `plan.md` |
+| `/act [需求]` | plan + build 二合一 |
 | `/compact` | 手动触发上下文压缩 |
-| `/clear` | 开始新会话 |
-| `/fork [type]` | 分支（explore/verify/isolate） |
-| `/rewind [n]` | 回退 n 轮 |
-| `/resume [last\|id]` | 恢复历史会话 |
+| `/clear` | 清屏 |
+| `/fork [消息序号]` | 从指定消息分支新会话 |
+| `/rewind [N]` | 撤销最近 N 轮交互 |
 | `/sessions` | 列出所有历史会话 |
 | `/branch [list\|tree\|id]` | 切换分支 |
 | `/tree` | 查看会话树 |
-| `/model [provider/model[:thinking_level]]` | 切换模型。`provider` 可选：`deepseek_chat`/`openai_chat`/`mimo_chat`/`chatglm_chat` 或 profile 名（`main`/`subagent`/`fallback`）。`:thinking_level` 可选：`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`。示例：`/model openai_chat/gpt-5.4-mini:high` |
+| `/model [provider/model[:thinking_level]]` | 切换模型 |
 | `/effort <level>` | 设置推理 effort |
 | `/thinking on/off` | 切换 thinking 显示 |
 | `/tool [list\|NAME INPUT]` | 查看/调用工具 |
 | `/skill NAME` | 显式激活技能 |
-| `/memory` | 检索、列出或添加项目级与用户级记忆 |
+| `/memory` | 检索、列出或添加记忆 |
 | `/permissions [revoke\|clear]` | 权限管理 |
 | `/hooks` | 查看 hook 状态 |
 | `/context` | 查看上下文 token 占用 |
@@ -147,53 +148,68 @@ REPL 支持以下会话命令：
 
 ## 核心能力
 
-- **结构化 Agent 循环** — `StructuredAgent` 消费 provider 流式事件，统一处理
-  text、reasoning、tool_use、tool_result 和 final answer。
-- **核心工具闭环** — 默认提供文件读写编辑、词法搜索和受控 bash。`edit_file`
-  依赖 read-before-edit 指纹校验。
+- **结构化 Agent 循环** — `StructuredAgent` 消费 provider 流式事件，统一处理 text、reasoning、tool_use、tool_result 和 final answer。
+- **核心工具闭环** — 默认提供文件读写编辑、词法搜索和受控 bash。`edit_file` 依赖 read-before-edit 指纹校验。
 - **工具并发分区** — 只读且并发安全的工具并行执行；写操作、高风险命令保持串行。
-- **权限与审计** — `PermissionEngine` 统一执行工具权限判定、HITL 审批和输出
-  脱敏；`JsonlAuditLogger` 记录审计日志。
-- **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果，
-  支持压缩后重建文件指纹。
-- **REPL 会话管理** — `/plan`、`/build`、`/act`、`/compact`、`/clear`、`/fork`、
-  `/rewind`、`/sessions`、`/resume`、`/branch`、`/tree`、`/model`、`/effort`、
-  `/thinking`、`/tool`、`/skill`、`/memory`、`/permissions`、`/hooks`、`/undo`、
-  `$skill-name` 快捷入口、`!COMMAND` shell 快捷入口、`@file` 引用、
-  `/context`、`/btw` 和 session transcript 落盘。
+- **权限与审计** — `PermissionEngine` 统一执行工具权限判定、HITL 审批和输出脱敏；`JsonlAuditLogger` 记录审计日志。
+- **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果，支持压缩后重建文件指纹。
+- **REPL 会话管理** — 丰富的 `/slash` 命令体系，支持 plan/build/act、会话分支、回退、模型切换、session transcript 落盘。
 - **Subagent 委托** — `ManagedSubagentRunner` 并行子任务调度；实验开关可启用 worktree 隔离。
 - **MCP 协议** — 自动发现 `.local/mcp_config.json`，注册 `mcp__{server}__{tool}` 动态工具。
-- **实验能力** — 可显式启用 tasks、基于共享本地文件系统的 mailbox、
-  progress 断点续传和 worktree 隔离；默认全部关闭。
-
----
-
-## 配置
-
-配置发现栈：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地
-`.local/settings.json` → 环境变量覆盖。所有字段默认值见 [CONFIG.md](CONFIG.md)。
+- **实验能力** — 可显式启用 tasks、mailbox、progress 断点续传和 worktree 隔离；默认全部关闭。
 
 ---
 
 ## 工具组
 
-| group | 工具 |
+| Group | Tools |
 |---|---|
-| `core` | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools` |
+| `core` | `read_file`, `write_file`, `edit_file`, `glob_files`, `find_files`, `grep_search`, `ls`, `bash`, `search_tools` |
 | `skills` | `load_skill`（发现 skill 时自动注册） |
-| `subagent` | `submit_subagent`、`check_subagent`、`cancel_subagent` |
+| `subagent` | `submit_subagent`, `check_subagent`, `cancel_subagent` |
 | `worktree` | 实验：`experimental.worktree=true` |
 | `tasks` | 实验：`experimental.tasks=true` |
 | `mailbox` | 实验：`experimental.mailbox=true` |
 | `progress` | 实验：`experimental.progress=true`，且要求 `tasks=true` |
 | `memory` | `search_memory`；主动召回、压缩摘要 consolidation |
 | `daemon` | `HeartbeatDaemon`（由 `daemon.enabled` 配置项控制） |
-| `mcp` | `mcp__{server}__{tool}`、`mcp_tool_search`（存在 `.local/mcp_config.json` 时自动注册） |
+| `mcp` | `mcp__{server}__{tool}`, `mcp_tool_search`（存在 `.local/mcp_config.json` 时自动注册） |
 
-每轮会按用户问题检索项目根 `MEMORY.md` 与用户级
-`~/.xcode/memory/MEMORY.md`，将最多 3 条匹配记录注入 `<memory>` 上下文。
-`search_memory` 是只读、低风险工具；schema 支持 `query`、`limit`、`scope`
-和 `layer`。
+每轮会按用户问题检索项目根 `MEMORY.md` 与用户级 `~/.xcode/memory/MEMORY.md`，将最多 3 条匹配记录注入 `<memory>` 上下文。`search_memory` 是只读、低风险工具。
+
+---
+
+## 配置
+
+配置发现栈（优先级从低到高）：
+
+```
+~/.xcode/settings.json          ← 全局默认
+     ↓
+xcode.config.json               ← 项目级
+     ↓
+.local/settings.json            ← 本地覆盖
+     ↓
+环境变量                          ← 最高优先级
+```
+
+所有字段默认值及完整参考见 [CONFIG.md](CONFIG.md)。
+
+---
+
+## 架构
+
+四层架构，自底向上：
+
+| Layer | 职责 |
+|---|---|
+| `ai/` | 多 provider LLM API（OpenAI-compatible 基类 + DeepSeek/ChatGLM/MiMo 适配器） |
+| `agent/` | 通用 agent loop 合约：消息/事件类型、工具执行分区、上下文收集、watchdog |
+| `harness/` | 应用装配、运行时配置、session 存储、权限引擎、审计日志、MCP 集成 |
+| `coding_agent/` | Coding 产品工具实现：file、code_search、bash、worktree |
+| `cli/` | REPL UI 和 slash command 系统 |
+
+运行路径：`main.py` → `build_app()` → `StructuredAgent` → `Agent` loop → provider stream → tool execution。
 
 ---
 
@@ -214,7 +230,7 @@ uv run python -m xcode.evals.cli --list-suites
 # 运行 pipeline 套件
 uv run python -m xcode.evals.cli --suite pipeline
 
-# 运行工具策略套件
+# 运行 tool-policy 套件
 uv run python -m xcode.evals.cli --suite tool-policy
 
 # 运行真实模型 eval（需要配置 API key）
