@@ -227,14 +227,13 @@ class XcodeAppRuntimeTests:
         """配置的 skills 目录不存在时，系统正常启动，发出警告。"""
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             root = Path(tmp)
-            # 只扫描不存在的显式目录，不引入用户级技能
-            with patch(
-                "xcode.harness.skills_registry.build_skill_search_dirs",
-                return_value=[(root / "missing-skills", 0)],
-            ):
+            # 用临时目录 mock 家目录，避免用户级技能干扰
+            with patch.object(Path, "home", return_value=root):
+                empty_skills = root / "empty-skills"
+                empty_skills.mkdir()
                 app = build_app(
                     project_root=root,
-                    skills_dir=root / "missing-skills",
+                    skills_dir=empty_skills,
                     runtime_config=XcodeRuntimeConfig(),
                 )
 

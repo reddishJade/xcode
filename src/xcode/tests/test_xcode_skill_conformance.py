@@ -33,7 +33,7 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from xcode.harness.skills_registry import (
+from xcode.harness.agent_skills import (
     SkillIndexCollector,
     SkillRegistry,
     build_load_skill_tool,
@@ -894,7 +894,7 @@ class TestSkillReferences:
 
             assert len(blocks) == 1
             content = blocks[0].content
-            assert "ci-skill" in content
+            assert "<name>ci-skill</name>" in content
             assert "Input validation" not in content
             assert "guide.md" not in content
 

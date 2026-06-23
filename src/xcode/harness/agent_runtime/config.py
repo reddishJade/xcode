@@ -45,7 +45,7 @@ from ..observability import (
 from ..observability.permission_model import GrantStore, PolicyEvaluator
 from ..observability.permission_model import ExternalDirectory
 from ..skills import ApprovalCallback, ToolSpec
-from ..skills_registry import SkillRegistry
+from ..agent_skills import SkillRegistry
 from ..session_todo import SessionTodoState
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
@@ -316,7 +316,7 @@ def build_loop_config(
     registry_: ContextCollectorRegistry | None = None
     assembler: DefaultContextAssembler | None = None
     if project_root is not None:
-        from xcode.harness.skills_registry import (
+        from xcode.harness.agent_skills import (
             SkillIndexCollector,
             SkillRegistry,
             build_skill_search_dirs,

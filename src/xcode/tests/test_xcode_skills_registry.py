@@ -17,13 +17,14 @@ from unittest import mock
 
 import jsonschema
 
-from xcode.harness.skills_registry import (
+from xcode.harness.agent_skills import (
     SkillIndexCollector,
     SkillRegistry,
     build_load_skill_tool,
     build_skill_search_dirs,
-    _parse_frontmatter,
+    SkillDiagnostic,
 )
+from xcode.harness.agent_skills.parsing import parse_frontmatter
 from xcode.harness.observability import (
     PermissionEngine,
     PermissionEngineConfig,
@@ -48,46 +49,50 @@ class TestFrontmatterParser:
 
     def test_basic_parse(self) -> None:
         text = "---\nname: code-review\ndescription: Review code.\n---\n\nBody."
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is not None
         assert result["name"] == "code-review"
         assert result["description"] == "Review code."
-        assert not (result["hidden"])
+        assert not (result["disable_model_invocation"])
 
-    def test_hidden_true(self) -> None:
+    def test_disable_model_invocation_true(self) -> None:
         text = (
-            "---\nname: secret\ndescription: Hidden skill.\nhidden: true\n---\n\nBody."
+            "---\nname: secret\ndescription: Hidden skill.\n"
+            "disable-model-invocation: true\n---\n\nBody."
         )
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is not None
-        assert result["hidden"]
+        assert result["disable_model_invocation"]
 
-    def test_hidden_false(self) -> None:
-        text = "---\nname: visible\ndescription: Visible skill.\nhidden: false\n---\n\nBody."
-        result = _parse_frontmatter(text)
+    def test_disable_model_invocation_false(self) -> None:
+        text = (
+            "---\nname: visible\ndescription: Visible skill.\n"
+            "disable-model-invocation: false\n---\n\nBody."
+        )
+        result = parse_frontmatter(text)
         assert result is not None
-        assert not (result["hidden"])
+        assert not (result["disable_model_invocation"])
 
     def test_quoted_values(self) -> None:
         text = "---\nname: \"my skill\"\ndescription: 'A skill.'\n---"
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is not None
         assert result["name"] == "my skill"
         assert result["description"] == "A skill."
 
     def test_missing_required_name(self) -> None:
         text = "---\ndescription: No name here.\n---\n\nBody."
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is None
 
     def test_missing_required_description(self) -> None:
         text = "---\nname: no-desc\n---\n\nBody."
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is None
 
     def test_ignores_unknown_keys(self) -> None:
         text = "---\nname: test\ndescription: Test.\ntriggers: code review\nrisk: low\ntools: bash, read_file\n---\n\nBody."
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is not None
         assert result["name"] == "test"
         assert result["description"] == "Test."
@@ -110,7 +115,7 @@ class TestFrontmatterParser:
             "---\n"
         )
 
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
 
         assert result is not None
         assert result["license"] == "Apache-2.0"
@@ -127,8 +132,8 @@ class TestFrontmatterParser:
             "---\n"
         )
 
-        with assert_logs("xcode.harness.skills_registry", level="WARNING"):
-            result = _parse_frontmatter(text)
+        with assert_logs("xcode.harness.agent_skills", level="WARNING"):
+            result = parse_frontmatter(text)
 
         assert result is not None
         assert result["description"] == "Use this skill when: the user asks about PDFs"
@@ -145,10 +150,10 @@ class TestFrontmatterParser:
         )
 
         with assert_logs(
-            "xcode.harness.skills_registry",
+            "xcode.harness.agent_skills",
             level="WARNING",
         ) as logs:
-            result = _parse_frontmatter(text)
+            result = parse_frontmatter(text)
 
         assert result is not None
         assert result["compatibility"] == compatibility
@@ -157,29 +162,29 @@ class TestFrontmatterParser:
     def test_malformed_frontmatter_skip(self) -> None:
         """没有闭合 --- 分隔符视为 malformed。"""
         text = "---\nname: test\ndescription: Test.\n"
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is None
 
     def test_no_frontmatter_returns_none(self) -> None:
         text = "Just a regular markdown file.\n\nNo frontmatter."
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is None
 
     def test_empty_frontmatter_returns_none(self) -> None:
         text = "---\n---\n\nBody."
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is None
 
     def test_invalid_yaml_skipped(self) -> None:
         """无效 YAML 内容跳过并记录警告。"""
         text = "---\nname: test\ndescription: Test\nunbalanced: [one, two\n---\n\nBody."
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is None
 
     def test_non_dict_frontmatter_skipped(self) -> None:
         """标量或列表 frontmatter 跳过。"""
         text = "---\njust a string\n---\n\nBody."
-        result = _parse_frontmatter(text)
+        result = parse_frontmatter(text)
         assert result is None
 
 
@@ -239,7 +244,7 @@ class TestSkillRegistry:
             registry = SkillRegistry()
 
             with assert_logs(
-                "xcode.harness.skills_registry",
+                "xcode.harness.agent_skills",
                 level="WARNING",
             ) as logs:
                 registry.discover(build_skill_search_dirs(root))
@@ -267,7 +272,7 @@ class TestSkillRegistry:
             registry = SkillRegistry()
 
             with assert_logs(
-                "xcode.harness.skills_registry",
+                "xcode.harness.agent_skills",
                 level="WARNING",
             ) as logs:
                 registry.discover(build_skill_search_dirs(root))
@@ -291,7 +296,7 @@ class TestSkillRegistry:
             registry = SkillRegistry()
 
             with assert_logs(
-                "xcode.harness.skills_registry",
+                "xcode.harness.agent_skills",
                 level="WARNING",
             ) as logs:
                 registry.discover(build_skill_search_dirs(root))
@@ -386,8 +391,8 @@ class TestSkillRegistry:
         registry.discover([])
         assert registry.load("nonexistent") is None
 
-    def test_hidden_not_in_summaries(self) -> None:
-        """hidden=true 的技能不出现在摘要中。"""
+    def test_disable_model_invocation_excludes_from_summaries(self) -> None:
+        """disable_model_invocation=true 的技能不出现在摘要中。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _make_skill(
@@ -396,7 +401,8 @@ class TestSkillRegistry:
                 "skills",
                 "secret",
                 content=(
-                    "---\nname: secret-skill\ndescription: Hidden.\nhidden: true\n---\n\nSecret."
+                    "---\nname: secret-skill\ndescription: Hidden.\n"
+                    "disable-model-invocation: true\n---\n\nSecret."
                 ),
             )
             registry = SkillRegistry()
@@ -405,8 +411,8 @@ class TestSkillRegistry:
             names = [s.name for s in summaries]
             assert "secret-skill" not in names
 
-    def test_hidden_still_loadable(self) -> None:
-        """hidden=true 的技能仍可通过 load() 加载。"""
+    def test_disable_model_invocation_skill_still_loadable(self) -> None:
+        """disable_model_invocation=true 的技能仍可通过 load() 加载。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _make_skill(
@@ -415,13 +421,13 @@ class TestSkillRegistry:
                 "skills",
                 "secret",
                 content=(
-                    "---\nname: secret-skill\ndescription: Hidden.\nhidden: true\n---\n\nSecret body."
+                    "---\nname: secret-skill\ndescription: Hidden.\n"
+                    "disable-model-invocation: true\n---\n\nSecret body."
                 ),
             )
             registry = SkillRegistry()
             registry.discover(build_skill_search_dirs(root))
             skill = registry.load("secret-skill")
-            assert skill is not None
             assert skill is not None
             assert skill.content == "Secret body."
 
@@ -530,7 +536,7 @@ class TestSkillRegistry:
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "missing"
             with assert_logs(
-                "xcode.harness.skills_registry",
+                "xcode.harness.agent_skills",
                 level="WARNING",
             ) as logs:
                 search_dirs = build_skill_search_dirs(
@@ -619,9 +625,9 @@ class TestSkillRegistry:
             registry.discover(build_skill_search_dirs(root))
             content = self._collect_text(registry)
 
-        assert 'name="code-review"' in content
+        assert "<name>code-review</name>" in content
         assert "Review code changes." in content
-        assert 'name="write-docs"' in content
+        assert "<name>write-docs</name>" in content
         assert "Write technical documentation." in content
 
     def test_skill_index_collector_escapes_xml_injection(self) -> None:

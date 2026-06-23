@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from xcode.experimental.mailbox import AgentMailbox
     from xcode.harness.daemon import HeartbeatDaemon
     from xcode.harness.mcp import McpRuntimeRegistry
-    from xcode.harness.skills_registry import SkillRegistry
+    from xcode.harness.agent_skills import SkillRegistry
 
 
 @dataclass(frozen=True)
@@ -286,7 +286,7 @@ def build_tool_registry(
     closers: list[Callable[[], None]] = []
     shell_spec = detect_shell(runtime_config.tools.shell)
 
-    from xcode.harness.skills_registry import (
+    from xcode.harness.agent_skills import (
         SkillRegistry,
         build_skill_search_dirs,
     )

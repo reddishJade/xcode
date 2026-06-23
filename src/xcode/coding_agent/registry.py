@@ -21,7 +21,7 @@ from xcode.coding_agent.tools import (
 
 if TYPE_CHECKING:
     from xcode.harness.agent_runtime import ContextualRetrievalState
-    from xcode.harness.skills_registry import SkillRegistry
+    from xcode.harness.agent_skills import SkillRegistry
     from xcode.coding_agent.tools import ShellSpec
 
 
@@ -47,7 +47,7 @@ def build_project_scoped_registry(
         ),
     )
     if skill_registry is not None and skill_registry.available_names():
-        from xcode.harness.skills_registry import build_load_skill_tool
+        from xcode.harness.agent_skills import build_load_skill_tool
 
         registry += (build_load_skill_tool(skill_registry),)
     return registry

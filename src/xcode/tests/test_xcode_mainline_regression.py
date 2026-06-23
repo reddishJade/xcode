@@ -37,7 +37,7 @@ from xcode.harness.observability import (
     StaticPermission,
 )
 from xcode.harness.session import SessionStore
-from xcode.harness.skills_registry import (
+from xcode.harness.agent_skills import (
     SkillRegistry,
     build_load_skill_tool,
     build_skill_search_dirs,

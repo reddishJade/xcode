@@ -13,7 +13,7 @@ from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 from xcode.harness.observability import PermissionPolicy, StaticPermission
 from xcode.harness.session import SessionStore
-from xcode.harness.skills_registry import (
+from xcode.harness.agent_skills import (
     SkillRegistry,
     build_load_skill_tool,
     build_skill_search_dirs,

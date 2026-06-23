@@ -43,7 +43,7 @@ from xcode.agent.protocols import AgentToolResult, ToolExecutionMode
 from xcode.agent.types import TextContent
 from xcode.ai.events import Message, TextDelta, ToolCall, ToolCallEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
-from xcode.harness.skills_registry import (
+from xcode.harness.agent_skills import (
     SkillIndexCollector,
     SkillRegistry,
     build_skill_search_dirs,
@@ -2297,7 +2297,7 @@ class TestSkillIndexCollector:
             assert "<available-skills>" in text
             assert "</available-skills>" in text
 
-    def test_hidden_skills_excluded(self) -> None:
+    def test_disable_model_invocation_excluded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._make_skill(
@@ -2315,7 +2315,8 @@ class TestSkillIndexCollector:
                 "skills",
                 "hidden",
                 content=(
-                    "---\nname: hidden-skill\ndescription: Hidden.\nhidden: true\n---\n\nBody."
+                    "---\nname: hidden-skill\ndescription: Hidden.\n"
+                    "disable-model-invocation: true\n---\n\nBody."
                 ),
             )
             registry = SkillRegistry()
