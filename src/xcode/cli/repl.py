@@ -247,6 +247,9 @@ def run_repl(
                 return 0
             continue
         if text.startswith("!"):
+            token = getattr(getattr(app, "agent", None), "cancellation_token", None)
+            if token is not None:
+                token.reset()
             output = run_shell_shortcut(text, app)
             store.append("event", {"type": "shell_shortcut", "data": text})
             store.append("event", {"type": "tool_result", "data": output})
