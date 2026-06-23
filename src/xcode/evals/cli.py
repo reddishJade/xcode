@@ -477,11 +477,12 @@ def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
             ),
         )
     else:
+        answer = " ".join(task.expected_answer_contains) or "offline ok"
         provider = _StaticProvider(
             [
                 [
-                    TextDelta(chunk="offline ok"),
-                    FinalMessage(content="offline ok", stop_reason="end_turn"),
+                    TextDelta(chunk=answer),
+                    FinalMessage(content=answer, stop_reason="end_turn"),
                 ]
             ]
         )

@@ -23,6 +23,7 @@ from xcode.harness.config import AgentConfig
 from xcode.harness.skills import ToolSpec
 from xcode.evals.benchmarks import load_benchmark
 from xcode.evals.cli import _print_failed_trials
+from xcode.evals.cli import _offline_app_factory
 from xcode.evals.cli import main as eval_main
 from xcode.evals.cli import _trial_project_root
 from xcode.evals.cli import _task_from_dict
@@ -50,6 +51,17 @@ PATH_SCHEMA = {
 
 
 class EvalPipelineTests:
+    def test_offline_app_returns_declared_expected_answer(self) -> None:
+        task = EvalTask(
+            id="offline-answer",
+            prompt="return the marker",
+            expected_answer_contains=("expected-marker",),
+        )
+
+        answer = _offline_app_factory(task, 0).ask(task.prompt)
+
+        assert answer == "expected-marker"
+
     def test_eval_runner_records_trace_and_passes_graders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task = EvalTask(
