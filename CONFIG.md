@@ -4,7 +4,9 @@
 
 配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地 `.local/settings.json` → 环境变量 `XCODE_SANDBOX_MODE`、`XCODE_PERMISSION_MODE`、`XCODE_APPROVAL_POLICY`。
 
-**没有配置文件时**只启用 `core` 工具组，零配置可用。
+**没有配置文件时**启用正式内置能力（`core`、`subagent`、`memory`，以及存在
+可见 skill 时的 `skills`）；`worktree`、`tasks`、`mailbox`、`progress` 和
+daemon 仍需显式启用。零配置可用。
 
 ---
 
@@ -131,6 +133,7 @@ xcode config delete subagent                          # 删除 subagent profile
 |---|---|---|---|
 | `sessions_dir` | string/null | `null` | REPL 会话目录；未配置时 CLI 使用 `.local/sessions` |
 | `skills_dir` | string/null | `null` | 最高优先级 Skill 扫描目录；相对路径按项目根目录解析 |
+| `progress_summary` | string/null | `null` | progress 摘要路径；当前未配置时底层回退到项目根 `claude-progress.txt`，计划改为 `.local/progress_summary.md` |
 
 固定本地路径：`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`。
 

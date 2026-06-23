@@ -1,6 +1,6 @@
 # Xcode 代码库现状报告
 
-基于 `src/xcode/` 当前源码审查，审查日期：2026-06-18。
+基于 `src/xcode/` 当前源码审查，审查日期：2026-06-23。
 
 本文描述当前实现边界，不代表未来规划。结论以源码调用链为准，未以测试名称、
 旧文档或接口预留作为已实现功能的证据。
@@ -17,18 +17,18 @@ cli → coding_agent → harness → agent → ai
 已经可用。MCP 和 Memory 均已迁入正式 runtime package：
 
 - Skill 和 MCP 是核心能力，应按基础范式兼容要求长期维护。
-- Memory 是正式能力，但在主动召回效果得到 eval 验证前可以保持可配置启用。
+- Memory 是正式能力，当前已在每轮按用户问题主动召回项目级与用户级记忆。
 - 进程内 Python Plugins 已删除，不再作为产品扩展路径。
-- Subagent 和 eval 是正式的高级能力，不要求默认启用。
+- Subagent 是默认注册的正式能力；eval 是独立的开发验证入口。
 
 当前主要架构缺口集中在：
 
 - 缺少跨工具、权限和运行时故障的统一错误 taxonomy。
 - 工具调度没有资源标签、并发额度或统一频控。
-- Memory 未接入每轮 Context Assembly 主动召回。
-- MCP 缺少运行时管理、健康检查和多 transport 支持。
-- Observability 没有 span tracing、统一时间戳和在线指标后端。
-- Subagent 缺少递归、实时输出和 agent 间通信。
+- Memory 主动召回已有运行路径，但缺少持续的离线质量 eval 和跨进程写入合并。
+- MCP 缺少 workspace roots、运行时状态/手动重载和长工具调用进度。
+- Observability 没有 span tracing 和在线指标后端。
+- Subagent 缺少实时输出和 agent 间通信；递归委托当前明确不支持。
 - Model routing 缺少成本、配额和多级 fallback 管理。
 
 ---
@@ -256,17 +256,17 @@ cli → coding_agent → harness → agent → ai
 
 - MCP 通过官方 Python SDK 从 `.local/mcp_config.json` 加载本地 stdio server。
 - MCP 配置支持 command、args、env、enabled、timeout、defer_loading。
-- initialize 发送最新支持协议版本，校验 server 返回版本、capabilities 和
-  serverInfo，并保存 instructions。
+- SDK 负责 initialize 协商和协议模型校验；adapter 保存协商版本、
+  capabilities、serverInfo 和 instructions。
 - tools 请求仅在 server 声明 `tools` capability 后发送。
 - `tools/list` 聚合 cursor pagination，并拒绝无效、重复或超量分页。
-- read loop 按 JSON-RPC 形状区分 response、server request 和 notification；
-  ping 返回空结果，未知 request 返回 method-not-found，未知 notification 记录
-  warning。
+- SDK 负责 JSON-RPC read loop、基础 server request 和 notification 分发；
+  Xcode 的 message handler 只消费 `tools/list_changed`。
 - server 声明 `tools.listChanged` 后，变更通知会刷新 schema cache 和下一轮
   runtime registry。
-- 请求 timeout 会发送 `notifications/cancelled`；关闭时先关闭 stdin 并等待
-  server，随后按 TERM/KILL 逐级清理。
+- `tools/list` 使用宿主超时，`tools/call` 使用 SDK request timeout；关闭由同一
+  owner task 退出 `ClientSession` 和 stdio transport context，避免 AnyIO
+  cancel scope 跨 task。
 - schema cache 同时记录配置 hash、协商协议版本和 server identity；缺少协商
   元数据的旧缓存会重新发现。
 - deferred server 使用 bootstrap 工具和 `mcp_tool_search` 懒加载。
@@ -293,6 +293,7 @@ cli → coding_agent → harness → agent → ai
 
 - MCP 产品面有意仅支持本地 stdio tools；没有 SSE、HTTP、Streamable HTTP、OAuth、
   resources、prompts 或除工具列表刷新外的 feature notification。
+- 没有向 server 暴露 workspace roots，也没有消费工具调用 progress。
 - 没有运行时 MCP server 增删和状态管理 UI。
 - `LazyClientRef` 没有连接池、周期健康检查或自动故障转移。
 - MCP 配置中的 `overrides` 当前明确跳过并警告。
@@ -483,11 +484,14 @@ ExecutionModeState
 - 同 title 冲突合并。
 - LRU 访问记录和超限淘汰。
 - compaction summary consolidation hook。
+- `build_runtime_context_provider()` 每轮按用户问题检索项目级和用户级记忆，
+  最多将 3 条结果注入隔离的 `<memory>` system context。
 
 限制：
 
-- 没有注册为 ContextCollector，也没有在每轮 Context Assembly 中根据用户问题
-  自动查询。
+- 主动召回由 runtime context provider 注入，不是 `ContextCollector`；这是当前
+  单一路径，不应再并行注册第二条 collector 注入路径。
+- 缺少覆盖误召回、漏召回和 token 收益的持续离线 eval。
 - LRU 淘汰主要按访问时间，不综合长期价值分数。
 - 文件写入没有跨进程 merge 协议，依赖单写者假设。
 
@@ -678,8 +682,8 @@ taxonomy。
 | Memory | `MEMORY.md` + LRU metadata | 项目级跨会话 | 长期知识积累和 BM25 检索 |
 | Checkpoint | 独立 git tree + turn index | session 内 | 文件级 pre/post snapshot 和 undo |
 
-三个概念的职责区分清晰；rewind 与 snapshot index 已保持同一时间线。当前主要
-缺口是 memory 尚未进入每轮主动召回路径。
+三个概念的职责区分清晰；rewind 与 snapshot index 已保持同一时间线。Memory
+已进入每轮主动召回路径，当前主要缺口是召回质量 eval 和跨进程写入一致性。
 
 ---
 
@@ -699,18 +703,19 @@ taxonomy。
 
 这些能力可能有价值，但应先证明使用频率、效果或维护收益。
 
-- Memory 每轮主动召回：先建立离线 eval，证明召回质量和上下文收益，再接入
-  Context Assembly。
+- Memory 主动召回质量：建立持续离线 eval，量化误召回、漏召回和上下文收益，
+  再决定是否调整默认 limit、评分或注入预算。
 - MCP Streamable HTTP、OAuth、resources 和 prompts：按真实 server 集成需求
   增量实现，不以覆盖完整协议为目标。
-- MCP 自动重连、list-changed 和长期连接管理：持久 MCP 使用成为主路径后实现。
+- MCP 已有有限重连和 list-changed 刷新；周期健康检查、运行时重载和更完整的
+  长连接管理在持久 MCP 使用成为主路径后实现。
 - Subagent 流式进度和更丰富结果：长任务体验出现实际瓶颈后实现。
 - 模型成本、预算和多级 fallback：多模型付费路由实际投入使用后实现。
 - 用户自定义 prompt region、slash command、eval 缓存和 task 依赖：
   出现明确调用方后实现。
 
-Skill 和 MCP 的基础范式兼容属于产品核心方向，但具体范围需要单独审查，见
-`docs/skill-mcp-capability-analysis.md`。
+Skill 和 MCP 的基础范式兼容属于产品核心方向；MCP 后续范围以 `TODO.md` 中
+“Coding Agent 必要能力”为准。
 
 ### C · 当前不建议实现
 
@@ -742,7 +747,8 @@ Skill 和 MCP 的基础范式兼容属于产品核心方向，但具体范围需
 ### Memory
 
 - 已迁入正式 runtime 模块，并保持独立 `memory` group。
-- consolidation 可正式使用；主动 recall 需通过 eval 后再默认接入。
+- consolidation 和每轮主动 recall 已接入；下一步是用 eval 校准召回质量和
+  注入预算。
 
 ## 审查边界
 

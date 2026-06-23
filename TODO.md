@@ -1,115 +1,119 @@
 # TODO
 
-## Worktree — 磁盘泄露与能力缺失
+## MCP — Coding Agent 必要能力
 
-### 1.1 添加 `list_worktrees` 工具
-- `WorktreeTaskRunner` 新增 `list()` 方法，扫描 `.local/worktrees/` 目录，用 `git worktree list` 验证有效性
-- 注册为只读 ToolSpec `list_worktrees`，返回 id / path / branch / dirty 状态
+当前基线：使用官方 Python SDK 连接本地 stdio server，支持初始化协商、
+`tools/list`、`tools/call`、分页、`tools/listChanged`、schema cache、延迟加载、
+超时取消和有限重连。后续只补 coding agent 的实际运行缺口，不追求完整 MCP
+协议覆盖。
 
-### 1.2 持久化 worktree 状态
-- 将 `self.tasks` 从内存 dict 改为 `.local/worktrees/index.json` 文件
-- 进程重启后可恢复已知 worktree 列表，`remove_worktree_task` 能正常工作
-- 恢复后运行 `git worktree list` 验证并清理已不存在的条目
+### M.1 暴露 workspace roots
+- 通过 SDK 的 roots callback 向 server 暴露当前项目根目录
+- 仅包含宿主权限边界允许读取的 workspace；不得把用户主目录或任意磁盘根目录
+  默认暴露给 server
+- workspace 发生明确切换时发送 roots changed notification
+- 添加 roots 请求、空 roots 和越界目录过滤的协议测试
 
-### 1.3 安全移除增强
-- `_get_cherry_output` 兜底候选列表从硬编码 `("main", "master")` 改为读取 `git remote show origin | grep "HEAD branch"` 或 `git symbolic-ref refs/remotes/origin/HEAD`
-- 若无 upstream 且无远程默认分支，返回明确错误而非静默通过
+### M.2 MCP 运行时状态与手动重载
+- 增加只读状态接口，展示 server 的 configured / deferred / connected /
+  failed 状态、协商协议版本、server identity、工具数量和脱敏后的最近错误
+- 支持手动重新读取 `.local/mcp_config.json` 并重建对应动态工具；配置变化不要求
+  自动文件监听
+- 重载必须关闭被删除或被替换的 stdio session，清理失效 schema cache，且不得
+  影响未变化 server
+- 为 REPL 增加最小 `/mcp status` 和 `/mcp reload` 入口，不扩展为通用 MCP
+  管理控制台
 
-### 1.4 添加 prune 能力
-- `remove_worktree_task` 新增 `prune: bool` 参数，清理 worktree 目录和 git 元数据
-- 新增 `prune_stale_worktrees` 工具，扫描 index 中标记为已移除但目录残留的条目
-- 在 daemon 中注册 `check_stale_worktrees` 定时任务，自动检测并报告
+### M.3 长工具调用的进度与取消
+- 为 `tools/call` 传递 progress token，并消费 SDK progress notification
+- 将进度映射为现有结构化事件或诊断状态，避免长时间调用只能等待最终结果
+- 用户取消、agent run 取消和 timeout 使用同一取消路径；确认 server 不响应取消
+  时仍能回收子进程
+- 不为 MCP 单独建立第二套事件总线或后台任务系统
 
----
+### M.4 工具元数据覆盖
+- 实现 `.local/mcp_config.json` 中当前被跳过的 `overrides`
+- 仅允许宿主侧覆盖 `risk`、`read_only`、`concurrency_safe`、启用状态和展示说明
+- server annotations 只作为提示；权限和并发属性最终由宿主配置与保守默认值决定
+- 配置按 `server + tool` 精确匹配，未知工具名给出诊断，不静默忽略
 
-## Tasks — 并发安全与工具补全
+### M.5 真实 server 兼容回归
+- 固定一个官方 `modelcontextprotocol/servers` 示例作为 stdio conformance smoke
+  test，覆盖发现、调用、structured content、list changed 和关闭生命周期
+- 单元测试继续围绕 SDK adapter 的可观察行为，不断言 SDK 私有实现细节
+- 外部 server 测试与默认离线 pytest 分离，避免网络或 npm 环境成为本地测试前提
+- 记录启动失败、协议不兼容、schema 非法、调用超时和异常退出的稳定诊断格式
 
-### 2.1 注册 `claim_task` 工具
-- 暴露 `TaskStore.claim()` 为 ToolSpec，使 agent 能原子性地领取任务
-- schema: `{"task_id": int}`, `"claimant": string`，返回 claimed 后的 TaskRecord
-
-### 2.2 乐观锁冲突检测
-- `TaskStore.update()` 读取时记录 `TaskRecord.version`，写入时检查版本一致
-- 版本冲突时抛出 `ConcurrentModificationError`，拒绝覆盖
-- `advance_task()` 同样加入版本检查
-
-### 2.3 状态枚举约束
-- 将 `UPDATE_TASK_SCHEMA` 的 `additionalProperties: True` 改为 `False`
-- `status` 字段添加 `enum: ["pending", "claimed", "completed"]`
-- `kanban_view` 对未知 status 单独归类为 `[unknown]` 而非静默丢进 `pending`
-
-### 2.4 `blocked_by` 语义清理
-- `_create_task` 和 `_update_task` 统一只接受 `blocked_by`，移除 `dependencies` 别名
-- `update_task` 中 `blocked_by` 的处理方式与 `_create_task` 一致（当前 `update_task` 忽略 `blocked_by` 但在 handler 里处理——保持 handler 行为，文档一致即可）
-
----
-
-## Mailbox — 消息生命周期管理
-
-### 3.1 消息过期与清理
-- `LocalFileMailboxTransport` 新增 `retention_days: int = 30` 参数
-- `read_unread_messages()` 自动跳过超过保留期的消息
-- 新增 `cleanup_expired_messages()` 方法，重写 JSONL 文件剔除过期条目和已 ACK 条目
-- 在 daemon 的 `check_mailbox` 任务中定期调用 cleanup
-
-### 3.2 ACK 分离存储
-- 将 ACK 从主 JSONL 中分离到 `.local/team/inbox/{agent_id}.ack` 文件（JSONL 格式）
-- 减少主 mailbox 文件的膨胀速度
-- `acknowledge_message()` 写入 ack 文件；`read_unread_messages()` 合并两个文件计算未读
-
-### 3.3 消息元数据扩展
-- 消息 schema 新增可选字段：`thread_id: str`、`priority: str`、`expires_at: str`
-- `read_unread_messages()` 支持 `sort_by` 和 `filter_type` 参数
-- 不影响现有协议，向后兼容
+### MCP 暂不实现
+- Streamable HTTP / SSE、OAuth 和远程 server 凭据管理：出现必须使用的真实
+  coding server 后再做
+- resources / prompts：当前工具调用已覆盖 coding agent 主路径；先不增加第二套
+  发现、注入和权限语义
+- sampling / elicitation：会形成 server 反向驱动模型或用户交互的新信任边界
+- 通用连接池、自动故障转移、周期健康轮询和 MCP marketplace：当前规模没有收益
+- 为追求协议覆盖而透传所有 notification：只消费会影响工具目录、进度、取消和
+  workspace 边界的事件
 
 ---
 
-## Progress — 解耦与模型清理
+## Tasks — 剩余一致性问题
 
-### 4.1 移除硬编码 `claude-progress.txt`
-- 将 `save_progress()` 中的路径改为可配置项：`TaskStore` 或新的 `ProgressConfig` 持有 `summary_path`
-- 默认值改为 `.local/progress_summary.md`（项目级本地路径）
-- 若调用方需要特定路径（如 Claude Code 约定），通过 `build_app()` 传入
+### T.1 `advance_task` 乐观锁
+- 为 `advance_task` schema 增加 `expected_version`
+- 完成主任务前检查当前版本，冲突时返回与 `update_task` 一致的可重试诊断
+- 下游依赖解除仍在同一目录锁内完成，不为每个下游任务要求调用方提供版本
 
-### 4.2 分离 orchestration state 与 task payload
-- `start_run()` 创建的 `orchestration` 字典保持独立，不混入 `task.payload`
-- 在 `TaskStore` 中新增 `get_orchestration(task_id)` / `set_orchestration(task_id, state)` 方法
-- 或使用单独的 `.local/orchestration/{task_id}.json` 文件
-
-### 4.3 容错改进
-- `resume_run()` 在缺少字段时记录 warning 而非静默使用默认值
-- `expire_stale_runs()` 添加 `.local/orchestration/.lease_index` 按过期时间索引，避免全表扫描
+### T.2 `blocked_by` 显式清空
+- `update_task(blocked_by=[])` 应清除已有依赖；当前 truthy 判断无法区分“未传入”
+  与“显式传空数组”
+- handler 使用键存在性判断，并保留 schema 的 `additionalProperties: false`
 
 ---
 
-## Daemon — 实例统一与回声防护
+## Progress — 默认输出路径
 
-### 5.1 共享 mailbox / task_store 实例
-- 移除 `HeartbeatDaemon.__init__()` 中硬编码的 `AgentMailbox(project_root)` 和 `TaskStore(project_root)`
-- 改为通过构造函数注入：`__init__(self, ..., mailbox: AgentMailbox, task_store: TaskStore)`
-- `build_app()` 在装配阶段将同一实例传递给 daemon
-
-### 5.2 回声防护加固
-- `check_mailbox` 的消息过滤从简单的 sender 检查改为 sender + type 组合过滤
-- Daemon 自身产生的 `daemon_task_error`/`mailbox_summary`/`git_dirty_alert`/`tasks_summary` 事件添加 `"source": "heartbeat_daemon"` 元数据
-- `read_unread_messages()` 支持 `exclude_senders` 和 `exclude_types` 过滤参数
-
-### 5.3 自愈恢复完整性
-- `ensure_healthy()` 重启后重新注册 `__init__` 中的 3 个默认任务
-- 自定义 `register_task()` 支持持久化注册（写入 `.local/daemon_tasks.json`），重启后自动恢复
-- 新增 `list_daemon_tasks()` 方法返回当前注册的任务清单
+### P.1 移除函数级 `claude-progress.txt` 回退
+- `paths.progress_summary` 默认设为 `.local/progress_summary.md`，并补充到
+  `CONFIG.md`
+- `save_progress()` 不再自行选择 Claude Code 专用文件名；路径由装配层传入
+- 直接调用底层函数时若没有路径，使用项目级 `.local/progress_summary.md`
 
 ---
 
-## 跨功能改进
+## Daemon — 持久自定义任务语义
 
-### C.1 共享实例统一注入
-- `assembly.py` 的 `build_tool_registry()` 和 `load_opt_in_services()` 创建的所有 `TaskStore`、`AgentMailbox` 实例统一为单例
-- 确保 daemon、tasks tools、progress tools、mailbox tools 都使用同一个 `TaskStore` / `AgentMailbox` 实例
+### D.1 明确恢复边界
+- 当前 `.local/daemon_tasks.json` 只能恢复自定义任务名称，不能恢复进程内
+  callable；文档和状态接口必须明确显示 `callable pending`
+- 只有出现真实跨进程自定义任务需求时，才设计可序列化的任务类型注册表；不持久化
+  Python callable，也不引入动态代码加载
 
-### C.2 测试覆盖
-- worktree：list / 重启恢复 / prune / 多分支兜底
-- tasks：claim 工具 / 乐观锁冲突 / 非法 status 拒绝
-- mailbox：过期清理 / ACK 分离 / 大文件性能
-- progress：orchestration 分离 / 全表扫描性能
-- daemon：实例注入 / 自愈注册恢复 / 回声过滤
+---
+
+## Config — 合并后强类型校验
+
+### C.1 使用 Pydantic 校验最终配置
+- 保留当前全局、项目、本地配置的 raw dict 深度合并语义，在所有来源合并及环境
+  变量覆盖后执行一次统一模型校验
+- 使用 Pydantic 模型替代 `_config_from_dict()` 的手写递归转换，拒绝未知字段、
+  错误标量类型、非法 enum 和错误的嵌套结构
+- 错误信息必须包含完整字段路径和配置来源提示，避免只暴露底层 validation error
+- 不引入 `pydantic-settings` 或第二套配置发现机制；Pydantic 只负责最终数据模型
+  与验证
+- 迁移时保持现有显式键覆盖、profile 继承、hook source 标注和环境变量优先级
+
+---
+
+## Experimental State — SQLite 迁移评估门槛
+
+### S.1 达到规模或并发瓶颈后再统一存储
+- 当前继续使用 JSON / JSONL + `filelock`；不立即迁移
+- 当出现以下任一真实证据时，评估使用标准库 `sqlite3` 统一 tasks、mailbox 和
+  orchestration：
+  - mailbox 或 task 扫描、清理、索引维护产生可测量性能瓶颈
+  - 多进程写入冲突或原子更新逻辑继续扩张
+  - ACK、lease、版本和查询索引需要跨多个旁路文件保持事务一致性
+  - 状态迁移与损坏恢复成本明显高于单文件存储的可读性收益
+- 评估时先设计最小 schema、事务边界、WAL/锁策略和现有文件的一次性迁移；
+  session transcript 与 MCP schema cache 不在首轮迁移范围
+- 没有 benchmark、故障案例或真实并发需求时，不为“统一技术栈”引入数据库

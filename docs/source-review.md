@@ -141,7 +141,9 @@ REPL 支持三种执行模式。`/act --clear` 把 plan artifact 写入 `.local/
 
 ### Subagent
 
-`ManagedSubagentRunner` 控制并发、超时和递归深度。支持 `worktree` 隔离。子 agent 使用过滤后的 tool registry。
+`ManagedSubagentRunner` 控制并发和超时。支持 `worktree` 隔离。子 agent 使用
+过滤后的 tool registry，且不包含 subagent 工具，因此当前只允许一层委托，
+不存在递归深度控制。
 
 权限边界：子 agent 继承父级的静态策略（rules + global_default）、restricted_dirs、hook_constraint_providers。不继承 `approval_callback`、`session_grant_store`、`permanent_grant_store`，因此 `ask` 决策在子 agent 中退化为硬阻断。`project_root` 正确传递给子 agent 的 `PermissionEngine.boundary_context()`。
 
