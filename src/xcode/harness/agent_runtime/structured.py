@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
+from copy import deepcopy
 from dataclasses import replace
 from uuid import uuid4
 
@@ -37,7 +38,7 @@ from .events import (
 from .execution_modes import ExecutionModeState, policy_for_mode
 from ..skills import ToolRegistryState, ToolSpec
 from .fallback import _FallbackWithRetryPrimary
-from .history_manager import HistoryManager
+from .message_codec import messages_from_run_state
 from .result import (
     _build_structured_result,
     _final_event,
@@ -131,7 +132,7 @@ class StructuredAgent:
             permanent_grant_store=gate.permanent_grant_store,
         )
         self.audit_logger = gate.audit_logger
-        self._history = HistoryManager()
+        self._history: list[AgentMessage] = []
         self._resumed_notice: str | None = None
 
     # ── 公共 API ──
@@ -157,7 +158,7 @@ class StructuredAgent:
             self._compact_controller.request()
 
     def clear_history(self) -> None:
-        self._history.clear()
+        self._history = []
         if self._todo_state is not None:
             self._todo_state.replace([])
         if self._runtime.skill_registry is not None:
@@ -195,7 +196,7 @@ class StructuredAgent:
         self._correlation.session_id = value
 
     def load_history(self, messages: list[AgentMessage]) -> None:
-        self._history.load(messages)
+        self._history = deepcopy(messages)
         if self._runtime.skill_registry is not None:
             self._runtime.skill_registry.restore_activations(messages)
         self._reset_provider_conversation_state()
@@ -204,7 +205,7 @@ class StructuredAgent:
         self._resumed_notice = notice
 
     def load_run_state(self, run_state: RunState) -> None:
-        self._history.load_run_state(run_state)
+        self._history = messages_from_run_state(run_state)
         if self._todo_state is not None:
             self._todo_state.replace(
                 [
@@ -219,12 +220,11 @@ class StructuredAgent:
         if self._runtime.skill_registry is not None:
             self._runtime.skill_registry.restore_activations(run_state.messages)
         self._reset_provider_conversation_state()
-        restored = self._history.restore_mode(run_state)
-        if restored is not None:
-            self._mode.set_mode(restored)
+        if run_state.current_mode in {"act", "plan", "build"}:
+            self._mode.set_mode(run_state.current_mode)
 
     def history_messages(self) -> list[AgentMessage]:
-        return self._history.messages()
+        return list(self._history)
 
     def available_skill_names(self) -> tuple[str, ...]:
         """返回当前运行时允许显式激活的技能名称。"""
@@ -381,7 +381,7 @@ class StructuredAgent:
             tool_name=tool_name,
             content=content,
         )
-        self._history.save_turn([assistant_message, result_message])
+        self._history.extend([assistant_message, result_message])
         self._reset_provider_conversation_state()
         return ExplicitSkillActivationResult(
             name=name,
@@ -503,7 +503,7 @@ class StructuredAgent:
         result = self._agent.last_result
         assert result is not None
 
-        self._history.save_turn(result.messages)
+        self._history.extend(result.messages)
         self._last_prompt_tokens = record_last_prompt_tokens(result.messages)
 
         visible_result = (

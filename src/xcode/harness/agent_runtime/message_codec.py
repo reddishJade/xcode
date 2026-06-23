@@ -14,6 +14,7 @@ from ...agent.messages import (
 )
 from ...agent.protocols import ContentBlock
 from ...agent.types import TextContent, ToolCallContent
+from .result import RunState
 
 
 def messages_from_compacted_dicts(
@@ -26,6 +27,11 @@ def messages_from_compacted_dicts(
         if message is not None:
             restored.append(message)
     return restored
+
+
+def messages_from_run_state(run_state: RunState) -> list[AgentMessage]:
+    """从可序列化运行状态恢复模型可见消息。"""
+    return messages_from_compacted_dicts(run_state.messages)
 
 
 def _message_from_compacted_dict(item: dict[str, Any]) -> AgentMessage | None:

@@ -19,6 +19,7 @@ from xcode.harness.agent_runtime import (
 from xcode.harness.skills import ToolRegistryState, ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from xcode.harness.session_todo import SessionTodoState, TodoItem
+from xcode.ai.providers.factory import ProviderSettings, build_provider_bundle
 from . import assembly as _assembly
 from .assembly import (
     build_agent,
@@ -163,7 +164,12 @@ def build_app(
     infra = build_shared_infra(project_root, cfg.runtime_config)
     shared_services = _assembly.build_shared_services(project_root)
 
-    providers = _assembly.build_providers(cfg.runtime_config, cfg.env_files)
+    providers = build_provider_bundle(
+        ProviderSettings(
+            env_files=cfg.env_files,
+            model_profiles=cfg.runtime_config.provider.model_profiles,
+        )
+    )
     external_hook_runner = (
         ExternalHookRunner(cfg.runtime_config.hooks.entries, project_root)
         if cfg.runtime_config.hooks.entries
@@ -180,7 +186,7 @@ def build_app(
         shared_services=shared_services,
         contextual_state=infra.contextual_state,
         compact_controller=infra.compact_controller,
-        cancel_event=infra.cancellation_token.event,
+        cancel_event=infra.cancellation_token,
         skills_dir=cfg.skills_dir,
         external_hook_runner=external_hook_runner,
         todo_state=todo_state,

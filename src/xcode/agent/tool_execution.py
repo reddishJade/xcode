@@ -16,6 +16,8 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
+import jsonschema
+
 from xcode.agent.types import (
     TextContent,
     ToolArguments,
@@ -41,9 +43,6 @@ from .protocols import (
     CancellationSignal,
     ToolResultContentBlock,
 )
-from ._tool_scheduling import partition_tool_calls_for_execution, _tool_execution_mode
-from ._tool_validation import validate_tool_arguments
-
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +50,59 @@ logger = logging.getLogger(__name__)
 class ExecutedToolBatch:
     results: list[ToolResultMessage]
     terminate: bool
+
+
+def partition_tool_calls_for_execution(
+    current_context: AgentContext,
+    tool_calls: list[ToolCallContent],
+) -> list[list[ToolCallContent]]:
+    """按工具执行模式将连续并发调用分批。"""
+    batches: list[list[ToolCallContent]] = []
+    parallel_batch: list[ToolCallContent] = []
+    for tool_call in tool_calls:
+        if _tool_execution_mode(current_context, tool_call) == "parallel":
+            parallel_batch.append(tool_call)
+            continue
+        if parallel_batch:
+            batches.append(parallel_batch)
+            parallel_batch = []
+        batches.append([tool_call])
+    if parallel_batch:
+        batches.append(parallel_batch)
+    return batches
+
+
+def _tool_execution_mode(
+    current_context: AgentContext,
+    tool_call: ToolCallContent,
+) -> str:
+    """返回工具声明的执行模式，未找到时保守地串行执行。"""
+    for tool in current_context.tools or []:
+        if tool.name == tool_call.name:
+            return tool.execution_mode or "sequential"
+    return "sequential"
+
+
+def validate_tool_arguments(
+    tool: AgentTool,
+    tool_call: ToolCallContent,
+    args: ToolArguments,
+) -> str | None:
+    """按工具 JSON schema 校验模型生成的参数。"""
+    try:
+        schema = dict(tool.parameters)
+    except Exception as exc:
+        return f"tool schema error for {tool_call.name}: {exc}"
+    try:
+        jsonschema.validate(instance=args, schema=schema)
+    except jsonschema.ValidationError as exc:
+        path = (
+            ".".join(str(part) for part in exc.absolute_path)
+            if exc.absolute_path
+            else tool_call.name
+        )
+        return f"tool argument schema error: {path}: {exc.message}"
+    return None
 
 
 async def execute_tool_calls(

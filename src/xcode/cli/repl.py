@@ -64,7 +64,6 @@ from xcode.harness.observability.permission_model import SessionGrantStoreManage
 from xcode.harness.session import SessionMetadataView, SessionStore
 from xcode.harness.session_todo import TodoItem
 from xcode.harness.snapshot import (
-    SnapshotResult,
     SnapshotStore,
     SnapshotUnsupportedError,
 )
@@ -186,32 +185,10 @@ def run_repl(
         sync_agent_history(app, store)
 
     while True:
-        if state.pending_inject is not None:
-            text = state.pending_inject
-            state.pending_inject = None
-        else:
-            try:
-                prompt_text: PromptText = (
-                    ""
-                    if state.exit_pending and time.time() - state.exit_pending < 1.5
-                    else input_prompt()
-                )
-                text = session.prompt(prompt_text).strip()
-            except (EOFError, KeyboardInterrupt):
-                now = time.time()
-                if state.exit_pending and now - state.exit_pending < 1.5:
-                    print()
-                    try:
-                        print_saved_conversation(store)
-                    except KeyboardInterrupt:
-                        pass
-                    return 0
-                state.exit_pending = now
-                print()
-                sys.stdout.write("\033[90m(press Ctrl+C again to exit)\033[0m\n")
-                sys.stdout.flush()
-                continue
-        if not text:
+        text, should_exit = _read_repl_text(state, session, store)
+        if should_exit:
+            return 0
+        if text is None:
             continue
         state.exit_pending = 0.0
         skill_invocation = parse_skill_invocation(text)
@@ -256,18 +233,6 @@ def run_repl(
 
         store.append("user", text)
 
-        # 用户轮次边界快照：拍摄 pre 快照，执行 agent 轮次，finally 中拍 post 快照
-        snapshot_turn_id: str | None = None
-        pre_result: SnapshotResult | None = None
-        if snapshot_store is not None:
-            try:
-                snapshot_turn_id = snapshot_store.next_turn_id(store.session_id)
-                svc = snapshot_store.service(store.session_id)
-                pre_result = svc.track()
-            except KeyboardInterrupt:
-                print("[interrupted] current run cancelled; session is still active.")
-                continue
-
         expanded_text, references = expand_file_references(text, root)
         if references:
             store.append("event", file_reference_event(references))
@@ -286,31 +251,82 @@ def run_repl(
             session=session,
             text=agent_text,
         )
-        tool_names: list[str] = []
+        _run_snapshotted_turn(ctx, snapshot_store)
+
+
+def _read_repl_text(
+    state: ReplState,
+    session: PromptLike,
+    store: SessionStore,
+) -> tuple[str | None, bool]:
+    """读取下一条输入，并统一处理双击 Ctrl+C 退出。"""
+    if state.pending_inject is not None:
+        text = state.pending_inject
+        state.pending_inject = None
+        return text or None, False
+
+    try:
+        prompt_text: PromptText = (
+            ""
+            if state.exit_pending and time.time() - state.exit_pending < 1.5
+            else input_prompt()
+        )
+        return session.prompt(prompt_text).strip() or None, False
+    except (EOFError, KeyboardInterrupt):
+        now = time.time()
+        if state.exit_pending and now - state.exit_pending < 1.5:
+            print()
+            try:
+                print_saved_conversation(store)
+            except KeyboardInterrupt:
+                pass
+            return None, True
+        state.exit_pending = now
+        print()
+        sys.stdout.write("\033[90m(press Ctrl+C again to exit)\033[0m\n")
+        sys.stdout.flush()
+        return None, False
+
+
+def _run_snapshotted_turn(
+    ctx: _AgentTurnContext,
+    snapshot_store: SnapshotStore | None,
+) -> None:
+    """在可用时记录用户轮次前后的文件快照。"""
+    if snapshot_store is None:
+        _run_agent_turn(ctx)
+        return
+
+    try:
+        turn_id = snapshot_store.next_turn_id(ctx.store.session_id)
+        service = snapshot_store.service(ctx.store.session_id)
+        pre_result = service.track()
+    except KeyboardInterrupt:
+        print("[interrupted] current run cancelled; session is still active.")
+        return
+
+    tool_names: list[str] = []
+    try:
+        tool_names = _run_agent_turn(ctx)
+    finally:
         try:
-            tool_names = _run_agent_turn(ctx)
-        finally:
-            if snapshot_store is not None and pre_result is not None:
-                try:
-                    svc = snapshot_store.service(store.session_id)
-                    post_result = svc.track()
-                    changes = svc.diff(
-                        pre_result.snapshot_id,
-                        post_result.snapshot_id,
-                    )
-                    all_skipped = list(pre_result.skipped_files)
-                    all_skipped.extend(post_result.skipped_files)
-                    snapshot_store.record_turn(
-                        session_id=store.session_id,
-                        turn_id=snapshot_turn_id or "000",
-                        pre_snapshot_id=pre_result.snapshot_id,
-                        post_snapshot_id=post_result.snapshot_id,
-                        changed_files=changes,
-                        skipped_files=all_skipped,
-                        tool_names=tool_names,
-                    )
-                except KeyboardInterrupt:
-                    print("[interrupted] snapshot cancelled; session is still active.")
+            post_result = service.track()
+            changes = service.diff(pre_result.snapshot_id, post_result.snapshot_id)
+            skipped_files = [
+                *pre_result.skipped_files,
+                *post_result.skipped_files,
+            ]
+            snapshot_store.record_turn(
+                session_id=ctx.store.session_id,
+                turn_id=turn_id,
+                pre_snapshot_id=pre_result.snapshot_id,
+                post_snapshot_id=post_result.snapshot_id,
+                changed_files=changes,
+                skipped_files=skipped_files,
+                tool_names=tool_names,
+            )
+        except KeyboardInterrupt:
+            print("[interrupted] snapshot cancelled; session is still active.")
 
 
 @dataclass

@@ -99,6 +99,13 @@ class ActPolicy:
         return "allow"
 
 
+_POLICIES: dict[ExecutionMode, ExecutionPolicy] = {
+    "plan": PlanPolicy(),
+    "build": BuildPolicy(),
+    "act": ActPolicy(),
+}
+
+
 def parse_execution_mode(value: object) -> ExecutionMode | None:
     if not isinstance(value, str):
         return None
@@ -114,11 +121,7 @@ def parse_execution_mode(value: object) -> ExecutionMode | None:
 
 
 def policy_for_mode(mode: ExecutionMode) -> ExecutionPolicy:
-    if mode == "plan":
-        return PlanPolicy()
-    if mode == "build":
-        return BuildPolicy()
-    return ActPolicy()
+    return _POLICIES[mode]
 
 
 def registry_for_mode(

@@ -54,10 +54,6 @@ from xcode.harness.session_todo import (
 )
 from xcode.coding_agent.registry import build_project_scoped_registry
 from xcode.coding_agent.tools import ShellSpec
-from xcode.ai.providers.factory import (
-    ProviderSettings,
-    build_provider_bundle,
-)
 
 if TYPE_CHECKING:
     from xcode.harness.daemon import HeartbeatDaemon
@@ -179,18 +175,6 @@ def build_shared_infra(
         cancellation_token=cancellation_token,
         compact_controller=compact_controller,
         compactor=compactor,
-    )
-
-
-# ── Provider ──
-
-
-def build_providers(runtime_config: XcodeRuntimeConfig, env_files: tuple[Path, ...]):
-    return build_provider_bundle(
-        ProviderSettings(
-            env_files=env_files,
-            model_profiles=runtime_config.provider.model_profiles,
-        )
     )
 
 

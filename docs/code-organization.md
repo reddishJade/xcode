@@ -78,15 +78,13 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `types.py` | 基础类型：`ShellCallOutputContent` |
 | `agent.py` | `Agent` 封装，包装 `run_agent_loop`，管理 steer/followup 队列 |
 | `agent_loop.py` | 无状态 Agent loop |
-| `tool_execution.py` | 工具执行调度（串行/并行分区） |
+| `tool_execution.py` | 工具执行调度、串行/并行分区和参数校验 |
 | `compaction.py` | Agent 层上下文压缩 |
 | `history.py` | 历史记录管理、request hygiene |
 | `hooks.py` | Agent 层 hook 点 |
 | `message_converter.py` | 消息格式转换 |
 | `watchdog.py` | 重复工具调用检测 |
 | `_provider.py` | 内部 provider 适配器 |
-| `_tool_scheduling.py` | 内部工具调度 |
-| `_tool_validation.py` | 内部工具验证 |
 | `context_collector.py` | `ContextCollectorRegistry`、6 个上下文收集器 |
 | `context_assembly.py` | `DefaultContextAssembler`、context block 排序/裁剪 |
 | `results.py` | `AgentToolResult`、`ToolResultMessage` |
@@ -131,7 +129,6 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `agent_runtime/cancellation.py` | `CancellationToken` |
 | `agent_runtime/contextual.py` | `ContextualRetrievalState` |
 | `agent_runtime/git_preflight.py` | Git 状态预检 |
-| `agent_runtime/history_manager.py` | 历史管理器 |
 | `agent_runtime/message_codec.py` | 消息编解码 |
 | `agent_runtime/tool_adapter.py` | 工具适配器 |
 | `agent_runtime/tool_audit.py` | 工具审计 |

@@ -136,7 +136,7 @@ class XcodeAppRuntimeTests:
                 "Follow the review workflow.",
                 encoding="utf-8",
             )
-            with patch("xcode.harness.assembly.build_providers", return_value=bundle):
+            with patch("xcode.harness.app.build_provider_bundle", return_value=bundle):
                 app = build_app(project_root=root, runtime_config=runtime_config)
             result = app.agent.run("Review this code change.")
 
@@ -373,7 +373,7 @@ class XcodeAppRuntimeTests:
                     runtime_config=XcodeRuntimeConfig(),
                 )
 
-        assert captured["cancel_event"] is app.agent.cancellation_token.event
+        assert captured["cancel_event"] is app.agent.cancellation_token
 
     def test_worktree_tools_are_always_registered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
@@ -439,7 +439,7 @@ class XcodeAppRuntimeTests:
         )
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            with patch("xcode.harness.assembly.build_providers", return_value=bundle):
+            with patch("xcode.harness.app.build_provider_bundle", return_value=bundle):
                 app = build_app(project_root=root, runtime_config=runtime_config)
             result = app.agent.run("write")
 
@@ -480,7 +480,7 @@ class XcodeAppRuntimeTests:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "a.txt").write_text("content", encoding="utf-8")
-            with patch("xcode.harness.assembly.build_providers", return_value=bundle):
+            with patch("xcode.harness.app.build_provider_bundle", return_value=bundle):
                 app = build_app(project_root=root, runtime_config=runtime_config)
             result = app.agent.run("read")
 
@@ -552,7 +552,7 @@ class XcodeAppRuntimeTests:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "a.txt").write_text("hello", encoding="utf-8")
-            with patch("xcode.harness.assembly.build_providers", return_value=bundle):
+            with patch("xcode.harness.app.build_provider_bundle", return_value=bundle):
                 app = build_app(project_root=root, runtime_config=XcodeRuntimeConfig())
             app.ask("read it")
 
@@ -658,7 +658,7 @@ class XcodeAppRuntimeTests:
                 "Subagent must follow project rules.",
                 encoding="utf-8",
             )
-            with patch("xcode.harness.assembly.build_providers", return_value=bundle):
+            with patch("xcode.harness.app.build_provider_bundle", return_value=bundle):
                 app = build_app(project_root=root, runtime_config=runtime_config)
 
             tools = {tool.name: tool for tool in app.registry}
@@ -800,7 +800,7 @@ class XcodeAppRuntimeTests:
             root = Path(tmp)
             (root / "marker.txt").write_text("root", encoding="utf-8")
             with (
-                patch("xcode.harness.assembly.build_providers", return_value=bundle),
+                patch("xcode.harness.app.build_provider_bundle", return_value=bundle),
                 patch(
                     "xcode.coding_agent.tools.worktree.WorktreeTaskRunner",
                     lambda project_root: FakeWorktreeRunner(project_root),
@@ -868,7 +868,7 @@ def _patched_provider_bundle(
         },
         embedding=object(),
     )
-    return patch("xcode.harness.assembly.build_providers", return_value=bundle)
+    return patch("xcode.harness.app.build_provider_bundle", return_value=bundle)
 
 
 def _layered_compactor(app: XcodeApp) -> LayeredCompactor:
