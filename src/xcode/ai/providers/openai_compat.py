@@ -12,12 +12,26 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 from xcode.ai.events import ProviderEvent
-from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.ai.types import StreamOptions, ThinkingBudgets, ToolDefinition
 
 from .codec import normalize_cross_provider_messages, to_chat_messages, to_chat_tools
 from .metrics import ProviderMetricsMixin
 from .runtime import ProviderRuntime
 from .stream_codec import chat_stream_to_events
+
+
+def _lookup_thinking_budget(budgets: ThinkingBudgets, level_name: str) -> int | None:
+    if level_name == "minimal":
+        return budgets.minimal
+    if level_name == "low":
+        return budgets.low
+    if level_name == "medium":
+        return budgets.medium
+    if level_name == "high":
+        return budgets.high
+    if level_name == "xhigh":
+        return budgets.xhigh
+    return None
 
 
 class OpenAICompatProvider(ProviderMetricsMixin):
@@ -68,19 +82,18 @@ class OpenAICompatProvider(ProviderMetricsMixin):
     ) -> AsyncIterator[ProviderEvent]:
         self._current_options = options
         messages = self._normalize_messages(messages)
-        for event in self._stream_sync(messages, tuple(tools), **kwargs):
+        for event in self._stream_sync(messages, tuple(tools)):
             yield event
 
     def _stream_sync(
         self,
         messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
-        **kwargs: Any,
     ) -> Iterator[ProviderEvent]:
         self._warn_builtin_tools(tools)
         clean = self._clean_reasoning_content(messages)
         api_messages = to_chat_messages(clean)
-        params = self._build_chat_params(api_messages, tools, **kwargs)
+        params = self._build_chat_params(api_messages, tools)
         yield from self._call_chat_api(params, len(api_messages))
 
     def _warn_builtin_tools(self, tools: tuple[ToolDefinition, ...]) -> None:
@@ -90,7 +103,6 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         self,
         api_messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
-        **kwargs: Any,
     ) -> dict[str, Any]:
         """构建 Chat Completions 请求参数。
 
@@ -112,7 +124,7 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         message_count: int,
     ) -> Iterator[ProviderEvent]:
         """调用 openai.OpenAI.chat.completions.create 并通过 _intercept_usage 流式返回事件。"""
-        opts = getattr(self, "_current_options", None)
+        opts = self._current_options
 
         # 请求级覆盖
         if opts:
@@ -156,11 +168,11 @@ class OpenAICompatProvider(ProviderMetricsMixin):
         effective = self.thinking if thinking_override is None else thinking_override
         extra = self._build_thinking_extra_body(thinking_override)
 
-        opts = getattr(self, "_current_options", None)
+        opts = self._current_options
         if opts and opts.thinking_budgets and effective:
-            level_name = getattr(opts, "thinking_level", None)
+            level_name = opts.thinking_level
             if level_name and level_name != "off":
-                budget = getattr(opts.thinking_budgets, level_name, None)
+                budget = _lookup_thinking_budget(opts.thinking_budgets, level_name)
                 if budget and budget > 0:
                     extra.setdefault("thinking", {})["budget_tokens"] = budget
 

@@ -60,12 +60,10 @@ class OpenAIChatProvider(OpenAICompatProvider):
         self,
         api_messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
-        **kwargs: Any,
     ) -> dict[str, Any]:
         params = super()._build_chat_params(api_messages, tools)
-        effective_format = kwargs.get("response_format") or self.response_format
-        if effective_format:
-            params["response_format"] = effective_format
+        if self.response_format:
+            params["response_format"] = self.response_format
         return params
 
     def _warn_builtin_tools(self, tools: tuple[ToolDefinition, ...]) -> None:

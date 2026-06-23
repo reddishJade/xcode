@@ -51,43 +51,26 @@ class DeepSeekProvider(OpenAICompatProvider):
         self,
         messages: list[dict[str, Any]],
         tools: tuple[ToolDefinition, ...],
-        **kwargs: Any,
     ) -> Iterator[Any]:
-        if self.thinking:
-            kwargs.pop("temperature", None)
-            kwargs.pop("top_p", None)
-            kwargs.pop("presence_penalty", None)
-            kwargs.pop("frequency_penalty", None)
-
         cleaned_messages = self._clean_reasoning_content(messages)
         api_messages = to_chat_messages(cleaned_messages)
 
-        response_format = kwargs.pop("response_format", None)
-        max_tokens = kwargs.pop("max_tokens", None)
-        effective_format = response_format or self.response_format
+        effective_format = self.response_format
         if effective_format and effective_format.get("type") == "json_object":
             api_messages = self._ensure_json_word(api_messages)
-
-        strict_tools = kwargs.pop("strict_tools", getattr(self, "strict_tools", False))
 
         params: dict[str, Any] = {
             "model": self.model,
             "messages": api_messages,
-            "tools": to_chat_tools(tools, strict=strict_tools),
+            "tools": to_chat_tools(tools, strict=self.strict_tools),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
 
         if effective_format:
             params["response_format"] = effective_format
-        if max_tokens:
-            params["max_tokens"] = max_tokens
 
         self._build_thinking_params(params)
-
-        for k, v in kwargs.items():
-            if k not in params:
-                params[k] = v
 
         yield from self._call_chat_api(params, len(api_messages))
 

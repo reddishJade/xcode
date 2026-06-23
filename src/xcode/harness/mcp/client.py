@@ -552,7 +552,14 @@ class McpClient:
         stream_name: str,
     ) -> None:
         """关闭指定进程流，并忽略已关闭或失效的流。"""
-        stream = getattr(process, stream_name, None)
+        if stream_name == "stdin":
+            stream = process.stdin
+        elif stream_name == "stdout":
+            stream = process.stdout
+        elif stream_name == "stderr":
+            stream = process.stderr
+        else:
+            stream = None
         if stream is None:
             return
         try:

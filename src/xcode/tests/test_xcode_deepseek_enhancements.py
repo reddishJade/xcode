@@ -226,6 +226,7 @@ class XcodeDeepSeekEnhancementsTests:
             api_key="ds-key",
             base_url="https://api.deepseek.com",
             model="deepseek-chat",
+            response_format={"type": "json_object"},
             client=client,
         )
 
@@ -233,7 +234,6 @@ class XcodeDeepSeekEnhancementsTests:
             provider._stream_sync(
                 [{"role": "user", "content": "Hi"}],
                 (),
-                response_format={"type": "json_object"},
             )
         )
 

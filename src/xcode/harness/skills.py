@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import threading
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from ..agent.protocols import ToolExecutionMode
 from ..agent.types import FileContent, ImageContent, ShellCallOutputContent
@@ -255,7 +255,9 @@ def _wrap_spec_as_registered(
     迁移期间使用：所有现有构建站点产生 ToolSpec，通过此函数包装。
     可按 origin_kind 区分 core / mcp / skill 并设置对应策略。
     """
-    origin_kind = origin_kind or _detect_origin_kind(spec)
+    origin_kind = cast(
+        Literal["core", "mcp", "skill"], origin_kind or _detect_origin_kind(spec)
+    )
     surface = _tool_surface(spec, origin_kind)
     canonical_id = make_canonical_id(origin_kind, origin_source, spec.name)
     profile = CORE_TOOL_ACTION_PROFILES.get(spec.name)
@@ -264,7 +266,7 @@ def _wrap_spec_as_registered(
         public_selector=ToolSelector(spec.name),
         spec=spec,
         surface_policy=surface,
-        origin=ToolOrigin(kind=origin_kind, source=origin_source),  # type: ignore[arg-type]
+        origin=ToolOrigin(kind=origin_kind, source=origin_source),
         action_profile=profile,
     )
 

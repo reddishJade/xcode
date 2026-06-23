@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from xcode.harness.mcp.tools import (
@@ -105,7 +105,7 @@ class TestMcpConfigValidation:
         assert cfg is None
 
     def test_non_dict_config_skips(self) -> None:
-        cfg = _validate_server_config("bad", "not_a_dict")  # type: ignore[arg-type]  # 故意传非 dict 测试校验函数
+        cfg = _validate_server_config("bad", cast(dict[str, object], "not_a_dict"))
         assert cfg is None
 
     def test_enabled_false(self) -> None:

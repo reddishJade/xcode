@@ -148,9 +148,11 @@ def resume_run(
         logger.warning("resume_run: no orchestration state for task %s", task_id)
         return _default_state(tid, fallback_status=task.status)
 
-    missing = [
-        field for field in ("status", "lease_expires_at") if not getattr(state, field)
-    ]
+    missing: list[str] = []
+    if not state.status:
+        missing.append("status")
+    if not state.lease_expires_at:
+        missing.append("lease_expires_at")
     if missing:
         logger.warning(
             "resume_run: task %s orchestration missing fields %s", task_id, missing

@@ -313,15 +313,16 @@ def create_prompt_session(
     if state is not None:
         bottom_toolbar = make_bottom_toolbar(state)
 
-    return PromptSessionAdapter(
-        PromptSession(  # type: ignore[arg-type]  # 与 prompt_toolkit PromptSession 参数名不对齐，运行时无影响
-            multiline=True,
-            key_bindings=bindings,
-            completer=completer,
-            complete_while_typing=True,
-            history=history,
-            style=style,
-            auto_suggest=suggester,
-            bottom_toolbar=bottom_toolbar,
-        )
+    from typing import Any, cast as _cast
+
+    session: Any = _cast(Any, PromptSession)(
+        multiline=True,
+        key_bindings=bindings,
+        completer=completer,
+        complete_while_typing=True,
+        history=history,
+        style=style,
+        auto_suggest=suggester,
+        bottom_toolbar=bottom_toolbar,
     )
+    return PromptSessionAdapter(session)

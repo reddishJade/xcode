@@ -712,7 +712,8 @@ def _compute_context_summary(
             parts.append("Guidelines:\n" + guidelines)
         categories.append(("System tools", estimate_tokens("\n\n".join(parts))))
 
-    messages = agent.history_messages() if hasattr(agent, "history_messages") else []  # type: ignore[union-attr]
+    history_messages = getattr(agent, "history_messages", None)
+    messages = history_messages() if history_messages is not None else []
     categories.append(("Messages", estimate_message_tokens(messages)))
 
     memory_manager = MemoryManager(project_root)
