@@ -19,6 +19,9 @@ def _build_config_parser(subparsers) -> None:
     config_parser.add_argument(
         "--project-root", type=Path, default=Path.cwd(), help="Project root directory."
     )
+    config_parser.add_argument(
+        "--config", type=Path, help="Path to xcode.config.json to manage."
+    )
     config_sub = config_parser.add_subparsers(dest="config_action")
 
     list_p = config_sub.add_parser("list", help="List all provider profiles")
@@ -27,6 +30,10 @@ def _build_config_parser(subparsers) -> None:
     add_p = config_sub.add_parser("add", help="Add a provider profile interactively")
     add_p.add_argument("name", help="Profile name (e.g. main, subagent, fallback)")
     add_p.set_defaults(config_action="add")
+
+    edit_p = config_sub.add_parser("edit", help="Edit a provider profile interactively")
+    edit_p.add_argument("name", help="Profile name to edit")
+    edit_p.set_defaults(config_action="edit")
 
     delete_p = config_sub.add_parser("delete", help="Delete a provider profile")
     delete_p.add_argument("name", help="Profile name to delete")
@@ -37,6 +44,10 @@ def _build_config_parser(subparsers) -> None:
     set_p.add_argument("field", help="Field name")
     set_p.add_argument("value", help="Field value")
     set_p.set_defaults(config_action="set")
+
+
+def _build_setup_parser(subparsers) -> None:
+    subparsers.add_parser("setup", help="Run the provider setup wizard")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -67,10 +78,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         help="Resume a specific session by id.",
     )
-    parser.add_argument(
-        "--setup", action="store_true", help="Force-run the provider setup wizard."
-    )
-    _build_config_parser(parser.add_subparsers(dest="command"))
+    subparsers = parser.add_subparsers(dest="command")
+    _build_config_parser(subparsers)
+    _build_setup_parser(subparsers)
     return parser.parse_args(argv)
 
 
@@ -82,9 +92,16 @@ def main() -> int:
         handle_config_command(args, project_root)
         return 0
 
+    if args.command == "setup":
+        try:
+            run_setup_wizard(project_root)
+        except KeyboardInterrupt:
+            pass
+        return 0
+
     temp_config: Path | None = None
 
-    if args.setup or not has_valid_config(project_root):
+    if not has_valid_config(project_root):
         if sys.stdin.isatty():
             try:
                 status, config_path = run_setup_wizard(project_root)
@@ -125,7 +142,6 @@ def _run(args, runtime_config) -> int:
     if daemon is not None:
         daemon.start()
     try:
-        # precedence: --session > --continue > --resume > new session
         if args.session:
             return run_repl(
                 app,
