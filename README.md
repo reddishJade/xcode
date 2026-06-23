@@ -155,7 +155,8 @@ xcode --config .local/settings.json
 - **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果，支持压缩后重建文件指纹。
 - **REPL 会话管理** — 丰富的 `/slash` 命令体系，支持 plan/build/act、会话分支、回退、模型切换、session transcript 落盘。
 - **Subagent 委托** — `ManagedSubagentRunner` 并行子任务调度；实验开关可启用 worktree 隔离。
-- **MCP 协议** — 自动发现 `.local/mcp_config.json`，注册 `mcp__{server}__{tool}` 动态工具。
+- **MCP 协议** — 基于官方 Python SDK 连接本地 stdio server，自动发现
+  `.local/mcp_config.json` 并注册 `mcp__{server}__{tool}` 动态工具。
 - **实验能力** — 可显式启用 tasks、mailbox、progress 断点续传和 worktree 隔离；默认全部关闭。
 
 ---

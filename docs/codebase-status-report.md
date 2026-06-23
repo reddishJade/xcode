@@ -246,7 +246,7 @@ cli → coding_agent → harness → agent → ai
 ### 核心文件
 
 - `src/xcode/harness/mcp/tools.py`
-- `src/xcode/harness/mcp/client.py`
+- `src/xcode/harness/mcp/client.py`（官方 Python SDK adapter）
 - `src/xcode/harness/skills.py`
 - `src/xcode/harness/skills_registry.py`
 - `src/xcode/cli/repl_skills.py`
@@ -254,7 +254,7 @@ cli → coding_agent → harness → agent → ai
 
 ### 已实现
 
-- MCP 从 `.local/mcp_config.json` 加载本地 stdio server。
+- MCP 通过官方 Python SDK 从 `.local/mcp_config.json` 加载本地 stdio server。
 - MCP 配置支持 command、args、env、enabled、timeout、defer_loading。
 - initialize 发送最新支持协议版本，校验 server 返回版本、capabilities 和
   serverInfo，并保存 instructions。
@@ -291,7 +291,7 @@ cli → coding_agent → harness → agent → ai
 
 ### 当前限制
 
-- MCP 仅支持本地 stdio；没有 SSE、HTTP、Streamable HTTP、OAuth、
+- MCP 产品面有意仅支持本地 stdio tools；没有 SSE、HTTP、Streamable HTTP、OAuth、
   resources、prompts 或除工具列表刷新外的 feature notification。
 - 没有运行时 MCP server 增删和状态管理 UI。
 - `LazyClientRef` 没有连接池、周期健康检查或自动故障转移。

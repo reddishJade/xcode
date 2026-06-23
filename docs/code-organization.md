@@ -105,8 +105,8 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `skill_activation.py` | Skill activation 内容解析 |
 | `skills_registry.py` | Skill 发现、索引、懒加载 |
 | `session_todo.py` | 主 agent 会话级 `update_todo` 工具与内存状态 |
-| `mcp/` | 核心 MCP stdio client、schema cache 和动态工具集成 |
-| `mcp/client.py` | MCP stdio JSON-RPC 客户端 |
+| `mcp/` | 官方 MCP SDK stdio adapter、schema cache 和动态工具集成 |
+| `mcp/client.py` | 官方 Python SDK 的同步生命周期适配层 |
 | `mcp/tools.py` | MCP 配置、schema cache 和动态 ToolSpec 构建 |
 | `mcp/results.py` | MCP structuredContent 校验和 typed content 宿主映射 |
 | `memory/` | Memory 管理与解析 |

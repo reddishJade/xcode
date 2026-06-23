@@ -15,10 +15,8 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import tempfile
-import time
 from pathlib import Path
 from typing import Any
 
@@ -279,7 +277,7 @@ class TestMcpStdioConformance:
         client.start()
         client.stop()
         with pytest.raises(RuntimeError):
-            client.send_request("tools/list", {})
+            client.list_tools()
 
     # ── 工具发现 ──
 
@@ -514,17 +512,8 @@ class TestMcpStdioConformance:
         client.start()
         assert client.status == "connected"
 
-        pid = client.process.pid if client.process else None
         client.stop()
         assert client.status == "disabled"
-        assert client.process is None
-
-        # 进程应已终止（SIGTERM 跨平台兼容，OSError 覆盖 POSIX ProcessLookupError 和 Windows PermissionError）
-        if pid is not None:
-            import signal
-
-            with pytest.raises(OSError):
-                os.kill(pid, signal.SIGTERM)
 
     def test_server_shutdown_receives_stdin_eof(self) -> None:
         """stop() 先关闭 stdin，让服务器完成自行退出逻辑。"""
@@ -659,16 +648,13 @@ class TestMcpStdioErrorHandling:
         client = McpClient(["/nonexistent/binary"])
         with pytest.raises(RuntimeError) as exc_info:
             client.start()
-        assert "Failed to start" in str(exc_info.value)
+        assert "MCP handshake failed" in str(exc_info.value)
 
     def test_timeout_on_unresponsive_server(self) -> None:
-        """无响应的服务器超时后收到 cancellation notification。"""
-        cancellation_path = self.temp_dir / "cancellation.json"
+        """无响应的服务器由 SDK session timeout 终止等待。"""
         slow_code = r"""
 import sys
 import json
-from pathlib import Path
-CANCELLATION_PATH = Path(__CANCELLATION_PATH__)
 
 def _read_message():
     line = sys.stdin.buffer.readline()
@@ -702,39 +688,16 @@ def main():
                 })
             elif method == "tools/list":
                 continue
-        if method == "notifications/cancelled":
-            CANCELLATION_PATH.write_text(
-                json.dumps(req),
-                encoding="utf-8",
-            )
 
 if __name__ == "__main__":
     main()
 """
-        slow_code = slow_code.replace(
-            "__CANCELLATION_PATH__",
-            json.dumps(str(cancellation_path)),
-        )
         server_file = _write_server_script(self.temp_dir, slow_code)
         cmd = [sys.executable, "-u", str(server_file)]
         client = McpClient(cmd, timeout=0.1)
         client.start()
         with pytest.raises(TimeoutError):
             client.list_tools()
-
-        deadline = time.monotonic() + 1.0
-        while not cancellation_path.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-
-        cancellation = json.loads(cancellation_path.read_text(encoding="utf-8"))
-        assert cancellation == {
-            "jsonrpc": "2.0",
-            "method": "notifications/cancelled",
-            "params": {
-                "requestId": 2,
-                "reason": "Client timeout waiting for tools/list",
-            },
-        }
         client.stop()
 
     def test_unknown_tool_raises_runtime_error(self) -> None:

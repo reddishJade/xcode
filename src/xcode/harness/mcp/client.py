@@ -1,39 +1,40 @@
-"""MCP 协议客户端。
-
-基于 stdio 的 JSON-RPC 2.0 客户端，实现 Model Context Protocol 的
-initialize 握手、tools/list 和 tools/call。
-"""
+"""基于官方 Python SDK 的 MCP stdio 客户端。"""
 
 from __future__ import annotations
 
-import atexit
-import json
+import asyncio
+import concurrent.futures
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import timedelta
 import logging
 import os
 import re
-import shutil
-import subprocess
+import tempfile
 import threading
-import time
-from collections.abc import Callable
-from typing import Any, BinaryIO, cast
+from typing import Any, IO, Literal, TextIO, TypeVar, cast
+
+from mcp import ClientSession, StdioServerParameters, types
+from mcp.client.session import MessageHandlerFnT
+from mcp.client.stdio import stdio_client
+from mcp.shared.session import RequestResponder
+from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS as _SDK_PROTOCOL_VERSIONS
+from pydantic import BaseModel
+
+from xcode.harness.agent_runtime.async_worker import IsolatedAsyncWorker
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_PROTOCOL_VERSIONS = (
-    "2025-11-25",
-    "2025-06-18",
-    "2025-03-26",
-    "2024-11-05",
-)
-LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
+LATEST_PROTOCOL_VERSION = types.LATEST_PROTOCOL_VERSION
+SUPPORTED_PROTOCOL_VERSIONS = tuple(_SDK_PROTOCOL_VERSIONS)
 MAX_TOOL_LIST_PAGES = 100
 MAX_LAZY_CONNECT_ATTEMPTS = 2
-SHUTDOWN_GRACE_SECONDS = 1.0
-TERMINATE_GRACE_SECONDS = 1.0
-KILL_GRACE_SECONDS = 1.0
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
 
-_REDACT_PATTERNS: list[re.Pattern] = [
+T = TypeVar("T")
+_Operation = Literal["list_tools", "call_tool", "close"]
+
+_REDACT_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(Bearer\s+)[^\s]+", re.IGNORECASE),
     re.compile(r"(sk-)[^\s]+", re.IGNORECASE),
     re.compile(r"((?:api_key|token|secret)=)[^\s]+", re.IGNORECASE),
@@ -51,74 +52,87 @@ def truncate_redact(text: str, max_len: int = 200) -> str:
     """先脱敏再按字符上限截断诊断文本。"""
     redacted = redact_mcp_text(text)
     if len(redacted) > max_len:
-        redacted = redacted[:max_len] + "..."
+        return redacted[:max_len] + "..."
     return redacted
 
 
-def _is_valid_server_info(value: object) -> bool:
-    """判断 serverInfo 是否包含稳定的名称和版本标识。"""
-    if not isinstance(value, dict):
-        return False
-    name = value.get("name")
-    version = value.get("version")
-    return (
-        isinstance(name, str)
-        and bool(name.strip())
-        and isinstance(version, str)
-        and bool(version.strip())
-    )
+def _model_dict(model: BaseModel) -> dict[str, Any]:
+    """将 SDK 模型转换为保留 MCP 字段别名的普通字典。"""
+    return model.model_dump(by_alias=True, mode="json", exclude_none=True)
 
 
-def _is_valid_message_id(value: object) -> bool:
-    """判断 JSON-RPC id 是否为支持的字符串或整数。"""
-    return isinstance(value, (int, str)) and not isinstance(value, bool)
+class _ErrorLog:
+    """使用真实文件描述符捕获 Windows 子进程 stderr。"""
+
+    def __init__(self) -> None:
+        self.stream: IO[str] = tempfile.TemporaryFile(
+            mode="w+",
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    def snapshot(self) -> str:
+        """返回当前 stderr 缓冲区内容。"""
+        position = self.stream.tell()
+        self.stream.flush()
+        self.stream.seek(0)
+        content = self.stream.read()
+        self.stream.seek(position)
+        return content
+
+    def close(self) -> None:
+        """关闭临时文件。"""
+        self.stream.close()
+
+
+@dataclass(frozen=True)
+class _SdkCommand:
+    """交给 session owner task 串行执行的操作。"""
+
+    operation: _Operation
+    future: concurrent.futures.Future[object]
+    name: str | None = None
+    arguments: dict[str, Any] | None = None
+    timeout: float | None = None
 
 
 class McpClient:
-    """基于 stdio 的同步 MCP 客户端。"""
+    """同步外观的官方 SDK stdio client。
+
+    一个长期 owner task 同时负责 transport/session 的进入、请求和退出，
+    满足 AnyIO cancel scope 必须由同一 task 管理的生命周期约束。
+    """
 
     def __init__(
         self,
         command: list[str],
         env: dict[str, str] | None = None,
         timeout: float | None = None,
-        tools_changed_callback: Callable[["McpClient"], None] | None = None,
+        tools_changed_callback: Callable[[McpClient], None] | None = None,
     ) -> None:
-        """保存进程配置并初始化连接状态。"""
+        """保存连接配置并初始化 SDK session 状态。"""
+        if not command:
+            raise ValueError("MCP command must not be empty")
         self.command = command
         self.env = os.environ.copy()
         if env:
             self.env.update(env)
-        self.process: subprocess.Popen | None = None
-        self.next_id = 1
-        self._lock = threading.Lock()
-        self._write_lock = threading.Lock()
-        self._tools_refresh_lock = threading.Lock()
-        self._tools_changed_event = threading.Event()
-        self._tools_refresh_thread: threading.Thread | None = None
-        self._active_request_ids: set[int | str] = set()
-        self._pending_responses: dict[int | str, dict[str, Any]] = {}
-        self._read_thread: threading.Thread | None = None
-        self._running = False
         self._timeout = timeout
         self._tools_changed_callback = tools_changed_callback
-        self._status: str = "pending"
+        self._worker = IsolatedAsyncWorker(name="xcode-mcp-client")
+        self._commands: asyncio.Queue[_SdkCommand] | None = None
+        self._owner_future: concurrent.futures.Future[None] | None = None
+        self._ready = threading.Event()
+        self._startup_error: BaseException | None = None
+        self._stderr = _ErrorLog()
+        self._status = "pending"
+        self._callback_lock = threading.Lock()
+        self._callback_running = False
+        self._callback_pending = False
         self.protocol_version: str | None = None
         self.server_capabilities: dict[str, Any] = {}
         self.server_info: dict[str, Any] = {}
         self.instructions: str | None = None
-
-    @staticmethod
-    def _resolve_command(command: list[str]) -> list[str]:
-        """解析命令路径，Windows 上通过 cmd.exe 启动 .cmd/.bat 脚本。"""
-        if os.name != "nt":
-            return command
-        resolved = shutil.which(command[0])
-        if resolved and resolved.lower().endswith((".cmd", ".bat")):
-            return ["cmd.exe", "/c", *command]
-        if resolved:
-            return [resolved, *command[1:]]
-        return command
 
     @property
     def status(self) -> str:
@@ -126,534 +140,300 @@ class McpClient:
         return self._status
 
     def start(self) -> None:
-        """启动服务器进程并完成 initialize 协商。"""
-        if self.process is not None:
+        """启动 owner task、stdio server 并完成 SDK initialize。"""
+        if self._status == "connected":
             return
-        try:
-            cmd = self._resolve_command(self.command)
-            self.process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=self.env,
-            )
-        except OSError as e:
+        self._owner_future = self._worker.submit(self._session_owner())
+        if not self._ready.wait(timeout=self._effective_timeout()):
             self._status = "failed"
-            raise RuntimeError(f"Failed to start MCP server {self.command}: {e}")
-
-        self._running = True
-        self._read_thread = threading.Thread(target=self._read_loop, daemon=True)
-        self._read_thread.start()
-        _active_clients.append(self)
-
-        try:
-            initialize_result = self.send_request(
-                "initialize",
-                {
-                    "protocolVersion": LATEST_PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": {"name": "xcode-client", "version": "0.1.0"},
-                },
-            )
-            self._apply_initialize_result(initialize_result)
-            self.send_notification("notifications/initialized")
-        except Exception as e:
-            self.stop()
+            self._shutdown_worker()
+            raise TimeoutError("Timeout waiting for MCP SDK initialization")
+        if self._startup_error is not None:
             self._status = "failed"
-            raise RuntimeError(f"MCP handshake failed: {e}")
-
+            diagnostic = truncate_redact(self._stderr.snapshot())
+            self._shutdown_worker()
+            suffix = f" Stderr: {diagnostic}" if diagnostic else ""
+            raise RuntimeError(
+                f"MCP handshake failed: {self._startup_error}.{suffix}"
+            ) from self._startup_error
         self._status = "connected"
 
-    def _apply_initialize_result(self, result: dict[str, Any]) -> None:
-        """校验 initialize 响应并保存协商后的服务器元数据。"""
-        protocol_version = result.get("protocolVersion")
-        if not isinstance(protocol_version, str):
-            raise RuntimeError("MCP initialize response has no protocolVersion")
-        if protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
-            supported = ", ".join(SUPPORTED_PROTOCOL_VERSIONS)
-            raise RuntimeError(
-                "Unsupported MCP protocol version "
-                f"{protocol_version!r}; client supports: {supported}"
+    async def _session_owner(self) -> None:
+        """在单一 task 内管理 SDK transport/session 的完整生命周期。"""
+        try:
+            params = StdioServerParameters(
+                command=self.command[0],
+                args=self.command[1:],
+                env=self.env,
             )
-
-        capabilities = result.get("capabilities")
-        if not isinstance(capabilities, dict):
-            raise RuntimeError("MCP initialize response has invalid capabilities")
-        server_info = result.get("serverInfo")
-        if not _is_valid_server_info(server_info):
-            raise RuntimeError("MCP initialize response has invalid serverInfo")
-        server_info = cast(dict[str, Any], server_info)
-        instructions = result.get("instructions")
-        if instructions is not None and not isinstance(instructions, str):
-            raise RuntimeError("MCP initialize response has invalid instructions")
-
-        self.protocol_version = protocol_version
-        self.server_capabilities = capabilities
-        self.server_info = server_info
-        self.instructions = instructions
-
-    def has_server_capability(self, capability: str) -> bool:
-        """判断服务器是否在 initialize 响应中声明能力。"""
-        return isinstance(self.server_capabilities.get(capability), dict)
-
-    def set_tools_changed_callback(
-        self,
-        callback: Callable[["McpClient"], None] | None,
-    ) -> None:
-        """设置后续工具列表变更通知使用的回调。"""
-        self._tools_changed_callback = callback
-
-    def _require_server_capability(self, capability: str, method: str) -> None:
-        """拒绝调用未协商的服务器能力。"""
-        if self.has_server_capability(capability):
-            return
-        raise RuntimeError(
-            f"MCP server did not negotiate {capability!r}; cannot call {method}"
-        )
-
-    def _read_loop(self) -> None:
-        """持续读取 JSON-RPC 消息并分派响应、请求和通知。"""
-        while self._running and self.process and self.process.stdout:
-            msg = _read_jsonrpc_message(cast(BinaryIO, self.process.stdout))
-            if msg is None:
-                break
-            self._handle_incoming_message(msg)
-
-    def _handle_incoming_message(self, message: dict[str, Any]) -> None:
-        """按 JSON-RPC 形状分派单条入站消息。"""
-        if "id" in message and ("result" in message or "error" in message):
-            response_id = message.get("id")
-            if not _is_valid_message_id(response_id):
-                logger.warning("Ignoring MCP response with invalid id: %s", message)
+            async with stdio_client(
+                params,
+                errlog=cast(TextIO, self._stderr.stream),
+            ) as (read_stream, write_stream):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=self._timeout_delta(),
+                    message_handler=self._message_handler(),
+                    client_info=types.Implementation(
+                        name="xcode-client",
+                        version="0.1.1",
+                    ),
+                ) as session:
+                    result = await session.initialize()
+                    self._apply_initialize_result(result)
+                    self._commands = asyncio.Queue()
+                    self._ready.set()
+                    await self._serve_commands(session)
+        except BaseException as exc:
+            if not self._ready.is_set():
+                self._startup_error = exc
+                self._ready.set()
                 return
-            response_id = cast(int | str, response_id)
-            with self._lock:
-                if response_id not in self._active_request_ids:
-                    logger.debug(
-                        "Ignoring late or duplicate MCP response id=%r",
-                        response_id,
-                    )
-                    return
-                self._pending_responses[response_id] = message
-            return
+            logger.warning("MCP SDK session owner stopped unexpectedly", exc_info=True)
+            self._fail_pending_commands(exc)
 
-        method = message.get("method")
-        if not isinstance(method, str):
-            logger.warning("Ignoring malformed MCP JSON-RPC message: %s", message)
-            return
-        if "id" in message:
-            request_id = message.get("id")
-            if not _is_valid_message_id(request_id):
-                logger.warning(
-                    "Ignoring MCP server request with invalid id: %s", message
-                )
-                return
-            request_id = cast(int | str, request_id)
-            self._handle_server_request(request_id, method)
-            return
-        self._handle_server_notification(method)
+    def _apply_initialize_result(self, result: types.InitializeResult) -> None:
+        """保存 SDK 校验后的协商元数据。"""
+        self.protocol_version = str(result.protocolVersion)
+        self.server_capabilities = _model_dict(result.capabilities)
+        self.server_info = _model_dict(result.serverInfo)
+        self.instructions = result.instructions
 
-    def _handle_server_request(self, request_id: int | str, method: str) -> None:
-        """处理 server-to-client request。"""
-        if method == "ping":
-            self._send_jsonrpc_response(request_id, result={})
-            return
-        self._send_jsonrpc_response(
-            request_id,
-            error={
-                "code": -32601,
-                "message": f"Method not found: {method}",
-            },
-        )
-
-    def _handle_server_notification(self, method: str) -> None:
-        """处理已协商的 server notification。"""
-        if method == "notifications/tools/list_changed":
-            tools_capability = self.server_capabilities.get("tools")
-            if not isinstance(tools_capability, dict) or not tools_capability.get(
-                "listChanged", False
-            ):
-                logger.warning(
-                    "Ignoring MCP tools/list_changed notification without "
-                    "negotiated tools.listChanged capability"
-                )
-                return
-            if self._tools_changed_callback is None:
-                logger.debug(
-                    "Ignoring MCP tools/list_changed notification without callback"
-                )
-                return
-            self._schedule_tools_refresh()
-            return
-        logger.warning("Ignoring unsupported MCP server notification: %s", method)
-
-    def _schedule_tools_refresh(self) -> None:
-        """合并连续通知，并保证每个客户端最多运行一个刷新线程。"""
-        self._tools_changed_event.set()
-        with self._tools_refresh_lock:
-            if (
-                self._tools_refresh_thread is not None
-                and self._tools_refresh_thread.is_alive()
-            ):
-                return
-            self._tools_refresh_thread = threading.Thread(
-                target=self._run_tools_changed_callback,
-                name="mcp-tools-list-changed",
-                daemon=True,
-            )
-            self._tools_refresh_thread.start()
-
-    def _run_tools_changed_callback(self) -> None:
-        """串行刷新工具列表，并处理刷新期间到达的新通知。"""
+    async def _serve_commands(self, session: ClientSession) -> None:
+        """串行执行宿主请求，close 命令返回后退出 context。"""
+        assert self._commands is not None
         while True:
-            self._tools_changed_event.clear()
-            if not self._running or self._tools_changed_callback is None:
+            command = await self._commands.get()
+            if command.operation == "close":
+                command.future.set_result(None)
                 return
             try:
-                self._tools_changed_callback(self)
-            except Exception:
-                logger.warning("Failed to refresh MCP tools", exc_info=True)
-            with self._tools_refresh_lock:
-                if self._tools_changed_event.is_set():
-                    continue
-                self._tools_refresh_thread = None
-                return
+                if command.operation == "list_tools":
+                    result = await self._list_tools(session, command.timeout)
+                else:
+                    assert command.name is not None
+                    result = await self._call_tool(
+                        session,
+                        command.name,
+                        command.arguments or {},
+                        command.timeout,
+                    )
+            except BaseException as exc:
+                if not command.future.cancelled():
+                    command.future.set_exception(self._normalize_error(exc))
+            else:
+                if not command.future.cancelled():
+                    command.future.set_result(result)
 
-    def _send_jsonrpc_response(
+    async def _list_tools(
         self,
-        request_id: int | str,
-        *,
-        result: dict[str, Any] | None = None,
-        error: dict[str, Any] | None = None,
-    ) -> None:
-        """向服务器发送 JSON-RPC response。"""
-        response: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id}
-        if error is not None:
-            response["error"] = error
-        else:
-            response["result"] = result or {}
-        try:
-            self._write_message(response)
-        except RuntimeError:
-            logger.warning(
-                "Failed to respond to MCP server request %r",
-                request_id,
-                exc_info=True,
-            )
-
-    def send_request(
-        self, method: str, params: dict, timeout: float | None = None
-    ) -> dict[str, Any]:
-        """发送 JSON-RPC request 并同步等待对应响应。"""
-        if not self._running or not self.process:
-            raise RuntimeError("MCP client is not running.")
-
-        effective_timeout = timeout if timeout is not None else self._timeout
-        if effective_timeout is None:
-            effective_timeout = 10.0
-
-        with self._lock:
-            req_id = self.next_id
-            self.next_id += 1
-            self._active_request_ids.add(req_id)
-
-        req = {"jsonrpc": "2.0", "method": method, "id": req_id, "params": params}
-        try:
-            self._write_message(req)
-        except RuntimeError:
-            self._abandon_request(req_id)
-            raise
-
-        deadline = time.monotonic() + effective_timeout
-        while time.monotonic() < deadline:
-            if self.process.poll() is not None:
-                self._abandon_request(req_id)
-                err_content = ""
-                if self.process.stderr:
-                    try:
-                        raw_err = self.process.stderr.read()
-                        raw_text = raw_err.decode("utf-8", errors="replace")
-                        err_content = truncate_redact(raw_text, max_len=200)
-                    except Exception:
-                        logger.debug("failed to read MCP server stderr", exc_info=True)
-                raise RuntimeError(
-                    f"MCP server process exited unexpectedly. Stderr: {err_content}"
-                )
-            response = self._take_response(req_id)
-            if response is not None:
-                return self._response_result(response)
-            time.sleep(0.01)
-
-        response = self._take_response(req_id)
-        if response is not None:
-            return self._response_result(response)
-
-        self._abandon_request(req_id)
-        try:
-            self.send_notification(
-                "notifications/cancelled",
-                {
-                    "requestId": req_id,
-                    "reason": f"Client timeout waiting for {method}",
-                },
-            )
-        except RuntimeError:
-            logger.warning(
-                "Failed to notify MCP server that request %r timed out",
-                req_id,
-                exc_info=True,
-            )
-        raise TimeoutError(f"Timeout waiting for response to {method} (id={req_id})")
-
-    def _take_response(self, request_id: int | str) -> dict[str, Any] | None:
-        """提取已到达响应，并结束对应活动请求。"""
-        with self._lock:
-            response = self._pending_responses.pop(request_id, None)
-            if response is not None:
-                self._active_request_ids.discard(request_id)
-            return response
-
-    def _abandon_request(self, request_id: int | str) -> None:
-        """清除不再等待的请求及其可能已到达的响应。"""
-        with self._lock:
-            self._active_request_ids.discard(request_id)
-            self._pending_responses.pop(request_id, None)
-
-    @staticmethod
-    def _response_result(response: dict[str, Any]) -> dict[str, Any]:
-        """将 JSON-RPC response 转换为调用结果或协议错误。"""
-        if "error" in response:
-            raise RuntimeError(f"MCP error response: {response['error']}")
-        return cast(dict[str, Any], response.get("result", {}))
-
-    def send_notification(self, method: str, params: dict | None = None) -> None:
-        """发送不需要响应的 JSON-RPC notification。"""
-        if not self._running or not self.process:
-            raise RuntimeError("MCP client is not running.")
-
-        req: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
-        if params is not None:
-            req["params"] = params
-
-        self._write_message(req)
-
-    def _write_message(self, message: dict[str, Any]) -> None:
-        """串行写入单条 JSON-RPC 消息，避免多线程交错。"""
-        if not self._running or not self.process:
-            raise RuntimeError("MCP client is not running.")
-        payload = _encode_jsonrpc_message(message)
-        try:
-            with self._write_lock:
-                assert self.process.stdin is not None
-                self.process.stdin.write(payload)
-                self.process.stdin.flush()
-        except (OSError, ValueError) as exc:
-            raise RuntimeError(f"Failed to write to MCP server: {exc}") from exc
-
-    def list_tools(self, timeout: float | None = None) -> list[dict[str, Any]]:
-        """列出服务器工具，要求已协商 tools capability。"""
-        self._require_server_capability("tools", "tools/list")
+        session: ClientSession,
+        timeout: float | None,
+    ) -> list[dict[str, Any]]:
         tools: list[dict[str, Any]] = []
         cursor: str | None = None
         seen_cursors: set[str] = set()
         for _ in range(MAX_TOOL_LIST_PAGES):
-            params = {"cursor": cursor} if cursor is not None else {}
-            result = self.send_request("tools/list", params, timeout=timeout)
-            page_tools = result.get("tools")
-            if not isinstance(page_tools, list) or not all(
-                isinstance(tool, dict) for tool in page_tools
-            ):
-                raise RuntimeError("MCP tools/list response has invalid tools")
-            tools.extend(cast(list[dict[str, Any]], page_tools))
-
-            next_cursor = result.get("nextCursor")
+            result = await asyncio.wait_for(
+                session.list_tools(cursor=cursor),
+                timeout=self._effective_timeout(timeout),
+            )
+            tools.extend(_model_dict(tool) for tool in result.tools)
+            next_cursor = result.nextCursor
             if next_cursor is None:
                 return tools
-            if not isinstance(next_cursor, str) or not next_cursor:
+            if not next_cursor:
                 raise RuntimeError("MCP tools/list response has invalid nextCursor")
             if next_cursor in seen_cursors:
                 raise RuntimeError(f"MCP tools/list repeated cursor: {next_cursor!r}")
             seen_cursors.add(next_cursor)
             cursor = next_cursor
-
         raise RuntimeError(f"MCP tools/list exceeded {MAX_TOOL_LIST_PAGES} pages")
 
-    def call_tool(
-        self, name: str, arguments: dict, timeout: float | None = None
+    async def _call_tool(
+        self,
+        session: ClientSession,
+        name: str,
+        arguments: dict[str, Any],
+        timeout: float | None,
     ) -> dict[str, Any]:
-        """调用服务器工具，要求已协商 tools capability。"""
-        self._require_server_capability("tools", "tools/call")
-        return self.send_request(
-            "tools/call",
-            {"name": name, "arguments": arguments},
-            timeout=timeout,
+        result = await session.call_tool(
+            name,
+            arguments,
+            read_timeout_seconds=self._timeout_delta(timeout),
+        )
+        return _model_dict(result)
+
+    def _message_handler(self) -> MessageHandlerFnT:
+        """创建仅消费 Xcode 所需通知的 SDK 消息处理器。"""
+
+        async def handler(
+            message: RequestResponder[types.ServerRequest, types.ClientResult]
+            | types.ServerNotification
+            | Exception,
+        ) -> None:
+            if isinstance(message, types.ServerNotification) and isinstance(
+                message.root,
+                types.ToolListChangedNotification,
+            ):
+                self._schedule_tools_refresh()
+            await asyncio.sleep(0)
+
+        return handler
+
+    def has_server_capability(self, capability: str) -> bool:
+        """判断 initialize 是否声明指定 server capability。"""
+        return isinstance(self.server_capabilities.get(capability), dict)
+
+    def set_tools_changed_callback(
+        self,
+        callback: Callable[[McpClient], None] | None,
+    ) -> None:
+        """设置工具列表变化后的宿主刷新回调。"""
+        self._tools_changed_callback = callback
+
+    def list_tools(self, timeout: float | None = None) -> list[dict[str, Any]]:
+        """列出服务器工具并聚合 SDK 分页结果。"""
+        self._require_connected("tools/list")
+        self._require_tools_capability("tools/list")
+        return cast(
+            list[dict[str, Any]],
+            self._execute(
+                _SdkCommand("list_tools", concurrent.futures.Future(), timeout=timeout)
+            ),
+        )
+
+    def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """调用服务器工具并返回普通 MCP 结果字典。"""
+        self._require_connected("tools/call")
+        self._require_tools_capability("tools/call")
+        return cast(
+            dict[str, Any],
+            self._execute(
+                _SdkCommand(
+                    "call_tool",
+                    concurrent.futures.Future(),
+                    name=name,
+                    arguments=arguments,
+                    timeout=timeout,
+                )
+            ),
         )
 
     def stop(self) -> None:
-        """关闭 stdin 后等待服务器退出，必要时逐级终止进程。"""
-        self._running = False
-        if self in _active_clients:
+        """通知 owner task 退出并关闭 transport、session 与 worker。"""
+        if self._status == "disabled":
+            return
+        if self._commands is not None and self._owner_future is not None:
+            command = _SdkCommand("close", concurrent.futures.Future())
             try:
-                _active_clients.remove(self)
-            except ValueError:
-                pass
-        process = self.process
-        if process is not None:
-            self._stop_process(process)
-            self.process = None
-        with self._lock:
-            self._active_request_ids.clear()
-            self._pending_responses.clear()
+                self._execute(command)
+                self._owner_future.result(timeout=self._effective_timeout())
+            except Exception:
+                logger.warning("Failed to close MCP SDK session", exc_info=True)
+        self._shutdown_worker()
         self._status = "disabled"
 
-    def _stop_process(self, process: subprocess.Popen) -> None:
-        """执行 stdin EOF、TERM、KILL 的分级关闭流程。"""
-        self._close_process_stream(process, "stdin")
-        try:
-            process.wait(timeout=SHUTDOWN_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            self._terminate_process(process)
-        finally:
-            self._close_process_stream(process, "stdout")
-            self._close_process_stream(process, "stderr")
-            read_thread = self._read_thread
-            if (
-                read_thread is not None
-                and read_thread is not threading.current_thread()
-            ):
-                read_thread.join(timeout=KILL_GRACE_SECONDS)
-            self._read_thread = None
+    def _execute(self, command: _SdkCommand) -> object:
+        commands = self._commands
+        if commands is None:
+            raise RuntimeError("MCP client is not connected")
 
-    def _terminate_process(self, process: subprocess.Popen) -> None:
-        """先发送 TERM，超时后发送 KILL 并回收进程。"""
-        try:
-            process.terminate()
-        except OSError:
-            logger.debug("failed to terminate MCP server process", exc_info=True)
-        try:
-            process.wait(timeout=TERMINATE_GRACE_SECONDS)
-            return
-        except subprocess.TimeoutExpired:
-            pass
+        async def enqueue() -> None:
+            await commands.put(command)
 
+        self._worker.submit(enqueue()).result(timeout=self._effective_timeout())
         try:
-            process.kill()
-        except OSError:
-            logger.debug("failed to kill MCP server process", exc_info=True)
-        try:
-            process.wait(timeout=KILL_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            logger.warning("MCP server process did not exit after kill")
-
-    @staticmethod
-    def _close_process_stream(
-        process: subprocess.Popen,
-        stream_name: str,
-    ) -> None:
-        """关闭指定进程流，并忽略已关闭或失效的流。"""
-        if stream_name == "stdin":
-            stream = process.stdin
-        elif stream_name == "stdout":
-            stream = process.stdout
-        elif stream_name == "stderr":
-            stream = process.stderr
-        else:
-            stream = None
-        if stream is None:
-            return
-        try:
-            stream.close()
-        except (OSError, ValueError):
-            logger.debug(
-                "failed to close MCP server stream %s",
-                stream_name,
-                exc_info=True,
+            return command.future.result(
+                timeout=self._effective_timeout(command.timeout)
             )
+        except concurrent.futures.TimeoutError:
+            command.future.cancel()
+            raise TimeoutError(
+                f"Timeout waiting for MCP SDK {command.operation}"
+            ) from None
 
+    def _shutdown_worker(self) -> None:
+        self._worker.close()
+        self._stderr.close()
 
-# ── JSON-RPC 编解码 ──
+    def _effective_timeout(self, timeout: float | None = None) -> float:
+        if timeout is not None:
+            return timeout
+        if self._timeout is not None:
+            return self._timeout
+        return DEFAULT_REQUEST_TIMEOUT_SECONDS
 
-_active_clients: list[McpClient] = []
+    def _timeout_delta(self, timeout: float | None = None) -> timedelta:
+        return timedelta(seconds=self._effective_timeout(timeout))
 
+    def _require_connected(self, method: str) -> None:
+        if self._status == "connected" and self._commands is not None:
+            return
+        raise RuntimeError(f"MCP client is not connected; cannot call {method}")
 
-def _encode_jsonrpc_message(message: dict[str, Any]) -> bytes:
-    """将 JSON-RPC 消息编码为换行分隔 JSON。"""
-    body = json.dumps(message, ensure_ascii=False)
-    return (body + "\n").encode("utf-8")
+    def _require_tools_capability(self, method: str) -> None:
+        if self.has_server_capability("tools"):
+            return
+        raise RuntimeError(
+            f"MCP server did not negotiate 'tools'; cannot call {method}"
+        )
 
+    def _normalize_error(self, exc: BaseException) -> Exception:
+        if isinstance(exc, TimeoutError):
+            return exc
+        diagnostic = truncate_redact(self._stderr.snapshot())
+        suffix = f" Stderr: {diagnostic}" if diagnostic else ""
+        return RuntimeError(f"{truncate_redact(str(exc))}.{suffix}")
 
-def _read_jsonrpc_message(stream: BinaryIO) -> dict[str, Any] | None:
-    """读取换行分隔 JSON，并兼容旧 Content-Length framing。"""
-    line = stream.readline()
-    if not line:
-        return None
+    def _fail_pending_commands(self, exc: BaseException) -> None:
+        commands = self._commands
+        if commands is None:
+            return
+        while not commands.empty():
+            command = commands.get_nowait()
+            if not command.future.done():
+                command.future.set_exception(self._normalize_error(exc))
 
-    text = line.decode("utf-8", errors="replace")
+    def _schedule_tools_refresh(self) -> None:
+        """在线程中合并 tools/list_changed，避免阻塞 SDK receive loop。"""
+        if self._tools_changed_callback is None:
+            return
+        with self._callback_lock:
+            self._callback_pending = True
+            if self._callback_running:
+                return
+            self._callback_running = True
+        threading.Thread(
+            target=self._run_tools_refresh,
+            name="mcp-tools-list-changed",
+            daemon=True,
+        ).start()
 
-    # NDJSON: line starts with '{'
-    stripped = text.strip()
-    if stripped and stripped.startswith("{"):
-        try:
-            data = json.loads(stripped)
-        except json.JSONDecodeError:
-            return None
-        return data if isinstance(data, dict) else None
-
-    # Content-Length header format
-    headers: dict[str, str] = {}
-    # The first line we read may already be a header
-    header_line = text.strip()
-    if ":" in header_line:
-        key, value = header_line.split(":", 1)
-        headers[key.lower()] = value.strip()
-
-    while True:
-        line = stream.readline()
-        if not line:
-            return None
-        if line in (b"\r\n", b"\n"):
-            break
-        header_text = line.decode("ascii", errors="replace").strip()
-        if ":" not in header_text:
-            continue
-        key, value = header_text.split(":", 1)
-        headers[key.lower()] = value.strip()
-
-    length_text = headers.get("content-length")
-    if not length_text:
-        return None
-    try:
-        length = int(length_text)
-    except ValueError:
-        return None
-    body = stream.read(length)
-    if len(body) != length:
-        return None
-    try:
-        data = json.loads(body.decode("utf-8"))
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _cleanup_clients() -> None:
-    """在进程退出时停止仍存活的 MCP 客户端。"""
-    while _active_clients:
-        client = _active_clients[0]
-        try:
-            client.stop()
-        except Exception:
-            logger.debug(
-                "failed to stop MCP client during atexit cleanup", exc_info=True
-            )
-
-
-atexit.register(_cleanup_clients)
+    def _run_tools_refresh(self) -> None:
+        while True:
+            with self._callback_lock:
+                if not self._callback_pending:
+                    self._callback_running = False
+                    return
+                self._callback_pending = False
+            callback = self._tools_changed_callback
+            if callback is None or self._status != "connected":
+                continue
+            try:
+                callback(self)
+            except Exception:
+                logger.warning("Failed to refresh MCP tools", exc_info=True)
 
 
 class LazyClientRef:
-    """延迟创建并复用 MCP 客户端。"""
+    """延迟创建并复用 MCP SDK client。"""
 
     def __init__(
         self,
@@ -674,13 +454,13 @@ class LazyClientRef:
         self._lock = threading.Lock()
 
     def get_or_create(self) -> McpClient:
-        """返回可用客户端，必要时完成启动和握手。"""
+        """返回可用客户端，必要时完成有限次数重连。"""
         with self._lock:
-            if self.client is not None and self.client.status != "failed":
+            if self.client is not None and self.client.status == "connected":
                 return self.client
             self._stop_client()
 
-            command = [self.config["command"]] + self.config.get("args", [])
+            command = [self.config["command"], *self.config.get("args", [])]
             env = self.config.get("env")
             timeout = self.config.get("timeout")
             for _ in range(self.max_connect_attempts):
@@ -707,7 +487,6 @@ class LazyClientRef:
             self._stop_client()
 
     def _stop_client(self) -> None:
-        """停止当前客户端；调用方必须持有实例锁。"""
         if self.client is not None:
             self.client.stop()
             self.client = None
