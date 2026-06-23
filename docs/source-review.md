@@ -121,7 +121,7 @@ StructuredAgent → Agent → agent/tool_execution.py → ToolSpecAdapter → To
 }
 ```
 
-旧字段 `deny_tools`、`ask_tools`、`allow_tools` 已被移除。如果在配置中出现，Xcode 会在启动时抛出 `ValueError`，提示迁移至 `security.rules` + `security.global_default`。
+权限配置仅支持 `security.rules` + `security.global_default`。
 
 ### HITL
 

@@ -17,7 +17,6 @@ import filelock
 
 _PRIORITY_ORDER = {"high": 0, "normal": 1, "low": 2}
 _DEFAULT_RETENTION_DAYS = 30
-_MIGRATION_MARKER = ".migrated_v2"
 
 
 class MailboxTransport(Protocol):
@@ -88,9 +87,6 @@ class LocalFileMailboxTransport:
     def _lock_path(self, agent_id: str) -> Path:
         return self.inbox_dir / f"{agent_id}.lock"
 
-    def _migration_marker_path(self, agent_id: str) -> Path:
-        return self.inbox_dir / f"{agent_id}{_MIGRATION_MARKER}"
-
     def _default_expires_at(self) -> str:
         future = time.time() + self.retention_days * 86400
         return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(future))
@@ -107,7 +103,6 @@ class LocalFileMailboxTransport:
         expires_at: str | None = None,
     ) -> str:
         self.inbox_dir.mkdir(parents=True, exist_ok=True)
-        self._migrate_legacy_acks(recipient_id)
         message_id = str(uuid.uuid4())
         event: dict[str, Any] = {
             "event": "message",
@@ -147,7 +142,6 @@ class LocalFileMailboxTransport:
         exclude_types: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         self.inbox_dir.mkdir(parents=True, exist_ok=True)
-        self._migrate_legacy_acks(recipient_id)
         path = self._mailbox_path(recipient_id)
         if not path.exists():
             return []
@@ -170,9 +164,6 @@ class LocalFileMailboxTransport:
                             continue
                         if event_type == "message":
                             messages[msg_id] = data
-                        elif event_type == "ack":
-                            # 兼容迁移前残留的 ack 行（迁移后不应出现，但兜底）
-                            acked_ids.add(msg_id)
                     except json.JSONDecodeError as exc:
                         logger.warning("Skipping bad line in mailbox: %s", exc)
                         continue
@@ -206,7 +197,6 @@ class LocalFileMailboxTransport:
 
     def acknowledge_message(self, message_id: str, recipient_id: str) -> None:
         self.inbox_dir.mkdir(parents=True, exist_ok=True)
-        self._migrate_legacy_acks(recipient_id)
         event = {
             "event": "ack",
             "message_id": message_id,
@@ -309,58 +299,6 @@ class LocalFileMailboxTransport:
                     continue
         return acked
 
-    def _migrate_legacy_acks(self, recipient_id: str) -> None:
-        """一次性迁移：将主 JSONL 中的 ack 行移动到 .ack 文件。
-
-        迁移完成后写入 marker 文件，后续调用直接跳过。
-        """
-        marker = self._migration_marker_path(recipient_id)
-        if marker.exists():
-            return
-        main_path = self._mailbox_path(recipient_id)
-        if not main_path.exists():
-            marker.touch()
-            return
-        lock = filelock.FileLock(
-            self._lock_path(recipient_id), timeout=self.lock_timeout_seconds
-        )
-        with lock:
-            if marker.exists():
-                return
-            legacy_acks: list[dict[str, Any]] = []
-            remaining: list[dict[str, Any]] = []
-            with open(main_path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        remaining.append({"_raw": line})
-                        continue
-                    if data.get("event") == "ack":
-                        legacy_acks.append(data)
-                    else:
-                        remaining.append(data)
-            if not legacy_acks:
-                marker.touch()
-                return
-            # 追加 legacy ack 到 .ack 文件
-            ack_path = self._ack_path(recipient_id)
-            with open(ack_path, "a", encoding="utf-8") as f:
-                for ack in legacy_acks:
-                    f.write(json.dumps(ack, ensure_ascii=False) + "\n")
-            # 重写主文件：仅 message 行（跳过 _raw 损坏行）
-            clean_messages = [d for d in remaining if "_raw" not in d]
-            self._atomic_write_lines(main_path, clean_messages)
-            marker.touch()
-            logger.info(
-                "migrated %d legacy ack entries for %s",
-                len(legacy_acks),
-                recipient_id,
-            )
-
     def _atomic_write_lines(self, path: Path, items: list[dict[str, Any]]) -> None:
         """原子性地重写 JSONL 文件。"""
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -454,7 +392,7 @@ def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
     def send_mailbox_message(args: ToolInput) -> str:
         sender_id = str(args.get("sender_id", "")).strip()
         recipient_id = str(args.get("recipient_id", "")).strip()
-        type_name = str(args.get("type", args.get("type_name", ""))).strip()
+        type_name = str(args.get("type", "")).strip()
         payload = args.get("payload", {})
         if not sender_id:
             raise ValueError("sender_id is required")

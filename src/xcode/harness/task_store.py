@@ -319,16 +319,7 @@ def resolve_task_dependencies(tasks: list[TaskRecord]) -> list[TaskRecord]:
         visited[task_id] = 0
         task = task_map.get(task_id)
         if task:
-            blocked_by = task.payload.get("blocked_by")
-            dep_ids = []
-            if isinstance(blocked_by, int):
-                dep_ids.append(blocked_by)
-            elif isinstance(blocked_by, list):
-                dep_ids.extend([int(x) for x in blocked_by if str(x).isdigit()])
-            elif isinstance(blocked_by, str) and blocked_by.isdigit():
-                dep_ids.append(int(blocked_by))
-
-            for dep_id in dep_ids:
+            for dep_id in _parse_blocked_by(task):
                 if dep_id in task_map:
                     visit(dep_id)
 
@@ -400,12 +391,8 @@ def advance_task(store: TaskStore, task_id: int | str) -> list[TaskRecord]:
 def _parse_blocked_by(task: TaskRecord) -> list[int]:
     """从 TaskRecord payload 中提取 blocked_by 依赖列表。"""
     blocked_by = task.payload.get("blocked_by")
-    if isinstance(blocked_by, int):
-        return [blocked_by]
     if isinstance(blocked_by, list):
-        return [int(x) for x in blocked_by if str(x).isdigit()]
-    if isinstance(blocked_by, str) and blocked_by.isdigit():
-        return [int(blocked_by)]
+        return [item for item in blocked_by if type(item) is int]
     return []
 
 

@@ -111,7 +111,7 @@ class TestTaskStateCollectorNoDuplicate:
             from xcode.harness.task_store import TaskStore
 
             store = TaskStore(root)
-            store.create("my task", payload={"blocked_by": "Task #5"})
+            store.create("my task", payload={"blocked_by": [5]})
 
             from xcode.harness.agent_runtime.config import _build_task_state_provider
 
@@ -120,7 +120,7 @@ class TestTaskStateCollectorNoDuplicate:
             state_text = provider()
 
             assert "my task" in state_text
-            assert "Blocked by: Task #5" in state_text
+            assert "Blocked by: [5]" in state_text
             assert "[Compressed]" not in state_text
             assert "compaction-state" not in state_text
 

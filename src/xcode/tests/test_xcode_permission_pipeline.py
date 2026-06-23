@@ -75,8 +75,8 @@ class TestXcodePermissionPipeline:
             # Create three tasks with dependencies: Task 3 depends on Task 2, Task 2 depends on Task 1
             store = TaskStore(project_root)
             t1 = store.create("Setup project", payload={})
-            t2 = store.create("Write core codebase", payload={"blocked_by": t1.id})
-            t3 = store.create("Write tests", payload={"blocked_by": t2.id})
+            t2 = store.create("Write core codebase", payload={"blocked_by": [t1.id]})
+            t3 = store.create("Write tests", payload={"blocked_by": [t2.id]})
 
             all_tasks = store.list()
             assert len(all_tasks) == 3
@@ -88,7 +88,7 @@ class TestXcodePermissionPipeline:
             # Verify circular dependency checking
             # Artificially modify t1 to block on t3 (creating t1 -> t3 -> t2 -> t1 loop)
             t1_record = store.get(t1.id)
-            t1_record.payload["blocked_by"] = t3.id
+            t1_record.payload["blocked_by"] = [t3.id]
             store._write(t1_record)
 
             with pytest.raises(ValueError) as exc_info:

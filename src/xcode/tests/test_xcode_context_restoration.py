@@ -91,7 +91,7 @@ class XcodeContextRestorationTests:
                         {"title": "Subtask 1", "status": "completed"},
                         {"title": "Subtask 2", "status": "pending"},
                     ],
-                    "blocked_by": "Task #99",
+                    "blocked_by": [99],
                 },
             )
 

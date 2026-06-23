@@ -22,10 +22,7 @@ from xcode.harness.observability import (
     StaticPolicyEvaluator,
     evaluate_policy_constraints,
 )
-from xcode.harness.config import (
-    _validate_external_directories,
-    _validate_legacy_security_fields,
-)
+from xcode.harness.config import _validate_external_directories
 from xcode.harness.observability._safety_backstop import (
     _is_dd_device_write,
     _is_root_recursive_deletion,
@@ -1989,41 +1986,6 @@ class StaticPolicyLastMatchWinsTests:
         )
         assert verdict.decision == "ask"
         assert verdict.source == "rule"
-
-
-class LegacyPermissionFieldValidationTests:
-    """Config fail-fast on legacy deny_tools/ask_tools/allow_tools."""
-
-    def _assert_raises(self, raw: dict) -> None:
-        with pytest.raises(ValueError) as exc_info:
-            _validate_legacy_security_fields(raw)
-        assert "Migrate to" in str(exc_info.value)
-
-    def test_legacy_deny_tools_raises(self) -> None:
-        self._assert_raises({"security": {"deny_tools": ["bash"]}})
-
-    def test_legacy_ask_tools_raises(self) -> None:
-        self._assert_raises({"security": {"ask_tools": ["write_file"]}})
-
-    def test_legacy_allow_tools_raises(self) -> None:
-        self._assert_raises({"security": {"allow_tools": ["read_file"]}})
-
-    def test_legacy_mixed_fields_raises(self) -> None:
-        self._assert_raises(
-            {
-                "security": {
-                    "deny_tools": ["bash"],
-                    "ask_tools": ["write_file"],
-                }
-            }
-        )
-
-    def test_new_rules_field_does_not_raise(self) -> None:
-        raw = {"security": {"rules": [{"tool": "bash", "decision": "deny"}]}}
-        _validate_legacy_security_fields(raw)  # should not raise
-
-    def test_no_security_does_not_raise(self) -> None:
-        _validate_legacy_security_fields({})  # should not raise
 
 
 class SessionGrantIsolationTests:

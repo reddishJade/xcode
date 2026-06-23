@@ -186,7 +186,7 @@ class TestMcpConfigPath:
             result = _mcp_config_path(root)
             assert result == local / "mcp_config.json"
 
-    def test_legacy_root_path_returns_none(self) -> None:
+    def test_root_config_path_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_config(root / "mcp_config.json", {"mcpServers": {}})

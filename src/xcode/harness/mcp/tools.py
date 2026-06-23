@@ -158,16 +158,9 @@ CANONICAL_CONFIG_PATH = ".local" / Path("mcp_config.json")
 
 
 def _mcp_config_path(project_root: Path) -> Path | None:
-    canonical = project_root / ".local" / "mcp_config.json"
+    canonical = project_root / CANONICAL_CONFIG_PATH
     if canonical.exists():
         return canonical
-    legacy = project_root / "mcp_config.json"
-    if legacy.exists():
-        _warn(
-            "found mcp_config.json at project root; canonical location is "
-            ".local/mcp_config.json. Move the file and remove the root copy."
-        )
-        return None
     return None
 
 

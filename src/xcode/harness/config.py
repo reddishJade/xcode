@@ -87,15 +87,6 @@ class ProviderRuntimeConfig:
     )
 
 
-_LEGACY_SECURITY_FIELDS: frozenset[str] = frozenset(
-    {
-        "deny_tools",
-        "ask_tools",
-        "allow_tools",
-    }
-)
-
-
 @dataclass
 class SecurityRuntimeConfig:
     permission_mode: PermissionMode = "normal"
@@ -117,20 +108,6 @@ class SecurityRuntimeConfig:
         if self.permission_mode == "strict":
             return True
         return self.sandbox_mode
-
-
-def _validate_legacy_security_fields(raw: dict[str, Any]) -> None:
-    """Fail-fast: legacy deny_tools/ask_tools/allow_tools detected."""
-    security = raw.get("security")
-    if not isinstance(security, dict):
-        return
-    found = _LEGACY_SECURITY_FIELDS & set(security)
-    if found:
-        raise ValueError(
-            "Security config contains deprecated fields: "
-            f"{', '.join(sorted(found))}. "
-            "Migrate to 'security.rules' and 'security.global_default'."
-        )
 
 
 def _validate_external_directories(raw: dict[str, Any]) -> None:
@@ -382,7 +359,6 @@ def discover_runtime_config(
     merged = _deep_merge_raw(global_raw, project_raw)
     merged = _deep_merge_raw(merged, local_raw)
 
-    _validate_legacy_security_fields(merged)
     _validate_external_directories(merged)
     _validate_instruction_sources(merged)
     _validate_external_hooks(merged)
