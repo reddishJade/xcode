@@ -22,7 +22,7 @@
 - Python **3.12** 或更高
 - [uv](https://docs.astral.sh/uv/)（推荐）或 pip
 
-### 从源码安装
+### 从源码安装（开发模式）
 
 ```powershell
 git clone https://github.com/your-org/xcode.git
@@ -30,7 +30,19 @@ cd xcode
 uv pip install -e .
 ```
 
-仅安装运行时依赖，不含开发工具。
+以 editable 模式安装到当前项目虚拟环境，源码修改即时生效。
+
+### 全局安装（uv tool）
+
+```powershell
+uv tool install --python 3.12 <path-to-xcode>
+```
+
+安装后 `xcode` 成为系统级 CLI 命令，任意目录下均可调用。升级：
+
+```powershell
+uv tool upgrade xcode --no-cache
+```
 
 ### 安装开发环境
 
@@ -39,6 +51,33 @@ uv pip install -e ".[dev]"
 ```
 
 开发依赖包括：ruff（格式化/lint）、pyright（类型检查）、pytest（测试框架）。
+
+---
+
+## 打包为独立二进制
+
+使用 PyInstaller 将 xcode 打包为免 Python 环境的可执行文件：
+
+```powershell
+# 安装打包依赖
+uv pip install -e ".[pack]"
+
+# 打包（onedir 模式，启动快、更新方便）
+uv run pyinstaller --onedir --name xcode --paths src src/xcode/__main__.py
+
+# 产出在 dist/xcode/
+# 直接运行（Windows）：
+.\dist\xcode\xcode.exe --help
+# 或（Linux/macOS）：
+./dist/xcode/xcode --help
+```
+
+| 模式 | 产出 | 启动速度 | 适用场景 |
+|---|---|---|---|
+| `--onedir`（默认）| `dist\xcode\` 目录（exe + 依赖）| 无延迟 | 开发/调试、频繁更新 |
+| `--onefile` | 单个 `dist\xcode.exe` | 慢 1-3 秒（需解压）| 分发给终端用户 |
+
+`onedir` 模式下，依赖层不变时只需重新打包主 exe，`_internal\` 目录可复用。
 
 ---
 
@@ -63,12 +102,13 @@ app.close()
 ### REPL 交互
 
 ```powershell
+# 项目内运行（开发模式）
+uv run xcode
+
+# 或通过 python -m
 uv run python -m xcode
-```
 
-或通过安装后的命令入口：
-
-```powershell
+# 全局安装后直接运行
 xcode
 ```
 

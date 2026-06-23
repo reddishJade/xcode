@@ -1,5 +1,5 @@
 import sys
 
-from .main import main
+from xcode.main import main
 
 sys.exit(main())

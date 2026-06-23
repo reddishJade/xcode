@@ -1,24 +1,34 @@
-.agent/
+# --- 开发工具缓存 ---
+.agents/
 .antigravitycli/
 .claude/
-.xcode/
-.crush/
 .codex/
-.env
-.local/
+.crush/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
 .uv-cache/
-.venv/
-*.egg-info/
+.xcode/
+
+# --- Python 缓存与构建 ——
 *.py[cod]
 __pycache__/
-diff.log
-docs/notes/
+*.egg-info/
+
+# --- 环境与配置 ——
+.env
+.local/
+.venv/
 opencode.json*
-packages/
-pi/
-tmp/
 uv.lock
 xcode.config.json
+
+# --- 构建产出 ——
+build/
+dist/
+*.spec
+
+# --- 杂项 ---
+diff.log
+docs/notes/
+tmp/
