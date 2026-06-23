@@ -26,6 +26,7 @@ from xcode.harness.agent_runtime import (
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig
 from xcode.harness.agent_runtime.events import FinalStructuredEvent
 from xcode.agent.messages import UserMessage
+from xcode.agent.results import TerminationReason
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
 import pytest
@@ -318,7 +319,7 @@ class XcodeStructuredAgentTests:
 
         result = agent.run("loop")
 
-        assert result.stopped_by_limit
+        assert result.termination_reason is TerminationReason.STEP_LIMIT
         assert result.answer == "step limit reached"
 
     def test_watchdog_stops_repeated_tool_call(self) -> None:
@@ -349,7 +350,7 @@ class XcodeStructuredAgentTests:
 
         result = agent.run("loop")
 
-        assert result.stopped_by_watchdog
+        assert result.termination_reason is TerminationReason.WATCHDOG
         assert result.steps == 3
         assert "watchdog stopped" in result.answer
 
@@ -389,7 +390,7 @@ class XcodeStructuredAgentTests:
 
         result = agent.run("test")
 
-        assert result.stopped_by_watchdog
+        assert result.termination_reason is TerminationReason.WATCHDOG
         assert "watchdog stopped" in result.answer
 
     def test_idle_watchdog_allows_successful_read_only_steps(self) -> None:
@@ -848,7 +849,7 @@ class XcodeStructuredAgentTests:
         )
         result = agent.run("hello")
 
-        assert result.stopped_by_error
+        assert result.termination_reason is TerminationReason.PROVIDER_ERROR
         assert "Diminishing Returns" in result.answer
 
     def test_transient_error_retry(self) -> None:
@@ -889,7 +890,7 @@ class XcodeStructuredAgentTests:
         with mock.patch("asyncio.sleep", new=mock.AsyncMock()):
             result = agent.run("hello")
 
-        assert result.stopped_by_error
+        assert result.termination_reason is TerminationReason.PROVIDER_ERROR
         assert "I encountered an error." in result.answer
 
 

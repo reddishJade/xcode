@@ -67,21 +67,6 @@ class StructuredAgentResult:
     last_agent: str = "main"
     run_state: RunState | None = None
 
-    @property
-    def stopped_by_limit(self) -> bool:
-        """兼容旧调用方；停止状态以 termination_reason 为准。"""
-        return self.termination_reason is TerminationReason.STEP_LIMIT
-
-    @property
-    def stopped_by_watchdog(self) -> bool:
-        """兼容旧调用方；停止状态以 termination_reason 为准。"""
-        return self.termination_reason is TerminationReason.WATCHDOG
-
-    @property
-    def stopped_by_error(self) -> bool:
-        """兼容旧调用方；停止状态以 termination_reason 为准。"""
-        return self.termination_reason is TerminationReason.PROVIDER_ERROR
-
 
 def _build_structured_result(
     result: AgentLoopResult,

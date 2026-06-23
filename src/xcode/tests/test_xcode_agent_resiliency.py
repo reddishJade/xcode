@@ -8,6 +8,7 @@ from xcode.ai.events import (
     TextDelta,
 )
 from xcode.ai.types import StreamOptions
+from xcode.agent.results import TerminationReason
 from xcode.harness.agent_runtime.structured import StructuredAgent
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig
 from xcode.harness.agent_runtime.fallback import _FallbackSwitchingProvider
@@ -61,7 +62,7 @@ class XcodeAgentResiliencyTests:
         result = agent.run("test diminishing returns")
 
         assert "Diminishing Returns" in result.answer
-        assert result.stopped_by_error
+        assert result.termination_reason is TerminationReason.PROVIDER_ERROR
 
     def test_semantic_idle_failsafe_triggers_in_act_mode(self) -> None:
         # Define a read-only tool (not productive)
@@ -135,7 +136,7 @@ class XcodeAgentResiliencyTests:
 
         # Act mode should trigger Watchdog after 4 consecutive idle steps
         result = agent.run("test idle act", mode="act")
-        assert result.stopped_by_watchdog
+        assert result.termination_reason is TerminationReason.WATCHDOG
         assert result.watchdog_reason is not None
         assert result.watchdog_reason is not None
         assert "consecutive steps" in result.watchdog_reason.lower()

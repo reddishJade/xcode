@@ -20,7 +20,7 @@ from ...agent.protocols import AgentTool, CancellationSignal
 from ...agent.types import ToolCallContent
 from .execution_modes import ExecutionModeState, policy_for_mode
 from .tool_adapter import adapt_tool_specs
-from .tool_audit import emit_audit
+from .tool_audit import build_audit_record, emit_audit
 from .tool_hooks import emit_hook, emit_tool_hook, tool_result_text
 from ..observability import (
     AuditRecord,
@@ -41,7 +41,6 @@ from ..observability.permission_model import (
     GrantStore,
     PolicyEvaluator,
 )
-from ..observability import redact_text
 from ..skills import (
     ApprovalCallback,
     ToolSpec,
@@ -235,7 +234,6 @@ class ToolGate:
                         tool_call,
                         args,
                         perm_result,
-                        snapshot.tool_map,
                     )
                 return permission_result
 
@@ -282,7 +280,6 @@ class ToolGate:
                 ctx,
                 action_input,
                 result_text,
-                snapshot.tool_map,
                 perm_result=perm_result,
                 correlation=self._hook_correlation_fields(ctx.tool_call.id),
             )
@@ -368,62 +365,20 @@ class ToolGate:
         tool_call: ToolCallContent,
         args: dict[str, Any],
         perm_result: PermissionEngineResult,
-        tool_map: dict[str, ToolSpec],
     ) -> None:
         if self._audit_logger is None:
             return
         action_input = stringify_tool_input(args)
-        metadata = perm_result.metadata or {}
-        approval_result = perm_result.approval_result
         correlation = self._hook_correlation_fields(tool_call.id)
         self._audit_logger(
-            AuditRecord(
+            build_audit_record(
                 session_id=self._session_id,
-                tool=tool_call.name,
-                dynamic_decision=perm_result.decision,
-                policy_decision=perm_result.matched_rule,
+                tool_call=tool_call,
+                action_input=action_input,
+                result_text="",
                 final_status="blocked",
-                approved=False,
-                redacted_input=redact_text(action_input),
-                redacted_output="",
-                timestamp=correlation["timestamp"],
-                turn_id=correlation["turn_id"],
-                request_id=correlation["request_id"],
-                tool_call_id=tool_call.id,
-                approval_scope=(
-                    approval_result.scope
-                    if approval_result is not None and approval_result.scope
-                    else (
-                        str(metadata.get("approval_scope"))
-                        if metadata.get("approval_scope")
-                        else None
-                    )
-                ),
-                user_decision=(
-                    str(metadata.get("user_decision"))
-                    if metadata.get("user_decision")
-                    else None
-                ),
-                capability=(
-                    perm_result.action.capability
-                    if perm_result.action is not None
-                    else None
-                ),
-                target_kind=(
-                    str(perm_result.action.targets[0].kind)
-                    if perm_result.action is not None and perm_result.action.targets
-                    else None
-                ),
-                target_value=(
-                    str(perm_result.action.targets[0].value)
-                    if perm_result.action is not None and perm_result.action.targets
-                    else None
-                ),
-                matched_rule=perm_result.matched_rule,
-                approval_source=perm_result.source,
-                approval_grant_id=(
-                    approval_result.grant_id if approval_result is not None else None
-                ),
+                perm_result=perm_result,
+                correlation=correlation,
             )
         )
 

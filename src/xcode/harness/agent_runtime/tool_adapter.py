@@ -1,9 +1,7 @@
-"""ToolSpec ↔ AgentTool 适配器。
+"""ToolSpec → AgentTool 适配器。
 
 将 harness 层的 ToolSpec 适配为 agent 层的 AgentTool protocol（正向），
-以及将 AgentTool 反向适配为 ToolSpec（反向），
-使 StructuredAgent 可以将 ToolSpec 注册表传给 agent 核心循环，
-也允许第三方 AgentTool 注册到 harness 层。
+使 StructuredAgent 可以将 ToolSpec 注册表传给 agent 核心循环。
 """
 
 from __future__ import annotations
@@ -11,7 +9,6 @@ from __future__ import annotations
 import asyncio
 
 from ...agent.protocols import (
-    AgentTool,
     AgentToolResult,
     CancellationSignal,
     ToolExecutionMode,
@@ -160,36 +157,6 @@ def _redacted_shell_output_item(item: dict[str, object]) -> dict[str, object]:
     if isinstance(stderr, str):
         redacted["stderr"] = redact_text(stderr)
     return redacted
-
-
-def create_tool_spec_from_agent_tool(tool: AgentTool) -> ToolSpec:
-    """将 AgentTool 反向适配为 ToolSpec。
-
-    在测试或第三方集成中，调用方提供了 AgentTool 实例而 harness
-    需要 ToolSpec 时使用。
-    """
-    import asyncio
-
-    async def execute_async(data):
-        return await tool.execute("", data, None)
-
-    def sync_handler(data):
-        result = asyncio.run(execute_async(data))
-        return "".join(c.text for c in result.content if isinstance(c, TextContent))
-
-    return ToolSpec(
-        name=tool.name,
-        description=tool.description,
-        input_hint=(
-            f"JSON: {tool.parameters.get('properties', {})!r}"
-            if tool.parameters
-            else "{}"
-        ),
-        handler=sync_handler,
-        schema=dict(tool.parameters),
-        execution_mode=tool.execution_mode,
-        examples=list(tool.examples),
-    )
 
 
 def _tool_input_from_arguments(arguments: ToolArguments) -> dict[str, object]:
