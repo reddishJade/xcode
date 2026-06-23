@@ -49,13 +49,11 @@ from xcode.agent.messages import AssistantMessage
 from xcode.agent.types import TextContent, ToolCallContent
 
 
-def _registry_and_state(
-    app: object,
-) -> tuple[tuple[ToolSpec, ...], ToolRegistryState | None]:
+def _registry(app: object) -> tuple[ToolSpec, ...]:
     raw = getattr(app, "registry", ())
     if isinstance(raw, ToolRegistryState):
-        return raw.snapshot(), raw
-    return tuple(raw) if raw else (), None
+        return raw.snapshot()
+    return tuple(raw) if raw else ()
 
 
 def run_tool_command(command: str, app: object) -> str:
@@ -63,19 +61,13 @@ def run_tool_command(command: str, app: object) -> str:
     if len(parts) < 2:
         return "usage: /tool NAME INPUT\n/tool list - show enabled tools by group"
     tool_name = parts[1]
-    registry, state = _registry_and_state(app)
-    use_governance = bool(getattr(getattr(app, "agent", None), "use_governance", False))
+    registry = _registry(app)
 
     if tool_name == "list":
-        if use_governance and state is not None:
-            return _tool_list_governance(state)
         return _tool_list_legacy(registry)
 
     # ── Direct execution ──
-    if use_governance and state is not None:
-        selected = _resolve_tool_governance(tool_name, state)
-    else:
-        selected = _resolve_tool_legacy(tool_name, registry)
+    selected = _resolve_tool_legacy(tool_name, registry)
 
     if selected is None:
         return f"unknown tool: {tool_name}"
@@ -86,24 +78,6 @@ def run_tool_command(command: str, app: object) -> str:
         return str(exc)
     agent = getattr(app, "agent", None)
     return _execute_tool_via_gate(selected, action_input, agent)
-
-
-def _tool_list_governance(state: ToolRegistryState) -> str:
-    lines = ["<visible tools>"]
-    root_tools = state.tools_visible_to_root()
-    groups: dict[str, list[str]] = {}
-    for rt in root_tools:
-        g = rt.spec.group
-        groups.setdefault(g, []).append(rt.public_selector.selector)
-
-    for group in sorted(groups):
-        names = sorted(groups[group])
-        lines.append(f"  {group}:")
-        for name in names:
-            lines.append(f"    {name}")
-
-    lines.append("</visible tools>")
-    return "\n".join(lines)
 
 
 def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:
@@ -149,19 +123,6 @@ def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:
         lines.extend(f"  {group}" for group in available_groups)
         lines.append("</available groups>")
     return "\n".join(lines)
-
-
-def _resolve_tool_governance(name: str, state: ToolRegistryState) -> ToolSpec | None:
-    available = state.tools_user_invocable()
-    for rt in available:
-        if rt.public_selector.selector == name:
-            return rt.spec
-    canonical = state.resolve_selector(name)
-    if canonical:
-        for rt in available:
-            if rt.canonical_id == canonical:
-                return rt.spec
-    return None
 
 
 def _resolve_tool_legacy(name: str, registry: tuple[ToolSpec, ...]) -> ToolSpec | None:

@@ -228,7 +228,6 @@ def _validate_instruction_sources(raw: dict[str, Any]) -> None:
 class ToolsRuntimeConfig:
     subagent_tool_allowlist: tuple[str, ...] = ()
     shell: str = "auto"
-    use_registered_tool_governance: bool = False
 
 
 @dataclass

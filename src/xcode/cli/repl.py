@@ -111,7 +111,6 @@ def run_repl(
 
     state = ReplState()
 
-    use_governance = bool(getattr(getattr(app, "agent", None), "use_governance", False))
     session = prompt_session or create_prompt_session(
         root,
         registry,
@@ -121,7 +120,6 @@ def run_repl(
         lambda: current_model_options(app),
         lambda: available_skill_names(app),
         state=state,
-        use_registered_tool_governance=use_governance,
     )
     grant_store_manager = SessionGrantStoreManager()
     permanent_grant_store = FileGrantStore.for_project_root(root)

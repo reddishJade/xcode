@@ -35,6 +35,7 @@ from .events import (
     StructuredAgentEvent,
 )
 from .execution_modes import ExecutionModeState, policy_for_mode
+from ..skills import ToolRegistryState, ToolSpec
 from .fallback import _FallbackWithRetryPrimary
 from .history_manager import HistoryManager
 from .result import (
@@ -51,8 +52,7 @@ from ..skill_activation import (
     ExplicitSkillActivationResult,
     is_skill_activation_content,
 )
-from ..skills import ApprovalCallback, ToolRegistryState, ToolSpec
-from .execution_modes import governance_registry_for_mode
+from ..skills import ApprovalCallback
 
 _PROMPT_VERSION_CACHE: str | None = None
 
@@ -140,11 +140,6 @@ class StructuredAgent:
     def registry(self) -> tuple[ToolSpec, ...]:
         """返回当前工具注册表快照。"""
         return self._registry_state.snapshot()
-
-    @property
-    def use_governance(self) -> bool:
-        """当前是否启用了 RegisteredTool 治理。"""
-        return self._runtime.use_registered_tool_governance
 
     @property
     def tool_map(self) -> dict[str, ToolSpec]:
@@ -437,14 +432,7 @@ class StructuredAgent:
         effective_mode = mode or snapshot.config.execution_mode
         self._mode.set_mode(effective_mode)
         registry_snapshot = snapshot.registry
-        governance_reg = self._registry_state.registered_snapshot()
-        if self._runtime.use_registered_tool_governance and governance_reg:
-            active_registry = tuple(
-                rt.spec
-                for rt in governance_registry_for_mode(governance_reg, effective_mode)
-            )
-        else:
-            active_registry = self._mode.filter_tools(registry_snapshot)
+        active_registry = self._mode.filter_tools(registry_snapshot)
         self.cancellation_token.reset()
         self._correlation.reset(self.session_id)
 
@@ -460,9 +448,6 @@ class StructuredAgent:
         def tools_for_mode_fn(
             reg: tuple[ToolSpec, ...], m: ExecutionMode
         ) -> list[AgentTool]:
-            if self._runtime.use_registered_tool_governance and governance_reg:
-                filtered_regs = governance_registry_for_mode(governance_reg, m)
-                return self._gate.adapt_tools(tuple(rt.spec for rt in filtered_regs))
             filtered = policy_for_mode(m).filter_tools(reg)
             return self._gate.adapt_tools(filtered)
 

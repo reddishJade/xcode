@@ -5,7 +5,7 @@ from typing import Protocol
 from xcode.ai.events import ToolCall
 from ..config import ExecutionMode
 from ..observability.permissions import PermissionDecision
-from ..skills import RegisteredTool, ToolSpec, filter_primary_agent_invocable
+from ..skills import ToolSpec
 
 """Plan / Build / Act 的工具可见性策略。"""
 
@@ -126,21 +126,6 @@ def registry_for_mode(
     mode: ExecutionMode,
 ) -> tuple[ToolSpec, ...]:
     return policy_for_mode(mode).filter_tools(registry)
-
-
-def governance_registry_for_mode(
-    registered: tuple[RegisteredTool, ...],
-    mode: ExecutionMode,
-) -> tuple[RegisteredTool, ...]:
-    """Filter registered tools by mode constraints using governance policy.
-
-    Applies primary_agent_invocable + action_profile presence check first,
-    then mode-specific read-only/write constraints.
-    """
-    eligible = filter_primary_agent_invocable(registered)
-    if mode == "plan":
-        return tuple(rt for rt in eligible if rt.spec.read_only)
-    return eligible
 
 
 def mode_notice(mode: ExecutionMode) -> str:

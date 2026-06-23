@@ -43,11 +43,27 @@ from ..observability.permission_model import (
 )
 from ..observability import redact_text
 from ..skills import (
-    CORE_TOOL_ACTION_PROFILES,
     ApprovalCallback,
     ToolSpec,
     stringify_tool_input,
 )
+
+# 核心工具 capability 映射，提供给权限引擎
+_TOOL_ACTION_PROFILES: dict[str, tuple[str, str]] = {
+    "read_file": ("read", "path"),
+    "glob_files": ("read", "path"),
+    "grep_search": ("read", "path"),
+    "find_files": ("read", "path"),
+    "ls": ("read", "path"),
+    "search_tools": ("read", "none"),
+    "write_file": ("write", "path"),
+    "edit_file": ("edit", "path"),
+    "apply_patch": ("patch", "path"),
+    "bash": ("shell", "none"),
+    "shell": ("shell", "none"),
+    "load_skill": ("execute", "none"),
+    "update_todo": ("write", "none"),
+}
 
 
 @dataclass(frozen=True)
@@ -421,12 +437,9 @@ class ToolGate:
     ) -> BeforeToolCallResult | None:
         action_profiles: dict[str, tuple[str, str]] = {}
         for spec in snapshot.tool_map.values():
-            profile = CORE_TOOL_ACTION_PROFILES.get(spec.name)
+            profile = _TOOL_ACTION_PROFILES.get(spec.name)
             if profile is not None:
-                action_profiles[spec.name] = (
-                    profile.capability,
-                    profile.target_resolver,
-                )
+                action_profiles[spec.name] = profile
         engine = PermissionEngine(
             PermissionEngineConfig(
                 static_policy=snapshot.permission_policy,

@@ -1,7 +1,6 @@
-"""工具注册表与 HITL 执行门禁。
+"""工具注册表与工具输出。
 
-ToolSpec 描述工具能力，dispatch map 根据工具名找到 handler。HITL 在执行
-handler 前根据 risk 字段和 permission policy 决定是否需要 approval callback。"""
+ToolSpec 描述工具能力，dispatch map 根据工具名找到 handler。"""
 
 from __future__ import annotations
 
@@ -11,7 +10,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import threading
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from ..agent.protocols import ToolExecutionMode
 from ..agent.types import FileContent, ImageContent, ShellCallOutputContent
@@ -37,136 +36,6 @@ class CitationSource:
     start_line: int
     end_line: int
     text: str
-
-
-# ── Governance metadata ──
-
-
-@dataclass(frozen=True)
-class ToolSurfacePolicy:
-    """宿主控制的工具展示、调用和委派策略。"""
-
-    exposure: Literal["root", "grouped", "hidden"] = "hidden"
-    user_invocable: bool = False
-    primary_agent_invocable: bool = False
-    subagent_policy: Literal["deny", "explicit_grant", "policy_derived"] = "deny"
-
-
-# 各类工具的 closed default
-SURFACE_POLICY_CORE = ToolSurfacePolicy(
-    exposure="root",
-    user_invocable=True,
-    primary_agent_invocable=True,
-    subagent_policy="policy_derived",
-)
-
-SURFACE_POLICY_CORE_READONLY = ToolSurfacePolicy(
-    exposure="root",
-    user_invocable=True,
-    primary_agent_invocable=True,
-    subagent_policy="policy_derived",
-)
-
-SURFACE_POLICY_CORE_WRITE = ToolSurfacePolicy(
-    exposure="root",
-    user_invocable=True,
-    primary_agent_invocable=True,
-    subagent_policy="policy_derived",
-)
-
-SURFACE_POLICY_CORE_EXECUTE = ToolSurfacePolicy(
-    exposure="root",
-    user_invocable=True,
-    primary_agent_invocable=True,
-    subagent_policy="policy_derived",
-)
-
-SURFACE_POLICY_SESSION = ToolSurfacePolicy(
-    exposure="grouped",
-    user_invocable=False,
-    primary_agent_invocable=True,
-    subagent_policy="explicit_grant",
-)
-
-SURFACE_POLICY_SUBAGENT = ToolSurfacePolicy(
-    exposure="grouped",
-    user_invocable=False,
-    primary_agent_invocable=True,
-    subagent_policy="deny",
-)
-
-
-@dataclass(frozen=True)
-class ToolOrigin:
-    """工具的传输和来源信息。仅用于审计和展示，不参与权限裁决。"""
-
-    kind: Literal["core", "mcp", "skill"] = "core"
-    source: str | None = None
-
-
-@dataclass(frozen=True)
-class ToolActionProfile:
-    """宿主控制的动作特征，提供给四轴权限引擎。
-
-    不由 MCP 元数据或工具描述文本推导。action_profile is None 的工具不能进入
-    任何 capability envelope 或通过公开 /tool 路径调用。
-    """
-
-    capability: str  # read, write, execute, network, credentialed-action
-    target_resolver: str
-    side_effecting: bool = False
-    credentialed: bool = False
-
-
-# 核心工具的 action profile 映射
-CORE_TOOL_ACTION_PROFILES: dict[str, ToolActionProfile] = {
-    "read_file": ToolActionProfile(capability="read", target_resolver="path"),
-    "glob_files": ToolActionProfile(capability="read", target_resolver="path"),
-    "grep_search": ToolActionProfile(capability="read", target_resolver="path"),
-    "find_files": ToolActionProfile(capability="read", target_resolver="path"),
-    "ls": ToolActionProfile(capability="read", target_resolver="path"),
-    "search_tools": ToolActionProfile(capability="read", target_resolver="none"),
-    "write_file": ToolActionProfile(
-        capability="write", target_resolver="path", side_effecting=True
-    ),
-    "edit_file": ToolActionProfile(
-        capability="edit", target_resolver="path", side_effecting=True
-    ),
-    "apply_patch": ToolActionProfile(
-        capability="patch", target_resolver="path", side_effecting=True
-    ),
-    "bash": ToolActionProfile(
-        capability="shell", target_resolver="none", side_effecting=True
-    ),
-    "shell": ToolActionProfile(
-        capability="shell", target_resolver="none", side_effecting=True
-    ),
-    "load_skill": ToolActionProfile(
-        capability="execute", target_resolver="none", side_effecting=True
-    ),
-    "update_todo": ToolActionProfile(
-        capability="write", target_resolver="none", side_effecting=True
-    ),
-}
-
-
-@dataclass(frozen=True)
-class ToolSelector:
-    """用户公开选择器，如 everything.echo。"""
-
-    selector: str
-
-
-@dataclass(frozen=True)
-class RegisteredTool:
-    """注册层包装，将 ToolSpec 与宿主治理元数据绑定。"""
-
-    canonical_id: str
-    public_selector: ToolSelector
-    spec: ToolSpec
-    surface_policy: ToolSurfacePolicy
-    origin: ToolOrigin
-    action_profile: ToolActionProfile | None = None
 
 
 class ToolOutput(str):
@@ -211,85 +80,18 @@ class ToolSpec:
     builtin: dict[str, Any] | None = None
 
 
-def make_canonical_id(kind: str, source: str | None, tool_name: str) -> str:
-    """Build canonical id from origin metadata and tool name.
-
-    Core tools keep their simple name; MCP/skill tools use kind://source/tool format.
-    """
-    if kind == "core" and source is None:
-        return tool_name
-    safe_source = source.replace("/", "__") if source else "default"
-    return f"{kind}://{safe_source}/{tool_name}"
-
-
-def _tool_surface(spec: ToolSpec, origin_kind: str) -> ToolSurfacePolicy:
-    """Select surface policy based on tool group and origin."""
-    if spec.group == "core":
-        name = spec.name
-        if name in ("bash", "shell", "write_file", "edit_file", "apply_patch"):
-            return SURFACE_POLICY_CORE_WRITE
-        return SURFACE_POLICY_CORE
-    if spec.group == "session":
-        return SURFACE_POLICY_SESSION
-    if spec.group == "subagent":
-        return SURFACE_POLICY_SUBAGENT
-    return ToolSurfacePolicy()
-
-
-def _detect_origin_kind(spec: ToolSpec) -> str:
-    """Auto-detect origin kind from tool group when not explicitly provided."""
-    if spec.group == "mcp":
-        return "mcp"
-    if spec.group == "skills":
-        return "skill"
-    return "core"
-
-
-def _wrap_spec_as_registered(
-    spec: ToolSpec,
-    origin_kind: str | None = None,
-    origin_source: str | None = None,
-) -> RegisteredTool:
-    """将裸 ToolSpec 包装为带 closed default 策略的 RegisteredTool。
-
-    迁移期间使用：所有现有构建站点产生 ToolSpec，通过此函数包装。
-    可按 origin_kind 区分 core / mcp / skill 并设置对应策略。
-    """
-    origin_kind = cast(
-        Literal["core", "mcp", "skill"], origin_kind or _detect_origin_kind(spec)
-    )
-    surface = _tool_surface(spec, origin_kind)
-    canonical_id = make_canonical_id(origin_kind, origin_source, spec.name)
-    profile = CORE_TOOL_ACTION_PROFILES.get(spec.name)
-    return RegisteredTool(
-        canonical_id=canonical_id,
-        public_selector=ToolSelector(spec.name),
-        spec=spec,
-        surface_policy=surface,
-        origin=ToolOrigin(kind=origin_kind, source=origin_source),
-        action_profile=profile,
-    )
-
-
 class ToolRegistryState:
     """保存可在运行期间原子替换的工具注册表快照。"""
 
     def __init__(self, registry: tuple[ToolSpec, ...]) -> None:
         """使用初始工具列表创建线程安全状态。"""
         self._lock = threading.Lock()
-        self._registered: tuple[RegisteredTool, ...] = tuple(
-            _wrap_spec_as_registered(t) for t in registry
-        )
+        self._registry: tuple[ToolSpec, ...] = registry
 
     def snapshot(self) -> tuple[ToolSpec, ...]:
-        """返回当前不可变工具快照（兼容旧 API）。"""
+        """返回当前不可变工具快照。"""
         with self._lock:
-            return tuple(rt.spec for rt in self._registered)
-
-    def registered_snapshot(self) -> tuple[RegisteredTool, ...]:
-        """返回包含治理元数据的当前快照。"""
-        with self._lock:
-            return self._registered
+            return self._registry
 
     def __iter__(self) -> Iterator[ToolSpec]:
         """迭代调用开始时的稳定工具快照。"""
@@ -302,7 +104,7 @@ class ToolRegistryState:
     def replace(self, registry: tuple[ToolSpec, ...]) -> None:
         """原子替换完整工具注册表。"""
         with self._lock:
-            self._registered = tuple(_wrap_spec_as_registered(t) for t in registry)
+            self._registry = registry
 
     def replace_group(
         self,
@@ -311,121 +113,16 @@ class ToolRegistryState:
     ) -> tuple[ToolSpec, ...]:
         """在原有位置替换指定工具组，并返回新快照。"""
         with self._lock:
-            wrapped = tuple(_wrap_spec_as_registered(t, "mcp") for t in tools)
-            existing = self._registered
+            existing = self._registry
             insertion_index = next(
-                (index for index, rt in enumerate(existing) if rt.spec.group == group),
+                (index for index, rt in enumerate(existing) if rt.group == group),
                 len(existing),
             )
-            retained = tuple(rt for rt in existing if rt.spec.group != group)
-            self._registered = (
-                retained[:insertion_index] + wrapped + retained[insertion_index:]
+            retained = tuple(rt for rt in existing if rt.group != group)
+            self._registry = (
+                retained[:insertion_index] + tools + retained[insertion_index:]
             )
-            return tuple(rt.spec for rt in self._registered)
-
-    # ── Governance filter API ──
-
-    def tools_visible_to_root(self) -> tuple[RegisteredTool, ...]:
-        """Return tools with exposure == 'root' and user_invocable and action_profile present."""
-        return tuple(
-            rt
-            for rt in self.registered_snapshot()
-            if rt.surface_policy.exposure == "root"
-            and rt.surface_policy.user_invocable
-            and rt.action_profile is not None
-        )
-
-    def tools_user_invocable(self) -> tuple[RegisteredTool, ...]:
-        """Return tools meeting the three /tool selector conditions."""
-        return tuple(
-            rt
-            for rt in self.registered_snapshot()
-            if rt.surface_policy.exposure != "hidden"
-            and rt.surface_policy.user_invocable
-            and rt.action_profile is not None
-        )
-
-    def tools_for_completion(self) -> tuple[RegisteredTool, ...]:
-        """Return tools visible to tab completion (exposure != 'hidden')."""
-        return tuple(
-            rt
-            for rt in self.registered_snapshot()
-            if rt.surface_policy.exposure != "hidden"
-        )
-
-    def tools_primary_agent_invocable(self) -> tuple[RegisteredTool, ...]:
-        """Return tools eligible for the primary-agent capability envelope."""
-        return tuple(
-            rt
-            for rt in self.registered_snapshot()
-            if rt.surface_policy.primary_agent_invocable
-            and rt.action_profile is not None
-        )
-
-    def tools_for_subagent(self) -> tuple[RegisteredTool, ...]:
-        """Return tools with subagent_policy != 'deny' (delegation eligibility ceiling)."""
-        return tuple(
-            rt
-            for rt in self.registered_snapshot()
-            if rt.surface_policy.subagent_policy != "deny"
-        )
-
-    def resolve_selector(self, selector: str) -> str | None:
-        """Map a public selector to canonical id. Returns None if not found."""
-        for rt in self.registered_snapshot():
-            if rt.public_selector.selector == selector:
-                return rt.canonical_id
-        return None
-
-
-def filter_root_visible(
-    tools: tuple[RegisteredTool, ...],
-) -> tuple[RegisteredTool, ...]:
-    return tuple(
-        t
-        for t in tools
-        if t.surface_policy.exposure == "root"
-        and t.surface_policy.user_invocable
-        and t.action_profile is not None
-    )
-
-
-def filter_user_invocable(
-    tools: tuple[RegisteredTool, ...],
-) -> tuple[RegisteredTool, ...]:
-    return tuple(
-        t
-        for t in tools
-        if t.surface_policy.exposure != "hidden"
-        and t.surface_policy.user_invocable
-        and t.action_profile is not None
-    )
-
-
-def filter_primary_agent_invocable(
-    tools: tuple[RegisteredTool, ...],
-) -> tuple[RegisteredTool, ...]:
-    return tuple(
-        t
-        for t in tools
-        if t.surface_policy.primary_agent_invocable and t.action_profile is not None
-    )
-
-
-def filter_for_subagent(
-    tools: tuple[RegisteredTool, ...],
-) -> tuple[RegisteredTool, ...]:
-    return tuple(t for t in tools if t.surface_policy.subagent_policy != "deny")
-
-
-def resolve_public_selector(
-    tools: tuple[RegisteredTool, ...],
-    selector: str,
-) -> str | None:
-    for rt in tools:
-        if rt.public_selector.selector == selector:
-            return rt.canonical_id
-    return None
+            return self._registry
 
 
 def resolve_project_path(project_root: Path, raw_path: str) -> Path:

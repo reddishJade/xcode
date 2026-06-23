@@ -47,12 +47,7 @@ from xcode.harness.observability import (
 from xcode.harness.observability.permission_model import ExternalDirectory
 from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
-from xcode.harness.skills import (
-    ToolInput,
-    ToolRegistryState,
-    ToolSpec,
-    filter_for_subagent,
-)
+from xcode.harness.skills import ToolInput, ToolRegistryState, ToolSpec
 from xcode.harness.session_todo import (
     build_session_todo_tools,
     SessionTodoState,
@@ -311,9 +306,10 @@ def build_tool_registry(
     registry_state = ToolRegistryState(registry)
     subagent_allowlist = set(runtime_config.tools.subagent_tool_allowlist)
     child_registry = tuple(
-        rt.spec
-        for rt in filter_for_subagent(registry_state.registered_snapshot())
-        if rt.spec.name != "update_todo" or rt.spec.name in subagent_allowlist
+        tool
+        for tool in registry_state.snapshot()
+        if tool.group in ("core", "session")
+        and (tool.name != "update_todo" or tool.name in subagent_allowlist)
     )
     registry += (build_search_tools_tool(registry_state.snapshot),)
 
@@ -480,7 +476,6 @@ def _build_subagent_integration(
                 project_root=child_root,
                 prompt_instructions=runtime_config.prompt.instructions,
                 todo_state=child_todo_state,
-                use_registered_tool_governance=runtime_config.tools.use_registered_tool_governance,
             ),
         ).run_async(prompt)
         return result.answer
@@ -586,7 +581,6 @@ def build_agent(
             skill_registry=skill_registry,
             prompt_instructions=runtime_config.prompt.instructions,
             todo_state=todo_state,
-            use_registered_tool_governance=runtime_config.tools.use_registered_tool_governance,
         ),
     )
 
