@@ -104,7 +104,7 @@ uv run python -m xcode.evals.cli --list-benchmarks          # 列出 benchmark
 - 禁止 `git commit --no-verify` 和 force push
 - 每个 commit 只含一个逻辑变更
 - 提交前检查：`git status --short && git diff --cached --stat`
-- commit message 格式：`[type]: one-line title` + body（英文）
+- commit message 格式：`type: one-line title` + body（英文）
 - 详细 git 工作流见 [docs/git-workflow.md](docs/git-workflow.md)
 
 ## 测试
