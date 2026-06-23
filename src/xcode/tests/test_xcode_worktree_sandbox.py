@@ -63,7 +63,7 @@ class TestWorktreeTaskRunner:
         # Mock clean status
         self.mock_responses["git status --porcelain"] = ""
         # Mock upstream check failing (no upstream branch)
-        self.mock_responses["git rev-parse --abbrev-ref @{u}"] = Exception(
+        self.mock_responses["git rev-parse --abbrev-ref @{u}"] = RuntimeError(
             "no upstream"
         )
         # Mock default branch detection via symbolic-ref
@@ -266,16 +266,29 @@ class TestWorktreeTaskRunner:
         self.commands_run.clear()
 
         self.mock_responses["git status --porcelain"] = ""
-        self.mock_responses["git rev-parse --abbrev-ref @{u}"] = Exception(
+        self.mock_responses["git rev-parse --abbrev-ref @{u}"] = RuntimeError(
             "no upstream"
         )
         # symbolic-ref 和 remote show origin 都失败
-        self.mock_responses["git symbolic-ref"] = Exception("no head ref")
-        self.mock_responses["git remote show origin"] = Exception("no remote")
+        self.mock_responses["git symbolic-ref"] = RuntimeError("no head ref")
+        self.mock_responses["git remote show origin"] = RuntimeError("no remote")
 
         res = runner.remove(task.id)
         assert "no upstream and no default branch" in res
         assert len(runner.tasks) == 1  # 未被移除
+
+    def test_default_branch_detection_does_not_hide_programming_errors(self) -> None:
+        """默认分支探测不得吞掉非命令执行类异常。"""
+        runner = WorktreeTaskRunner(
+            repo_root=self.repo_root,
+            worktrees_dir=self.worktrees_dir,
+            command_runner=self.mock_command_runner,
+        )
+        task = runner.create("broken-runner-task")
+        self.mock_responses["git symbolic-ref"] = ValueError("broken runner")
+
+        with pytest.raises(ValueError, match="broken runner"):
+            runner._detect_default_branch(task)
 
     def test_remove_detects_custom_default_branch(self) -> None:
         """默认分支为 develop 时也能检测未推送提交。"""
@@ -288,7 +301,7 @@ class TestWorktreeTaskRunner:
         self.commands_run.clear()
 
         self.mock_responses["git status --porcelain"] = ""
-        self.mock_responses["git rev-parse --abbrev-ref @{u}"] = Exception(
+        self.mock_responses["git rev-parse --abbrev-ref @{u}"] = RuntimeError(
             "no upstream"
         )
         self.mock_responses["git symbolic-ref refs/remotes/origin/HEAD"] = (

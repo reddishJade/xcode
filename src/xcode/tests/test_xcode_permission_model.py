@@ -317,6 +317,30 @@ class StructuredBoundaryPolicyTests:
             assert "outside all approved roots" in verdict.reason
             outside.unlink()
 
+    def test_symlink_escape_is_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            outside = root.parent / f"{root.name}-outside.txt"
+            outside.write_text("secret", encoding="utf-8")
+            link = root / "link.txt"
+            try:
+                link.symlink_to(outside)
+            except OSError as exc:
+                pytest.skip(f"symlink unavailable: {exc}")
+
+            action = ActionExtractor().extract("read_file", {"path": "link.txt"})
+            with caplog.at_level(
+                "WARNING",
+                logger="xcode.harness.observability.permission_model",
+            ):
+                evaluate_policy_constraints(
+                    action,
+                    boundary_context=self._boundary_context(root),
+                )
+
+            assert "path resolved outside workspace boundary: link.txt" in caplog.text
+            outside.unlink()
+
     def test_symlink_to_git_write_produces_non_bypassable_deny(self) -> None:
         with tempfile.TemporaryDirectory() as root_text:
             root = Path(root_text)

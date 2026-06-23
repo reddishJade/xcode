@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from ...agent.config import AfterToolCallContext
 from ...agent.results import AgentLoopResult, TerminationReason
 from ...agent.messages import AssistantMessage
 from xcode.ai.events import ToolCall
@@ -173,12 +172,6 @@ def _todo_items(value: object) -> tuple[TodoItem, ...]:
         return state.replace(value)
     except ValueError:
         return ()
-
-
-def _tool_result_text(ctx: AfterToolCallContext) -> str:
-    if not ctx.result or not ctx.result.content:
-        return ""
-    return "".join(c.text for c in ctx.result.content if isinstance(c, TextContent))
 
 
 def _final_event(

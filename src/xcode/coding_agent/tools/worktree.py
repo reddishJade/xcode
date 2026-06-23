@@ -353,15 +353,21 @@ class WorktreeTaskRunner:
             head = ref.strip()
             if head.startswith("refs/remotes/origin/"):
                 return head[len("refs/remotes/origin/") :]
-        except Exception:
-            pass
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            logger.debug(
+                "git symbolic-ref failed while detecting default branch",
+                exc_info=True,
+            )
         try:
             out = self.command_runner(["git", "remote", "show", "origin"], task.path)
             for line in out.splitlines():
                 if "HEAD branch" in line:
                     return line.split(":")[-1].strip()
-        except Exception:
-            pass
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            logger.debug(
+                "git remote show origin failed while detecting default branch",
+                exc_info=True,
+            )
         return None
 
 

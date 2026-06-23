@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import json
+import logging
 import re
 import shlex
 from pathlib import Path
@@ -34,6 +35,8 @@ GrantScope = Literal["once", "session", "permanent"]
 PermissionDecisionV2 = Literal["allow", "ask", "deny"]
 TargetKind = Literal["path", "command", "domain", "mcp", "subagent"]
 type GrantRecordData = dict[str, object]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -790,7 +793,21 @@ class StructuredBoundaryPolicyEvaluator:
             # resolved is relative to workspace root
             return self._check_restrictions(resolved, path_str, action, target)
         except _BoundaryEscapeError:
-            pass
+            candidate = self._try_external_directory(target, action)
+            if candidate is not None:
+                return candidate
+            logger.warning(
+                "path resolved outside workspace boundary: %s",
+                path_str,
+            )
+            return Constraint(
+                decision="deny",
+                source="boundary",
+                reason=f"path outside all approved roots: {path_str}",
+                target_pattern=path_str,
+                operation=action.operation,
+                access=target.access,
+            )
         except _BoundaryResolutionError as exc:
             candidate = self._try_external_directory(target, action)
             if candidate is not None:
@@ -804,19 +821,6 @@ class StructuredBoundaryPolicyEvaluator:
                 operation=action.operation,
                 access=target.access,
             )
-
-        # Outside workspace — check external_directory before denying
-        candidate = self._try_external_directory(target, action)
-        if candidate is not None:
-            return candidate
-        return Constraint(
-            decision="deny",
-            source="boundary",
-            reason=f"path outside all approved roots: {path_str}",
-            target_pattern=path_str,
-            operation=action.operation,
-            access=target.access,
-        )
 
     def _try_external_directory(
         self, target: Target, action: Action
