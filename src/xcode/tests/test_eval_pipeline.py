@@ -337,6 +337,97 @@ class EvalPipelineTests:
         assert metrics["memory_stale_conflict_retrieval_rate"] == 0.5
         assert metrics["memory_injected_tokens"] == 22
 
+    def test_build_run_metrics_reports_memory_on_off_ablation(self) -> None:
+        tasks = (
+            EvalTask(
+                id="memory-on",
+                prompt="task",
+                metadata={
+                    "memory_eval": {
+                        "comparison_group": "provider-timeout",
+                        "mode": "on",
+                    }
+                },
+            ),
+            EvalTask(
+                id="memory-off",
+                prompt="task",
+                metadata={
+                    "memory_eval": {
+                        "comparison_group": "provider-timeout",
+                        "mode": "off",
+                    }
+                },
+            ),
+            EvalTask(
+                id="memory-on-regress",
+                prompt="task",
+                metadata={
+                    "memory_eval": {
+                        "comparison_group": "retry-regress",
+                        "mode": "on",
+                    }
+                },
+            ),
+            EvalTask(
+                id="memory-off-regress",
+                prompt="task",
+                metadata={
+                    "memory_eval": {
+                        "comparison_group": "retry-regress",
+                        "mode": "off",
+                    }
+                },
+            ),
+        )
+        trials = [
+            TrialResult(
+                task_id="memory-on",
+                trial_id="memory-on-1",
+                success=True,
+                answer="",
+                trace_path=Path("trace-on-1.jsonl"),
+                graders=(),
+                metrics={"tool_calls": 1},
+            ),
+            TrialResult(
+                task_id="memory-off",
+                trial_id="memory-off-1",
+                success=False,
+                answer="",
+                trace_path=Path("trace-off-1.jsonl"),
+                graders=(),
+                metrics={"tool_calls": 3},
+            ),
+            TrialResult(
+                task_id="memory-on-regress",
+                trial_id="memory-on-regress-1",
+                success=False,
+                answer="",
+                trace_path=Path("trace-on-2.jsonl"),
+                graders=(),
+                metrics={"tool_calls": 2},
+            ),
+            TrialResult(
+                task_id="memory-off-regress",
+                trial_id="memory-off-regress-1",
+                success=True,
+                answer="",
+                trace_path=Path("trace-off-2.jsonl"),
+                graders=(),
+                metrics={"tool_calls": 1},
+            ),
+        ]
+
+        metrics = _build_run_metrics(tasks, trials)
+
+        assert metrics["memory_ablation_pair_count"] == 2
+        assert metrics["memory_on_success_rate"] == 0.5
+        assert metrics["memory_off_success_rate"] == 0.5
+        assert metrics["memory_success_delta"] == 0.0
+        assert metrics["memory_tool_call_delta_mean"] == -0.5
+        assert metrics["memory_negative_migration_rate"] == 0.5
+
     def test_trial_project_root_copies_fixture_to_sandbox(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp) / "base"

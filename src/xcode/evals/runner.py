@@ -343,6 +343,8 @@ _MEMORY_RATE_FIELDS = (
     "memory_stale_conflict_retrieval_rate",
 )
 
+type MemoryEvalConfig = dict[str, Any]
+
 
 def _extract_agent_metrics(events: list[StructuredAgentEvent]) -> dict[str, Any]:
     for event in events:
@@ -538,6 +540,9 @@ def _build_run_metrics(
             sum(float(value) for value in values) / len(values),
             4,
         )
+    memory_ablation = _build_memory_ablation_metrics(tasks, trials)
+    if memory_ablation:
+        metrics.update(memory_ablation)
     all_graders = [grader for trial in trials for grader in trial.graders]
     skipped_graders = [grader for grader in all_graders if grader.skipped]
     evaluated_graders = [grader for grader in all_graders if not grader.skipped]
@@ -574,3 +579,73 @@ def _unbiased_pass_at_k(sample_count: int, correct_count: int, k: int) -> float:
     if sample_count - correct_count < k:
         return 1.0
     return 1.0 - math.comb(sample_count - correct_count, k) / math.comb(sample_count, k)
+
+
+def _build_memory_ablation_metrics(
+    tasks: Sequence[EvalTask],
+    trials: Sequence[TrialResult],
+) -> dict[str, Any]:
+    task_configs = {
+        task.id: _memory_eval_config(task)
+        for task in tasks
+        if _memory_eval_config(task) is not None
+    }
+    grouped: dict[tuple[str, int], dict[str, TrialResult]] = {}
+    for trial in trials:
+        config = task_configs.get(trial.task_id)
+        if config is None:
+            continue
+        group = str(config.get("comparison_group", "")).strip()
+        mode = str(config.get("mode", "")).strip().lower()
+        if not group or mode not in {"on", "off"}:
+            continue
+        key = (group, _trial_iteration(trial.trial_id))
+        grouped.setdefault(key, {})[mode] = trial
+
+    paired = [pair for pair in grouped.values() if {"on", "off"} <= pair.keys()]
+    if not paired:
+        return {}
+
+    on_successes = [1.0 if pair["on"].success else 0.0 for pair in paired]
+    off_successes = [1.0 if pair["off"].success else 0.0 for pair in paired]
+    tool_call_deltas = [
+        float((pair["on"].metrics.get("tool_calls", 0) or 0))
+        - float((pair["off"].metrics.get("tool_calls", 0) or 0))
+        for pair in paired
+    ]
+    negative_migrations = [
+        1.0 if (not pair["on"].success and pair["off"].success) else 0.0
+        for pair in paired
+    ]
+    return {
+        "memory_ablation_pair_count": len(paired),
+        "memory_on_success_rate": round(sum(on_successes) / len(paired), 4),
+        "memory_off_success_rate": round(sum(off_successes) / len(paired), 4),
+        "memory_success_delta": round(
+            (sum(on_successes) - sum(off_successes)) / len(paired),
+            4,
+        ),
+        "memory_tool_call_delta_mean": round(
+            sum(tool_call_deltas) / len(tool_call_deltas),
+            4,
+        ),
+        "memory_negative_migration_rate": round(
+            sum(negative_migrations) / len(negative_migrations),
+            4,
+        ),
+    }
+
+
+def _memory_eval_config(task: EvalTask) -> MemoryEvalConfig | None:
+    config = task.metadata.get("memory_eval")
+    if isinstance(config, dict):
+        return config
+    return None
+
+
+def _trial_iteration(trial_id: str) -> int:
+    suffix = trial_id.rsplit("-", 1)[-1]
+    try:
+        return int(suffix)
+    except ValueError:
+        return 1

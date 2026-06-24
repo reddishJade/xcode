@@ -135,6 +135,7 @@ def report_to_html(report: EvalReport) -> str:
     total_tool_errors = m.get("total_tool_errors", 0)
     grader_table = _grader_summary_table(m.get("per_grader_pass_rate", {}))
     dist_table = _distribution_table_html(m)
+    memory_ablation_table = _memory_ablation_table_html(m)
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -186,6 +187,7 @@ def report_to_html(report: EvalReport) -> str:
     </div>
     {grader_table}
     {dist_table}
+    {memory_ablation_table}
   <h2>Trials</h2>
   <table>
     <thead>
@@ -352,3 +354,35 @@ def _distribution_table_html(m: dict[str, Any]) -> str:
         "<table><thead><tr><th>Metric</th><th>Min</th><th>p50</th><th>p95</th><th>p99</th><th>Max</th><th>Mean</th><th>p50→max</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
     )
+
+
+def _memory_ablation_table_html(m: dict[str, Any]) -> str:
+    pair_count = m.get("memory_ablation_pair_count")
+    if not pair_count:
+        return ""
+    rows = [
+        ("Pairs", str(pair_count)),
+        ("Memory On Success", _fmt_ratio(m.get("memory_on_success_rate"))),
+        ("Memory Off Success", _fmt_ratio(m.get("memory_off_success_rate"))),
+        ("Success Delta", _fmt_ratio(m.get("memory_success_delta"))),
+        ("Tool Call Delta", str(m.get("memory_tool_call_delta_mean", "—"))),
+        (
+            "Negative Migration",
+            _fmt_ratio(m.get("memory_negative_migration_rate")),
+        ),
+    ]
+    body = "".join(
+        f"<tr><td>{escape(label)}</td><td>{escape(value)}</td></tr>"
+        for label, value in rows
+    )
+    return (
+        "<h2>Memory On/Off</h2>"
+        "<table><thead><tr><th>Metric</th><th>Value</th></tr></thead>"
+        f"<tbody>{body}</tbody></table>"
+    )
+
+
+def _fmt_ratio(value: Any) -> str:
+    if value is None or value == "":
+        return "—"
+    return f"{float(value) * 100:.1f}%"
