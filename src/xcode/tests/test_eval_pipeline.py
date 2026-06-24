@@ -497,6 +497,15 @@ class EvalPipelineTests:
             assert "validation" in task.metadata
             assert task.metadata["validation"]["commands"]
 
+    def test_memory_suite_registers_on_off_pair(self) -> None:
+        tasks = SUITES["memory"]
+
+        assert len(tasks) == 2
+        configs = [task.metadata["memory_eval"] for task in tasks]
+        assert {config["mode"] for config in configs} == {"on", "off"}
+        assert len({config["comparison_group"] for config in configs}) == 1
+        assert any(config.get("offline_memory_blocks") for config in configs)
+
     def test_all_suite_excludes_real_coding_fixtures(self) -> None:
         all_tasks = SUITES["all"]
 
@@ -514,6 +523,7 @@ class EvalPipelineTests:
         assert exit_code == 0
         text = output.getvalue()
         assert "coding-fixture" in text
+        assert "memory" in text
         assert "tool-policy" in text
 
     def test_eval_cli_shows_suite_tasks(self) -> None:
@@ -526,6 +536,18 @@ class EvalPipelineTests:
         text = output.getvalue()
         assert "tiny-calculator-subtract" in text
         assert "validation_commands" in text
+
+    def test_eval_cli_runs_memory_suite_offline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                exit_code = eval_main(["--suite", "memory", "--output-dir", tmp])
+
+            assert exit_code == 0
+            text = output.getvalue()
+            assert "Memory on/off:" in text
+            assert "negative_migration" in text
 
     def test_eval_cli_lists_external_benchmarks(self) -> None:
         output = io.StringIO()

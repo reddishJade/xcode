@@ -191,6 +191,46 @@ def pipeline() -> tuple[EvalTask, ...]:
     return smoke()
 
 
+def memory() -> tuple[EvalTask, ...]:
+    """memory on/off 对照：验证 memory trace、指标和对照汇总。"""
+    comparison_group = "provider-timeout-retry"
+    return (
+        EvalTask(
+            id="memory-provider-timeout-on",
+            prompt="provider timeout retry",
+            expected_answer_contains=("done",),
+            tags=("memory", "ablation", "offline"),
+            metadata={
+                "memory_eval": {
+                    "comparison_group": comparison_group,
+                    "mode": "on",
+                    "expected_titles": ("Provider timeout retry",),
+                    "offline_memory_blocks": (
+                        "## Provider timeout retry\n"
+                        "- Context/Query: Provider timeout retry\n"
+                        "- Solution: Retry transient provider failures with backoff\n"
+                        "- Files: src/provider.py\n"
+                        "- Takeaways: Bound retries and preserve the root cause\n",
+                    ),
+                }
+            },
+        ),
+        EvalTask(
+            id="memory-provider-timeout-off",
+            prompt="provider timeout retry",
+            expected_answer_contains=("done",),
+            tags=("memory", "ablation", "offline"),
+            metadata={
+                "memory_eval": {
+                    "comparison_group": comparison_group,
+                    "mode": "off",
+                    "expected_titles": ("Provider timeout retry",),
+                }
+            },
+        ),
+    )
+
+
 def tool_use() -> tuple[EvalTask, ...]:
     """工具调用能力：预期工具名、禁止工具名。"""
     return (
@@ -272,6 +312,7 @@ def all_suites() -> tuple[EvalTask, ...]:
 
 SUITES: dict[str, tuple[EvalTask, ...]] = {
     "pipeline": pipeline(),
+    "memory": memory(),
     "tool-policy": tool_policy(),
     "coding-fixture": coding_fixture(),
     "smoke": smoke(),
@@ -284,6 +325,7 @@ SUITES: dict[str, tuple[EvalTask, ...]] = {
 
 SUITE_DESCRIPTIONS: dict[str, str] = {
     "pipeline": "Offline eval pipeline regression: validates event flow, grader, and report.",
+    "memory": "Offline memory regression: validates retrieval trace, report metrics, and memory on/off summaries.",
     "tool-policy": "Offline tool policy regression: validates expected tools and write-disallowed constraints.",
     "coding-fixture": "Real-provider small coding regression: copies fixture to sandbox by default.",
     "smoke": "Basic smoke task.",

@@ -4,9 +4,12 @@ import argparse
 from collections.abc import AsyncIterator, Callable
 import json
 from pathlib import Path
+import tempfile
 from typing import Any
 
 from xcode.harness.agent_runtime import StructuredAgent
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig
+from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.ai.events import (
     FinalMessage,
     Message,
@@ -20,6 +23,7 @@ from xcode.ai.providers.protocol import ModelProvider
 from xcode.harness.app import XcodeApp, build_app as build_real_app
 from xcode.harness.config import AgentConfig
 from xcode.harness.config import discover_runtime_config
+from xcode.harness.memory import MemoryManager
 from xcode.harness.skills import ToolSpec
 from xcode.harness.observability import HITLResult
 
@@ -98,6 +102,11 @@ _NUMERIC_FIELDS = (
     "tool_calls",
     "tool_errors",
     "steps",
+    "memory_retrieval_count",
+    "memory_injected_count",
+    "memory_tool_search_count",
+    "memory_injected_tokens",
+    "memory_retrieval_latency_ms",
 )
 
 
@@ -144,6 +153,15 @@ def _print_enhanced_summary(report) -> None:
         parts.append(f"{total_ms / 1000:.1f}s model time")
     if parts:
         print(f"Metrics: {', '.join(parts)}")
+    if m.get("memory_ablation_pair_count"):
+        print(
+            "Memory on/off: "
+            f"pairs={m['memory_ablation_pair_count']}  "
+            f"on={m.get('memory_on_success_rate', 0.0) * 100:.1f}%  "
+            f"off={m.get('memory_off_success_rate', 0.0) * 100:.1f}%  "
+            f"delta={m.get('memory_success_delta', 0.0) * 100:.1f}%  "
+            f"negative_migration={m.get('memory_negative_migration_rate', 0.0) * 100:.1f}%"
+        )
     _print_distribution(m)
 
 
@@ -436,6 +454,9 @@ def _trial_project_root(
 
 
 def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
+    memory_config = task.metadata.get("memory_eval")
+    if isinstance(memory_config, dict):
+        return _offline_memory_app_factory(task, memory_config)
     provider: _StaticProvider
     tools: tuple[ToolSpec, ...]
     if task.expected_tool_calls:
@@ -494,6 +515,53 @@ def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
             config=AgentConfig(max_steps=3),
         ),
         registry=tools,
+    )
+
+
+def _offline_memory_app_factory(
+    task: EvalTask,
+    memory_config: dict[str, Any],
+) -> XcodeApp:
+    temp_dir = tempfile.TemporaryDirectory(prefix="xcode-eval-memory-")
+    project_root = Path(temp_dir.name)
+    manager = MemoryManager(
+        project_root,
+        user_memory_file=project_root / "home" / ".xcode" / "memory" / "MEMORY.md",
+    )
+    for block in memory_config.get("offline_memory_blocks", ()):
+        text = str(block).strip()
+        if text:
+            manager.add_memory_block(text, source="offline-eval")
+    manager.drain_trace_events()
+    answer = " ".join(task.expected_answer_contains) or "offline ok"
+    provider = _StaticProvider(
+        [
+            [
+                TextDelta(chunk=answer),
+                FinalMessage(content=answer, stop_reason="end_turn"),
+            ]
+        ]
+    )
+    runtime = AgentRuntimeConfig(
+        project_root=project_root,
+        runtime_context_provider=build_runtime_context_provider(
+            project_root,
+            (),
+            memory_manager=manager,
+        )
+        if str(memory_config.get("mode", "")).strip().lower() == "on"
+        else None,
+    )
+    return XcodeApp(
+        agent=StructuredAgent(
+            provider=provider,
+            registry=(),
+            config=AgentConfig(max_steps=3),
+            runtime=runtime,
+        ),
+        registry=(),
+        memory_manager=manager,
+        _closers=(temp_dir.cleanup,),
     )
 
 

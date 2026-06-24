@@ -85,83 +85,88 @@ class EvalRunner:
         trial_id = f"{task.id}-{trial_index + 1}"
         trace_path = self.output_dir / f"{trial_id}.jsonl"
         app = self.app_factory(task, trial_index)
-        events: list[StructuredAgentEvent] = []
-        answer = ""
-        runtime_error: BaseException | None = None
+        try:
+            events: list[StructuredAgentEvent] = []
+            answer = ""
+            runtime_error: BaseException | None = None
 
-        project_root = getattr(app.agent, "project_root", None)
-        before_evidence = _collect_file_evidence(task, project_root)
-        with TraceRecorder(trace_path) as trace:
-            try:
-                async for event in app.aask_stream(task.prompt, mode=task.mode):
-                    events.append(event)
-                    trace.record(event)
-                    if event.type == "final":
-                        answer = event.data.answer
-            except BaseException as exc:
-                runtime_error = exc
-                trace.record_error(exc)
+            project_root = getattr(app.agent, "project_root", None)
+            before_evidence = _collect_file_evidence(task, project_root)
+            with TraceRecorder(trace_path) as trace:
+                try:
+                    async for event in app.aask_stream(task.prompt, mode=task.mode):
+                        events.append(event)
+                        trace.record(event)
+                        if event.type == "final":
+                            answer = event.data.answer
+                except BaseException as exc:
+                    runtime_error = exc
+                    trace.record_error(exc)
 
-        after_evidence = _collect_file_evidence(task, project_root)
-        memory_trace = _collect_memory_trace(app)
-        evidence_graders = _grade_file_evidence(task, before_evidence, after_evidence)
-        validation_graders, validation_results = run_validation(task, project_root)
-        graders = (
-            grade_events(task, events, answer, runtime_error)
-            + evidence_graders
-            + validation_graders
-        )
-
-        # LLM-as-judge：当 task.llm_judge_criteria 非空时执行
-        if task.llm_judge_criteria:
-            judge_graders = await run_llm_judge(
-                task,
-                answer,
-                events,
-                judge_provider=app.agent.provider,
+            after_evidence = _collect_file_evidence(task, project_root)
+            memory_trace = _collect_memory_trace(app)
+            evidence_graders = _grade_file_evidence(
+                task, before_evidence, after_evidence
             )
-            graders = graders + judge_graders
+            validation_graders, validation_results = run_validation(task, project_root)
+            graders = (
+                grade_events(task, events, answer, runtime_error)
+                + evidence_graders
+                + validation_graders
+            )
 
-        success = all(grader.passed for grader in graders)
-        tool_call_count = sum(1 for event in events if event.type == "tool_use")
-        tool_error_count = sum(
-            1
-            for event in events
-            if event.type == "tool_result"
-            and getattr(event.data, "status", "ok") not in {"ok", "interrupted"}
-        )
-        metrics: dict[str, Any] = {
-            "event_count": len(events),
-            "tool_calls": tool_call_count,
-            "tool_errors": tool_error_count,
-        }
-        if project_root is not None:
-            metrics["project_root"] = str(project_root)
-        # 从 final event 提取运行级指标
-        agent_metrics = _extract_agent_metrics(events)
-        if agent_metrics:
-            metrics.update(agent_metrics)
-        memory_metrics = _build_memory_metrics(task, memory_trace)
-        if memory_trace:
-            metrics["memory_trace"] = [asdict(event) for event in memory_trace]
-        if memory_metrics:
-            metrics.update(memory_metrics)
-        if after_evidence:
-            metrics["file_evidence"] = after_evidence
-        model_patch = _collect_model_patch(project_root)
-        if model_patch:
-            metrics["model_patch"] = model_patch
-        if validation_results:
-            metrics["validation"] = validation_results_to_dict(validation_results)
-        return TrialResult(
-            task_id=task.id,
-            trial_id=trial_id,
-            success=success,
-            answer=answer,
-            trace_path=trace_path,
-            graders=graders,
-            metrics=metrics,
-        )
+            # LLM-as-judge：当 task.llm_judge_criteria 非空时执行
+            if task.llm_judge_criteria:
+                judge_graders = await run_llm_judge(
+                    task,
+                    answer,
+                    events,
+                    judge_provider=app.agent.provider,
+                )
+                graders = graders + judge_graders
+
+            success = all(grader.passed for grader in graders)
+            tool_call_count = sum(1 for event in events if event.type == "tool_use")
+            tool_error_count = sum(
+                1
+                for event in events
+                if event.type == "tool_result"
+                and getattr(event.data, "status", "ok") not in {"ok", "interrupted"}
+            )
+            metrics: dict[str, Any] = {
+                "event_count": len(events),
+                "tool_calls": tool_call_count,
+                "tool_errors": tool_error_count,
+            }
+            if project_root is not None:
+                metrics["project_root"] = str(project_root)
+            # 从 final event 提取运行级指标
+            agent_metrics = _extract_agent_metrics(events)
+            if agent_metrics:
+                metrics.update(agent_metrics)
+            memory_metrics = _build_memory_metrics(task, memory_trace)
+            if memory_trace:
+                metrics["memory_trace"] = [asdict(event) for event in memory_trace]
+            if memory_metrics:
+                metrics.update(memory_metrics)
+            if after_evidence:
+                metrics["file_evidence"] = after_evidence
+            model_patch = _collect_model_patch(project_root)
+            if model_patch:
+                metrics["model_patch"] = model_patch
+            if validation_results:
+                metrics["validation"] = validation_results_to_dict(validation_results)
+            return TrialResult(
+                task_id=task.id,
+                trial_id=trial_id,
+                success=success,
+                answer=answer,
+                trace_path=trace_path,
+                graders=graders,
+                metrics=metrics,
+            )
+        finally:
+            app.close()
 
 
 def _new_run_id() -> str:
