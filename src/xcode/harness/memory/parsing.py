@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from hashlib import sha256
+from typing import Literal
 
 # 质量门阈值
 _MIN_BLOCK_LENGTH = 50
@@ -40,6 +42,41 @@ class MemorySearchEvalResult:
     passed: bool
     expected_title_contains: str
     matched_titles: tuple[str, ...]
+
+
+type MemoryTraceEventType = Literal[
+    "candidate_created",
+    "accepted",
+    "rejected",
+    "retrieved",
+    "injected",
+    "tool_searched",
+    "used",
+    "superseded",
+    "forgotten",
+]
+
+
+@dataclass(frozen=True)
+class MemoryTraceEvent:
+    """描述 memory 生命周期中的结构化事件。"""
+
+    type: MemoryTraceEventType
+    memory_id: str | None = None
+    layer: str | None = None
+    title: str | None = None
+    score: float | None = None
+    token_count: int | None = None
+    latency_ms: float | None = None
+    rejection_reason: str | None = None
+    source: str | None = None
+    timestamp: float = field(default_factory=time.time)
+
+
+def build_memory_id(*, layer: str, title: str) -> str:
+    """基于层级和标题生成不泄露内容的临时 memory id。"""
+    digest = sha256(f"{layer}:{title.strip().lower()}".encode("utf-8")).hexdigest()
+    return f"mem_{digest[:12]}"
 
 
 # ── 解析 ──

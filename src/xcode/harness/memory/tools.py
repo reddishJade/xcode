@@ -32,6 +32,7 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
             limit=limit,
             scope=scope,
             layer=cast(MemoryLayerFilter, layer),
+            source="tool",
         )
         if not records:
             return f"No memory matching {query!r}."

@@ -83,6 +83,12 @@ def test_runtime_context_provider_injects_relevant_memory(tmp_path: Path) -> Non
     assert any("<memory>" in context for context in contexts)
     assert any("Provider timeout retry" in context for context in contexts)
     assert any('layer="project"' in context for context in contexts)
+    trace_events = manager.drain_trace_events()
+    assert any(event.type == "retrieved" for event in trace_events)
+    injected = [event for event in trace_events if event.type == "injected"]
+    assert injected
+    assert all(event.token_count and event.token_count > 0 for event in injected)
+    assert all("Provider connection timeout" not in repr(event) for event in trace_events)
 
 
 def test_memory_group_registers_search_tool(tmp_path: Path) -> None:
@@ -164,3 +170,6 @@ def test_memory_tool_searches_both_layers(tmp_path: Path) -> None:
     assert tool.read_only
     assert "[user]" in output
     assert "Shared timeout rule" in output
+    trace_events = manager.drain_trace_events()
+    assert any(event.type == "retrieved" for event in trace_events)
+    assert any(event.type == "tool_searched" for event in trace_events)

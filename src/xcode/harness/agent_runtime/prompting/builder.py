@@ -296,6 +296,7 @@ def _render_memory_context(manager: MemoryManager, question: str) -> str:
     records = manager.search_memory_records(question, limit=3)
     if not records:
         return ""
+    manager.record_injected_records(records)
 
     lines = [
         "<memory>",

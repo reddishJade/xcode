@@ -129,6 +129,11 @@ class TestBM25AndMemory:
         assert "- Scope: tasks" in text
         assert "- Confidence: 0.80" in text
         assert manager.validate_memory_block(text)
+        trace_events = manager.drain_trace_events()
+        assert [event.type for event in trace_events] == [
+            "candidate_created",
+            "accepted",
+        ]
 
     def test_memory_search_eval_reports_topk_hit(self) -> None:
         manager = MemoryManager(self.root)
@@ -196,6 +201,55 @@ class TestBM25AndMemory:
         archive_files = list(manager.archive_dir.glob("*.md"))
         assert len(archive_files) == 1
         assert "Incident 4" in archive_files[0].read_text(encoding="utf-8")
+        trace_events = manager.drain_trace_events()
+        assert trace_events[0].type == "candidate_created"
+        assert trace_events[1].type == "accepted"
+        assert trace_events[2].type == "candidate_created"
+        assert trace_events[3].type == "rejected"
+        assert trace_events[3].rejection_reason == "schema_validation_failed"
+
+    def test_memory_trace_reports_supersede_and_lru_forget(self) -> None:
+        manager = MemoryManager(self.root, max_blocks=1)
+        first_block = (
+            "## Incident A: Provider retry\n"
+            "- Context/Query: Provider timeout\n"
+            "- Solution: Add bounded retry\n"
+            "- Files: provider.py\n"
+            "- Takeaways: Retry only transient failures\n"
+        )
+        second_block = (
+            "## Incident A: Provider retry\n"
+            "- Context/Query: Provider timeout after refactor\n"
+            "- Solution: Add bounded retry and jitter\n"
+            "- Files: provider.py\n"
+            "- Takeaways: Preserve the root cause\n"
+        )
+        third_block = (
+            "## Incident B: Task lock\n"
+            "- Context/Query: Task claim timeout\n"
+            "- Solution: Use file lock retry\n"
+            "- Files: task_store.py\n"
+            "- Takeaways: Claiming must stay atomic\n"
+        )
+
+        assert manager.add_memory_block(first_block, source="repl")
+        manager.drain_trace_events()
+
+        assert manager.add_memory_block(second_block, source="repl")
+        supersede_events = manager.drain_trace_events()
+        assert [event.type for event in supersede_events] == [
+            "candidate_created",
+            "superseded",
+            "accepted",
+        ]
+
+        assert manager.add_memory_block(third_block, source="repl")
+        lru_events = manager.drain_trace_events()
+        assert [event.type for event in lru_events] == [
+            "candidate_created",
+            "forgotten",
+            "accepted",
+        ]
 
 
 if __name__ == "__main__":

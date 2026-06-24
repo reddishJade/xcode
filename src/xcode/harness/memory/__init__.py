@@ -5,6 +5,7 @@ from .parsing import (
     MemoryRecord,
     MemorySearchEvalCase,
     MemorySearchEvalResult,
+    MemoryTraceEvent,
 )
 from .tools import build_memory_tools
 
@@ -15,5 +16,6 @@ __all__ = [
     "MemoryRecord",
     "MemorySearchEvalCase",
     "MemorySearchEvalResult",
+    "MemoryTraceEvent",
     "build_memory_tools",
 ]

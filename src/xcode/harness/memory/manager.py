@@ -18,11 +18,13 @@ from .parsing import (
     MemoryRecord,
     MemorySearchEvalCase,
     MemorySearchEvalResult,
+    MemoryTraceEvent,
     _DEFAULT_MAX_BLOCKS,
     _MIN_BLOCK_LENGTH,
     _MIN_FIELD_CONTENT_LENGTH,
     _NOVELTY_THRESHOLD,
     adjust_score,
+    build_memory_id,
     extract_field_content,
     extract_title,
     parse_fields,
@@ -54,6 +56,7 @@ class MemoryManager:
         self.archive_dir = root / ".local" / "memory_archive"
         self.lru_file = root / ".local" / "memory_lru.json"
         self.max_blocks = max_blocks
+        self._trace_events: list[MemoryTraceEvent] = []
 
     # ── 读取 ──
 
@@ -132,11 +135,22 @@ class MemoryManager:
         limit: int = 3,
         scope: str | None = None,
         layer: MemoryLayerFilter = "all",
+        *,
+        source: str = "api",
     ) -> list[MemoryRecord]:
         """跨层级执行 BM25 检索并返回带来源的记录。"""
+        started_at = time.perf_counter()
         records = self.read_memory_records(layer=layer)
         blocks = [record.block for record in records]
         if not blocks or not query.strip() or limit <= 0:
+            if source == "tool":
+                self._emit_trace(
+                    MemoryTraceEvent(
+                        type="tool_searched",
+                        latency_ms=self._elapsed_ms(started_at),
+                        source=source,
+                    )
+                )
             return []
 
         corpus = [tokenize(block) for block in blocks]
@@ -173,7 +187,29 @@ class MemoryManager:
                     )
                 )
         ranked.sort(key=lambda r: (-r.score, r.title))
-        return ranked[:limit]
+        limited = ranked[:limit]
+        elapsed_ms = self._elapsed_ms(started_at)
+        for record in limited:
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="retrieved",
+                    memory_id=self._memory_id(record.layer, record.title),
+                    layer=record.layer,
+                    title=record.title,
+                    score=record.score,
+                    latency_ms=elapsed_ms,
+                    source=source,
+                )
+            )
+        if source == "tool":
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="tool_searched",
+                    latency_ms=elapsed_ms,
+                    source=source,
+                )
+            )
+        return limited
 
     # ── 评测 ──
 
@@ -226,12 +262,19 @@ class MemoryManager:
     def _quality_check(
         self, block: str, existing_records: list[MemoryRecord] | None = None
     ) -> bool:
+        return self._quality_rejection_reason(block, existing_records) is None
+
+    def _quality_rejection_reason(
+        self,
+        block: str,
+        existing_records: list[MemoryRecord] | None = None,
+    ) -> str | None:
         if not self._content_quality_check(block):
-            return False
+            return "content_quality_failed"
         if existing_records and len(existing_records) > 0:
             if self._is_duplicate(block, existing_records):
-                return False
-        return True
+                return "duplicate_block"
+        return None
 
     def _is_duplicate(self, block: str, existing_records: list[MemoryRecord]) -> bool:
         new_tokens = tokenize_set(block)
@@ -260,7 +303,27 @@ class MemoryManager:
         layer: MemoryLayer = "project",
     ) -> bool:
         """校验并写入指定记忆层级。"""
+        title = extract_title(block)
+        self._emit_trace(
+            MemoryTraceEvent(
+                type="candidate_created",
+                memory_id=self._memory_id(layer, title) if title else None,
+                layer=layer,
+                title=title or None,
+                source=source,
+            )
+        )
         if not self.validate_memory_block(block):
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="rejected",
+                    memory_id=self._memory_id(layer, title) if title else None,
+                    layer=layer,
+                    title=title or None,
+                    rejection_reason="schema_validation_failed",
+                    source=source,
+                )
+            )
             self._archive_block(block, layer)
             return False
 
@@ -272,13 +335,52 @@ class MemoryManager:
             merged_block = self._merge_with_existing(block, new_title, existing_records)
             if merged_block is not None:
                 if not self._content_quality_check(merged_block):
+                    self._emit_trace(
+                        MemoryTraceEvent(
+                            type="rejected",
+                            memory_id=self._memory_id(layer, new_title),
+                            layer=layer,
+                            title=new_title,
+                            rejection_reason="merged_quality_gate_failed",
+                            source=source,
+                        )
+                    )
                     self._archive_block(merged_block, layer)
                     return False
+                self._emit_trace(
+                    MemoryTraceEvent(
+                        type="superseded",
+                        memory_id=self._memory_id(layer, new_title),
+                        layer=layer,
+                        title=new_title,
+                        source=source,
+                    )
+                )
                 self._replace_block_by_title(new_title, merged_block, layer)
                 self._enforce_lru(layer)
+                self._emit_trace(
+                    MemoryTraceEvent(
+                        type="accepted",
+                        memory_id=self._memory_id(layer, new_title),
+                        layer=layer,
+                        title=new_title,
+                        source=source,
+                    )
+                )
                 return True
 
-        if not self._quality_check(block, existing_records):
+        rejection_reason = self._quality_rejection_reason(block, existing_records)
+        if rejection_reason is not None:
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="rejected",
+                    memory_id=self._memory_id(layer, new_title) if new_title else None,
+                    layer=layer,
+                    title=new_title or None,
+                    rejection_reason=rejection_reason,
+                    source=source,
+                )
+            )
             self._archive_block(block, layer)
             return False
 
@@ -287,6 +389,15 @@ class MemoryManager:
         with memory_file.open("a", encoding="utf-8") as file:
             file.write("\n" + block.strip() + "\n")
         self._enforce_lru(layer)
+        self._emit_trace(
+            MemoryTraceEvent(
+                type="accepted",
+                memory_id=self._memory_id(layer, new_title) if new_title else None,
+                layer=layer,
+                title=new_title or None,
+                source=source,
+            )
+        )
         return True
 
     def _replace_block_by_title(
@@ -357,7 +468,7 @@ class MemoryManager:
                 line.strip() for line in block.splitlines() if line.strip()
             )
             if self._is_memory_attempt(block):
-                self.add_memory_block(block, layer="project")
+                self.add_memory_block(block, source="consolidation", layer="project")
 
     def _is_memory_attempt(self, block: str) -> bool:
         has_field = any(
@@ -426,6 +537,15 @@ class MemoryManager:
         for block in blocks:
             title = extract_title(block)
             if title in titles_to_evict:
+                self._emit_trace(
+                    MemoryTraceEvent(
+                        type="forgotten",
+                        memory_id=self._memory_id(layer, title),
+                        layer=layer,
+                        title=title,
+                        source="lru",
+                    )
+                )
                 self._archive_block(block, layer)
             else:
                 kept_blocks.append(block)
@@ -483,3 +603,38 @@ class MemoryManager:
     def _lru_key(self, layer: str, title: str) -> str:
         """生成跨层级无冲突的 LRU 键。"""
         return f"{layer}:{title}"
+
+    def record_injected_records(self, records: Sequence[MemoryRecord]) -> None:
+        """记录进入 prompt 上下文的记忆摘要。"""
+        for record in records:
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="injected",
+                    memory_id=self._memory_id(record.layer, record.title),
+                    layer=record.layer,
+                    title=record.title,
+                    score=record.score,
+                    token_count=self._estimate_block_tokens(record.block),
+                    source="prompt",
+                )
+            )
+
+    def drain_trace_events(self) -> tuple[MemoryTraceEvent, ...]:
+        """返回并清空当前进程内累积的 memory trace 事件。"""
+        events = tuple(self._trace_events)
+        self._trace_events.clear()
+        return events
+
+    def _emit_trace(self, event: MemoryTraceEvent) -> None:
+        self._trace_events.append(event)
+
+    def _estimate_block_tokens(self, block: str) -> int:
+        from xcode.agent.compaction import estimate_tokens
+
+        return estimate_tokens(block)
+
+    def _memory_id(self, layer: str, title: str) -> str:
+        return build_memory_id(layer=layer, title=title)
+
+    def _elapsed_ms(self, started_at: float) -> float:
+        return round((time.perf_counter() - started_at) * 1000, 3)
