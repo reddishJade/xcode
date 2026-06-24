@@ -16,6 +16,11 @@ _NUMERIC_FIELDS = (
     "tool_calls",
     "tool_errors",
     "steps",
+    "memory_retrieval_count",
+    "memory_injected_count",
+    "memory_tool_search_count",
+    "memory_injected_tokens",
+    "memory_retrieval_latency_ms",
 )
 
 
@@ -248,7 +253,12 @@ def _trial_row(trial) -> str:
         )
     graders = "<br>".join(grader_lines)
     # 指标展示：过滤掉大数组字段，格式化延迟
-    skip_keys = {"model_latencies_ms", "tool_latencies_ms", "file_evidence"}
+    skip_keys = {
+        "model_latencies_ms",
+        "tool_latencies_ms",
+        "file_evidence",
+        "memory_trace",
+    }
     pills = []
     for key, value in sorted(trial.metrics.items()):
         if key in skip_keys:
@@ -276,10 +286,19 @@ def _trial_row(trial) -> str:
 
 def _fmt_metric_value(key: str, value: str | int | float) -> str:
     """格式化单个指标值用于展示。"""
-    if key in ("model_total_ms", "tool_total_ms", "total_observed_ms"):
+    if key in (
+        "model_total_ms",
+        "tool_total_ms",
+        "total_observed_ms",
+        "memory_retrieval_latency_ms",
+    ):
         return _fmt_ms(float(value))
     if key == "estimated_prompt_tokens":
         return f"{int(value):,}"
+    if key == "memory_injected_tokens":
+        return f"{int(value):,}"
+    if key.startswith("memory_") and key.endswith(("_rate", "_mrr", "_at_k")):
+        return f"{float(value) * 100:.1f}%"
     return str(value)
 
 

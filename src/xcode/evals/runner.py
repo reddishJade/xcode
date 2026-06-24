@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 from collections.abc import Callable, Sequence
 from datetime import datetime, UTC
 from pathlib import Path
@@ -102,6 +103,7 @@ class EvalRunner:
                 trace.record_error(exc)
 
         after_evidence = _collect_file_evidence(task, project_root)
+        memory_trace = _collect_memory_trace(app)
         evidence_graders = _grade_file_evidence(task, before_evidence, after_evidence)
         validation_graders, validation_results = run_validation(task, project_root)
         graders = (
@@ -139,6 +141,11 @@ class EvalRunner:
         agent_metrics = _extract_agent_metrics(events)
         if agent_metrics:
             metrics.update(agent_metrics)
+        memory_metrics = _build_memory_metrics(task, memory_trace)
+        if memory_trace:
+            metrics["memory_trace"] = [asdict(event) for event in memory_trace]
+        if memory_metrics:
+            metrics.update(memory_metrics)
         if after_evidence:
             metrics["file_evidence"] = after_evidence
         model_patch = _collect_model_patch(project_root)
@@ -322,6 +329,18 @@ _NUMERIC_FIELDS = (
     "tool_calls",
     "tool_errors",
     "steps",
+    "memory_retrieval_count",
+    "memory_injected_count",
+    "memory_tool_search_count",
+    "memory_injected_tokens",
+    "memory_retrieval_latency_ms",
+)
+
+_MEMORY_RATE_FIELDS = (
+    "memory_recall_at_k",
+    "memory_mrr",
+    "memory_irrelevant_injection_rate",
+    "memory_stale_conflict_retrieval_rate",
 )
 
 
@@ -345,6 +364,95 @@ def _extract_agent_metrics(events: list[StructuredAgentEvent]) -> dict[str, Any]
             metrics["termination_reason"] = event.data.termination_reason.value
             return metrics
     return {}
+
+
+def _collect_memory_trace(app: XcodeApp) -> tuple[Any, ...]:
+    manager = getattr(app, "memory_manager", None)
+    if manager is None or not hasattr(manager, "drain_trace_events"):
+        return ()
+    drained = manager.drain_trace_events()
+    return drained if isinstance(drained, tuple) else tuple(drained)
+
+
+def _build_memory_metrics(task: EvalTask, memory_trace: Sequence[Any]) -> dict[str, Any]:
+    if not memory_trace:
+        return {}
+    retrieved = [
+        event for event in memory_trace if getattr(event, "type", "") == "retrieved"
+    ]
+    injected = [
+        event for event in memory_trace if getattr(event, "type", "") == "injected"
+    ]
+    tool_searched = [
+        event for event in memory_trace if getattr(event, "type", "") == "tool_searched"
+    ]
+    metrics: dict[str, Any] = {
+        "memory_retrieval_count": len(retrieved),
+        "memory_injected_count": len(injected),
+        "memory_tool_search_count": len(tool_searched),
+        "memory_injected_tokens": sum(
+            int(getattr(event, "token_count", 0) or 0) for event in injected
+        ),
+    }
+    retrieval_latencies = [
+        float(getattr(event, "latency_ms", 0.0) or 0.0)
+        for event in retrieved
+        if getattr(event, "latency_ms", None) is not None
+    ]
+    if not retrieval_latencies:
+        retrieval_latencies = [
+            float(getattr(event, "latency_ms", 0.0) or 0.0)
+            for event in tool_searched
+            if getattr(event, "latency_ms", None) is not None
+        ]
+    if retrieval_latencies:
+        metrics["memory_retrieval_latency_ms"] = round(
+            sum(retrieval_latencies) / len(retrieval_latencies),
+            3,
+        )
+
+    config = task.metadata.get("memory_eval", {})
+    if not isinstance(config, dict):
+        return metrics
+
+    expected_titles = {
+        str(item).strip()
+        for item in config.get("expected_titles", ())
+        if str(item).strip()
+    }
+    stale_titles = {
+        str(item).strip()
+        for item in config.get("stale_or_conflicting_titles", ())
+        if str(item).strip()
+    }
+    retrieved_titles = [str(getattr(event, "title", "") or "") for event in retrieved]
+    injected_titles = [str(getattr(event, "title", "") or "") for event in injected]
+
+    if expected_titles:
+        retrieved_hits = sum(1 for title in expected_titles if title in retrieved_titles)
+        metrics["memory_recall_at_k"] = round(
+            retrieved_hits / max(len(expected_titles), 1),
+            4,
+        )
+        reciprocal_rank = 0.0
+        for index, title in enumerate(retrieved_titles, start=1):
+            if title in expected_titles:
+                reciprocal_rank = 1.0 / index
+                break
+        metrics["memory_mrr"] = round(reciprocal_rank, 4)
+        if injected_titles:
+            irrelevant = sum(1 for title in injected_titles if title not in expected_titles)
+            metrics["memory_irrelevant_injection_rate"] = round(
+                irrelevant / len(injected_titles),
+                4,
+            )
+    if stale_titles and retrieved_titles:
+        stale_hits = sum(1 for title in retrieved_titles if title in stale_titles)
+        metrics["memory_stale_conflict_retrieval_rate"] = round(
+            stale_hits / len(retrieved_titles),
+            4,
+        )
+    return metrics
 
 
 def _percentile(sorted_values: Sequence[float], p: float) -> float:
@@ -422,6 +530,14 @@ def _build_run_metrics(
             "max": sv[-1],
             "mean": round(sum(sv) / len(sv), 1),
         }
+    for field in _MEMORY_RATE_FIELDS:
+        values = [t.metrics.get(field) for t in trials if t.metrics.get(field) is not None]
+        if not values:
+            continue
+        metrics[f"{field}_mean"] = round(
+            sum(float(value) for value in values) / len(values),
+            4,
+        )
     all_graders = [grader for trial in trials for grader in trial.graders]
     skipped_graders = [grader for grader in all_graders if grader.skipped]
     evaluated_graders = [grader for grader in all_graders if not grader.skipped]

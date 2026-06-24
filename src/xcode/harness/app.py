@@ -29,6 +29,7 @@ from .assembly import (
 if TYPE_CHECKING:
     from xcode.experimental.mailbox import AgentMailbox
     from xcode.harness.daemon import HeartbeatDaemon
+    from xcode.harness.memory import MemoryManager
 
 
 @dataclass
@@ -43,6 +44,7 @@ class XcodeApp:
     progress: bool | None = None
     external_hook_runner: ExternalHookRunner | None = None
     todo_state: SessionTodoState | None = None
+    memory_manager: MemoryManager | None = None
     _model_profiles: dict[str, Any] | None = None
     _env_files: tuple[Path, ...] = ()
     _closers: tuple[Callable[[], None], ...] = ()
@@ -163,6 +165,9 @@ def build_app(
     )
     infra = build_shared_infra(project_root, cfg.runtime_config)
     shared_services = _assembly.build_shared_services(project_root, cfg.runtime_config)
+    from xcode.harness.memory import MemoryManager
+
+    memory_manager = MemoryManager(project_root)
 
     providers = build_provider_bundle(
         ProviderSettings(
@@ -209,6 +214,7 @@ def build_app(
         skill_registry=skill_registry,
         external_hook_runner=external_hook_runner,
         todo_state=todo_state,
+        memory_manager=memory_manager,
     )
 
     opt_in_services = _assembly.load_opt_in_services(
@@ -224,6 +230,7 @@ def build_app(
         progress=opt_in_services.progress,
         external_hook_runner=external_hook_runner,
         todo_state=todo_state,
+        memory_manager=memory_manager,
         _env_files=cfg.env_files,
         _model_profiles=cfg.runtime_config.provider.model_profiles,
         _closers=closers,

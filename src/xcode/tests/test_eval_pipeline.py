@@ -19,7 +19,9 @@ from xcode.ai.events import (
     ToolCallEvent,
 )
 from xcode.harness.app import XcodeApp
+from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.harness.config import AgentConfig
+from xcode.harness.memory import MemoryManager, MemoryTraceEvent
 from xcode.harness.skills import ToolSpec
 from xcode.evals.benchmarks import load_benchmark
 from xcode.evals.cli import _print_failed_trials
@@ -34,6 +36,7 @@ from xcode.evals.sandbox import UnsafeEvalTaskError
 from xcode.evals.tasks import SUITES
 from xcode.tests.fixtures import FakeProvider
 from xcode.evals.schema import TrialResult
+from xcode.evals.runner import _build_memory_metrics
 import pytest
 
 INPUT_SCHEMA = {
@@ -245,6 +248,94 @@ class EvalPipelineTests:
             trial = report.trials[0]
             assert "model_patch" in trial.metrics
             assert "math_utils.py" in trial.metrics["model_patch"]
+
+    def test_eval_runner_reports_memory_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "project"
+            root.mkdir()
+            task = EvalTask(
+                id="memory-metrics",
+                prompt="provider timeout retry",
+                expected_answer_contains=("done",),
+                metadata={
+                    "memory_eval": {
+                        "expected_titles": ("Provider timeout retry",),
+                    }
+                },
+            )
+            runner = EvalRunner(
+                tasks=(task,),
+                app_factory=lambda _task, _trial: _memory_app(root),
+                output_dir=Path(tmp) / "run",
+            )
+
+            report = runner.run()
+
+            assert report.success
+            trial = report.trials[0]
+            assert trial.metrics["memory_recall_at_k"] == 1.0
+            assert trial.metrics["memory_mrr"] == 1.0
+            assert trial.metrics["memory_irrelevant_injection_rate"] == 0.0
+            assert trial.metrics["memory_injected_count"] == 1
+            assert trial.metrics["memory_injected_tokens"] > 0
+            assert len(trial.metrics["memory_trace"]) >= 2
+            assert report.metrics["memory_recall_at_k_mean"] == 1.0
+            assert report.metrics["memory_mrr_mean"] == 1.0
+            assert report.metrics["memory_irrelevant_injection_rate_mean"] == 0.0
+
+    def test_build_memory_metrics_scores_expected_and_stale_titles(self) -> None:
+        task = EvalTask(
+            id="memory-metric-formula",
+            prompt="provider timeout retry",
+            metadata={
+                "memory_eval": {
+                    "expected_titles": ("Provider timeout retry",),
+                    "stale_or_conflicting_titles": ("Old timeout workaround",),
+                }
+            },
+        )
+        trace = (
+            MemoryTraceEvent(
+                type="retrieved",
+                memory_id="mem_expected",
+                layer="project",
+                title="Provider timeout retry",
+                score=1.0,
+                latency_ms=5.0,
+            ),
+            MemoryTraceEvent(
+                type="retrieved",
+                memory_id="mem_stale",
+                layer="project",
+                title="Old timeout workaround",
+                score=1.0,
+                latency_ms=5.0,
+            ),
+            MemoryTraceEvent(
+                type="injected",
+                memory_id="mem_expected",
+                layer="project",
+                title="Provider timeout retry",
+                score=1.0,
+                token_count=12,
+            ),
+            MemoryTraceEvent(
+                type="injected",
+                memory_id="mem_stale",
+                layer="project",
+                title="Old timeout workaround",
+                score=1.0,
+                token_count=10,
+            ),
+        )
+
+        metrics = _build_memory_metrics(task, trace)
+
+        assert metrics["memory_recall_at_k"] == 1.0
+        assert metrics["memory_mrr"] == 1.0
+        assert metrics["memory_irrelevant_injection_rate"] == 0.5
+        assert metrics["memory_stale_conflict_retrieval_rate"] == 0.5
+        assert metrics["memory_injected_tokens"] == 22
 
     def test_trial_project_root_copies_fixture_to_sandbox(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -529,6 +620,40 @@ def _validation_app(project_root: Path) -> XcodeApp:
         ),
         registry=(tool,),
     )
+
+
+def _memory_app(project_root: Path) -> XcodeApp:
+    manager = MemoryManager(
+        project_root,
+        user_memory_file=project_root / "home" / ".xcode" / "memory" / "MEMORY.md",
+    )
+    manager.memory_file.write_text(
+        (
+            "## Provider timeout retry\n"
+            "- Context/Query: Provider timeout retry\n"
+            "- Solution: Retry transient provider failures with backoff\n"
+            "- Files: src/provider.py\n"
+            "- Takeaways: Bound retries and preserve the root cause\n"
+        ),
+        encoding="utf-8",
+    )
+    responses: list[ProviderEvent] = [
+        TextDelta(chunk="done"),
+        FinalMessage(content="", stop_reason="end_turn"),
+    ]
+    agent = StructuredAgent(
+        provider=FakeProvider(responses),
+        registry=(),
+        runtime=AgentRuntimeConfig(
+            project_root=project_root,
+            runtime_context_provider=build_runtime_context_provider(
+                project_root,
+                (),
+                memory_manager=manager,
+            ),
+        ),
+    )
+    return XcodeApp(agent=agent, memory_manager=manager)
 
 
 def _trial(task_id: str, success: bool) -> TrialResult:

@@ -561,10 +561,11 @@ def build_agent(
     skill_registry: SkillRegistry | None = None,
     external_hook_runner: ExternalHookRunner | None = None,
     todo_state: SessionTodoState | None = None,
+    memory_manager: Any | None = None,
 ) -> StructuredAgent:
     from xcode.harness.memory import MemoryManager
 
-    memory_manager = MemoryManager(project_root)
+    memory_manager = memory_manager or MemoryManager(project_root)
 
     hook_manager = _build_hook_manager(
         contextual_state,
