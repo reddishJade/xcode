@@ -1,5 +1,222 @@
 # TODO
 
+## Memory — 从静态检索库演进为可验证经验系统
+
+当前基线：项目级 `MEMORY.md` 与用户级 `~/.xcode/memory/MEMORY.md` 保存
+结构化 H2 记忆块；写入路径包括 `/memory add` 和 compaction consolidation；
+读取路径包括每轮 BM25 主动召回、隔离的 `<memory>` 上下文注入和只读
+`search_memory` 工具。现有实现提供字段校验、词汇重复检测、同标题合并、
+元数据重排、归档和可选 LRU，但尚未形成基于真实任务结果的可靠写入、使用反馈
+和负迁移评测闭环。
+
+### MEM.1 建立 memory 事件与端到端评测基线
+- 定义统一的 memory trace 事件，至少覆盖 candidate created、accepted /
+  rejected、retrieved、injected、tool searched、used、superseded 和 forgotten
+- 记录 memory id、层级、检索分数、进入上下文的 token 数、延迟和拒绝原因；不得
+  在 trace 中复制未脱敏的完整用户级记忆
+- 将检索评测接入现有 eval report，增加 Recall@k、MRR、无关注入率、过期或冲突
+  记忆召回率、检索延迟和 token 成本
+- 增加同一 coding fixture 的 memory on / off 对照，测量任务成功率、工具调用数
+  和负迁移；不能只用“预期标题是否出现在 top-k”作为 memory 有效性的结论
+- 覆盖精确错误消息、代码符号、路径、中文查询、语义改写、多轮事实更新和不应
+  召回的干扰记忆
+
+### MEM.2 引入稳定身份、类型和证据模型
+- 为记忆增加稳定 `memory_id`，并区分 `semantic`、`episodic`、`procedural` 和
+  `preference`；不得继续让项目事实、单次事故、用户偏好和操作流程共享完全相同
+  的生命周期
+- 结构化保存 scope、source session、相关文件或 symbol、created / modified、
+  confidence、status、validity、supersedes 和 evidence
+- evidence 至少能引用测试结果、工具结果、修改文件和用户确认；模型自行总结但
+  没有外部结果支撑的内容不得标记为 verified
+- 保持 Markdown 为人类可读、可 review 的正式界面；内部索引格式不得破坏现有
+  项目级和用户级分层，也不得要求用户手工维护生成字段
+- 提供一次性兼容读取或迁移，将现有 H2 块转换为带稳定 id 的记录；不长期维护
+  两套并行写入协议
+
+### MEM.3 将 consolidation 改为候选提炼与晋升管线
+- compaction summary 只生成 memory candidate，不再因为文本恰好包含 H2 和必需
+  字段就直接晋升为长期记忆
+- 候选提炼应基于真实任务轨迹，区分成功策略、失败触发条件、架构事实、用户偏好
+  和仅对当前会话有效的状态
+- 晋升前执行 schema、内容质量、重复、冲突、适用范围和 evidence gate；无法确认
+  的候选进入 quarantine 或被拒绝，不污染正式检索结果
+- 使用测试结果、最终工具状态、保留的文件修改和用户纠正作为 outcome 信号；
+  失败经验允许保存，但必须显式记录失败条件和不可复用边界
+- 同标题覆盖改为 id、语义关系和版本状态驱动的 merge / supersede；保留可追踪
+  的变更来源，避免新字段静默覆盖旧事实
+
+### MEM.4 修正召回门控、使用记录与遗忘语义
+- 自动 `<memory>` 注入和 `search_memory` 工具使用同一检索入口，并都更新
+  `last_used_at`；当前自动注入绕过 LRU touch 的行为必须消除
+- 增加最低相关性和置信度门槛，允许返回零条结果；不得固定把前三条弱相关记录
+  注入每轮上下文
+- query 除用户文本外，应可使用当前文件、symbol、错误消息、任务阶段和涉及模块，
+  但这些运行时信号必须作为结构化检索上下文传入，不拼成不可审计的隐藏 prompt
+- 注入短小 memory packet，仅包含 id、类型、结论、适用范围、证据摘要和来源；
+  完整记录由 `search_memory` 按需获取
+- 遗忘策略综合 freshness、使用频率、验证状态、成功或失败反馈和 superseded
+  状态；不得仅以容量上限和 LRU 删除仍有效但低频的架构约束
+
+### MEM.5 混合检索与结果重排
+- 先改进 lexical 检索：字段加权、中文分词、代码 symbol、路径和错误消息精确匹配
+- 定义可替换的 candidate retrieval 与 rerank 接口，保留 BM25 作为离线、零服务
+  依赖的基线
+- 只有在 MEM.1 的语义改写或跨表达评测证明 lexical 召回不足后，才引入 embedding
+  召回；embedding 必须可关闭、可重建并具有模型版本信息
+- 混合结果按 lexical、semantic、scope、freshness、confidence、evidence 和历史
+  utility 重排，并通过离线数据调权，不在实现中散落不可解释的乘数
+- LLM reranker 只用于候选集的可选末级重排；必须有超时、成本预算和确定性降级，
+  不得让基础 memory 检索依赖外部 provider
+
+### MEM.6 使用反馈、经验演化与 procedural 晋升
+- 记录某条记忆是否被注入、被 agent 明确引用或采用，以及任务最终成功、失败或被
+  用户纠正；不得把“被召回”自动视为“有帮助”
+- 根据结果维护 utility、success count 和 failure count，支持降权、review、
+  supersede 和恢复，不直接用一次失败物理删除记录
+- 多次独立成功且适用范围稳定的 episodic 经验可以抽象为 procedural playbook；
+  抽象过程必须保留来源记录和反例
+- 稳定、通用、可执行的 procedure 应评估晋升为 skill，由 skill 的版本和 eval
+  管理；memory 不承担无限增长的技能仓库职责
+- 增加 stale memory、错误经验传播、分布变化和错误相似度匹配测试，确保经验复用
+  不会稳定复制旧错误
+
+### Memory 暂不实现
+- 不立即引入 graph database：只有真实 multi-hop、时序关系或跨记录冲突评测显示
+  平面记录无法满足需求时，再评估显式关系图
+- 不立即把 memory 主存储迁移到 SQLite 或外部 vector database：先完成稳定数据
+  模型和评测；仅在索引重建、查询延迟、并发写入或事务一致性出现实证瓶颈后迁移
+- 不保存完整 chain-of-thought、未经筛选的全量聊天或所有工具输出；长期记忆只保存
+  完成任务所需的结论、证据、边界和可复用经验
+- 不允许 memory 自动修改项目规范、用户偏好或高置信度架构事实而没有可追踪证据
+  和 supersede 记录
+- 不以“接入 embedding、知识图谱或某个 memory 框架”本身作为完成标准；完成标准
+  是 coding task 增益、低负迁移、可解释检索和可治理生命周期
+
+---
+
+## Eval — 从可运行 pipeline 演进为产品决策系统
+
+当前基线：`EvalRunner` 已支持多 task、多 trial、结构化事件 trace、确定性 grader、
+文件证据、validation command、LLM-as-judge、fixture 目录隔离、`pass@k` /
+`pass^k` 和 JSON / HTML / CSV report；已提供 HumanEval、EvalPlus、MBPP loader
+及 SWE-bench patch 导出。当前离线 suite 主要验证 eval 基础设施而非真实 agent
+能力，task metadata 缺少强 schema，run 缺少完整可复现清单，也尚未形成
+baseline / candidate 对照、统计置信度、能力切片和持续回归闭环。
+
+### E.1 修正 eval 基线与能力声明
+- 修复默认 `all` suite：离线 provider 必须能表达任务声明的完整多步工具轨迹；
+  当前 `multi-read-grep` 只生成第一个预期工具调用，不能把 runner fixture 的限制
+  计作 agent 能力失败
+- 将 benchmark 状态明确区分为 `integrated`、`export-only` 和 `catalog-only`；
+  `--list-benchmarks`、文档和 CLI choices 必须使用同一 registry，不能把
+  Terminal-Bench、SWE-bench Verified、Aider Polyglot 等未接通 harness 的目标
+  展示成可直接运行
+- capability suite 与 regression suite 分离：capability 用于发现能力边界，允许
+  较低通过率；regression 必须稳定接近全绿并作为代码变更门禁
+- 为内置 task 增加稳定版本、owner、能力维度、预期时长、难度和适用运行模式；
+  suite 不再只是硬编码 task tuple 的匿名集合
+- 增加 eval 自检，验证 task id 唯一、fixture 存在、validation command 合法、
+  grader 引用有效，以及真实写入任务具有隔离环境
+
+### E.2 Run manifest 与可复现环境
+- 每次运行输出 `run_manifest.json`，记录 xcode commit、dirty state、模型与 provider、
+  推理参数、AgentConfig、工具目录 hash、runtime config hash、dataset / suite
+  版本、Python、OS、开始时间和随机种子
+- report 引用 manifest 和 task dataset digest；同名 suite 内容变化必须可检测，
+  不能让两个不可比较的 run 共享相同身份
+- trace 和 report 使用稳定 schema version，并提供一次性迁移或兼容读取；不长期
+  维护多个无版本输出协议
+- 记录实际 input / output / cached token、墙钟时间、模型与工具延迟、退出原因和
+  sandbox 状态；无法获得的字段显式标记 unavailable，不以估算值冒充真实用量
+- fixture 目录复制继续作为快速本地基线；需要依赖、服务或系统权限的任务使用
+  可固定镜像和资源限制的容器环境，不把目录复制描述成安全沙箱
+
+### E.3 强类型 task、grader 与 outcome 模型
+- 将 `EvalTask.metadata` 中的 evidence、validation、fixture、benchmark 等隐式协议
+  提升为强类型 schema；JSON / JSONL 加载必须拒绝未知字段和错误类型，并输出
+  精确字段路径
+- grader 使用稳定 id，并返回 `score`、`passed`、`required`、`weight`、
+  evidence 和 failure category；trial 不再只能用全部布尔 grader 的简单 AND
+- 区分 outcome grader 与 trajectory grader：测试、编译、目标状态等决定任务
+  是否完成；工具策略、路径质量和效率用于诊断，不应默认覆盖真实 outcome
+- 确定性代码 grader 优先；LLM judge 只评判无法可靠程序化判断的质量维度
+- LLM judge 使用独立模型和固定版本，支持结构化输出、重复投票、失败重试和成本
+  上限；建立人工标注校准集，持续测量 judge 与人的一致率
+- judge unavailable、parse failure 和 timeout 继续显式记录，但 required judge
+  不得以 skipped 方式让 trial 静默通过
+
+### E.4 Baseline 对照、统计与回归门禁
+- CLI 支持 `--baseline <report-or-run-dir>`，按 task、grader、能力切片比较
+  candidate 与 baseline 的成功率、成本、延迟、工具调用和失败类型
+- 多 trial 报告增加 bootstrap 置信区间；样本不足时明确显示不确定性，不用单次
+  pass rate 宣称模型或实现取得提升
+- 对同一 task 尽量使用配对运行和固定环境；支持多随机种子及模型温度，区分稳定
+  回归能力和探索上限
+- 输出 regression、improvement、unchanged 和 incomparable task 列表，并能下钻
+  到 trace、patch、grader evidence 和 validation 输出
+- 增加可配置 CI gate，例如 regression suite 不得下降、关键 grader 必须全过、
+  p95 延迟和平均 token / 成本增长不得超过预算
+- 保存历史 run 索引和趋势数据，但 report 文件继续是可移植的正式产物；不要求
+  先部署数据库或外部观测平台才能运行本地 eval
+
+### E.5 数据集治理与真实任务回放
+- task pack 使用明确的 train / dev / held-out 划分；调 prompt、工具策略和 grader
+  时不得反复查看 held-out outcome 后继续手工优化
+- 数据集记录来源、许可证、采集时间、去重规则、污染风险、任务版本和失效原因；
+  动态或 live 数据集必须固定可复现快照
+- 从真实 xcode issue、失败 trace、用户纠正和已合并 PR 中提炼回放任务，优先覆盖
+  当前产品的工具、provider、Windows、memory、MCP、subagent 和 git 工作流
+- 真实回放任务保留原始问题、最小 fixture、验收测试和失败分类，不直接复制敏感
+  用户内容或私有凭据
+- 建立任务难度和人类完成时长标注，逐步用可完成任务的时间跨度衡量长时程能力，
+  不只比较静态 benchmark 总通过率
+- 定期审查已饱和、已泄漏、grader 失效或不再代表产品需求的任务；保留历史结果，
+  但从当前决策 suite 中退役
+
+### E.6 Agent trajectory、探索与恢复能力评测
+- 在现有事件流上定义语义化 trajectory 指标：目标文件 / symbol Recall@k、MRR、
+  首次有效定位步数、读取行数、上下文利用率和无关文件访问率
+- 记录必要步骤覆盖、冗余工具调用、重复读取、无效编辑、revert、测试前后顺序和
+  最终 patch 范围；指标用于定位失败原因，不强制唯一“黄金轨迹”
+- 为错误恢复增加 fault-injection suite，覆盖命令失败、测试失败、缺失依赖、
+  错误路径、工具超时、provider 中断和上下文冲突，测量诊断、重试和降级能力
+- 增加 tool policy 的状态结果检查：不能只看是否调用某个工具，还要检查参数、
+  调用顺序、工具结果是否被采用以及禁止副作用是否实际发生
+- 将 memory on / off、retrieval 策略、prompt 模块、工具组和 subagent 策略作为
+  一等实验变量，支持同任务 A/B，对比 outcome、负迁移、成本和 trajectory
+- 失败分类至少区分理解、检索、规划、工具选择、工具执行、代码修改、验证、停止
+  条件和环境故障，避免所有失败最终只表现为 `trial.success = false`
+
+### E.7 外部 benchmark 与长时程环境
+- 定义统一 adapter 生命周期：
+  `TaskSource → EnvironmentBuilder → AgentRunner → OutcomeGrader →
+  TrajectoryGrader → Reporter`，外部 benchmark 不继续堆叠在单个 loader 文件中
+- EvalPlus 继续作为快速函数级正确性基线，但不得代表 coding agent 的仓库级能力
+- SWE-bench 使用官方 harness 执行 checkout、环境构建和测试；在此之前保持
+  `export-only`，不要用 LLM judge 代替官方 resolved / unresolved outcome
+- 优先评估 SWE-bench Live / Pro 或同类更新、held-out、抗污染仓库任务，以及
+  SWE-Explore 类代码定位和上下文效率评测
+- 接入 Terminal-Bench 2.0 或等价终端任务环境，覆盖构建、调试、系统操作和长链路
+  工程任务；运行时必须有容器、资源预算、超时和网络策略
+- 外部 leaderboard 只用于能力参照；xcode 的发布决策以自有 regression、
+  capability 和真实任务回放集为主
+
+### Eval 暂不实现
+- 不先建设复杂 Web dashboard、远程服务或多租户平台；先让 run artifact、
+  baseline diff 和 CI gate 可靠
+- 不以增加 benchmark 数量作为完成标准；未接通官方环境和 outcome grader 的
+  benchmark 只保留 catalog 或 export 状态
+- 不依赖单一 LLM judge 作为主要正确性信号，也不保存或评估私有 chain-of-thought
+- 不为所有任务规定唯一黄金工具轨迹；允许不同有效策略，只处罚可证明的错误、
+  无效副作用和显著资源浪费
+- 不立即引入结果数据库、分布式调度或大规模并发执行；出现历史查询、运行时长或
+  吞吐瓶颈后再设计持久存储和 worker 调度
+- 不将公开 benchmark 分数直接等同于真实用户价值；完成标准是可复现的能力提升、
+  低回归、合理成本和对 xcode 实际任务的稳定增益
+
+---
+
 ## MCP — Coding Agent 必要能力
 
 当前基线：使用官方 Python SDK 连接本地 stdio server，支持初始化协商、
