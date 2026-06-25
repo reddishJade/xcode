@@ -1106,6 +1106,98 @@ class MemoryManager:
             created += 1
         return created
 
+    def promote_candidate(
+        self,
+        title: str,
+        *,
+        layer: MemoryLayer = "project",
+    ) -> bool:
+        """将候选目录中的记忆晋升为正式 memory 记录。"""
+        candidate_file = self._find_candidate_file(title, layer=layer)
+        if candidate_file is None:
+            return False
+        candidate_block = self._extract_candidate_block(
+            candidate_file.read_text(encoding="utf-8")
+        )
+        existing_records = self.read_memory_records(layer=layer)
+        rejection_reason = self._promotion_gate_rejection_reason(
+            candidate_block,
+            existing_records=existing_records,
+        )
+        if rejection_reason is not None:
+            self._move_candidate_to_quarantine(
+                candidate_file,
+                layer=layer,
+                reason=rejection_reason,
+                source="candidate_review",
+            )
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="quarantined",
+                    memory_id=self._memory_id(layer, title),
+                    layer=layer,
+                    title=title,
+                    rejection_reason=rejection_reason,
+                    source="candidate_review",
+                )
+            )
+            return False
+        promoted_block = self._normalize_candidate_for_promotion(candidate_block)
+        persisted = self._persist_memory_block(
+            promoted_block,
+            source="candidate_review",
+            scope=None,
+            confidence=None,
+            memory_type=None,
+            status=None,
+            validity=None,
+            supersedes=(),
+            evidence=(),
+            retrieval_count=None,
+            injection_count=None,
+            reference_count=None,
+            adoption_count=None,
+            success_count=None,
+            failure_count=None,
+            correction_count=None,
+            utility=None,
+            last_outcome=None,
+            layer=layer,
+            emit_candidate_trace=False,
+        )
+        if persisted:
+            candidate_file.unlink(missing_ok=True)
+        return persisted
+
+    def reject_candidate(
+        self,
+        title: str,
+        *,
+        layer: MemoryLayer = "project",
+        reason: str = "manual_rejection",
+    ) -> bool:
+        """将候选目录中的记忆移入 quarantine。"""
+        candidate_file = self._find_candidate_file(title, layer=layer)
+        if candidate_file is None:
+            return False
+        self._move_candidate_to_quarantine(
+            candidate_file,
+            layer=layer,
+            reason=reason,
+            source="candidate_review",
+        )
+        self._emit_trace(
+            MemoryTraceEvent(
+                type="quarantined",
+                memory_id=self._memory_id(layer, title),
+                layer=layer,
+                title=title,
+                rejection_reason=reason,
+                source="candidate_review",
+            )
+        )
+        return True
+
     def drain_trace_events(self) -> tuple[MemoryTraceEvent, ...]:
         """返回并清空当前进程内累积的 memory trace 事件。"""
         events = tuple(self._trace_events)
@@ -1300,6 +1392,57 @@ class MemoryManager:
                 if f"## {title}" in path.read_text(encoding="utf-8"):
                     return True
         return False
+
+    def _find_candidate_file(self, title: str, *, layer: MemoryLayer) -> Path | None:
+        marker = f"## {title}".strip()
+        for path in sorted(self._candidate_dir(layer).glob("*.md")):
+            if marker in path.read_text(encoding="utf-8"):
+                return path
+        return None
+
+    def _extract_candidate_block(self, content: str) -> str:
+        marker = content.find("## ")
+        if marker < 0:
+            return content.strip() + "\n"
+        return content[marker:].strip() + "\n"
+
+    def _normalize_candidate_for_promotion(self, block: str) -> str:
+        fields = parse_fields(block)
+        lines: list[str] = []
+        for raw_line in block.strip().splitlines():
+            stripped = raw_line.strip()
+            if not stripped.startswith("- "):
+                lines.append(stripped)
+                continue
+            key = stripped[2:].split(":", 1)[0].strip().lower()
+            if key == "status":
+                lines.append("- Status: active")
+            elif key == "validity":
+                lines.append("- Validity: derived")
+            else:
+                lines.append(stripped)
+        if "status" not in fields:
+            lines.append("- Status: active")
+        if "validity" not in fields:
+            lines.append("- Validity: derived")
+        return "\n".join(lines).strip() + "\n"
+
+    def _move_candidate_to_quarantine(
+        self,
+        candidate_file: Path,
+        *,
+        layer: MemoryLayer,
+        reason: str,
+        source: str,
+    ) -> None:
+        block = self._extract_candidate_block(candidate_file.read_text(encoding="utf-8"))
+        self._quarantine_block(
+            block,
+            layer=layer,
+            reason=reason,
+            source=source,
+        )
+        candidate_file.unlink(missing_ok=True)
 
     def _estimate_block_tokens(self, block: str) -> int:
         from xcode.agent.compaction import estimate_tokens
