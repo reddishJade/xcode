@@ -297,6 +297,50 @@ class TestBM25AndMemory:
             "accepted",
         ]
 
+    def test_retention_keeps_high_value_semantic_record_over_weaker_new_episode(self) -> None:
+        manager = MemoryManager(self.root, max_blocks=1)
+        stable_fact = (
+            "## Architecture fact\n"
+            "- Context/Query: Shared runtime constraint\n"
+            "- Solution: Keep provider wiring in assembly.py\n"
+            "- Files: assembly.py\n"
+            "- Takeaways: Stable architecture facts should survive weak churn\n"
+        )
+        weak_episode = (
+            "## Incident weak retry\n"
+            "- Context/Query: Retry tweak during one failing run\n"
+            "- Solution: Add one more retry\n"
+            "- Files: provider.py\n"
+            "- Takeaways: This needs review before reuse\n"
+        )
+
+        assert manager.add_memory_block(
+            stable_fact,
+            validity="verified",
+            memory_type="semantic",
+        )
+        record = manager.read_memory_records(layer="project")[0]
+        manager.record_adopted_records((record,))
+        manager.record_session_outcome("success")
+        manager.drain_trace_events()
+
+        assert manager.add_memory_block(
+            weak_episode,
+            status="needs_review",
+            validity="needs_review",
+        )
+
+        records = manager.read_memory_records(layer="project")
+        assert len(records) == 1
+        assert records[0].title == "Architecture fact"
+        events = manager.drain_trace_events()
+        assert [event.type for event in events] == [
+            "candidate_created",
+            "forgotten",
+            "accepted",
+        ]
+        assert events[1].title == "Incident weak retry"
+
     def test_migrate_legacy_records_rewrites_missing_identity_metadata(self) -> None:
         manager = MemoryManager(self.root)
         manager.memory_file.write_text(

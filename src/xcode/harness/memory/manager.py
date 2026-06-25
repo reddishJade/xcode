@@ -1,7 +1,7 @@
 """基于 BM25 的 MEMORY.md 记忆系统。
 
 支持质量门（拒绝低质量/重复块）、冲突合并（同标题合并字段）、
-LRU 遗忘策略（超过 max_blocks 时淘汰最久未访问的块）。
+保留策略（超过 max_blocks 时结合质量与使用信号淘汰较弱记忆）。
 """
 
 from __future__ import annotations
@@ -846,7 +846,7 @@ class MemoryManager:
         normalized = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
         return normalized[:48]
 
-    # ── LRU 遗忘策略 ──
+    # ── 保留与遗忘策略 ──
 
     def _touch_lru(self, records: Sequence[MemoryRecord]) -> None:
         lru = self._read_lru()
@@ -854,6 +854,53 @@ class MemoryManager:
         for record in records:
             lru[self._lru_key(record.layer, record.memory_id)] = now
         self._write_lru(lru)
+
+    def _retention_sort_key(
+        self,
+        record: MemoryRecord,
+        *,
+        lru: dict[str, float],
+    ) -> tuple[float, float]:
+        """返回越小越应优先淘汰的 retention key。"""
+        status_rank = {
+            "superseded": 0.0,
+            "obsolete": 0.0,
+            "deprecated": 0.0,
+            "candidate": 0.5,
+            "needs_review": 1.0,
+            "active": 2.0,
+        }.get(record.status, 1.5)
+        validity_rank = {
+            "needs_review": 0.0,
+            "corrected": 0.0,
+            "unknown": 1.0,
+            "derived": 1.0,
+            "verified": 2.0,
+        }.get(record.validity, 1.0)
+        type_rank = {
+            "episodic": 0.0,
+            "preference": 0.5,
+            "procedural": 1.5,
+            "semantic": 2.0,
+        }.get(record.memory_type, 1.0)
+        engagement = (
+            record.retrieval_count
+            + record.injection_count
+            + record.reference_count
+            + record.adoption_count * 2
+        )
+        outcome_score = record.success_count - record.failure_count - record.correction_count
+        utility_score = max(-4.0, min(4.0, record.utility))
+        strength = (
+            status_rank * 3.0
+            + validity_rank * 2.0
+            + type_rank
+            + utility_score
+            + outcome_score * 0.75
+            + min(engagement, 6) * 0.1
+        )
+        freshness = lru.get(self._lru_key(record.layer, record.memory_id), 0.0)
+        return (strength, freshness)
 
     def _enforce_lru(self, layer: MemoryLayer) -> None:
         if self.max_blocks <= 0:
@@ -884,23 +931,25 @@ class MemoryManager:
             if key not in lru:
                 lru[key] = now
 
-        sorted_keys = sorted(
-            (key for key in lru if key.startswith(f"{layer}:")),
-            key=lambda key: lru.get(key, 0.0),
+        ranked_records = sorted(
+            records,
+            key=lambda record: self._retention_sort_key(record, lru=lru),
         )
-        keys_to_evict = set(sorted_keys[: len(blocks) - self.max_blocks])
+        records_to_evict = {
+            record.memory_id for record in ranked_records[: len(blocks) - self.max_blocks]
+        }
 
         kept_blocks: list[str] = []
         for record in records:
             key = self._lru_key(layer, record.memory_id)
-            if key in keys_to_evict:
+            if record.memory_id in records_to_evict:
                 self._emit_trace(
                     MemoryTraceEvent(
                         type="forgotten",
                         memory_id=record.memory_id,
                         layer=layer,
                         title=record.title,
-                        source="lru",
+                        source="retention",
                     )
                 )
                 self._archive_block(record.block, layer)
@@ -909,8 +958,8 @@ class MemoryManager:
 
         if len(kept_blocks) < len(blocks):
             self._write_blocks(kept_blocks, layer)
-            for key in keys_to_evict:
-                lru.pop(key, None)
+            for record in ranked_records[: len(blocks) - self.max_blocks]:
+                lru.pop(self._lru_key(layer, record.memory_id), None)
             self._write_lru(lru)
 
     def _read_lru(self) -> dict[str, float]:
