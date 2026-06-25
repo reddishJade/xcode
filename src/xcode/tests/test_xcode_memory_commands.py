@@ -86,8 +86,11 @@ def test_runtime_context_provider_injects_relevant_memory(tmp_path: Path) -> Non
     assert any("Retry transient provider failures" in context for context in contexts)
     assert any('layer="project"' in context for context in contexts)
     assert all("- Context/Query:" not in context for context in contexts if "<memory>" in context)
+    record = manager.read_memory_records()[0]
+    assert manager.get_last_used_at(record) is not None
     trace_events = manager.drain_trace_events()
     assert any(event.type == "retrieved" for event in trace_events)
+    assert any(event.type == "used" and event.source == "prompt" for event in trace_events)
     injected = [event for event in trace_events if event.type == "injected"]
     assert injected
     assert all(event.token_count and event.token_count > 0 for event in injected)
@@ -175,6 +178,35 @@ def test_memory_tool_searches_both_layers(tmp_path: Path) -> None:
     assert "type=" in output
     assert "Shared timeout rule" in output
     assert "- Context/Query:" in output
+    record = manager.read_memory_records(layer="user")[0]
+    assert manager.get_last_used_at(record) is not None
     trace_events = manager.drain_trace_events()
     assert any(event.type == "retrieved" for event in trace_events)
     assert any(event.type == "tool_searched" for event in trace_events)
+    assert any(event.type == "used" and event.source == "tool" for event in trace_events)
+
+
+def test_memory_context_skips_weak_matches_when_below_threshold(tmp_path: Path) -> None:
+    manager = MemoryManager(
+        tmp_path,
+        user_memory_file=tmp_path / "user-memory" / "MEMORY.md",
+        min_retrieval_score=0.8,
+    )
+    assert manager.add_memory_block(
+        (
+            "## Provider timeout retry\n"
+            "- Context/Query: Provider connection timeout\n"
+            "- Solution: Retry transient provider failures\n"
+            "- Files: src/provider.py\n"
+            "- Takeaways: Bound retries and preserve the root cause\n"
+        )
+    )
+    provider = build_runtime_context_provider(
+        tmp_path,
+        (),
+        memory_manager=manager,
+    )
+
+    contexts = provider("unrelated grocery list question")
+
+    assert all("<memory>" not in context for context in contexts)

@@ -49,6 +49,8 @@ class MemoryManager:
         root: Path,
         max_blocks: int = _DEFAULT_MAX_BLOCKS,
         user_memory_file: Path | None = None,
+        min_retrieval_score: float = 0.2,
+        min_confidence: float = 0.0,
     ) -> None:
         """创建项目级与用户级并行的记忆管理器。"""
         self.root = root
@@ -59,6 +61,8 @@ class MemoryManager:
         self.archive_dir = root / ".local" / "memory_archive"
         self.lru_file = root / ".local" / "memory_lru.json"
         self.max_blocks = max_blocks
+        self.min_retrieval_score = min_retrieval_score
+        self.min_confidence = min_confidence
         self._trace_events: list[MemoryTraceEvent] = []
 
     # ── 读取 ──
@@ -121,7 +125,6 @@ class MemoryManager:
             scope=scope,
             layer=layer,
         )
-        self._touch_lru(records)
         return [record.block for record in records]
 
     def search_memory_records(
@@ -132,6 +135,7 @@ class MemoryManager:
         layer: MemoryLayerFilter = "all",
         *,
         source: str = "api",
+        track_usage: bool = True,
     ) -> list[MemoryRecord]:
         """跨层级执行 BM25 检索并返回带来源的记录。"""
         started_at = time.perf_counter()
@@ -171,7 +175,9 @@ class MemoryManager:
         ranked: list[MemoryRecord] = []
         for score, record in zip(scores, records, strict=True):
             adjusted = adjust_score(score, record, query, scope)
-            if adjusted > 0:
+            if adjusted >= self.min_retrieval_score and self._passes_confidence_gate(
+                record
+            ):
                 ranked.append(
                     MemoryRecord(
                         block=record.block,
@@ -197,6 +203,8 @@ class MemoryManager:
         ranked.sort(key=lambda r: (-r.score, r.title))
         limited = ranked[:limit]
         elapsed_ms = self._elapsed_ms(started_at)
+        if track_usage and limited:
+            self._touch_lru(limited)
         for record in limited:
             self._emit_trace(
                 MemoryTraceEvent(
@@ -209,6 +217,17 @@ class MemoryManager:
                     source=source,
                 )
             )
+            if track_usage:
+                self._emit_trace(
+                    MemoryTraceEvent(
+                        type="used",
+                        memory_id=record.memory_id,
+                        layer=record.layer,
+                        title=record.title,
+                        score=record.score,
+                        source=source,
+                    )
+                )
         if source == "tool":
             self._emit_trace(
                 MemoryTraceEvent(
@@ -544,17 +563,15 @@ class MemoryManager:
         lru = self._read_lru()
         now = time.time()
         for record in records:
-            lru[self._lru_key(record.layer, record.title)] = now
+            lru[self._lru_key(record.layer, record.memory_id)] = now
         self._write_lru(lru)
 
     def _enforce_lru(self, layer: MemoryLayer) -> None:
         if self.max_blocks <= 0:
             return
-        blocks = self.read_memory_blocks(layer=layer)
-        block_titles = [extract_title(b) for b in blocks]
-        block_title_set = {
-            self._lru_key(layer, title) for title in block_titles if title
-        }
+        records = self.read_memory_records(layer=layer)
+        blocks = [record.block for record in records]
+        record_keys = {self._lru_key(layer, record.memory_id) for record in records}
 
         lru = self._read_lru()
         other_layer_lru = {
@@ -563,7 +580,7 @@ class MemoryManager:
             if not key.startswith(f"{layer}:")
         }
         layer_lru = {
-            key: timestamp for key, timestamp in lru.items() if key in block_title_set
+            key: timestamp for key, timestamp in lru.items() if key in record_keys
         }
         cleaned = other_layer_lru | layer_lru
         if cleaned != lru:
@@ -573,9 +590,9 @@ class MemoryManager:
         if len(blocks) <= self.max_blocks:
             return
         now = time.time()
-        for title in block_titles:
-            key = self._lru_key(layer, title)
-            if title and key not in lru:
+        for record in records:
+            key = self._lru_key(layer, record.memory_id)
+            if key not in lru:
                 lru[key] = now
 
         sorted_keys = sorted(
@@ -583,24 +600,23 @@ class MemoryManager:
             key=lambda key: lru.get(key, 0.0),
         )
         keys_to_evict = set(sorted_keys[: len(blocks) - self.max_blocks])
-        titles_to_evict = {key.split(":", 1)[1] for key in keys_to_evict}
 
         kept_blocks: list[str] = []
-        for block in blocks:
-            title = extract_title(block)
-            if title in titles_to_evict:
+        for record in records:
+            key = self._lru_key(layer, record.memory_id)
+            if key in keys_to_evict:
                 self._emit_trace(
                     MemoryTraceEvent(
                         type="forgotten",
-                        memory_id=self._memory_id(layer, title),
+                        memory_id=record.memory_id,
                         layer=layer,
-                        title=title,
+                        title=record.title,
                         source="lru",
                     )
                 )
-                self._archive_block(block, layer)
+                self._archive_block(record.block, layer)
             else:
-                kept_blocks.append(block)
+                kept_blocks.append(record.block)
 
         if len(kept_blocks) < len(blocks):
             self._write_blocks(kept_blocks, layer)
@@ -751,3 +767,12 @@ class MemoryManager:
         if record.source_session:
             return f"{record.layer}:{record.source_session}"
         return record.layer
+
+    def get_last_used_at(self, record: MemoryRecord) -> float | None:
+        """返回某条记忆最近一次被检索使用的时间戳。"""
+        return self._read_lru().get(self._lru_key(record.layer, record.memory_id))
+
+    def _passes_confidence_gate(self, record: MemoryRecord) -> bool:
+        if record.confidence_value is None:
+            return True
+        return record.confidence_value >= self.min_confidence

@@ -292,7 +292,7 @@ def build_runtime_context_provider(
 
 def _render_memory_context(manager: MemoryManager, question: str) -> str:
     """将跨层级检索结果渲染为隔离的 system prompt 区域。"""
-    records = manager.search_memory_records(question, limit=3)
+    records = manager.search_memory_records(question, limit=3, source="prompt")
     if not records:
         return ""
     manager.record_injected_records(records)
