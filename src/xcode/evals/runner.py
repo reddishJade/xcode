@@ -126,6 +126,7 @@ class EvalRunner:
                 graders = graders + judge_graders
 
             success = all(grader.passed for grader in graders)
+            _record_memory_feedback(app, success=success, trial_id=trial_id)
             tool_call_count = sum(1 for event in events if event.type == "tool_use")
             tool_error_count = sum(
                 1
@@ -381,7 +382,17 @@ def _collect_memory_trace(app: XcodeApp) -> tuple[Any, ...]:
     return drained if isinstance(drained, tuple) else tuple(drained)
 
 
-def _build_memory_metrics(task: EvalTask, memory_trace: Sequence[Any]) -> dict[str, Any]:
+def _record_memory_feedback(app: XcodeApp, *, success: bool, trial_id: str) -> None:
+    manager = getattr(app, "memory_manager", None)
+    if manager is None or not hasattr(manager, "record_session_outcome"):
+        return
+    outcome = "success" if success else "failure"
+    manager.record_session_outcome(outcome, source=f"eval:{trial_id}")
+
+
+def _build_memory_metrics(
+    task: EvalTask, memory_trace: Sequence[Any]
+) -> dict[str, Any]:
     if not memory_trace:
         return {}
     retrieved = [
@@ -436,7 +447,9 @@ def _build_memory_metrics(task: EvalTask, memory_trace: Sequence[Any]) -> dict[s
     injected_titles = [str(getattr(event, "title", "") or "") for event in injected]
 
     if expected_titles:
-        retrieved_hits = sum(1 for title in expected_titles if title in retrieved_titles)
+        retrieved_hits = sum(
+            1 for title in expected_titles if title in retrieved_titles
+        )
         metrics["memory_recall_at_k"] = round(
             retrieved_hits / max(len(expected_titles), 1),
             4,
@@ -448,7 +461,9 @@ def _build_memory_metrics(task: EvalTask, memory_trace: Sequence[Any]) -> dict[s
                 break
         metrics["memory_mrr"] = round(reciprocal_rank, 4)
         if injected_titles:
-            irrelevant = sum(1 for title in injected_titles if title not in expected_titles)
+            irrelevant = sum(
+                1 for title in injected_titles if title not in expected_titles
+            )
             metrics["memory_irrelevant_injection_rate"] = round(
                 irrelevant / len(injected_titles),
                 4,
@@ -538,7 +553,9 @@ def _build_run_metrics(
             "mean": round(sum(sv) / len(sv), 1),
         }
     for field in _MEMORY_RATE_FIELDS:
-        values = [t.metrics.get(field) for t in trials if t.metrics.get(field) is not None]
+        values = [
+            t.metrics.get(field) for t in trials if t.metrics.get(field) is not None
+        ]
         if not values:
             continue
         metrics[f"{field}_mean"] = round(

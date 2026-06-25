@@ -149,7 +149,9 @@ class TestBM25AndMemory:
             status="active",
             validity="verified",
             evidence=(
-                MemoryEvidence("test", "pytest src/xcode/tests/test_xcode_memory_bm25.py"),
+                MemoryEvidence(
+                    "test", "pytest src/xcode/tests/test_xcode_memory_bm25.py"
+                ),
                 MemoryEvidence("file", "src/xcode/harness/memory/manager.py"),
             ),
         )
@@ -316,6 +318,74 @@ class TestBM25AndMemory:
         assert "- Memory-Type: semantic" in rewritten
         assert "- Status: active" in rewritten
         assert "- Validity: unknown" in rewritten
+
+    def test_session_outcome_tracks_exposure_without_counting_helpfulness(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.add_memory_block(
+            (
+                "## Provider retry playbook\n"
+                "- Context/Query: Provider timeout retry\n"
+                "- Solution: Retry transient provider failures\n"
+                "- Files: provider.py\n"
+                "- Takeaways: Keep bounded retries\n"
+            )
+        )
+        manager.drain_trace_events()
+
+        record = manager.search_memory_records(
+            "provider timeout retry",
+            source="prompt",
+        )[0]
+        manager.record_injected_records((record,))
+
+        updated = manager.record_session_outcome("success")
+
+        assert updated == 1
+        persisted = manager.read_memory_records(layer="project")[0]
+        assert persisted.retrieval_count == 1
+        assert persisted.injection_count == 1
+        assert persisted.adoption_count == 0
+        assert persisted.success_count == 0
+        assert persisted.failure_count == 0
+        assert persisted.utility == 0.0
+        assert persisted.last_outcome == "success"
+
+    def test_adopted_feedback_updates_utility_and_review_state(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.add_memory_block(
+            (
+                "## Task lock workaround\n"
+                "- Context/Query: Task lock timeout\n"
+                "- Solution: Retry file lock with backoff\n"
+                "- Files: task_store.py\n"
+                "- Takeaways: Treat lock contention as transient\n"
+            ),
+            validity="verified",
+        )
+        manager.drain_trace_events()
+
+        record = manager.read_memory_records(layer="project")[0]
+        manager.record_adopted_records((record,))
+        manager.record_session_outcome("failure")
+
+        failed = manager.read_memory_records(layer="project")[0]
+        assert failed.adoption_count == 1
+        assert failed.failure_count == 1
+        assert failed.success_count == 0
+        assert failed.utility == -1.0
+        assert failed.status == "needs_review"
+        assert failed.validity == "needs_review"
+
+        manager.record_adopted_records((failed,))
+        manager.record_session_outcome("success")
+
+        recovered = manager.read_memory_records(layer="project")[0]
+        assert recovered.adoption_count == 2
+        assert recovered.failure_count == 1
+        assert recovered.success_count == 1
+        assert recovered.utility == 0.0
+        assert recovered.status == "active"
+        assert recovered.validity == "verified"
 
 
 if __name__ == "__main__":

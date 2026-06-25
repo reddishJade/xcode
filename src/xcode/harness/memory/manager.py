@@ -6,6 +6,7 @@ LRU 遗忘策略（超过 max_blocks 时淘汰最久未访问的块）。
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from html import escape
 import json
 import re
@@ -40,6 +41,14 @@ from .parsing import (
 
 type MemoryLayer = Literal["project", "user"]
 type MemoryLayerFilter = Literal["all", "project", "user"]
+type MemoryOutcome = Literal["success", "failure", "corrected"]
+
+
+@dataclass
+class _SessionMemoryUsage:
+    retrieved: bool = False
+    injected: bool = False
+    adopted: bool = False
 
 
 class MemoryManager:
@@ -67,6 +76,7 @@ class MemoryManager:
         self.min_retrieval_score = min_retrieval_score
         self.min_confidence = min_confidence
         self._trace_events: list[MemoryTraceEvent] = []
+        self._session_usage: dict[tuple[str, str], _SessionMemoryUsage] = {}
 
     # ── 读取 ──
 
@@ -199,6 +209,14 @@ class MemoryManager:
                         validity=record.validity,
                         supersedes=record.supersedes,
                         evidence=record.evidence,
+                        retrieval_count=record.retrieval_count,
+                        injection_count=record.injection_count,
+                        adoption_count=record.adoption_count,
+                        success_count=record.success_count,
+                        failure_count=record.failure_count,
+                        correction_count=record.correction_count,
+                        utility=record.utility,
+                        last_outcome=record.last_outcome,
                         score=round(adjusted, 6),
                         layer=record.layer,
                     )
@@ -208,6 +226,7 @@ class MemoryManager:
         elapsed_ms = self._elapsed_ms(started_at)
         if track_usage and limited:
             self._touch_lru(limited)
+            self._mark_session_usage(limited, usage="retrieved")
         for record in limited:
             self._emit_trace(
                 MemoryTraceEvent(
@@ -348,6 +367,14 @@ class MemoryManager:
             validity=validity,
             supersedes=tuple(supersedes),
             evidence=evidence,
+            retrieval_count=None,
+            injection_count=None,
+            adoption_count=None,
+            success_count=None,
+            failure_count=None,
+            correction_count=None,
+            utility=None,
+            last_outcome=None,
             layer=layer,
             emit_candidate_trace=True,
         )
@@ -364,6 +391,14 @@ class MemoryManager:
         validity: str | None,
         supersedes: Sequence[str],
         evidence: Sequence[MemoryEvidence],
+        retrieval_count: int | None,
+        injection_count: int | None,
+        adoption_count: int | None,
+        success_count: int | None,
+        failure_count: int | None,
+        correction_count: int | None,
+        utility: float | None,
+        last_outcome: str | None,
         layer: MemoryLayer,
         emit_candidate_trace: bool,
     ) -> bool:
@@ -404,6 +439,14 @@ class MemoryManager:
             validity=validity,
             supersedes=tuple(supersedes),
             evidence=tuple(evidence),
+            retrieval_count=retrieval_count,
+            injection_count=injection_count,
+            adoption_count=adoption_count,
+            success_count=success_count,
+            failure_count=failure_count,
+            correction_count=correction_count,
+            utility=utility,
+            last_outcome=last_outcome,
         )
         existing_records = self.read_memory_records(layer=layer)
         new_title = extract_title(block)
@@ -660,6 +703,14 @@ class MemoryManager:
             validity=None,
             supersedes=(),
             evidence=(),
+            retrieval_count=None,
+            injection_count=None,
+            adoption_count=None,
+            success_count=None,
+            failure_count=None,
+            correction_count=None,
+            utility=None,
+            last_outcome=None,
             layer=layer,
             emit_candidate_trace=False,
         )
@@ -917,6 +968,7 @@ class MemoryManager:
 
     def record_injected_records(self, records: Sequence[MemoryRecord]) -> None:
         """记录进入 prompt 上下文的记忆摘要。"""
+        self._mark_session_usage(records, usage="injected")
         for record in records:
             self._emit_trace(
                 MemoryTraceEvent(
@@ -930,6 +982,35 @@ class MemoryManager:
                 )
             )
 
+    def record_adopted_records(self, records: Sequence[MemoryRecord]) -> None:
+        """记录被 agent 明确采用的记忆。"""
+        self._mark_session_usage(records, usage="adopted")
+
+    def record_session_outcome(
+        self,
+        outcome: MemoryOutcome,
+        *,
+        source: str = "session",
+    ) -> int:
+        """将本轮 session 中的 memory 使用反馈回写到正式记录。"""
+        updated = 0
+        records_by_layer = {
+            current_layer: {
+                record.memory_id: record
+                for record in self.read_memory_records(layer=current_layer)
+            }
+            for current_layer in self._selected_layers("all")
+        }
+        for (layer, memory_id), usage in list(self._session_usage.items()):
+            record = records_by_layer.get(layer, {}).get(memory_id)
+            if record is None:
+                continue
+            next_fields = self._feedback_fields_for_record(record, usage, outcome)
+            self._replace_record_by_memory_id(record, next_fields)
+            updated += 1
+        self._session_usage.clear()
+        return updated
+
     def drain_trace_events(self) -> tuple[MemoryTraceEvent, ...]:
         """返回并清空当前进程内累积的 memory trace 事件。"""
         events = tuple(self._trace_events)
@@ -938,6 +1019,119 @@ class MemoryManager:
 
     def _emit_trace(self, event: MemoryTraceEvent) -> None:
         self._trace_events.append(event)
+
+    def _mark_session_usage(
+        self,
+        records: Sequence[MemoryRecord],
+        *,
+        usage: Literal["retrieved", "injected", "adopted"],
+    ) -> None:
+        for record in records:
+            key = (record.layer, record.memory_id)
+            state = self._session_usage.setdefault(key, _SessionMemoryUsage())
+            if usage == "retrieved":
+                state.retrieved = True
+            elif usage == "injected":
+                state.injected = True
+            elif usage == "adopted":
+                state.adopted = True
+
+    def _feedback_fields_for_record(
+        self,
+        record: MemoryRecord,
+        usage: _SessionMemoryUsage,
+        outcome: MemoryOutcome,
+    ) -> dict[str, str]:
+        retrieval_count = record.retrieval_count + int(usage.retrieved)
+        injection_count = record.injection_count + int(usage.injected)
+        adoption_count = record.adoption_count + int(usage.adopted)
+        success_count = record.success_count
+        failure_count = record.failure_count
+        correction_count = record.correction_count
+        utility = record.utility
+        status = record.status
+        validity = record.validity
+        if usage.adopted:
+            if outcome == "success":
+                success_count += 1
+                utility += 1.0
+                if status == "needs_review" and success_count >= failure_count:
+                    status = "active"
+                if validity in {"needs_review", "corrected"}:
+                    validity = "verified"
+            elif outcome == "failure":
+                failure_count += 1
+                utility -= 1.0
+                status = "needs_review"
+                validity = "needs_review"
+            elif outcome == "corrected":
+                correction_count += 1
+                utility -= 0.5
+                status = "needs_review"
+                validity = "corrected"
+        return {
+            "retrieval-count": str(retrieval_count),
+            "injection-count": str(injection_count),
+            "adoption-count": str(adoption_count),
+            "success-count": str(success_count),
+            "failure-count": str(failure_count),
+            "correction-count": str(correction_count),
+            "utility": f"{utility:.2f}",
+            "last-outcome": outcome,
+            "status": status,
+            "validity": validity,
+            "modified": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+        }
+
+    def _replace_record_by_memory_id(
+        self,
+        record: MemoryRecord,
+        field_updates: dict[str, str],
+    ) -> None:
+        blocks = self.read_memory_blocks(layer=record.layer)
+        updated: list[str] = []
+        replaced = False
+        for block in blocks:
+            existing_record = parse_memory_record(block, layer=record.layer)
+            if existing_record.memory_id == record.memory_id:
+                updated.append(
+                    self._rewrite_record_block(existing_record, field_updates)
+                )
+                replaced = True
+            else:
+                updated.append(existing_record.block.rstrip() + "\n")
+        if replaced:
+            self._write_blocks(updated, record.layer)
+
+    def _rewrite_record_block(
+        self,
+        record: MemoryRecord,
+        field_updates: dict[str, str],
+    ) -> str:
+        fields = dict(record.fields)
+        fields.update(field_updates)
+        lines = [f"## {record.title}"]
+        mandatory = ("context/query", "solution", "files", "takeaways")
+        display_names = {
+            "context/query": "Context/Query",
+            "solution": "Solution",
+            "files": "Files",
+            "takeaways": "Takeaways",
+        }
+        for key in mandatory:
+            value = fields.pop(key, "").strip()
+            if value:
+                lines.append(f"- {display_names[key]}: {value}")
+        for key, value in fields.items():
+            value = value.strip()
+            if not value:
+                continue
+            lines.append(f"- {self._display_field_name(key)}: {value}")
+        return "\n".join(lines).strip() + "\n"
+
+    def _display_field_name(self, key: str) -> str:
+        parts = [part.capitalize() for part in key.split("-")]
+        return "-".join(parts)
 
     def _estimate_block_tokens(self, block: str) -> int:
         from xcode.agent.compaction import estimate_tokens

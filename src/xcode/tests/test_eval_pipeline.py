@@ -282,6 +282,14 @@ class EvalPipelineTests:
             assert report.metrics["memory_recall_at_k_mean"] == 1.0
             assert report.metrics["memory_mrr_mean"] == 1.0
             assert report.metrics["memory_irrelevant_injection_rate_mean"] == 0.0
+            persisted = MemoryManager(
+                root,
+                user_memory_file=root / "home" / ".xcode" / "memory" / "MEMORY.md",
+            ).read_memory_records(layer="project")
+            assert persisted[0].retrieval_count == 1
+            assert persisted[0].injection_count == 1
+            assert persisted[0].success_count == 0
+            assert persisted[0].last_outcome == "success"
 
     def test_build_memory_metrics_scores_expected_and_stale_titles(self) -> None:
         task = EvalTask(

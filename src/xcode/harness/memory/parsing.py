@@ -48,6 +48,14 @@ class MemoryRecord:
     validity: str = "unknown"
     supersedes: tuple[str, ...] = ()
     evidence: tuple[MemoryEvidence, ...] = ()
+    retrieval_count: int = 0
+    injection_count: int = 0
+    adoption_count: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    correction_count: int = 0
+    utility: float = 0.0
+    last_outcome: str | None = None
     score: float = 0.0
     layer: str = "project"
 
@@ -138,6 +146,14 @@ def parse_memory_record(block: str, *, layer: str = "project") -> MemoryRecord:
         validity=(fields.get("validity") or "unknown").strip().lower(),
         supersedes=_parse_list_field(fields.get("supersedes")),
         evidence=parse_evidence_field(fields.get("evidence")),
+        retrieval_count=_parse_int_field(fields.get("retrieval-count")),
+        injection_count=_parse_int_field(fields.get("injection-count")),
+        adoption_count=_parse_int_field(fields.get("adoption-count")),
+        success_count=_parse_int_field(fields.get("success-count")),
+        failure_count=_parse_int_field(fields.get("failure-count")),
+        correction_count=_parse_int_field(fields.get("correction-count")),
+        utility=_parse_float_field(fields.get("utility")) or 0.0,
+        last_outcome=fields.get("last-outcome"),
         layer=layer,
     )
 
@@ -229,6 +245,24 @@ def _parse_list_field(value: str | None) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def _parse_int_field(value: str | None) -> int:
+    if not value:
+        return 0
+    try:
+        return max(0, int(value.strip()))
+    except ValueError:
+        return 0
+
+
+def _parse_float_field(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return float(value.strip())
+    except ValueError:
+        return None
+
+
 # ── 评分 ──
 
 
@@ -247,6 +281,10 @@ def adjust_score(
     confidence = record.confidence_value
     if confidence is not None:
         adjusted *= 0.75 + min(max(confidence, 0.0), 1.0) * 0.5
+    if record.status == "needs_review":
+        adjusted *= 0.7
+    if record.utility != 0.0:
+        adjusted *= max(0.4, min(1.6, 1.0 + record.utility * 0.25))
     if scope:
         adjusted *= scope_multiplier(record, scope)
     query_terms = set(tokenize(query))
@@ -303,6 +341,14 @@ def with_metadata(
     validity: str | None = None,
     supersedes: tuple[str, ...] = (),
     evidence: tuple[MemoryEvidence, ...] = (),
+    retrieval_count: int | None = None,
+    injection_count: int | None = None,
+    adoption_count: int | None = None,
+    success_count: int | None = None,
+    failure_count: int | None = None,
+    correction_count: int | None = None,
+    utility: float | None = None,
+    last_outcome: str | None = None,
 ) -> str:
     lines = [line.rstrip() for line in block.strip().splitlines()]
     existing = {
@@ -336,6 +382,22 @@ def with_metadata(
         additions.append(f"- Supersedes: {', '.join(supersedes)}")
     if evidence and "evidence" not in existing:
         additions.append(f"- Evidence: {format_evidence_field(evidence)}")
+    if retrieval_count is not None and "retrieval-count" not in existing:
+        additions.append(f"- Retrieval-Count: {max(0, retrieval_count)}")
+    if injection_count is not None and "injection-count" not in existing:
+        additions.append(f"- Injection-Count: {max(0, injection_count)}")
+    if adoption_count is not None and "adoption-count" not in existing:
+        additions.append(f"- Adoption-Count: {max(0, adoption_count)}")
+    if success_count is not None and "success-count" not in existing:
+        additions.append(f"- Success-Count: {max(0, success_count)}")
+    if failure_count is not None and "failure-count" not in existing:
+        additions.append(f"- Failure-Count: {max(0, failure_count)}")
+    if correction_count is not None and "correction-count" not in existing:
+        additions.append(f"- Correction-Count: {max(0, correction_count)}")
+    if utility is not None and "utility" not in existing:
+        additions.append(f"- Utility: {utility:.2f}")
+    if last_outcome and "last-outcome" not in existing:
+        additions.append(f"- Last-Outcome: {last_outcome}")
     if "created" not in existing:
         additions.append(f"- Created: {time.strftime('%Y-%m-%d', time.localtime())}")
     if additions:
