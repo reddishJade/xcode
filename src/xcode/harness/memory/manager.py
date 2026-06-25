@@ -11,6 +11,7 @@ from html import escape
 import json
 import re
 import time
+from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
@@ -1035,8 +1036,75 @@ class MemoryManager:
             next_fields = self._feedback_fields_for_record(record, usage, outcome)
             self._replace_record_by_memory_id(record, next_fields)
             updated += 1
+        touched_layers = {
+            layer for (layer, _memory_id), _usage in self._session_usage.items()
+        }
         self._session_usage.clear()
+        for layer in touched_layers:
+            self.derive_procedural_candidates(layer=layer)
         return updated
+
+    def derive_procedural_candidates(
+        self,
+        *,
+        layer: MemoryLayer = "project",
+    ) -> int:
+        """从稳定成功的 episodic 记录中提炼 procedural candidate。"""
+        records = self.read_memory_records(layer=layer)
+        groups: dict[tuple[str, str, str], list[MemoryRecord]] = defaultdict(list)
+        for record in records:
+            if record.memory_type != "episodic":
+                continue
+            groups[self._procedural_group_key(record)].append(record)
+
+        created = 0
+        for grouped in groups.values():
+            successful = [record for record in grouped if self._is_successful_episode(record)]
+            if len(successful) < 2:
+                continue
+            candidate_block = self._build_procedural_candidate(successful)
+            title = extract_title(candidate_block)
+            if self._candidate_exists(title, layer=layer):
+                continue
+            counterexamples = [record for record in grouped if self._has_counterexample(record)]
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="candidate_created",
+                    memory_id=self._memory_id(layer, title) if title else None,
+                    layer=layer,
+                    title=title or None,
+                    source="procedural_promotion",
+                )
+            )
+            if counterexamples:
+                quarantined = self._append_counterexamples(
+                    candidate_block,
+                    counterexamples=counterexamples,
+                )
+                self._quarantine_block(
+                    quarantined,
+                    layer=layer,
+                    reason="counterexample_gate_failed",
+                    source="procedural_promotion",
+                )
+                self._emit_trace(
+                    MemoryTraceEvent(
+                        type="quarantined",
+                        memory_id=self._memory_id(layer, title) if title else None,
+                        layer=layer,
+                        title=title or None,
+                        rejection_reason="counterexample_gate_failed",
+                        source="procedural_promotion",
+                    )
+                )
+                continue
+            self._write_candidate_block(
+                candidate_block,
+                layer=layer,
+                source="procedural_promotion",
+            )
+            created += 1
+        return created
 
     def drain_trace_events(self) -> tuple[MemoryTraceEvent, ...]:
         """返回并清空当前进程内累积的 memory trace 事件。"""
@@ -1163,6 +1231,75 @@ class MemoryManager:
     def _display_field_name(self, key: str) -> str:
         parts = [part.capitalize() for part in key.split("-")]
         return "-".join(parts)
+
+    def _procedural_group_key(self, record: MemoryRecord) -> tuple[str, str, str]:
+        scope = (record.scope or "").strip().lower()
+        files = ",".join(item.strip().lower() for item in record.related_files)
+        solution = record.fields.get("solution", "").strip().lower()
+        return (scope, files, solution)
+
+    def _is_successful_episode(self, record: MemoryRecord) -> bool:
+        return (
+            record.success_count > 0
+            and record.failure_count == 0
+            and record.correction_count == 0
+            and record.status == "active"
+            and record.validity not in {"needs_review", "corrected"}
+        )
+
+    def _has_counterexample(self, record: MemoryRecord) -> bool:
+        return record.failure_count > 0 or record.correction_count > 0
+
+    def _build_procedural_candidate(self, records: Sequence[MemoryRecord]) -> str:
+        anchor = sorted(records, key=lambda record: record.title)[0]
+        solution = anchor.fields.get("solution", "").strip()
+        takeaways = anchor.fields.get("takeaways", "").strip()
+        files = anchor.fields.get("files", "").strip()
+        context = "; ".join(record.title for record in records)
+        title = f"How to: {solution}".strip()
+        source_records = ", ".join(record.memory_id for record in records)
+        evidence = "; ".join(f"memory:{record.memory_id}" for record in records)
+        lines = [
+            f"## {title}",
+            f"- Context/Query: Abstracted from successful incidents: {context}",
+            f"- Solution: {solution}",
+            f"- Files: {files}",
+            f"- Takeaways: {takeaways}",
+            "- Memory-Type: procedural",
+            f"- Scope: {anchor.scope or 'project'}",
+            f"- Source-Records: {source_records}",
+            f"- Evidence: {evidence}",
+            "- Status: candidate",
+            "- Validity: derived",
+        ]
+        return "\n".join(lines) + "\n"
+
+    def _append_counterexamples(
+        self,
+        block: str,
+        *,
+        counterexamples: Sequence[MemoryRecord],
+    ) -> str:
+        ids = ", ".join(record.memory_id for record in counterexamples)
+        return block.strip() + f"\n- Counterexamples: {ids}\n"
+
+    def _candidate_exists(
+        self,
+        title: str,
+        *,
+        layer: MemoryLayer,
+    ) -> bool:
+        normalized = title.strip().lower()
+        if not normalized:
+            return False
+        for record in self.read_memory_records(layer=layer):
+            if record.title.strip().lower() == normalized:
+                return True
+        for root_dir in (self._candidate_dir(layer), self._quarantine_dir(layer)):
+            for path in root_dir.glob("*.md"):
+                if f"## {title}" in path.read_text(encoding="utf-8"):
+                    return True
+        return False
 
     def _estimate_block_tokens(self, block: str) -> int:
         from xcode.agent.compaction import estimate_tokens
