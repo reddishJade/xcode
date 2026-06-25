@@ -50,47 +50,49 @@ class TestMemoryConsolidationHook:
         assert final_messages[1]["role"] == "user"
         assert final_messages[1]["content"].startswith("[Compressed]")
 
-        # Verify that the memory block was consolidated into MEMORY.md!
+        # 没有 evidence / outcome 的 compaction 候选不能直接晋升为正式记忆
+        assert not self.manager.memory_file.exists()
+        candidate_files = list(self.manager.candidate_dir.glob("*.md"))
+        assert len(candidate_files) == 1
+        candidate_text = candidate_files[0].read_text(encoding="utf-8")
+        assert "Incident 99: Memory compaction works" in candidate_text
+        quarantine_files = list(self.manager.quarantine_dir.glob("*.md"))
+        assert len(quarantine_files) == 1
+        quarantine_text = quarantine_files[0].read_text(encoding="utf-8")
+        assert "- Reason: evidence_gate_failed" in quarantine_text
+        trace_events = self.manager.drain_trace_events()
+        assert [event.type for event in trace_events] == [
+            "candidate_created",
+            "quarantined",
+        ]
+        assert trace_events[1].rejection_reason == "evidence_gate_failed"
+
+    def test_consolidate_promotes_candidate_with_evidence(self) -> None:
+        promotable_block = (
+            "## Incident 100: Verified compaction flow\n"
+            "- Context/Query: Compaction failure test\n"
+            "- Solution: Persist candidate before promotion\n"
+            "- Files: compaction.py\n"
+            "- Takeaways: Promotion needs explicit evidence\n"
+            "- Evidence: test:src/xcode/tests/test_xcode_memory_consolidation.py\n"
+        )
+        self.manager.consolidate(f"[Compressed]\n{promotable_block}")
+
         assert self.manager.memory_file.exists()
         memory_text = self.manager.memory_file.read_text(encoding="utf-8")
-        assert "Incident 99: Memory compaction works" in memory_text
-        assert "Hook into Summary Compact" in memory_text
-
-    def test_consolidation_hook_archives_invalid_attempt(self) -> None:
-        compactor = LayeredCompactor(
-            max_recent_messages=2, on_compact=self.manager.consolidate
+        assert "Incident 100: Verified compaction flow" in memory_text
+        assert (
+            "- Evidence: test:src/xcode/tests/test_xcode_memory_consolidation.py"
+            in (memory_text)
         )
-
-        # Malformed block (missing 'Takeaways' field)
-        invalid_block = (
-            "## Incident 100: Corrupt compaction\n"
-            "- Context/Query: Compaction failure test\n"
-            "- Solution: Archive it\n"
-            "- Files: compaction.py\n"
-        )
-
-        messages = [
-            {"role": "system", "content": "System prompt"},
-            {"role": "user", "content": "Normal user message"},
-            {"role": "assistant", "content": invalid_block},
-            {"role": "user", "content": "Latest user message"},
-            {"role": "assistant", "content": "Latest assistant reply"},
+        candidate_files = list(self.manager.candidate_dir.glob("*.md"))
+        assert len(candidate_files) == 1
+        assert list(self.manager.quarantine_dir.glob("*.md")) == []
+        trace_events = self.manager.drain_trace_events()
+        assert [event.type for event in trace_events] == [
+            "candidate_created",
+            "accepted",
         ]
-
-        # Trigger compaction
-        compactor(messages)
-
-        # Verify that MEMORY.md does not contain the invalid block
-        if self.manager.memory_file.exists():
-            assert "Incident 100" not in self.manager.memory_file.read_text(
-                encoding="utf-8"
-            )
-
-        # Verify that the invalid block was safely archived to the archive directory
-        archive_files = list(self.manager.archive_dir.glob("*.md"))
-        assert len(archive_files) == 1
-        archive_text = archive_files[0].read_text(encoding="utf-8")
-        assert "Incident 100: Corrupt compaction" in archive_text
 
 
 if __name__ == "__main__":

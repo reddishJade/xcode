@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from html import escape
 import json
+import re
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -59,6 +60,8 @@ class MemoryManager:
             Path.home() / ".xcode" / "memory" / "MEMORY.md"
         )
         self.archive_dir = root / ".local" / "memory_archive"
+        self.candidate_dir = root / ".local" / "memory_candidates"
+        self.quarantine_dir = root / ".local" / "memory_quarantine"
         self.lru_file = root / ".local" / "memory_lru.json"
         self.max_blocks = max_blocks
         self.min_retrieval_score = min_retrieval_score
@@ -335,16 +338,47 @@ class MemoryManager:
         layer: MemoryLayer = "project",
     ) -> bool:
         """校验并写入指定记忆层级。"""
-        title = extract_title(block)
-        self._emit_trace(
-            MemoryTraceEvent(
-                type="candidate_created",
-                memory_id=self._memory_id(layer, title) if title else None,
-                layer=layer,
-                title=title or None,
-                source=source,
-            )
+        return self._persist_memory_block(
+            block,
+            source=source,
+            scope=scope,
+            confidence=confidence,
+            memory_type=memory_type,
+            status=status,
+            validity=validity,
+            supersedes=tuple(supersedes),
+            evidence=evidence,
+            layer=layer,
+            emit_candidate_trace=True,
         )
+
+    def _persist_memory_block(
+        self,
+        block: str,
+        *,
+        source: str | None,
+        scope: str | None,
+        confidence: float | None,
+        memory_type: MemoryType | None,
+        status: str | None,
+        validity: str | None,
+        supersedes: Sequence[str],
+        evidence: Sequence[MemoryEvidence],
+        layer: MemoryLayer,
+        emit_candidate_trace: bool,
+    ) -> bool:
+        """执行正式记忆写入与合并。"""
+        title = extract_title(block)
+        if emit_candidate_trace:
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="candidate_created",
+                    memory_id=self._memory_id(layer, title) if title else None,
+                    layer=layer,
+                    title=title or None,
+                    source=source,
+                )
+            )
         if not self.validate_memory_block(block):
             self._emit_trace(
                 MemoryTraceEvent(
@@ -475,15 +509,18 @@ class MemoryManager:
             rewritten: list[str] = []
             changed = False
             for block in blocks:
-                normalized = with_metadata(
-                    block,
-                    layer=current_layer,
-                    source=None,
-                    scope=None,
-                    confidence=None,
-                    status="active",
-                    validity="unknown",
-                ).strip() + "\n"
+                normalized = (
+                    with_metadata(
+                        block,
+                        layer=current_layer,
+                        source=None,
+                        scope=None,
+                        confidence=None,
+                        status="active",
+                        validity="unknown",
+                    ).strip()
+                    + "\n"
+                )
                 rewritten.append(normalized)
                 if normalized != block:
                     changed = True
@@ -525,21 +562,42 @@ class MemoryManager:
         return None
 
     def consolidate(self, summary: str) -> None:
-        """从压缩摘要中提取结构化块并写入项目级记忆。"""
-        parts = summary.split("## ")
-        if len(parts) <= 1:
-            return
-        for part in parts[1:]:
-            segment = part.split("\n- ")[0].strip()
-            block = "## " + segment
-            for field in ["Context/Query", "Solution", "Files", "Takeaways"]:
-                block = block.replace(f" - {field}", f"\n- {field}")
-                block = block.replace(f"- {field}", f"\n- {field}")
-            block = "\n".join(
-                line.strip() for line in block.splitlines() if line.strip()
-            )
+        """从压缩摘要中提取候选记忆，并经 gate 决定晋升或隔离。"""
+        for block in self._extract_summary_blocks(summary):
             if self._is_memory_attempt(block):
-                self.add_memory_block(block, source="consolidation", layer="project")
+                self._ingest_consolidation_candidate(
+                    block,
+                    source="consolidation",
+                    layer="project",
+                )
+
+    def _extract_summary_blocks(self, summary: str) -> list[str]:
+        """从 compact summary 中提取 H2 结构块。"""
+        content = summary.removeprefix("[Compressed]").strip()
+        if "## " not in content:
+            return []
+        normalized_lines: list[str] = []
+        for raw_line in content.splitlines():
+            stripped = raw_line.strip()
+            if stripped.startswith("- ") and "## " in stripped:
+                stripped = stripped[stripped.index("## ") :]
+            normalized_lines.append(stripped)
+        normalized = "\n".join(normalized_lines)
+        normalized = re.sub(
+            r"\s-\s(?=[A-Za-z][A-Za-z0-9_/-]*:)",
+            "\n- ",
+            normalized,
+        )
+        blocks: list[str] = []
+        for part in normalized.split("## "):
+            fragment = part.strip()
+            if not fragment:
+                continue
+            block = "## " + fragment
+            blocks.append(
+                "\n".join(line.strip() for line in block.splitlines() if line.strip())
+            )
+        return blocks
 
     def _is_memory_attempt(self, block: str) -> bool:
         has_field = any(
@@ -549,6 +607,130 @@ class MemoryManager:
             has_field or "incident" in block.lower()
         )
 
+    def _ingest_consolidation_candidate(
+        self,
+        block: str,
+        *,
+        source: str,
+        layer: MemoryLayer,
+    ) -> None:
+        """将 compaction 产物写成候选，并执行晋升 gate。"""
+        title = extract_title(block)
+        memory_id = self._memory_id(layer, title) if title else None
+        self._write_candidate_block(block, layer=layer, source=source)
+        self._emit_trace(
+            MemoryTraceEvent(
+                type="candidate_created",
+                memory_id=memory_id,
+                layer=layer,
+                title=title or None,
+                source=source,
+            )
+        )
+        existing_records = self.read_memory_records(layer=layer)
+        rejection_reason = self._promotion_gate_rejection_reason(
+            block,
+            existing_records=existing_records,
+        )
+        if rejection_reason is not None:
+            self._quarantine_block(
+                block,
+                layer=layer,
+                reason=rejection_reason,
+                source=source,
+            )
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="quarantined",
+                    memory_id=memory_id,
+                    layer=layer,
+                    title=title or None,
+                    rejection_reason=rejection_reason,
+                    source=source,
+                )
+            )
+            return
+        self._persist_memory_block(
+            block,
+            source=source,
+            scope=None,
+            confidence=None,
+            memory_type=None,
+            status=None,
+            validity=None,
+            supersedes=(),
+            evidence=(),
+            layer=layer,
+            emit_candidate_trace=False,
+        )
+
+    def _promotion_gate_rejection_reason(
+        self,
+        block: str,
+        *,
+        existing_records: list[MemoryRecord],
+    ) -> str | None:
+        """晋升 gate：在写入正式记忆前执行结构、质量与证据检查。"""
+        if not self.validate_memory_block(block):
+            return "schema_validation_failed"
+        quality_rejection = self._quality_rejection_reason(block, existing_records)
+        if quality_rejection is not None:
+            return quality_rejection
+        if not self._has_reusable_scope(block):
+            return "scope_gate_failed"
+        if not self._has_promotable_evidence(block):
+            return "evidence_gate_failed"
+        return None
+
+    def _has_reusable_scope(self, block: str) -> bool:
+        """拒绝只描述当前回合状态、无法跨任务复用的候选。"""
+        fields = parse_fields(block)
+        scoped_text = " ".join(
+            [
+                extract_title(block),
+                fields.get("context/query", ""),
+                fields.get("solution", ""),
+                fields.get("takeaways", ""),
+            ]
+        ).lower()
+        ephemeral_markers = (
+            "latest user message",
+            "latest assistant reply",
+            "current turn",
+            "this turn",
+            "this session only",
+            "temporary",
+            "temp file",
+        )
+        return not any(marker in scoped_text for marker in ephemeral_markers)
+
+    def _has_promotable_evidence(self, block: str) -> bool:
+        """要求候选至少带有可审计的 outcome / evidence / validation 信号。"""
+        fields = parse_fields(block)
+        evidence_fields = (
+            "evidence",
+            "validated",
+            "validation",
+            "result",
+            "outcome",
+            "confidence",
+        )
+        for key in evidence_fields:
+            value = fields.get(key, "").strip()
+            if value:
+                return True
+        combined = " ".join(fields.values()).lower()
+        evidence_markers = (
+            "passed",
+            "verified",
+            "confirmed",
+            "reproduced",
+            "failed because",
+            "test:",
+            "pytest",
+        )
+        return any(marker in combined for marker in evidence_markers)
+
     def _archive_block(self, block: str, layer: MemoryLayer) -> None:
         """将无效或淘汰块归档到对应层级。"""
         archive_dir = self._archive_dir(layer)
@@ -556,6 +738,55 @@ class MemoryManager:
         timestamp = int(time.time() * 1000)
         archive_file = archive_dir / f"corrupt_{timestamp}.md"
         archive_file.write_text(block, encoding="utf-8")
+
+    def _write_candidate_block(
+        self,
+        block: str,
+        *,
+        layer: MemoryLayer,
+        source: str,
+    ) -> Path:
+        """将待晋升候选持久化，保留 compaction 原文以便审查。"""
+        candidate_dir = self._candidate_dir(layer)
+        candidate_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = int(time.time() * 1000)
+        slug = self._candidate_slug(extract_title(block)) or f"candidate-{timestamp}"
+        candidate_file = candidate_dir / f"{timestamp}_{slug}.md"
+        payload = (
+            f"- Source: {source}\n"
+            f"- Created: {time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime())}\n"
+            "\n"
+            f"{block.strip()}\n"
+        )
+        candidate_file.write_text(payload, encoding="utf-8")
+        return candidate_file
+
+    def _quarantine_block(
+        self,
+        block: str,
+        *,
+        layer: MemoryLayer,
+        reason: str,
+        source: str,
+    ) -> None:
+        """保留未通过晋升 gate 的候选，避免污染正式记忆。"""
+        quarantine_dir = self._quarantine_dir(layer)
+        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = int(time.time() * 1000)
+        slug = self._candidate_slug(extract_title(block)) or f"candidate-{timestamp}"
+        quarantine_file = quarantine_dir / f"{timestamp}_{slug}.md"
+        payload = (
+            f"- Source: {source}\n"
+            f"- Reason: {reason}\n"
+            f"- Created: {time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime())}\n"
+            "\n"
+            f"{block.strip()}\n"
+        )
+        quarantine_file.write_text(payload, encoding="utf-8")
+
+    def _candidate_slug(self, title: str) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+        return normalized[:48]
 
     # ── LRU 遗忘策略 ──
 
@@ -658,6 +889,18 @@ class MemoryManager:
         if layer == "project":
             return self.archive_dir
         return self.user_memory_file.parent / "archive"
+
+    def _candidate_dir(self, layer: MemoryLayer) -> Path:
+        """返回指定层级的候选目录。"""
+        if layer == "project":
+            return self.candidate_dir
+        return self.user_memory_file.parent / "candidates"
+
+    def _quarantine_dir(self, layer: MemoryLayer) -> Path:
+        """返回指定层级的隔离目录。"""
+        if layer == "project":
+            return self.quarantine_dir
+        return self.user_memory_file.parent / "quarantine"
 
     def _selected_layers(
         self,

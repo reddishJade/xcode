@@ -71,6 +71,7 @@ type MemoryTraceEventType = Literal[
     "candidate_created",
     "accepted",
     "rejected",
+    "quarantined",
     "retrieved",
     "injected",
     "tool_searched",
@@ -115,7 +116,9 @@ def parse_memory_record(block: str, *, layer: str = "project") -> MemoryRecord:
             key, value = line[2:].split(":", 1)
             fields[key.strip().lower()] = value.strip()
     memory_id = fields.get("memory-id") or build_memory_id(layer=layer, title=title)
-    memory_type = parse_memory_type(fields.get("memory-type"), title=title, fields=fields)
+    memory_type = parse_memory_type(
+        fields.get("memory-type"), title=title, fields=fields
+    )
     return MemoryRecord(
         block=block,
         title=title,
@@ -124,7 +127,9 @@ def parse_memory_record(block: str, *, layer: str = "project") -> MemoryRecord:
         memory_type=memory_type,
         scope=fields.get("scope"),
         source_session=fields.get("source-session") or fields.get("source"),
-        related_files=_parse_list_field(fields.get("related-files") or fields.get("files")),
+        related_files=_parse_list_field(
+            fields.get("related-files") or fields.get("files")
+        ),
         related_symbols=_parse_list_field(fields.get("related-symbols")),
         created_at=fields.get("created"),
         modified_at=fields.get("modified") or fields.get("last_modified"),
@@ -183,9 +188,15 @@ def parse_memory_type(
     )
     if "preference" in combined or "prefer " in combined:
         return "preference"
-    if any(token in combined for token in ("incident", "error", "bug", "crash", "timeout", "failure")):
+    if any(
+        token in combined
+        for token in ("incident", "error", "bug", "crash", "timeout", "failure")
+    ):
         return "episodic"
-    if any(token in combined for token in ("always", "steps", "procedure", "workflow", "checklist", "run ")) or title.lower().startswith("how to"):
+    if any(
+        token in combined
+        for token in ("always", "steps", "procedure", "workflow", "checklist", "run ")
+    ) or title.lower().startswith("how to"):
         return "procedural"
     return "semantic"
 
@@ -303,7 +314,9 @@ def with_metadata(
     additions = []
     if title and "memory-id" not in existing:
         additions.append(f"- Memory-ID: {build_memory_id(layer=layer, title=title)}")
-    normalized_type = memory_type or parse_memory_type(None, title=title, fields=parse_fields(block))
+    normalized_type = memory_type or parse_memory_type(
+        None, title=title, fields=parse_fields(block)
+    )
     if "memory-type" not in existing:
         additions.append(f"- Memory-Type: {normalized_type}")
     if source and "source" not in existing:
