@@ -37,10 +37,7 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
         if not records:
             return f"No memory matching {query!r}."
 
-        rendered = [
-            f"[{record.layer}] score={record.score:.3f}\n{record.block.strip()}"
-            for record in records
-        ]
+        rendered = [manager.render_search_result(record) for record in records]
         return "\n\n".join(rendered)
 
     return (

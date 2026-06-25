@@ -81,8 +81,11 @@ def test_runtime_context_provider_injects_relevant_memory(tmp_path: Path) -> Non
     contexts = provider("How should provider timeout retries work?")
 
     assert any("<memory>" in context for context in contexts)
-    assert any("Provider timeout retry" in context for context in contexts)
+    assert any('type="episodic"' in context for context in contexts)
+    assert any("<conclusion>" in context for context in contexts)
+    assert any("Retry transient provider failures" in context for context in contexts)
     assert any('layer="project"' in context for context in contexts)
+    assert all("- Context/Query:" not in context for context in contexts if "<memory>" in context)
     trace_events = manager.drain_trace_events()
     assert any(event.type == "retrieved" for event in trace_events)
     injected = [event for event in trace_events if event.type == "injected"]
@@ -168,8 +171,10 @@ def test_memory_tool_searches_both_layers(tmp_path: Path) -> None:
 
     assert tool.group == "memory"
     assert tool.read_only
-    assert "[user]" in output
+    assert "[user] id=mem_" in output
+    assert "type=" in output
     assert "Shared timeout rule" in output
+    assert "- Context/Query:" in output
     trace_events = manager.drain_trace_events()
     assert any(event.type == "retrieved" for event in trace_events)
     assert any(event.type == "tool_searched" for event in trace_events)

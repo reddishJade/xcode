@@ -6,6 +6,7 @@ LRU 遗忘策略（超过 max_blocks 时淘汰最久未访问的块）。
 
 from __future__ import annotations
 
+from html import escape
 import json
 import time
 from collections.abc import Sequence
@@ -689,3 +690,64 @@ class MemoryManager:
 
     def _elapsed_ms(self, started_at: float) -> float:
         return round((time.perf_counter() - started_at) * 1000, 3)
+
+    def render_prompt_packet(self, record: MemoryRecord) -> str:
+        """将记忆渲染为短小、可审计的 prompt packet。"""
+        lines = [
+            (
+                f'<record id="{escape(record.memory_id)}" '
+                f'type="{escape(record.memory_type)}" '
+                f'layer="{escape(record.layer)}" '
+                f'score="{record.score:.3f}">'
+            ),
+            f"<conclusion>{escape(self._conclusion_text(record))}</conclusion>",
+        ]
+        if record.scope:
+            lines.append(f"<scope>{escape(record.scope)}</scope>")
+        evidence_summary = self._evidence_summary(record)
+        if evidence_summary:
+            lines.append(f"<evidence>{escape(evidence_summary)}</evidence>")
+        source_summary = self._source_summary(record)
+        if source_summary:
+            lines.append(f"<source>{escape(source_summary)}</source>")
+        lines.append("</record>")
+        return "\n".join(lines)
+
+    def render_search_result(self, record: MemoryRecord) -> str:
+        """渲染显式检索结果，保留完整记录并补充结构化头部。"""
+        lines = [
+            (
+                f"[{record.layer}] id={record.memory_id} type={record.memory_type} "
+                f"score={record.score:.3f}"
+            ),
+            f"title: {record.title}",
+        ]
+        evidence_summary = self._evidence_summary(record)
+        if evidence_summary:
+            lines.append(f"evidence: {evidence_summary}")
+        lines.append(record.block.strip())
+        return "\n".join(lines)
+
+    def _conclusion_text(self, record: MemoryRecord) -> str:
+        for key in ("solution", "takeaways"):
+            value = record.fields.get(key, "").strip()
+            if value:
+                return value
+        return record.title
+
+    def _evidence_summary(self, record: MemoryRecord) -> str:
+        if record.evidence:
+            return "; ".join(
+                f"{item.kind}:{item.reference}" for item in record.evidence[:3]
+            )
+        fallback = []
+        for key in ("validated", "validation", "source-session", "source"):
+            value = record.fields.get(key, "").strip()
+            if value:
+                fallback.append(value)
+        return "; ".join(fallback[:2])
+
+    def _source_summary(self, record: MemoryRecord) -> str:
+        if record.source_session:
+            return f"{record.layer}:{record.source_session}"
+        return record.layer
