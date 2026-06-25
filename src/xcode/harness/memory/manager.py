@@ -15,10 +15,12 @@ from typing import Literal
 from rank_bm25 import BM25Okapi
 
 from .parsing import (
+    MemoryEvidence,
     MemoryRecord,
     MemorySearchEvalCase,
     MemorySearchEvalResult,
     MemoryTraceEvent,
+    MemoryType,
     _DEFAULT_MAX_BLOCKS,
     _MIN_BLOCK_LENGTH,
     _MIN_FIELD_CONTENT_LENGTH,
@@ -79,16 +81,8 @@ class MemoryManager:
         for current_layer in self._selected_layers(layer):
             memory_file = self._memory_file(current_layer)
             for block in self._read_blocks_from_file(memory_file):
-                record = parse_memory_record(block)
-                records.append(
-                    MemoryRecord(
-                        block=record.block,
-                        title=record.title,
-                        fields=record.fields,
-                        score=record.score,
-                        layer=current_layer,
-                    )
-                )
+                record = parse_memory_record(block, layer=current_layer)
+                records.append(record)
         return records
 
     def _read_blocks_from_file(self, memory_file: Path) -> list[str]:
@@ -182,6 +176,19 @@ class MemoryManager:
                         block=record.block,
                         title=record.title,
                         fields=record.fields,
+                        memory_id=record.memory_id,
+                        memory_type=record.memory_type,
+                        scope=record.scope,
+                        source_session=record.source_session,
+                        related_files=record.related_files,
+                        related_symbols=record.related_symbols,
+                        created_at=record.created_at,
+                        modified_at=record.modified_at,
+                        confidence_value=record.confidence_value,
+                        status=record.status,
+                        validity=record.validity,
+                        supersedes=record.supersedes,
+                        evidence=record.evidence,
                         score=round(adjusted, 6),
                         layer=record.layer,
                     )
@@ -300,6 +307,11 @@ class MemoryManager:
         source: str | None = None,
         scope: str | None = None,
         confidence: float | None = None,
+        memory_type: MemoryType | None = None,
+        status: str | None = None,
+        validity: str | None = None,
+        supersedes: Sequence[str] = (),
+        evidence: Sequence[MemoryEvidence] = (),
         layer: MemoryLayer = "project",
     ) -> bool:
         """校验并写入指定记忆层级。"""
@@ -327,7 +339,18 @@ class MemoryManager:
             self._archive_block(block, layer)
             return False
 
-        block = with_metadata(block, source=source, scope=scope, confidence=confidence)
+        block = with_metadata(
+            block,
+            layer=layer,
+            source=source,
+            scope=scope,
+            confidence=confidence,
+            memory_type=memory_type,
+            status=status,
+            validity=validity,
+            supersedes=tuple(supersedes),
+            evidence=tuple(evidence),
+        )
         existing_records = self.read_memory_records(layer=layer)
         new_title = extract_title(block)
 
@@ -420,6 +443,34 @@ class MemoryManager:
         if not found:
             updated.append(new_block.strip() + "\n")
         self._memory_file(layer).write_text("".join(updated), encoding="utf-8")
+
+    def migrate_legacy_records(
+        self,
+        layer: MemoryLayerFilter = "all",
+    ) -> int:
+        """一次性补齐缺失的 memory_id / type / status / validity 元数据。"""
+        updated_count = 0
+        for current_layer in self._selected_layers(layer):
+            blocks = self.read_memory_blocks(layer=current_layer)
+            rewritten: list[str] = []
+            changed = False
+            for block in blocks:
+                normalized = with_metadata(
+                    block,
+                    layer=current_layer,
+                    source=None,
+                    scope=None,
+                    confidence=None,
+                    status="active",
+                    validity="unknown",
+                ).strip() + "\n"
+                rewritten.append(normalized)
+                if normalized != block:
+                    changed = True
+                    updated_count += 1
+            if changed:
+                self._write_blocks(rewritten, current_layer)
+        return updated_count
 
     def _merge_with_existing(
         self,

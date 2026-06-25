@@ -2,10 +2,12 @@
 
 from .manager import MemoryLayer, MemoryLayerFilter, MemoryManager
 from .parsing import (
+    MemoryEvidence,
     MemoryRecord,
     MemorySearchEvalCase,
     MemorySearchEvalResult,
     MemoryTraceEvent,
+    MemoryType,
 )
 from .tools import build_memory_tools
 
@@ -13,9 +15,11 @@ __all__ = [
     "MemoryLayer",
     "MemoryLayerFilter",
     "MemoryManager",
+    "MemoryEvidence",
     "MemoryRecord",
     "MemorySearchEvalCase",
     "MemorySearchEvalResult",
     "MemoryTraceEvent",
+    "MemoryType",
     "build_memory_tools",
 ]

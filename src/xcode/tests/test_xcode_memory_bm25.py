@@ -4,7 +4,11 @@ import tempfile
 from pathlib import Path
 
 from rank_bm25 import BM25Okapi
-from xcode.harness.memory import MemoryManager, MemorySearchEvalCase
+from xcode.harness.memory import (
+    MemoryEvidence,
+    MemoryManager,
+    MemorySearchEvalCase,
+)
 import pytest
 
 
@@ -106,6 +110,26 @@ class TestBM25AndMemory:
         score_current = adjust_score(base, current, "test", None)
         assert score_current > score_old
 
+    def test_legacy_record_gets_stable_id_and_inferred_type(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Incident: Provider timeout\n"
+                "- Context/Query: Provider timeout during deploy\n"
+                "- Solution: Retry with backoff\n"
+                "- Files: provider.py\n"
+                "- Takeaways: Treat this as an incident\n"
+            ),
+            encoding="utf-8",
+        )
+
+        record = manager.read_memory_records()[0]
+
+        assert record.memory_id.startswith("mem_")
+        assert record.memory_type == "episodic"
+        assert record.status == "active"
+        assert record.validity == "unknown"
+
     def test_add_memory_block_appends_metadata_without_breaking_contract(self) -> None:
         manager = MemoryManager(self.root)
         block = (
@@ -121,14 +145,34 @@ class TestBM25AndMemory:
             source="session-123",
             scope="tasks",
             confidence=0.8,
+            memory_type="procedural",
+            status="active",
+            validity="verified",
+            evidence=(
+                MemoryEvidence("test", "pytest src/xcode/tests/test_xcode_memory_bm25.py"),
+                MemoryEvidence("file", "src/xcode/harness/memory/manager.py"),
+            ),
         )
 
         assert success
         text = manager.memory_file.read_text(encoding="utf-8")
+        assert "- Memory-ID: mem_" in text
+        assert "- Memory-Type: procedural" in text
         assert "- Source: session-123" in text
+        assert "- Source-Session: session-123" in text
         assert "- Scope: tasks" in text
         assert "- Confidence: 0.80" in text
+        assert "- Status: active" in text
+        assert "- Validity: verified" in text
+        assert (
+            "- Evidence: test:pytest src/xcode/tests/test_xcode_memory_bm25.py; "
+            "file:src/xcode/harness/memory/manager.py"
+        ) in text
         assert manager.validate_memory_block(text)
+        record = manager.read_memory_records()[0]
+        assert record.memory_type == "procedural"
+        assert record.source_session == "session-123"
+        assert len(record.evidence) == 2
         trace_events = manager.drain_trace_events()
         assert [event.type for event in trace_events] == [
             "candidate_created",
@@ -250,6 +294,28 @@ class TestBM25AndMemory:
             "forgotten",
             "accepted",
         ]
+
+    def test_migrate_legacy_records_rewrites_missing_identity_metadata(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Team convention\n"
+                "- Context/Query: Shared architecture fact\n"
+                "- Solution: Keep provider wiring in assembly.py\n"
+                "- Files: src/xcode/harness/assembly.py\n"
+                "- Takeaways: Stable runtime facts belong in memory\n"
+            ),
+            encoding="utf-8",
+        )
+
+        updated_count = manager.migrate_legacy_records()
+
+        assert updated_count == 1
+        rewritten = manager.memory_file.read_text(encoding="utf-8")
+        assert "- Memory-ID: mem_" in rewritten
+        assert "- Memory-Type: semantic" in rewritten
+        assert "- Status: active" in rewritten
+        assert "- Validity: unknown" in rewritten
 
 
 if __name__ == "__main__":

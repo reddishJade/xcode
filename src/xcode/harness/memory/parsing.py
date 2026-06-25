@@ -17,6 +17,16 @@ _MIN_FIELD_CONTENT_LENGTH = 3
 _NOVELTY_THRESHOLD = 0.85
 _DEFAULT_MAX_BLOCKS = 0
 
+type MemoryType = Literal["semantic", "episodic", "procedural", "preference"]
+
+
+@dataclass(frozen=True)
+class MemoryEvidence:
+    """结构化证据引用。"""
+
+    kind: str
+    reference: str
+
 
 @dataclass(frozen=True)
 class MemoryRecord:
@@ -25,6 +35,19 @@ class MemoryRecord:
     block: str
     title: str
     fields: dict[str, str]
+    memory_id: str
+    memory_type: MemoryType
+    scope: str | None = None
+    source_session: str | None = None
+    related_files: tuple[str, ...] = ()
+    related_symbols: tuple[str, ...] = ()
+    created_at: str | None = None
+    modified_at: str | None = None
+    confidence_value: float | None = None
+    status: str = "active"
+    validity: str = "unknown"
+    supersedes: tuple[str, ...] = ()
+    evidence: tuple[MemoryEvidence, ...] = ()
     score: float = 0.0
     layer: str = "project"
 
@@ -82,7 +105,7 @@ def build_memory_id(*, layer: str, title: str) -> str:
 # ── 解析 ──
 
 
-def parse_memory_record(block: str) -> MemoryRecord:
+def parse_memory_record(block: str, *, layer: str = "project") -> MemoryRecord:
     title = ""
     fields: dict[str, str] = {}
     for line in block.splitlines():
@@ -91,7 +114,27 @@ def parse_memory_record(block: str) -> MemoryRecord:
         elif line.startswith("- ") and ":" in line:
             key, value = line[2:].split(":", 1)
             fields[key.strip().lower()] = value.strip()
-    return MemoryRecord(block=block, title=title, fields=fields)
+    memory_id = fields.get("memory-id") or build_memory_id(layer=layer, title=title)
+    memory_type = parse_memory_type(fields.get("memory-type"), title=title, fields=fields)
+    return MemoryRecord(
+        block=block,
+        title=title,
+        fields=fields,
+        memory_id=memory_id,
+        memory_type=memory_type,
+        scope=fields.get("scope"),
+        source_session=fields.get("source-session") or fields.get("source"),
+        related_files=_parse_list_field(fields.get("related-files") or fields.get("files")),
+        related_symbols=_parse_list_field(fields.get("related-symbols")),
+        created_at=fields.get("created"),
+        modified_at=fields.get("modified") or fields.get("last_modified"),
+        confidence_value=parse_confidence(fields.get("confidence", "")),
+        status=(fields.get("status") or "active").strip().lower(),
+        validity=(fields.get("validity") or "unknown").strip().lower(),
+        supersedes=_parse_list_field(fields.get("supersedes")),
+        evidence=parse_evidence_field(fields.get("evidence")),
+        layer=layer,
+    )
 
 
 def extract_title(block: str) -> str:
@@ -121,6 +164,60 @@ def parse_fields(block: str) -> dict[str, str]:
     return fields
 
 
+def parse_memory_type(
+    value: str | None,
+    *,
+    title: str,
+    fields: dict[str, str],
+) -> MemoryType:
+    text = (value or "").strip().lower()
+    if text in {"semantic", "episodic", "procedural", "preference"}:
+        return text
+    combined = " ".join(
+        [
+            title.lower(),
+            fields.get("context/query", "").lower(),
+            fields.get("solution", "").lower(),
+            fields.get("takeaways", "").lower(),
+        ]
+    )
+    if "preference" in combined or "prefer " in combined:
+        return "preference"
+    if any(token in combined for token in ("incident", "error", "bug", "crash", "timeout", "failure")):
+        return "episodic"
+    if any(token in combined for token in ("always", "steps", "procedure", "workflow", "checklist", "run ")) or title.lower().startswith("how to"):
+        return "procedural"
+    return "semantic"
+
+
+def parse_evidence_field(value: str | None) -> tuple[MemoryEvidence, ...]:
+    if not value:
+        return ()
+    items: list[MemoryEvidence] = []
+    for part in value.split(";"):
+        entry = part.strip()
+        if not entry:
+            continue
+        kind, separator, reference = entry.partition(":")
+        if not separator:
+            continue
+        normalized_kind = kind.strip().lower()
+        normalized_reference = reference.strip()
+        if normalized_kind and normalized_reference:
+            items.append(MemoryEvidence(normalized_kind, normalized_reference))
+    return tuple(items)
+
+
+def format_evidence_field(evidence: tuple[MemoryEvidence, ...]) -> str:
+    return "; ".join(f"{item.kind}:{item.reference}" for item in evidence)
+
+
+def _parse_list_field(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
 # ── 评分 ──
 
 
@@ -133,10 +230,10 @@ def adjust_score(
     adjusted = score
     if adjusted <= 0:
         return 0.0
-    status = record.fields.get("status", "").lower()
+    status = record.status
     if status in {"deprecated", "superseded", "obsolete"}:
         adjusted *= 0.2
-    confidence = parse_confidence(record.fields.get("confidence", ""))
+    confidence = record.confidence_value
     if confidence is not None:
         adjusted *= 0.75 + min(max(confidence, 0.0), 1.0) * 0.5
     if scope:
@@ -186,9 +283,15 @@ def parse_confidence(value: str) -> float | None:
 def with_metadata(
     block: str,
     *,
+    layer: str,
     source: str | None,
     scope: str | None,
     confidence: float | None,
+    memory_type: MemoryType | None = None,
+    status: str | None = None,
+    validity: str | None = None,
+    supersedes: tuple[str, ...] = (),
+    evidence: tuple[MemoryEvidence, ...] = (),
 ) -> str:
     lines = [line.rstrip() for line in block.strip().splitlines()]
     existing = {
@@ -196,14 +299,30 @@ def with_metadata(
         for line in lines
         if line.startswith("- ") and ":" in line
     }
+    title = extract_title(block)
     additions = []
+    if title and "memory-id" not in existing:
+        additions.append(f"- Memory-ID: {build_memory_id(layer=layer, title=title)}")
+    normalized_type = memory_type or parse_memory_type(None, title=title, fields=parse_fields(block))
+    if "memory-type" not in existing:
+        additions.append(f"- Memory-Type: {normalized_type}")
     if source and "source" not in existing:
         additions.append(f"- Source: {source}")
+    if source and "source-session" not in existing:
+        additions.append(f"- Source-Session: {source}")
     if scope and "scope" not in existing:
         additions.append(f"- Scope: {scope}")
     if confidence is not None and "confidence" not in existing:
         bounded = min(max(confidence, 0.0), 1.0)
         additions.append(f"- Confidence: {bounded:.2f}")
+    if status and "status" not in existing:
+        additions.append(f"- Status: {status}")
+    if validity and "validity" not in existing:
+        additions.append(f"- Validity: {validity}")
+    if supersedes and "supersedes" not in existing:
+        additions.append(f"- Supersedes: {', '.join(supersedes)}")
+    if evidence and "evidence" not in existing:
+        additions.append(f"- Evidence: {format_evidence_field(evidence)}")
     if "created" not in existing:
         additions.append(f"- Created: {time.strftime('%Y-%m-%d', time.localtime())}")
     if additions:
