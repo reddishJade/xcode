@@ -387,6 +387,37 @@ class TestBM25AndMemory:
         assert recovered.status == "active"
         assert recovered.validity == "verified"
 
+    def test_explicit_reference_tracks_title_without_promoting_to_adoption(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.add_memory_block(
+            (
+                "## Provider retry playbook\n"
+                "- Context/Query: Provider timeout retry\n"
+                "- Solution: Retry transient provider failures\n"
+                "- Files: provider.py\n"
+                "- Takeaways: Keep bounded retries\n"
+            )
+        )
+        manager.drain_trace_events()
+
+        record = manager.search_memory_records("provider timeout retry", source="prompt")[
+            0
+        ]
+        manager.record_injected_records((record,))
+
+        matched = manager.record_explicit_references(
+            "Following Provider retry playbook for this task."
+        )
+        updated = manager.record_session_outcome("success")
+
+        assert matched == 1
+        assert updated == 1
+        persisted = manager.read_memory_records(layer="project")[0]
+        assert persisted.reference_count == 1
+        assert persisted.adoption_count == 0
+        assert persisted.success_count == 0
+        assert persisted.utility == 0.0
+
 
 if __name__ == "__main__":
     pytest.main()

@@ -291,6 +291,35 @@ class EvalPipelineTests:
             assert persisted[0].success_count == 0
             assert persisted[0].last_outcome == "success"
 
+    def test_eval_runner_persists_explicit_memory_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "project"
+            root.mkdir()
+            task = EvalTask(
+                id="memory-reference",
+                prompt="provider timeout retry",
+                expected_answer_contains=("Provider timeout retry",),
+            )
+            runner = EvalRunner(
+                tasks=(task,),
+                app_factory=lambda _task, _trial: _memory_app(
+                    root,
+                    answer="Use Provider timeout retry here.",
+                ),
+                output_dir=Path(tmp) / "run",
+            )
+
+            report = runner.run()
+
+            assert report.success
+            persisted = MemoryManager(
+                root,
+                user_memory_file=root / "home" / ".xcode" / "memory" / "MEMORY.md",
+            ).read_memory_records(layer="project")
+            assert persisted[0].reference_count == 1
+            assert persisted[0].adoption_count == 0
+            assert persisted[0].success_count == 0
+
     def test_build_memory_metrics_scores_expected_and_stale_titles(self) -> None:
         task = EvalTask(
             id="memory-metric-formula",
@@ -743,7 +772,7 @@ def _validation_app(project_root: Path) -> XcodeApp:
     )
 
 
-def _memory_app(project_root: Path) -> XcodeApp:
+def _memory_app(project_root: Path, *, answer: str = "done") -> XcodeApp:
     manager = MemoryManager(
         project_root,
         user_memory_file=project_root / "home" / ".xcode" / "memory" / "MEMORY.md",
@@ -759,7 +788,7 @@ def _memory_app(project_root: Path) -> XcodeApp:
         encoding="utf-8",
     )
     responses: list[ProviderEvent] = [
-        TextDelta(chunk="done"),
+        TextDelta(chunk=answer),
         FinalMessage(content="", stop_reason="end_turn"),
     ]
     agent = StructuredAgent(
@@ -772,6 +801,7 @@ def _memory_app(project_root: Path) -> XcodeApp:
                 (),
                 memory_manager=manager,
             ),
+            memory_manager=manager,
         ),
     )
     return XcodeApp(agent=agent, memory_manager=manager)

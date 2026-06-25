@@ -102,6 +102,7 @@ class StructuredAgent:
         self.cancellation_token = runtime.cancellation_token or CancellationToken()
         self.request_hygiene = runtime.request_hygiene or RequestHygieneConfig()
         self._todo_state = runtime.todo_state
+        self._memory_manager = runtime.memory_manager
         self._correlation = gate.correlation or RuntimeCorrelation(gate.session_id)
         self._last_prompt_tokens: int | None = None
 
@@ -517,6 +518,8 @@ class StructuredAgent:
             self._mode.current_mode,
             self._todo_state.snapshot() if self._todo_state is not None else (),
         )
+        if self._memory_manager is not None and final.answer:
+            self._memory_manager.record_explicit_references(final.answer)
 
         yield _final_event(
             result.steps,

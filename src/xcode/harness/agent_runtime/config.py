@@ -46,6 +46,7 @@ from ..observability.permission_model import GrantStore, PolicyEvaluator
 from ..observability.permission_model import ExternalDirectory
 from ..skills import ApprovalCallback, ToolSpec
 from ..agent_skills import SkillRegistry
+from ..memory import MemoryManager
 from ..session_todo import SessionTodoState
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
@@ -100,6 +101,7 @@ class AgentRuntimeConfig:
     request_hygiene: RequestHygieneConfig | None = None
     skill_registry: SkillRegistry | None = None
     todo_state: SessionTodoState | None = None
+    memory_manager: MemoryManager | None = None
     prompt_instructions: tuple[dict, ...] = ()
 
 

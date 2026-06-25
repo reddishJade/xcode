@@ -608,6 +608,7 @@ def build_agent(
             skill_registry=skill_registry,
             prompt_instructions=runtime_config.prompt.instructions,
             todo_state=todo_state,
+            memory_manager=memory_manager,
         ),
     )
 

@@ -48,6 +48,7 @@ type MemoryOutcome = Literal["success", "failure", "corrected"]
 class _SessionMemoryUsage:
     retrieved: bool = False
     injected: bool = False
+    referenced: bool = False
     adopted: bool = False
 
 
@@ -211,6 +212,7 @@ class MemoryManager:
                         evidence=record.evidence,
                         retrieval_count=record.retrieval_count,
                         injection_count=record.injection_count,
+                        reference_count=record.reference_count,
                         adoption_count=record.adoption_count,
                         success_count=record.success_count,
                         failure_count=record.failure_count,
@@ -369,6 +371,7 @@ class MemoryManager:
             evidence=evidence,
             retrieval_count=None,
             injection_count=None,
+            reference_count=None,
             adoption_count=None,
             success_count=None,
             failure_count=None,
@@ -393,6 +396,7 @@ class MemoryManager:
         evidence: Sequence[MemoryEvidence],
         retrieval_count: int | None,
         injection_count: int | None,
+        reference_count: int | None,
         adoption_count: int | None,
         success_count: int | None,
         failure_count: int | None,
@@ -441,6 +445,7 @@ class MemoryManager:
             evidence=tuple(evidence),
             retrieval_count=retrieval_count,
             injection_count=injection_count,
+            reference_count=reference_count,
             adoption_count=adoption_count,
             success_count=success_count,
             failure_count=failure_count,
@@ -705,6 +710,7 @@ class MemoryManager:
             evidence=(),
             retrieval_count=None,
             injection_count=None,
+            reference_count=None,
             adoption_count=None,
             success_count=None,
             failure_count=None,
@@ -986,6 +992,27 @@ class MemoryManager:
         """记录被 agent 明确采用的记忆。"""
         self._mark_session_usage(records, usage="adopted")
 
+    def record_explicit_references(self, text: str) -> int:
+        """根据最终回答中的显式 memory_id 或标题标记被引用的记忆。"""
+        normalized = text.casefold()
+        matched = 0
+        records_by_layer = {
+            current_layer: {
+                record.memory_id: record
+                for record in self.read_memory_records(layer=current_layer)
+            }
+            for current_layer in self._selected_layers("all")
+        }
+        for (layer, memory_id), usage in self._session_usage.items():
+            record = records_by_layer.get(layer, {}).get(memory_id)
+            if record is None:
+                continue
+            if memory_id.casefold() in normalized or record.title.casefold() in normalized:
+                if not usage.referenced:
+                    matched += 1
+                usage.referenced = True
+        return matched
+
     def record_session_outcome(
         self,
         outcome: MemoryOutcome,
@@ -1024,7 +1051,7 @@ class MemoryManager:
         self,
         records: Sequence[MemoryRecord],
         *,
-        usage: Literal["retrieved", "injected", "adopted"],
+        usage: Literal["retrieved", "injected", "referenced", "adopted"],
     ) -> None:
         for record in records:
             key = (record.layer, record.memory_id)
@@ -1033,6 +1060,8 @@ class MemoryManager:
                 state.retrieved = True
             elif usage == "injected":
                 state.injected = True
+            elif usage == "referenced":
+                state.referenced = True
             elif usage == "adopted":
                 state.adopted = True
 
@@ -1044,6 +1073,7 @@ class MemoryManager:
     ) -> dict[str, str]:
         retrieval_count = record.retrieval_count + int(usage.retrieved)
         injection_count = record.injection_count + int(usage.injected)
+        reference_count = record.reference_count + int(usage.referenced)
         adoption_count = record.adoption_count + int(usage.adopted)
         success_count = record.success_count
         failure_count = record.failure_count
@@ -1072,6 +1102,7 @@ class MemoryManager:
         return {
             "retrieval-count": str(retrieval_count),
             "injection-count": str(injection_count),
+            "reference-count": str(reference_count),
             "adoption-count": str(adoption_count),
             "success-count": str(success_count),
             "failure-count": str(failure_count),

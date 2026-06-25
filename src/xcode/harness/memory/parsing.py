@@ -50,6 +50,7 @@ class MemoryRecord:
     evidence: tuple[MemoryEvidence, ...] = ()
     retrieval_count: int = 0
     injection_count: int = 0
+    reference_count: int = 0
     adoption_count: int = 0
     success_count: int = 0
     failure_count: int = 0
@@ -148,6 +149,7 @@ def parse_memory_record(block: str, *, layer: str = "project") -> MemoryRecord:
         evidence=parse_evidence_field(fields.get("evidence")),
         retrieval_count=_parse_int_field(fields.get("retrieval-count")),
         injection_count=_parse_int_field(fields.get("injection-count")),
+        reference_count=_parse_int_field(fields.get("reference-count")),
         adoption_count=_parse_int_field(fields.get("adoption-count")),
         success_count=_parse_int_field(fields.get("success-count")),
         failure_count=_parse_int_field(fields.get("failure-count")),
@@ -343,6 +345,7 @@ def with_metadata(
     evidence: tuple[MemoryEvidence, ...] = (),
     retrieval_count: int | None = None,
     injection_count: int | None = None,
+    reference_count: int | None = None,
     adoption_count: int | None = None,
     success_count: int | None = None,
     failure_count: int | None = None,
@@ -386,6 +389,8 @@ def with_metadata(
         additions.append(f"- Retrieval-Count: {max(0, retrieval_count)}")
     if injection_count is not None and "injection-count" not in existing:
         additions.append(f"- Injection-Count: {max(0, injection_count)}")
+    if reference_count is not None and "reference-count" not in existing:
+        additions.append(f"- Reference-Count: {max(0, reference_count)}")
     if adoption_count is not None and "adoption-count" not in existing:
         additions.append(f"- Adoption-Count: {max(0, adoption_count)}")
     if success_count is not None and "success-count" not in existing:
