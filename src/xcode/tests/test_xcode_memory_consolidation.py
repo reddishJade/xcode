@@ -50,49 +50,36 @@ class TestMemoryConsolidationHook:
         assert final_messages[1]["role"] == "user"
         assert final_messages[1]["content"].startswith("[Compressed]")
 
-        # 没有 evidence / outcome 的 compaction 候选不能直接晋升为正式记忆
-        assert not self.manager.memory_file.exists()
-        candidate_files = list(self.manager.candidate_dir.glob("*.md"))
-        assert len(candidate_files) == 1
-        candidate_text = candidate_files[0].read_text(encoding="utf-8")
-        assert "Incident 99: Memory compaction works" in candidate_text
-        quarantine_files = list(self.manager.quarantine_dir.glob("*.md"))
-        assert len(quarantine_files) == 1
-        quarantine_text = quarantine_files[0].read_text(encoding="utf-8")
-        assert "- Reason: evidence_gate_failed" in quarantine_text
-        trace_events = self.manager.drain_trace_events()
-        assert [event.type for event in trace_events] == [
-            "candidate_created",
-            "quarantined",
-        ]
-        assert trace_events[1].rejection_reason == "evidence_gate_failed"
-
-    def test_consolidate_promotes_candidate_with_evidence(self) -> None:
-        promotable_block = (
-            "## Incident 100: Verified compaction flow\n"
-            "- Context/Query: Compaction failure test\n"
-            "- Solution: Persist candidate before promotion\n"
-            "- Files: compaction.py\n"
-            "- Takeaways: Promotion needs explicit evidence\n"
-            "- Evidence: test:src/xcode/tests/test_xcode_memory_consolidation.py\n"
-        )
-        self.manager.consolidate(f"[Compressed]\n{promotable_block}")
-
         assert self.manager.memory_file.exists()
         memory_text = self.manager.memory_file.read_text(encoding="utf-8")
-        assert "Incident 100: Verified compaction flow" in memory_text
-        assert (
-            "- Evidence: test:src/xcode/tests/test_xcode_memory_consolidation.py"
-            in (memory_text)
-        )
-        candidate_files = list(self.manager.candidate_dir.glob("*.md"))
-        assert len(candidate_files) == 1
-        assert list(self.manager.quarantine_dir.glob("*.md")) == []
+        assert "Incident 99: Memory compaction works" in memory_text
         trace_events = self.manager.drain_trace_events()
         assert [event.type for event in trace_events] == [
             "candidate_created",
             "accepted",
         ]
+        assert trace_events[1].title == "Incident 99: Memory compaction works"
+
+    def test_consolidate_rejects_ephemeral_session_only_memory(self) -> None:
+        ephemeral_block = (
+            "## Incident 100: Session-only compaction flow\n"
+            "- Context/Query: This session only compaction failure test\n"
+            "- Solution: Persist current turn scratch state\n"
+            "- Files: compaction.py\n"
+            "- Takeaways: Temporary notes from this turn should not become memory\n"
+        )
+        self.manager.consolidate(f"[Compressed]\n{ephemeral_block}")
+
+        assert not self.manager.memory_file.exists()
+        archive_files = list(self.manager.archive_dir.glob("*.md"))
+        assert len(archive_files) == 1
+        archive_text = archive_files[0].read_text(encoding="utf-8")
+        assert "Incident 100: Session-only compaction flow" in archive_text
+        trace_events = self.manager.drain_trace_events()
+        assert [event.type for event in trace_events] == [
+            "rejected",
+        ]
+        assert trace_events[0].rejection_reason == "scope_gate_failed"
 
 
 if __name__ == "__main__":

@@ -12,7 +12,6 @@ from html import escape
 import json
 import re
 import time
-from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
@@ -142,8 +141,6 @@ class MemoryManager:
             Path.home() / ".xcode" / "memory" / "MEMORY.md"
         )
         self.archive_dir = root / ".local" / "memory_archive"
-        self.candidate_dir = root / ".local" / "memory_candidates"
-        self.quarantine_dir = root / ".local" / "memory_quarantine"
         self.lru_file = root / ".local" / "memory_lru.json"
         self.max_blocks = max_blocks
         self.min_retrieval_score = min_retrieval_score
@@ -1070,7 +1067,7 @@ class MemoryManager:
         return None
 
     def consolidate(self, summary: str) -> None:
-        """从压缩摘要中提取候选记忆，并经 gate 决定晋升或隔离。"""
+        """从压缩摘要中提取可复用记忆并直接写入正式存储。"""
         for block in self._extract_summary_blocks(summary):
             if self._is_memory_attempt(block):
                 self._ingest_consolidation_candidate(
@@ -1122,41 +1119,20 @@ class MemoryManager:
         source: str,
         layer: MemoryLayer,
     ) -> None:
-        """将 compaction 产物写成候选，并执行晋升 gate。"""
+        """将 compaction 产物经轻量 gate 后直接写入正式记忆。"""
         title = extract_title(block)
-        memory_id = self._memory_id(layer, title) if title else None
-        self._write_candidate_block(block, layer=layer, source=source)
-        self._emit_trace(
-            MemoryTraceEvent(
-                type="candidate_created",
-                memory_id=memory_id,
-                layer=layer,
-                title=title or None,
-                source=source,
-            )
-        )
-        existing_records = self.read_memory_records(layer=layer)
-        rejection_reason = self._promotion_gate_rejection_reason(
-            block,
-            existing_records=existing_records,
-        )
-        if rejection_reason is not None:
-            self._quarantine_block(
-                block,
-                layer=layer,
-                reason=rejection_reason,
-                source=source,
-            )
+        if not self._has_reusable_scope(block):
             self._emit_trace(
                 MemoryTraceEvent(
-                    type="quarantined",
-                    memory_id=memory_id,
+                    type="rejected",
+                    memory_id=self._memory_id(layer, title) if title else None,
                     layer=layer,
                     title=title or None,
-                    rejection_reason=rejection_reason,
+                    rejection_reason="scope_gate_failed",
                     source=source,
                 )
             )
+            self._archive_block(block, layer)
             return
         self._persist_memory_block(
             block,
@@ -1178,26 +1154,8 @@ class MemoryManager:
             utility=None,
             last_outcome=None,
             layer=layer,
-            emit_candidate_trace=False,
+            emit_candidate_trace=True,
         )
-
-    def _promotion_gate_rejection_reason(
-        self,
-        block: str,
-        *,
-        existing_records: list[MemoryRecord],
-    ) -> str | None:
-        """晋升 gate：在写入正式记忆前执行结构、质量与证据检查。"""
-        if not self.validate_memory_block(block):
-            return "schema_validation_failed"
-        quality_rejection = self._quality_rejection_reason(block, existing_records)
-        if quality_rejection is not None:
-            return quality_rejection
-        if not self._has_reusable_scope(block):
-            return "scope_gate_failed"
-        if not self._has_promotable_evidence(block):
-            return "evidence_gate_failed"
-        return None
 
     def _has_reusable_scope(self, block: str) -> bool:
         """拒绝只描述当前回合状态、无法跨任务复用的候选。"""
@@ -1221,33 +1179,6 @@ class MemoryManager:
         )
         return not any(marker in scoped_text for marker in ephemeral_markers)
 
-    def _has_promotable_evidence(self, block: str) -> bool:
-        """要求候选至少带有可审计的 outcome / evidence / validation 信号。"""
-        fields = parse_fields(block)
-        evidence_fields = (
-            "evidence",
-            "validated",
-            "validation",
-            "result",
-            "outcome",
-            "confidence",
-        )
-        for key in evidence_fields:
-            value = fields.get(key, "").strip()
-            if value:
-                return True
-        combined = " ".join(fields.values()).lower()
-        evidence_markers = (
-            "passed",
-            "verified",
-            "confirmed",
-            "reproduced",
-            "failed because",
-            "test:",
-            "pytest",
-        )
-        return any(marker in combined for marker in evidence_markers)
-
     def _archive_block(self, block: str, layer: MemoryLayer) -> None:
         """将无效或淘汰块归档到对应层级。"""
         archive_dir = self._archive_dir(layer)
@@ -1255,55 +1186,6 @@ class MemoryManager:
         timestamp = int(time.time() * 1000)
         archive_file = archive_dir / f"corrupt_{timestamp}.md"
         archive_file.write_text(block, encoding="utf-8")
-
-    def _write_candidate_block(
-        self,
-        block: str,
-        *,
-        layer: MemoryLayer,
-        source: str,
-    ) -> Path:
-        """将待晋升候选持久化，保留 compaction 原文以便审查。"""
-        candidate_dir = self._candidate_dir(layer)
-        candidate_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = int(time.time() * 1000)
-        slug = self._candidate_slug(extract_title(block)) or f"candidate-{timestamp}"
-        candidate_file = candidate_dir / f"{timestamp}_{slug}.md"
-        payload = (
-            f"- Source: {source}\n"
-            f"- Created: {time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime())}\n"
-            "\n"
-            f"{block.strip()}\n"
-        )
-        candidate_file.write_text(payload, encoding="utf-8")
-        return candidate_file
-
-    def _quarantine_block(
-        self,
-        block: str,
-        *,
-        layer: MemoryLayer,
-        reason: str,
-        source: str,
-    ) -> None:
-        """保留未通过晋升 gate 的候选，避免污染正式记忆。"""
-        quarantine_dir = self._quarantine_dir(layer)
-        quarantine_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = int(time.time() * 1000)
-        slug = self._candidate_slug(extract_title(block)) or f"candidate-{timestamp}"
-        quarantine_file = quarantine_dir / f"{timestamp}_{slug}.md"
-        payload = (
-            f"- Source: {source}\n"
-            f"- Reason: {reason}\n"
-            f"- Created: {time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime())}\n"
-            "\n"
-            f"{block.strip()}\n"
-        )
-        quarantine_file.write_text(payload, encoding="utf-8")
-
-    def _candidate_slug(self, title: str) -> str:
-        normalized = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-        return normalized[:48]
 
     # ── 保留与遗忘策略 ──
 
@@ -1456,18 +1338,6 @@ class MemoryManager:
             return self.archive_dir
         return self.user_memory_file.parent / "archive"
 
-    def _candidate_dir(self, layer: MemoryLayer) -> Path:
-        """返回指定层级的候选目录。"""
-        if layer == "project":
-            return self.candidate_dir
-        return self.user_memory_file.parent / "candidates"
-
-    def _quarantine_dir(self, layer: MemoryLayer) -> Path:
-        """返回指定层级的隔离目录。"""
-        if layer == "project":
-            return self.quarantine_dir
-        return self.user_memory_file.parent / "quarantine"
-
     def _selected_layers(
         self,
         layer: MemoryLayerFilter,
@@ -1544,167 +1414,8 @@ class MemoryManager:
             next_fields = self._feedback_fields_for_record(record, usage, outcome)
             self._replace_record_by_memory_id(record, next_fields)
             updated += 1
-        touched_layers = {
-            layer for (layer, _memory_id), _usage in self._session_usage.items()
-        }
         self._session_usage.clear()
-        for layer in touched_layers:
-            self.derive_procedural_candidates(layer=layer)
         return updated
-
-    def derive_procedural_candidates(
-        self,
-        *,
-        layer: MemoryLayer = "project",
-    ) -> int:
-        """从稳定成功的 episodic 记录中提炼 procedural candidate。"""
-        records = self.read_memory_records(layer=layer)
-        groups: dict[tuple[str, str, str], list[MemoryRecord]] = defaultdict(list)
-        for record in records:
-            if record.memory_type != "episodic":
-                continue
-            groups[self._procedural_group_key(record)].append(record)
-
-        created = 0
-        for grouped in groups.values():
-            successful = [record for record in grouped if self._is_successful_episode(record)]
-            if len(successful) < 2:
-                continue
-            candidate_block = self._build_procedural_candidate(successful)
-            title = extract_title(candidate_block)
-            if self._candidate_exists(title, layer=layer):
-                continue
-            counterexamples = [record for record in grouped if self._has_counterexample(record)]
-            self._emit_trace(
-                MemoryTraceEvent(
-                    type="candidate_created",
-                    memory_id=self._memory_id(layer, title) if title else None,
-                    layer=layer,
-                    title=title or None,
-                    source="procedural_promotion",
-                )
-            )
-            if counterexamples:
-                quarantined = self._append_counterexamples(
-                    candidate_block,
-                    counterexamples=counterexamples,
-                )
-                self._quarantine_block(
-                    quarantined,
-                    layer=layer,
-                    reason="counterexample_gate_failed",
-                    source="procedural_promotion",
-                )
-                self._emit_trace(
-                    MemoryTraceEvent(
-                        type="quarantined",
-                        memory_id=self._memory_id(layer, title) if title else None,
-                        layer=layer,
-                        title=title or None,
-                        rejection_reason="counterexample_gate_failed",
-                        source="procedural_promotion",
-                    )
-                )
-                continue
-            self._write_candidate_block(
-                candidate_block,
-                layer=layer,
-                source="procedural_promotion",
-            )
-            created += 1
-        return created
-
-    def promote_candidate(
-        self,
-        title: str,
-        *,
-        layer: MemoryLayer = "project",
-    ) -> bool:
-        """将候选目录中的记忆晋升为正式 memory 记录。"""
-        candidate_file = self._find_candidate_file(title, layer=layer)
-        if candidate_file is None:
-            return False
-        candidate_block = self._extract_candidate_block(
-            candidate_file.read_text(encoding="utf-8")
-        )
-        existing_records = self.read_memory_records(layer=layer)
-        rejection_reason = self._promotion_gate_rejection_reason(
-            candidate_block,
-            existing_records=existing_records,
-        )
-        if rejection_reason is not None:
-            self._move_candidate_to_quarantine(
-                candidate_file,
-                layer=layer,
-                reason=rejection_reason,
-                source="candidate_review",
-            )
-            self._emit_trace(
-                MemoryTraceEvent(
-                    type="quarantined",
-                    memory_id=self._memory_id(layer, title),
-                    layer=layer,
-                    title=title,
-                    rejection_reason=rejection_reason,
-                    source="candidate_review",
-                )
-            )
-            return False
-        promoted_block = self._normalize_candidate_for_promotion(candidate_block)
-        persisted = self._persist_memory_block(
-            promoted_block,
-            source="candidate_review",
-            scope=None,
-            confidence=None,
-            memory_type=None,
-            status=None,
-            validity=None,
-            supersedes=(),
-            evidence=(),
-            retrieval_count=None,
-            injection_count=None,
-            reference_count=None,
-            adoption_count=None,
-            success_count=None,
-            failure_count=None,
-            correction_count=None,
-            utility=None,
-            last_outcome=None,
-            layer=layer,
-            emit_candidate_trace=False,
-        )
-        if persisted:
-            candidate_file.unlink(missing_ok=True)
-        return persisted
-
-    def reject_candidate(
-        self,
-        title: str,
-        *,
-        layer: MemoryLayer = "project",
-        reason: str = "manual_rejection",
-    ) -> bool:
-        """将候选目录中的记忆移入 quarantine。"""
-        candidate_file = self._find_candidate_file(title, layer=layer)
-        if candidate_file is None:
-            return False
-        self._move_candidate_to_quarantine(
-            candidate_file,
-            layer=layer,
-            reason=reason,
-            source="candidate_review",
-        )
-        self._emit_trace(
-            MemoryTraceEvent(
-                type="quarantined",
-                memory_id=self._memory_id(layer, title),
-                layer=layer,
-                title=title,
-                rejection_reason=reason,
-                source="candidate_review",
-            )
-        )
-        return True
 
     def drain_trace_events(self) -> tuple[MemoryTraceEvent, ...]:
         """返回并清空当前进程内累积的 memory trace 事件。"""
@@ -1831,126 +1542,6 @@ class MemoryManager:
     def _display_field_name(self, key: str) -> str:
         parts = [part.capitalize() for part in key.split("-")]
         return "-".join(parts)
-
-    def _procedural_group_key(self, record: MemoryRecord) -> tuple[str, str, str]:
-        scope = (record.scope or "").strip().lower()
-        files = ",".join(item.strip().lower() for item in record.related_files)
-        solution = record.fields.get("solution", "").strip().lower()
-        return (scope, files, solution)
-
-    def _is_successful_episode(self, record: MemoryRecord) -> bool:
-        return (
-            record.success_count > 0
-            and record.failure_count == 0
-            and record.correction_count == 0
-            and record.status == "active"
-            and record.validity not in {"needs_review", "corrected"}
-        )
-
-    def _has_counterexample(self, record: MemoryRecord) -> bool:
-        return record.failure_count > 0 or record.correction_count > 0
-
-    def _build_procedural_candidate(self, records: Sequence[MemoryRecord]) -> str:
-        anchor = sorted(records, key=lambda record: record.title)[0]
-        solution = anchor.fields.get("solution", "").strip()
-        takeaways = anchor.fields.get("takeaways", "").strip()
-        files = anchor.fields.get("files", "").strip()
-        context = "; ".join(record.title for record in records)
-        title = f"How to: {solution}".strip()
-        source_records = ", ".join(record.memory_id for record in records)
-        evidence = "; ".join(f"memory:{record.memory_id}" for record in records)
-        lines = [
-            f"## {title}",
-            f"- Context/Query: Abstracted from successful incidents: {context}",
-            f"- Solution: {solution}",
-            f"- Files: {files}",
-            f"- Takeaways: {takeaways}",
-            "- Memory-Type: procedural",
-            f"- Scope: {anchor.scope or 'project'}",
-            f"- Source-Records: {source_records}",
-            f"- Evidence: {evidence}",
-            "- Status: candidate",
-            "- Validity: derived",
-        ]
-        return "\n".join(lines) + "\n"
-
-    def _append_counterexamples(
-        self,
-        block: str,
-        *,
-        counterexamples: Sequence[MemoryRecord],
-    ) -> str:
-        ids = ", ".join(record.memory_id for record in counterexamples)
-        return block.strip() + f"\n- Counterexamples: {ids}\n"
-
-    def _candidate_exists(
-        self,
-        title: str,
-        *,
-        layer: MemoryLayer,
-    ) -> bool:
-        normalized = title.strip().lower()
-        if not normalized:
-            return False
-        for record in self.read_memory_records(layer=layer):
-            if record.title.strip().lower() == normalized:
-                return True
-        for root_dir in (self._candidate_dir(layer), self._quarantine_dir(layer)):
-            for path in root_dir.glob("*.md"):
-                if f"## {title}" in path.read_text(encoding="utf-8"):
-                    return True
-        return False
-
-    def _find_candidate_file(self, title: str, *, layer: MemoryLayer) -> Path | None:
-        marker = f"## {title}".strip()
-        for path in sorted(self._candidate_dir(layer).glob("*.md")):
-            if marker in path.read_text(encoding="utf-8"):
-                return path
-        return None
-
-    def _extract_candidate_block(self, content: str) -> str:
-        marker = content.find("## ")
-        if marker < 0:
-            return content.strip() + "\n"
-        return content[marker:].strip() + "\n"
-
-    def _normalize_candidate_for_promotion(self, block: str) -> str:
-        fields = parse_fields(block)
-        lines: list[str] = []
-        for raw_line in block.strip().splitlines():
-            stripped = raw_line.strip()
-            if not stripped.startswith("- "):
-                lines.append(stripped)
-                continue
-            key = stripped[2:].split(":", 1)[0].strip().lower()
-            if key == "status":
-                lines.append("- Status: active")
-            elif key == "validity":
-                lines.append("- Validity: derived")
-            else:
-                lines.append(stripped)
-        if "status" not in fields:
-            lines.append("- Status: active")
-        if "validity" not in fields:
-            lines.append("- Validity: derived")
-        return "\n".join(lines).strip() + "\n"
-
-    def _move_candidate_to_quarantine(
-        self,
-        candidate_file: Path,
-        *,
-        layer: MemoryLayer,
-        reason: str,
-        source: str,
-    ) -> None:
-        block = self._extract_candidate_block(candidate_file.read_text(encoding="utf-8"))
-        self._quarantine_block(
-            block,
-            layer=layer,
-            reason=reason,
-            source=source,
-        )
-        candidate_file.unlink(missing_ok=True)
 
     def _estimate_block_tokens(self, block: str) -> int:
         from xcode.agent.compaction import estimate_tokens
