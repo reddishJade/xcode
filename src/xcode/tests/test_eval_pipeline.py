@@ -537,11 +537,22 @@ class EvalPipelineTests:
     def test_memory_suite_registers_on_off_pair(self) -> None:
         tasks = SUITES["memory"]
 
-        assert len(tasks) == 2
+        assert len(tasks) == 4
         configs = [task.metadata["memory_eval"] for task in tasks]
         assert {config["mode"] for config in configs} == {"on", "off"}
-        assert len({config["comparison_group"] for config in configs}) == 1
+        assert {config["comparison_group"] for config in configs} == {
+            "provider-timeout-retry",
+            "provider-timeout-conflict",
+        }
         assert any(config.get("offline_memory_blocks") for config in configs)
+        conflict = next(
+            config
+            for config in configs
+            if config["comparison_group"] == "provider-timeout-conflict"
+            and config["mode"] == "on"
+        )
+        assert conflict["stale_or_conflicting_titles"] == ("Old timeout workaround",)
+        assert len(conflict["offline_memory_blocks"]) == 2
 
     def test_all_suite_excludes_real_coding_fixtures(self) -> None:
         all_tasks = SUITES["all"]

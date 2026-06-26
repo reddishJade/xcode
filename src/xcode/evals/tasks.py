@@ -194,6 +194,7 @@ def pipeline() -> tuple[EvalTask, ...]:
 def memory() -> tuple[EvalTask, ...]:
     """memory on/off 对照：验证 memory trace、指标和对照汇总。"""
     comparison_group = "provider-timeout-retry"
+    conflict_group = "provider-timeout-conflict"
     return (
         EvalTask(
             id="memory-provider-timeout-on",
@@ -225,6 +226,46 @@ def memory() -> tuple[EvalTask, ...]:
                     "comparison_group": comparison_group,
                     "mode": "off",
                     "expected_titles": ("Provider timeout retry",),
+                }
+            },
+        ),
+        EvalTask(
+            id="memory-provider-timeout-conflict-on",
+            prompt="provider timeout retry",
+            expected_answer_contains=("done",),
+            tags=("memory", "ablation", "offline"),
+            metadata={
+                "memory_eval": {
+                    "comparison_group": conflict_group,
+                    "mode": "on",
+                    "expected_titles": ("Provider timeout retry",),
+                    "stale_or_conflicting_titles": ("Old timeout workaround",),
+                    "offline_memory_blocks": (
+                        "## Provider timeout retry\n"
+                        "- Context/Query: Provider timeout retry\n"
+                        "- Solution: Retry transient provider failures with backoff\n"
+                        "- Files: src/provider.py\n"
+                        "- Takeaways: Bound retries and preserve the root cause\n",
+                        "## Old timeout workaround\n"
+                        "- Context/Query: Provider timeout retry\n"
+                        "- Solution: Retry indefinitely without preserving the root cause\n"
+                        "- Files: legacy/provider.py\n"
+                        "- Takeaways: Legacy workaround kept for stale-conflict eval coverage\n",
+                    ),
+                }
+            },
+        ),
+        EvalTask(
+            id="memory-provider-timeout-conflict-off",
+            prompt="provider timeout retry",
+            expected_answer_contains=("done",),
+            tags=("memory", "ablation", "offline"),
+            metadata={
+                "memory_eval": {
+                    "comparison_group": conflict_group,
+                    "mode": "off",
+                    "expected_titles": ("Provider timeout retry",),
+                    "stale_or_conflicting_titles": ("Old timeout workaround",),
                 }
             },
         ),
