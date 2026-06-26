@@ -29,7 +29,6 @@ from .parsing import (
     _MIN_BLOCK_LENGTH,
     _MIN_FIELD_CONTENT_LENGTH,
     _NOVELTY_THRESHOLD,
-    adjust_score,
     build_memory_id,
     extract_field_content,
     extract_title,
@@ -53,6 +52,36 @@ class _SessionMemoryUsage:
     adopted: bool = False
 
 
+@dataclass(frozen=True)
+class MemoryRerankPolicy:
+    """memory rerank 的显式权重与乘数配置。"""
+
+    lexical_bm25_weight: float = 0.8
+    title_weight: float = 1.8
+    solution_weight: float = 1.6
+    context_weight: float = 1.1
+    takeaways_weight: float = 1.0
+    file_weight: float = 1.9
+    symbol_weight: float = 2.2
+    lexical_score_cap: float = 3.5
+
+    exact_file_match_bonus: float = 1.2
+    exact_basename_bonus: float = 0.8
+    exact_symbol_match_bonus: float = 1.1
+    phrase_match_bonus: float = 0.35
+
+    deprecated_status_multiplier: float = 0.2
+    confidence_base: float = 0.75
+    confidence_scale: float = 0.5
+    needs_review_multiplier: float = 0.7
+    utility_scale: float = 0.25
+    utility_multiplier_min: float = 0.4
+    utility_multiplier_max: float = 1.6
+    provenance_bonus: float = 1.1
+    scope_hit_multiplier: float = 1.35
+    scope_mismatch_multiplier: float = 0.75
+
+
 class MemoryManager:
     """基于 H2 契约校验、BM25 召回和元数据重排的 MEMORY.md 记忆系统。"""
 
@@ -63,6 +92,7 @@ class MemoryManager:
         user_memory_file: Path | None = None,
         min_retrieval_score: float = 0.2,
         min_confidence: float = 0.0,
+        rerank_policy: MemoryRerankPolicy | None = None,
     ) -> None:
         """创建项目级与用户级并行的记忆管理器。"""
         self.root = root
@@ -77,6 +107,7 @@ class MemoryManager:
         self.max_blocks = max_blocks
         self.min_retrieval_score = min_retrieval_score
         self.min_confidence = min_confidence
+        self.rerank_policy = rerank_policy or MemoryRerankPolicy()
         self._trace_events: list[MemoryTraceEvent] = []
         self._session_usage: dict[tuple[str, str], _SessionMemoryUsage] = {}
 
@@ -285,7 +316,7 @@ class MemoryManager:
         """对 lexical candidates 应用可替换的 rerank 与 gate。"""
         ranked: list[MemoryRecord] = []
         for candidate in candidates:
-            adjusted = adjust_score(candidate.score, candidate, query, scope)
+            adjusted = self._apply_rerank_policy(candidate, query, scope)
             if adjusted < self.min_retrieval_score or not self._passes_confidence_gate(
                 candidate
             ):
@@ -389,35 +420,39 @@ class MemoryManager:
         query_terms = tokenize_set(query)
         if not query_terms:
             return 0.0
-        score = bm25_score * 0.8
-        score += self._field_overlap_score(query_terms, record.title, weight=1.8)
+        score = bm25_score * self.rerank_policy.lexical_bm25_weight
+        score += self._field_overlap_score(
+            query_terms,
+            record.title,
+            weight=self.rerank_policy.title_weight,
+        )
         score += self._field_overlap_score(
             query_terms,
             record.fields.get("solution", ""),
-            weight=1.6,
+            weight=self.rerank_policy.solution_weight,
         )
         score += self._field_overlap_score(
             query_terms,
             record.fields.get("context/query", ""),
-            weight=1.1,
+            weight=self.rerank_policy.context_weight,
         )
         score += self._field_overlap_score(
             query_terms,
             record.fields.get("takeaways", ""),
-            weight=1.0,
+            weight=self.rerank_policy.takeaways_weight,
         )
         score += self._field_overlap_score(
             query_terms,
             ", ".join(record.related_files or ()) or record.fields.get("files", ""),
-            weight=1.9,
+            weight=self.rerank_policy.file_weight,
         )
         score += self._field_overlap_score(
             query_terms,
             ", ".join(record.related_symbols),
-            weight=2.2,
+            weight=self.rerank_policy.symbol_weight,
         )
         score += self._exact_match_bonus(record, query)
-        return min(score, 3.5)
+        return min(score, self.rerank_policy.lexical_score_cap)
 
     def _field_overlap_score(
         self,
@@ -432,6 +467,60 @@ class MemoryManager:
         overlap = len(query_terms & field_terms) / max(len(query_terms), 1)
         return overlap * weight
 
+    def _apply_rerank_policy(
+        self,
+        candidate: MemoryRecord,
+        query: str,
+        scope: str | None,
+    ) -> float:
+        adjusted = candidate.score
+        if adjusted <= 0:
+            return 0.0
+        if candidate.status in {"deprecated", "superseded", "obsolete"}:
+            adjusted *= self.rerank_policy.deprecated_status_multiplier
+        confidence = candidate.confidence_value
+        if confidence is not None:
+            bounded = min(max(confidence, 0.0), 1.0)
+            adjusted *= (
+                self.rerank_policy.confidence_base
+                + bounded * self.rerank_policy.confidence_scale
+            )
+        if candidate.status == "needs_review":
+            adjusted *= self.rerank_policy.needs_review_multiplier
+        if candidate.utility != 0.0:
+            adjusted *= max(
+                self.rerank_policy.utility_multiplier_min,
+                min(
+                    self.rerank_policy.utility_multiplier_max,
+                    1.0 + candidate.utility * self.rerank_policy.utility_scale,
+                ),
+            )
+        if scope:
+            adjusted *= self._scope_multiplier(candidate, scope)
+        query_terms = set(tokenize(query))
+        provenance_text = " ".join(
+            candidate.fields.get(key, "")
+            for key in ("source", "session", "validated", "validation")
+        )
+        if query_terms and query_terms.intersection(tokenize(provenance_text)):
+            adjusted *= self.rerank_policy.provenance_bonus
+        return adjusted
+
+    def _scope_multiplier(self, candidate: MemoryRecord, scope: str) -> float:
+        scope_terms = set(tokenize(scope))
+        if not scope_terms:
+            return 1.0
+        scoped_text = " ".join(
+            candidate.fields.get(key, "")
+            for key in ("scope", "files", "context/query", "takeaways")
+        )
+        scoped_terms = set(tokenize(scoped_text))
+        if scope_terms.intersection(scoped_terms):
+            return self.rerank_policy.scope_hit_multiplier
+        if candidate.fields.get("scope"):
+            return self.rerank_policy.scope_mismatch_multiplier
+        return 1.0
+
     def _exact_match_bonus(self, record: MemoryRecord, query: str) -> float:
         bonus = 0.0
         normalized_query = query.strip().lower()
@@ -439,19 +528,19 @@ class MemoryManager:
             return 0.0
         related_files = record.related_files or ()
         if any(normalized_query == item.lower() for item in related_files):
-            bonus += 1.2
+            bonus += self.rerank_policy.exact_file_match_bonus
         elif normalized_query in {Path(item).name.lower() for item in related_files}:
-            bonus += 0.8
+            bonus += self.rerank_policy.exact_basename_bonus
         related_symbols = {symbol.lower() for symbol in record.related_symbols}
         if normalized_query in related_symbols:
-            bonus += 1.1
+            bonus += self.rerank_policy.exact_symbol_match_bonus
         phrase_fields = [
             record.title.lower(),
             record.fields.get("context/query", "").lower(),
             record.fields.get("solution", "").lower(),
         ]
         if len(tokenize(query)) >= 2 and any(normalized_query in field for field in phrase_fields):
-            bonus += 0.35
+            bonus += self.rerank_policy.phrase_match_bonus
         return bonus
 
     def _quality_rejection_reason(

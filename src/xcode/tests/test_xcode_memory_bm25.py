@@ -197,19 +197,68 @@ class TestBM25AndMemory:
         assert ranked[0].title == "Task store lock"
         assert ranked[0].score >= candidates[0].score
 
-    def test_memory_search_demotes_deprecated_records(self) -> None:
-        from xcode.harness.memory.parsing import adjust_score, parse_memory_record
+    def test_custom_rerank_policy_can_disable_exact_path_bonus(self) -> None:
+        from xcode.harness.memory import MemoryRerankPolicy
 
-        base = 1.0
-        old = parse_memory_record(
-            "## Old\n- Context/Query: test\n- Status: deprecated\n- Confidence: 0.80\n"
+        block = (
+            "## Task store lock\n"
+            "- Context/Query: Timeout retry failure\n"
+            "- Solution: Retry task store lock\n"
+            "- Files: src/xcode/harness/task_store.py\n"
+            "- Takeaways: Exact path bonus should be configurable\n"
         )
-        current = parse_memory_record(
-            "## Current\n- Context/Query: test\n- Confidence: 0.80\n"
+        default_manager = MemoryManager(self.root)
+        default_manager.memory_file.write_text(block, encoding="utf-8")
+
+        manager = MemoryManager(
+            self.root,
+            rerank_policy=MemoryRerankPolicy(
+                exact_file_match_bonus=0.0,
+                exact_basename_bonus=0.0,
+                file_weight=0.1,
+            ),
         )
-        score_old = adjust_score(base, old, "test", None)
-        score_current = adjust_score(base, current, "test", None)
-        assert score_current > score_old
+        manager.memory_file.write_text(block, encoding="utf-8")
+
+        record = manager.read_memory_records()[0]
+        default_bonus = default_manager._exact_match_bonus(
+            record,
+            "src/xcode/harness/task_store.py",
+        )
+        custom_bonus = manager._exact_match_bonus(
+            record,
+            "src/xcode/harness/task_store.py",
+        )
+
+        assert default_bonus > 0.0
+        assert custom_bonus == 0.0
+
+    def test_memory_search_demotes_deprecated_records(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Old\n"
+                "- Context/Query: timeout retry failure\n"
+                "- Solution: obsolete fix\n"
+                "- Files: old.py\n"
+                "- Takeaways: old path\n"
+                "- Status: deprecated\n"
+                "- Confidence: 0.80\n"
+                "\n"
+                "## Current\n"
+                "- Context/Query: timeout retry failure\n"
+                "- Solution: current fix\n"
+                "- Files: current.py\n"
+                "- Takeaways: current path\n"
+                "- Confidence: 0.80\n"
+            ),
+            encoding="utf-8",
+        )
+
+        records = manager.search_memory_records("timeout retry failure", limit=2)
+
+        assert records[0].title == "Current"
+        assert records[0].score > records[1].score
 
     def test_legacy_record_gets_stable_id_and_inferred_type(self) -> None:
         manager = MemoryManager(self.root)
