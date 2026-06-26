@@ -12,6 +12,7 @@ from xcode.cli.repl_commands import (
     _list_memory,
     _search_memory,
 )
+from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.harness.assembly import _extend_registry_with_features
 from xcode.harness.mcp import McpRuntimeRegistry
@@ -95,6 +96,51 @@ def test_runtime_context_provider_injects_relevant_memory(tmp_path: Path) -> Non
     assert injected
     assert all(event.token_count and event.token_count > 0 for event in injected)
     assert all("Provider connection timeout" not in repr(event) for event in trace_events)
+
+
+def test_runtime_context_provider_uses_active_file_for_memory_retrieval(
+    tmp_path: Path,
+) -> None:
+    manager = MemoryManager(
+        tmp_path,
+        user_memory_file=tmp_path / "user-memory" / "MEMORY.md",
+    )
+    assert manager.add_memory_block(
+        (
+            "## Generic retry\n"
+            "- Context/Query: timeout retry failure\n"
+            "- Solution: Retry provider calls\n"
+            "- Files: src/provider.py\n"
+            "- Takeaways: Generic timeout retry\n"
+        )
+    )
+    assert manager.add_memory_block(
+        (
+            "## Active file retry\n"
+            "- Context/Query: timeout retry failure\n"
+            "- Solution: Retry task store lock\n"
+            "- Files: src/xcode/harness/task_store.py\n"
+            "- Takeaways: Prefer the active file-specific memory\n"
+        )
+    )
+    contextual_state = ContextualRetrievalState(tmp_path)
+    contextual_state.record_file("src/xcode/harness/task_store.py")
+    provider = build_runtime_context_provider(
+        tmp_path,
+        (),
+        memory_manager=manager,
+        contextual_state=contextual_state,
+    )
+
+    contexts = provider("timeout retry failure")
+
+    memory_contexts = [context for context in contexts if "<memory>" in context]
+    assert memory_contexts
+    assert "Retry task store lock" in memory_contexts[0]
+    trace_events = manager.drain_trace_events()
+    retrieved = [event for event in trace_events if event.type == "retrieved"]
+    assert retrieved
+    assert retrieved[0].title == "Active file retry"
 
 
 def test_memory_group_registers_search_tool(tmp_path: Path) -> None:
@@ -184,6 +230,45 @@ def test_memory_tool_searches_both_layers(tmp_path: Path) -> None:
     assert any(event.type == "retrieved" for event in trace_events)
     assert any(event.type == "tool_searched" for event in trace_events)
     assert any(event.type == "used" and event.source == "tool" for event in trace_events)
+
+
+def test_memory_tool_accepts_structured_retrieval_context(tmp_path: Path) -> None:
+    manager = MemoryManager(
+        tmp_path,
+        user_memory_file=tmp_path / "user" / "MEMORY.md",
+    )
+    assert manager.add_memory_block(
+        (
+            "## Generic retry\n"
+            "- Context/Query: timeout retry failure\n"
+            "- Solution: Retry provider calls\n"
+            "- Files: src/provider.py\n"
+            "- Takeaways: Generic timeout retry\n"
+        )
+    )
+    assert manager.add_memory_block(
+        (
+            "## Snapshot builder retry\n"
+            "- Context/Query: timeout retry failure\n"
+            "- Solution: Rebuild the snapshot graph before retrying\n"
+            "- Files: src/xcode/harness/snapshot.py\n"
+            "- Scope: harness\n"
+            "- Related-Symbols: SnapshotBuilder\n"
+            "- Takeaways: Prefer harness-specific snapshot handling\n"
+        )
+    )
+    tool = build_memory_tools(manager)[0]
+
+    output = tool.handler(
+        {
+            "query": "timeout retry failure",
+            "symbols": ["SnapshotBuilder"],
+            "modules": ["harness"],
+            "current_file": "src/xcode/harness/snapshot.py",
+        }
+    )
+
+    assert "Snapshot builder retry" in output
 
 
 def test_memory_context_skips_weak_matches_when_below_threshold(tmp_path: Path) -> None:

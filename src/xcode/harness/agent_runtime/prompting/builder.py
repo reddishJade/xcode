@@ -282,7 +282,11 @@ def build_runtime_context_provider(
             if rendered_todos:
                 parts.append(rendered_todos)
         if memory_manager is not None:
-            rendered_memory = _render_memory_context(memory_manager, question)
+            rendered_memory = _render_memory_context(
+                memory_manager,
+                question,
+                contextual_state=contextual_state,
+            )
             if rendered_memory:
                 parts.append(rendered_memory)
         return parts
@@ -290,9 +294,34 @@ def build_runtime_context_provider(
     return provide
 
 
-def _render_memory_context(manager: MemoryManager, question: str) -> str:
+def _render_memory_context(
+    manager: MemoryManager,
+    question: str,
+    *,
+    contextual_state: ContextualRetrievalState | None = None,
+) -> str:
     """将跨层级检索结果渲染为隔离的 system prompt 区域。"""
-    records = manager.search_memory_records(question, limit=3, source="prompt")
+    from xcode.harness.memory import MemoryRetrievalContext
+
+    retrieval_context = MemoryRetrievalContext(
+        query=question,
+        current_file=(
+            contextual_state.active_file
+            if contextual_state is not None
+            else None
+        ),
+        recent_files=(
+            contextual_state.recent_files
+            if contextual_state is not None
+            else ()
+        ),
+    )
+    records = manager.search_memory_records(
+        question,
+        limit=3,
+        source="prompt",
+        retrieval_context=retrieval_context,
+    )
     if not records:
         return ""
     manager.record_injected_records(records)

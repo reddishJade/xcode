@@ -1,6 +1,12 @@
 """项目级与用户级长期记忆管理。"""
 
-from .manager import MemoryLayer, MemoryLayerFilter, MemoryManager, MemoryRerankPolicy
+from .manager import (
+    MemoryLayer,
+    MemoryLayerFilter,
+    MemoryManager,
+    MemoryRerankPolicy,
+    MemoryRetrievalContext,
+)
 from .parsing import (
     MemoryEvidence,
     MemoryRecord,
@@ -16,6 +22,7 @@ __all__ = [
     "MemoryLayerFilter",
     "MemoryManager",
     "MemoryRerankPolicy",
+    "MemoryRetrievalContext",
     "MemoryEvidence",
     "MemoryRecord",
     "MemorySearchEvalCase",

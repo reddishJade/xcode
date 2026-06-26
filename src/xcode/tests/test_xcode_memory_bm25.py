@@ -8,6 +8,7 @@ from rank_bm25 import BM25Okapi
 from xcode.harness.memory import (
     MemoryEvidence,
     MemoryManager,
+    MemoryRetrievalContext,
     MemorySearchEvalCase,
 )
 import pytest
@@ -146,6 +147,69 @@ class TestBM25AndMemory:
         records = manager.search_memory_records("SnapshotBuilder", limit=2)
 
         assert records[0].title == "Snapshot procedure"
+
+    def test_memory_search_uses_structured_current_file_context(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Provider timeout generic\n"
+                "- Context/Query: Timeout retry failure\n"
+                "- Solution: Retry provider calls\n"
+                "- Files: src/provider.py\n"
+                "- Takeaways: Generic timeout memory\n"
+                "\n"
+                "## Active task store fix\n"
+                "- Context/Query: Timeout retry failure\n"
+                "- Solution: Retry task store lock\n"
+                "- Files: src/xcode/harness/task_store.py\n"
+                "- Takeaways: Prefer the current file-specific fix\n"
+            ),
+            encoding="utf-8",
+        )
+
+        records = manager.search_memory_records(
+            "timeout retry failure",
+            limit=2,
+            retrieval_context=MemoryRetrievalContext(
+                query="timeout retry failure",
+                current_file="src/xcode/harness/task_store.py",
+            ),
+        )
+
+        assert records[0].title == "Active task store fix"
+
+    def test_memory_search_uses_structured_symbol_and_module_context(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Generic provider retry\n"
+                "- Context/Query: timeout retry\n"
+                "- Solution: Retry provider calls\n"
+                "- Files: src/provider.py\n"
+                "- Takeaways: Generic timeout retry\n"
+                "\n"
+                "## Snapshot builder issue\n"
+                "- Context/Query: timeout retry\n"
+                "- Solution: Rebuild the snapshot graph before retrying\n"
+                "- Files: src/xcode/harness/snapshot.py\n"
+                "- Scope: harness\n"
+                "- Related-Symbols: SnapshotBuilder\n"
+                "- Takeaways: SnapshotBuilder failures are harness-specific\n"
+            ),
+            encoding="utf-8",
+        )
+
+        records = manager.search_memory_records(
+            "timeout retry",
+            limit=2,
+            retrieval_context=MemoryRetrievalContext(
+                query="timeout retry",
+                symbols=("SnapshotBuilder",),
+                modules=("harness",),
+            ),
+        )
+
+        assert records[0].title == "Snapshot builder issue"
 
     def test_memory_search_supports_chinese_subphrase_match(self) -> None:
         manager = MemoryManager(self.root)

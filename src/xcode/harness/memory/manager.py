@@ -87,6 +87,40 @@ class MemoryRerankPolicy:
     recent_window_days: float = 7.0
     failed_reuse_penalty: float = 0.35
     corrected_reuse_penalty: float = 0.55
+    current_file_bonus: float = 1.2
+    recent_file_bonus: float = 0.35
+    symbol_context_bonus: float = 1.15
+    error_context_bonus: float = 0.75
+    task_phase_bonus: float = 0.3
+    module_context_bonus: float = 0.4
+
+
+@dataclass(frozen=True)
+class MemoryRetrievalContext:
+    """结构化 memory 检索上下文。"""
+
+    query: str
+    scope: str | None = None
+    current_file: str | None = None
+    symbols: tuple[str, ...] = ()
+    error_messages: tuple[str, ...] = ()
+    task_phase: str | None = None
+    modules: tuple[str, ...] = ()
+    recent_files: tuple[str, ...] = ()
+
+    def lexical_text(self) -> str:
+        parts = [self.query]
+        if self.current_file:
+            parts.append(self.current_file)
+        parts.extend(self.recent_files)
+        parts.extend(self.symbols)
+        parts.extend(self.error_messages)
+        if self.task_phase:
+            parts.append(self.task_phase)
+        parts.extend(self.modules)
+        if self.scope:
+            parts.append(self.scope)
+        return "\n".join(part.strip() for part in parts if part and part.strip())
 
 
 class MemoryManager:
@@ -170,6 +204,7 @@ class MemoryManager:
         limit: int = 3,
         scope: str | None = None,
         layer: MemoryLayerFilter = "all",
+        retrieval_context: MemoryRetrievalContext | None = None,
     ) -> list[str]:
         """跨项目级与用户级记忆检索匹配块。"""
         records = self.search_memory_records(
@@ -177,6 +212,7 @@ class MemoryManager:
             limit=limit,
             scope=scope,
             layer=layer,
+            retrieval_context=retrieval_context,
         )
         return [record.block for record in records]
 
@@ -189,10 +225,19 @@ class MemoryManager:
         *,
         source: str = "api",
         track_usage: bool = True,
+        retrieval_context: MemoryRetrievalContext | None = None,
     ) -> list[MemoryRecord]:
         """跨层级执行检索和重排并返回带来源的记录。"""
         started_at = time.perf_counter()
-        candidates = self.retrieve_memory_candidates(query, layer=layer)
+        context = self._coerce_retrieval_context(
+            query,
+            scope=scope,
+            retrieval_context=retrieval_context,
+        )
+        candidates = self.retrieve_memory_candidates(
+            context,
+            layer=layer,
+        )
         if not candidates or limit <= 0:
             if source == "tool":
                 self._emit_trace(
@@ -206,7 +251,7 @@ class MemoryManager:
 
         ranked = self.rerank_memory_candidates(
             candidates,
-            query,
+            context,
             scope=scope,
             limit=limit,
         )
@@ -249,18 +294,20 @@ class MemoryManager:
 
     def retrieve_memory_candidates(
         self,
-        query: str,
+        query: str | MemoryRetrievalContext,
         *,
         layer: MemoryLayerFilter = "all",
     ) -> list[MemoryRecord]:
         """返回 lexical candidate 集，供后续 rerank 使用。"""
+        context = self._coerce_retrieval_context(query)
         records = self.read_memory_records(layer=layer)
         blocks = [record.block for record in records]
-        if not blocks or not query.strip():
+        lexical_query = context.lexical_text()
+        if not blocks or not lexical_query.strip():
             return []
 
         corpus = [tokenize(block) for block in blocks]
-        query_words = tokenize(query)
+        query_words = tokenize(lexical_query)
         bm25 = BM25Okapi(corpus)
         raw = list(bm25.get_scores(query_words))
         if not raw:
@@ -277,7 +324,7 @@ class MemoryManager:
 
         candidates: list[MemoryRecord] = []
         for score, record in zip(scores, records, strict=True):
-            lexical = self._weighted_lexical_score(record, query, bm25_score=score)
+            lexical = self._weighted_lexical_score(record, context, bm25_score=score)
             candidates.append(
                 MemoryRecord(
                     block=record.block,
@@ -315,15 +362,20 @@ class MemoryManager:
     def rerank_memory_candidates(
         self,
         candidates: Sequence[MemoryRecord],
-        query: str,
+        query: str | MemoryRetrievalContext,
         *,
         scope: str | None = None,
         limit: int | None = None,
     ) -> list[MemoryRecord]:
         """对 lexical candidates 应用可替换的 rerank 与 gate。"""
+        context = self._coerce_retrieval_context(query, scope=scope)
         ranked: list[MemoryRecord] = []
         for candidate in candidates:
-            adjusted = self._apply_rerank_policy(candidate, query, scope)
+            adjusted = self._apply_rerank_policy(
+                candidate,
+                context.query,
+                context.scope,
+            )
             if adjusted < self.min_retrieval_score or not self._passes_confidence_gate(
                 candidate
             ):
@@ -420,11 +472,11 @@ class MemoryManager:
     def _weighted_lexical_score(
         self,
         record: MemoryRecord,
-        query: str,
+        context: MemoryRetrievalContext,
         *,
         bm25_score: float,
     ) -> float:
-        query_terms = tokenize_set(query)
+        query_terms = tokenize_set(context.lexical_text())
         if not query_terms:
             return 0.0
         score = bm25_score * self.rerank_policy.lexical_bm25_weight
@@ -458,7 +510,8 @@ class MemoryManager:
             ", ".join(record.related_symbols),
             weight=self.rerank_policy.symbol_weight,
         )
-        score += self._exact_match_bonus(record, query)
+        score += self._exact_match_bonus(record, context.query)
+        score += self._structured_context_bonus(record, context)
         return min(score, self.rerank_policy.lexical_score_cap)
 
     def _field_overlap_score(
@@ -629,6 +682,91 @@ class MemoryManager:
         if len(tokenize(query)) >= 2 and any(normalized_query in field for field in phrase_fields):
             bonus += self.rerank_policy.phrase_match_bonus
         return bonus
+
+    def _structured_context_bonus(
+        self,
+        record: MemoryRecord,
+        context: MemoryRetrievalContext,
+    ) -> float:
+        bonus = 0.0
+        related_files = tuple(item.lower() for item in record.related_files)
+        if context.current_file:
+            current_file = context.current_file.strip().lower()
+            if current_file in related_files:
+                bonus += self.rerank_policy.current_file_bonus
+            elif current_file in {Path(item).name.lower() for item in related_files}:
+                bonus += self.rerank_policy.current_file_bonus * 0.7
+        if context.recent_files:
+            recent_files = {item.strip().lower() for item in context.recent_files if item.strip()}
+            if recent_files.intersection(related_files):
+                bonus += self.rerank_policy.recent_file_bonus
+        related_symbols = {symbol.lower() for symbol in record.related_symbols}
+        if related_symbols and {
+            symbol.strip().lower() for symbol in context.symbols if symbol.strip()
+        }.intersection(related_symbols):
+            bonus += self.rerank_policy.symbol_context_bonus
+        if context.error_messages:
+            phrase_fields = (
+                record.fields.get("context/query", ""),
+                record.fields.get("solution", ""),
+                record.fields.get("takeaways", ""),
+            )
+            for message in context.error_messages:
+                normalized = message.strip().lower()
+                if not normalized:
+                    continue
+                if any(normalized in field.lower() for field in phrase_fields):
+                    bonus += self.rerank_policy.error_context_bonus
+                    break
+        if context.task_phase:
+            phase_terms = tokenize_set(context.task_phase)
+            if phase_terms:
+                phase_text = " ".join(
+                    (
+                        record.fields.get("context/query", ""),
+                        record.fields.get("takeaways", ""),
+                    )
+                )
+                if phase_terms.intersection(tokenize_set(phase_text)):
+                    bonus += self.rerank_policy.task_phase_bonus
+        if context.modules:
+            module_terms = {
+                module.strip().lower() for module in context.modules if module.strip()
+            }
+            scope_text = " ".join(
+                (
+                    record.fields.get("scope", ""),
+                    record.fields.get("files", ""),
+                    ", ".join(record.related_files),
+                )
+            ).lower()
+            if any(module in scope_text for module in module_terms):
+                bonus += self.rerank_policy.module_context_bonus
+        return bonus
+
+    def _coerce_retrieval_context(
+        self,
+        query: str | MemoryRetrievalContext,
+        *,
+        scope: str | None = None,
+        retrieval_context: MemoryRetrievalContext | None = None,
+    ) -> MemoryRetrievalContext:
+        if retrieval_context is not None:
+            return retrieval_context
+        if isinstance(query, MemoryRetrievalContext):
+            if scope is None or query.scope == scope:
+                return query
+            return MemoryRetrievalContext(
+                query=query.query,
+                scope=scope,
+                current_file=query.current_file,
+                symbols=query.symbols,
+                error_messages=query.error_messages,
+                task_phase=query.task_phase,
+                modules=query.modules,
+                recent_files=query.recent_files,
+            )
+        return MemoryRetrievalContext(query=query, scope=scope)
 
     def _quality_rejection_reason(
         self,

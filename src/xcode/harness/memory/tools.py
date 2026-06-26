@@ -10,7 +10,7 @@ from typing import cast
 
 from xcode.harness.skills import ToolInput, ToolSpec
 
-from .manager import MemoryLayerFilter, MemoryManager
+from .manager import MemoryLayerFilter, MemoryManager, MemoryRetrievalContext
 
 
 def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
@@ -23,9 +23,15 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
             return "query is required"
         limit = _parse_limit(data.get("limit", 3))
         scope = _optional_text(data.get("scope"))
+        current_file = _optional_text(data.get("current_file"))
+        task_phase = _optional_text(data.get("task_phase"))
         layer = str(data.get("layer", "all"))
         if layer not in {"all", "project", "user"}:
             return "layer must be one of: all, project, user"
+        symbols = _optional_list(data.get("symbols"))
+        error_messages = _optional_list(data.get("error_messages"))
+        modules = _optional_list(data.get("modules"))
+        recent_files = _optional_list(data.get("recent_files"))
 
         records = manager.search_memory_records(
             query,
@@ -33,6 +39,16 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
             scope=scope,
             layer=cast(MemoryLayerFilter, layer),
             source="tool",
+            retrieval_context=MemoryRetrievalContext(
+                query=query,
+                scope=scope,
+                current_file=current_file,
+                symbols=symbols,
+                error_messages=error_messages,
+                task_phase=task_phase,
+                modules=modules,
+                recent_files=recent_files,
+            ),
         )
         if not records:
             return f"No memory matching {query!r}."
@@ -49,7 +65,10 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
             ),
             input_hint=(
                 'JSON: {"query": "provider timeout", "limit": 3, '
-                '"scope": "providers", "layer": "all"}'
+                '"scope": "providers", "current_file": "src/provider.py", '
+                '"symbols": ["ProviderClient"], "error_messages": ["connection timeout"], '
+                '"task_phase": "debug", "modules": ["providers"], '
+                '"recent_files": ["src/provider.py"], "layer": "all"}'
             ),
             handler=search_memory,
             schema={
@@ -68,6 +87,34 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
                     "scope": {
                         "type": "string",
                         "description": "Optional scope used to rerank matching records.",
+                    },
+                    "current_file": {
+                        "type": "string",
+                        "description": "Current file relevant to the task.",
+                    },
+                    "symbols": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Relevant code symbols for retrieval and reranking.",
+                    },
+                    "error_messages": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Relevant error messages or failure signatures.",
+                    },
+                    "task_phase": {
+                        "type": "string",
+                        "description": "Current task phase, such as debug, implement, or verify.",
+                    },
+                    "modules": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Relevant project modules or subsystems.",
+                    },
+                    "recent_files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Recent files already made relevant by the task.",
                     },
                     "layer": {
                         "type": "string",
@@ -108,3 +155,16 @@ def _optional_text(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _optional_list(value: object) -> tuple[str, ...]:
+    """将工具输入规范化为文本元组。"""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        return (text,) if text else ()
+    if isinstance(value, list):
+        normalized = [str(item).strip() for item in value]
+        return tuple(item for item in normalized if item)
+    return ()

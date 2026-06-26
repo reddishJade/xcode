@@ -135,6 +135,16 @@ class ContextualRetrievalState:
         self._dirty = False
         return rendered
 
+    @property
+    def active_file(self) -> str | None:
+        """返回当前最相关文件。"""
+        return self._active_file
+
+    @property
+    def recent_files(self) -> tuple[str, ...]:
+        """返回最近相关文件列表。"""
+        return tuple(self._files)
+
     def _display(self, path: Path | str) -> str:
         candidate = Path(path)
         if not candidate.is_absolute():
