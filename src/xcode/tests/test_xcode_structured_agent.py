@@ -4,10 +4,12 @@ import asyncio
 import json
 import sys
 import threading
+import tempfile
 
 from unittest.mock import patch
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, cast
 from xcode.harness.config import AgentConfig
 from xcode.ai.events import (
@@ -25,8 +27,10 @@ from xcode.harness.agent_runtime import (
 )
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig
 from xcode.harness.agent_runtime.events import FinalStructuredEvent
+from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.agent.messages import UserMessage
 from xcode.agent.results import TerminationReason
+from xcode.harness.memory import MemoryManager
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
 import pytest
@@ -77,6 +81,32 @@ class ResettableFakeProvider(FakeProvider):
 
 
 class XcodeStructuredAgentTests:
+    def _memory_runtime(self, project_root: Path) -> tuple[AgentRuntimeConfig, MemoryManager]:
+        manager = MemoryManager(
+            project_root,
+            user_memory_file=project_root / "home" / ".xcode" / "memory" / "MEMORY.md",
+        )
+        manager.memory_file.write_text(
+            (
+                "## Provider timeout retry\n"
+                "- Context/Query: Provider timeout retry\n"
+                "- Solution: Retry transient provider failures with backoff\n"
+                "- Files: src/provider.py\n"
+                "- Takeaways: Bound retries and preserve the root cause\n"
+            ),
+            encoding="utf-8",
+        )
+        runtime = AgentRuntimeConfig(
+            project_root=project_root,
+            runtime_context_provider=build_runtime_context_provider(
+                project_root,
+                (),
+                memory_manager=manager,
+            ),
+            memory_manager=manager,
+        )
+        return runtime, manager
+
     def _assert_final_answer(self, event: StructuredAgentEvent, expected: str) -> None:
         """断言最终事件包含指定答案。"""
         assert isinstance(event, FinalStructuredEvent)
@@ -892,6 +922,78 @@ class XcodeStructuredAgentTests:
 
         assert result.termination_reason is TerminationReason.PROVIDER_ERROR
         assert "I encountered an error." in result.answer
+
+    def test_successful_run_persists_memory_adoption_feedback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            runtime, manager = self._memory_runtime(project_root)
+            agent = StructuredAgent(
+                provider=FakeProvider(
+                    [
+                        TextDelta(chunk="done"),
+                        FinalMessage(content="", stop_reason="end_turn"),
+                    ]
+                ),
+                registry=(),
+                runtime=runtime,
+            )
+
+            result = agent.run("provider timeout retry")
+
+            assert result.termination_reason is TerminationReason.COMPLETED
+            record = manager.read_memory_records(layer="project")[0]
+            assert record.injection_count == 1
+            assert record.adoption_count == 1
+            assert record.success_count == 1
+            assert record.utility == 1.0
+            trace_events = manager.drain_trace_events()
+            assert any(event.type == "used" for event in trace_events)
+
+    def test_provider_error_run_persists_memory_failure_without_adoption(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            runtime, manager = self._memory_runtime(project_root)
+
+            def factory(_messages, _tools) -> list[ProviderEvent]:
+                raise RuntimeError("provider down")
+
+            agent = StructuredAgent(
+                provider=FakeProvider(factory),
+                registry=(),
+                runtime=runtime,
+            )
+
+            result = agent.run("provider timeout retry")
+
+            assert result.termination_reason is TerminationReason.PROVIDER_ERROR
+            record = manager.read_memory_records(layer="project")[0]
+            assert record.injection_count == 1
+            assert record.adoption_count == 0
+            assert record.failure_count == 0
+            assert record.last_outcome == "failure"
+            trace_events = manager.drain_trace_events()
+            assert all(event.type != "used" for event in trace_events)
+
+    def test_ambiguous_empty_run_skips_memory_feedback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            runtime, manager = self._memory_runtime(project_root)
+            agent = StructuredAgent(
+                provider=FakeProvider([]),
+                registry=(),
+                runtime=runtime,
+            )
+
+            result = agent.run("provider timeout retry")
+
+            assert result.termination_reason is TerminationReason.COMPLETED
+            assert result.answer == ""
+            record = manager.read_memory_records(layer="project")[0]
+            assert record.injection_count == 0
+            assert record.adoption_count == 0
+            assert record.success_count == 0
+            assert record.failure_count == 0
+            assert record.last_outcome is None
 
 
 if __name__ == "__main__":

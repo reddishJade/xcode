@@ -19,6 +19,7 @@ from ...agent.messages import (
 )
 from ...agent.protocols import AgentTool, AgentToolResult
 from ...agent.types import TextContent, ToolCallContent
+from ...agent.results import TerminationReason
 from .agent_helpers import aiter_to_sync_iter, run_coro_sync
 from .cancellation import CancellationToken
 from .config import (
@@ -518,8 +519,7 @@ class StructuredAgent:
             self._mode.current_mode,
             self._todo_state.snapshot() if self._todo_state is not None else (),
         )
-        if self._memory_manager is not None and final.answer:
-            self._memory_manager.record_explicit_references(final.answer)
+        self._record_memory_feedback(final)
 
         yield _final_event(
             result.steps,
@@ -528,6 +528,38 @@ class StructuredAgent:
         )
 
     # ── 内部 ──
+
+    def _record_memory_feedback(self, final: StructuredAgentResult) -> None:
+        manager = self._memory_manager
+        if manager is None:
+            return
+        if final.answer:
+            manager.record_explicit_references(final.answer)
+        outcome = self._memory_outcome_for_result(final)
+        if outcome is None:
+            return
+        source = f"runtime:{self.session_id}"
+        if outcome == "success":
+            manager.adopt_injected_records(source=source)
+        manager.record_session_outcome(outcome, source=source)
+
+    def _memory_outcome_for_result(
+        self, final: StructuredAgentResult
+    ) -> str | None:
+        answer = final.answer.strip()
+        if final.termination_reason is TerminationReason.COMPLETED:
+            return "success" if answer else None
+        if final.termination_reason in {
+            TerminationReason.PROVIDER_ERROR,
+            TerminationReason.WATCHDOG,
+        }:
+            return "failure"
+        if (
+            final.termination_reason is TerminationReason.STEP_LIMIT
+            and not answer
+        ):
+            return "failure"
+        return None
 
     def _reset_provider_conversation_state(self) -> None:
         reset = getattr(self.provider, "reset_conversation_state", None)
