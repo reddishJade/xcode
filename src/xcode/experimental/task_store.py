@@ -462,8 +462,8 @@ def _update_task(store: TaskStore, args: ToolInput) -> str:
 
     current = store.get(task_id)
     payload = dict(current.payload)
-    if args.get("blocked_by"):
-        payload["blocked_by"] = args.get("blocked_by")
+    if "blocked_by" in args:
+        payload["blocked_by"] = args["blocked_by"]
 
     try:
         task = store.update(
