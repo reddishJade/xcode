@@ -117,8 +117,8 @@ class XcodeRuntimeConfigMergeSemanticsTests:
 
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_unknown_key_handling_unchanged(self) -> None:
-        """未知键被静默忽略（与旧行为一致）。"""
+    def test_unknown_key_rejected_by_pydantic(self) -> None:
+        """Pydantic 拒绝未知配置字段。"""
         root = Path(tempfile.mkdtemp())
         try:
             config_path = root / "xcode.config.json"
@@ -126,9 +126,8 @@ class XcodeRuntimeConfigMergeSemanticsTests:
                 '{"unknown_key":"value"}',
                 encoding="utf-8",
             )
-            config = discover_runtime_config(root)
-            # 不抛出异常即为通过
-            assert config is not None
+            with pytest.raises(ValueError, match="unknown_key"):
+                discover_runtime_config(root)
         finally:
             import shutil
 
@@ -236,7 +235,6 @@ class XcodeRuntimeConfigTests:
                 '"paths":{"sessions_dir":"sessions",'
                 '"skills_dir":"skills"},'
                 '"observability":{"audit_path":"audit.jsonl"},'
-                '"tools":{"network_commands":"deny"},'
                 '"skills":{},'
                 '"prompt":{"modules":["identity","tools"]},'
                 '"daemon":{"enabled":true,"interval_seconds":15},'

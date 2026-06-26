@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import types
-from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal, Union, get_origin, get_type_hints
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 ProviderTransport = Literal[
     "openai_chat",
@@ -42,8 +42,8 @@ DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
 )
 
 
-@dataclass
-class AgentConfig:
+class AgentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     max_steps: int = 20
     execution_mode: ExecutionMode = "act"
     compact_threshold: int = 0
@@ -54,8 +54,8 @@ class AgentConfig:
     watchdog_repeated_tool_limit: int = 3
 
 
-@dataclass
-class RequestHygieneConfig:
+class RequestHygieneConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     enabled: bool = True
     max_tool_result_bytes: int = 8000
     max_tool_arg_length: int = 1000
@@ -63,8 +63,8 @@ class RequestHygieneConfig:
     keep_tail_lines: int = 50
 
 
-@dataclass
-class ModelProfileRuntimeConfig:
+class ModelProfileRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     transport: ProviderTransport = "openai_chat"
     chat_model: str = "deepseek-v4-flash"
     base_url: str = "https://api.deepseek.com"
@@ -76,9 +76,9 @@ class ModelProfileRuntimeConfig:
     response_format: dict[str, Any] | None = None
 
 
-@dataclass
-class ProviderRuntimeConfig:
-    model_profiles: dict[str, ModelProfileRuntimeConfig] = field(
+class ProviderRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model_profiles: dict[str, ModelProfileRuntimeConfig] = Field(
         default_factory=lambda: {
             PROFILE_MAIN: ModelProfileRuntimeConfig(),
             PROFILE_SUBAGENT: ModelProfileRuntimeConfig(),
@@ -87,8 +87,8 @@ class ProviderRuntimeConfig:
     )
 
 
-@dataclass
-class SecurityRuntimeConfig:
+class SecurityRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     permission_mode: PermissionMode = "normal"
     sandbox_mode: bool = False
     approval_policy: str = "never"
@@ -201,39 +201,39 @@ def _validate_instruction_sources(raw: dict[str, Any]) -> None:
                 )
 
 
-@dataclass
-class ToolsRuntimeConfig:
+class ToolsRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     subagent_tool_allowlist: tuple[str, ...] = ()
     shell: str = "auto"
 
 
-@dataclass
-class SkillsRuntimeConfig:
+class SkillsRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     trust_project_skills: bool = False
 
 
-@dataclass
-class PromptRuntimeConfig:
+class PromptRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     modules: tuple[str, ...] = DEFAULT_PROMPT_MODULES
     instructions: tuple[dict, ...] = ()
 
 
-@dataclass
-class PathsRuntimeConfig:
+class PathsRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     sessions_dir: Path | None = None
     skills_dir: Path | None = None
     progress_summary: Path = Path(".local/progress_summary.md")
 
 
-@dataclass
-class ObservabilityRuntimeConfig:
+class ObservabilityRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     audit_path: Path | None = None
 
 
-@dataclass(frozen=True)
-class ExternalHookRuntimeConfig:
+class ExternalHookRuntimeConfig(BaseModel):
     """单个受信任外部命令 hook 声明。"""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
     event: HookEventName
     command: tuple[str, ...]
     matcher: str | None = None
@@ -244,109 +244,65 @@ class ExternalHookRuntimeConfig:
     source: str = ""
 
 
-@dataclass
-class HooksRuntimeConfig:
+class HooksRuntimeConfig(BaseModel):
     """外部命令 hook 配置集合。"""
 
+    model_config = ConfigDict(extra="forbid")
     entries: tuple[ExternalHookRuntimeConfig, ...] = ()
 
 
-@dataclass
-class DaemonRuntimeConfig:
+class DaemonRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     enabled: bool = False
     interval_seconds: int = 30
 
 
-@dataclass
-class ExperimentalRuntimeConfig:
+class ExperimentalRuntimeConfig(BaseModel):
     """默认关闭的实验性能力开关。"""
 
+    model_config = ConfigDict(extra="forbid")
     tasks: bool = False
     mailbox: bool = False
     progress: bool = False
     worktree: bool = False
 
 
-@dataclass
-class XcodeRuntimeConfig:
-    provider: ProviderRuntimeConfig = field(default_factory=ProviderRuntimeConfig)
-    agent: AgentConfig = field(default_factory=AgentConfig)
-    tools: ToolsRuntimeConfig = field(default_factory=ToolsRuntimeConfig)
-    skills: SkillsRuntimeConfig = field(default_factory=SkillsRuntimeConfig)
-    prompt: PromptRuntimeConfig = field(default_factory=PromptRuntimeConfig)
-    paths: PathsRuntimeConfig = field(default_factory=PathsRuntimeConfig)
-    observability: ObservabilityRuntimeConfig = field(
+class XcodeRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: ProviderRuntimeConfig = Field(default_factory=ProviderRuntimeConfig)
+    agent: AgentConfig = Field(default_factory=AgentConfig)
+    tools: ToolsRuntimeConfig = Field(default_factory=ToolsRuntimeConfig)
+    skills: SkillsRuntimeConfig = Field(default_factory=SkillsRuntimeConfig)
+    prompt: PromptRuntimeConfig = Field(default_factory=PromptRuntimeConfig)
+    paths: PathsRuntimeConfig = Field(default_factory=PathsRuntimeConfig)
+    observability: ObservabilityRuntimeConfig = Field(
         default_factory=ObservabilityRuntimeConfig
     )
-    hooks: HooksRuntimeConfig = field(default_factory=HooksRuntimeConfig)
-    daemon: DaemonRuntimeConfig = field(default_factory=DaemonRuntimeConfig)
-    experimental: ExperimentalRuntimeConfig = field(
+    hooks: HooksRuntimeConfig = Field(default_factory=HooksRuntimeConfig)
+    daemon: DaemonRuntimeConfig = Field(default_factory=DaemonRuntimeConfig)
+    experimental: ExperimentalRuntimeConfig = Field(
         default_factory=ExperimentalRuntimeConfig
     )
-    request_hygiene: RequestHygieneConfig = field(default_factory=RequestHygieneConfig)
-    security: SecurityRuntimeConfig = field(default_factory=SecurityRuntimeConfig)
+    request_hygiene: RequestHygieneConfig = Field(default_factory=RequestHygieneConfig)
+    security: SecurityRuntimeConfig = Field(default_factory=SecurityRuntimeConfig)
 
 
 # ── 序列化 / 反序列化 ──
 
 
 def _config_from_dict(data: dict[str, Any]) -> XcodeRuntimeConfig:
-    """从 dict 递归构建 XcodeRuntimeConfig。"""
+    """从 dict 使用 Pydantic 模型校验构建 XcodeRuntimeConfig。
 
-    def _build(cls: type, d: dict[str, Any]) -> Any:
-        field_types = get_type_hints(cls)
-        kwargs: dict[str, Any] = {}
-        for name, ftype in field_types.items():
-            if name not in d:
-                continue
-            val = d[name]
-            kwargs[name] = _resolve_value(ftype, val)
-        return cls(**kwargs)
-
-    def _resolve_value(ftype: Any, val: Any) -> Any:
-        if val is None:
-            return None
-
-        origin = get_origin(ftype)
-        args = getattr(ftype, "__args__", ())
-
-        # 处理 Union 类型 (如 Path | None, str | int, PathsRuntimeConfig | None)
-        if origin is types.UnionType or origin is Union:
-            non_none_args = [a for a in args if a is not type(None)]
-            for candidate in non_none_args:
-                try:
-                    return _resolve_value(candidate, val)
-                except (TypeError, ValueError):
-                    continue
-            if non_none_args:
-                return _resolve_value(non_none_args[0], val)
-            return val
-
-        # 处理嵌套 dataclass
-        if hasattr(ftype, "__dataclass_fields__"):
-            return _build(ftype, val)
-
-        # 处理 Path
-        if ftype is Path or (isinstance(ftype, type) and issubclass(ftype, Path)):
-            return Path(val) if val else None
-
-        # 处理元组
-        if origin is tuple:
-            if isinstance(val, list):
-                item_type = args[0] if args else object
-                return tuple(_resolve_value(item_type, item) for item in val)
-            return val
-
-        # 处理字典
-        if origin is dict:
-            if args and len(args) >= 2:
-                vtype = args[1]
-                return {k: _resolve_value(vtype, v) for k, v in val.items()}
-            return val
-
-        return val
-
-    return _build(XcodeRuntimeConfig, data)
+    Pydantic 自动校验类型、枚举值、嵌套结构，并拒绝未知字段。
+    """
+    try:
+        return XcodeRuntimeConfig.model_validate(data)
+    except ValidationError as e:
+        lines = ["配置校验失败，请检查字段路径和来源配置层:"]
+        for err in e.errors():
+            path = ".".join(str(p) for p in err["loc"])
+            lines.append(f"  {path}: {err['msg']} (type={err['type']})")
+        raise ValueError("\n".join(lines)) from e
 
 
 # ── 配置发现（基于 raw dict 合并，仅覆盖显式指定的键）──
@@ -565,8 +521,8 @@ def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
         security_updates["approval_policy"] = parsed_approval_policy
 
     if security_updates:
-        security = replace(config.security, **security_updates)
-        config = replace(config, security=security)
+        security = config.security.model_copy(update=security_updates)
+        config = config.model_copy(update={"security": security})
 
     return config
 
