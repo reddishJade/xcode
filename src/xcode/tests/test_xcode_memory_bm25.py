@@ -514,6 +514,40 @@ class TestBM25AndMemory:
 
         assert all(result.passed for result in results)
 
+    def test_memory_search_eval_rejects_stale_or_conflicting_titles(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Current provider retry\n"
+                "- Context/Query: Provider timeout retry\n"
+                "- Solution: Retry provider calls with bounded backoff\n"
+                "- Files: core/providers/factory.py\n"
+                "- Takeaways: Current provider retry policy\n"
+                "\n"
+                "## Old provider retry workaround\n"
+                "- Context/Query: Provider timeout retry\n"
+                "- Solution: Retry provider calls forever\n"
+                "- Files: legacy/provider.py\n"
+                "- Takeaways: Old stale workaround should not be accepted in eval\n"
+            ),
+            encoding="utf-8",
+        )
+
+        results = manager.evaluate_search(
+            [
+                MemorySearchEvalCase(
+                    query="provider timeout retry",
+                    expected_title_contains="Current provider retry",
+                    excluded_title_contains=("Old provider retry",),
+                )
+            ],
+            limit=2,
+        )
+
+        assert len(results) == 1
+        assert results[0].passed is False
+        assert results[0].excluded_title_hits == ("Old provider retry workaround",)
+
     def test_memory_manager_validation_and_archive(self) -> None:
         manager = MemoryManager(self.root)
 

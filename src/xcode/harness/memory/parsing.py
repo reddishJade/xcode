@@ -66,6 +66,7 @@ class MemorySearchEvalCase:
     query: str
     expected_title_contains: str
     scope: str | None = None
+    excluded_title_contains: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,7 @@ class MemorySearchEvalResult:
     passed: bool
     expected_title_contains: str
     matched_titles: tuple[str, ...]
+    excluded_title_hits: tuple[str, ...] = ()
 
 
 type MemoryTraceEventType = Literal[

@@ -430,12 +430,19 @@ class MemoryManager:
             )
             titles = tuple(r.title for r in records)
             expected = case.expected_title_contains
+            excluded_hits = tuple(
+                title
+                for title in titles
+                if any(blocked in title for blocked in case.excluded_title_contains)
+            )
             results.append(
                 MemorySearchEvalResult(
                     query=case.query,
-                    passed=any(expected in title for title in titles),
+                    passed=any(expected in title for title in titles)
+                    and not excluded_hits,
                     expected_title_contains=expected,
                     matched_titles=titles,
+                    excluded_title_hits=excluded_hits,
                 )
             )
         return results
