@@ -288,8 +288,12 @@ class EvalPipelineTests:
             ).read_memory_records(layer="project")
             assert persisted[0].retrieval_count == 1
             assert persisted[0].injection_count == 1
-            assert persisted[0].success_count == 0
+            assert persisted[0].adoption_count == 1
+            assert persisted[0].success_count == 1
+            assert persisted[0].utility == 1.0
             assert persisted[0].last_outcome == "success"
+            trace_types = [event["type"] for event in trial.metrics["memory_trace"]]
+            assert "used" in trace_types
 
     def test_eval_runner_persists_explicit_memory_references(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -317,8 +321,8 @@ class EvalPipelineTests:
                 user_memory_file=root / "home" / ".xcode" / "memory" / "MEMORY.md",
             ).read_memory_records(layer="project")
             assert persisted[0].reference_count == 1
-            assert persisted[0].adoption_count == 0
-            assert persisted[0].success_count == 0
+            assert persisted[0].adoption_count == 1
+            assert persisted[0].success_count == 1
 
     def test_build_memory_metrics_scores_expected_and_stale_titles(self) -> None:
         task = EvalTask(

@@ -91,7 +91,6 @@ def test_runtime_context_provider_injects_relevant_memory(tmp_path: Path) -> Non
     assert manager.get_last_used_at(record) is not None
     trace_events = manager.drain_trace_events()
     assert any(event.type == "retrieved" for event in trace_events)
-    assert any(event.type == "used" and event.source == "prompt" for event in trace_events)
     injected = [event for event in trace_events if event.type == "injected"]
     assert injected
     assert all(event.token_count and event.token_count > 0 for event in injected)
@@ -229,7 +228,6 @@ def test_memory_tool_searches_both_layers(tmp_path: Path) -> None:
     trace_events = manager.drain_trace_events()
     assert any(event.type == "retrieved" for event in trace_events)
     assert any(event.type == "tool_searched" for event in trace_events)
-    assert any(event.type == "used" and event.source == "tool" for event in trace_events)
 
 
 def test_memory_tool_accepts_structured_retrieval_context(tmp_path: Path) -> None:

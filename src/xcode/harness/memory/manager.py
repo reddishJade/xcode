@@ -50,6 +50,7 @@ class _SessionMemoryUsage:
     injected: bool = False
     referenced: bool = False
     adopted: bool = False
+    score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -268,17 +269,6 @@ class MemoryManager:
                     source=source,
                 )
             )
-            if track_usage:
-                self._emit_trace(
-                    MemoryTraceEvent(
-                        type="used",
-                        memory_id=record.memory_id,
-                        layer=record.layer,
-                        title=record.title,
-                        score=record.score,
-                        source=source,
-                    )
-                )
         if source == "tool":
             self._emit_trace(
                 MemoryTraceEvent(
@@ -1367,9 +1357,57 @@ class MemoryManager:
                 )
             )
 
-    def record_adopted_records(self, records: Sequence[MemoryRecord]) -> None:
+    def record_adopted_records(
+        self,
+        records: Sequence[MemoryRecord],
+        *,
+        source: str = "session",
+    ) -> None:
         """记录被 agent 明确采用的记忆。"""
-        self._mark_session_usage(records, usage="adopted")
+        adopted_records: list[MemoryRecord] = []
+        for record in records:
+            key = (record.layer, record.memory_id)
+            state = self._session_usage.setdefault(key, _SessionMemoryUsage())
+            if state.adopted:
+                continue
+            state.adopted = True
+            if record.score > 0:
+                state.score = record.score
+            adopted_records.append(record)
+        for record in adopted_records:
+            state = self._session_usage[(record.layer, record.memory_id)]
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="used",
+                    memory_id=record.memory_id,
+                    layer=record.layer,
+                    title=record.title,
+                    score=state.score if state.score is not None else record.score,
+                    source=source,
+                )
+            )
+
+    def adopt_injected_records(self, *, source: str = "session") -> int:
+        """将当前 session 中已注入的记忆按保守策略标记为采用。"""
+        records_by_layer = {
+            current_layer: {
+                record.memory_id: record
+                for record in self.read_memory_records(layer=current_layer)
+            }
+            for current_layer in self._selected_layers("all")
+        }
+        adopted_records: list[MemoryRecord] = []
+        for (layer, memory_id), usage in self._session_usage.items():
+            if not usage.injected or usage.adopted:
+                continue
+            record = records_by_layer.get(layer, {}).get(memory_id)
+            if record is None:
+                continue
+            adopted_records.append(record)
+        if not adopted_records:
+            return 0
+        self.record_adopted_records(adopted_records, source=source)
+        return len(adopted_records)
 
     def record_explicit_references(self, text: str) -> int:
         """根据最终回答中的显式 memory_id 或标题标记被引用的记忆。"""
@@ -1443,6 +1481,8 @@ class MemoryManager:
                 state.referenced = True
             elif usage == "adopted":
                 state.adopted = True
+            if record.score > 0:
+                state.score = record.score
 
     def _feedback_fields_for_record(
         self,

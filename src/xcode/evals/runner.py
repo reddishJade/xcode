@@ -104,7 +104,6 @@ class EvalRunner:
                     trace.record_error(exc)
 
             after_evidence = _collect_file_evidence(task, project_root)
-            memory_trace = _collect_memory_trace(app)
             evidence_graders = _grade_file_evidence(
                 task, before_evidence, after_evidence
             )
@@ -127,6 +126,7 @@ class EvalRunner:
 
             success = all(grader.passed for grader in graders)
             _record_memory_feedback(app, success=success, trial_id=trial_id)
+            memory_trace = _collect_memory_trace(app)
             tool_call_count = sum(1 for event in events if event.type == "tool_use")
             tool_error_count = sum(
                 1
@@ -386,6 +386,8 @@ def _record_memory_feedback(app: XcodeApp, *, success: bool, trial_id: str) -> N
     manager = getattr(app, "memory_manager", None)
     if manager is None or not hasattr(manager, "record_session_outcome"):
         return
+    if success and hasattr(manager, "adopt_injected_records"):
+        manager.adopt_injected_records(source=f"eval:{trial_id}")
     outcome = "success" if success else "failure"
     manager.record_session_outcome(outcome, source=f"eval:{trial_id}")
 

@@ -213,11 +213,6 @@ def parse_memory_type(
         for token in ("incident", "error", "bug", "crash", "timeout", "failure")
     ):
         return "episodic"
-    if any(
-        token in combined
-        for token in ("always", "steps", "procedure", "workflow", "checklist", "run ")
-    ) or title.lower().startswith("how to"):
-        return "procedural"
     return "semantic"
 
 

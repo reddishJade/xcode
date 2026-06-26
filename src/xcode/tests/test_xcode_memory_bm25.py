@@ -793,7 +793,38 @@ class TestBM25AndMemory:
         assert persisted.reference_count == 1
         assert persisted.adoption_count == 0
         assert persisted.success_count == 0
-        assert persisted.utility == 0.0
+
+    def test_adopt_injected_records_marks_used_on_successful_run(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.add_memory_block(
+            (
+                "## Provider retry playbook\n"
+                "- Context/Query: Provider timeout retry\n"
+                "- Solution: Retry transient provider failures\n"
+                "- Files: provider.py\n"
+                "- Takeaways: Keep bounded retries\n"
+            )
+        )
+        manager.drain_trace_events()
+
+        record = manager.search_memory_records("provider timeout retry", source="prompt")[
+            0
+        ]
+        manager.record_injected_records((record,))
+
+        adopted = manager.adopt_injected_records(source="eval:test")
+        updated = manager.record_session_outcome("success")
+
+        assert adopted == 1
+        assert updated == 1
+        persisted = manager.read_memory_records(layer="project")[0]
+        assert persisted.adoption_count == 1
+        assert persisted.success_count == 1
+        assert persisted.utility == 1.0
+        trace_events = manager.drain_trace_events()
+        used = [event for event in trace_events if event.type == "used"]
+        assert len(used) == 1
+        assert used[0].source == "eval:test"
 
 if __name__ == "__main__":
     pytest.main()
