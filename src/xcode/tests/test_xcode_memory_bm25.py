@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import tempfile
 from pathlib import Path
 
@@ -258,6 +259,38 @@ class TestBM25AndMemory:
         records = manager.search_memory_records("timeout retry failure", limit=2)
 
         assert records[0].title == "Current"
+        assert records[0].score > records[1].score
+
+    def test_memory_search_demotes_stale_records(self) -> None:
+        manager = MemoryManager(self.root)
+        now = datetime.now(timezone.utc)
+        stale = (now - timedelta(days=180)).isoformat()
+        fresh = (now - timedelta(days=2)).isoformat()
+        manager.memory_file.write_text(
+            (
+                "## Stale timeout fix\n"
+                "- Context/Query: provider timeout retry failure\n"
+                "- Solution: old retry plan\n"
+                "- Files: provider.py\n"
+                "- Takeaways: stale memory\n"
+                f"- Modified: {stale}\n"
+                "\n"
+                "## Fresh timeout fix\n"
+                "- Context/Query: provider timeout retry failure\n"
+                "- Solution: current retry plan\n"
+                "- Files: provider.py\n"
+                "- Takeaways: fresh memory\n"
+                f"- Modified: {fresh}\n"
+            ),
+            encoding="utf-8",
+        )
+
+        records = manager.search_memory_records(
+            "provider timeout retry failure",
+            limit=2,
+        )
+
+        assert records[0].title == "Fresh timeout fix"
         assert records[0].score > records[1].score
 
     def test_legacy_record_gets_stable_id_and_inferred_type(self) -> None:

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from html import escape
 import json
 import re
@@ -80,6 +81,10 @@ class MemoryRerankPolicy:
     provenance_bonus: float = 1.1
     scope_hit_multiplier: float = 1.35
     scope_mismatch_multiplier: float = 0.75
+    freshness_half_life_days: float = 30.0
+    freshness_multiplier_min: float = 0.55
+    freshness_multiplier_max: float = 1.1
+    recent_window_days: float = 7.0
 
 
 class MemoryManager:
@@ -497,6 +502,7 @@ class MemoryManager:
             )
         if scope:
             adjusted *= self._scope_multiplier(candidate, scope)
+        adjusted *= self._freshness_multiplier(candidate)
         query_terms = set(tokenize(query))
         provenance_text = " ".join(
             candidate.fields.get(key, "")
@@ -520,6 +526,45 @@ class MemoryManager:
         if candidate.fields.get("scope"):
             return self.rerank_policy.scope_mismatch_multiplier
         return 1.0
+
+    def _freshness_multiplier(self, record: MemoryRecord) -> float:
+        timestamp = self._record_timestamp(record)
+        if timestamp is None:
+            return 1.0
+        age_days = max((time.time() - timestamp) / 86400.0, 0.0)
+        half_life_days = max(self.rerank_policy.freshness_half_life_days, 1.0)
+        recent_window_days = max(self.rerank_policy.recent_window_days, 0.0)
+        max_multiplier = max(self.rerank_policy.freshness_multiplier_max, 1.0)
+        min_multiplier = min(self.rerank_policy.freshness_multiplier_min, 1.0)
+        if age_days <= recent_window_days:
+            if recent_window_days == 0:
+                return max_multiplier
+            boost_ratio = 1.0 - age_days / recent_window_days
+            return 1.0 + (max_multiplier - 1.0) * boost_ratio
+        decay = 0.5 ** ((age_days - recent_window_days) / half_life_days)
+        return max(min_multiplier, decay)
+
+    def _record_timestamp(self, record: MemoryRecord) -> float | None:
+        for value in (record.modified_at, record.created_at):
+            parsed = self._parse_timestamp(value)
+            if parsed is not None:
+                return parsed
+        return self.get_last_used_at(record)
+
+    def _parse_timestamp(self, value: str | None) -> float | None:
+        if not value:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        normalized = text.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
 
     def _exact_match_bonus(self, record: MemoryRecord, query: str) -> float:
         bonus = 0.0
