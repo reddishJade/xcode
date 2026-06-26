@@ -273,10 +273,11 @@ class TestHeartbeatDaemon:
             agent_id="test_agent",
         )
         infos = {t.name: t for t in daemon2.list_daemon_tasks()}
-        # my_custom 名字被恢复为 persistent，但 callable 未注册（registered=False 等价于不在 _tasks）
-        # 由于 callable 未重新注册，它不在 _tasks 中
-        assert "my_custom" not in infos
-        # 但持久化文件仍含其名
+        # my_custom 名字被恢复为 persistent，但 callable 未注册
+        assert "my_custom" in infos
+        assert infos["my_custom"].registered is False
+        assert infos["my_custom"].persistent is True
+        # 持久化文件仍含其名
         import json
 
         data = json.loads(tasks_file.read_text(encoding="utf-8"))

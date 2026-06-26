@@ -145,16 +145,33 @@ class HeartbeatDaemon:
         return True
 
     def list_daemon_tasks(self) -> list[DaemonTaskInfo]:
-        """返回当前注册的任务清单。"""
-        return [
-            DaemonTaskInfo(
-                name=name,
-                registered=True,
-                persistent=name in self._persistent_names,
-                builtin=name in _BUILTIN_TASKS,
+        """返回当前注册的任务清单。
+
+        包含已注册（有 callable）和仅持久化名称（callable pending）的任务。
+        """
+        seen: set[str] = set()
+        result: list[DaemonTaskInfo] = []
+        for name in self._tasks:
+            seen.add(name)
+            result.append(
+                DaemonTaskInfo(
+                    name=name,
+                    registered=True,
+                    persistent=name in self._persistent_names,
+                    builtin=name in _BUILTIN_TASKS,
+                )
             )
-            for name in self._tasks
-        ]
+        for name in sorted(self._persistent_names):
+            if name not in seen and name not in _BUILTIN_TASKS:
+                result.append(
+                    DaemonTaskInfo(
+                        name=name,
+                        registered=False,
+                        persistent=True,
+                        builtin=False,
+                    )
+                )
+        return result
 
     def register_callback(
         self,
