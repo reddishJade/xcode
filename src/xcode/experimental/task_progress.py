@@ -69,7 +69,7 @@ def save_progress(
         lines.extend(["", "## Current Active Step:", f"- {in_progress_steps[0]}"])
 
     summary_content = "\n".join(lines) + "\n"
-    target = summary_path or (task_store.root / "claude-progress.txt")
+    target = summary_path or (task_store.root / ".local" / "progress_summary.md")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(summary_content, encoding="utf-8")
 

@@ -44,10 +44,10 @@ class TestTaskProgress:
         saved_checklist = updated_task.payload.get("feature_list")
         assert saved_checklist == checklist
 
-        progress_txt = self.root / "claude-progress.txt"
-        assert progress_txt.exists()
+        progress_file = self.root / ".local" / "progress_summary.md"
+        assert progress_file.exists()
 
-        content = progress_txt.read_text(encoding="utf-8")
+        content = progress_file.read_text(encoding="utf-8")
         assert "Progress: 33.3%" in content
         assert "Step 1: Design schema" in content
         assert "- [/] Step 2: Implement API" in content
@@ -76,7 +76,7 @@ class TestTaskProgress:
             summary_path=custom,
         )
         assert custom.exists()
-        assert (self.root / "claude-progress.txt").exists() is False
+        assert (self.root / ".local" / "progress_summary.md").exists() is False
 
     def test_build_progress_tools_uses_configured_summary_path(self) -> None:
         """build_progress_tools 的 summary_path 参数透传到 save_progress handler。"""
@@ -93,7 +93,7 @@ class TestTaskProgress:
             }
         )
         assert custom.exists()
-        assert (self.root / "claude-progress.txt").exists() is False
+        assert (self.root / ".local" / "progress_summary.md").exists() is False
 
     def test_resume_missing_or_unknown_task(self) -> None:
         resumed = resume_task(self.store, 999)
@@ -123,7 +123,7 @@ class TestTaskProgress:
         resumed = tools["resume_task_progress"].handler({"task_id": 1})
         assert '"title": "Index files"' in resumed
         assert '"status": "completed"' in resumed
-        assert (self.root / "claude-progress.txt").exists()
+        assert (self.root / ".local" / "progress_summary.md").exists()
 
     def test_start_run_dispatches_subtasks_and_can_resume(self) -> None:
         task = self.store.create("Implement orchestration")

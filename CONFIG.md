@@ -133,7 +133,7 @@ xcode config delete subagent                          # 删除 subagent profile
 |---|---|---|---|
 | `sessions_dir` | string/null | `null` | REPL 会话目录；未配置时 CLI 使用 `.local/sessions` |
 | `skills_dir` | string/null | `null` | 最高优先级 Skill 扫描目录；相对路径按项目根目录解析 |
-| `progress_summary` | string/null | `null` | progress 摘要路径；当前未配置时底层回退到项目根 `claude-progress.txt`，计划改为 `.local/progress_summary.md` |
+| `progress_summary` | string | `".local/progress_summary.md"` | progress 摘要路径；相对路径按项目根目录解析 |
 
 固定本地路径：`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`。
 

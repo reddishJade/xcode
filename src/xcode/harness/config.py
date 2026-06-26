@@ -222,7 +222,7 @@ class PromptRuntimeConfig:
 class PathsRuntimeConfig:
     sessions_dir: Path | None = None
     skills_dir: Path | None = None
-    progress_summary: Path | None = None
+    progress_summary: Path = Path(".local/progress_summary.md")
 
 
 @dataclass
