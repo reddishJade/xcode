@@ -164,6 +164,39 @@ class TestBM25AndMemory:
         assert records
         assert records[0].title == "中文超时处理"
 
+    def test_memory_candidate_retrieval_and_rerank_interfaces_preserve_order(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Provider timeout generic\n"
+                "- Context/Query: Timeout retry failure\n"
+                "- Solution: Retry provider calls\n"
+                "- Files: src/provider.py\n"
+                "- Takeaways: Generic timeout memory\n"
+                "\n"
+                "## Task store lock\n"
+                "- Context/Query: Timeout retry failure\n"
+                "- Solution: Retry task store lock\n"
+                "- Files: src/xcode/harness/task_store.py\n"
+                "- Takeaways: Exact path should dominate\n"
+            ),
+            encoding="utf-8",
+        )
+
+        candidates = manager.retrieve_memory_candidates(
+            "src/xcode/harness/task_store.py",
+        )
+        ranked = manager.rerank_memory_candidates(
+            candidates,
+            "src/xcode/harness/task_store.py",
+            limit=2,
+        )
+
+        assert len(candidates) == 2
+        assert candidates[0].title == "Task store lock"
+        assert ranked[0].title == "Task store lock"
+        assert ranked[0].score >= candidates[0].score
+
     def test_memory_search_demotes_deprecated_records(self) -> None:
         from xcode.harness.memory.parsing import adjust_score, parse_memory_record
 

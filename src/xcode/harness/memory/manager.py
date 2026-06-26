@@ -152,11 +152,10 @@ class MemoryManager:
         source: str = "api",
         track_usage: bool = True,
     ) -> list[MemoryRecord]:
-        """跨层级执行 BM25 检索并返回带来源的记录。"""
+        """跨层级执行检索和重排并返回带来源的记录。"""
         started_at = time.perf_counter()
-        records = self.read_memory_records(layer=layer)
-        blocks = [record.block for record in records]
-        if not blocks or not query.strip() or limit <= 0:
+        candidates = self.retrieve_memory_candidates(query, layer=layer)
+        if not candidates or limit <= 0:
             if source == "tool":
                 self._emit_trace(
                     MemoryTraceEvent(
@@ -167,71 +166,17 @@ class MemoryManager:
                 )
             return []
 
-        corpus = [tokenize(block) for block in blocks]
-        query_words = tokenize(query)
-
-        bm25 = BM25Okapi(corpus)
-        raw = list(bm25.get_scores(query_words))
-
-        # 归一化 BM25 得分到 [0,1]。rank_bm25 的标准 IDF 在小语料下
-        # 得分差异可能极小或全零，此时退化到 term 命中率来保持区分度
-        if not raw:
-            scores = []
-        elif max(raw) - min(raw) > 1e-6:
-            lo, hi = min(raw), max(raw)
-            scores = [(s - lo) / (hi - lo) for s in raw]
-        else:
-            query_set = set(query_words)
-            scores = [
-                sum(q in b for q in query_set) / max(len(query_words), 1)
-                for b in corpus
-            ]
-
-        ranked: list[MemoryRecord] = []
-        for score, record in zip(scores, records, strict=True):
-            lexical = self._weighted_lexical_score(record, query, bm25_score=score)
-            adjusted = adjust_score(lexical, record, query, scope)
-            if adjusted >= self.min_retrieval_score and self._passes_confidence_gate(
-                record
-            ):
-                ranked.append(
-                    MemoryRecord(
-                        block=record.block,
-                        title=record.title,
-                        fields=record.fields,
-                        memory_id=record.memory_id,
-                        memory_type=record.memory_type,
-                        scope=record.scope,
-                        source_session=record.source_session,
-                        related_files=record.related_files,
-                        related_symbols=record.related_symbols,
-                        created_at=record.created_at,
-                        modified_at=record.modified_at,
-                        confidence_value=record.confidence_value,
-                        status=record.status,
-                        validity=record.validity,
-                        supersedes=record.supersedes,
-                        evidence=record.evidence,
-                        retrieval_count=record.retrieval_count,
-                        injection_count=record.injection_count,
-                        reference_count=record.reference_count,
-                        adoption_count=record.adoption_count,
-                        success_count=record.success_count,
-                        failure_count=record.failure_count,
-                        correction_count=record.correction_count,
-                        utility=record.utility,
-                        last_outcome=record.last_outcome,
-                        score=round(adjusted, 6),
-                        layer=record.layer,
-                    )
-                )
-        ranked.sort(key=lambda r: (-r.score, r.title))
-        limited = ranked[:limit]
+        ranked = self.rerank_memory_candidates(
+            candidates,
+            query,
+            scope=scope,
+            limit=limit,
+        )
         elapsed_ms = self._elapsed_ms(started_at)
-        if track_usage and limited:
-            self._touch_lru(limited)
-            self._mark_session_usage(limited, usage="retrieved")
-        for record in limited:
+        if track_usage and ranked:
+            self._touch_lru(ranked)
+            self._mark_session_usage(ranked, usage="retrieved")
+        for record in ranked:
             self._emit_trace(
                 MemoryTraceEvent(
                     type="retrieved",
@@ -262,7 +207,124 @@ class MemoryManager:
                     source=source,
                 )
             )
-        return limited
+        return ranked
+
+    def retrieve_memory_candidates(
+        self,
+        query: str,
+        *,
+        layer: MemoryLayerFilter = "all",
+    ) -> list[MemoryRecord]:
+        """返回 lexical candidate 集，供后续 rerank 使用。"""
+        records = self.read_memory_records(layer=layer)
+        blocks = [record.block for record in records]
+        if not blocks or not query.strip():
+            return []
+
+        corpus = [tokenize(block) for block in blocks]
+        query_words = tokenize(query)
+        bm25 = BM25Okapi(corpus)
+        raw = list(bm25.get_scores(query_words))
+        if not raw:
+            scores = []
+        elif max(raw) - min(raw) > 1e-6:
+            lo, hi = min(raw), max(raw)
+            scores = [(s - lo) / (hi - lo) for s in raw]
+        else:
+            query_set = set(query_words)
+            scores = [
+                sum(q in b for q in query_set) / max(len(query_words), 1)
+                for b in corpus
+            ]
+
+        candidates: list[MemoryRecord] = []
+        for score, record in zip(scores, records, strict=True):
+            lexical = self._weighted_lexical_score(record, query, bm25_score=score)
+            candidates.append(
+                MemoryRecord(
+                    block=record.block,
+                    title=record.title,
+                    fields=record.fields,
+                    memory_id=record.memory_id,
+                    memory_type=record.memory_type,
+                    scope=record.scope,
+                    source_session=record.source_session,
+                    related_files=record.related_files,
+                    related_symbols=record.related_symbols,
+                    created_at=record.created_at,
+                    modified_at=record.modified_at,
+                    confidence_value=record.confidence_value,
+                    status=record.status,
+                    validity=record.validity,
+                    supersedes=record.supersedes,
+                    evidence=record.evidence,
+                    retrieval_count=record.retrieval_count,
+                    injection_count=record.injection_count,
+                    reference_count=record.reference_count,
+                    adoption_count=record.adoption_count,
+                    success_count=record.success_count,
+                    failure_count=record.failure_count,
+                    correction_count=record.correction_count,
+                    utility=record.utility,
+                    last_outcome=record.last_outcome,
+                    score=round(lexical, 6),
+                    layer=record.layer,
+                )
+            )
+        candidates.sort(key=lambda r: (-r.score, r.title))
+        return candidates
+
+    def rerank_memory_candidates(
+        self,
+        candidates: Sequence[MemoryRecord],
+        query: str,
+        *,
+        scope: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryRecord]:
+        """对 lexical candidates 应用可替换的 rerank 与 gate。"""
+        ranked: list[MemoryRecord] = []
+        for candidate in candidates:
+            adjusted = adjust_score(candidate.score, candidate, query, scope)
+            if adjusted < self.min_retrieval_score or not self._passes_confidence_gate(
+                candidate
+            ):
+                continue
+            ranked.append(
+                MemoryRecord(
+                    block=candidate.block,
+                    title=candidate.title,
+                    fields=candidate.fields,
+                    memory_id=candidate.memory_id,
+                    memory_type=candidate.memory_type,
+                    scope=candidate.scope,
+                    source_session=candidate.source_session,
+                    related_files=candidate.related_files,
+                    related_symbols=candidate.related_symbols,
+                    created_at=candidate.created_at,
+                    modified_at=candidate.modified_at,
+                    confidence_value=candidate.confidence_value,
+                    status=candidate.status,
+                    validity=candidate.validity,
+                    supersedes=candidate.supersedes,
+                    evidence=candidate.evidence,
+                    retrieval_count=candidate.retrieval_count,
+                    injection_count=candidate.injection_count,
+                    reference_count=candidate.reference_count,
+                    adoption_count=candidate.adoption_count,
+                    success_count=candidate.success_count,
+                    failure_count=candidate.failure_count,
+                    correction_count=candidate.correction_count,
+                    utility=candidate.utility,
+                    last_outcome=candidate.last_outcome,
+                    score=round(adjusted, 6),
+                    layer=candidate.layer,
+                )
+            )
+        ranked.sort(key=lambda r: (-r.score, r.title))
+        if limit is not None and limit > 0:
+            return ranked[:limit]
+        return ranked
 
     # ── 评测 ──
 
