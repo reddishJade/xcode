@@ -153,12 +153,11 @@ class InstructionSource:
 
 
 class InstructionCollector:
-    """从配置的指令源 + 默认 AGENTS.md / CLAUDE.md 收集指令。
+    """从配置的指令源 + 默认 AGENTS.md 收集指令。
 
     配置在 prompt.instructions 中（PromptRuntimeConfig）。
-    空配置时回退到 AGENTS.md / CLAUDE.md。
+    空配置时回退到 AGENTS.md。
     非空配置时：先收集配置源，再收集回退文件。
-    CLAUDE.md 仅包含 @AGENTS.md 引用时不重复发出块。
     配置源与回退文件按解析后的路径去重，已配置源优先。
     """
 
@@ -217,20 +216,6 @@ class InstructionCollector:
         if agents_path.is_file() and agents_path.resolve() not in configured_paths:
             content = agents_path.read_text(encoding="utf-8", errors="replace").strip()
             if content:
-                blocks.append(
-                    ContextBlock(
-                        source=ContextBlockSource.INSTRUCTION,
-                        target=ContextBlockTarget.SYSTEM,
-                        priority=ContextPriority.CRITICAL,
-                        content=_prepare_manifest(content),
-                    )
-                )
-
-        # 3. 回退 CLAUDE.md
-        claude_path = root / "CLAUDE.md"
-        if claude_path.is_file() and claude_path.resolve() not in configured_paths:
-            content = claude_path.read_text(encoding="utf-8", errors="replace").strip()
-            if content and not _is_agents_reference(content):
                 blocks.append(
                     ContextBlock(
                         source=ContextBlockSource.INSTRUCTION,
@@ -408,19 +393,6 @@ def _prepare_manifest(text: str) -> str:
     if source_bytes <= MANIFEST_MAX_BYTES:
         return text
     return _condense_manifest(text)
-
-
-_AGENTS_REF_PATTERNS = frozenset({"@AGENTS.md"})
-
-
-def _is_agents_reference(content: str) -> bool:
-    """判断 CLAUDE.md 内容是否仅引用 AGENTS.md。
-
-    Claude Desktop 约定：CLAUDE.md 中单独一行 @AGENTS.md 表示
-    该文件内容与 AGENTS.md 相同。此时不重复发出块。
-    """
-    stripped = content.strip()
-    return stripped in _AGENTS_REF_PATTERNS
 
 
 # ── 活动 diff 收集器 ──

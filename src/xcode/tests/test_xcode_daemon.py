@@ -174,8 +174,7 @@ class TestHeartbeatDaemon:
             }
         ]
         assert any(
-            task.name == "check_worktree_prune"
-            for task in daemon.list_daemon_tasks()
+            task.name == "check_worktree_prune" for task in daemon.list_daemon_tasks()
         )
 
     def test_daemon_events_carry_source_metadata(self) -> None:
@@ -252,6 +251,8 @@ class TestHeartbeatDaemon:
         assert "check_background_tasks" in names
         for t in tasks:
             assert t.registered is True
+            assert t.status == "registered"
+            assert t.callable_pending is False
             assert t.builtin is True
             assert t.persistent is False
 
@@ -276,6 +277,8 @@ class TestHeartbeatDaemon:
         # my_custom 名字被恢复为 persistent，但 callable 未注册
         assert "my_custom" in infos
         assert infos["my_custom"].registered is False
+        assert infos["my_custom"].status == "callable_pending"
+        assert infos["my_custom"].callable_pending is True
         assert infos["my_custom"].persistent is True
         # 持久化文件仍含其名
         import json

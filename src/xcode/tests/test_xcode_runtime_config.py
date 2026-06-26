@@ -117,6 +117,28 @@ class XcodeRuntimeConfigMergeSemanticsTests:
 
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_invalid_env_override_rejected_after_merge_with_source(self) -> None:
+        """环境变量覆盖在最终校验阶段失败，并显示 env 来源。"""
+        root = Path(tempfile.mkdtemp())
+        try:
+            config_path = root / "xcode.config.json"
+            config_path.write_text(
+                '{"security":{"approval_policy":"never"}}',
+                encoding="utf-8",
+            )
+            with (
+                patch.dict("os.environ", {"XCODE_APPROVAL_POLICY": "sometimes"}),
+                pytest.raises(ValueError) as excinfo,
+            ):
+                discover_runtime_config(root)
+            message = str(excinfo.value)
+            assert "security.approval_policy" in message
+            assert "XCODE_APPROVAL_POLICY" in message
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_unknown_key_rejected_by_pydantic(self) -> None:
         """Pydantic 拒绝未知配置字段。"""
         root = Path(tempfile.mkdtemp())
@@ -128,6 +150,25 @@ class XcodeRuntimeConfigMergeSemanticsTests:
             )
             with pytest.raises(ValueError, match="unknown_key"):
                 discover_runtime_config(root)
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_wrong_scalar_type_rejected_with_field_path_and_source(self) -> None:
+        """错误标量类型报完整字段路径和来源配置。"""
+        root = Path(tempfile.mkdtemp())
+        try:
+            config_path = root / "xcode.config.json"
+            config_path.write_text(
+                '{"agent":{"max_steps":"20"}}',
+                encoding="utf-8",
+            )
+            with pytest.raises(ValueError) as excinfo:
+                discover_runtime_config(root)
+            message = str(excinfo.value)
+            assert "agent.max_steps" in message
+            assert str(config_path) in message
         finally:
             import shutil
 

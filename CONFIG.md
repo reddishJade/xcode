@@ -337,7 +337,7 @@ MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺
 {"type": "inline", "content": "No external dependencies without approval.", "priority": "high"}
 ```
 
-未配置 `instructions` 时自动回退到 `AGENTS.md` / `CLAUDE.md`。
+未配置 `instructions` 时自动回退到 `AGENTS.md`。
 配置非空时：先收集配置源，再收集回退文件。配置源与回退文件按路径去重，配置源优先。
 
 所有指令内容按 UTF-8 字节计入预算：≤32KB 完整注入，>32KB 压缩保留关键章节。

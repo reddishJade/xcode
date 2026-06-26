@@ -1439,10 +1439,10 @@ class TestDefaultContextAssemblerSystemBlocks:
 
 
 class TestInstructionCollector:
-    """测试 InstructionCollector（空配置时回退到 AGENTS.md / CLAUDE.md）。"""
+    """测试 InstructionCollector（空配置时回退到 AGENTS.md）。"""
 
     def test_no_files_returns_empty(self) -> None:
-        """项目根目录无 AGENTS.md / CLAUDE.md 时返回空列表。"""
+        """项目根目录无 AGENTS.md 时返回空列表。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             collector = InstructionCollector(sources=(), project_root=root)
@@ -1462,49 +1462,25 @@ class TestInstructionCollector:
             assert blocks[0].priority == ContextPriority.CRITICAL
             assert blocks[0].content == "Use tests."
 
-    def test_empty_config_fallback_claude_dedup(self) -> None:
-        """CLAUDE.md 仅包含 @AGENTS.md 引用时不重复发出块。"""
+    def test_empty_config_ignores_unconfigured_instruction_file(self) -> None:
+        """空配置时仅回退 AGENTS.md。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("Real content.", encoding="utf-8")
-            (root / "CLAUDE.md").write_text("@AGENTS.md", encoding="utf-8")
+            (root / "NOTES.md").write_text("Extra content.", encoding="utf-8")
             collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
             assert len(blocks) == 1
             assert blocks[0].content == "Real content."
 
-    def test_empty_config_both_files(self) -> None:
-        """AGENTS.md 和 CLAUDE.md 各自有内容时都收集。"""
+    def test_empty_config_without_agents_returns_empty(self) -> None:
+        """没有 AGENTS.md 时不收集额外文件。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "AGENTS.md").write_text("AGENTS content.", encoding="utf-8")
-            (root / "CLAUDE.md").write_text("CLAUDE specific rules.", encoding="utf-8")
+            (root / "NOTES.md").write_text("Standalone notes.", encoding="utf-8")
             collector = InstructionCollector(sources=(), project_root=root)
             blocks = collector.collect(ContextCollectionInput())
-            assert len(blocks) == 2
-            contents = [b.content for b in blocks]
-            assert "AGENTS content." in contents
-            assert "CLAUDE specific rules." in contents
-
-    def test_empty_config_claude_reference_with_whitespace(self) -> None:
-        """带空格的 @AGENTS.md 引用也被识别。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "AGENTS.md").write_text("Content.", encoding="utf-8")
-            (root / "CLAUDE.md").write_text("  @AGENTS.md  ", encoding="utf-8")
-            collector = InstructionCollector(sources=(), project_root=root)
-            blocks = collector.collect(ContextCollectionInput())
-            assert len(blocks) == 1
-
-    def test_empty_config_only_claude(self) -> None:
-        """仅有 CLAUDE.md 且其内容有效时作为独立块发出。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "CLAUDE.md").write_text("CLAUDE rules.", encoding="utf-8")
-            collector = InstructionCollector(sources=(), project_root=root)
-            blocks = collector.collect(ContextCollectionInput())
-            assert len(blocks) == 1
-            assert blocks[0].content == "CLAUDE rules."
+            assert len(blocks) == 0
 
     def test_agents_md_via_input_project_root(self) -> None:
         """project_root 可通过 ContextCollectionInput 传入。"""
@@ -1589,19 +1565,19 @@ class TestInstructionCollector:
             assert blocks[0].content == "First priority."
 
     def test_configured_plus_fallback(self) -> None:
-        """配置源 + 回退文件均收集，不回退未配置的文件。"""
+        """配置源 + AGENTS.md 回退均收集，忽略未配置文件。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("Fallback AGENTS.", encoding="utf-8")
-            (root / "CLAUDE.md").write_text("Fallback CLAUDE.", encoding="utf-8")
+            (root / "NOTES.md").write_text("Fallback notes.", encoding="utf-8")
             sources = ({"type": "inline", "content": "Inline instruction."},)
             collector = InstructionCollector(sources=sources, project_root=root)
             blocks = collector.collect(ContextCollectionInput())
-            assert len(blocks) == 3
+            assert len(blocks) == 2
             contents = [b.content for b in blocks]
             assert "Inline instruction." in contents
             assert "Fallback AGENTS." in contents
-            assert "Fallback CLAUDE." in contents
+            assert "Fallback notes." not in contents
 
     def test_inline_source_size_governed(self) -> None:
         """inline 内容 > 32KB 时被压缩。"""

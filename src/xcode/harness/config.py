@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    ValidationError,
+)
 
 ProviderTransport = Literal[
     "openai_chat",
@@ -44,23 +53,23 @@ DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    max_steps: int = 20
+    max_steps: StrictInt = 20
     execution_mode: ExecutionMode = "act"
-    compact_threshold: int = 0
-    compact_token_threshold: int = 0
-    max_recent_messages: int = 10
-    tool_workers: int = 4
-    subagent_workers: int = 4
-    watchdog_repeated_tool_limit: int = 3
+    compact_threshold: StrictInt = 0
+    compact_token_threshold: StrictInt = 0
+    max_recent_messages: StrictInt = 10
+    tool_workers: StrictInt = 4
+    subagent_workers: StrictInt = 4
+    watchdog_repeated_tool_limit: StrictInt = 3
 
 
 class RequestHygieneConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = True
-    max_tool_result_bytes: int = 8000
-    max_tool_arg_length: int = 1000
-    keep_head_lines: int = 50
-    keep_tail_lines: int = 50
+    enabled: StrictBool = True
+    max_tool_result_bytes: StrictInt = 8000
+    max_tool_arg_length: StrictInt = 1000
+    keep_head_lines: StrictInt = 50
+    keep_tail_lines: StrictInt = 50
 
 
 class ModelProfileRuntimeConfig(BaseModel):
@@ -69,10 +78,10 @@ class ModelProfileRuntimeConfig(BaseModel):
     chat_model: str = "deepseek-v4-flash"
     base_url: str = "https://api.deepseek.com"
     api_key: str = ""
-    thinking: bool = True
+    thinking: StrictBool = True
     reasoning_effort: str | None = "high"
-    clear_thinking: bool = False
-    tool_stream: bool = True
+    clear_thinking: StrictBool = False
+    tool_stream: StrictBool = True
     response_format: dict[str, Any] | None = None
 
 
@@ -90,9 +99,9 @@ class ProviderRuntimeConfig(BaseModel):
 class SecurityRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     permission_mode: PermissionMode = "normal"
-    sandbox_mode: bool = False
-    approval_policy: str = "never"
-    network_access: bool = True
+    sandbox_mode: StrictBool = False
+    approval_policy: ApprovalPolicy = "never"
+    network_access: StrictBool = True
     writable_roots: tuple[str, ...] = ()
     restricted_dirs: tuple[str, ...] = ()
     rules: tuple[dict[str, Any], ...] = ()
@@ -100,9 +109,7 @@ class SecurityRuntimeConfig(BaseModel):
     external_directories: tuple[dict[str, Any], ...] = ()
 
     def resolve_approval_policy(self) -> str:
-        if self.approval_policy in ("always", "never"):
-            return self.approval_policy
-        return "never"
+        return self.approval_policy
 
     def resolve_sandbox_mode(self) -> bool:
         if self.permission_mode == "strict":
@@ -237,10 +244,10 @@ class ExternalHookRuntimeConfig(BaseModel):
     event: HookEventName
     command: tuple[str, ...]
     matcher: str | None = None
-    timeout: float = 10.0
-    enabled: bool = True
+    timeout: StrictFloat | StrictInt = 10.0
+    enabled: StrictBool = True
     failure_policy: HookFailurePolicy = "warn"
-    inherit_to_subagents: bool = False
+    inherit_to_subagents: StrictBool = False
     source: str = ""
 
 
@@ -253,18 +260,18 @@ class HooksRuntimeConfig(BaseModel):
 
 class DaemonRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = False
-    interval_seconds: int = 30
+    enabled: StrictBool = False
+    interval_seconds: StrictInt = 30
 
 
 class ExperimentalRuntimeConfig(BaseModel):
     """默认关闭的实验性能力开关。"""
 
     model_config = ConfigDict(extra="forbid")
-    tasks: bool = False
-    mailbox: bool = False
-    progress: bool = False
-    worktree: bool = False
+    tasks: StrictBool = False
+    mailbox: StrictBool = False
+    progress: StrictBool = False
+    worktree: StrictBool = False
 
 
 class XcodeRuntimeConfig(BaseModel):
@@ -290,7 +297,11 @@ class XcodeRuntimeConfig(BaseModel):
 # ── 序列化 / 反序列化 ──
 
 
-def _config_from_dict(data: dict[str, Any]) -> XcodeRuntimeConfig:
+def _config_from_dict(
+    data: dict[str, Any],
+    *,
+    source_hint: Callable[[tuple[str | int, ...]], str | None] | None = None,
+) -> XcodeRuntimeConfig:
     """从 dict 使用 Pydantic 模型校验构建 XcodeRuntimeConfig。
 
     Pydantic 自动校验类型、枚举值、嵌套结构，并拒绝未知字段。
@@ -301,7 +312,12 @@ def _config_from_dict(data: dict[str, Any]) -> XcodeRuntimeConfig:
         lines = ["配置校验失败，请检查字段路径和来源配置层:"]
         for err in e.errors():
             path = ".".join(str(p) for p in err["loc"])
-            lines.append(f"  {path}: {err['msg']} (type={err['type']})")
+            line = f"  {path}: {err['msg']} (type={err['type']})"
+            if source_hint is not None:
+                hint = source_hint(tuple(err["loc"]))
+                if hint:
+                    line += f" [source: {hint}]"
+            lines.append(line)
         raise ValueError("\n".join(lines)) from e
 
 
@@ -327,13 +343,24 @@ def discover_runtime_config(
 
     merged = _deep_merge_raw(global_raw, project_raw)
     merged = _deep_merge_raw(merged, local_raw)
+    env_raw, env_sources = _build_env_override_raw()
+    merged = _deep_merge_raw(merged, env_raw)
 
     _validate_external_directories(merged)
     _validate_instruction_sources(merged)
     _validate_external_hooks(merged)
-    config = _config_from_dict(merged)
-    config = _apply_env_overrides(config)
-    return config
+    return _config_from_dict(
+        merged,
+        source_hint=lambda loc: _resolve_config_source_hint(
+            loc,
+            (
+                ("environment", env_raw, env_sources),
+                (f"local config {local_path}", local_raw, {}),
+                (f"project config {project_path}", project_raw, {}),
+                (f"global config {global_path}", global_raw, {}),
+            ),
+        ),
+    )
 
 
 def _load_raw_config(path: Path | None) -> dict[str, Any]:
@@ -503,50 +530,43 @@ def _deep_merge_raw(base: dict[str, Any], override: dict[str, Any]) -> dict[str,
     return result
 
 
-def _apply_env_overrides(config: XcodeRuntimeConfig) -> XcodeRuntimeConfig:
-    import os
+def _build_env_override_raw() -> tuple[
+    dict[str, Any], dict[tuple[str | int, ...], str]
+]:
+    raw: dict[str, Any] = {}
+    sources: dict[tuple[str | int, ...], str] = {}
+    security: dict[str, Any] = {}
+
+    permission_mode = os.getenv("XCODE_PERMISSION_MODE")
+    if permission_mode is not None:
+        security["permission_mode"] = permission_mode
+        sources[("security", "permission_mode")] = (
+            "environment variable XCODE_PERMISSION_MODE"
+        )
 
     sandbox_mode = os.getenv("XCODE_SANDBOX_MODE")
-    security_updates: dict[str, Any] = {}
+    if sandbox_mode is not None:
+        if sandbox_mode == "true":
+            security["sandbox_mode"] = True
+        elif sandbox_mode == "false":
+            security["sandbox_mode"] = False
+        else:
+            security["sandbox_mode"] = sandbox_mode
+        sources[("security", "sandbox_mode")] = (
+            "environment variable XCODE_SANDBOX_MODE"
+        )
 
-    parsed_permission_mode = _parse_permission_mode(os.getenv("XCODE_PERMISSION_MODE"))
-    if parsed_permission_mode is not None:
-        security_updates["permission_mode"] = parsed_permission_mode
+    approval_policy = os.getenv("XCODE_APPROVAL_POLICY")
+    if approval_policy is not None:
+        security["approval_policy"] = approval_policy
+        sources[("security", "approval_policy")] = (
+            "environment variable XCODE_APPROVAL_POLICY"
+        )
 
-    if sandbox_mode in ("true", "false"):
-        security_updates["sandbox_mode"] = sandbox_mode == "true"
-
-    parsed_approval_policy = _parse_approval_policy(os.getenv("XCODE_APPROVAL_POLICY"))
-    if parsed_approval_policy is not None:
-        security_updates["approval_policy"] = parsed_approval_policy
-
-    if security_updates:
-        security = config.security.model_copy(update=security_updates)
-        config = config.model_copy(update={"security": security})
-
-    return config
-
-
-def _parse_permission_mode(value: object) -> PermissionMode | None:
-    if not isinstance(value, str):
-        return None
-    match value:
-        case "strict":
-            return "strict"
-        case "normal":
-            return "normal"
-        case "permissive":
-            return "permissive"
-        case _:
-            return None
-
-
-def _parse_approval_policy(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    if value in ("always", "never"):
-        return value
-    return "never"
+    if security:
+        raw["security"] = security
+        sources[("security",)] = "environment overrides"
+    return raw, sources
 
 
 def _load_provider_transport(
@@ -576,8 +596,58 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
     raw = _resolve_profiles_in_raw(raw)
     if path is not None:
         raw = _annotate_hook_sources(raw, path)
+    env_raw, env_sources = _build_env_override_raw()
+    raw = _deep_merge_raw(raw, env_raw)
+    _validate_external_directories(raw)
+    _validate_instruction_sources(raw)
     _validate_external_hooks(raw)
-    return _config_from_dict(raw)
+    file_source = f"config {path}" if path is not None else "in-memory defaults"
+    return _config_from_dict(
+        raw,
+        source_hint=lambda loc: _resolve_config_source_hint(
+            loc,
+            (
+                ("environment", env_raw, env_sources),
+                (file_source, raw, {}),
+            ),
+        ),
+    )
+
+
+def _resolve_config_source_hint(
+    loc: tuple[str | int, ...],
+    layers: tuple[tuple[str, dict[str, Any], dict[tuple[str | int, ...], str]], ...],
+) -> str | None:
+    for default_label, raw, path_labels in layers:
+        if not raw:
+            continue
+        for size in range(len(loc), 0, -1):
+            prefix = loc[:size]
+            if not _path_exists(raw, prefix):
+                continue
+            for label_size in range(size, -1, -1):
+                label = path_labels.get(prefix[:label_size])
+                if label is not None:
+                    return label
+            return default_label
+    return None
+
+
+def _path_exists(data: object, path: tuple[str | int, ...]) -> bool:
+    cursor = data
+    for part in path:
+        if isinstance(cursor, dict) and isinstance(part, str) and part in cursor:
+            cursor = cursor[part]
+            continue
+        if (
+            isinstance(cursor, list)
+            and isinstance(part, int)
+            and 0 <= part < len(cursor)
+        ):
+            cursor = cursor[part]
+            continue
+        return False
+    return True
 
 
 def resolve_config_path(project_root: Path, path: Path | None) -> Path | None:

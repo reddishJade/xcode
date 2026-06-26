@@ -21,7 +21,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import filelock
 
@@ -65,7 +65,9 @@ class DaemonTaskInfo:
     """单个已注册任务的信息。"""
 
     name: str
+    status: Literal["registered", "callable_pending"]
     registered: bool
+    callable_pending: bool
     persistent: bool
     builtin: bool
 
@@ -156,7 +158,9 @@ class HeartbeatDaemon:
             result.append(
                 DaemonTaskInfo(
                     name=name,
+                    status="registered",
                     registered=True,
+                    callable_pending=False,
                     persistent=name in self._persistent_names,
                     builtin=name in _BUILTIN_TASKS,
                 )
@@ -166,7 +170,9 @@ class HeartbeatDaemon:
                 result.append(
                     DaemonTaskInfo(
                         name=name,
+                        status="callable_pending",
                         registered=False,
+                        callable_pending=True,
                         persistent=True,
                         builtin=False,
                     )

@@ -356,7 +356,7 @@ SUMMARIZE_SYSTEM_PROMPT = (
 
 
 def build_summarize_prompt(older: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """构建 LLM 摘要的消息列表。与 claude.md 描述的 fork → Summarize 模式对应。"""
+    """构建 LLM 摘要的消息列表。"""
     return [
         {"role": "user", "content": SUMMARIZE_SYSTEM_PROMPT},
         *older,

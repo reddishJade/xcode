@@ -310,13 +310,13 @@ def context() -> tuple[EvalTask, ...]:
         EvalTask(
             id="compact-instructions",
             prompt=(
-                "Check if there is a CLAUDE.md or AGENTS.md in the project root. "
+                "Check if there is an AGENTS.md in the project root. "
                 "Read it and report what compact instructions it specifies."
             ),
             expected_tool_calls=("read_file",),
             tags=("context",),
             llm_judge_criteria=(
-                "Answer states whether CLAUDE.md or AGENTS.md exists.",
+                "Answer states whether AGENTS.md exists.",
                 "Answer extracts compact-related instructions rather than a general summary.",
             ),
         ),

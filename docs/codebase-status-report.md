@@ -62,7 +62,7 @@ cli → coding_agent → harness → agent → ai
   `prompt_guidelines`。
 - `PromptRuntimeConfig.modules` 可控制具体 prompt 模块。
 - `InstructionCollector` 支持配置文件源、inline 源以及
-  `AGENTS.md`/`CLAUDE.md` 回退。
+  `AGENTS.md` 回退。
 - 指令文本超过 32 KiB 时保留开头和关键 Markdown 节段，并添加截断标记。
 - `PROMPT_VERSION` 已实现：根据稳定 prompt 内容和模块定义计算 SHA-256
   摘要，格式为 `prompt:<16 hex chars>`。

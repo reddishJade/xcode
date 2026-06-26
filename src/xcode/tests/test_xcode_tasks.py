@@ -274,6 +274,38 @@ class XcodeTaskStoreTests:
             # 状态不应被修改
             assert store.get(created.id).status == CLAIMED
 
+    def test_update_task_handler_clears_blocked_by_with_empty_list(self) -> None:
+        """update_task(blocked_by=[]) 显式清空已有依赖。"""
+        from xcode.experimental.task_store import build_task_tools
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = TaskStore(Path(temp_dir))
+            tools = build_task_tools(store)
+            update_tool = next(t for t in tools if t.name == "update_task")
+            blocked = store.create("blocked", payload={"blocked_by": [1, 2]})
+
+            result = update_tool.handler({"id": blocked.id, "blocked_by": []})
+
+            assert "Updated task" in result
+            assert store.get(blocked.id).payload.get("blocked_by") is None
+
+    def test_advance_task_handler_returns_conflict_message(self) -> None:
+        """advance_task handler 在版本冲突时返回可重试诊断。"""
+        from xcode.experimental.task_store import build_task_tools
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = TaskStore(Path(temp_dir))
+            tools = build_task_tools(store)
+            advance_tool = next(t for t in tools if t.name == "advance_task")
+            created = store.create("task")
+            store.update(created.id, status=CLAIMED)
+
+            result = advance_tool.handler({"id": created.id, "expected_version": 1})
+
+            assert "Concurrent modification" in result
+            assert "current version is 2" in result
+            assert store.get(created.id).status == CLAIMED
+
     def test_claim_task_tool_success(self) -> None:
         """claim_task 工具成功认领 pending 任务。"""
         from xcode.experimental.task_store import build_task_tools
