@@ -85,6 +85,8 @@ class MemoryRerankPolicy:
     freshness_multiplier_min: float = 0.55
     freshness_multiplier_max: float = 1.1
     recent_window_days: float = 7.0
+    failed_reuse_penalty: float = 0.35
+    corrected_reuse_penalty: float = 0.55
 
 
 class MemoryManager:
@@ -500,6 +502,7 @@ class MemoryManager:
                     1.0 + candidate.utility * self.rerank_policy.utility_scale,
                 ),
             )
+        adjusted *= self._negative_transfer_multiplier(candidate, query, scope)
         if scope:
             adjusted *= self._scope_multiplier(candidate, scope)
         adjusted *= self._freshness_multiplier(candidate)
@@ -565,6 +568,45 @@ class MemoryManager:
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.timestamp()
+
+    def _negative_transfer_multiplier(
+        self,
+        record: MemoryRecord,
+        query: str,
+        scope: str | None,
+    ) -> float:
+        if self._has_reuse_boundary_match(record, query, scope):
+            return 1.0
+        if record.failure_count > record.success_count or record.last_outcome == "failure":
+            return self.rerank_policy.failed_reuse_penalty
+        if record.correction_count > 0 or record.last_outcome == "corrected":
+            return self.rerank_policy.corrected_reuse_penalty
+        return 1.0
+
+    def _has_reuse_boundary_match(
+        self,
+        record: MemoryRecord,
+        query: str,
+        scope: str | None,
+    ) -> bool:
+        normalized_query = query.strip().lower()
+        if not normalized_query:
+            return False
+        related_files = tuple(item.lower() for item in record.related_files)
+        if normalized_query in related_files:
+            return True
+        if normalized_query in {Path(item).name.lower() for item in related_files}:
+            return True
+        related_symbols = {symbol.lower() for symbol in record.related_symbols}
+        if normalized_query in related_symbols:
+            return True
+        if scope:
+            scope_terms = set(tokenize(scope))
+            if scope_terms:
+                record_scope_terms = tokenize_set(record.fields.get("scope", ""))
+                if scope_terms.intersection(record_scope_terms):
+                    return True
+        return False
 
     def _exact_match_bonus(self, record: MemoryRecord, query: str) -> float:
         bonus = 0.0

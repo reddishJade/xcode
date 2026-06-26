@@ -293,6 +293,58 @@ class TestBM25AndMemory:
         assert records[0].title == "Fresh timeout fix"
         assert records[0].score > records[1].score
 
+    def test_failed_memory_without_boundary_match_is_demoted(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Generic timeout failure\n"
+                "- Context/Query: task store lock timeout retry task store lock timeout retry\n"
+                "- Solution: Retry task store lock timeout with provider fallback\n"
+                "- Files: provider.py\n"
+                "- Takeaways: Generic fix previously failed outside provider scope\n"
+                "- Failure-Count: 2\n"
+                "- Last-Outcome: failure\n"
+                "\n"
+                "## Targeted task store fix\n"
+                "- Context/Query: task store lock timeout retry\n"
+                "- Solution: Retry task store lock with bounded backoff\n"
+                "- Files: task_store.py\n"
+                "- Takeaways: Use the task-store-specific retry path\n"
+            ),
+            encoding="utf-8",
+        )
+
+        records = manager.search_memory_records("task store lock timeout retry", limit=2)
+
+        assert records[0].title == "Targeted task store fix"
+        assert records[0].score > records[1].score
+
+    def test_failed_memory_keeps_rank_when_exact_boundary_matches(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Provider timeout failure\n"
+                "- Context/Query: provider timeout retry\n"
+                "- Solution: Retry provider transport once\n"
+                "- Files: src/provider.py\n"
+                "- Takeaways: Exact file path still matters for repeated failures\n"
+                "- Failure-Count: 2\n"
+                "- Last-Outcome: failure\n"
+                "\n"
+                "## Generic retry note\n"
+                "- Context/Query: provider timeout retry\n"
+                "- Solution: Retry generic timeout paths\n"
+                "- Files: src/timeout.py\n"
+                "- Takeaways: Broad note without exact boundary\n"
+            ),
+            encoding="utf-8",
+        )
+
+        records = manager.search_memory_records("src/provider.py", limit=2)
+
+        assert records[0].title == "Provider timeout failure"
+        assert records[0].score > records[1].score
+
     def test_legacy_record_gets_stable_id_and_inferred_type(self) -> None:
         manager = MemoryManager(self.root)
         manager.memory_file.write_text(
