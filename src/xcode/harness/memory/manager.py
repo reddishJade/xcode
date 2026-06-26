@@ -189,7 +189,8 @@ class MemoryManager:
 
         ranked: list[MemoryRecord] = []
         for score, record in zip(scores, records, strict=True):
-            adjusted = adjust_score(score, record, query, scope)
+            lexical = self._weighted_lexical_score(record, query, bm25_score=score)
+            adjusted = adjust_score(lexical, record, query, scope)
             if adjusted >= self.min_retrieval_score and self._passes_confidence_gate(
                 record
             ):
@@ -315,6 +316,81 @@ class MemoryManager:
         self, block: str, existing_records: list[MemoryRecord] | None = None
     ) -> bool:
         return self._quality_rejection_reason(block, existing_records) is None
+
+    def _weighted_lexical_score(
+        self,
+        record: MemoryRecord,
+        query: str,
+        *,
+        bm25_score: float,
+    ) -> float:
+        query_terms = tokenize_set(query)
+        if not query_terms:
+            return 0.0
+        score = bm25_score * 0.8
+        score += self._field_overlap_score(query_terms, record.title, weight=1.8)
+        score += self._field_overlap_score(
+            query_terms,
+            record.fields.get("solution", ""),
+            weight=1.6,
+        )
+        score += self._field_overlap_score(
+            query_terms,
+            record.fields.get("context/query", ""),
+            weight=1.1,
+        )
+        score += self._field_overlap_score(
+            query_terms,
+            record.fields.get("takeaways", ""),
+            weight=1.0,
+        )
+        score += self._field_overlap_score(
+            query_terms,
+            ", ".join(record.related_files or ()) or record.fields.get("files", ""),
+            weight=1.9,
+        )
+        score += self._field_overlap_score(
+            query_terms,
+            ", ".join(record.related_symbols),
+            weight=2.2,
+        )
+        score += self._exact_match_bonus(record, query)
+        return min(score, 3.5)
+
+    def _field_overlap_score(
+        self,
+        query_terms: set[str],
+        text: str,
+        *,
+        weight: float,
+    ) -> float:
+        field_terms = tokenize_set(text)
+        if not field_terms:
+            return 0.0
+        overlap = len(query_terms & field_terms) / max(len(query_terms), 1)
+        return overlap * weight
+
+    def _exact_match_bonus(self, record: MemoryRecord, query: str) -> float:
+        bonus = 0.0
+        normalized_query = query.strip().lower()
+        if not normalized_query:
+            return 0.0
+        related_files = record.related_files or ()
+        if any(normalized_query == item.lower() for item in related_files):
+            bonus += 1.2
+        elif normalized_query in {Path(item).name.lower() for item in related_files}:
+            bonus += 0.8
+        related_symbols = {symbol.lower() for symbol in record.related_symbols}
+        if normalized_query in related_symbols:
+            bonus += 1.1
+        phrase_fields = [
+            record.title.lower(),
+            record.fields.get("context/query", "").lower(),
+            record.fields.get("solution", "").lower(),
+        ]
+        if len(tokenize(query)) >= 2 and any(normalized_query in field for field in phrase_fields):
+            bonus += 0.35
+        return bonus
 
     def _quality_rejection_reason(
         self,

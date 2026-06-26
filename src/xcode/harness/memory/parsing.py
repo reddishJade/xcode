@@ -413,12 +413,40 @@ def with_metadata(
 # ── 分词 ──
 
 
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]+")
+
+
 def tokenize(text: str) -> list[str]:
-    return [
-        w.lower()
-        for w in re.sub(r"[^\w\s-]", "", text).replace("-", " ").split()
-        if len(w) >= 2
-    ]
+    normalized = text.lower()
+    cleaned = re.sub(r"[^\w\s/.-]", " ", normalized)
+    base = [token for token in cleaned.replace("-", " ").replace("_", " ").split() if len(token) >= 2]
+    tokens: list[str] = []
+    seen: set[str] = set()
+
+    def add(token: str) -> None:
+        if len(token) < 2 or token in seen:
+            return
+        seen.add(token)
+        tokens.append(token)
+
+    for token in base:
+        add(token)
+        if any(sep in token for sep in ("/", ".")):
+            for part in re.split(r"[\/.:]", token):
+                add(part)
+
+    for match in _CJK_RE.finditer(normalized):
+        segment = match.group(0)
+        add(segment)
+        if len(segment) <= 2:
+            continue
+        for size in (2, 3):
+            if len(segment) < size:
+                continue
+            for index in range(len(segment) - size + 1):
+                add(segment[index : index + size])
+
+    return tokens
 
 
 def tokenize_set(text: str) -> set[str]:

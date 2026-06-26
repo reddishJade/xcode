@@ -96,6 +96,74 @@ class TestBM25AndMemory:
 
         assert "Incident 2" in results[0]
 
+    def test_memory_search_prefers_exact_file_path_match(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Provider timeout generic\n"
+                "- Context/Query: Timeout retry failure\n"
+                "- Solution: Retry provider calls\n"
+                "- Files: src/provider.py\n"
+                "- Takeaways: Generic timeout memory\n"
+                "\n"
+                "## Task store lock\n"
+                "- Context/Query: Timeout retry failure\n"
+                "- Solution: Retry task store lock\n"
+                "- Files: src/xcode/harness/task_store.py\n"
+                "- Takeaways: Exact path should dominate\n"
+            ),
+            encoding="utf-8",
+        )
+
+        records = manager.search_memory_records(
+            "src/xcode/harness/task_store.py",
+            limit=2,
+        )
+
+        assert records[0].title == "Task store lock"
+
+    def test_memory_search_prefers_exact_symbol_match(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## Provider timeout generic\n"
+                "- Context/Query: Timeout retry failure\n"
+                "- Solution: Retry provider calls\n"
+                "- Files: src/provider.py\n"
+                "- Takeaways: Generic timeout memory\n"
+                "\n"
+                "## Snapshot procedure\n"
+                "- Context/Query: Snapshot creation flow\n"
+                "- Solution: Use SnapshotBuilder for reproducible snapshots\n"
+                "- Files: src/xcode/harness/snapshot.py\n"
+                "- Related-Symbols: SnapshotBuilder\n"
+                "- Takeaways: Exact symbol should dominate\n"
+            ),
+            encoding="utf-8",
+        )
+
+        records = manager.search_memory_records("SnapshotBuilder", limit=2)
+
+        assert records[0].title == "Snapshot procedure"
+
+    def test_memory_search_supports_chinese_subphrase_match(self) -> None:
+        manager = MemoryManager(self.root)
+        manager.memory_file.write_text(
+            (
+                "## 中文超时处理\n"
+                "- Context/Query: 提供者连接超时重试\n"
+                "- Solution: 使用有界退避重试\n"
+                "- Files: provider.py\n"
+                "- Takeaways: 超时重试需要保留根因\n"
+            ),
+            encoding="utf-8",
+        )
+
+        records = manager.search_memory_records("超时重试", limit=1)
+
+        assert records
+        assert records[0].title == "中文超时处理"
+
     def test_memory_search_demotes_deprecated_records(self) -> None:
         from xcode.harness.memory.parsing import adjust_score, parse_memory_record
 
