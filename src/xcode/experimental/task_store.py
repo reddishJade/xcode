@@ -359,7 +359,9 @@ def resolve_blocked(tasks: list[TaskRecord]) -> list[dict[str, Any]]:
     return blocked
 
 
-def advance_task(store: TaskStore, task_id: int | str) -> list[TaskRecord]:
+def advance_task(
+    store: TaskStore, task_id: int | str, expected_version: int | None = None
+) -> list[TaskRecord]:
     """完成任务并自动解除下游依赖阻塞。
 
     将 task_id 标记为 completed，然后查找所有 blocked_by 包含此任务的
@@ -367,7 +369,9 @@ def advance_task(store: TaskStore, task_id: int | str) -> list[TaskRecord]:
     返回所有受影响的任务列表。
     """
     with store.locked():
-        updated = store._apply_update(task_id, status=COMPLETED)
+        updated = store._apply_update(
+            task_id, status=COMPLETED, expected_version=expected_version
+        )
         affected = [updated]
 
         all_tasks = store.list()
@@ -522,6 +526,10 @@ ADVANCE_TASK_SCHEMA = {
     "type": "object",
     "properties": {
         "id": {"type": "integer", "description": "ID of the task to mark as completed"},
+        "expected_version": {
+            "type": "integer",
+            "description": "Optimistic lock: fail if current version does not match",
+        },
     },
     "required": ["id"],
     "additionalProperties": False,
@@ -544,7 +552,22 @@ def _advance_task(store: TaskStore, args: ToolInput) -> str:
     task_id = args.get("id")
     if task_id is None:
         raise ValueError("id is required")
-    affected = advance_task(store, task_id)
+    expected_version = args.get("expected_version")
+    try:
+        affected = advance_task(
+            store,
+            task_id,
+            expected_version=int(expected_version)
+            if expected_version is not None
+            else None,
+        )
+    except ConcurrentModificationError:
+        latest = store.get(task_id)
+        return (
+            f"Concurrent modification: task #{latest.id} current version is "
+            f"{latest.version}, you expected {expected_version}. "
+            f"Please re-read and retry."
+        )
     names = [f"#{t.id} ({t.status}): {t.title}" for t in affected]
     return f"Advanced task #{task_id}.\nAffected:\n" + "\n".join(names)
 
