@@ -1,15 +1,4 @@
-"""MCP 工具注册与配置。
-
-Step 9 canonicalized MCP integration:
-- Config schema validation with McpServerConfig
-- Single canonical config path (.local/mcp_config.json only)
-- overrides → skip server with warning
-- enabled/timeout config support
-- sanitize() naming + collision detection
-- ActionExtractor MCP branch support via ToolSpec metadata
-- isError structured handling
-- stderr redaction/truncation
-"""
+"""MCP 工具注册与配置。"""
 
 from __future__ import annotations
 
@@ -55,6 +44,31 @@ class McpToolMetadata:
     host_tool_id: str
 
 
+@dataclass(frozen=True)
+class McpToolOverride:
+    """宿主侧允许覆盖的 MCP 工具元数据。"""
+
+    risk: str | None = None
+    read_only: bool | None = None
+    concurrency_safe: bool | None = None
+    enabled: bool | None = None
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class McpServerStatus:
+    """供 REPL 与诊断读取的 MCP server 运行时状态。"""
+
+    server_name: str
+    state: str
+    enabled: bool
+    deferred: bool
+    tool_count: int
+    protocol_version: str | None = None
+    server_info: dict[str, Any] | None = None
+    last_error: str | None = None
+
+
 class McpRuntimeRegistry:
     """协调 MCP 动态工具快照、订阅者和持久客户端生命周期。"""
 
@@ -62,7 +76,29 @@ class McpRuntimeRegistry:
         """初始化空的运行时注册状态。"""
         self._lock = threading.Lock()
         self._callbacks: list[Callable[[tuple[ToolSpec, ...]], None]] = []
-        self._client_refs: list[_mcp_mod.LazyClientRef] = []
+        self._client_refs: dict[str, _mcp_mod.LazyClientRef] = {}
+        self._reload_callback: Callable[[], tuple[ToolSpec, ...]] | None = None
+        self._workspace_roots: tuple[Path, ...] = ()
+        self._cancel_event: threading.Event | None = None
+        self._raw_servers: dict[str, dict[str, Any]] = {}
+        self._validated_servers: dict[str, McpServerConfig] = {}
+        self._deferred_servers: set[str] = set()
+        self._tool_counts: dict[str, int] = {}
+        self._cache_metadata: dict[str, dict[str, Any]] = {}
+        self._server_errors: dict[str, str] = {}
+
+    def configure_runtime(
+        self,
+        *,
+        workspace_roots: tuple[Path, ...],
+        cancel_event: threading.Event | None,
+    ) -> None:
+        """配置与当前宿主运行绑定的共享上下文。"""
+        with self._lock:
+            self._workspace_roots = tuple(
+                path.resolve() for path in workspace_roots if path.exists()
+            )
+            self._cancel_event = cancel_event
 
     def subscribe(
         self,
@@ -79,15 +115,127 @@ class McpRuntimeRegistry:
         for callback in callbacks:
             callback(tools)
 
-    def track_client_ref(self, ref: _mcp_mod.LazyClientRef) -> None:
+    def set_reload_callback(
+        self,
+        callback: Callable[[], tuple[ToolSpec, ...]],
+    ) -> None:
+        """注册手动 reload 入口。"""
+        with self._lock:
+            self._reload_callback = callback
+
+    def reload(self) -> tuple[ToolSpec, ...]:
+        """重新读取 MCP 配置并发布新的工具快照。"""
+        with self._lock:
+            callback = self._reload_callback
+        if callback is None:
+            return ()
+        tools = callback()
+        self.publish(tools)
+        return tools
+
+    def update_runtime_snapshot(
+        self,
+        *,
+        raw_servers: dict[str, dict[str, Any]],
+        validated_servers: dict[str, McpServerConfig],
+        deferred_servers: set[str],
+        tool_counts: dict[str, int],
+        cache_metadata: dict[str, dict[str, Any]],
+        server_errors: dict[str, str],
+    ) -> None:
+        """保存当前配置与发现结果，供状态接口读取。"""
+        with self._lock:
+            self._raw_servers = dict(raw_servers)
+            self._validated_servers = dict(validated_servers)
+            self._deferred_servers = set(deferred_servers)
+            self._tool_counts = dict(tool_counts)
+            self._cache_metadata = dict(cache_metadata)
+            self._server_errors = dict(server_errors)
+
+    def status_snapshot(self) -> tuple[McpServerStatus, ...]:
+        """返回所有已配置 server 的只读运行时状态。"""
+        with self._lock:
+            raw_servers = dict(self._raw_servers)
+            validated_servers = dict(self._validated_servers)
+            deferred_servers = set(self._deferred_servers)
+            tool_counts = dict(self._tool_counts)
+            cache_metadata = dict(self._cache_metadata)
+            server_errors = dict(self._server_errors)
+            client_refs = dict(self._client_refs)
+        statuses: list[McpServerStatus] = []
+        for server_name, raw in raw_servers.items():
+            validated = validated_servers.get(server_name)
+            enabled = bool(raw.get("enabled", True))
+            last_error = server_errors.get(server_name)
+            ref = client_refs.get(server_name)
+            protocol_version = None
+            server_info = None
+            state = "configured"
+            if ref is not None and ref.client is not None and ref.client.status == "connected":
+                state = "connected"
+                protocol_version = ref.client.protocol_version
+                server_info = ref.client.server_info
+                last_error = ref.last_error or last_error
+            else:
+                cached = cache_metadata.get(server_name, {})
+                protocol_version = cached.get("protocol_version")
+                server_info = cached.get("server_info")
+                if last_error or (ref is not None and ref.last_error):
+                    state = "failed"
+                    last_error = ref.last_error or last_error
+                elif server_name in deferred_servers and tool_counts.get(server_name, 0) == 0:
+                    state = "deferred"
+            if validated is None:
+                state = "failed"
+            statuses.append(
+                McpServerStatus(
+                    server_name=server_name,
+                    state=state,
+                    enabled=enabled,
+                    deferred=server_name in deferred_servers,
+                    tool_count=tool_counts.get(server_name, 0),
+                    protocol_version=protocol_version,
+                    server_info=server_info,
+                    last_error=last_error,
+                )
+            )
+        return tuple(sorted(statuses, key=lambda item: item.server_name))
+
+    @property
+    def workspace_roots(self) -> tuple[Path, ...]:
+        with self._lock:
+            return self._workspace_roots
+
+    @property
+    def cancel_event(self) -> threading.Event | None:
+        with self._lock:
+            return self._cancel_event
+
+    def update_workspace_roots(self, workspace_roots: tuple[Path, ...]) -> None:
+        """更新 roots 并通知所有已连接 server。"""
+        normalized = tuple(path.resolve() for path in workspace_roots if path.exists())
+        with self._lock:
+            self._workspace_roots = normalized
+            refs = tuple(self._client_refs.values())
+        for ref in refs:
+            ref.update_workspace_roots(normalized)
+
+    def track_client_ref(self, server_name: str, ref: _mcp_mod.LazyClientRef) -> None:
         """登记需要随应用关闭的延迟客户端。"""
         with self._lock:
-            self._client_refs.append(ref)
+            self._client_refs[server_name] = ref
+
+    def drop_client_ref(self, server_name: str) -> None:
+        """关闭并移除被删除或替换的 server client。"""
+        with self._lock:
+            ref = self._client_refs.pop(server_name, None)
+        if ref is not None:
+            ref.stop()
 
     def close(self) -> None:
         """关闭所有已启动的 MCP 持久客户端。"""
         with self._lock:
-            refs = tuple(self._client_refs)
+            refs = tuple(self._client_refs.values())
             self._client_refs.clear()
             self._callbacks.clear()
         for ref in refs:
@@ -111,10 +259,6 @@ def _warn(msg: str) -> None:
 def _validate_server_config(name: str, raw: object) -> McpServerConfig | None:
     if not isinstance(raw, dict):
         _warn(f"server {name!r} config is not a dict; skipped")
-        return None
-
-    if "overrides" in raw:
-        _warn(f"server {name!r} uses unsupported overrides; skipped")
         return None
 
     command = raw.get("command")
@@ -148,6 +292,59 @@ def _validate_server_config(name: str, raw: object) -> McpServerConfig | None:
         env=env,
         enabled=enabled,
         timeout=float(timeout) if timeout is not None else None,
+    )
+
+
+def _parse_overrides(raw: object) -> dict[str, McpToolOverride]:
+    """解析宿主侧 tool overrides，仅接受显式白名单字段。"""
+    if not isinstance(raw, dict):
+        return {}
+    overrides: dict[str, McpToolOverride] = {}
+    for tool_name, tool_override in raw.items():
+        if not isinstance(tool_name, str) or not isinstance(tool_override, dict):
+            continue
+        enabled = tool_override.get("enabled")
+        read_only = tool_override.get("read_only")
+        concurrency_safe = tool_override.get("concurrency_safe")
+        description = tool_override.get("description")
+        risk = tool_override.get("risk")
+        overrides[tool_name] = McpToolOverride(
+            risk=risk if isinstance(risk, str) else None,
+            read_only=read_only if isinstance(read_only, bool) else None,
+            concurrency_safe=(
+                concurrency_safe if isinstance(concurrency_safe, bool) else None
+            ),
+            enabled=enabled if isinstance(enabled, bool) else None,
+            description=description if isinstance(description, str) else None,
+        )
+    return overrides
+
+
+def _tool_override(
+    raw_server: dict[str, Any],
+    tool_name: str,
+) -> McpToolOverride:
+    overrides = _parse_overrides(raw_server.get("overrides"))
+    default_override = overrides.get("*", McpToolOverride())
+    specific_override = overrides.get(tool_name, McpToolOverride())
+    return McpToolOverride(
+        risk=specific_override.risk or default_override.risk,
+        read_only=(
+            specific_override.read_only
+            if specific_override.read_only is not None
+            else default_override.read_only
+        ),
+        concurrency_safe=(
+            specific_override.concurrency_safe
+            if specific_override.concurrency_safe is not None
+            else default_override.concurrency_safe
+        ),
+        enabled=(
+            specific_override.enabled
+            if specific_override.enabled is not None
+            else default_override.enabled
+        ),
+        description=specific_override.description or default_override.description,
     )
 
 
@@ -417,6 +614,7 @@ def _make_handler(
     server_name: str,
     cache_path: Path,
     output_schema: object,
+    runtime_registry: McpRuntimeRegistry,
 ) -> Any:
     def handler(args: ToolInput) -> str:
         if deferred:
@@ -450,10 +648,35 @@ def _make_handler(
                     raise
 
         client_instance = ref.get_or_create()
+        progress_updates: list[dict[str, object]] = []
+
+        def record_progress(
+            progress: float,
+            total: float | None,
+            message: str | None,
+        ) -> None:
+            progress_updates.append(
+                {
+                    "progress": progress,
+                    "total": total,
+                    "message": message,
+                }
+            )
+
         response = client_instance.call_tool(
-            original_tool_name, args, timeout=ref.config.get("timeout")
+            original_tool_name,
+            args,
+            timeout=ref.config.get("timeout"),
+            progress_callback=record_progress,
+            cancel_event=runtime_registry.cancel_event,
         )
-        return convert_mcp_tool_result(response, output_schema)
+        result = convert_mcp_tool_result(response, output_schema)
+        if not progress_updates:
+            return result
+        metadata = getattr(result, "metadata", {})
+        merged = dict(metadata)
+        merged["mcp_progress"] = progress_updates
+        return type(result)(str(result), metadata=merged, is_error=result.is_error)
 
     return handler
 
@@ -492,6 +715,37 @@ def _detect_collisions(
     return disabled
 
 
+def _prune_removed_or_replaced_servers(
+    project_root: Path,
+    runtime_registry: McpRuntimeRegistry,
+    raw_servers: dict[str, dict[str, Any]],
+) -> None:
+    """关闭被删除或配置已变化的 server，并清理失效缓存。"""
+    previous = runtime_registry._raw_servers
+    removed_or_changed = {
+        server_name
+        for server_name, old_raw in previous.items()
+        if server_name not in raw_servers
+        or compute_config_hash(old_raw) != compute_config_hash(raw_servers[server_name])
+    }
+    if not removed_or_changed:
+        return
+    for server_name in removed_or_changed:
+        runtime_registry.drop_client_ref(server_name)
+    cache_path = _cache_path(project_root)
+    cache_data = _load_cache(cache_path)
+    servers = cache_data.get("servers")
+    if not isinstance(servers, dict):
+        return
+    changed = False
+    for server_name in removed_or_changed:
+        if server_name in servers:
+            servers.pop(server_name, None)
+            changed = True
+    if changed:
+        _save_cache(cache_path, cache_data)
+
+
 # ── 主入口 ──
 
 
@@ -501,56 +755,87 @@ def build_mcp_tools(
 ) -> tuple[ToolSpec, ...]:
     """根据配置文件加载和构建所有 MCP 工具。"""
     runtime_registry = runtime_registry or McpRuntimeRegistry()
+    runtime_registry.set_reload_callback(
+        lambda: _load_mcp_tools_snapshot(project_root, runtime_registry)
+    )
+    return _load_mcp_tools_snapshot(project_root, runtime_registry)
+
+
+def _load_mcp_tools_snapshot(
+    project_root: Path,
+    runtime_registry: McpRuntimeRegistry,
+) -> tuple[ToolSpec, ...]:
+    """读取当前配置并构建完整 MCP 工具快照。"""
     config_path = _mcp_config_path(project_root)
     if config_path is None:
+        runtime_registry.update_runtime_snapshot(
+            raw_servers={},
+            validated_servers={},
+            deferred_servers=set(),
+            tool_counts={},
+            cache_metadata={},
+            server_errors={},
+        )
         return ()
 
     try:
         config_data = json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        _warn(f"failed to load MCP config {config_path}: {e}")
+    except Exception as exc:
+        _warn(f"failed to load MCP config {config_path}: {exc}")
+        runtime_registry.update_runtime_snapshot(
+            raw_servers={},
+            validated_servers={},
+            deferred_servers=set(),
+            tool_counts={},
+            cache_metadata={},
+            server_errors={"<config>": _redact_and_truncate(str(exc))},
+        )
         return ()
 
-    mcp_servers = config_data.get("mcpServers", {})
-    if not mcp_servers:
-        return ()
-
-    # Validate all servers first
+    mcp_servers = {
+        name: raw
+        for name, raw in config_data.get("mcpServers", {}).items()
+        if isinstance(name, str) and isinstance(raw, dict)
+    }
     validated_servers: dict[str, McpServerConfig] = {}
+    server_errors: dict[str, str] = {}
     for server_name, raw in mcp_servers.items():
         validated = _validate_server_config(server_name, raw)
         if validated is not None:
             validated_servers[server_name] = validated
+        else:
+            server_errors[server_name] = "invalid config"
+
+    _prune_removed_or_replaced_servers(project_root, runtime_registry, mcp_servers)
 
     tools_to_register: list[ToolSpec] = []
     deferred_servers: set[str] = set()
     slug_map: dict[str, str] = {}
     all_tools_by_server: dict[str, list[dict[str, Any]]] = {}
-    lazy_refs: dict[str, _mcp_mod.LazyClientRef] = {}
+    cache_metadata_by_server: dict[str, dict[str, Any]] = {}
     refresh_lock = threading.Lock()
-
     cache_path = _cache_path(project_root)
     cache_data = _load_cache(cache_path)
 
     for server_name, validated in validated_servers.items():
-        if not validated.enabled:
-            _log.info("MCP server %r is disabled; skipping", server_name)
-            continue
-
         is_deferred = bool(mcp_servers.get(server_name, {}).get("defer_loading", False))
         if is_deferred:
             deferred_servers.add(server_name)
             slug_map[server_name] = _sanitize(server_name)
-
+        if not validated.enabled:
+            continue
         tools_list = _tools_for_server(
             project_root,
             cache_path,
             cache_data,
             server_name,
-            mcp_servers.get(server_name, {}),
+            mcp_servers[server_name],
             validated,
             is_deferred,
             tools_to_register,
+            runtime_registry.workspace_roots,
+            cache_metadata_by_server,
+            server_errors,
         )
         if tools_list:
             all_tools_by_server[server_name] = tools_list
@@ -562,11 +847,7 @@ def build_mcp_tools(
         else ()
     )
 
-    def refresh_server_tools(
-        server_name: str,
-        client: _mcp_mod.McpClient,
-    ) -> None:
-        """重新发现服务器工具并同步缓存与宿主运行时注册表。"""
+    def refresh_server_tools(server_name: str, client: _mcp_mod.McpClient) -> None:
         validated = validated_servers[server_name]
         tools_list = client.list_tools(timeout=validated.timeout)
         cache_metadata = _cache_metadata(client)
@@ -580,15 +861,25 @@ def build_mcp_tools(
             }
             _save_cache(cache_path, current_cache)
             all_tools_by_server[server_name] = tools_list
+            cache_metadata_by_server[server_name] = cache_metadata
             refreshed = _build_runtime_mcp_tools(
                 all_tools_by_server=all_tools_by_server,
                 validated_servers=validated_servers,
                 raw_servers=mcp_servers,
                 deferred_servers=deferred_servers,
                 cache_path=cache_path,
-                lazy_refs=lazy_refs,
                 runtime_registry=runtime_registry,
                 refresh_server_tools=refresh_server_tools,
+            )
+            runtime_registry.update_runtime_snapshot(
+                raw_servers=mcp_servers,
+                validated_servers=validated_servers,
+                deferred_servers=deferred_servers,
+                tool_counts={
+                    name: len(tools) for name, tools in all_tools_by_server.items()
+                },
+                cache_metadata=cache_metadata_by_server,
+                server_errors=server_errors,
             )
         runtime_registry.publish(bootstrap_tools + refreshed + search_tools)
 
@@ -598,9 +889,16 @@ def build_mcp_tools(
         raw_servers=mcp_servers,
         deferred_servers=deferred_servers,
         cache_path=cache_path,
-        lazy_refs=lazy_refs,
         runtime_registry=runtime_registry,
         refresh_server_tools=refresh_server_tools,
+    )
+    runtime_registry.update_runtime_snapshot(
+        raw_servers=mcp_servers,
+        validated_servers=validated_servers,
+        deferred_servers=deferred_servers,
+        tool_counts={name: len(tools) for name, tools in all_tools_by_server.items()},
+        cache_metadata=cache_metadata_by_server,
+        server_errors=server_errors,
     )
     return bootstrap_tools + registered_tools + search_tools
 
@@ -612,7 +910,6 @@ def _build_runtime_mcp_tools(
     raw_servers: dict[str, dict[str, Any]],
     deferred_servers: set[str],
     cache_path: Path,
-    lazy_refs: dict[str, _mcp_mod.LazyClientRef],
     runtime_registry: McpRuntimeRegistry,
     refresh_server_tools: Callable[[str, _mcp_mod.McpClient], None],
 ) -> tuple[ToolSpec, ...]:
@@ -622,7 +919,7 @@ def _build_runtime_mcp_tools(
 
     for server_name, tools_list in all_tools_by_server.items():
         validated = validated_servers[server_name]
-        lazy_ref = lazy_refs.get(server_name)
+        lazy_ref = runtime_registry._client_refs.get(server_name)
         if lazy_ref is None:
 
             def on_tools_changed(
@@ -636,14 +933,17 @@ def _build_runtime_mcp_tools(
                 server_name,
                 raw_servers[server_name],
                 tools_changed_callback=on_tools_changed,
+                workspace_roots=runtime_registry.workspace_roots,
             )
-            lazy_refs[server_name] = lazy_ref
-            runtime_registry.track_client_ref(lazy_ref)
+            runtime_registry.track_client_ref(server_name, lazy_ref)
 
         server_slug = _sanitize(server_name)
         for tool in tools_list:
             tool_key = f"{server_name}:{tool['name']}"
             if tool_key in disabled:
+                continue
+            tool_override = _tool_override(raw_servers[server_name], tool["name"])
+            if tool_override.enabled is False:
                 continue
 
             tool_slug = _sanitize(tool["name"])
@@ -662,6 +962,8 @@ def _build_runtime_mcp_tools(
                     is_deferred=(server_name in deferred_servers),
                     cache_path=cache_path,
                     metadata=metadata,
+                    tool_override=tool_override,
+                    runtime_registry=runtime_registry,
                 )
             )
 
@@ -677,11 +979,18 @@ def _tools_for_server(
     validated: McpServerConfig,
     is_deferred: bool,
     tools_to_register: list[ToolSpec],
+    workspace_roots: tuple[Path, ...],
+    cache_metadata_by_server: dict[str, dict[str, Any]],
+    server_errors: dict[str, str],
 ) -> list[dict[str, Any]]:
     config_hash = compute_config_hash(raw_config)
     cached_entry = cache_data.get("servers", {}).get(server_name, {})
     cached_tools = _compatible_cached_tools(cached_entry, config_hash)
     if cached_tools is not None:
+        cache_metadata_by_server[server_name] = {
+            "protocol_version": cached_entry.get("protocol_version"),
+            "server_info": cached_entry.get("server_info"),
+        }
         return cached_tools
 
     if is_deferred:
@@ -698,6 +1007,9 @@ def _tools_for_server(
         validated,
         config_hash,
         cached_entry,
+        workspace_roots,
+        cache_metadata_by_server,
+        server_errors,
     )
 
 
@@ -709,14 +1021,23 @@ def _query_server_tools(
     validated: McpServerConfig,
     config_hash: str,
     cached_entry: dict[str, Any],
+    workspace_roots: tuple[Path, ...],
+    cache_metadata_by_server: dict[str, dict[str, Any]],
+    server_errors: dict[str, str],
 ) -> list[dict[str, Any]]:
     client: _mcp_mod.McpClient | None = None
     try:
         command = [validated.command[0]] + list(validated.args)
-        client = _mcp_mod.McpClient(command, validated.env, timeout=validated.timeout)
+        client = _mcp_mod.McpClient(
+            command,
+            validated.env,
+            timeout=validated.timeout,
+            workspace_roots=workspace_roots,
+        )
         client.start()
         tools_list = client.list_tools()
         cache_metadata = _cache_metadata(client)
+        cache_metadata_by_server[server_name] = cache_metadata
 
         cache_data.setdefault("servers", {})[server_name] = {
             "config_hash": config_hash,
@@ -727,8 +1048,14 @@ def _query_server_tools(
         return tools_list
     except Exception as e:
         redacted = _redact_and_truncate(str(e), max_len=200)
+        server_errors[server_name] = redacted
         _warn(f"error querying tools from MCP server {server_name!r}: {redacted}")
         cached_tools = _compatible_cached_tools(cached_entry, config_hash)
+        if cached_tools is not None:
+            cache_metadata_by_server[server_name] = {
+                "protocol_version": cached_entry.get("protocol_version"),
+                "server_info": cached_entry.get("server_info"),
+            }
         return cached_tools or []
     finally:
         if client is not None:
@@ -742,13 +1069,26 @@ def _build_registered_mcp_tool(
     is_deferred: bool,
     cache_path: Path,
     metadata: McpToolMetadata,
+    tool_override: McpToolOverride,
+    runtime_registry: McpRuntimeRegistry,
 ) -> ToolSpec:
     tool_schema, tool_description = _mcp_tool_schema_and_description(
         validated.name, tool, is_deferred
     )
+    annotations = tool.get("annotations")
+    read_only_hint = isinstance(annotations, dict) and bool(
+        annotations.get("readOnlyHint")
+    )
+    read_only = (
+        tool_override.read_only
+        if tool_override.read_only is not None
+        else read_only_hint
+    )
+    concurrency_safe = bool(tool_override.concurrency_safe)
+    description = tool_override.description or tool_description
     return ToolSpec(
         name=metadata.host_tool_id,
-        description=tool_description,
+        description=description,
         input_hint=_mcp_tool_input_hint(tool.get("inputSchema", {})),
         handler=_make_handler(
             lazy_ref,
@@ -757,9 +1097,12 @@ def _build_registered_mcp_tool(
             validated.name,
             cache_path,
             tool.get("outputSchema"),
+            runtime_registry,
         ),
         schema=tool_schema,
         group="mcp",
+        read_only=read_only,
+        concurrency_safe=concurrency_safe,
         builtin={
             "mcp_metadata": {
                 "server": metadata.server_name,
@@ -768,6 +1111,7 @@ def _build_registered_mcp_tool(
                 "tool_slug": metadata.tool_slug,
                 "outputSchema": tool.get("outputSchema"),
                 "annotations": tool.get("annotations"),
+                "risk": tool_override.risk,
             }
         },
     )

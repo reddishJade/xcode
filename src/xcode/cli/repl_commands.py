@@ -509,6 +509,48 @@ def cmd_hooks(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
+def cmd_mcp(cmd: str, ctx: CommandContext) -> bool:
+    """显示 MCP 状态或手动重载配置。"""
+    parts = cmd.split(maxsplit=1)
+    action = parts[1].strip() if len(parts) == 2 else "status"
+    if action == "reload":
+        reload_mcp = getattr(ctx.app, "reload_mcp", None)
+        if reload_mcp is None:
+            print("MCP runtime is not available.")
+            return False
+        names = reload_mcp()
+        print(f"Reloaded MCP config. Registered {len(names)} MCP tools.")
+        return False
+    if action != "status":
+        print("Usage: /mcp status|reload")
+        return False
+    mcp_status = getattr(ctx.app, "mcp_status", None)
+    if mcp_status is None:
+        print("MCP runtime is not available.")
+        return False
+    statuses = mcp_status()
+    if not statuses:
+        print("No MCP servers configured.")
+        return False
+    for status in statuses:
+        identity = status.get("server_info") or {}
+        identity_text = ""
+        if isinstance(identity, dict) and identity:
+            name = identity.get("name", "?")
+            version = identity.get("version", "?")
+            identity_text = f" identity={name}@{version}"
+        protocol = status.get("protocol_version")
+        protocol_text = f" protocol={protocol}" if protocol else ""
+        error = status.get("last_error")
+        error_text = f" error={error}" if error else ""
+        print(
+            f"{status['server_name']}: state={status['state']} "
+            f"tools={status['tool_count']} deferred={status['deferred']}"
+            f"{protocol_text}{identity_text}{error_text}"
+        )
+    return False
+
+
 def cmd_tool(cmd: str, ctx: CommandContext) -> bool:
     """直接执行一个已注册的工具。"""
     output = run_tool_command(cmd, ctx.app)
@@ -1182,6 +1224,13 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/hooks": CommandEntry(
         handler=cmd_hooks,
         desc="Show external hook sources and recent status.",
+        group=COMMAND_GROUP_INFO,
+    ),
+    "/mcp": CommandEntry(
+        handler=cmd_mcp,
+        desc="Show MCP server status or reload .local/mcp_config.json.",
+        args_desc="status|reload",
+        accepts_args=True,
         group=COMMAND_GROUP_INFO,
     ),
     "/tool": CommandEntry(

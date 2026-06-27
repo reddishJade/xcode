@@ -192,9 +192,15 @@ class TestXcodeMcpDeferredLoading:
         ):
             output = stub_tool.handler({"factor": 5})
             assert output == "result: 42"
-            mock_client.call_tool.assert_called_with(
-                "heavy_calculate", {"factor": 5}, timeout=None
-            )
+        mock_client.call_tool.assert_called_with(
+            "heavy_calculate",
+            {"factor": 5},
+            timeout=None,
+            progress_callback=mock_client.call_tool.call_args.kwargs[
+                "progress_callback"
+            ],
+            cancel_event=None,
+        )
 
     def test_fetch_tools_bootstrap_tool(self) -> None:
         """测试 fetch_tools 引导工具是否能正常冷启动拉取列表并缓存。"""

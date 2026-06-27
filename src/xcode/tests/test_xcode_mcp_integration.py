@@ -87,7 +87,7 @@ class XcodeMcpIntegrationTests:
 
         # Verify client was instantiated, started, queried, and stopped
         mock_client_class.assert_called_once_with(
-            ["python", "fetch_server.py"], {}, timeout=None
+            ["python", "fetch_server.py"], {}, timeout=None, workspace_roots=()
         )
         mock_client.start.assert_called_once()
         mock_client.list_tools.assert_called_once()
@@ -122,7 +122,10 @@ class XcodeMcpIntegrationTests:
 
         build_mcp_tools(self.project_root)
         mock_client_class.assert_called_once_with(
-            ["python", "fetch_server.py", "--verbose"], {}, timeout=None
+            ["python", "fetch_server.py", "--verbose"],
+            {},
+            timeout=None,
+            workspace_roots=(),
         )
 
     @patch("xcode.harness.mcp.client.McpClient")
@@ -187,11 +190,15 @@ class XcodeMcpIntegrationTests:
 
         # Now connection should be created and started, and call_tool invoked
         mock_client_class.assert_called_once_with(
-            ["python", "db_server.py"], None, timeout=None
+            ["python", "db_server.py"], None, timeout=None, workspace_roots=()
         )
         mock_client.start.assert_called_once()
         mock_client.call_tool.assert_called_once_with(
-            "edit_record", {"id": 42, "value": "new_val"}, timeout=None
+            "edit_record",
+            {"id": 42, "value": "new_val"},
+            timeout=None,
+            progress_callback=mock_client.call_tool.call_args.kwargs["progress_callback"],
+            cancel_event=None,
         )
 
     @patch("xcode.harness.mcp.client.McpClient")

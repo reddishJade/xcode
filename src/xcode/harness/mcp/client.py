@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from datetime import timedelta
 import logging
 import os
+from pathlib import Path
 import re
 import tempfile
 import threading
+import time
 from typing import Any, IO, Literal, TextIO, TypeVar, cast
 
 from mcp import ClientSession, StdioServerParameters, types
@@ -94,6 +96,8 @@ class _SdkCommand:
     name: str | None = None
     arguments: dict[str, Any] | None = None
     timeout: float | None = None
+    progress_callback: Callable[[float, float | None, str | None], None] | None = None
+    cancel_event: threading.Event | None = None
 
 
 class McpClient:
@@ -109,6 +113,7 @@ class McpClient:
         env: dict[str, str] | None = None,
         timeout: float | None = None,
         tools_changed_callback: Callable[[McpClient], None] | None = None,
+        workspace_roots: tuple[Path, ...] = (),
     ) -> None:
         """保存连接配置并初始化 SDK session 状态。"""
         if not command:
@@ -119,6 +124,7 @@ class McpClient:
             self.env.update(env)
         self._timeout = timeout
         self._tools_changed_callback = tools_changed_callback
+        self._workspace_roots = tuple(workspace_roots)
         self._worker = IsolatedAsyncWorker(name="xcode-mcp-client")
         self._commands: asyncio.Queue[_SdkCommand] | None = None
         self._owner_future: concurrent.futures.Future[None] | None = None
@@ -129,6 +135,8 @@ class McpClient:
         self._callback_lock = threading.Lock()
         self._callback_running = False
         self._callback_pending = False
+        self._session: ClientSession | None = None
+        self._latest_progress: dict[str, object] | None = None
         self.protocol_version: str | None = None
         self.server_capabilities: dict[str, Any] = {}
         self.server_info: dict[str, Any] = {}
@@ -138,6 +146,11 @@ class McpClient:
     def status(self) -> str:
         """返回当前连接状态。"""
         return self._status
+
+    @property
+    def latest_progress(self) -> dict[str, object] | None:
+        """返回最近一次工具调用进度。"""
+        return self._latest_progress
 
     def start(self) -> None:
         """启动 owner task、stdio server 并完成 SDK initialize。"""
@@ -170,18 +183,24 @@ class McpClient:
                 params,
                 errlog=cast(TextIO, self._stderr.stream),
             ) as (read_stream, write_stream):
-                async with ClientSession(
-                    read_stream,
-                    write_stream,
-                    read_timeout_seconds=self._timeout_delta(),
-                    message_handler=self._message_handler(),
-                    client_info=types.Implementation(
+                session_kwargs: dict[str, object] = {
+                    "read_timeout_seconds": self._timeout_delta(),
+                    "message_handler": self._message_handler(),
+                    "client_info": types.Implementation(
                         name="xcode-client",
                         version="0.1.1",
                     ),
+                }
+                if self._workspace_roots:
+                    session_kwargs["list_roots_callback"] = self._list_roots_callback
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    **session_kwargs,
                 ) as session:
                     result = await session.initialize()
                     self._apply_initialize_result(result)
+                    self._session = session
                     self._commands = asyncio.Queue()
                     self._ready.set()
                     await self._serve_commands(session)
@@ -192,6 +211,23 @@ class McpClient:
                 return
             logger.warning("MCP SDK session owner stopped unexpectedly", exc_info=True)
             self._fail_pending_commands(exc)
+        finally:
+            self._session = None
+
+    async def _list_roots_callback(
+        self,
+        _context: object,
+    ) -> types.ListRootsResult:
+        """向 server 暴露当前允许读取的工作区根目录。"""
+        roots = [
+            types.Root(
+                uri=path.resolve().as_uri(),
+                name=path.name or str(path.resolve()),
+            )
+            for path in self._workspace_roots
+            if path.exists()
+        ]
+        return types.ListRootsResult(roots=roots)
 
     def _apply_initialize_result(self, result: types.InitializeResult) -> None:
         """保存 SDK 校验后的协商元数据。"""
@@ -218,6 +254,7 @@ class McpClient:
                         command.name,
                         command.arguments or {},
                         command.timeout,
+                        command.progress_callback,
                     )
             except BaseException as exc:
                 if not command.future.cancelled():
@@ -257,12 +294,28 @@ class McpClient:
         name: str,
         arguments: dict[str, Any],
         timeout: float | None,
+        progress_callback: Callable[[float, float | None, str | None], None] | None,
     ) -> dict[str, Any]:
+        async def on_progress(
+            progress: float,
+            total: float | None,
+            message: str | None,
+        ) -> None:
+            self._latest_progress = {
+                "progress": progress,
+                "total": total,
+                "message": message,
+            }
+            if progress_callback is not None:
+                progress_callback(progress, total, message)
+
         result = await session.call_tool(
             name,
             arguments,
             read_timeout_seconds=self._timeout_delta(timeout),
+            progress_callback=on_progress,
         )
+        self._latest_progress = None
         return _model_dict(result)
 
     def _message_handler(self) -> MessageHandlerFnT:
@@ -309,6 +362,8 @@ class McpClient:
         name: str,
         arguments: dict[str, Any],
         timeout: float | None = None,
+        progress_callback: Callable[[float, float | None, str | None], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         """调用服务器工具并返回普通 MCP 结果字典。"""
         self._require_connected("tools/call")
@@ -322,9 +377,32 @@ class McpClient:
                     name=name,
                     arguments=arguments,
                     timeout=timeout,
+                    progress_callback=progress_callback,
+                    cancel_event=cancel_event,
                 )
             ),
         )
+
+    def update_workspace_roots(self, workspace_roots: tuple[Path, ...]) -> None:
+        """更新 roots 回调使用的工作区，并在必要时通知 server。"""
+        normalized = tuple(path.resolve() for path in workspace_roots if path.exists())
+        if normalized == self._workspace_roots:
+            return
+        self._workspace_roots = normalized
+        if self._status == "connected":
+            self.send_roots_list_changed()
+
+    def send_roots_list_changed(self) -> None:
+        """向已连接 server 发送 roots/list_changed。"""
+        if not self.has_server_capability("roots"):
+            return
+
+        async def notify() -> None:
+            session = self._session
+            if session is not None:
+                await session.send_roots_list_changed()
+
+        self._worker.submit(notify()).result(timeout=self._effective_timeout())
 
     def stop(self) -> None:
         """通知 owner task 退出并关闭 transport、session 与 worker。"""
@@ -349,19 +427,32 @@ class McpClient:
             await commands.put(command)
 
         self._worker.submit(enqueue()).result(timeout=self._effective_timeout())
-        try:
-            return command.future.result(
-                timeout=self._effective_timeout(command.timeout)
-            )
-        except concurrent.futures.TimeoutError:
-            command.future.cancel()
-            raise TimeoutError(
-                f"Timeout waiting for MCP SDK {command.operation}"
-            ) from None
+        deadline = time.monotonic() + self._effective_timeout(command.timeout)
+        while True:
+            if command.cancel_event is not None and command.cancel_event.is_set():
+                self._interrupt_active_command(command, "cancelled")
+                raise RuntimeError(f"MCP SDK {command.operation} cancelled")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._interrupt_active_command(command, "timeout")
+                raise TimeoutError(
+                    f"Timeout waiting for MCP SDK {command.operation}"
+                ) from None
+            try:
+                return command.future.result(timeout=min(0.1, remaining))
+            except concurrent.futures.TimeoutError:
+                continue
 
     def _shutdown_worker(self) -> None:
         self._worker.close()
         self._stderr.close()
+
+    def _interrupt_active_command(self, command: _SdkCommand, reason: str) -> None:
+        """统一回收挂起请求的底层会话与子进程。"""
+        logger.info("Interrupting MCP command %s due to %s", command.operation, reason)
+        command.future.cancel()
+        self._status = "disabled"
+        self._shutdown_worker()
 
     def _effective_timeout(self, timeout: float | None = None) -> float:
         if timeout is not None:
@@ -441,6 +532,7 @@ class LazyClientRef:
         config: dict[str, Any],
         tools_changed_callback: Callable[[McpClient], None] | None = None,
         max_connect_attempts: int = MAX_LAZY_CONNECT_ATTEMPTS,
+        workspace_roots: tuple[Path, ...] = (),
     ) -> None:
         """保存服务器名称和原始运行配置。"""
         if max_connect_attempts < 1:
@@ -449,6 +541,7 @@ class LazyClientRef:
         self.config = config
         self.tools_changed_callback = tools_changed_callback
         self.max_connect_attempts = max_connect_attempts
+        self.workspace_roots = tuple(workspace_roots)
         self.client: McpClient | None = None
         self.last_error: str | None = None
         self._lock = threading.Lock()
@@ -464,7 +557,12 @@ class LazyClientRef:
             env = self.config.get("env")
             timeout = self.config.get("timeout")
             for _ in range(self.max_connect_attempts):
-                client = McpClient(command, env, timeout=timeout)
+                client = McpClient(
+                    command,
+                    env,
+                    timeout=timeout,
+                    workspace_roots=self.workspace_roots,
+                )
                 client.set_tools_changed_callback(self.tools_changed_callback)
                 try:
                     client.start()
@@ -485,6 +583,13 @@ class LazyClientRef:
         """停止并清除当前客户端。"""
         with self._lock:
             self._stop_client()
+
+    def update_workspace_roots(self, workspace_roots: tuple[Path, ...]) -> None:
+        """更新后续连接与现有连接使用的工作区 roots。"""
+        with self._lock:
+            self.workspace_roots = tuple(workspace_roots)
+            if self.client is not None:
+                self.client.update_workspace_roots(self.workspace_roots)
 
     def _stop_client(self) -> None:
         if self.client is not None:

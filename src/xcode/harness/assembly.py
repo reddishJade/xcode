@@ -279,6 +279,7 @@ def build_tool_registry(
     ShellSpec,
     tuple[Callable[[], None], ...],
     SkillRegistry | None,
+    McpRuntimeRegistry,
 ]:
     from xcode.coding_agent.tools import detect_shell
     from xcode.harness.mcp import McpRuntimeRegistry
@@ -311,6 +312,10 @@ def build_tool_registry(
     if todo_state is not None:
         registry += build_session_todo_tools(todo_state)
     mcp_runtime_registry = McpRuntimeRegistry()
+    mcp_runtime_registry.configure_runtime(
+        workspace_roots=(project_root,),
+        cancel_event=cancel_event,
+    )
     registry = _extend_registry_with_features(
         registry,
         project_root,
@@ -356,7 +361,13 @@ def build_tool_registry(
     mcp_runtime_registry.subscribe(replace_mcp_tools)
     closers.append(mcp_runtime_registry.close)
 
-    return registry_state, shell_spec, tuple(closers), skill_registry
+    return (
+        registry_state,
+        shell_spec,
+        tuple(closers),
+        skill_registry,
+        mcp_runtime_registry,
+    )
 
 
 def _extend_registry_with_features(

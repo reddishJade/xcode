@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from xcode.experimental.mailbox import AgentMailbox
     from xcode.harness.daemon import HeartbeatDaemon
     from xcode.harness.memory import MemoryManager
+    from xcode.harness.mcp import McpRuntimeRegistry
 
 
 @dataclass
@@ -45,6 +46,7 @@ class XcodeApp:
     external_hook_runner: ExternalHookRunner | None = None
     todo_state: SessionTodoState | None = None
     memory_manager: MemoryManager | None = None
+    mcp_runtime: McpRuntimeRegistry | None = None
     _model_profiles: dict[str, Any] | None = None
     _env_files: tuple[Path, ...] = ()
     _closers: tuple[Callable[[], None], ...] = ()
@@ -143,6 +145,18 @@ class XcodeApp:
             return ()
         return self.todo_state.replace(items)
 
+    def mcp_status(self) -> tuple[dict[str, object], ...]:
+        """返回 MCP server 运行时状态快照。"""
+        if self.mcp_runtime is None:
+            return ()
+        return tuple(status.__dict__ for status in self.mcp_runtime.status_snapshot())
+
+    def reload_mcp(self) -> tuple[str, ...]:
+        """重新读取 MCP 配置并返回当前工具名快照。"""
+        if self.mcp_runtime is None:
+            return ()
+        return tuple(tool.name for tool in self.mcp_runtime.reload())
+
     def close(self) -> None:
         if self._closed:
             return
@@ -182,7 +196,13 @@ def build_app(
     )
     todo_state = SessionTodoState()
 
-    registry_state, shell_spec, closers, skill_registry = _assembly.build_tool_registry(
+    (
+        registry_state,
+        shell_spec,
+        closers,
+        skill_registry,
+        mcp_runtime_registry,
+    ) = _assembly.build_tool_registry(
         project_root=project_root,
         llm=providers.llm,
         llm_profiles=providers.llms,
@@ -231,6 +251,7 @@ def build_app(
         external_hook_runner=external_hook_runner,
         todo_state=todo_state,
         memory_manager=memory_manager,
+        mcp_runtime=mcp_runtime_registry,
         _env_files=cfg.env_files,
         _model_profiles=cfg.runtime_config.provider.model_profiles,
         _closers=closers,

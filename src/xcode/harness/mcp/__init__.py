@@ -4,6 +4,7 @@ from .client import LazyClientRef, McpClient
 from .tools import (
     McpRuntimeRegistry,
     McpServerConfig,
+    McpServerStatus,
     McpToolMetadata,
     build_mcp_tools,
 )
@@ -13,6 +14,7 @@ __all__ = [
     "McpClient",
     "McpRuntimeRegistry",
     "McpServerConfig",
+    "McpServerStatus",
     "McpToolMetadata",
     "build_mcp_tools",
 ]

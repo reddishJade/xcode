@@ -90,15 +90,15 @@ class TestMcpConfigValidation:
         assert cfg.enabled
         assert cfg.timeout is None
 
-    def test_overrides_skips_server(self) -> None:
+    def test_overrides_are_allowed(self) -> None:
         cfg = _validate_server_config(
             "bad",
             {
                 "command": "python",
-                "overrides": {"tool": "low"},
+                "overrides": {"tool": {"risk": "high"}},
             },
         )
-        assert cfg is None
+        assert cfg is not None
 
     def test_empty_command_skips(self) -> None:
         cfg = _validate_server_config("bad", {"command": ""})
@@ -556,11 +556,11 @@ class TestMcpBuildIntegration:
             # and fails because mock has no list_tools — returns empty
             assert isinstance(tools, tuple)
 
-    def test_overrides_server_skipped(self, mock_client: MagicMock) -> None:
+    def test_overrides_server_applied(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()
         mock_instance.protocol_version = "2025-11-25"
         mock_instance.server_info = {"name": "good", "version": "1.0.0"}
-        mock_instance.list_tools.return_value = []
+        mock_instance.list_tools.return_value = [_minimal_mcp_tool("x")]
         mock_client.return_value = mock_instance
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -573,15 +573,26 @@ class TestMcpBuildIntegration:
                         "good": {"command": "python"},
                         "bad": {
                             "command": "python",
-                            "overrides": {"x": "low"},
+                            "overrides": {
+                                "x": {
+                                    "read_only": True,
+                                    "concurrency_safe": True,
+                                    "description": "Overridden description",
+                                    "risk": "high",
+                                }
+                            },
                         },
                     }
                 },
             )
             tools = build_mcp_tools(root)
-            # Only "good" server's tools (if any) appear
-            # bad is skipped due to overrides
-            assert isinstance(tools, tuple)
+            overridden = next(tool for tool in tools if tool.name == "mcp__bad__x")
+            assert overridden.read_only
+            assert overridden.concurrency_safe
+            assert overridden.description == "Overridden description"
+            assert overridden.builtin is not None
+            meta = overridden.builtin["mcp_metadata"]
+            assert meta["risk"] == "high"
 
     def test_mcp_metadata_on_tool_spec(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()
@@ -640,10 +651,24 @@ class TestMcpBuildIntegration:
             "required": ["temperature"],
         }
         mock_instance.list_tools.return_value = [tool]
-        mock_instance.call_tool.return_value = {
-            "content": [{"type": "text", "text": "22.5 C"}],
-            "structuredContent": {"temperature": 22.5},
-        }
+        def call_tool_side_effect(
+            _name: str,
+            _arguments: dict[str, object],
+            *,
+            timeout: float | None = None,
+            progress_callback=None,
+            cancel_event=None,
+        ) -> dict[str, object]:
+            assert timeout is None
+            assert cancel_event is None
+            assert progress_callback is not None
+            progress_callback(0.5, 1.0, "Halfway")
+            return {
+                "content": [{"type": "text", "text": "22.5 C"}],
+                "structuredContent": {"temperature": 22.5},
+            }
+
+        mock_instance.call_tool.side_effect = call_tool_side_effect
         mock_instance.status = "connected"
         mock_client.return_value = mock_instance
 
@@ -663,10 +688,15 @@ class TestMcpBuildIntegration:
         details = output.metadata[MCP_RESULT_METADATA_KEY]
         assert isinstance(details, dict)
         assert details["validation"]["status"] == "valid"
+        assert output.metadata["mcp_progress"] == [
+            {"progress": 0.5, "total": 1.0, "message": "Halfway"}
+        ]
         mock_instance.call_tool.assert_called_once_with(
             "weather",
             {},
             timeout=None,
+            progress_callback=mock_instance.call_tool.call_args.kwargs["progress_callback"],
+            cancel_event=None,
         )
 
     def test_collision_disables_tools(self, mock_client: MagicMock) -> None:

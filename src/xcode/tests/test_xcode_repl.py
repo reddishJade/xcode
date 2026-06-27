@@ -702,6 +702,65 @@ class XcodeReplTests:
 
         assert "No external hooks configured." in output.getvalue()
 
+    def test_mcp_command_shows_runtime_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir), project_root=Path(temp_dir))
+            app = SimpleNamespace(
+                mcp_status=lambda: (
+                    {
+                        "server_name": "demo",
+                        "state": "connected",
+                        "tool_count": 2,
+                        "deferred": False,
+                        "protocol_version": "2025-11-25",
+                        "server_info": {"name": "demo", "version": "1.0.0"},
+                        "last_error": None,
+                    },
+                )
+            )
+
+            with redirect_stdout(StringIO()) as output:
+                handled = handle_command(
+                    "/mcp status",
+                    store,
+                    cast(Any, app),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+        assert not handled
+        rendered = output.getvalue()
+        assert "demo: state=connected" in rendered
+        assert "tools=2" in rendered
+        assert "protocol=2025-11-25" in rendered
+        assert "identity=demo@1.0.0" in rendered
+
+    def test_mcp_command_triggers_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir), project_root=Path(temp_dir))
+            reloaded: list[bool] = []
+
+            def reload_mcp() -> tuple[str, ...]:
+                reloaded.append(True)
+                return ("mcp__demo__read", "mcp__demo__write")
+
+            app = SimpleNamespace(reload_mcp=reload_mcp)
+
+            with redirect_stdout(StringIO()) as output:
+                handled = handle_command(
+                    "/mcp reload",
+                    store,
+                    cast(Any, app),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+        assert not handled
+        assert reloaded == [True]
+        assert "Reloaded MCP config. Registered 2 MCP tools." in output.getvalue()
+
     def test_run_repl_tool_list_shows_visible_and_hidden_groups(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = ToolApp(

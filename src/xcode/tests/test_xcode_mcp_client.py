@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +19,7 @@ from xcode.harness.mcp.client import (
     LazyClientRef,
     McpClient,
 )
+from xcode.harness.mcp import client as client_module
 
 SERVER_CODE = r"""
 import json
@@ -151,6 +155,107 @@ class TestMcpSdkClient:
             with pytest.raises(RuntimeError, match="not connected"):
                 client.call_tool("mock_read_tool", {})
 
+    def test_list_roots_callback_returns_workspace_roots(self) -> None:
+        """roots 回调仅暴露存在的 workspace roots。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            nested = root / "workspace"
+            nested.mkdir()
+            missing = root / "missing"
+            client = McpClient(
+                ["python", "server.py"],
+                workspace_roots=(nested, missing),
+            )
+
+            result = asyncio.run(
+                client._list_roots_callback(SimpleNamespace())  # type: ignore[arg-type]
+            )
+
+        assert [item.name for item in result.roots] == ["workspace"]
+        assert [str(item.uri) for item in result.roots] == [nested.resolve().as_uri()]
+
+    def test_list_roots_callback_allows_empty_roots(self) -> None:
+        """未配置 workspace roots 时返回空列表。"""
+        client = McpClient(["python", "server.py"])
+
+        result = asyncio.run(
+            client._list_roots_callback(SimpleNamespace())  # type: ignore[arg-type]
+        )
+
+        assert result.roots == []
+
+    def test_update_workspace_roots_notifies_connected_server(self) -> None:
+        """workspace 变化时向已连接 server 发送 roots changed。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            other = root / "other"
+            other.mkdir()
+            client = McpClient(["python", "server.py"], workspace_roots=(root,))
+            client._status = "connected"
+            with patch.object(client, "send_roots_list_changed") as notify:
+                client.update_workspace_roots((root / "missing", other))
+
+        notify.assert_called_once_with()
+
+    def test_execute_uses_same_interrupt_path_for_cancel(self) -> None:
+        """取消中的 tools/call 与 timeout 共用同一中断路径。"""
+
+        class _AsyncQueue:
+            async def put(self, _item: object) -> None:
+                return None
+
+        class _ImmediateWorker:
+            def submit(self, coro):
+                result = asyncio.run(coro)
+                future: concurrent.futures.Future[object] = concurrent.futures.Future()
+                future.set_result(result)
+                return future
+
+        client = McpClient(["python", "server.py"])
+        client._commands = _AsyncQueue()
+        client._worker = _ImmediateWorker()
+        command = client_module._SdkCommand(
+            "call_tool",
+            concurrent.futures.Future(),
+            cancel_event=threading.Event(),
+        )
+        command.cancel_event.set()
+
+        with patch.object(client, "_interrupt_active_command") as interrupt:
+            with pytest.raises(RuntimeError, match="cancelled"):
+                client._execute(command)
+
+        interrupt.assert_called_once_with(command, "cancelled")
+
+    def test_execute_uses_same_interrupt_path_for_timeout(self) -> None:
+        """timeout 也走统一中断路径。"""
+
+        class _AsyncQueue:
+            async def put(self, _item: object) -> None:
+                return None
+
+        class _ImmediateWorker:
+            def submit(self, coro):
+                result = asyncio.run(coro)
+                future: concurrent.futures.Future[object] = concurrent.futures.Future()
+                future.set_result(result)
+                return future
+
+        client = McpClient(["python", "server.py"])
+        client._commands = _AsyncQueue()
+        client._worker = _ImmediateWorker()
+        command = client_module._SdkCommand(
+            "call_tool",
+            concurrent.futures.Future(),
+            timeout=0.0,
+        )
+
+        with patch.object(client, "_interrupt_active_command") as interrupt:
+            with pytest.raises(TimeoutError, match="Timeout waiting"):
+                client._execute(command)
+
+        interrupt.assert_called_once_with(command, "timeout")
+
     def test_tools_changed_notification_runs_callback_off_sdk_loop(self) -> None:
         """工具变化回调可同步调用 client，而不会阻塞 SDK receive loop。"""
         callback_done = threading.Event()
@@ -205,6 +310,7 @@ class TestMcpSdkClient:
             ["python", "server.py"],
             {"TOKEN": "value"},
             timeout=4.0,
+            workspace_roots=(),
         )
         first_client.stop.assert_called_once_with()
         second_client.set_tools_changed_callback.assert_called_once_with(callback)

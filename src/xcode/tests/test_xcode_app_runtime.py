@@ -312,6 +312,46 @@ class XcodeAppRuntimeTests:
         assert "mcp__demo__new" in search_tool.handler({"query": "new"})
         app.close()
 
+    def test_app_exposes_mcp_runtime_status_and_reload(self) -> None:
+        runtime_registries: list[McpRuntimeRegistry] = []
+        old_tool = ToolSpec("mcp__demo__old", "Old MCP tool.", "{}", lambda _d: "old")
+        new_tool = ToolSpec("mcp__demo__new", "New MCP tool.", "{}", lambda _d: "new")
+
+        def build_dynamic_tools(
+            _project_root: Path,
+            runtime_registry: McpRuntimeRegistry,
+        ) -> tuple[ToolSpec, ...]:
+            runtime_registries.append(runtime_registry)
+            runtime_registry.update_runtime_snapshot(
+                raw_servers={"demo": {"command": "python"}},
+                validated_servers={},
+                deferred_servers=set(),
+                tool_counts={"demo": 1},
+                cache_metadata={
+                    "demo": {
+                        "protocol_version": "2025-11-25",
+                        "server_info": {"name": "demo", "version": "1.0.0"},
+                    }
+                },
+                server_errors={},
+            )
+            runtime_registry.set_reload_callback(lambda: (new_tool,))
+            return (old_tool,)
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _patched_provider_bundle([]),
+            patch("xcode.harness.mcp.build_mcp_tools", side_effect=build_dynamic_tools),
+        ):
+            app = build_app(project_root=Path(tmp), runtime_config=XcodeRuntimeConfig())
+
+        statuses = app.mcp_status()
+        assert statuses[0]["server_name"] == "demo"
+        assert statuses[0]["tool_count"] == 1
+        assert statuses[0]["protocol_version"] == "2025-11-25"
+        assert app.reload_mcp() == ("mcp__demo__new",)
+        app.close()
+
     def test_default_runtime_does_not_create_experimental_services(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             app = build_app(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 from collections.abc import Coroutine
+import queue
 import sys
 import threading
 from typing import Any, TypeVar
@@ -19,6 +20,10 @@ class IsolatedAsyncWorker:
         self._thread: threading.Thread | None = None
         self._started = threading.Event()
         self._closed = False
+        self._submit_queue: queue.Queue[
+            tuple[Coroutine[Any, Any, Any], concurrent.futures.Future[Any]] | None
+        ] = queue.Queue()
+        self._tasks: set[asyncio.Task[Any]] = set()
 
     def start(self) -> None:
         if self._closed:
@@ -47,16 +52,16 @@ class IsolatedAsyncWorker:
 
         self.start()
 
-        assert self._loop is not None
-        return asyncio.run_coroutine_threadsafe(coro, self._loop)
+        future: concurrent.futures.Future[T] = concurrent.futures.Future()
+        self._submit_queue.put((coro, future))
+        return future
 
     def close(self) -> None:
         if self._closed:
             return
 
         self._closed = True
-        if self._loop is not None and self._loop.is_running():
-            self._loop.call_soon_threadsafe(self._loop.stop)
+        self._submit_queue.put(None)
         if self._thread is not None:
             self._thread.join(timeout=5.0)
 
@@ -71,7 +76,7 @@ class IsolatedAsyncWorker:
         self._started.set()
 
         try:
-            loop.run_forever()
+            loop.run_until_complete(self._dispatcher())
         finally:
             try:
                 pending = asyncio.all_tasks(loop)
@@ -84,3 +89,45 @@ class IsolatedAsyncWorker:
                 loop.run_until_complete(loop.shutdown_asyncgens())
             finally:
                 loop.close()
+
+    async def _dispatcher(self) -> None:
+        """持续从线程安全队列读取提交的协程并在本 loop 内执行。"""
+        while True:
+            try:
+                item = self._submit_queue.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.01)
+                continue
+            if item is None:
+                break
+            coro, future = item
+            if future.cancelled():
+                coro.close()
+                continue
+            task = asyncio.create_task(coro)
+            self._tasks.add(task)
+            task.add_done_callback(
+                lambda done, target=future: self._complete_future(done, target)
+            )
+        if self._tasks:
+            for task in tuple(self._tasks):
+                task.cancel()
+            await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
+
+    def _complete_future(
+        self,
+        task: asyncio.Task[Any],
+        future: concurrent.futures.Future[Any],
+    ) -> None:
+        """将 loop 内 task 的完成状态映射回线程安全 Future。"""
+        self._tasks.discard(task)
+        if future.cancelled():
+            return
+        if task.cancelled():
+            future.cancel()
+            return
+        exc = task.exception()
+        if exc is not None:
+            future.set_exception(exc)
+            return
+        future.set_result(task.result())
