@@ -22,6 +22,7 @@ type AgentResultContentBlock = ImageContent | FileContent | ShellCallOutputConte
 type ToolMetadataValue = JsonValue | list[AgentResultContentBlock]
 type ToolMetadata = dict[str, ToolMetadataValue]
 ActionHandler = Callable[[ToolInput], str]
+StreamingActionHandler = Callable[[ToolInput, Callable[[str], None] | None], str]
 ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
 AGENT_CONTENT_BLOCKS_METADATA_KEY = "agent_content_blocks"
 CITATION_SOURCES_METADATA_KEY = "citation_sources"
@@ -78,6 +79,7 @@ class ToolSpec:
     prompt_snippet: str | None = None
     prompt_guidelines: tuple[str, ...] = ()
     builtin: dict[str, Any] | None = None
+    streaming_handler: StreamingActionHandler | None = None
 
 
 class ToolRegistryState:

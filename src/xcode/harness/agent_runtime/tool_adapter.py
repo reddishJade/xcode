@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from ...agent.protocols import (
     AgentToolResult,
@@ -81,13 +82,36 @@ class ToolSpecAdapter:
         on_update: ToolUpdateCallback | None = None,
     ) -> AgentToolResult:
         tool_input = _tool_input_from_arguments(params)
-        content = await asyncio.to_thread(self._spec.handler, tool_input)
+        if self._spec.streaming_handler is None:
+            content = await asyncio.to_thread(self._spec.handler, tool_input)
+        else:
+            loop = asyncio.get_running_loop()
+            content = await asyncio.to_thread(
+                self._spec.streaming_handler,
+                tool_input,
+                _stream_update_callback(loop, on_update),
+            )
         metadata = getattr(content, "metadata", None)
         return AgentToolResult(
             content=_tool_result_content(content, tool_call_id),
             details=metadata if isinstance(metadata, dict) else None,
             is_error=bool(getattr(content, "is_error", False)),
         )
+
+
+def _stream_update_callback(
+    loop: asyncio.AbstractEventLoop,
+    on_update: ToolUpdateCallback | None,
+) -> Callable[[str], None] | None:
+    """将文本进度适配为 agent 既有的工具更新事件。"""
+    if on_update is None:
+        return None
+
+    def emit_update(text: str) -> None:
+        result = AgentToolResult(content=[TextContent(text=redact_text(text))])
+        loop.call_soon_threadsafe(on_update, result)
+
+    return emit_update
 
 
 def adapt_tool_specs(specs: tuple[ToolSpec, ...]) -> list[ToolSpecAdapter]:

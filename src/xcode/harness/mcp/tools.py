@@ -171,7 +171,11 @@ class McpRuntimeRegistry:
             protocol_version = None
             server_info = None
             state = "configured"
-            if ref is not None and ref.client is not None and ref.client.status == "connected":
+            if (
+                ref is not None
+                and ref.client is not None
+                and ref.client.status == "connected"
+            ):
                 state = "connected"
                 protocol_version = ref.client.protocol_version
                 server_info = ref.client.server_info
@@ -182,8 +186,12 @@ class McpRuntimeRegistry:
                 server_info = cached.get("server_info")
                 if last_error or (ref is not None and ref.last_error):
                     state = "failed"
-                    last_error = ref.last_error or last_error
-                elif server_name in deferred_servers and tool_counts.get(server_name, 0) == 0:
+                    if ref is not None and ref.last_error:
+                        last_error = ref.last_error
+                elif (
+                    server_name in deferred_servers
+                    and tool_counts.get(server_name, 0) == 0
+                ):
                     state = "deferred"
             if validated is None:
                 state = "failed"
@@ -616,7 +624,10 @@ def _make_handler(
     output_schema: object,
     runtime_registry: McpRuntimeRegistry,
 ) -> Any:
-    def handler(args: ToolInput) -> str:
+    def handler(
+        args: ToolInput,
+        on_update: Callable[[str], None] | None = None,
+    ) -> str:
         if deferred:
             try:
                 cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -655,13 +666,14 @@ def _make_handler(
             total: float | None,
             message: str | None,
         ) -> None:
-            progress_updates.append(
-                {
-                    "progress": progress,
-                    "total": total,
-                    "message": message,
-                }
-            )
+            update = {
+                "progress": progress,
+                "total": total,
+                "message": message,
+            }
+            progress_updates.append(update)
+            if on_update is not None:
+                on_update(_format_progress_update(progress, total, message))
 
         response = client_instance.call_tool(
             original_tool_name,
@@ -679,6 +691,19 @@ def _make_handler(
         return type(result)(str(result), metadata=merged, is_error=result.is_error)
 
     return handler
+
+
+def _format_progress_update(
+    progress: float,
+    total: float | None,
+    message: str | None,
+) -> str:
+    """将 MCP progress notification 转为稳定的工具更新文本。"""
+    position = f"{progress:g}"
+    if total is not None:
+        position = f"{position}/{total:g}"
+    suffix = f" {message}" if message else ""
+    return f"MCP progress {position}{suffix}"
 
 
 # ── 碰撞检测 ──
@@ -1086,19 +1111,20 @@ def _build_registered_mcp_tool(
     )
     concurrency_safe = bool(tool_override.concurrency_safe)
     description = tool_override.description or tool_description
+    mcp_handler = _make_handler(
+        lazy_ref,
+        tool["name"],
+        is_deferred,
+        validated.name,
+        cache_path,
+        tool.get("outputSchema"),
+        runtime_registry,
+    )
     return ToolSpec(
         name=metadata.host_tool_id,
         description=description,
         input_hint=_mcp_tool_input_hint(tool.get("inputSchema", {})),
-        handler=_make_handler(
-            lazy_ref,
-            tool["name"],
-            is_deferred,
-            validated.name,
-            cache_path,
-            tool.get("outputSchema"),
-            runtime_registry,
-        ),
+        handler=lambda args: mcp_handler(args),
         schema=tool_schema,
         group="mcp",
         read_only=read_only,
@@ -1114,6 +1140,7 @@ def _build_registered_mcp_tool(
                 "risk": tool_override.risk,
             }
         },
+        streaming_handler=mcp_handler,
     )
 
 

@@ -651,6 +651,7 @@ class TestMcpBuildIntegration:
             "required": ["temperature"],
         }
         mock_instance.list_tools.return_value = [tool]
+
         def call_tool_side_effect(
             _name: str,
             _arguments: dict[str, object],
@@ -695,9 +696,47 @@ class TestMcpBuildIntegration:
             "weather",
             {},
             timeout=None,
-            progress_callback=mock_instance.call_tool.call_args.kwargs["progress_callback"],
+            progress_callback=mock_instance.call_tool.call_args.kwargs[
+                "progress_callback"
+            ],
             cancel_event=None,
         )
+
+    def test_mcp_progress_emits_tool_update(self, mock_client: MagicMock) -> None:
+        """MCP progress 在最终结果前进入 agent 的既有更新链路。"""
+        mock_instance = MagicMock()
+        mock_instance.protocol_version = "2025-11-25"
+        mock_instance.server_info = {"name": "progress", "version": "1.0.0"}
+        mock_instance.list_tools.return_value = [_minimal_mcp_tool("slow")]
+        mock_instance.status = "connected"
+
+        def call_tool_side_effect(
+            _name: str,
+            _arguments: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object]:
+            progress_callback = kwargs["progress_callback"]
+            assert callable(progress_callback)
+            progress_callback(2.0, 4.0, "Working")
+            return {"content": [{"type": "text", "text": "complete"}]}
+
+        mock_instance.call_tool.side_effect = call_tool_side_effect
+        mock_client.return_value = mock_instance
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_config(
+                root / ".local" / "mcp_config.json",
+                {"mcpServers": {"progress": {"command": "python"}}},
+            )
+            (spec,) = build_mcp_tools(root)
+            updates: list[str] = []
+            assert spec.streaming_handler is not None
+
+            result = spec.streaming_handler({}, updates.append)
+
+        assert str(result) == "complete"
+        assert updates == ["MCP progress 2/4 Working"]
 
     def test_collision_disables_tools(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()

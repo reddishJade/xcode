@@ -4,7 +4,7 @@ import asyncio
 import threading
 import time
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from xcode.agent.tool_execution import (
     ExecutedToolBatch,
@@ -27,7 +27,10 @@ from xcode.agent.types import (
     TextContent,
     ToolCallContent,
 )
-from xcode.harness.agent_runtime.tool_adapter import adapt_tool_specs
+from xcode.harness.agent_runtime.tool_adapter import (
+    _stream_update_callback,
+    adapt_tool_specs,
+)
 from xcode.harness.agent_runtime.cancellation import CancellationToken
 from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
@@ -52,6 +55,19 @@ EMPTY_SCHEMA = {
 
 
 class AgentToolExecutionTests:
+    def test_streaming_handler_emits_existing_tool_updates(self) -> None:
+        """工作线程的文本进度线程安全地投递到既有 on_update 合约。"""
+        loop = MagicMock()
+        on_update = MagicMock()
+        emit = _stream_update_callback(loop, on_update)
+        assert emit is not None
+
+        emit("halfway")
+
+        callback, result = loop.call_soon_threadsafe.call_args.args
+        assert callback is on_update
+        assert result.content[0] == TextContent(text="halfway")
+
     def test_parallel_tools_respect_worker_limit(self) -> None:
         """parallel batch 的活跃 handler 数不超过 tool_workers。"""
         lock = threading.Lock()
