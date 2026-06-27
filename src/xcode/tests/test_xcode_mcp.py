@@ -594,6 +594,41 @@ class TestMcpBuildIntegration:
             meta = overridden.builtin["mcp_metadata"]
             assert meta["risk"] == "high"
 
+    def test_unknown_override_emits_diagnostic(
+        self,
+        mock_client: MagicMock,
+        caplog,
+    ) -> None:
+        """未知工具名的 override 不得静默忽略。"""
+        mock_instance = MagicMock()
+        mock_instance.protocol_version = "2025-11-25"
+        mock_instance.server_info = {"name": "demo", "version": "1.0.0"}
+        mock_instance.list_tools.return_value = [_minimal_mcp_tool("known")]
+        mock_client.return_value = mock_instance
+
+        with tempfile.TemporaryDirectory() as tmp, caplog.at_level("WARNING"):
+            root = Path(tmp)
+            _write_config(
+                root / ".local" / "mcp_config.json",
+                {
+                    "mcpServers": {
+                        "demo": {
+                            "command": "python",
+                            "overrides": {
+                                "missing": {"enabled": False},
+                                "*": {"read_only": True},
+                            },
+                        }
+                    }
+                },
+            )
+
+            tools = build_mcp_tools(root)
+
+        assert [tool.name for tool in tools] == ["mcp__demo__known"]
+        assert "override references unknown tool 'missing'; ignored" in caplog.text
+        assert "unknown tool '*'" not in caplog.text
+
     def test_mcp_metadata_on_tool_spec(self, mock_client: MagicMock) -> None:
         mock_instance = MagicMock()
         mock_instance.protocol_version = "2025-11-25"

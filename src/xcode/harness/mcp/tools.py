@@ -356,6 +356,23 @@ def _tool_override(
     )
 
 
+def _warn_unknown_overrides(
+    server_name: str,
+    raw_server: dict[str, Any],
+    tools: list[dict[str, Any]],
+) -> None:
+    """诊断无法匹配 server 工具目录的精确 override。"""
+    overrides = _parse_overrides(raw_server.get("overrides"))
+    known_names = {
+        tool_name for tool in tools if isinstance((tool_name := tool.get("name")), str)
+    }
+    for tool_name in sorted(overrides.keys() - known_names - {"*"}):
+        _warn(
+            f"server {server_name!r} override references unknown tool "
+            f"{tool_name!r}; ignored"
+        )
+
+
 # ── 配置与缓存路径 ──
 
 
@@ -944,6 +961,11 @@ def _build_runtime_mcp_tools(
 
     for server_name, tools_list in all_tools_by_server.items():
         validated = validated_servers[server_name]
+        _warn_unknown_overrides(
+            server_name,
+            raw_servers[server_name],
+            tools_list,
+        )
         lazy_ref = runtime_registry._client_refs.get(server_name)
         if lazy_ref is None:
 
