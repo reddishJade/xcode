@@ -45,6 +45,10 @@ testpaths = ["src/xcode/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*", "*Test", "*Tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not mcp_external'"
+markers = [
+    "mcp_external: requires npx and network access to run a pinned official MCP server",
+]
 
 [project.scripts]
 xcode = "xcode.main:main"

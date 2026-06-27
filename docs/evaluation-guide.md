@@ -30,6 +30,7 @@
 | `uv run python -m xcode.evals.cli --suite tool-policy` | 工具策略回归（离线） |
 | `uv run python -m xcode.evals.cli --suite all --trials 3` | 默认离线回归集合 |
 | `uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3` | 真实 provider sandbox 评测 |
+| `uv run pytest -o addopts='' -m mcp_external src/xcode/tests/test_xcode_mcp_official_server.py -q` | 官方 MCP Everything server 外部回归 |
 | `uv run python -m xcode.evals.cli --list-benchmarks` | 列出外部 benchmark adapter |
 | `uv run python -m xcode.evals.cli --real --benchmark evalplus-humaneval --benchmark-path <url> --limit 1` | 外部 benchmark 小子集 |
 
@@ -116,6 +117,19 @@ uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3
 ```
 
 `coding-fixture` 把 `examples/eval/fixtures/` 下的小型项目复制到 sandbox。Agent 的写入在 sandbox 中进行。
+
+## 官方 MCP Server 回归
+
+默认 pytest 排除 `mcp_external`，避免网络和 npm 成为离线测试前提。显式运行：
+
+```powershell
+uv run pytest -o addopts='' -m mcp_external src/xcode/tests/test_xcode_mcp_official_server.py -q
+```
+
+该测试固定官方 `@modelcontextprotocol/server-everything@2026.1.26`，覆盖 stdio
+发现、普通调用、structured content、progress notification 和关闭生命周期。
+`tools/listChanged` 的可观察刷新行为由离线 SDK adapter conformance 测试覆盖；
+Everything server 没有提供用于动态修改 tool catalog 的公开测试工具。
 
 ---
 
