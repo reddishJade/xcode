@@ -350,51 +350,12 @@ class SessionStore:
         """
         all_meta = {m.id: m for m in self._load_metadata()}
         current_id = self._session_id(self.current_path)
-
-        # 构建父子索引
-        children: dict[str, list[SessionMetadata]] = {}
-        for m in all_meta.values():
-            pid = m.parent_id
-            if pid:
-                children.setdefault(pid, []).append(m)
-
-        result: list[TreeNode] = []
-
-        # 从根节点开始构建
         current = all_meta.get(current_id)
         if current is None:
-            return result
-
-        # 先构建祖先链（root→parent→current）
-        chain: list[SessionMetadata] = [current]
-        while chain[-1].parent_id and chain[-1].parent_id in all_meta:
-            chain.append(all_meta[chain[-1].parent_id])
-        chain.reverse()
-
-        seen: set[str] = set()
-
-        def walk(meta: SessionMetadata, depth: int) -> None:
-            if meta.id in seen:
-                return
-            seen.add(meta.id)
-            is_current = meta.id == current_id
-            result.append(
-                TreeNode(
-                    id=meta.id,
-                    title=meta.title,
-                    fork_type=meta.fork_type,
-                    depth=depth,
-                    is_current=is_current,
-                    is_leaf=meta.id not in children,
-                )
-            )
-            for child in sorted(children.get(meta.id, []), key=lambda m: m.created_at):
-                walk(child, depth + 1)
-
-        for ancestor in chain:
-            walk(ancestor, 0 if ancestor.id == chain[0].id else chain.index(ancestor))
-
-        return result
+            return []
+        children = _build_children_index(all_meta)
+        chain = _build_ancestor_chain(all_meta, current_id)
+        return _walk_tree(chain, children, current_id)
 
     def _session_paths(self) -> list[Path]:
         return sorted(
@@ -650,3 +611,59 @@ class TreeNode:
     depth: int
     is_current: bool
     is_leaf: bool
+
+
+def _build_children_index(
+    all_meta: dict[str, SessionMetadata],
+) -> dict[str, list[SessionMetadata]]:
+    """从元数据构建父→子索引。"""
+    children: dict[str, list[SessionMetadata]] = {}
+    for m in all_meta.values():
+        pid = m.parent_id
+        if pid:
+            children.setdefault(pid, []).append(m)
+    return children
+
+
+def _build_ancestor_chain(
+    all_meta: dict[str, SessionMetadata],
+    current_id: str,
+) -> list[SessionMetadata]:
+    """从当前节点回溯到根节点，返回从根到当前的链。"""
+    chain: list[SessionMetadata] = [all_meta[current_id]]
+    while chain[-1].parent_id and chain[-1].parent_id in all_meta:
+        chain.append(all_meta[chain[-1].parent_id])
+    chain.reverse()
+    return chain
+
+
+def _walk_tree(
+    chain: list[SessionMetadata],
+    children: dict[str, list[SessionMetadata]],
+    current_id: str,
+) -> list[TreeNode]:
+    """遍历祖先链和子树，生成扁平的 TreeNode 列表。"""
+    result: list[TreeNode] = []
+    seen: set[str] = set()
+
+    def walk(meta: SessionMetadata, depth: int) -> None:
+        if meta.id in seen:
+            return
+        seen.add(meta.id)
+        is_current = meta.id == current_id
+        result.append(
+            TreeNode(
+                id=meta.id,
+                title=meta.title,
+                fork_type=meta.fork_type,
+                depth=depth,
+                is_current=is_current,
+                is_leaf=meta.id not in children,
+            )
+        )
+        for child in sorted(children.get(meta.id, []), key=lambda m: m.created_at):
+            walk(child, depth + 1)
+
+    for ancestor in chain:
+        walk(ancestor, 0 if ancestor.id == chain[0].id else chain.index(ancestor))
+    return result
