@@ -85,6 +85,7 @@ class CommandEntry:
     accepts_args: bool = False
     visible: bool = True
     group: str = ""
+    canonical: str | None = None
 
 
 def command_names(registry: dict[str, CommandEntry]) -> tuple[str, ...]:

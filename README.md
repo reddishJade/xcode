@@ -134,12 +134,12 @@ xcode --config .local/settings.json
 | `/tool [list\|NAME INPUT]` | 查看/调用工具 |
 | `/skill NAME` | 显式激活技能 |
 | `/memory` | 检索、列出或添加记忆 |
-| `/permissions [revoke\|clear]` | 权限管理 |
+| `/permissions [list\|clear]` | 查看或清除权限授权 |
 | `/hooks` | 查看 hook 状态 |
 | `/context` | 查看上下文 token 占用 |
 | `/btw` | 侧问题快速问答 |
 | `/undo` | 文件级撤销 |
-| `/exit\|/quit` | 退出 |
+| `/exit` | 退出（`/quit` 为隐藏别名） |
 | `$skill-name ...` | 行首 `$` 激活技能并传递任务 |
 | `!COMMAND` | 执行 shell 命令 |
 | `@file` | 引用并读取文件内容 |

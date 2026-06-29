@@ -49,6 +49,9 @@ def handle_permissions(
         session_grant_store.clear()
         print("Session permissions cleared.")
         return
+    if sub and sub != "list":
+        print("Usage: /permissions [list|clear]")
+        return
     list_permissions(
         session_grant_store,
         permanent_grant_store,
@@ -101,12 +104,12 @@ def list_permissions(
     lines = ["<permissions>"]
     has_any = False
 
-    if static_policy is not None and static_policy.rules:
-        has_any = True
-        lines.append("  static:")
-        for line in _format_rules(static_policy.rules):
-            lines.append("    " + line)
-
+    if static_policy is not None:
+        if static_policy.rules:
+            has_any = True
+            lines.append("  static:")
+            for line in _format_rules(static_policy.rules):
+                lines.append("    " + line)
         if static_policy.global_default is not None:
             has_any = True
             lines.append(f"  global_default: {static_policy.global_default}")
@@ -134,7 +137,7 @@ def list_permissions(
                 lines.append(_format_grant(rec))
 
     if not has_any:
-        lines.append("  (none)")
+        lines.append("  (none: no static rules, restricted dirs, or grants active)")
     lines.append("</permissions>")
     print("\n".join(lines))
 

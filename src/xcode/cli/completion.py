@@ -82,6 +82,7 @@ class ReplCompleter(Completer):
         self._command_meta: dict[str, str] = {}
         self._command_args: dict[str, str] = {}
         self._command_group: dict[str, str] = {}
+        self._command_aliases: dict[str, str] = {}
         if command_registry:
             for name, entry in command_registry.items():
                 if entry.visible:
@@ -89,6 +90,8 @@ class ReplCompleter(Completer):
                     self._command_group[name] = entry.group
                     if entry.args_desc:
                         self._command_args[name] = entry.args_desc
+                if entry.canonical is not None:
+                    self._command_aliases[name] = entry.canonical
         self._effort_options = effort_options
         self._model_options = model_options
         self._skill_options = skill_options
@@ -148,10 +151,12 @@ class ReplCompleter(Completer):
         return self._complete_file_reference(text_before_cursor)
 
     def _complete_command(self, text: str) -> list[CompletionItem]:
-        matched = _ranked_matches(text, self.command_names)
+        matched = _ranked_command_matches(
+            text, self.command_names, self._command_aliases
+        )
         matched.sort(
             key=lambda name: (
-                _fuzzy_score(text, name),
+                _command_score(text, name, self._command_aliases),
                 COMMAND_GROUP_ORDER.get(self._command_group.get(name, ""), 99),
                 name,
             )
@@ -324,6 +329,38 @@ def _ranked_matches(query: str, candidates: Iterable[str]) -> list[str]:
     ]
     matched.sort(key=lambda candidate: (_fuzzy_score(query, candidate), candidate))
     return matched
+
+
+def _ranked_command_matches(
+    query: str,
+    command_names: Iterable[str],
+    aliases: dict[str, str],
+) -> list[str]:
+    """按命令名和隐藏别名匹配，返回 canonical command。"""
+    matched: set[str] = {
+        command
+        for command in command_names
+        if _fuzzy_score(query, command) is not None
+    }
+    for alias, canonical in aliases.items():
+        if _fuzzy_score(query, alias) is not None:
+            matched.add(canonical)
+    return sorted(matched)
+
+
+def _command_score(
+    query: str,
+    command: str,
+    aliases: dict[str, str],
+) -> tuple[int, int, int]:
+    """命令补全排序：alias 命中按 canonical 展示但按 alias 相关性排序。"""
+    scores = [_fuzzy_score(query, command)]
+    scores.extend(
+        _fuzzy_score(query, alias)
+        for alias, canonical in aliases.items()
+        if canonical == command
+    )
+    return min(score for score in scores if score is not None)
 
 
 def _fuzzy_score(query: str, candidate: str) -> tuple[int, int, int] | None:
