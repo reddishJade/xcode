@@ -8,7 +8,7 @@ import logging
 import re
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -814,8 +814,8 @@ def _load_mcp_tools_snapshot(
     runtime_registry: McpRuntimeRegistry,
 ) -> tuple[ToolSpec, ...]:
     """读取当前配置并构建完整 MCP 工具快照。"""
-    config_path = _mcp_config_path(project_root)
-    if config_path is None:
+    config = _read_mcp_config(project_root)
+    if config is None:
         runtime_registry.update_runtime_snapshot(
             raw_servers={},
             validated_servers={},
@@ -825,26 +825,118 @@ def _load_mcp_tools_snapshot(
             server_errors={},
         )
         return ()
-
-    try:
-        config_data = json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        _warn(f"failed to load MCP config {config_path}: {exc}")
+    if config.error is not None:
+        _warn(f"failed to load MCP config {config.config_path}: {config.error}")
         runtime_registry.update_runtime_snapshot(
             raw_servers={},
             validated_servers={},
             deferred_servers=set(),
             tool_counts={},
             cache_metadata={},
-            server_errors={"<config>": _redact_and_truncate(str(exc))},
+            server_errors={"<config>": _redact_and_truncate(config.error)},
         )
         return ()
 
+    mcp_servers = config.servers
+    validated_servers, server_errors = _validate_mcp_servers(mcp_servers)
+    _prune_removed_or_replaced_servers(project_root, runtime_registry, mcp_servers)
+
+    cache_path = _cache_path(project_root)
+    cache_data = _load_cache(cache_path)
+    collected = _collect_mcp_tools(
+        project_root,
+        mcp_servers,
+        validated_servers,
+        server_errors,
+        cache_path,
+        cache_data,
+        runtime_registry,
+    )
+
+    bootstrap_tools = tuple(collected.tools_to_register)
+    search_tools = (
+        (
+            build_mcp_tool_search(
+                project_root, collected.deferred_servers, collected.slug_map
+            ),
+        )
+        if collected.deferred_servers
+        else ()
+    )
+
+    refresh = _build_mcp_refresh_fn(
+        validated_servers=validated_servers,
+        mcp_servers=mcp_servers,
+        deferred_servers=collected.deferred_servers,
+        cache_path=cache_path,
+        all_tools_by_server=collected.all_tools_by_server,
+        cache_metadata_by_server=collected.cache_metadata_by_server,
+        runtime_registry=runtime_registry,
+        bootstrap_tools=bootstrap_tools,
+        search_tools=search_tools,
+        server_errors=server_errors,
+    )
+
+    registered_tools = _build_runtime_mcp_tools(
+        all_tools_by_server=collected.all_tools_by_server,
+        validated_servers=validated_servers,
+        raw_servers=mcp_servers,
+        deferred_servers=collected.deferred_servers,
+        cache_path=cache_path,
+        runtime_registry=runtime_registry,
+        refresh_server_tools=refresh,
+    )
+    runtime_registry.update_runtime_snapshot(
+        raw_servers=mcp_servers,
+        validated_servers=validated_servers,
+        deferred_servers=collected.deferred_servers,
+        tool_counts={
+            name: len(tools) for name, tools in collected.all_tools_by_server.items()
+        },
+        cache_metadata=collected.cache_metadata_by_server,
+        server_errors=server_errors,
+    )
+    return bootstrap_tools + registered_tools + search_tools
+
+
+@dataclass(frozen=True)
+class _McpConfigReadResult:
+    """_read_mcp_config 的返回值。"""
+
+    servers: dict[str, dict[str, Any]]
+    config_path: Path | None
+    error: str | None
+
+
+def _read_mcp_config(project_root: Path) -> _McpConfigReadResult | None:
+    """读取并解析 MCP 配置文件。返回 None 表示无配置。"""
+    config_path = _mcp_config_path(project_root)
+    if config_path is None:
+        return None
+    try:
+        config_data = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return _McpConfigReadResult(
+            servers={},
+            config_path=config_path,
+            error=str(exc),
+        )
     mcp_servers = {
         name: raw
         for name, raw in config_data.get("mcpServers", {}).items()
         if isinstance(name, str) and isinstance(raw, dict)
     }
+    return _McpConfigReadResult(
+        servers=mcp_servers,
+        config_path=config_path,
+        error=None,
+    )
+
+
+def _validate_mcp_servers(
+    mcp_servers: dict[str, dict[str, Any]],
+) -> tuple[dict[str, McpServerConfig], dict[str, str]]:
+    """验证所有 MCP server 配置。"""
     validated_servers: dict[str, McpServerConfig] = {}
     server_errors: dict[str, str] = {}
     for server_name, raw in mcp_servers.items():
@@ -853,17 +945,35 @@ def _load_mcp_tools_snapshot(
             validated_servers[server_name] = validated
         else:
             server_errors[server_name] = "invalid config"
+    return validated_servers, server_errors
 
-    _prune_removed_or_replaced_servers(project_root, runtime_registry, mcp_servers)
 
+@dataclass(frozen=True)
+class _McpToolsCollection:
+    """_collect_mcp_tools 的返回值。"""
+
+    tools_to_register: list[ToolSpec] = field(default_factory=list)
+    deferred_servers: set[str] = field(default_factory=set)
+    slug_map: dict[str, str] = field(default_factory=dict)
+    all_tools_by_server: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    cache_metadata_by_server: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+def _collect_mcp_tools(
+    project_root: Path,
+    mcp_servers: dict[str, dict[str, Any]],
+    validated_servers: dict[str, McpServerConfig],
+    server_errors: dict[str, str],
+    cache_path: Path,
+    cache_data: dict[str, Any],
+    runtime_registry: McpRuntimeRegistry,
+) -> _McpToolsCollection:
+    """遍历所有已验证的 MCP server，收集工具列表。"""
     tools_to_register: list[ToolSpec] = []
     deferred_servers: set[str] = set()
     slug_map: dict[str, str] = {}
     all_tools_by_server: dict[str, list[dict[str, Any]]] = {}
     cache_metadata_by_server: dict[str, dict[str, Any]] = {}
-    refresh_lock = threading.Lock()
-    cache_path = _cache_path(project_root)
-    cache_data = _load_cache(cache_path)
 
     for server_name, validated in validated_servers.items():
         is_deferred = bool(mcp_servers.get(server_name, {}).get("defer_loading", False))
@@ -888,67 +998,80 @@ def _load_mcp_tools_snapshot(
         if tools_list:
             all_tools_by_server[server_name] = tools_list
 
-    bootstrap_tools = tuple(tools_to_register)
-    search_tools = (
-        (build_mcp_tool_search(project_root, deferred_servers, slug_map),)
-        if deferred_servers
-        else ()
+    return _McpToolsCollection(
+        tools_to_register=tools_to_register,
+        deferred_servers=deferred_servers,
+        slug_map=slug_map,
+        all_tools_by_server=all_tools_by_server,
+        cache_metadata_by_server=cache_metadata_by_server,
     )
 
-    def refresh_server_tools(server_name: str, client: _mcp_mod.McpClient) -> None:
-        validated = validated_servers[server_name]
+
+def _build_mcp_refresh_fn(
+    *,
+    validated_servers: dict[str, McpServerConfig],
+    mcp_servers: dict[str, dict[str, Any]],
+    deferred_servers: set[str],
+    cache_path: Path,
+    all_tools_by_server: dict[str, list[dict[str, Any]]],
+    cache_metadata_by_server: dict[str, dict[str, Any]],
+    runtime_registry: McpRuntimeRegistry,
+    bootstrap_tools: tuple[ToolSpec, ...],
+    search_tools: tuple[ToolSpec, ...],
+    server_errors: dict[str, str],
+) -> Callable[[str, _mcp_mod.McpClient], None]:
+    """构建 MCP server 工具刷新回调。"""
+    refresh_lock = threading.Lock()
+
+    def _refresh(
+        server_name: str,
+        client: _mcp_mod.McpClient,
+        *,
+        _validated=validated_servers,
+        _mcp_servers=mcp_servers,
+        _deferred=deferred_servers,
+        _cache_path=cache_path,
+        _all_tools=all_tools_by_server,
+        _cache_meta=cache_metadata_by_server,
+        _registry=runtime_registry,
+        _bootstrap=bootstrap_tools,
+        _search=search_tools,
+        _errors=server_errors,
+    ) -> None:
+        validated = _validated[server_name]
         tools_list = client.list_tools(timeout=validated.timeout)
         cache_metadata = _cache_metadata(client)
-        config_hash = compute_config_hash(mcp_servers[server_name])
+        config_hash = compute_config_hash(_mcp_servers[server_name])
         with refresh_lock:
-            current_cache = _load_cache(cache_path)
+            current_cache = _load_cache(_cache_path)
             current_cache.setdefault("servers", {})[server_name] = {
                 "config_hash": config_hash,
                 "tools": tools_list,
                 **cache_metadata,
             }
-            _save_cache(cache_path, current_cache)
-            all_tools_by_server[server_name] = tools_list
-            cache_metadata_by_server[server_name] = cache_metadata
+            _save_cache(_cache_path, current_cache)
+            _all_tools[server_name] = tools_list
+            _cache_meta[server_name] = cache_metadata
             refreshed = _build_runtime_mcp_tools(
-                all_tools_by_server=all_tools_by_server,
-                validated_servers=validated_servers,
-                raw_servers=mcp_servers,
-                deferred_servers=deferred_servers,
-                cache_path=cache_path,
-                runtime_registry=runtime_registry,
-                refresh_server_tools=refresh_server_tools,
+                all_tools_by_server=_all_tools,
+                validated_servers=_validated,
+                raw_servers=_mcp_servers,
+                deferred_servers=_deferred,
+                cache_path=_cache_path,
+                runtime_registry=_registry,
+                refresh_server_tools=_refresh,
             )
-            runtime_registry.update_runtime_snapshot(
-                raw_servers=mcp_servers,
-                validated_servers=validated_servers,
-                deferred_servers=deferred_servers,
-                tool_counts={
-                    name: len(tools) for name, tools in all_tools_by_server.items()
-                },
-                cache_metadata=cache_metadata_by_server,
-                server_errors=server_errors,
+            _registry.update_runtime_snapshot(
+                raw_servers=_mcp_servers,
+                validated_servers=_validated,
+                deferred_servers=_deferred,
+                tool_counts={name: len(tools) for name, tools in _all_tools.items()},
+                cache_metadata=_cache_meta,
+                server_errors=_errors,
             )
-        runtime_registry.publish(bootstrap_tools + refreshed + search_tools)
+        _registry.publish(_bootstrap + refreshed + _search)
 
-    registered_tools = _build_runtime_mcp_tools(
-        all_tools_by_server=all_tools_by_server,
-        validated_servers=validated_servers,
-        raw_servers=mcp_servers,
-        deferred_servers=deferred_servers,
-        cache_path=cache_path,
-        runtime_registry=runtime_registry,
-        refresh_server_tools=refresh_server_tools,
-    )
-    runtime_registry.update_runtime_snapshot(
-        raw_servers=mcp_servers,
-        validated_servers=validated_servers,
-        deferred_servers=deferred_servers,
-        tool_counts={name: len(tools) for name, tools in all_tools_by_server.items()},
-        cache_metadata=cache_metadata_by_server,
-        server_errors=server_errors,
-    )
-    return bootstrap_tools + registered_tools + search_tools
+    return _refresh
 
 
 def _build_runtime_mcp_tools(
