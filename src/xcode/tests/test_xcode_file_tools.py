@@ -65,6 +65,104 @@ class XcodeSandboxedFileToolsTests:
             assert root / "a.txt" in operations.writes
             assert root in operations.mkdirs
 
+    def test_apply_patch_adds_updates_deletes_and_moves_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("one\ntwo\n", encoding="utf-8")
+            (root / "delete.txt").write_text("gone\n", encoding="utf-8")
+            (root / "old.txt").write_text("move me\n", encoding="utf-8")
+            tools = self._tools(root)
+
+            output = tools["apply_patch"].handler(
+                {
+                    "patch_text": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: new.txt",
+                            "+created",
+                            "*** Update File: a.txt",
+                            "@@",
+                            " one",
+                            "-two",
+                            "+three",
+                            "*** Delete File: delete.txt",
+                            "*** Update File: old.txt",
+                            "*** Move to: moved/renamed.txt",
+                            "@@",
+                            "-move me",
+                            "+moved",
+                            "*** End Patch",
+                        ]
+                    )
+                }
+            )
+
+            assert "A new.txt" in output
+            assert "M a.txt" in output
+            assert "D delete.txt" in output
+            assert "R old.txt -> moved/renamed.txt" in output
+            assert (root / "new.txt").read_text(encoding="utf-8") == "created\n"
+            assert (root / "a.txt").read_text(encoding="utf-8") == "one\nthree\n"
+            assert not (root / "delete.txt").exists()
+            assert not (root / "old.txt").exists()
+            assert (root / "moved" / "renamed.txt").read_text(
+                encoding="utf-8"
+            ) == "moved\n"
+            metadata = getattr(output, "metadata", {})
+            assert "patch" in metadata
+            assert len(metadata["files"]) == 4
+
+    def test_apply_patch_rejects_stale_update_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("current\n", encoding="utf-8")
+            tools = self._tools(root)
+
+            with pytest.raises(ValueError, match="context not found"):
+                tools["apply_patch"].handler(
+                    {
+                        "patch_text": "\n".join(
+                            [
+                                "*** Begin Patch",
+                                "*** Update File: a.txt",
+                                "@@",
+                                "-old",
+                                "+new",
+                                "*** End Patch",
+                            ]
+                        )
+                    }
+                )
+
+            assert (root / "a.txt").read_text(encoding="utf-8") == "current\n"
+
+    def test_apply_patch_rejects_move_target_that_already_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "source.txt").write_text("source\n", encoding="utf-8")
+            (root / "target.txt").write_text("target\n", encoding="utf-8")
+            tools = self._tools(root)
+
+            with pytest.raises(ValueError, match="move target already exists"):
+                tools["apply_patch"].handler(
+                    {
+                        "patch_text": "\n".join(
+                            [
+                                "*** Begin Patch",
+                                "*** Update File: source.txt",
+                                "*** Move to: target.txt",
+                                "@@",
+                                "-source",
+                                "+source",
+                                "*** End Patch",
+                            ]
+                        )
+                    }
+                )
+
+            assert (root / "source.txt").exists()
+            assert (root / "target.txt").read_text(encoding="utf-8") == "target\n"
+
     def test_read_file_with_offset_and_continuation_hint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -284,6 +382,7 @@ class XcodeSandboxedFileToolsTests:
             assert tools["read_file"].schema is not None
             assert tools["write_file"].schema is not None
             assert tools["edit_file"].schema is not None
+            assert tools["apply_patch"].schema is not None
             assert "offset" in tools["read_file"].schema["properties"]
             assert tools["write_file"].schema["required"] == ["path", "content"]
             assert tools["edit_file"].schema["required"] == ["path"]

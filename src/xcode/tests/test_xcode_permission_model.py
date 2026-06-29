@@ -199,6 +199,32 @@ class ActionExtractorTests:
         assert action.capability == "patch"
         assert [target.value for target in action.targets] == ["src/a.py", "src/b.py"]
 
+    def test_apply_patch_extracts_paths_from_patch_text(self) -> None:
+        action = ActionExtractor().extract(
+            "apply_patch",
+            {
+                "patch_text": "\n".join(
+                    [
+                        "*** Begin Patch",
+                        "*** Update File: src/a.py",
+                        "*** Move to: src/b.py",
+                        "@@",
+                        "-old",
+                        "+new",
+                        "*** Delete File: src/c.py",
+                        "*** End Patch",
+                    ]
+                )
+            },
+        )
+
+        assert action.capability == "patch"
+        assert [target.value for target in action.targets] == [
+            "src/a.py",
+            "src/b.py",
+            "src/c.py",
+        ]
+
     def test_shell_extracts_command_targets_only(self) -> None:
         action = ActionExtractor().extract(
             "shell", {"commands": ["git status --short", "uv run ruff check src"]}

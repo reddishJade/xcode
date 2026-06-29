@@ -149,6 +149,24 @@ class XcodePermissionsTests:
         assert result.blocked
         assert result.matched_rule == "restricted_dirs"
 
+    def test_restricted_dirs_checks_patch_text_targets(self) -> None:
+        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        result = engine.decide(
+            "apply_patch",
+            {
+                "patch_text": "\n".join(
+                    [
+                        "*** Begin Patch",
+                        "*** Add File: secrets/key.txt",
+                        "+token",
+                        "*** End Patch",
+                    ]
+                )
+            },
+        )
+        assert result.blocked
+        assert result.matched_rule == "restricted_dirs"
+
     def test_restricted_dirs_asks_for_unparseable_filesystem_command(self) -> None:
         engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
         result = engine.decide(

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.harness.skills import ToolSpec
+from .apply_patch import build_apply_patch_tool
 from .file_handlers import (
     _edit_file,
     _read_file,
@@ -177,5 +178,10 @@ def build_file_tools(
                     ],
                 }
             ],
+        ),
+        build_apply_patch_tool(
+            root,
+            context_state=context_state,
+            operations=ops,
         ),
     )

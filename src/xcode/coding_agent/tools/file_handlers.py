@@ -82,6 +82,7 @@ class FileOperations(Protocol):
     def read_bytes(self, path: Path) -> bytes: ...
     def write_bytes(self, path: Path, data: bytes) -> None: ...
     def mkdir(self, path: Path) -> None: ...
+    def remove_file(self, path: Path) -> None: ...
 
 
 class LocalFileOperations:
@@ -105,6 +106,9 @@ class LocalFileOperations:
 
     def mkdir(self, path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
+
+    def remove_file(self, path: Path) -> None:
+        path.unlink()
 
 
 def _read_file(

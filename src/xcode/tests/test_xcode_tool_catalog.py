@@ -35,6 +35,7 @@ class ToolCatalogConsistencyTests:
 
         assert "update_todo" in catalog["session"]
         assert "search_tools" in catalog["core"]
+        assert "apply_patch" in catalog["core"]
         assert "load_skill" in catalog["skills"]
         assert catalog["subagent"] == {
             "submit_subagent",

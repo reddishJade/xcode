@@ -67,6 +67,7 @@ class XcodeAppRuntimeTests:
         names = {tool.name for tool in app.registry}
 
         assert "read_file" in names
+        assert "apply_patch" in names
         assert "bash" in names
         assert "grep_search" in names
         assert "create_worktree_task" not in names
