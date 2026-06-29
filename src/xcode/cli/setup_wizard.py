@@ -51,6 +51,14 @@ PROVIDER_PRESETS: dict[str, Any] = {
         "env_key": "CHATGLM_API_KEY",
         "env_base_url": "CHATGLM_BASE_URL",
     },
+    "custom": {
+        "label": "Custom",
+        "base_url": "",
+        "models": [],
+        "default_model": "",
+        "env_key": "OPENAI_API_KEY",
+        "env_base_url": "OPENAI_BASE_URL",
+    },
 }
 
 
@@ -122,6 +130,7 @@ def _resolve_transport(provider_key: str) -> str:
         "deepseek": "deepseek_chat",
         "mimo": "mimo_chat",
         "chatglm": "chatglm_chat",
+        "custom": "openai_chat",
     }
     return transport_map.get(provider_key, "openai_chat")
 
@@ -173,6 +182,14 @@ def _prompt_base_url(preset: dict[str, Any]) -> str | None:
 def _prompt_model(preset: dict[str, Any]) -> str | None:
     """交互式选择模型。返回模型名或 None（取消）。"""
     import questionary
+
+    if not preset["models"]:
+        model = questionary.text("Model name:").ask()
+        if model is None:
+            return None
+        if not model:
+            return preset["default_model"]
+        return model
 
     model_default = preset["default_model"]
     model_choices = [*preset["models"], "Custom (enter name)"]
