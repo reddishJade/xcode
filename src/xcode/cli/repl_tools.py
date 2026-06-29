@@ -5,6 +5,8 @@ import json
 from dataclasses import asdict
 from typing import Any
 
+from pydantic import BaseModel
+
 from rich.console import Console
 from rich.text import Text
 
@@ -290,7 +292,9 @@ def _event_payload(event: StructuredAgentEvent) -> object:
     if isinstance(event, (TextDeltaStructuredEvent, ReasoningDeltaStructuredEvent)):
         return event.data
     if isinstance(event, MessageStartStructuredEvent):
-        return asdict(event.data) if event.data is not None else None
+        if isinstance(event.data, BaseModel):
+            return event.data.model_dump()
+        return None
     if isinstance(event, TurnEndStructuredEvent):
         return {
             "tool_results": [

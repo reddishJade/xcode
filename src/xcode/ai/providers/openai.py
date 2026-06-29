@@ -75,9 +75,12 @@ def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:
     for tool in tools:
         if tool.builtin is None:
             continue
+        builtin_type = tool.builtin.get("type")
+        if not builtin_type:
+            continue
         _LOGGER.warning(
             "OpenAI Chat Completions does not support builtin tool %r "
             "with type=%r; builtin tools are not available",
             tool.name,
-            tool.builtin.get("type"),
+            builtin_type,
         )
