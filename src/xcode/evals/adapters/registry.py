@@ -86,5 +86,7 @@ BENCHMARK_ADAPTERS: dict[str, BenchmarkAdapterSpec] = {
 }
 
 INTEGRATED_BENCHMARKS: tuple[str, ...] = tuple(
-    sorted(name for name, spec in BENCHMARK_ADAPTERS.items() if spec.status == "integrated")
+    sorted(
+        name for name, spec in BENCHMARK_ADAPTERS.items() if spec.status == "integrated"
+    )
 )

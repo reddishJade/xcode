@@ -22,7 +22,6 @@ from xcode.harness.agent_skills import (
     SkillRegistry,
     build_load_skill_tool,
     build_skill_search_dirs,
-    SkillDiagnostic,
 )
 from xcode.harness.agent_skills.parsing import parse_frontmatter
 from xcode.harness.observability import (
@@ -812,7 +811,9 @@ class TestLoadSkillTool:
             registry.discover(build_skill_search_dirs(root))
             tool = build_load_skill_tool(registry)
 
-            policy = PermissionPolicy((StaticPermission("load_skill", "deny"),))
+            policy = PermissionPolicy(
+                (StaticPermission(tool="load_skill", decision="deny"),)
+            )
             engine = PermissionEngine(PermissionEngineConfig(static_policy=policy))
             result = engine.decide(
                 "load_skill",

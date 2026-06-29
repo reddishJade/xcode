@@ -22,7 +22,8 @@ from xcode.harness.observability import (
     StaticPolicyEvaluator,
     evaluate_policy_constraints,
 )
-from xcode.harness.config import _validate_external_directories
+from pydantic import ValidationError
+from xcode.harness.config import SecurityExternalDirectory, SecurityRuntimeConfig
 from xcode.harness.observability._safety_backstop import (
     _is_dd_device_write,
     _is_root_recursive_deletion,
@@ -68,9 +69,14 @@ class PermissionResolverTests:
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
-                Constraint("allow", "mode", "mode allows"),
-                Constraint("ask", "boundary", "boundary asks"),
-                Constraint("deny", "safety", "root delete", non_bypassable=True),
+                Constraint(decision="allow", source="mode", reason="mode allows"),
+                Constraint(decision="ask", source="boundary", reason="boundary asks"),
+                Constraint(
+                    decision="deny",
+                    source="safety",
+                    reason="root delete",
+                    non_bypassable=True,
+                ),
             )
         )
 
@@ -82,9 +88,9 @@ class PermissionResolverTests:
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
-                Constraint("allow", "mode", "mode allows"),
-                Constraint("ask", "boundary", "boundary asks"),
-                Constraint("deny", "rule", "rule denies"),
+                Constraint(decision="allow", source="mode", reason="mode allows"),
+                Constraint(decision="ask", source="boundary", reason="boundary asks"),
+                Constraint(decision="deny", source="rule", reason="rule denies"),
             )
         )
 
@@ -95,8 +101,8 @@ class PermissionResolverTests:
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
-                Constraint("allow", "mode", "mode allows"),
-                Constraint("ask", "boundary", "boundary asks"),
+                Constraint(decision="allow", source="mode", reason="mode allows"),
+                Constraint(decision="ask", source="boundary", reason="boundary asks"),
             )
         )
 
@@ -107,10 +113,10 @@ class PermissionResolverTests:
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
-                Constraint("ask", "boundary", "boundary asks"),
-                Constraint("allow", "mode", "mode allows"),
-                Constraint("deny", "rule", "rule denies"),
-                Constraint("allow", "grant", "grant allows"),
+                Constraint(decision="ask", source="boundary", reason="boundary asks"),
+                Constraint(decision="allow", source="mode", reason="mode allows"),
+                Constraint(decision="deny", source="rule", reason="rule denies"),
+                Constraint(decision="allow", source="grant", reason="grant allows"),
             )
         )
 
@@ -121,8 +127,10 @@ class PermissionResolverTests:
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
-                Constraint("allow", "mode", "mode allows"),
-                Constraint("allow", "boundary", "boundary allows"),
+                Constraint(decision="allow", source="mode", reason="mode allows"),
+                Constraint(
+                    decision="allow", source="boundary", reason="boundary allows"
+                ),
             )
         )
 
@@ -142,12 +150,12 @@ class PermissionResolverTests:
         verdict = resolver.resolve(
             (
                 Constraint(
-                    "ask",
-                    "boundary",
-                    "external path",
+                    decision="ask",
+                    source="boundary",
+                    reason="external path",
                     metadata={"target": "../outside.txt"},
                 ),
-                Constraint("allow", "mode", "mode allows"),
+                Constraint(decision="allow", source="mode", reason="mode allows"),
             )
         )
 
@@ -212,7 +220,7 @@ class ActionExtractorTests:
 
 class StructuredBoundaryPolicyTests:
     def _boundary_context(self, root: Path) -> BoundaryContext:
-        return BoundaryContext(root)
+        return BoundaryContext(project_root=root)
 
     def test_workspace_internal_read_produces_allow_constraint(self) -> None:
         action = ActionExtractor().extract("read_file", {"path": "src/app.py"})
@@ -424,8 +432,8 @@ class StructuredBoundaryPolicyTests:
         action = ActionExtractor().extract("read_file", {"path": "docs/a.md"})
         policy = PermissionPolicy(
             (
-                StaticPermission("read_file", "allow"),
-                StaticPermission("*", "deny"),
+                StaticPermission(tool="read_file", decision="allow"),
+                StaticPermission(tool="*", decision="deny"),
             )
         )
 
@@ -446,7 +454,9 @@ class StructuredBoundaryPolicyTests:
 
     def test_static_policy_ask_beats_boundary_allow(self) -> None:
         action = ActionExtractor().extract("write_file", {"path": "docs/a.md"})
-        policy = PermissionPolicy((StaticPermission("write_file", "ask"),))
+        policy = PermissionPolicy(
+            (StaticPermission(tool="write_file", decision="ask"),)
+        )
 
         verdict = PermissionResolver().resolve(
             evaluate_policy_constraints(
@@ -462,7 +472,7 @@ class StructuredBoundaryPolicyTests:
     def test_global_default_ask_when_no_rule_matches(self) -> None:
         action = ActionExtractor().extract("write_file", {"path": "docs/a.md"})
         policy = PermissionPolicy(
-            rules=(StaticPermission("read_file", "allow"),),
+            rules=(StaticPermission(tool="read_file", decision="allow"),),
             global_default="ask",
         )
 
@@ -537,7 +547,7 @@ class StructuredBoundaryPolicyTests:
     ) -> BoundaryContext:
         """Create BoundaryContext with one external directory."""
         return BoundaryContext(
-            root,
+            project_root=root,
             external_directories=(
                 ExternalDirectory(path=Path(ext_path), access=ext_access),
             ),
@@ -767,8 +777,10 @@ class StructuredBoundaryPolicyTests:
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
-                Constraint("allow", "rule", "static allows"),
-                Constraint("deny", "boundary", "boundary denies"),
+                Constraint(decision="allow", source="rule", reason="static allows"),
+                Constraint(
+                    decision="deny", source="boundary", reason="boundary denies"
+                ),
             )
         )
         assert verdict.decision == "deny"
@@ -797,47 +809,40 @@ class ExternalDirectoryConfigValidationTests:
     """验证 external_directories 配置的 fail-fast 校验。"""
 
     def test_valid_external_directory_passes(self) -> None:
-        raw = {
-            "security": {
-                "external_directories": [{"path": "/tmp/valid", "access": "read"}]
-            }
-        }
-        _validate_external_directories(raw)  # should not raise
+        SecurityExternalDirectory.model_validate(
+            {"path": "/tmp/valid", "access": "read"}
+        )
 
     def test_valid_external_directory_default_access(self) -> None:
-        raw = {"security": {"external_directories": [{"path": "/tmp/valid"}]}}
-        _validate_external_directories(raw)  # default access=read, should not raise
+        SecurityExternalDirectory.model_validate({"path": "/tmp/valid"})
 
     def test_missing_path_raises(self) -> None:
-        raw = {"security": {"external_directories": [{"access": "read"}]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_external_directories(raw)
+        with pytest.raises(ValidationError) as exc_info:
+            SecurityExternalDirectory.model_validate({"access": "read"})
         assert "path" in str(exc_info.value)
 
     def test_empty_path_raises(self) -> None:
-        raw = {"security": {"external_directories": [{"path": "", "access": "read"}]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_external_directories(raw)
+        with pytest.raises(ValidationError) as exc_info:
+            SecurityExternalDirectory.model_validate({"path": "", "access": "read"})
         assert "path" in str(exc_info.value)
 
     def test_invalid_access_raises(self) -> None:
-        raw = {
-            "security": {
-                "external_directories": [{"path": "/tmp/foo", "access": "delete"}]
-            }
-        }
-        with pytest.raises(ValueError) as exc_info:
-            _validate_external_directories(raw)
+        with pytest.raises(ValidationError) as exc_info:
+            SecurityExternalDirectory.model_validate(
+                {"path": "/tmp/foo", "access": "delete"}
+            )
         assert "access" in str(exc_info.value)
 
     def test_non_dict_entry_raises(self) -> None:
-        raw = {"security": {"external_directories": ["not-a-dict"]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_external_directories(raw)
-        assert "must be an object" in str(exc_info.value)
+        from pydantic import ValidationError as Ve
+
+        with pytest.raises(Ve):
+            SecurityRuntimeConfig.model_validate(
+                {"external_directories": ["not-a-dict"]}
+            )
 
     def test_no_security_does_not_raise(self) -> None:
-        _validate_external_directories({})  # should not raise
+        SecurityRuntimeConfig.model_validate({})  # should not raise
 
 
 class GrantStoreTests:
@@ -983,7 +988,9 @@ class PermissionEngineShadowTests:
     ) -> None:
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="read_file", decision="ask"),)
+                ),
                 shadow_model_enabled=True,
             )
         )
@@ -1057,7 +1064,9 @@ class ShadowApprovalCandidateTests:
     def test_new_session_grant_allow(self) -> None:
         store = InMemoryGrantStore((_grant("src/foo.py"),))
         engine = self._engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         result, candidate = self._decide(engine, "read_file", {"path": "src/foo.py"})
@@ -1076,7 +1085,9 @@ class ShadowApprovalCandidateTests:
         store = InMemoryGrantStore()
         store.add(_grant("src/foo.py", decision="deny"))
         engine = self._engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
             permanent_grant_store=store,
         )
         result, candidate = self._decide(engine, "read_file", {"path": "src/foo.py"})
@@ -1090,7 +1101,9 @@ class ShadowApprovalCandidateTests:
 
     def test_no_grants_produces_would_call_approval(self) -> None:
         engine = self._engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
         )
         result, candidate = self._decide(engine, "read_file", {"path": "src/foo.py"})
 
@@ -1116,7 +1129,9 @@ class ShadowApprovalCandidateTests:
             )
         )
         engine = self._engine(
-            static_policy=PermissionPolicy((StaticPermission("apply_patch", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="apply_patch", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         tool_input: dict[str, object] = {
@@ -1156,7 +1171,9 @@ class ShadowApprovalCandidateTests:
             )
         )
         engine = self._engine(
-            static_policy=PermissionPolicy((StaticPermission("apply_patch", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="apply_patch", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         tool_input: dict[str, object] = {
@@ -1192,7 +1209,9 @@ class ShadowApprovalCandidateTests:
             )
         )
         engine = self._engine(
-            static_policy=PermissionPolicy((StaticPermission("apply_patch", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="apply_patch", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         tool_input: dict[str, object] = {
@@ -1209,7 +1228,9 @@ class ShadowApprovalCandidateTests:
     def test_shadow_disabled_no_candidate(self) -> None:
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="read_file", decision="ask"),)
+                ),
                 shadow_model_enabled=False,
             )
         )
@@ -1224,7 +1245,9 @@ class ShadowApprovalCandidateTests:
 
     def test_shadow_verdict_allow_no_candidate(self) -> None:
         engine = self._engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "allow"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="allow"),)
+            ),
         )
         result = engine.decide("read_file", {"path": "src/foo.py"})
 
@@ -1234,7 +1257,9 @@ class ShadowApprovalCandidateTests:
 
     def test_non_structured_tool_no_candidate(self) -> None:
         engine = self._engine(
-            static_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="bash", decision="ask"),)
+            ),
         )
         result = engine.decide("bash", {"command": "echo hello"})
 
@@ -1245,7 +1270,9 @@ class ShadowApprovalCandidateTests:
     def test_fingerprint_shape(self) -> None:
         store = InMemoryGrantStore((_grant("src/foo.py"),))
         engine = self._engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         _, candidate = self._decide(engine, "read_file", {"path": "src/foo.py"})
@@ -1262,7 +1289,9 @@ class ShadowApprovalCandidateTests:
     def test_new_session_deny(self) -> None:
         store = InMemoryGrantStore((_grant("src/foo.py", decision="deny"),))
         engine = self._engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         result, candidate = self._decide(engine, "read_file", {"path": "src/foo.py"})
@@ -1350,7 +1379,9 @@ class ApprovalCutoverEnabledTests:
         """新格式 session 授权命中 → 回调不被调用，授权直接决定。"""
         store = InMemoryGrantStore((_grant("src/foo.py"),))
         engine = self._cutover_engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         cb = self._RecordingCallback()
@@ -1371,7 +1402,9 @@ class ApprovalCutoverEnabledTests:
         """新格式 permanent 授权命中 → 回调不被调用，授权直接决定。"""
         store = InMemoryGrantStore((_grant("src/foo.py", decision="deny"),))
         engine = self._cutover_engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
             permanent_grant_store=store,
         )
         cb = self._RecordingCallback()
@@ -1392,7 +1425,9 @@ class ApprovalCutoverEnabledTests:
     def test_ask_no_grant_calls_callback(self) -> None:
         """无命中授权 → 以 (tool_spec, tool_input) 调用回调。"""
         engine = self._cutover_engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
         )
         cb = self._RecordingCallback(HITLResult("allow", "once"))
         tool = self._tool("read_file")
@@ -1415,7 +1450,9 @@ class ApprovalCutoverEnabledTests:
         """allow/once → 放行，不写入任何 store。"""
         store = InMemoryGrantStore()
         engine = self._cutover_engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         cb = self._RecordingCallback(HITLResult("allow", "once"))
@@ -1435,7 +1472,9 @@ class ApprovalCutoverEnabledTests:
         """allow/session（单目标）→ 放行，session store 写入 GrantRecord。"""
         store = InMemoryGrantStore()
         engine = self._cutover_engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         cb = self._RecordingCallback(HITLResult("allow", "session"))
@@ -1459,7 +1498,9 @@ class ApprovalCutoverEnabledTests:
         """allow/session（多目标）→ 放行但不写入 store，元数据记录限制。"""
         store = InMemoryGrantStore()
         engine = self._cutover_engine(
-            static_policy=PermissionPolicy((StaticPermission("apply_patch", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="apply_patch", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         cb = self._RecordingCallback(HITLResult("allow", "session"))
@@ -1484,7 +1525,9 @@ class ApprovalCutoverEnabledTests:
         """deny → 拒绝，不写入任何 store。"""
         store = InMemoryGrantStore()
         engine = self._cutover_engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
             session_grant_store=store,
         )
         cb = self._RecordingCallback(HITLResult("deny", "once"))
@@ -1505,7 +1548,9 @@ class ApprovalCutoverEnabledTests:
         """allow/permanent → 放行，permanent store 写入 GrantRecord。"""
         store = InMemoryGrantStore()
         engine = self._cutover_engine(
-            static_policy=PermissionPolicy((StaticPermission("read_file", "ask"),)),
+            static_policy=PermissionPolicy(
+                (StaticPermission(tool="read_file", decision="ask"),)
+            ),
             permanent_grant_store=store,
         )
         cb = self._RecordingCallback(HITLResult("allow", "permanent"))
@@ -1808,7 +1853,9 @@ class HookInvariantTests:
     def test_hook_allow_cannot_override_static_deny(self) -> None:
         """Hook 返回 allow 不能覆盖 StaticPolicy 的 explicit deny。"""
         always_allow_hook: PolicyEvaluator = _AlwaysAllowHook()
-        static_policy = PermissionPolicy(rules=(StaticPermission("bash", "deny"),))
+        static_policy = PermissionPolicy(
+            rules=(StaticPermission(tool="bash", decision="deny"),)
+        )
         action = ActionExtractor().extract("bash", {"command": "echo hello"})
 
         constraints = evaluate_policy_constraints(
@@ -1861,8 +1908,8 @@ class StaticPolicyLastMatchWinsTests:
     def test_last_match_wins_basic(self) -> None:
         action = ActionExtractor().extract("bash", {"command": "echo hello"})
         rules = (
-            StaticPermission("bash", "deny"),
-            StaticPermission("bash", "allow"),
+            StaticPermission(tool="bash", decision="deny"),
+            StaticPermission(tool="bash", decision="allow"),
         )
         evaluator = StaticPolicyEvaluator(rules)
         constraints = evaluator.evaluate(action)
@@ -1873,8 +1920,8 @@ class StaticPolicyLastMatchWinsTests:
     def test_last_match_wins_reversed(self) -> None:
         action = ActionExtractor().extract("bash", {"command": "echo hello"})
         rules = (
-            StaticPermission("bash", "allow"),
-            StaticPermission("bash", "deny"),
+            StaticPermission(tool="bash", decision="allow"),
+            StaticPermission(tool="bash", decision="deny"),
         )
         evaluator = StaticPolicyEvaluator(rules)
         constraints = evaluator.evaluate(action)
@@ -1883,7 +1930,7 @@ class StaticPolicyLastMatchWinsTests:
 
     def test_global_asterisk_rule(self) -> None:
         action = ActionExtractor().extract("bash", {"command": "echo hello"})
-        rules = (StaticPermission("*", "deny"),)
+        rules = (StaticPermission(tool="*", decision="deny"),)
         evaluator = StaticPolicyEvaluator(rules)
         constraints = evaluator.evaluate(action)
         assert len(constraints) == 1
@@ -1891,7 +1938,9 @@ class StaticPolicyLastMatchWinsTests:
 
     def test_input_regex_matches(self) -> None:
         action = ActionExtractor().extract("bash", {"command": "curl example.com"})
-        rules = (StaticPermission("bash", "ask", input_regex=r"curl|wget"),)
+        rules = (
+            StaticPermission(tool="bash", decision="ask", input_regex=r"curl|wget"),
+        )
         evaluator = StaticPolicyEvaluator(rules)
         constraints = evaluator.evaluate(action)
         assert len(constraints) == 1
@@ -1899,14 +1948,18 @@ class StaticPolicyLastMatchWinsTests:
 
     def test_input_regex_no_match(self) -> None:
         action = ActionExtractor().extract("bash", {"command": "ls -la"})
-        rules = (StaticPermission("bash", "ask", input_regex=r"curl|wget"),)
+        rules = (
+            StaticPermission(tool="bash", decision="ask", input_regex=r"curl|wget"),
+        )
         evaluator = StaticPolicyEvaluator(rules)
         constraints = evaluator.evaluate(action)
         assert len(constraints) == 0
 
     def test_target_matches_action_target(self) -> None:
         action = ActionExtractor().extract("read_file", {"path": "src/foo.py"})
-        rules = (StaticPermission("read_file", "allow", target="src/foo.py"),)
+        rules = (
+            StaticPermission(tool="read_file", decision="allow", target="src/foo.py"),
+        )
         evaluator = StaticPolicyEvaluator(rules)
         constraints = evaluator.evaluate(action)
         assert len(constraints) == 1
@@ -1914,14 +1967,16 @@ class StaticPolicyLastMatchWinsTests:
 
     def test_target_no_match(self) -> None:
         action = ActionExtractor().extract("read_file", {"path": "src/other.py"})
-        rules = (StaticPermission("read_file", "allow", target="src/foo.py"),)
+        rules = (
+            StaticPermission(tool="read_file", decision="allow", target="src/foo.py"),
+        )
         evaluator = StaticPolicyEvaluator(rules)
         constraints = evaluator.evaluate(action)
         assert len(constraints) == 0
 
     def test_target_type_matches_command(self) -> None:
         action = ActionExtractor().extract("bash", {"command": "git status"})
-        rules = (StaticPermission("bash", "ask", target_type="command"),)
+        rules = (StaticPermission(tool="bash", decision="ask", target_type="command"),)
         evaluator = StaticPolicyEvaluator(rules)
         constraints = evaluator.evaluate(action)
         assert len(constraints) == 1
@@ -1929,14 +1984,14 @@ class StaticPolicyLastMatchWinsTests:
 
     def test_target_type_no_match(self) -> None:
         action = ActionExtractor().extract("bash", {"command": "git status"})
-        rules = (StaticPermission("bash", "ask", target_type="path"),)
+        rules = (StaticPermission(tool="bash", decision="ask", target_type="path"),)
         evaluator = StaticPolicyEvaluator(rules)
         constraints = evaluator.evaluate(action)
         assert len(constraints) == 0
 
     def test_global_default_applies_when_no_rule_matches(self) -> None:
         action = ActionExtractor().extract("bash", {"command": "echo hello"})
-        rules = (StaticPermission("read_file", "allow"),)
+        rules = (StaticPermission(tool="read_file", decision="allow"),)
         evaluator = StaticPolicyEvaluator(rules, global_default="ask")
         constraints = evaluator.evaluate(action)
         assert len(constraints) == 1
@@ -1954,9 +2009,12 @@ class StaticPolicyLastMatchWinsTests:
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
-                Constraint("allow", "rule", "static allows"),
+                Constraint(decision="allow", source="rule", reason="static allows"),
                 Constraint(
-                    "deny", "safety", "non-bypassable deny", non_bypassable=True
+                    decision="deny",
+                    source="safety",
+                    reason="non-bypassable deny",
+                    non_bypassable=True,
                 ),
             )
         )
@@ -1968,8 +2026,10 @@ class StaticPolicyLastMatchWinsTests:
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
-                Constraint("allow", "rule", "static allows"),
-                Constraint("deny", "boundary", "boundary denies"),
+                Constraint(decision="allow", source="rule", reason="static allows"),
+                Constraint(
+                    decision="deny", source="boundary", reason="boundary denies"
+                ),
             )
         )
         assert verdict.decision == "deny"
@@ -1980,8 +2040,10 @@ class StaticPolicyLastMatchWinsTests:
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
-                Constraint("allow", "boundary", "boundary allows"),
-                Constraint("ask", "rule", "static asks"),
+                Constraint(
+                    decision="allow", source="boundary", reason="boundary allows"
+                ),
+                Constraint(decision="ask", source="rule", reason="static asks"),
             )
         )
         assert verdict.decision == "ask"

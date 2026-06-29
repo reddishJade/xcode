@@ -616,7 +616,7 @@ class TestPermissionSingleGate:
         self._handler_called = False
         spec = self._make_spec(self._handler_ok)
         gate = self._make_gate(
-            PermissionPolicy((StaticPermission(self.TOOL_NAME, "allow"),))
+            PermissionPolicy((StaticPermission(tool=self.TOOL_NAME, decision="allow"),))
         )
 
         decide_count: list[int] = [0]
@@ -639,7 +639,7 @@ class TestPermissionSingleGate:
         """deny path: PermissionEngine.decide() called once, handler not executed."""
         spec = self._make_spec(self._handler_never)
         gate = self._make_gate(
-            PermissionPolicy((StaticPermission(self.TOOL_NAME, "deny"),))
+            PermissionPolicy((StaticPermission(tool=self.TOOL_NAME, decision="deny"),))
         )
 
         decide_count: list[int] = [0]
@@ -666,7 +666,7 @@ class TestPermissionSingleGate:
         """
         spec = self._make_spec(self._handler_never)
         gate = self._make_gate(
-            PermissionPolicy((StaticPermission(self.TOOL_NAME, "ask"),)),
+            PermissionPolicy((StaticPermission(tool=self.TOOL_NAME, decision="ask"),)),
             callback=lambda _t, _i: HITLResult("allow", "session"),
         )
 
@@ -716,7 +716,7 @@ class TestPermissionSingleGate:
         self._handler_called = False
         spec = self._make_spec(self._handler_ok)
         gate = self._make_gate(
-            PermissionPolicy((StaticPermission(self.TOOL_NAME, "allow"),))
+            PermissionPolicy((StaticPermission(tool=self.TOOL_NAME, decision="allow"),))
         )
 
         decide_count: list[int] = [0]

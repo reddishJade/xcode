@@ -624,7 +624,10 @@ class MemoryManager:
     ) -> float:
         if self._has_reuse_boundary_match(record, query, scope):
             return 1.0
-        if record.failure_count > record.success_count or record.last_outcome == "failure":
+        if (
+            record.failure_count > record.success_count
+            or record.last_outcome == "failure"
+        ):
             return self.rerank_policy.failed_reuse_penalty
         if record.correction_count > 0 or record.last_outcome == "corrected":
             return self.rerank_policy.corrected_reuse_penalty
@@ -673,7 +676,9 @@ class MemoryManager:
             record.fields.get("context/query", "").lower(),
             record.fields.get("solution", "").lower(),
         ]
-        if len(tokenize(query)) >= 2 and any(normalized_query in field for field in phrase_fields):
+        if len(tokenize(query)) >= 2 and any(
+            normalized_query in field for field in phrase_fields
+        ):
             bonus += self.rerank_policy.phrase_match_bonus
         return bonus
 
@@ -691,7 +696,9 @@ class MemoryManager:
             elif current_file in {Path(item).name.lower() for item in related_files}:
                 bonus += self.rerank_policy.current_file_bonus * 0.7
         if context.recent_files:
-            recent_files = {item.strip().lower() for item in context.recent_files if item.strip()}
+            recent_files = {
+                item.strip().lower() for item in context.recent_files if item.strip()
+            }
             if recent_files.intersection(related_files):
                 bonus += self.rerank_policy.recent_file_bonus
         related_symbols = {symbol.lower() for symbol in record.related_symbols}
@@ -1220,7 +1227,9 @@ class MemoryManager:
             + record.reference_count
             + record.adoption_count * 2
         )
-        outcome_score = record.success_count - record.failure_count - record.correction_count
+        outcome_score = (
+            record.success_count - record.failure_count - record.correction_count
+        )
         utility_score = max(-4.0, min(4.0, record.utility))
         strength = (
             status_rank * 3.0
@@ -1267,7 +1276,8 @@ class MemoryManager:
             key=lambda record: self._retention_sort_key(record, lru=lru),
         )
         records_to_evict = {
-            record.memory_id for record in ranked_records[: len(blocks) - self.max_blocks]
+            record.memory_id
+            for record in ranked_records[: len(blocks) - self.max_blocks]
         }
 
         kept_blocks: list[str] = []
@@ -1424,7 +1434,10 @@ class MemoryManager:
             record = records_by_layer.get(layer, {}).get(memory_id)
             if record is None:
                 continue
-            if memory_id.casefold() in normalized or record.title.casefold() in normalized:
+            if (
+                memory_id.casefold() in normalized
+                or record.title.casefold() in normalized
+            ):
                 if not usage.referenced:
                     matched += 1
                 usage.referenced = True

@@ -262,7 +262,9 @@ class ExternalHookRunnerTests:
             agent = _agent_with_tool(
                 runner,
                 handler,
-                permission_policy=PermissionPolicy((StaticPermission("echo", "deny"),)),
+                permission_policy=PermissionPolicy(
+                    (StaticPermission(tool="echo", decision="deny"),)
+                ),
             )
             result = agent.run("go")
 

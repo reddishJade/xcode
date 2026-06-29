@@ -18,7 +18,7 @@ _safety_backstop 从本模块导入 Action/Constraint 等共享模型类型；
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 import json
 import logging
 import re
@@ -39,17 +39,19 @@ type GrantRecordData = dict[str, object]
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class ExternalDirectory:
+class ExternalDirectory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     path: Path
     access: DirAccess = "read"
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "path", self.path.expanduser().resolve(strict=False))
+    @model_validator(mode="after")
+    def _resolve_path(self) -> ExternalDirectory:
+        self.path = self.path.expanduser().resolve(strict=False)
+        return self
 
 
-@dataclass(frozen=True)
-class StaticPermission:
+class StaticPermission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     tool: str
     decision: PermissionDecisionV2
     target: str | None = None
@@ -59,19 +61,19 @@ class StaticPermission:
     input_regex: str | None = None
 
 
-@dataclass(frozen=True)
-class Target:
+class Target(BaseModel):
     """动作作用的具体对象。"""
 
+    model_config = ConfigDict(extra="forbid")
     kind: TargetKind
     value: str
     access: PermissionAccess
 
 
-@dataclass(frozen=True)
-class Action:
+class Action(BaseModel):
     """一次工具调用归一化后的权限判断输入。"""
 
+    model_config = ConfigDict(extra="forbid")
     tool: str
     capability: str
     operation: str
@@ -79,10 +81,10 @@ class Action:
     input: Mapping[str, object]
 
 
-@dataclass(frozen=True)
-class Constraint:
+class Constraint(BaseModel):
     """单个策略对 action 给出的约束。"""
 
+    model_config = ConfigDict(extra="forbid")
     decision: PermissionDecisionV2
     source: str
     reason: str
@@ -90,30 +92,30 @@ class Constraint:
     target_pattern: str | None = None
     operation: str | None = None
     access: PermissionAccess | None = None
-    metadata: Mapping[str, object] = field(default_factory=dict)
+    metadata: Mapping[str, object] = Field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class BoundaryContext:
+class BoundaryContext(BaseModel):
     """结构化边界策略所需的文件系统上下文。"""
 
+    model_config = ConfigDict(extra="forbid")
     project_root: Path
     external_directories: tuple[ExternalDirectory, ...] = ()
 
 
-@dataclass(frozen=True)
-class ApprovalResult:
+class ApprovalResult(BaseModel):
     """用户或 reviewer 对 ask verdict 的授权结果。"""
 
+    model_config = ConfigDict(extra="forbid")
     decision: Literal["allow", "deny"]
     scope: Literal["once", "session", "permanent"]
     grant_id: str | None = None
 
 
-@dataclass(frozen=True)
-class Verdict:
+class Verdict(BaseModel):
     """resolver 合并所有 constraints 后的最终结论。"""
 
+    model_config = ConfigDict(extra="forbid")
     decision: PermissionDecisionV2
     source: str
     reason: str
@@ -121,12 +123,13 @@ class Verdict:
     constraints: tuple[Constraint, ...]
     approval: ApprovalResult | None = None
     grant_id: str | None = None
-    metadata: Mapping[str, object] = field(default_factory=dict)
+    metadata: Mapping[str, object] = Field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class GrantRecord:
+class GrantRecord(BaseModel):
     """结构化授权记录。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     capability: str
     operation: str
@@ -136,12 +139,13 @@ class GrantRecord:
     decision: GrantDecision
     scope: GrantScope
     grant_id: str
-    metadata: Mapping[str, object] = field(default_factory=dict)
+    metadata: Mapping[str, object] = Field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class TargetFingerprint:
+class TargetFingerprint(BaseModel):
     """授权请求中单个目标的指纹。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     capability: str
     operation: str
@@ -150,21 +154,23 @@ class TargetFingerprint:
     access: PermissionAccess
 
 
-@dataclass(frozen=True)
-class FingerprintLookupResult:
+class FingerprintLookupResult(BaseModel):
     """单个目标指纹的查找结果。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     fingerprint: TargetFingerprint
     source: Literal["new_session", "new_permanent", "none"]
     grant: GrantRecord | None
 
 
-@dataclass(frozen=True)
-class ApprovalCandidate:
+class ApprovalCandidate(BaseModel):
     """shadow 模型对 resolver 返回 ask 后 candidate 路径的预测结果。
 
     不会调用真实 approval_callback，不写入任何 grant store。
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     would_resolve: Literal["allow", "deny", "would_call_approval"]
     fingerprints: tuple[FingerprintLookupResult, ...]
@@ -437,7 +443,11 @@ def compute_shadow_approval_candidate(
                 action, target, boundary_context=boundary_context
             )
             if grant is not None:
-                results.append(FingerprintLookupResult(fp, "new_session", grant))
+                results.append(
+                    FingerprintLookupResult(
+                        fingerprint=fp, source="new_session", grant=grant
+                    )
+                )
                 continue
 
         if permanent_grant_store is not None:
@@ -445,10 +455,16 @@ def compute_shadow_approval_candidate(
                 action, target, boundary_context=boundary_context
             )
             if grant is not None:
-                results.append(FingerprintLookupResult(fp, "new_permanent", grant))
+                results.append(
+                    FingerprintLookupResult(
+                        fingerprint=fp, source="new_permanent", grant=grant
+                    )
+                )
                 continue
 
-        results.append(FingerprintLookupResult(fp, "none", None))
+        results.append(
+            FingerprintLookupResult(fingerprint=fp, source="none", grant=None)
+        )
 
     return ApprovalCandidate(
         would_resolve=_compute_would_resolve(results),
@@ -548,64 +564,17 @@ def _normalize_target_path(
 def _grant_record_from_data(value: object) -> GrantRecord | None:
     if not isinstance(value, dict):
         return None
-    capability = value.get("capability")
-    operation = value.get("operation")
-    target_kind = value.get("target_kind")
-    target_pattern = value.get("target_pattern")
-    access = value.get("access")
-    decision = value.get("decision")
-    scope = value.get("scope")
-    grant_id = value.get("grant_id")
-    metadata = value.get("metadata")
-    if not isinstance(capability, str):
+    try:
+        return GrantRecord.model_validate(value)
+    except ValidationError:
         return None
-    if not isinstance(operation, str):
-        return None
-    if not isinstance(target_kind, str):
-        return None
-    if not isinstance(target_pattern, str):
-        return None
-    if not isinstance(access, str):
-        return None
-    if not isinstance(decision, str):
-        return None
-    if not isinstance(scope, str):
-        return None
-    if not isinstance(grant_id, str):
-        return None
-    if target_kind not in ("path", "command", "domain", "mcp", "subagent"):
-        return None
-    if access not in ("read", "write", "execute", "network"):
-        return None
-    if decision not in ("allow", "deny"):
-        return None
-    if scope not in ("once", "session", "permanent"):
-        return None
-    return GrantRecord(
-        capability=capability,
-        operation=operation,
-        target_kind=target_kind,
-        target_pattern=target_pattern,
-        access=access,
-        decision=decision,
-        scope=scope,
-        grant_id=grant_id,
-        metadata=metadata if isinstance(metadata, Mapping) else {},
-    )
 
 
 def _grant_record_to_data(record: GrantRecord) -> GrantRecordData:
-    data: GrantRecordData = {
-        "capability": record.capability,
-        "operation": record.operation,
-        "target_kind": record.target_kind,
-        "target_pattern": record.target_pattern,
-        "access": record.access,
-        "decision": record.decision,
-        "scope": record.scope,
-        "grant_id": record.grant_id,
-    }
-    if record.metadata:
+    data: GrantRecordData = record.model_dump(exclude_none=True)
+    if not record.metadata:
+        data.pop("metadata", None)
+    else:
         data["metadata"] = dict(record.metadata)
     return data
 
@@ -1025,7 +994,7 @@ class ActionExtractor:
                 tool=tool_name,
                 capability="mcp",
                 operation=tool_name,
-                targets=(Target("mcp", tool_name, "execute"),),
+                targets=(Target(kind="mcp", value=tool_name, access="execute"),),
                 input=tool_input,
             )
         return Action(
@@ -1047,7 +1016,11 @@ class ActionExtractor:
         raw_path = tool_input.get("path")
         targets: tuple[Target, ...] = ()
         if isinstance(raw_path, str) and raw_path.strip():
-            targets = (Target("path", _normalize_path_text(raw_path), access),)
+            targets = (
+                Target(
+                    kind="path", value=_normalize_path_text(raw_path), access=access
+                ),
+            )
         return Action(
             tool=tool_name,
             capability=capability,
@@ -1060,7 +1033,7 @@ class ActionExtractor:
         self, tool_name: str, tool_input: Mapping[str, object]
     ) -> Action:
         targets = tuple(
-            Target("path", _normalize_path_text(path), "write")
+            Target(kind="path", value=_normalize_path_text(path), access="write")
             for path in self._patch_paths(tool_input)
         )
         return Action(
@@ -1077,7 +1050,7 @@ class ActionExtractor:
         if isinstance(command, str) and command.strip():
             normalized_command = command.strip()
             targets = (
-                Target("command", normalized_command, "execute"),
+                Target(kind="command", value=normalized_command, access="execute"),
                 *self._shell_path_targets(normalized_command),
             )
         return Action(
@@ -1094,7 +1067,9 @@ class ActionExtractor:
             normalized_command = command.strip()
             if not normalized_command:
                 continue
-            targets.append(Target("command", normalized_command, "execute"))
+            targets.append(
+                Target(kind="command", value=normalized_command, access="execute")
+            )
             targets.extend(self._shell_path_targets(normalized_command))
         return Action(
             tool=tool_name,
@@ -1119,7 +1094,7 @@ class ActionExtractor:
             "read" if command_name in _READ_FILESYSTEM_COMMANDS else "write"
         )
         return tuple(
-            Target("path", _normalize_path_text(path), access)
+            Target(kind="path", value=_normalize_path_text(path), access=access)
             for path in path_arguments
         )
 

@@ -197,7 +197,9 @@ class XcodeMcpIntegrationTests:
             "edit_record",
             {"id": 42, "value": "new_val"},
             timeout=None,
-            progress_callback=mock_client.call_tool.call_args.kwargs["progress_callback"],
+            progress_callback=mock_client.call_tool.call_args.kwargs[
+                "progress_callback"
+            ],
             cancel_event=None,
         )
 

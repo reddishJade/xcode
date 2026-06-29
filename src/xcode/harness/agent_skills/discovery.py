@@ -110,9 +110,7 @@ def scan_skill_references(
             st = file_path.stat()
         except OSError:
             references.append(
-                SkillReference(
-                    name=rel_path, skipped=True, skipped_reason="unreadable"
-                )
+                SkillReference(name=rel_path, skipped=True, skipped_reason="unreadable")
             )
             continue
 

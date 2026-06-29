@@ -95,7 +95,7 @@ class XcodeSkillActivationLifecycleTests:
                 registry=(tool,),
                 gate=GateConfig(
                     permission_policy=PermissionPolicy(
-                        (StaticPermission("load_skill", "deny"),)
+                        (StaticPermission(tool="load_skill", decision="deny"),)
                     )
                 ),
                 runtime=AgentRuntimeConfig(skill_registry=registry),

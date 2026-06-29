@@ -70,7 +70,7 @@ def build_load_skill_tool(
                 relative_path = f"references/{ref.name}"
                 attrs = (
                     f"name={xml_escape_attr(ref.name)} "
-                    f"path={xml_escape_attr(relative_path)} size=\"{ref.size}\""
+                    f'path={xml_escape_attr(relative_path)} size="{ref.size}"'
                 )
                 if ref.truncated:
                     attrs += ' truncated="true"'
@@ -96,11 +96,11 @@ def build_load_skill_tool(
         )
         if skill.content:
             return (
-                f"<skill name={safe_name} root={safe_root} activated=\"true\">\n"
+                f'<skill name={safe_name} root={safe_root} activated="true">\n'
                 f"{activation_lines}\n{skill.content}{resource_suffix}\n</skill>"
             )
         return (
-            f"<skill name={safe_name} root={safe_root} activated=\"true\">\n"
+            f'<skill name={safe_name} root={safe_root} activated="true">\n'
             f"{activation_lines}\n{skill.description}{resource_suffix}\n</skill>"
         )
 
@@ -144,10 +144,10 @@ def _render_resource_group(
         return []
     lines = ["", f"<{group_name}>"]
     for resource in resources:
-        attrs = f"path={xml_escape_attr(resource.path)} size=\"{resource.size}\""
+        attrs = f'path={xml_escape_attr(resource.path)} size="{resource.size}"'
         if resource.skipped:
             reason = xml_escape_attr(resource.skipped_reason or "unknown")
-            attrs += f" skipped=\"true\" reason={reason}"
+            attrs += f' skipped="true" reason={reason}'
         lines.append(f"  <resource {attrs}/>")
     lines.append(f"</{group_name}>")
     return lines
@@ -162,7 +162,7 @@ def _render_activation_frontmatter(skill: SkillDef) -> str:
         )
     if skill.allowed_tools:
         lines.append(
-            "<allowed-tools advisory=\"true\" permission-bypass=\"false\">"
+            '<allowed-tools advisory="true" permission-bypass="false">'
             f"{xml_escape_content(skill.allowed_tools)}</allowed-tools>"
         )
     return "\n".join(lines)

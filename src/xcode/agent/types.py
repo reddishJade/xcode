@@ -5,27 +5,27 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field
 
 from xcode.ai.types import ToolArguments
 
 type ContentSource = dict[str, object]
 
 
-@dataclass(frozen=True)
-class TextContent:
+class TextContent(BaseModel):
     """纯文本内容块。"""
 
     type: str = "text"
     text: str = ""
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-@dataclass(frozen=True, repr=False)
-class ImageContent:
+class ImageContent(BaseModel):
     """图像内容块。"""
 
     type: str = "image"
     source: ContentSource | None = None
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     def __repr__(self) -> str:
         """返回不包含内联图片数据的诊断表示。"""
@@ -38,8 +38,7 @@ class ImageContent:
         )
 
 
-@dataclass(frozen=True, repr=False)
-class FileContent:
+class FileContent(BaseModel):
     """文件内容块。"""
 
     type: str = "file"
@@ -47,6 +46,7 @@ class FileContent:
     file_id: str | None = None
     filename: str | None = None
     file_data: str | None = None
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     def __repr__(self) -> str:
         """返回不包含内联文件数据的诊断表示。"""
@@ -54,40 +54,40 @@ class FileContent:
         return f"FileContent(type={self.type!r}, identity={identity!r})"
 
 
-@dataclass(frozen=True)
-class ToolCallContent:
+class ToolCallContent(BaseModel):
     """工具调用内容块。"""
 
     type: str = "tool_call"
     id: str = ""
     name: str = ""
     arguments: ToolArguments | None = None
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-@dataclass(frozen=True)
-class ThinkingContent:
+class ThinkingContent(BaseModel):
     """思考内容块。"""
 
     type: str = "thinking"
     thinking: str = ""
     signature: str | None = None
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-@dataclass(frozen=True)
-class ToolResultContent:
+class ToolResultContent(BaseModel):
     """工具执行结果内容块。"""
 
     type: str = "tool_result"
     tool_use_id: str = ""
     content: str = ""
     status: str = "ok"
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-@dataclass(frozen=True)
-class ShellCallOutputContent:
+class ShellCallOutputContent(BaseModel):
     """Shell 调用输出内容块。"""
 
     type: str = "shell_call_output"
     call_id: str = ""
-    output: list[dict[str, object]] = field(default_factory=list)
+    output: list[dict[str, object]] = Field(default_factory=list)
     max_output_length: int | None = None
+    model_config = ConfigDict(frozen=True, extra="forbid")

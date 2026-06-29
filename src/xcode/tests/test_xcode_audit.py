@@ -319,7 +319,9 @@ class XcodeAuditTests:
             gate=GateConfig(
                 audit_logger=capture,
                 session_id="test-deny",
-                permission_policy=PermissionPolicy((StaticPermission("echo", "deny"),)),
+                permission_policy=PermissionPolicy(
+                    (StaticPermission(tool="echo", decision="deny"),)
+                ),
             ),
         )
         agent.run("go")

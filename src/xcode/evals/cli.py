@@ -31,8 +31,10 @@ from .adapters.registry import BENCHMARK_ADAPTERS, INTEGRATED_BENCHMARKS
 from .benchmarks import load_benchmark
 from .runner import EvalRunner
 from .sandbox import trial_project_root
-from .schema import EvalReport, EvalTask, EvalTaskSchemaError, parse_eval_task
-from .tasks import SUITE_DESCRIPTIONS, SUITE_SPECS, SUITES
+from pydantic import ValidationError
+
+from .schema import EvalReport, EvalTask, EvalTaskSchemaError
+from .tasks import SUITE_SPECS, SUITES
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -440,13 +442,18 @@ def _load_tasks(path: Path) -> tuple[EvalTask, ...]:
     else:
         raw = json.loads(text)
         raw_items = raw if isinstance(raw, list) else [raw]
-    tasks = tuple(_task_from_dict(item, index=index) for index, item in enumerate(raw_items))
+    tasks = tuple(
+        _task_from_dict(item, index=index) for index, item in enumerate(raw_items)
+    )
     _ensure_unique_task_ids(tasks, source=str(path))
     return tasks
 
 
 def _task_from_dict(item: dict[str, Any], *, index: int = 0) -> EvalTask:
-    return parse_eval_task(item, path=f"tasks[{index}]")
+    try:
+        return EvalTask.model_validate(item)
+    except ValidationError as exc:
+        raise EvalTaskSchemaError(str(exc)) from exc
 
 
 def _ensure_unique_task_ids(tasks: tuple[EvalTask, ...], *, source: str) -> None:
@@ -526,7 +533,12 @@ def _offline_app_factory(task: EvalTask, _trial_index: int) -> XcodeApp:
     return XcodeApp(
         agent=StructuredAgent(
             provider=_StaticProvider(
-                [[TextDelta(chunk=answer), FinalMessage(content=answer, stop_reason="end_turn")]]
+                [
+                    [
+                        TextDelta(chunk=answer),
+                        FinalMessage(content=answer, stop_reason="end_turn"),
+                    ]
+                ]
             ),
             registry=(),
             config=AgentConfig(max_steps=3),
@@ -546,7 +558,9 @@ def _offline_scripted_tool_app(task: EvalTask) -> XcodeApp | None:
     argument_checks = _dict_tuple(policy_dict.get("argument_contains", ()))
     result_checks = _dict_tuple(policy_dict.get("result_contains", ()))
     adopted_checks = _dict_tuple(policy_dict.get("answer_contains_from_tool", ()))
-    tool_inputs = _build_offline_tool_inputs(tool_sequence, argument_checks, task.prompt)
+    tool_inputs = _build_offline_tool_inputs(
+        tool_sequence, argument_checks, task.prompt
+    )
     tool_outputs = _build_offline_tool_outputs(tool_sequence, result_checks)
     turns: list[list[ProviderEvent]] = []
     handlers: dict[str, list[object]] = {
@@ -647,7 +661,12 @@ def _offline_fault_injection_app_factory(
         return XcodeApp(
             agent=StructuredAgent(
                 provider=_StaticProvider(
-                    [[TextDelta(chunk=answer), FinalMessage(content=answer, stop_reason="aborted")]]
+                    [
+                        [
+                            TextDelta(chunk=answer),
+                            FinalMessage(content=answer, stop_reason="aborted"),
+                        ]
+                    ]
                 ),
                 registry=(),
                 config=AgentConfig(max_steps=2),
@@ -657,7 +676,12 @@ def _offline_fault_injection_app_factory(
     return _offline_scripted_tool_app(task) or XcodeApp(
         agent=StructuredAgent(
             provider=_StaticProvider(
-                [[TextDelta(chunk="offline fault"), FinalMessage(content="offline fault", stop_reason="end_turn")]]
+                [
+                    [
+                        TextDelta(chunk="offline fault"),
+                        FinalMessage(content="offline fault", stop_reason="end_turn"),
+                    ]
+                ]
             ),
             registry=(),
             config=AgentConfig(max_steps=2),
@@ -830,7 +854,12 @@ def _offline_memory_app_factory(
     manager.drain_trace_events()
     answer = " ".join(task.expected_answer_contains) or "offline ok"
     provider = _StaticProvider(
-        [[TextDelta(chunk=answer), FinalMessage(content=answer, stop_reason="end_turn")]]
+        [
+            [
+                TextDelta(chunk=answer),
+                FinalMessage(content=answer, stop_reason="end_turn"),
+            ]
+        ]
     )
     runtime = AgentRuntimeConfig(
         project_root=project_root,
@@ -1020,7 +1049,9 @@ def _normalize_trial_detail(trial: dict[str, Any] | None) -> dict[str, Any] | No
         ),
         "metrics": {
             "tool_calls": metrics.get("tool_calls", "unavailable"),
-            "estimated_prompt_tokens": metrics.get("estimated_prompt_tokens", "unavailable"),
+            "estimated_prompt_tokens": metrics.get(
+                "estimated_prompt_tokens", "unavailable"
+            ),
             "model_total_ms": metrics.get("model_total_ms", "unavailable"),
             "wall_clock_ms": metrics.get("wall_clock_ms", "unavailable"),
             "termination_reason": metrics.get("termination_reason", "unavailable"),
@@ -1082,14 +1113,18 @@ def _compare_capability_slices(
         if baseline_trial is None or candidate_trial is None:
             continue
         rows[capability]["candidate"].append(1.0 if candidate_trial["success"] else 0.0)
-        rows[capability]["baseline"].append(1.0 if baseline_trial.get("success") else 0.0)
+        rows[capability]["baseline"].append(
+            1.0 if baseline_trial.get("success") else 0.0
+        )
     for task_id, capability in baseline_tasks.items():
         if any(task.id == task_id for task in report.tasks):
             continue
         baseline_trial = baseline_trials.get(task_id)
         if baseline_trial is None:
             continue
-        rows[capability]["baseline"].append(1.0 if baseline_trial.get("success") else 0.0)
+        rows[capability]["baseline"].append(
+            1.0 if baseline_trial.get("success") else 0.0
+        )
     result: dict[str, dict[str, float]] = {}
     for capability, values in rows.items():
         if not values["baseline"] or not values["candidate"]:
@@ -1107,7 +1142,9 @@ def _compare_grader_rates(
 ) -> dict[str, float]:
     baseline_rates = baseline.get("metrics", {}).get("per_grader_pass_rate", {})
     candidate_rates = report.metrics.get("per_grader_pass_rate", {})
-    if not isinstance(baseline_rates, Mapping) or not isinstance(candidate_rates, Mapping):
+    if not isinstance(baseline_rates, Mapping) or not isinstance(
+        candidate_rates, Mapping
+    ):
         return {}
     deltas: dict[str, float] = {}
     for name in sorted(set(baseline_rates) & set(candidate_rates)):
@@ -1137,7 +1174,9 @@ def _compare_summary_metrics(
             _average_from_total_and_count(baseline_metrics, "total_model_ms"),
         ),
         "p95_model_ms": (
-            _distribution_value(candidate_metrics, "model_total_ms_distribution", "p95"),
+            _distribution_value(
+                candidate_metrics, "model_total_ms_distribution", "p95"
+            ),
             _distribution_value(baseline_metrics, "model_total_ms_distribution", "p95"),
         ),
         "avg_token_cost": ("unavailable", "unavailable"),
@@ -1157,7 +1196,9 @@ def _compare_failure_categories(
 ) -> dict[str, float]:
     candidate_rates = report.metrics.get("failure_category_pass_rate", {})
     baseline_rates = baseline.get("metrics", {}).get("failure_category_pass_rate", {})
-    if not isinstance(candidate_rates, Mapping) or not isinstance(baseline_rates, Mapping):
+    if not isinstance(candidate_rates, Mapping) or not isinstance(
+        baseline_rates, Mapping
+    ):
         return {}
     result: dict[str, float] = {}
     for name in sorted(set(candidate_rates) & set(baseline_rates)):
@@ -1187,7 +1228,9 @@ def _distribution_value(
     return float(selected)
 
 
-def _evaluate_baseline_gates(comparison: dict[str, Any], args: argparse.Namespace) -> list[str]:
+def _evaluate_baseline_gates(
+    comparison: dict[str, Any], args: argparse.Namespace
+) -> list[str]:
     failures: list[str] = []
     regressions = comparison.get("regression", [])
     if args.fail_on_regression and regressions:
@@ -1224,10 +1267,14 @@ def _evaluate_baseline_gates(comparison: dict[str, Any], args: argparse.Namespac
     for grader_name in args.require_grader_pass:
         rate = grader_rates.get(grader_name)
         if rate is None:
-            failures.append(f"required grader {grader_name!r} missing from candidate report")
+            failures.append(
+                f"required grader {grader_name!r} missing from candidate report"
+            )
             continue
         if float(rate) < 1.0:
-            failures.append(f"required grader {grader_name!r} pass rate is {float(rate):.1%}")
+            failures.append(
+                f"required grader {grader_name!r} pass rate is {float(rate):.1%}"
+            )
     return failures
 
 

@@ -88,9 +88,7 @@ def build_shared_services(
             _build_worktree_runner(project_root) if experimental.worktree else None
         ),
         orchestration_store=(
-            _build_orchestration_store(project_root)
-            if experimental.progress
-            else None
+            _build_orchestration_store(project_root) if experimental.progress else None
         ),
     )
 
@@ -508,7 +506,10 @@ def _build_subagent_integration(
                     memory_manager=memory_manager,
                 ),
                 project_root=child_root,
-                prompt_instructions=runtime_config.prompt.instructions,
+                prompt_instructions=tuple(
+                    i.model_dump(exclude_none=True)
+                    for i in runtime_config.prompt.instructions
+                ),
                 todo_state=child_todo_state,
             ),
         ).run_async(prompt)
@@ -546,9 +547,7 @@ def load_opt_in_services(
     return OptInServices(
         daemon=daemon,
         mailbox=shared_services.mailbox,
-        progress=(
-            True if shared_services.orchestration_store is not None else None
-        ),
+        progress=(True if shared_services.orchestration_store is not None else None),
     )
 
 
@@ -617,7 +616,10 @@ def build_agent(
             project_root=project_root,
             request_hygiene=runtime_config.request_hygiene,
             skill_registry=skill_registry,
-            prompt_instructions=runtime_config.prompt.instructions,
+            prompt_instructions=tuple(
+                i.model_dump(exclude_none=True)
+                for i in runtime_config.prompt.instructions
+            ),
             todo_state=todo_state,
             memory_manager=memory_manager,
         ),
@@ -672,7 +674,7 @@ def _external_directories_from_security(
     security: SecurityRuntimeConfig,
 ) -> tuple[ExternalDirectory, ...]:
     return tuple(
-        ExternalDirectory(path=Path(ed["path"]), access=ed.get("access", "read"))
+        ExternalDirectory(path=Path(ed.path), access=ed.access)
         for ed in security.external_directories
     )
 

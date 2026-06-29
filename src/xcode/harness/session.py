@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 import shutil
 from collections.abc import Callable
 
@@ -35,36 +36,17 @@ SESSION_RECOVERY_BOUNDARY = "current_transcript_and_session_tree"
 FORK_TYPES = frozenset(["explore", "verify", "isolate"])
 
 
-@dataclass(frozen=True)
-class SessionRecord:
+class SessionRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     type: str
     content: JsonValue
     created_at: str
 
-    def to_dict(self) -> dict[str, JsonValue]:
-        return {
-            "type": self.type,
-            "content": self.content,
-            "created_at": self.created_at,
-        }
 
-    @classmethod
-    def from_dict(cls, payload: object) -> "SessionRecord | None":
-        if not isinstance(payload, dict):
-            return None
-        record_type = payload.get("type")
-        created_at = payload.get("created_at")
-        if not isinstance(record_type, str) or not isinstance(created_at, str):
-            return None
-        return cls(
-            type=record_type,
-            content=_json_value(payload.get("content")),
-            created_at=created_at,
-        )
+class SessionMetadata(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-
-@dataclass(frozen=True)
-class SessionMetadata:
     id: str
     title: str
     summary: str
@@ -75,54 +57,18 @@ class SessionMetadata:
     parent_id: str | None = None
     fork_type: str | None = None
 
-    def to_dict(self) -> dict[str, str | None]:
-        return {
-            "id": self.id,
-            "title": self.title,
-            "summary": self.summary,
-            "project_path": self.project_path,
-            "transcript_path": self.transcript_path,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "parent_id": self.parent_id,
-            "fork_type": self.fork_type,
-        }
-
+    @field_validator("fork_type")
     @classmethod
-    def from_dict(cls, payload: object) -> "SessionMetadata | None":
-        if not isinstance(payload, dict):
+    def _validate_fork_type(cls, v: str | None) -> str | None:
+        if v is not None and v not in FORK_TYPES:
             return None
-        required = (
-            "id",
-            "title",
-            "summary",
-            "project_path",
-            "transcript_path",
-            "created_at",
-            "updated_at",
-        )
-        values: dict[str, str] = {}
-        for key in required:
-            value = payload.get(key)
-            if not isinstance(value, str):
-                return None
-            values[key] = value
-        return cls(
-            id=values["id"],
-            title=values["title"],
-            summary=values["summary"],
-            project_path=values["project_path"],
-            transcript_path=values["transcript_path"],
-            created_at=values["created_at"],
-            updated_at=values["updated_at"],
-            parent_id=_optional_string(payload.get("parent_id")),
-            fork_type=_fork_type(payload.get("fork_type")),
-        )
+        return v
 
 
-@dataclass(frozen=True)
-class SessionProtocolInfo:
+class SessionProtocolInfo(BaseModel):
     """会话持久化协议描述。"""
+
+    model_config = ConfigDict(frozen=True)
 
     version: int
     storage: str
@@ -161,7 +107,7 @@ class SessionStore:
                 created_at=datetime.now(UTC).isoformat(timespec="seconds"),
             )
             with self.current_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+                handle.write(json.dumps(record.model_dump(), ensure_ascii=False) + "\n")
             if record_type == "user":
                 self.ensure_metadata(str(content))
 
@@ -227,9 +173,11 @@ class SessionStore:
         for line in target.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 data = json.loads(line)
-                record = SessionRecord.from_dict(data)
-                if record is not None:
-                    records.append(record)
+                try:
+                    record = SessionRecord.model_validate(data)
+                except ValidationError:
+                    continue
+                records.append(record)
         return records
 
     def resume(self, target: Path | str) -> None:
@@ -265,7 +213,7 @@ class SessionStore:
             with self.current_path.open("w", encoding="utf-8") as handle:
                 for record in kept:
                     handle.write(
-                        json.dumps(record.to_dict(), ensure_ascii=False) + "\n"
+                        json.dumps(record.model_dump(), ensure_ascii=False) + "\n"
                     )
             return len(records) - len(kept)
 
@@ -302,7 +250,7 @@ class SessionStore:
                 with self.current_path.open("w", encoding="utf-8") as handle:
                     for record in new_records:
                         handle.write(
-                            json.dumps(record.to_dict(), ensure_ascii=False) + "\n"
+                            json.dumps(record.model_dump(), ensure_ascii=False) + "\n"
                         )
             return compacted_count
 
@@ -489,8 +437,9 @@ class SessionStore:
         raw_items = data.get("sessions", []) if isinstance(data, dict) else []
         items = []
         for raw in raw_items:
-            metadata = SessionMetadata.from_dict(raw)
-            if metadata is None:
+            try:
+                metadata = SessionMetadata.model_validate(raw)
+            except ValidationError:
                 logging.warning("skipping malformed session metadata: %s", raw)
                 continue
             items.append(metadata)
@@ -504,7 +453,7 @@ class SessionStore:
                 "version": protocol.version,
                 "storage": protocol.storage,
                 "recovery_boundary": protocol.recovery_boundary,
-                "sessions": [item.to_dict() for item in items],
+                "sessions": [item.model_dump() for item in items],
             }
             self.index_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
@@ -587,8 +536,11 @@ class SessionStore:
                 if not line.strip():
                     continue
                 data = json.loads(line)
-                record = SessionRecord.from_dict(data)
-                if record is not None and record.type in {"user", "assistant", "event"}:
+                try:
+                    record = SessionRecord.model_validate(data)
+                except ValidationError:
+                    continue
+                if record.type in {"user", "assistant", "event"}:
                     return True
         except (OSError, json.JSONDecodeError):
             return False
@@ -688,28 +640,6 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
-
-
-def _json_value(value: object) -> JsonValue:
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    if isinstance(value, list):
-        return [_json_value(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    return str(value)
-
-
-def _optional_string(value: object) -> str | None:
-    if value is None:
-        return None
-    return value if isinstance(value, str) else None
-
-
-def _fork_type(value: object) -> str | None:
-    if value in FORK_TYPES:
-        return str(value)
-    return None
 
 
 @dataclass(frozen=True)

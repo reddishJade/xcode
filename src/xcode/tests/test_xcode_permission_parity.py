@@ -118,10 +118,14 @@ class StructuredPermissionParityTests:
         """构造同时覆盖 allow、ask、deny 与 allowlist fallback 的规则。"""
         return PermissionPolicy(
             rules=(
-                StaticPermission("read_file", "allow"),
-                StaticPermission("write_file", "ask"),
-                StaticPermission("edit_file", "deny", input_contains="static-policy"),
-                StaticPermission("edit_file", "ask", input_contains=".env"),
+                StaticPermission(tool="read_file", decision="allow"),
+                StaticPermission(tool="write_file", decision="ask"),
+                StaticPermission(
+                    tool="edit_file", decision="deny", input_contains="static-policy"
+                ),
+                StaticPermission(
+                    tool="edit_file", decision="ask", input_contains=".env"
+                ),
             ),
             global_default="ask",
         )

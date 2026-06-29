@@ -416,7 +416,11 @@ _CJK_RE = re.compile(r"[\u4e00-\u9fff]+")
 def tokenize(text: str) -> list[str]:
     normalized = text.lower()
     cleaned = re.sub(r"[^\w\s/.-]", " ", normalized)
-    base = [token for token in cleaned.replace("-", " ").replace("_", " ").split() if len(token) >= 2]
+    base = [
+        token
+        for token in cleaned.replace("-", " ").replace("_", " ").split()
+        if len(token) >= 2
+    ]
     tokens: list[str] = []
     seen: set[str] = set()
 

@@ -423,7 +423,9 @@ class TestMcpStdioConformance:
         tools = build_mcp_tools(self.temp_dir)
         echo_tool = next(t for t in tools if t.name == "mcp__test-server__echo")
 
-        policy = PermissionPolicy((StaticPermission("mcp__test-server__echo", "deny"),))
+        policy = PermissionPolicy(
+            (StaticPermission(tool="mcp__test-server__echo", decision="deny"),)
+        )
         engine = PermissionEngine(PermissionEngineConfig(static_policy=policy))
         result = engine.decide(
             "mcp__test-server__echo",
@@ -443,7 +445,7 @@ class TestMcpStdioConformance:
         echo_tool = next(t for t in tools if t.name == "mcp__test-server__echo")
 
         policy = PermissionPolicy(
-            (StaticPermission("mcp__test-server__echo", "allow"),)
+            (StaticPermission(tool="mcp__test-server__echo", decision="allow"),)
         )
         engine = PermissionEngine(PermissionEngineConfig(static_policy=policy))
         result = engine.decide(

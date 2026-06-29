@@ -8,6 +8,7 @@ from ._registry import (
     PROVIDER_REGISTRY,
 )
 from .factory import ProviderBundle, ProviderSettings, build_provider_bundle
+
 __all__ = [
     "ChatGLMProvider",
     "DeepSeekProvider",

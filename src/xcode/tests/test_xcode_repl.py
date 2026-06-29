@@ -92,10 +92,10 @@ class XcodeReplTests:
         """工具轮次恢复时保留最终助手文本。"""
         created_at = "2026-01-01T00:00:00+00:00"
         records = [
-            SessionRecord("user", "change file", created_at),
+            SessionRecord(type="user", content="change file", created_at=created_at),
             SessionRecord(
-                "event",
-                {
+                type="event",
+                content={
                     "type": "assistant",
                     "data": [
                         {
@@ -106,11 +106,11 @@ class XcodeReplTests:
                         }
                     ],
                 },
-                created_at,
+                created_at=created_at,
             ),
             SessionRecord(
-                "event",
-                {
+                type="event",
+                content={
                     "type": "tool_result",
                     "data": {
                         "tool_use_id": "write-1",
@@ -118,9 +118,11 @@ class XcodeReplTests:
                         "content": "wrote file: hello.py",
                     },
                 },
-                created_at,
+                created_at=created_at,
             ),
-            SessionRecord("assistant", "Updated hello.py.", created_at),
+            SessionRecord(
+                type="assistant", content="Updated hello.py.", created_at=created_at
+            ),
         ]
 
         messages = records_to_agent_messages(records)
@@ -133,10 +135,10 @@ class XcodeReplTests:
         """工具事件已包含相同文本时不重复恢复。"""
         created_at = "2026-01-01T00:00:00+00:00"
         records = [
-            SessionRecord("user", "inspect file", created_at),
+            SessionRecord(type="user", content="inspect file", created_at=created_at),
             SessionRecord(
-                "event",
-                {
+                type="event",
+                content={
                     "type": "assistant",
                     "data": [
                         {"type": "text", "text": "Inspecting hello.py."},
@@ -148,11 +150,11 @@ class XcodeReplTests:
                         },
                     ],
                 },
-                created_at,
+                created_at=created_at,
             ),
             SessionRecord(
-                "event",
-                {
+                type="event",
+                content={
                     "type": "tool_result",
                     "data": {
                         "tool_use_id": "read-1",
@@ -160,9 +162,11 @@ class XcodeReplTests:
                         "content": "hello",
                     },
                 },
-                created_at,
+                created_at=created_at,
             ),
-            SessionRecord("assistant", "Inspecting hello.py.", created_at),
+            SessionRecord(
+                type="assistant", content="Inspecting hello.py.", created_at=created_at
+            ),
         ]
 
         messages = records_to_agent_messages(records)
@@ -538,7 +542,7 @@ class XcodeReplTests:
                 ),
             )
             policy = PermissionPolicy(
-                (StaticPermission("write_file", "ask"),),
+                (StaticPermission(tool="write_file", decision="ask"),),
                 global_default="allow",
             )
 
@@ -602,7 +606,7 @@ class XcodeReplTests:
                 ),
             )
             policy = PermissionPolicy(
-                (StaticPermission("write_file", "ask"),),
+                (StaticPermission(tool="write_file", decision="ask"),),
                 global_default="allow",
             )
 
@@ -1910,7 +1914,9 @@ class StaticPermissionAgent:
     """提供 REPL 权限命令读取的静态策略字段。"""
 
     def __init__(self) -> None:
-        self.permission_policy = PermissionPolicy((StaticPermission("bash", "deny"),))
+        self.permission_policy = PermissionPolicy(
+            (StaticPermission(tool="bash", decision="deny"),)
+        )
         self.restricted_dirs: tuple[str, ...] = ()
         self.approval_callback: ApprovalCallback | None = None
         self.cancellation_token = CancellationToken()
@@ -2368,7 +2374,9 @@ class DeniedToolAgent:
     """提供 /tool 直连执行读取的静态权限策略。"""
 
     def __init__(self) -> None:
-        self.permission_policy = PermissionPolicy((StaticPermission("bash", "deny"),))
+        self.permission_policy = PermissionPolicy(
+            (StaticPermission(tool="bash", decision="deny"),)
+        )
         self.restricted_dirs: tuple[str, ...] = ()
         self.approval_callback = None
 

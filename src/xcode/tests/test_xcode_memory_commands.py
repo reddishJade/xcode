@@ -86,7 +86,11 @@ def test_runtime_context_provider_injects_relevant_memory(tmp_path: Path) -> Non
     assert any("<conclusion>" in context for context in contexts)
     assert any("Retry transient provider failures" in context for context in contexts)
     assert any('layer="project"' in context for context in contexts)
-    assert all("- Context/Query:" not in context for context in contexts if "<memory>" in context)
+    assert all(
+        "- Context/Query:" not in context
+        for context in contexts
+        if "<memory>" in context
+    )
     record = manager.read_memory_records()[0]
     assert manager.get_last_used_at(record) is not None
     trace_events = manager.drain_trace_events()
@@ -94,7 +98,9 @@ def test_runtime_context_provider_injects_relevant_memory(tmp_path: Path) -> Non
     injected = [event for event in trace_events if event.type == "injected"]
     assert injected
     assert all(event.token_count and event.token_count > 0 for event in injected)
-    assert all("Provider connection timeout" not in repr(event) for event in trace_events)
+    assert all(
+        "Provider connection timeout" not in repr(event) for event in trace_events
+    )
 
 
 def test_runtime_context_provider_uses_active_file_for_memory_retrieval(

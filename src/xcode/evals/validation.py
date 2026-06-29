@@ -59,6 +59,8 @@ def validation_commands(task: EvalTask) -> tuple[str | tuple[str, ...], ...]:
     """读取 task.metadata.validation.commands。"""
     validation = task.metadata.validation
     return validation.commands if validation is not None else ()
+
+
 def validation_timeout_seconds(task: EvalTask) -> float:
     """读取验证命令超时时间，默认 60 秒。"""
     validation = task.metadata.validation

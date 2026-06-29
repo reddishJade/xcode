@@ -128,7 +128,7 @@ def report_to_dict(report: EvalReport) -> dict[str, Any]:
         "success": report.success,
         "output_dir": str(report.output_dir),
         "metrics": report.metrics,
-        "tasks": [task.to_dict() for task in report.tasks],
+        "tasks": [task.model_dump(exclude_none=True) for task in report.tasks],
         "trials": [
             {
                 "task_id": trial.task_id,
@@ -539,7 +539,9 @@ def _update_run_history_index(
         "pass^k_rate": report.metrics.get("pass^k_rate", "unavailable"),
         "grader_pass_rate": report.metrics.get("grader_pass_rate", "unavailable"),
         "total_model_ms": report.metrics.get("total_model_ms", "unavailable"),
-        "total_estimated_tokens": report.metrics.get("total_estimated_tokens", "unavailable"),
+        "total_estimated_tokens": report.metrics.get(
+            "total_estimated_tokens", "unavailable"
+        ),
         "manifest_path": str(manifest_path),
         "report_path": str(report.output_dir / "report.json"),
     }
@@ -577,7 +579,9 @@ def _build_trend_summary(index_path: Path) -> dict[str, Any]:
 
 
 def _mean_available(rows: list[dict[str, Any]], key: str) -> Any:
-    values = [float(value) for row in rows if isinstance((value := row.get(key)), int | float)]
+    values = [
+        float(value) for row in rows if isinstance((value := row.get(key)), int | float)
+    ]
     if not values:
         return "unavailable"
     return round(sum(values) / len(values), 4)

@@ -45,7 +45,9 @@ class XcodePermissionsTests:
         tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("echo", "deny"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="echo", decision="deny"),)
+                ),
             )
         )
         result = engine.decide("echo", {"input": "hello"}, tool_spec=tool)
@@ -68,7 +70,9 @@ class XcodePermissionsTests:
         tool = ToolSpec("echo", "Echo.", "text", lambda value: value["input"])
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("echo", "ask"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="echo", decision="ask"),)
+                ),
             )
         )
         result = engine.decide("echo", {"input": "hello"}, tool_spec=tool)
@@ -84,7 +88,9 @@ class XcodePermissionsTests:
         )
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("danger", "allow"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="danger", decision="allow"),)
+                ),
             )
         )
         result = engine.decide("danger", {"input": "go"}, tool_spec=tool)
@@ -93,8 +99,8 @@ class XcodePermissionsTests:
 
     def test_static_last_match_wins(self) -> None:
         rules = (
-            StaticPermission("bash", "allow"),
-            StaticPermission("*", "deny"),
+            StaticPermission(tool="bash", decision="allow"),
+            StaticPermission(tool="*", decision="deny"),
         )
         policy = PermissionPolicy(rules)
         engine = PermissionEngine(PermissionEngineConfig(static_policy=policy))
@@ -213,7 +219,9 @@ class XcodePermissionsTests:
             store.add(grant)
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="bash", decision="ask"),)
+                ),
                 session_grant_store=store,
             )
         )
@@ -228,7 +236,7 @@ class XcodePermissionsTests:
         engine = PermissionEngine(
             PermissionEngineConfig(
                 static_policy=PermissionPolicy(
-                    rules=(StaticPermission("read_file", "allow"),),
+                    rules=(StaticPermission(tool="read_file", decision="allow"),),
                     global_default="ask",
                 ),
             )
@@ -275,7 +283,9 @@ class XcodePermissionsTests:
         gate = ToolGate(
             mode_state=mode,
             approval_callback=approve,
-            permission_policy=PermissionPolicy((StaticPermission("bash", "deny"),)),
+            permission_policy=PermissionPolicy(
+                (StaticPermission(tool="bash", decision="deny"),)
+            ),
             hook_manager=None,
             audit_logger=None,
             session_id="test",
@@ -324,7 +334,9 @@ class XcodePermissionsTests:
                 ),
             ),
             gate=GateConfig(
-                permission_policy=PermissionPolicy((StaticPermission("echo", "deny"),)),
+                permission_policy=PermissionPolicy(
+                    (StaticPermission(tool="echo", decision="deny"),)
+                ),
             ),
         )
 
@@ -370,7 +382,9 @@ class XcodePermissionsTests:
         tool = ToolSpec("failing", "Fails.", "text", fail_handler)
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("failing", "ask"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="failing", decision="ask"),)
+                ),
             )
         )
         result = engine.decide(
@@ -392,7 +406,9 @@ class XcodePermissionsTests:
         )
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="bash", decision="ask"),)
+                ),
             )
         )
         result = engine.decide(
@@ -413,7 +429,9 @@ class XcodePermissionsTests:
         )
         engine = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="bash", decision="ask"),)
+                ),
             )
         )
         result = engine.decide(
@@ -525,7 +543,9 @@ class SubagentGatePermissionBoundaryTests:
         gate = ToolGate(
             mode_state=mode,
             approval_callback=None,
-            permission_policy=PermissionPolicy((StaticPermission("bash", "deny"),)),
+            permission_policy=PermissionPolicy(
+                (StaticPermission(tool="bash", decision="deny"),)
+            ),
             hook_manager=None,
             audit_logger=None,
             session_id="subagent-test",
@@ -559,7 +579,7 @@ class SubagentGatePermissionBoundaryTests:
             mode_state=mode,
             approval_callback=None,
             permission_policy=PermissionPolicy(
-                rules=(StaticPermission("read_file", "allow"),),
+                rules=(StaticPermission(tool="read_file", decision="allow"),),
                 global_default="ask",
             ),
             hook_manager=None,
@@ -641,7 +661,9 @@ class SubagentGatePermissionBoundaryTests:
         gate = ToolGate(
             mode_state=mode,
             approval_callback=None,  # 子代理：无回调
-            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            permission_policy=PermissionPolicy(
+                (StaticPermission(tool="bash", decision="ask"),)
+            ),
             hook_manager=None,
             audit_logger=None,
             session_id="subagent-test",
@@ -682,7 +704,9 @@ class SubagentGatePermissionBoundaryTests:
         gate = ToolGate(
             mode_state=mode,
             approval_callback=None,
-            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            permission_policy=PermissionPolicy(
+                (StaticPermission(tool="bash", decision="ask"),)
+            ),
             hook_manager=None,
             audit_logger=None,
             session_id="subagent-test",
@@ -730,7 +754,9 @@ class SubagentGatePermissionBoundaryTests:
             gate = ToolGate(
                 mode_state=mode,
                 approval_callback=None,
-                permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+                permission_policy=PermissionPolicy(
+                    (StaticPermission(tool="bash", decision="ask"),)
+                ),
                 hook_manager=None,
                 audit_logger=None,
                 session_id="subagent-test",
@@ -782,7 +808,9 @@ class SubagentGatePermissionBoundaryTests:
                 ),
             ),
             gate=GateConfig(
-                permission_policy=PermissionPolicy((StaticPermission("echo", "deny"),)),
+                permission_policy=PermissionPolicy(
+                    (StaticPermission(tool="echo", decision="deny"),)
+                ),
             ),
         )
         result = agent.run("go")
@@ -1027,7 +1055,9 @@ class ToolGateBoundaryResolutionTests:
         gate = ToolGate(
             mode_state=mode,
             approval_callback=None,
-            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            permission_policy=PermissionPolicy(
+                (StaticPermission(tool="bash", decision="ask"),)
+            ),
             hook_manager=None,
             audit_logger=None,
             session_id="subagent-test",
@@ -1110,7 +1140,7 @@ class ToolGateGrantFlowTests:
             return HITLResult("allow", "session")
 
         gate = self._make_gate(
-            policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            policy=PermissionPolicy((StaticPermission(tool="bash", decision="ask"),)),
             session_store=InMemoryGrantStore(),
             callback=cb,
         )
@@ -1125,7 +1155,7 @@ class ToolGateGrantFlowTests:
         """Callback returning allow/session writes a grant to session store."""
         store = InMemoryGrantStore()
         gate = self._make_gate(
-            policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            policy=PermissionPolicy((StaticPermission(tool="bash", decision="ask"),)),
             session_store=store,
             callback=lambda _t, _i: HITLResult("allow", "session"),
         )
@@ -1147,7 +1177,7 @@ class ToolGateGrantFlowTests:
 
         store = InMemoryGrantStore()
         gate = self._make_gate(
-            policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            policy=PermissionPolicy((StaticPermission(tool="bash", decision="ask"),)),
             session_store=store,
             callback=cb,
         )
@@ -1182,7 +1212,9 @@ class ToolGateGrantFlowTests:
         gate = ToolGate(
             mode_state=mode,
             approval_callback=cb,
-            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            permission_policy=PermissionPolicy(
+                (StaticPermission(tool="bash", decision="ask"),)
+            ),
             hook_manager=None,
             audit_logger=None,
             session_id="test-a",
@@ -1197,7 +1229,9 @@ class ToolGateGrantFlowTests:
         gate_b = ToolGate(
             mode_state=mode,
             approval_callback=cb,
-            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            permission_policy=PermissionPolicy(
+                (StaticPermission(tool="bash", decision="ask"),)
+            ),
             hook_manager=None,
             audit_logger=None,
             session_id="test-b",
@@ -1213,7 +1247,7 @@ class ToolGateGrantFlowTests:
     def test_callback_deny_blocks_tool(self) -> None:
         """Callback returning deny blocks the tool."""
         gate = self._make_gate(
-            policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            policy=PermissionPolicy((StaticPermission(tool="bash", decision="ask"),)),
             session_store=InMemoryGrantStore(),
             callback=lambda _t, _i: HITLResult("deny", "once"),
         )
@@ -1234,7 +1268,9 @@ class ToolGateGrantFlowTests:
         gate = ToolGate(
             mode_state=mode,
             approval_callback=None,
-            permission_policy=PermissionPolicy((StaticPermission("bash", "ask"),)),
+            permission_policy=PermissionPolicy(
+                (StaticPermission(tool="bash", decision="ask"),)
+            ),
             hook_manager=None,
             audit_logger=None,
             session_id="test-no-mechanism",

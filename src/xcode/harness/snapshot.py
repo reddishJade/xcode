@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime, UTC
 import json
 import logging
 from pathlib import Path
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 import shutil
 import subprocess
 import threading
@@ -46,86 +46,37 @@ class SnapshotUnsupportedError(RuntimeError):
     """本步骤仅支持 git 工程。"""
 
 
-@dataclass
-class SkippedFileInfo:
+class SkippedFileInfo(BaseModel):
     path: str
     reason: str
 
 
-@dataclass
-class ChangeEntry:
+class ChangeEntry(BaseModel):
     path: str
     kind: Literal["modified", "created", "deleted"]
 
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _coerce_kind(cls, v: str) -> str:
+        if v not in ("modified", "created", "deleted"):
+            return "modified"
+        return v
 
-@dataclass
-class TurnSnapshotRecord:
+
+class TurnSnapshotRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     turn_id: str
     pre_snapshot_id: str
     post_snapshot_id: str
     changed_files: list[ChangeEntry]
-    skipped_files: list[SkippedFileInfo] = field(default_factory=list)
+    skipped_files: list[SkippedFileInfo] = []
     timestamp: str = ""
     undone: bool = False
-    tool_names: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "turn_id": self.turn_id,
-            "pre_snapshot_id": self.pre_snapshot_id,
-            "post_snapshot_id": self.post_snapshot_id,
-            "changed_files": [
-                {"path": c.path, "kind": c.kind} for c in self.changed_files
-            ],
-            "skipped_files": [
-                {"path": s.path, "reason": s.reason} for s in self.skipped_files
-            ],
-            "timestamp": self.timestamp,
-            "undone": self.undone,
-            "tool_names": self.tool_names,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, object]) -> TurnSnapshotRecord:
-        raw_changed = data.get("changed_files", [])
-        raw_skipped = data.get("skipped_files", [])
-        if not isinstance(raw_changed, list):
-            raw_changed = []
-        if not isinstance(raw_skipped, list):
-            raw_skipped = []
-        changed: list[ChangeEntry] = []
-        for c in raw_changed:
-            if not isinstance(c, dict):
-                continue
-            path = str(c.get("path", ""))
-            raw_kind = str(c.get("kind", "modified"))
-            kind: Literal["modified", "created", "deleted"] = "modified"
-            if raw_kind == "created":
-                kind = "created"
-            elif raw_kind == "deleted":
-                kind = "deleted"
-            changed.append(ChangeEntry(path=path, kind=kind))
-        return cls(
-            turn_id=str(data.get("turn_id", "")),
-            pre_snapshot_id=str(data.get("pre_snapshot_id", "")),
-            post_snapshot_id=str(data.get("post_snapshot_id", "")),
-            changed_files=changed,
-            skipped_files=[
-                SkippedFileInfo(
-                    path=str(s.get("path", "")),
-                    reason=str(s.get("reason", "")),
-                )
-                for s in raw_skipped
-                if isinstance(s, dict)
-            ],
-            timestamp=str(data.get("timestamp", "")),
-            undone=bool(data.get("undone", False)),
-            tool_names=_tool_names_from_data(data.get("tool_names")),
-        )
+    tool_names: list[str] = []
 
 
-@dataclass
-class SnapshotResult:
+class SnapshotResult(BaseModel):
     snapshot_id: str
     skipped_files: list[SkippedFileInfo]
 
@@ -311,12 +262,6 @@ class SnapshotService:
         self._git(["checkout", snapshot_id, "--", rel_path])
 
 
-def _tool_names_from_data(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value if isinstance(item, str)]
-
-
 class SnapshotStore:
     """快照存储管理器，维护 TurnSnapshotRecord 索引。"""
 
@@ -378,16 +323,23 @@ class SnapshotStore:
             logger.warning("failed to load snapshot index: %s", path)
             return []
         raw_turns = data.get("turns", []) if isinstance(data, dict) else []
-        return [
-            TurnSnapshotRecord.from_dict(t) for t in raw_turns if isinstance(t, dict)
-        ]
+        records: list[TurnSnapshotRecord] = []
+        for t in raw_turns:
+            if not isinstance(t, dict):
+                continue
+            try:
+                records.append(TurnSnapshotRecord.model_validate(t))
+            except ValidationError:
+                logger.warning("skipping malformed snapshot record: %s", t)
+                continue
+        return records
 
     def _write_index(self, session_id: str, records: list[TurnSnapshotRecord]) -> None:
         path = self._index_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "session_id": session_id,
-            "turns": [r.to_dict() for r in records],
+            "turns": [r.model_dump() for r in records],
         }
         path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",

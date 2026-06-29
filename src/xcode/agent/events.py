@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
 
 from .messages import AgentMessage, ToolResultMessage
@@ -10,84 +10,83 @@ from .types import ToolArguments
 """Agent 事件类型。"""
 
 
-@dataclass
-class AgentStartEvent:
+class AgentStartEvent(BaseModel):
     """Agent 循环开始事件。"""
 
     type: str = "agent_start"
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class AgentEndEvent:
+class AgentEndEvent(BaseModel):
     """Agent 循环结束事件，携带最终消息列表。"""
 
     type: str = "agent_end"
-    messages: list[AgentMessage] = field(default_factory=list)
+    messages: list[AgentMessage] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class TurnStartEvent:
+class TurnStartEvent(BaseModel):
     """单次 turn 开始事件（调用模型前）。"""
 
     type: str = "turn_start"
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class TurnEndEvent:
+class TurnEndEvent(BaseModel):
     """单次 turn 结束事件（模型返回并执行工具后）。"""
 
     type: str = "turn_end"
     message: AgentMessage | None = None
-    tool_results: list[ToolResultMessage] = field(default_factory=list)
+    tool_results: list[ToolResultMessage] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class MessageStartEvent:
+class MessageStartEvent(BaseModel):
     """模型响应开始事件（首个 token 到达）。"""
 
     type: str = "message_start"
     message: AgentMessage | None = None
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class MessageUpdateEvent:
+class MessageUpdateEvent(BaseModel):
     """模型响应增量更新事件（流式传输中）。"""
 
     type: str = "message_update"
     message: AgentMessage | None = None
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class MessageEndEvent:
+class MessageEndEvent(BaseModel):
     """模型响应结束事件（流式传输完成）。"""
 
     type: str = "message_end"
     message: AgentMessage | None = None
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class ToolExecutionStartEvent:
+class ToolExecutionStartEvent(BaseModel):
     """工具执行开始事件。"""
 
     type: str = "tool_execution_start"
     tool_call_id: str = ""
     tool_name: str = ""
-    args: ToolArguments = field(default_factory=dict)
+    args: ToolArguments = Field(default_factory=dict)
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class ToolExecutionUpdateEvent:
+class ToolExecutionUpdateEvent(BaseModel):
     """工具执行增量更新事件（支持进度报告的工具）。"""
 
     type: str = "tool_execution_update"
     tool_call_id: str = ""
     tool_name: str = ""
-    args: ToolArguments = field(default_factory=dict)
+    args: ToolArguments = Field(default_factory=dict)
     partial_result: AgentToolResult | None = None
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
-@dataclass
-class ToolExecutionEndEvent:
+class ToolExecutionEndEvent(BaseModel):
     """工具执行结束事件，携带结果或错误。"""
 
     type: str = "tool_execution_end"
@@ -95,26 +94,26 @@ class ToolExecutionEndEvent:
     tool_name: str = ""
     result: ToolResultMessage | None = None
     is_error: bool = False
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class ThinkingUpdateEvent:
+class ThinkingUpdateEvent(BaseModel):
     """思考内容增量更新事件（支持 reasoning_content 的模型）。"""
 
     type: str = "thinking_update"
     reasoning_content: str = ""
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class CompactionArchive:
+class CompactionArchive(BaseModel):
     """压缩归档元数据。"""
 
     path: str
     status: Literal["summary", "full"]
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class CompactionEvent:
+class CompactionEvent(BaseModel):
     """上下文压缩事件，包含压缩统计和归档路径。"""
 
     type: str = "compaction"
@@ -123,6 +122,7 @@ class CompactionEvent:
     summary_token_estimate: int = 0
     trigger: str = "token_limit"
     archive: CompactionArchive | None = None
+    model_config = ConfigDict(extra="forbid")
 
 
 type AgentEvent = (

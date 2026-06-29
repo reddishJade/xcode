@@ -362,7 +362,8 @@ class McpClient:
         name: str,
         arguments: dict[str, Any],
         timeout: float | None = None,
-        progress_callback: Callable[[float, float | None, str | None], None] | None = None,
+        progress_callback: Callable[[float, float | None, str | None], None]
+        | None = None,
         cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         """调用服务器工具并返回普通 MCP 结果字典。"""

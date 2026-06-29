@@ -361,7 +361,7 @@ class TestSnapshotStore:
             pre_snapshot_id=pre.snapshot_id,
             post_snapshot_id=post.snapshot_id,
             changed_files=changes,
-            skipped_files=[SkippedFileInfo("big.bin", "too large")],
+            skipped_files=[SkippedFileInfo(path="big.bin", reason="too large")],
         )
         records = store.list_records("sess-skp")
         assert len(records[0].skipped_files) == 1
@@ -388,8 +388,8 @@ class TestSnapshotStore:
         assert records[0].tool_names == ["read_file", "write_file"]
 
         # 验证 JSON 往返
-        data = records[0].to_dict()
-        restored = TurnSnapshotRecord.from_dict(data)
+        data = records[0].model_dump()
+        restored = TurnSnapshotRecord.model_validate(data)
         assert restored.tool_names == ["read_file", "write_file"]
 
     def test_tool_names_default_empty(self) -> None:

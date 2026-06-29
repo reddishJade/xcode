@@ -306,14 +306,10 @@ def _render_memory_context(
     retrieval_context = MemoryRetrievalContext(
         query=question,
         current_file=(
-            contextual_state.active_file
-            if contextual_state is not None
-            else None
+            contextual_state.active_file if contextual_state is not None else None
         ),
         recent_files=(
-            contextual_state.recent_files
-            if contextual_state is not None
-            else ()
+            contextual_state.recent_files if contextual_state is not None else ()
         ),
     )
     records = manager.search_memory_records(

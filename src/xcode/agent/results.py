@@ -5,7 +5,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.functional_validators import SkipValidation
 from enum import StrEnum
 
 from xcode.ai.providers.protocol import StreamProvider
@@ -21,26 +24,26 @@ class TerminationReason(StrEnum):
     PROVIDER_ERROR = "provider_error"
 
 
-@dataclass
-class AgentLoopMetrics:
+class AgentLoopMetrics(BaseModel):
     llm_calls: int = 0
     tool_calls: int = 0
     steps: int = 0
-    model_latencies_ms: list[float] = field(default_factory=list)
-    tool_latencies_ms: list[float] = field(default_factory=list)
+    model_latencies_ms: list[float] = Field(default_factory=list)
+    tool_latencies_ms: list[float] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class AgentLoopResult:
-    messages: list = field(default_factory=list)
+class AgentLoopResult(BaseModel):
+    messages: list = Field(default_factory=list)
     steps: int = 0
     termination_reason: TerminationReason = TerminationReason.COMPLETED
     watchdog_reason: str | None = None
     error_detail: str | None = None
     metrics: AgentLoopMetrics | None = None
-    active_provider: StreamProvider | None = None
+    active_provider: Annotated[StreamProvider | None, SkipValidation] = None
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     @property
     def stopped_by_limit(self) -> bool:

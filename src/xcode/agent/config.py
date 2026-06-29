@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Literal
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.functional_validators import SkipValidation
 
 from xcode.ai.providers.protocol import StreamProvider
 from xcode.ai.types import StreamOptions, ThinkingLevel
@@ -33,78 +35,78 @@ from .hooks import (
 )
 
 
-@dataclass
-class _LoopRunState:
+class _LoopRunState(BaseModel):
     """Agent 循环运行时状态，由 agent_loop.py 持有并更新。"""
 
     first_turn: bool = True
-    pending_messages: list[AgentMessage] = field(default_factory=list)
+    pending_messages: list[AgentMessage] = Field(default_factory=list)
     last_tool_signature: str | None = None
     repeated_tool_count: int = 0
     consecutive_idle_steps: int = 0
     consecutive_continuations: int = 0
     step_retries: int = 0
-    active_provider: StreamProvider | None = None
+    active_provider: Annotated[StreamProvider | None, SkipValidation] = None
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
 # ── 上下文 ──
 
 
-@dataclass
-class AgentContext:
+class AgentContext(BaseModel):
     system_prompt: str = ""
-    messages: list[AgentMessage] = field(default_factory=list)
-    tools: list[AgentTool] = field(default_factory=list)
+    messages: list[AgentMessage] = Field(default_factory=list)
+    tools: list[Annotated[AgentTool, SkipValidation]] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
 # ── 钩子上下文 ──
 
 
-@dataclass
-class BeforeToolCallContext:
+class BeforeToolCallContext(BaseModel):
     assistant_message: AssistantMessage
     tool_call: ToolCallContent
     args: ToolArguments
     context: AgentContext
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
-@dataclass
-class BeforeToolCallResult:
+class BeforeToolCallResult(BaseModel):
     block: bool = False
     reason: str = ""
     args: ToolArguments | None = None
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
-@dataclass
-class AfterToolCallContext:
+class AfterToolCallContext(BaseModel):
     assistant_message: AssistantMessage
     tool_call: ToolCallContent
     args: ToolArguments
     result: AgentToolResult
     is_error: bool
     context: AgentContext
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
-@dataclass
-class AfterToolCallResult:
+class AfterToolCallResult(BaseModel):
     content: list[ToolResultContentBlock] | None = None
     details: ToolResultDetails | None = None
     is_error: bool | None = None
     terminate: bool | None = None
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
-@dataclass
-class ShouldStopAfterTurnContext:
+class ShouldStopAfterTurnContext(BaseModel):
     message: AssistantMessage
     tool_results: list[ToolResultMessage]
     context: AgentContext
     new_messages: list[AgentMessage]
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
-@dataclass
-class AgentLoopTurnUpdate:
+class AgentLoopTurnUpdate(BaseModel):
     context: AgentContext | None = None
     thinking_level: ThinkingLevel = "off"
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
 # ── 压缩指令 ──
@@ -119,9 +121,8 @@ type CompactPriority = Literal[
 ]
 
 
-@dataclass
-class CompactInstructions:
-    priorities: list[CompactPriority] = field(
+class CompactInstructions(BaseModel):
+    priorities: list[CompactPriority] = Field(
         default_factory=lambda: [
             "architecture_decision",
             "modified_file",
@@ -130,7 +131,8 @@ class CompactInstructions:
             "tool_output",
         ]
     )
-    frozen_identifiers: list[str] = field(default_factory=list)
+    frozen_identifiers: list[str] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
 
 
 # ── Callable type aliases（引用本模块上下文类型）──
@@ -149,9 +151,9 @@ type ShouldStopAfterTurnHook = Callable[[ShouldStopAfterTurnContext], bool]
 # ── 循环配置 ──
 
 
-@dataclass
-class AgentLoopConfig:
-    provider: StreamProvider | None = None
+class AgentLoopConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+    provider: Annotated[StreamProvider | None, SkipValidation] = None
     tool_execution: ToolExecutionMode = "parallel"
     tool_workers: int = 4
 
@@ -191,7 +193,7 @@ class AgentLoopConfig:
     传递给 context_assembler。未配置时收集阶段返回空列表。
     """
 
-    context_assembler: ContextAssembler | None = None
+    context_assembler: Annotated[ContextAssembler | None, SkipValidation] = None
     """结构化上下文组装器。配置后替代/增强 transform_context 的功能。
 
     未配置时消息流完全不变。配置后每轮 provider 调用前执行，

@@ -79,7 +79,9 @@ def grade_events(
                 details=""
                 if tool_name in tool_calls
                 else f"observed tools: {tool_calls}",
-                failure_category="tool_selection" if tool_name not in tool_calls else None,
+                failure_category="tool_selection"
+                if tool_name not in tool_calls
+                else None,
                 required=False,
             )
         )
@@ -107,9 +109,7 @@ def grade_events(
                 else f"tool errors {len(tool_errors)} exceeded {task.max_tool_errors}"
             ),
             failure_category=(
-                "tool_execution"
-                if len(tool_errors) > task.max_tool_errors
-                else None
+                "tool_execution" if len(tool_errors) > task.max_tool_errors else None
             ),
             required=False,
         )
@@ -165,7 +165,9 @@ def _grade_tool_policy(
                 },
             )
         )
-    for index, check in enumerate(_dict_tuple_or_empty(policy.get("argument_contains")), start=1):
+    for index, check in enumerate(
+        _dict_tuple_or_empty(policy.get("argument_contains")), start=1
+    ):
         tool_name = str(check.get("tool", "")).strip()
         arguments = check.get("arguments")
         if not tool_name or not isinstance(arguments, dict):
@@ -191,7 +193,9 @@ def _grade_tool_policy(
                 evidence={"tool": tool_name, "arguments": arguments},
             )
         )
-    for index, check in enumerate(_dict_tuple_or_empty(policy.get("result_contains")), start=1):
+    for index, check in enumerate(
+        _dict_tuple_or_empty(policy.get("result_contains")), start=1
+    ):
         tool_name = str(check.get("tool", "")).strip()
         substrings = _string_tuple_or_empty(check.get("substrings"))
         if not tool_name or not substrings:
@@ -201,7 +205,10 @@ def _grade_tool_policy(
             for tool_use_id, text in result_by_tool_use_id.items()
             if name_by_tool_use_id.get(tool_use_id) == tool_name
         ]
-        passed = any(all(expected in text for expected in substrings) for text in matching_results)
+        passed = any(
+            all(expected in text for expected in substrings)
+            for text in matching_results
+        )
         graders.append(
             GraderResult(
                 name=f"tool_policy:result:{index}:{tool_name}",
@@ -214,7 +221,9 @@ def _grade_tool_policy(
                 evidence={"tool": tool_name, "substrings": substrings},
             )
         )
-    for index, check in enumerate(_dict_tuple_or_empty(policy.get("answer_contains_from_tool")), start=1):
+    for index, check in enumerate(
+        _dict_tuple_or_empty(policy.get("answer_contains_from_tool")), start=1
+    ):
         tool_name = str(check.get("tool", "")).strip()
         substrings = _string_tuple_or_empty(check.get("substrings"))
         if not tool_name or not substrings:
@@ -242,7 +251,11 @@ def _grade_tool_policy(
                 else f"answer did not adopt any expected {tool_name} result snippet",
                 required=False,
                 failure_category="understanding" if not passed else None,
-                evidence={"tool": tool_name, "substrings": substrings, "answer": answer},
+                evidence={
+                    "tool": tool_name,
+                    "substrings": substrings,
+                    "answer": answer,
+                },
             )
         )
     return graders

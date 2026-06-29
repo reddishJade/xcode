@@ -692,7 +692,9 @@ def validate_suite_registry() -> None:
         seen_ids: set[str] = set()
         for task in spec.tasks:
             if task.id in seen_ids:
-                raise RuntimeError(f"suite {suite_name} has duplicate task id: {task.id}")
+                raise RuntimeError(
+                    f"suite {suite_name} has duplicate task id: {task.id}"
+                )
             seen_ids.add(task.id)
             fixture = task.metadata.fixture_dir
             if fixture:
@@ -710,7 +712,11 @@ def validate_suite_registry() -> None:
                 raise RuntimeError(
                     f"suite {suite_name} task {task.id} is offline but declares fixture_dir"
                 )
-            if task.run_mode == "real" and not fixture and task.requires_project_mutation():
+            if (
+                task.run_mode == "real"
+                and not fixture
+                and task.requires_project_mutation()
+            ):
                 raise RuntimeError(
                     f"suite {suite_name} task {task.id} real task must use fixture_dir"
                 )

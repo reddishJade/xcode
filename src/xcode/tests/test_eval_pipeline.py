@@ -95,12 +95,16 @@ class EvalPipelineTests:
             ]
             assert "tool_use" in [record["type"] for record in records]
             assert "final" in [record["type"] for record in records]
-            manifest = json.loads((Path(tmp) / "run_manifest.json").read_text(encoding="utf-8"))
+            manifest = json.loads(
+                (Path(tmp) / "run_manifest.json").read_text(encoding="utf-8")
+            )
             assert manifest["task_ids"] == ["echo-task"]
             assert manifest["trace_schema_version"] == 1
             assert manifest["wall_clock_ms"] != "unavailable"
             assert manifest["termination_reasons"] != "unavailable"
-            report_data = json.loads((Path(tmp) / "report.json").read_text(encoding="utf-8"))
+            report_data = json.loads(
+                (Path(tmp) / "report.json").read_text(encoding="utf-8")
+            )
             metrics = report_data["trials"][0]["metrics"]
             assert metrics["input_tokens"] == "unavailable"
             assert metrics["output_tokens"] == "unavailable"
@@ -148,7 +152,10 @@ class EvalPipelineTests:
                     "tool_policy": {
                         "ordered_tools": ("grep_search", "read_file"),
                         "argument_contains": (
-                            {"tool": "grep_search", "arguments": {"query": "EvalRunner"}},
+                            {
+                                "tool": "grep_search",
+                                "arguments": {"query": "EvalRunner"},
+                            },
                             {
                                 "tool": "read_file",
                                 "arguments": {"path": "src/xcode/evals/runner.py"},
@@ -598,7 +605,7 @@ class EvalPipelineTests:
         assert task.llm_judge_required is True
 
     def test_task_from_dict_rejects_unknown_fields(self) -> None:
-        with pytest.raises(EvalTaskSchemaError, match=r"tasks\[0\]\.unknown"):
+        with pytest.raises(EvalTaskSchemaError, match="Extra inputs are not permitted"):
             _task_from_dict(
                 {
                     "id": "bad-task",
@@ -610,7 +617,7 @@ class EvalPipelineTests:
     def test_task_from_dict_rejects_invalid_llm_judge_required_type(self) -> None:
         with pytest.raises(
             EvalTaskSchemaError,
-            match=r"tasks\[0\]\.llm_judge_required: expected boolean",
+            match="Input should be a valid boolean",
         ):
             _task_from_dict(
                 {
@@ -620,7 +627,9 @@ class EvalPipelineTests:
                 }
             )
 
-    def test_task_from_dict_accepts_tool_policy_and_fault_injection_metadata(self) -> None:
+    def test_task_from_dict_accepts_tool_policy_and_fault_injection_metadata(
+        self,
+    ) -> None:
         task = _task_from_dict(
             {
                 "id": "fault-task",
@@ -763,7 +772,10 @@ class EvalPipelineTests:
                 app_factory=lambda _task, _trial: XcodeApp(
                     agent=StructuredAgent(
                         provider=FakeProvider(
-                            [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")]
+                            [
+                                TextDelta(chunk="done"),
+                                FinalMessage(content="", stop_reason="end_turn"),
+                            ]
                         ),
                         registry=(),
                     )
@@ -790,13 +802,18 @@ class EvalPipelineTests:
 
             diff = _compare_report_to_baseline(
                 candidate,
-                json.loads((baseline.output_dir / "report.json").read_text(encoding="utf-8")),
+                json.loads(
+                    (baseline.output_dir / "report.json").read_text(encoding="utf-8")
+                ),
             )
 
             assert diff["regression"] == ["baseline-task"]
             assert "avg_tool_calls" in diff["summary_delta"]
             assert "task_details" in diff
-            assert diff["task_details"]["baseline-task"]["candidate"]["failure_categories"] == []
+            assert (
+                diff["task_details"]["baseline-task"]["candidate"]["failure_categories"]
+                == []
+            )
 
     def test_baseline_gate_fails_on_regression(self) -> None:
         args = type(
@@ -836,7 +853,10 @@ class EvalPipelineTests:
                 app_factory=lambda _task, _trial: XcodeApp(
                     agent=StructuredAgent(
                         provider=FakeProvider(
-                            [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")]
+                            [
+                                TextDelta(chunk="done"),
+                                FinalMessage(content="", stop_reason="end_turn"),
+                            ]
                         ),
                         registry=(),
                     )
@@ -848,7 +868,12 @@ class EvalPipelineTests:
             exit_code = eval_main(
                 [
                     "--tasks",
-                    str(_write_tasks_json(candidate_dir / "tasks.json", [baseline_task.to_dict()])),
+                    str(
+                        _write_tasks_json(
+                            candidate_dir / "tasks.json",
+                            [baseline_task.model_dump(exclude_none=True)],
+                        )
+                    ),
                     "--output-dir",
                     str(candidate_dir),
                     "--baseline",

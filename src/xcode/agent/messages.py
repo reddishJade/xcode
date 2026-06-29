@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field
 
 from xcode.ai.events import StopReason
 from xcode.agent.types import (
@@ -30,24 +30,23 @@ type ToolResultMessageContent = (
 # ── 消息类型 ──
 
 
-@dataclass
-class SystemMessage:
+class SystemMessage(BaseModel):
     role: str = "system"
     content: str = ""
     timestamp: int = 0
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class UserMessage:
+class UserMessage(BaseModel):
     role: str = "user"
     content: UserContent = ""
     timestamp: int = 0
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class AssistantMessage:
+class AssistantMessage(BaseModel):
     role: str = "assistant"
-    content: list[ContentBlock] = field(default_factory=list)
+    content: list[ContentBlock] = Field(default_factory=list)
     reasoning_content: str | None = None
     phase: str | None = None
     stop_reason: StopReason = "end_turn"
@@ -56,10 +55,10 @@ class AssistantMessage:
     provider: str = ""
     timestamp: int = 0
     usage: dict[str, int] | None = None
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class ToolResultMessage:
+class ToolResultMessage(BaseModel):
     role: str = "tool_result"
     tool_call_id: str = ""
     tool_name: str = ""
@@ -67,22 +66,23 @@ class ToolResultMessage:
     is_error: bool = False
     metadata: dict[str, object] | None = None
     timestamp: int = 0
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class CompactionSummaryMessage:
+class CompactionSummaryMessage(BaseModel):
     role: str = "compaction_summary"
     summary: str = ""
     tokens_before: int = 0
     timestamp: int = 0
+    model_config = ConfigDict(extra="forbid")
 
 
-@dataclass
-class BranchSummaryMessage:
+class BranchSummaryMessage(BaseModel):
     role: str = "branch_summary"
     summary: str = ""
     from_id: str = ""
     timestamp: int = 0
+    model_config = ConfigDict(extra="forbid")
 
 
 type AgentMessage = (

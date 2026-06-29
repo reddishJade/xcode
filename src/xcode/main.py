@@ -47,7 +47,9 @@ def _build_config_parser(subparsers) -> None:
     )
     config_sub = config_parser.add_subparsers(dest="config_action")
 
-    list_p = config_sub.add_parser("list", help="Show all configured profiles and their settings")
+    list_p = config_sub.add_parser(
+        "list", help="Show all configured profiles and their settings"
+    )
     list_p.set_defaults(config_action="list")
 
     add_p = config_sub.add_parser(

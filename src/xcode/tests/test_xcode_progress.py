@@ -248,7 +248,9 @@ class TestTaskProgress:
         import logging
 
         task = self.store.create("task")
-        with caplog.at_level(logging.WARNING, logger="xcode.experimental.task_progress"):
+        with caplog.at_level(
+            logging.WARNING, logger="xcode.experimental.task_progress"
+        ):
             state = resume_run(self.store, self.orchestration, task.id)
         assert state.status == "pending"  # 回退到 task.status
         assert state.attempt == 0
@@ -275,7 +277,9 @@ class TestTaskProgress:
             ),
             encoding="utf-8",
         )
-        with caplog.at_level(logging.WARNING, logger="xcode.experimental.task_progress"):
+        with caplog.at_level(
+            logging.WARNING, logger="xcode.experimental.task_progress"
+        ):
             state = resume_run(self.store, self.orchestration, task.id)
         assert state.status == "running"
         assert any("missing fields" in r.message for r in caplog.records)

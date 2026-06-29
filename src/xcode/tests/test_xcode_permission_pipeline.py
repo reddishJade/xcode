@@ -23,8 +23,8 @@ class TestXcodePermissionPipeline:
             PermissionEngineConfig(
                 static_policy=PermissionPolicy(
                     rules=(
-                        StaticPermission("read_file", "allow"),
-                        StaticPermission("bash", "deny"),
+                        StaticPermission(tool="read_file", decision="allow"),
+                        StaticPermission(tool="bash", decision="deny"),
                     ),
                     global_default="ask",
                 ),
@@ -59,7 +59,7 @@ class TestXcodePermissionPipeline:
         engine = PermissionEngine(
             PermissionEngineConfig(
                 static_policy=PermissionPolicy(
-                    (StaticPermission("read_file", "allow"),)
+                    (StaticPermission(tool="read_file", decision="allow"),)
                 ),
                 restricted_dirs=("secrets",),
             )

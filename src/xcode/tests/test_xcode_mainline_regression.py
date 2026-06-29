@@ -165,7 +165,7 @@ class TestMainlineRegression:
             deny_engine = PermissionEngine(
                 PermissionEngineConfig(
                     static_policy=PermissionPolicy(
-                        (StaticPermission("write_file", "deny"),)
+                        (StaticPermission(tool="write_file", decision="deny"),)
                     ),
                     project_root=root,
                 )
@@ -177,7 +177,7 @@ class TestMainlineRegression:
             allow_engine = PermissionEngine(
                 PermissionEngineConfig(
                     static_policy=PermissionPolicy(
-                        (StaticPermission("read_file", "allow"),)
+                        (StaticPermission(tool="read_file", decision="allow"),)
                     ),
                     project_root=root,
                 )

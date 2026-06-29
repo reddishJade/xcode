@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, field_validator
+
 from xcode.harness.skills import ToolInput, ToolSpec
 
 from . import client as _mcp_mod
@@ -23,14 +25,49 @@ _log = logging.getLogger(__name__)
 # ── 数据模型 ──
 
 
-@dataclass(frozen=True)
-class McpServerConfig:
+class McpServerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str
     command: tuple[str, ...]
     args: tuple[str, ...] = ()
     env: dict[str, str] | None = None
     enabled: bool = True
     timeout: float | None = None
+
+    @field_validator("command", mode="before")
+    @classmethod
+    def _coerce_command(cls, v: object) -> object:
+        if isinstance(v, str):
+            return (v,)
+        return v
+
+    @field_validator("command")
+    @classmethod
+    def _validate_command(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        if not v or not v[0].strip():
+            raise ValueError("command must be a non-empty string")
+        return v
+
+    @field_validator("timeout", mode="before")
+    @classmethod
+    def _coerce_timeout(cls, v: object) -> object:
+        if not isinstance(v, (int, float)):
+            return None
+        return v
+
+    @field_validator("env", mode="before")
+    @classmethod
+    def _coerce_env(cls, v: object) -> object:
+        if not isinstance(v, dict):
+            return None
+        return v
+
+    @field_validator("args", mode="before")
+    @classmethod
+    def _coerce_args(cls, v: object) -> object:
+        if not isinstance(v, list | tuple):
+            return ()
+        return v
 
 
 @dataclass(frozen=True)
@@ -44,9 +81,8 @@ class McpToolMetadata:
     host_tool_id: str
 
 
-@dataclass(frozen=True)
-class McpToolOverride:
-    """宿主侧允许覆盖的 MCP 工具元数据。"""
+class McpToolOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
     risk: str | None = None
     read_only: bool | None = None
@@ -269,38 +305,18 @@ def _validate_server_config(name: str, raw: object) -> McpServerConfig | None:
         _warn(f"server {name!r} config is not a dict; skipped")
         return None
 
-    command = raw.get("command")
-    if not isinstance(command, str) or not command.strip():
-        _warn(f"server {name!r} has no valid command; skipped")
-        return None
-
-    args_list: tuple[str, ...] = ()
-    raw_args = raw.get("args", [])
-    if isinstance(raw_args, list):
-        args_list = tuple(str(a) for a in raw_args if isinstance(a, str))
-
-    env = raw.get("env")
-    if env is not None and not isinstance(env, dict):
-        env = None
-
-    enabled = bool(raw.get("enabled", True))
-    timeout = raw.get("timeout")
-    if timeout is not None and not isinstance(timeout, (int, float)):
-        timeout = None
-
     slug = _sanitize(name)
     if not slug:
         _warn(f"server {name!r} produces empty slug after sanitize; skipped")
         return None
 
-    return McpServerConfig(
-        name=name,
-        command=(command,),
-        args=args_list,
-        env=env,
-        enabled=enabled,
-        timeout=float(timeout) if timeout is not None else None,
-    )
+    server_fields = McpServerConfig.model_fields
+    filtered = {k: v for k, v in raw.items() if k in server_fields}
+    try:
+        return McpServerConfig.model_validate({"name": name, **filtered})
+    except Exception:
+        _warn(f"server {name!r} config is invalid; skipped")
+        return None
 
 
 def _parse_overrides(raw: object) -> dict[str, McpToolOverride]:
@@ -311,20 +327,10 @@ def _parse_overrides(raw: object) -> dict[str, McpToolOverride]:
     for tool_name, tool_override in raw.items():
         if not isinstance(tool_name, str) or not isinstance(tool_override, dict):
             continue
-        enabled = tool_override.get("enabled")
-        read_only = tool_override.get("read_only")
-        concurrency_safe = tool_override.get("concurrency_safe")
-        description = tool_override.get("description")
-        risk = tool_override.get("risk")
-        overrides[tool_name] = McpToolOverride(
-            risk=risk if isinstance(risk, str) else None,
-            read_only=read_only if isinstance(read_only, bool) else None,
-            concurrency_safe=(
-                concurrency_safe if isinstance(concurrency_safe, bool) else None
-            ),
-            enabled=enabled if isinstance(enabled, bool) else None,
-            description=description if isinstance(description, str) else None,
-        )
+        try:
+            overrides[tool_name] = McpToolOverride.model_validate(tool_override)
+        except Exception:
+            continue
     return overrides
 
 

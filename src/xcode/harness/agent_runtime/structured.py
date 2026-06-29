@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
-from dataclasses import replace
 from uuid import uuid4
 
 from xcode.ai.providers.protocol import StreamProvider
@@ -509,7 +508,7 @@ class StructuredAgent:
         self._last_prompt_tokens = record_last_prompt_tokens(result.messages)
 
         visible_result = (
-            replace(result, messages=context_messages + result.messages)
+            result.model_copy(update={"messages": context_messages + result.messages})
             if context_messages
             else result
         )
@@ -543,9 +542,7 @@ class StructuredAgent:
             manager.adopt_injected_records(source=source)
         manager.record_session_outcome(outcome, source=source)
 
-    def _memory_outcome_for_result(
-        self, final: StructuredAgentResult
-    ) -> str | None:
+    def _memory_outcome_for_result(self, final: StructuredAgentResult) -> str | None:
         answer = final.answer.strip()
         if final.termination_reason is TerminationReason.COMPLETED:
             return "success" if answer else None
@@ -554,10 +551,7 @@ class StructuredAgent:
             TerminationReason.WATCHDOG,
         }:
             return "failure"
-        if (
-            final.termination_reason is TerminationReason.STEP_LIMIT
-            and not answer
-        ):
+        if final.termination_reason is TerminationReason.STEP_LIMIT and not answer:
             return "failure"
         return None
 

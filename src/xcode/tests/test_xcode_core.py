@@ -33,7 +33,9 @@ class XcodeSkillCoreTests:
 
         engine2 = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("danger", "ask"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="danger", decision="ask"),)
+                ),
             )
         )
         result2 = engine2.decide(
@@ -48,7 +50,9 @@ class XcodeSkillCoreTests:
         # 静态 ask + allow callback
         engine3 = PermissionEngine(
             PermissionEngineConfig(
-                static_policy=PermissionPolicy((StaticPermission("danger", "ask"),)),
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="danger", decision="ask"),)
+                ),
             )
         )
         result3 = engine3.decide(

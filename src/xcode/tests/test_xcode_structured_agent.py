@@ -81,7 +81,9 @@ class ResettableFakeProvider(FakeProvider):
 
 
 class XcodeStructuredAgentTests:
-    def _memory_runtime(self, project_root: Path) -> tuple[AgentRuntimeConfig, MemoryManager]:
+    def _memory_runtime(
+        self, project_root: Path
+    ) -> tuple[AgentRuntimeConfig, MemoryManager]:
         manager = MemoryManager(
             project_root,
             user_memory_file=project_root / "home" / ".xcode" / "memory" / "MEMORY.md",

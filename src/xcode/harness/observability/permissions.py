@@ -334,8 +334,8 @@ class PermissionEngine:
         if self._config.project_root is None:
             return None
         return BoundaryContext(
-            self._config.project_root,
-            self._config.external_directories,
+            project_root=self._config.project_root,
+            external_directories=self._config.external_directories,
         )
 
     def _shadow_diff(

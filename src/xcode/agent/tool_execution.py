@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import jsonschema
 
@@ -43,6 +43,7 @@ from .protocols import (
     CancellationSignal,
     ToolResultContentBlock,
 )
+
 logger = logging.getLogger(__name__)
 
 
@@ -285,7 +286,7 @@ async def _execute_one_impl(
         )
     if before_result is not None and before_result.args is not None:
         args = before_result.args
-        tool_call = replace(tool_call, arguments=args)
+        tool_call = tool_call.model_copy(update={"arguments": args})
         assistant_message.content = [
             (
                 tool_call

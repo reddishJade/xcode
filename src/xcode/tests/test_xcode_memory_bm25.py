@@ -229,7 +229,9 @@ class TestBM25AndMemory:
         assert records
         assert records[0].title == "中文超时处理"
 
-    def test_memory_candidate_retrieval_and_rerank_interfaces_preserve_order(self) -> None:
+    def test_memory_candidate_retrieval_and_rerank_interfaces_preserve_order(
+        self,
+    ) -> None:
         manager = MemoryManager(self.root)
         manager.memory_file.write_text(
             (
@@ -378,7 +380,9 @@ class TestBM25AndMemory:
             encoding="utf-8",
         )
 
-        records = manager.search_memory_records("task store lock timeout retry", limit=2)
+        records = manager.search_memory_records(
+            "task store lock timeout retry", limit=2
+        )
 
         assert records[0].title == "Targeted task store fix"
         assert records[0].score > records[1].score
@@ -630,7 +634,9 @@ class TestBM25AndMemory:
             "accepted",
         ]
 
-    def test_retention_keeps_high_value_semantic_record_over_weaker_new_episode(self) -> None:
+    def test_retention_keeps_high_value_semantic_record_over_weaker_new_episode(
+        self,
+    ) -> None:
         manager = MemoryManager(self.root, max_blocks=1)
         stable_fact = (
             "## Architecture fact\n"
@@ -764,7 +770,9 @@ class TestBM25AndMemory:
         assert recovered.status == "active"
         assert recovered.validity == "verified"
 
-    def test_explicit_reference_tracks_title_without_promoting_to_adoption(self) -> None:
+    def test_explicit_reference_tracks_title_without_promoting_to_adoption(
+        self,
+    ) -> None:
         manager = MemoryManager(self.root)
         manager.add_memory_block(
             (
@@ -777,9 +785,9 @@ class TestBM25AndMemory:
         )
         manager.drain_trace_events()
 
-        record = manager.search_memory_records("provider timeout retry", source="prompt")[
-            0
-        ]
+        record = manager.search_memory_records(
+            "provider timeout retry", source="prompt"
+        )[0]
         manager.record_injected_records((record,))
 
         matched = manager.record_explicit_references(
@@ -807,9 +815,9 @@ class TestBM25AndMemory:
         )
         manager.drain_trace_events()
 
-        record = manager.search_memory_records("provider timeout retry", source="prompt")[
-            0
-        ]
+        record = manager.search_memory_records(
+            "provider timeout retry", source="prompt"
+        )[0]
         manager.record_injected_records((record,))
 
         adopted = manager.adopt_injected_records(source="eval:test")
@@ -825,6 +833,7 @@ class TestBM25AndMemory:
         used = [event for event in trace_events if event.type == "used"]
         assert len(used) == 1
         assert used[0].source == "eval:test"
+
 
 if __name__ == "__main__":
     pytest.main()

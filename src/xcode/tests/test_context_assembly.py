@@ -1742,90 +1742,73 @@ class TestInstructionSourceValidation:
 
     def test_invalid_entry_raises(self) -> None:
         """非 dict 条目抛出 ValueError。"""
-        from xcode.harness.config import _validate_instruction_sources
+        from pydantic import ValidationError
+        from xcode.harness.config import PromptRuntimeConfig
 
-        raw = {"prompt": {"instructions": ["bad"]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_instruction_sources(raw)
-        assert "prompt.instructions[0]" in str(exc_info.value)
+        with pytest.raises(ValidationError):
+            PromptRuntimeConfig.model_validate({"instructions": ["bad"]})
 
     def test_invalid_type_raises(self) -> None:
         """不支持的 type 抛出 ValueError。"""
-        from xcode.harness.config import _validate_instruction_sources
+        from xcode.harness.config import FileInstructionSource
 
-        raw = {"prompt": {"instructions": [{"type": "xyz"}]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_instruction_sources(raw)
-        assert "prompt.instructions[0]" in str(exc_info.value)
+        with pytest.raises(ValueError):
+            FileInstructionSource.model_validate({"type": "xyz", "path": "foo"})
 
     def test_absolute_path_posix_raises(self) -> None:
         """POSIX 绝对路径抛出 ValueError。"""
-        from xcode.harness.config import _validate_instruction_sources
+        from xcode.harness.config import FileInstructionSource
 
-        raw = {"prompt": {"instructions": [{"type": "file", "path": "/etc/passwd"}]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_instruction_sources(raw)
-        assert "prompt.instructions[0]" in str(exc_info.value)
+        with pytest.raises(ValueError):
+            FileInstructionSource.model_validate(
+                {"type": "file", "path": "/etc/passwd"}
+            )
 
     def test_absolute_path_windows_raises(self) -> None:
         """Windows 绝对路径抛出 ValueError。"""
-        from xcode.harness.config import _validate_instruction_sources
+        from xcode.harness.config import FileInstructionSource
 
-        raw = {"prompt": {"instructions": [{"type": "file", "path": "C:\\foo"}]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_instruction_sources(raw)
-        assert "prompt.instructions[0]" in str(exc_info.value)
+        with pytest.raises(ValueError):
+            FileInstructionSource.model_validate({"type": "file", "path": "C:\\foo"})
 
     def test_home_relative_path_raises(self) -> None:
         """~ 开头的路径抛出 ValueError。"""
-        from xcode.harness.config import _validate_instruction_sources
+        from xcode.harness.config import FileInstructionSource
 
-        raw = {"prompt": {"instructions": [{"type": "file", "path": "~/foo"}]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_instruction_sources(raw)
-        assert "prompt.instructions[0]" in str(exc_info.value)
+        with pytest.raises(ValueError):
+            FileInstructionSource.model_validate({"type": "file", "path": "~/foo"})
 
     def test_traversal_path_raises(self) -> None:
         """../foo 抛出 ValueError。"""
-        from xcode.harness.config import _validate_instruction_sources
+        from xcode.harness.config import FileInstructionSource
 
-        raw = {"prompt": {"instructions": [{"type": "file", "path": "../foo"}]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_instruction_sources(raw)
-        assert "prompt.instructions[0]" in str(exc_info.value)
+        with pytest.raises(ValueError):
+            FileInstructionSource.model_validate({"type": "file", "path": "../foo"})
 
     def test_traversal_path_segment_raises(self) -> None:
         """路径中包含 .. 段抛出 ValueError。"""
-        from xcode.harness.config import _validate_instruction_sources
+        from xcode.harness.config import FileInstructionSource
 
-        raw = {"prompt": {"instructions": [{"type": "file", "path": "foo/../../bar"}]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_instruction_sources(raw)
-        assert "prompt.instructions[0]" in str(exc_info.value)
+        with pytest.raises(ValueError):
+            FileInstructionSource.model_validate(
+                {"type": "file", "path": "foo/../../bar"}
+            )
 
     def test_inline_empty_content_raises(self) -> None:
         """inline 内容为空抛出 ValueError。"""
-        from xcode.harness.config import _validate_instruction_sources
+        from xcode.harness.config import InlineInstructionSource
 
-        raw = {"prompt": {"instructions": [{"type": "inline", "content": ""}]}}
-        with pytest.raises(ValueError) as exc_info:
-            _validate_instruction_sources(raw)
-        assert "prompt.instructions[0]" in str(exc_info.value)
+        with pytest.raises(ValueError):
+            InlineInstructionSource.model_validate({"type": "inline", "content": ""})
 
     def test_invalid_priority_raises(self) -> None:
         """不支持的 priority 抛出 ValueError。"""
-        from xcode.harness.config import _validate_instruction_sources
+        from xcode.harness.config import InlineInstructionSource
 
-        raw = {
-            "prompt": {
-                "instructions": [
-                    {"type": "inline", "content": "ok", "priority": "urgent"}
-                ]
-            }
-        }
-        with pytest.raises(ValueError) as exc_info:
-            _validate_instruction_sources(raw)
-        assert "prompt.instructions[0]" in str(exc_info.value)
+        with pytest.raises(ValueError):
+            InlineInstructionSource.model_validate(
+                {"type": "inline", "content": "ok", "priority": "urgent"}
+            )
 
 
 # ── ActiveDiffCollector 测试 ──

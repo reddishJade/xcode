@@ -13,7 +13,10 @@ from pydantic import (
     StrictFloat,
     StrictInt,
     ValidationError,
+    field_validator,
 )
+
+DirAccess = Literal["read", "write", "read_write"]
 
 ProviderTransport = Literal[
     "openai_chat",
@@ -96,6 +99,12 @@ class ProviderRuntimeConfig(BaseModel):
     )
 
 
+class SecurityExternalDirectory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(min_length=1)
+    access: DirAccess = "read"
+
+
 class SecurityRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     permission_mode: PermissionMode = "normal"
@@ -106,7 +115,7 @@ class SecurityRuntimeConfig(BaseModel):
     restricted_dirs: tuple[str, ...] = ()
     rules: tuple[dict[str, Any], ...] = ()
     global_default: str | None = None
-    external_directories: tuple[dict[str, Any], ...] = ()
+    external_directories: tuple[SecurityExternalDirectory, ...] = ()
 
     def resolve_approval_policy(self) -> str:
         return self.approval_policy
@@ -117,95 +126,59 @@ class SecurityRuntimeConfig(BaseModel):
         return self.sandbox_mode
 
 
-def _validate_external_directories(raw: dict[str, Any]) -> None:
-    """Fail-fast: invalid external_directory entries."""
-    security = raw.get("security")
-    if not isinstance(security, dict):
-        return
-    ext = security.get("external_directories")
-    if not isinstance(ext, list):
-        return
-    for i, entry in enumerate(ext):
-        if not isinstance(entry, dict):
-            raise ValueError(f"security.external_directories[{i}]: must be an object")
-        path_val = entry.get("path")
-        if not isinstance(path_val, str) or not path_val.strip():
-            raise ValueError(
-                f"security.external_directories[{i}]: 'path' is required "
-                "and must be a non-empty string"
-            )
-        access_val = entry.get("access", "read")
-        if access_val not in ("read", "write", "read_write"):
-            raise ValueError(
-                f"security.external_directories[{i}]: 'access' must be one of "
-                "'read', 'write', 'read_write'"
-            )
-
-
 _INSTRUCTION_PRIORITIES: frozenset[str] = frozenset(
     {"critical", "high", "medium", "low"}
 )
 
 
-def _validate_instruction_sources(raw: dict[str, Any]) -> None:
-    """Fail-fast: invalid prompt.instructions entries."""
-    prompt = raw.get("prompt")
-    if not isinstance(prompt, dict):
-        return
-    instructions = prompt.get("instructions")
-    if not isinstance(instructions, list):
-        return
-    for i, entry in enumerate(instructions):
-        if not isinstance(entry, dict):
-            raise ValueError(f"prompt.instructions[{i}]: must be an object")
-        typ = entry.get("type")
-        if typ not in ("file", "inline"):
+class FileInstructionSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["file"] = "file"
+    path: str
+    priority: str | None = None
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path(cls, v: str) -> str:
+        norm = v.replace("\\", "/")
+        if norm.startswith("/"):
+            raise ValueError(f"absolute path not allowed: {v}")
+        if len(norm) >= 2 and norm[1] == ":":
+            raise ValueError(f"absolute path not allowed: {v}")
+        if norm.startswith("~"):
+            raise ValueError(f"home-relative path not allowed: {v}")
+        for segment in norm.split("/"):
+            if segment == "..":
+                raise ValueError(f"traversal path not allowed: {v}")
+        return v
+
+    @field_validator("priority")
+    @classmethod
+    def _validate_priority(cls, v: str | None) -> str | None:
+        if v is not None and v.lower() not in _INSTRUCTION_PRIORITIES:
             raise ValueError(
-                f"prompt.instructions[{i}]: type must be 'file' or 'inline'"
+                f"invalid priority '{v}'. Must be one of: critical, high, medium, low"
             )
-        if typ == "file":
-            path_raw = entry.get("path")
-            if not isinstance(path_raw, str) or not path_raw.strip():
-                raise ValueError(
-                    f"prompt.instructions[{i}]: file path must be a non-empty string"
-                )
-            norm = path_raw.replace("\\", "/")
-            if norm.startswith("/"):
-                raise ValueError(
-                    f"prompt.instructions[{i}]: absolute path not allowed: {path_raw}"
-                )
-            if len(norm) >= 2 and norm[1] == ":":
-                raise ValueError(
-                    f"prompt.instructions[{i}]: absolute path not allowed: {path_raw}"
-                )
-            if norm.startswith("~"):
-                raise ValueError(
-                    f"prompt.instructions[{i}]: home-relative path not allowed: "
-                    f"{path_raw}"
-                )
-            for segment in norm.split("/"):
-                if segment == "..":
-                    raise ValueError(
-                        f"prompt.instructions[{i}]: traversal path not allowed: "
-                        f"{path_raw}"
-                    )
-        if typ == "inline":
-            content = entry.get("content")
-            if not isinstance(content, str) or not content.strip():
-                raise ValueError(
-                    f"prompt.instructions[{i}]: inline content must be a "
-                    "non-empty string"
-                )
-        priority_raw = entry.get("priority")
-        if priority_raw is not None:
-            if (
-                not isinstance(priority_raw, str)
-                or priority_raw.lower() not in _INSTRUCTION_PRIORITIES
-            ):
-                raise ValueError(
-                    f"prompt.instructions[{i}]: invalid priority '{priority_raw}'. "
-                    "Must be one of: critical, high, medium, low"
-                )
+        return v
+
+
+class InlineInstructionSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["inline"] = "inline"
+    content: str = Field(min_length=1)
+    priority: str | None = None
+
+    @field_validator("priority")
+    @classmethod
+    def _validate_priority(cls, v: str | None) -> str | None:
+        if v is not None and v.lower() not in _INSTRUCTION_PRIORITIES:
+            raise ValueError(
+                f"invalid priority '{v}'. Must be one of: critical, high, medium, low"
+            )
+        return v
+
+
+InstructionSource = FileInstructionSource | InlineInstructionSource
 
 
 class ToolsRuntimeConfig(BaseModel):
@@ -222,7 +195,7 @@ class SkillsRuntimeConfig(BaseModel):
 class PromptRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     modules: tuple[str, ...] = DEFAULT_PROMPT_MODULES
-    instructions: tuple[dict, ...] = ()
+    instructions: tuple[InstructionSource, ...] = ()
 
 
 class PathsRuntimeConfig(BaseModel):
@@ -249,6 +222,27 @@ class ExternalHookRuntimeConfig(BaseModel):
     failure_policy: HookFailurePolicy = "warn"
     inherit_to_subagents: StrictBool = False
     source: str = ""
+
+    @field_validator("command")
+    @classmethod
+    def _validate_command(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        if not v or not v[0].strip():
+            raise ValueError("command must be a non-empty argv array")
+        return v
+
+    @field_validator("matcher")
+    @classmethod
+    def _validate_matcher(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("matcher must be a non-empty string")
+        return v
+
+    @field_validator("timeout")
+    @classmethod
+    def _validate_timeout(cls, v: float | int) -> float | int:
+        if v <= 0:
+            raise ValueError("timeout must be positive")
+        return v
 
 
 class HooksRuntimeConfig(BaseModel):
@@ -346,9 +340,6 @@ def discover_runtime_config(
     env_raw, env_sources = _build_env_override_raw()
     merged = _deep_merge_raw(merged, env_raw)
 
-    _validate_external_directories(merged)
-    _validate_instruction_sources(merged)
-    _validate_external_hooks(merged)
     return _config_from_dict(
         merged,
         source_hint=lambda loc: _resolve_config_source_hint(
@@ -398,75 +389,6 @@ def _annotate_hook_sources(
     result["hooks"] = dict(hooks)
     result["hooks"]["entries"] = annotated_entries
     return result
-
-
-_HOOK_EVENTS: frozenset[str] = frozenset(
-    {
-        "pre_tool",
-        "post_tool",
-        "on_error",
-        "on_compact",
-        "before_agent_start",
-        "before_provider_request",
-    }
-)
-_HOOK_FAILURE_POLICIES: frozenset[str] = frozenset({"ignore", "warn", "fail"})
-
-
-def _validate_external_hooks(raw: dict[str, Any]) -> None:
-    """Fail-fast 校验 hooks.entries 声明。"""
-    hooks = raw.get("hooks")
-    if hooks is None:
-        return
-    if not isinstance(hooks, dict):
-        raise ValueError("hooks must be an object")
-    entries = hooks.get("entries", [])
-    if not isinstance(entries, list):
-        raise ValueError("hooks.entries must be an array")
-    for index, entry in enumerate(entries):
-        _validate_external_hook_entry(entry, index)
-
-
-def _validate_external_hook_entry(entry: object, index: int) -> None:
-    """校验单个外部 hook 声明。"""
-    prefix = f"hooks.entries[{index}]"
-    if not isinstance(entry, dict):
-        raise ValueError(f"{prefix}: must be an object")
-    event = entry.get("event")
-    if event not in _HOOK_EVENTS:
-        allowed = ", ".join(sorted(_HOOK_EVENTS))
-        raise ValueError(f"{prefix}.event: must be one of {allowed}")
-
-    command = entry.get("command")
-    if not isinstance(command, list) or not command:
-        raise ValueError(f"{prefix}.command: must be a non-empty argv array")
-    if any(not isinstance(item, str) or not item.strip() for item in command):
-        raise ValueError(f"{prefix}.command: argv items must be non-empty strings")
-
-    matcher = entry.get("matcher")
-    if matcher is not None and (not isinstance(matcher, str) or not matcher.strip()):
-        raise ValueError(f"{prefix}.matcher: must be a non-empty string")
-
-    timeout = entry.get("timeout", 10.0)
-    if (
-        not isinstance(timeout, int | float)
-        or isinstance(timeout, bool)
-        or timeout <= 0
-    ):
-        raise ValueError(f"{prefix}.timeout: must be a positive number")
-
-    enabled = entry.get("enabled", True)
-    if not isinstance(enabled, bool):
-        raise ValueError(f"{prefix}.enabled: must be a boolean")
-
-    failure_policy = entry.get("failure_policy", "warn")
-    if failure_policy not in _HOOK_FAILURE_POLICIES:
-        allowed = ", ".join(sorted(_HOOK_FAILURE_POLICIES))
-        raise ValueError(f"{prefix}.failure_policy: must be one of {allowed}")
-
-    inherit = entry.get("inherit_to_subagents", False)
-    if not isinstance(inherit, bool):
-        raise ValueError(f"{prefix}.inherit_to_subagents: must be a boolean")
 
 
 def _resolve_profiles_in_raw(data: dict[str, Any]) -> dict[str, Any]:
@@ -598,9 +520,6 @@ def load_runtime_config(path: Path | None) -> XcodeRuntimeConfig:
         raw = _annotate_hook_sources(raw, path)
     env_raw, env_sources = _build_env_override_raw()
     raw = _deep_merge_raw(raw, env_raw)
-    _validate_external_directories(raw)
-    _validate_instruction_sources(raw)
-    _validate_external_hooks(raw)
     file_source = f"config {path}" if path is not None else "in-memory defaults"
     return _config_from_dict(
         raw,
