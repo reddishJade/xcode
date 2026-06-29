@@ -210,130 +210,195 @@ def _translate_event(
         return None
 
     if isinstance(event, MessageUpdateEvent):
-        msg = event.message
-        if isinstance(msg, AssistantMessage) and msg.content:
-            for block in msg.content:
-                if isinstance(block, TextContent) and block.text:
-                    step = state.step
-                    prev = state.text_seen.get(step, "")
-                    full = block.text
-                    delta = full[len(prev) :]
-                    if not delta:
-                        return None
-                    state.text_seen[step] = full
-                    return TextDeltaStructuredEvent(
-                        "text_delta",
-                        step,
-                        delta,
-                        state.correlation.snapshot(),
-                    )
-        return None
+        return _translate_message_update(event, state)
 
     if isinstance(event, MessageStartEvent):
-        return MessageStartStructuredEvent(
-            "message_start",
-            state.step,
-            event.message,
-            state.correlation.snapshot(),
-        )
+        return _translate_message_start(event, state)
 
     if isinstance(event, TurnEndEvent):
-        return TurnEndStructuredEvent(
-            "turn_end",
-            state.step,
-            TurnEndData(
-                tool_results=[
-                    TurnToolResultData(r.tool_call_id, str(r.content))
-                    for r in event.tool_results
-                ]
-            ),
-            state.correlation.snapshot(),
-        )
+        return _translate_turn_end(event, state)
 
     if isinstance(event, ThinkingUpdateEvent):
-        return ReasoningDeltaStructuredEvent(
-            "reasoning_delta",
-            state.step,
-            event.reasoning_content,
-            state.correlation.snapshot(),
-        )
+        return _translate_thinking_update(event, state)
 
     if isinstance(event, MessageEndEvent):
-        msg = event.message
-        if isinstance(msg, AssistantMessage) and msg.content:
-            blocks = _assistant_event_blocks(msg)
-            if blocks:
-                return AssistantStructuredEvent(
-                    "assistant",
-                    state.step,
-                    blocks,
-                    state.correlation.snapshot(),
-                )
-        return None
+        return _translate_message_end(event, state)
 
     if isinstance(event, ToolExecutionStartEvent):
-        tool_use = ToolCall(
-            id=event.tool_call_id,
-            name=event.tool_name,
-            input=event.args or {},
-        )
-        return ToolUseStructuredEvent(
-            "tool_use",
-            state.step,
-            tool_use,
-            state.correlation.snapshot(event.tool_call_id),
-        )
+        return _translate_tool_execution_start(event, state)
 
     if isinstance(event, ToolExecutionUpdateEvent):
-        return ToolUpdateStructuredEvent(
-            "tool_update",
-            state.step,
-            ToolUpdateData(
-                tool_call_id=event.tool_call_id,
-                tool_name=event.tool_name,
-                partial_result=_tool_update_text(event.partial_result),
-            ),
-            state.correlation.snapshot(event.tool_call_id),
-        )
+        return _translate_tool_execution_update(event, state)
 
     if isinstance(event, ToolExecutionEndEvent):
-        result_event = ToolResultStructuredEvent(
-            "tool_result",
-            state.step,
-            ToolResultBlock(
-                tool_use_id=event.tool_call_id,
-                content=str(event.result.content) if event.result else "",
-                status="error" if event.is_error else "ok",
-            ),
-            state.correlation.snapshot(event.tool_call_id),
-        )
-        todo_items = _todo_items_from_result(event)
-        if todo_items is None:
-            return result_event
-        return [
-            result_event,
-            TodoUpdateStructuredEvent(
-                "todo_update",
-                state.step,
-                todo_items,
-                state.correlation.snapshot(event.tool_call_id),
-            ),
-        ]
+        return _translate_tool_execution_end(event, state)
 
     if isinstance(event, CompactionEvent):
-        return CompactionStructuredEvent(
-            "compaction",
-            state.step,
-            CompactionData(
-                messages_removed=event.messages_removed,
-                messages_after=event.messages_after,
-                summary_token_estimate=event.summary_token_estimate,
-                trigger=event.trigger,
-            ),
-            state.correlation.snapshot(),
-        )
+        return _translate_compaction(event, state)
 
     return None
+
+
+def _translate_message_update(
+    event: MessageUpdateEvent,
+    state: _StreamTranslationState,
+) -> StructuredAgentEvent | None:
+    msg = event.message
+    if not isinstance(msg, AssistantMessage) or not msg.content:
+        return None
+    for block in msg.content:
+        if isinstance(block, TextContent) and block.text:
+            step = state.step
+            prev = state.text_seen.get(step, "")
+            full = block.text
+            delta = full[len(prev) :]
+            if not delta:
+                return None
+            state.text_seen[step] = full
+            return TextDeltaStructuredEvent(
+                "text_delta",
+                step,
+                delta,
+                state.correlation.snapshot(),
+            )
+    return None
+
+
+def _translate_message_start(
+    event: MessageStartEvent,
+    state: _StreamTranslationState,
+) -> MessageStartStructuredEvent:
+    return MessageStartStructuredEvent(
+        "message_start",
+        state.step,
+        event.message,
+        state.correlation.snapshot(),
+    )
+
+
+def _translate_turn_end(
+    event: TurnEndEvent,
+    state: _StreamTranslationState,
+) -> TurnEndStructuredEvent:
+    return TurnEndStructuredEvent(
+        "turn_end",
+        state.step,
+        TurnEndData(
+            tool_results=[
+                TurnToolResultData(r.tool_call_id, str(r.content))
+                for r in event.tool_results
+            ]
+        ),
+        state.correlation.snapshot(),
+    )
+
+
+def _translate_thinking_update(
+    event: ThinkingUpdateEvent,
+    state: _StreamTranslationState,
+) -> ReasoningDeltaStructuredEvent:
+    return ReasoningDeltaStructuredEvent(
+        "reasoning_delta",
+        state.step,
+        event.reasoning_content,
+        state.correlation.snapshot(),
+    )
+
+
+def _translate_message_end(
+    event: MessageEndEvent,
+    state: _StreamTranslationState,
+) -> AssistantStructuredEvent | None:
+    msg = event.message
+    if not isinstance(msg, AssistantMessage) or not msg.content:
+        return None
+    blocks = _assistant_event_blocks(msg)
+    if not blocks:
+        return None
+    return AssistantStructuredEvent(
+        "assistant",
+        state.step,
+        blocks,
+        state.correlation.snapshot(),
+    )
+
+
+def _translate_tool_execution_start(
+    event: ToolExecutionStartEvent,
+    state: _StreamTranslationState,
+) -> ToolUseStructuredEvent:
+    tool_use = ToolCall(
+        id=event.tool_call_id,
+        name=event.tool_name,
+        input=event.args or {},
+    )
+    return ToolUseStructuredEvent(
+        "tool_use",
+        state.step,
+        tool_use,
+        state.correlation.snapshot(event.tool_call_id),
+    )
+
+
+def _translate_tool_execution_update(
+    event: ToolExecutionUpdateEvent,
+    state: _StreamTranslationState,
+) -> ToolUpdateStructuredEvent:
+    return ToolUpdateStructuredEvent(
+        "tool_update",
+        state.step,
+        ToolUpdateData(
+            tool_call_id=event.tool_call_id,
+            tool_name=event.tool_name,
+            partial_result=_tool_update_text(event.partial_result),
+        ),
+        state.correlation.snapshot(event.tool_call_id),
+    )
+
+
+def _translate_tool_execution_end(
+    event: ToolExecutionEndEvent,
+    state: _StreamTranslationState,
+) -> StructuredAgentEvent | list[StructuredAgentEvent]:
+    result_event = ToolResultStructuredEvent(
+        "tool_result",
+        state.step,
+        ToolResultBlock(
+            tool_use_id=event.tool_call_id,
+            content=str(event.result.content) if event.result else "",
+            status="error" if event.is_error else "ok",
+        ),
+        state.correlation.snapshot(event.tool_call_id),
+    )
+    todo_items = _todo_items_from_result(event)
+    if todo_items is None:
+        return result_event
+    return [
+        result_event,
+        TodoUpdateStructuredEvent(
+            "todo_update",
+            state.step,
+            todo_items,
+            state.correlation.snapshot(event.tool_call_id),
+        ),
+    ]
+
+
+def _translate_compaction(
+    event: CompactionEvent,
+    state: _StreamTranslationState,
+) -> CompactionStructuredEvent:
+    return CompactionStructuredEvent(
+        "compaction",
+        state.step,
+        CompactionData(
+            messages_removed=event.messages_removed,
+            messages_after=event.messages_after,
+            summary_token_estimate=event.summary_token_estimate,
+            trigger=event.trigger,
+        ),
+        state.correlation.snapshot(),
+    )
 
 
 def _todo_items_from_result(
