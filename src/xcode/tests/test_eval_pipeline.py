@@ -27,15 +27,17 @@ from xcode.evals.benchmarks import load_benchmark
 from xcode.evals.cli import _print_failed_trials
 from xcode.evals.cli import _offline_app_factory
 from xcode.evals.cli import main as eval_main
+from xcode.evals.cli import _compare_report_to_baseline
+from xcode.evals.cli import _evaluate_baseline_gates
 from xcode.evals.cli import _trial_project_root
 from xcode.evals.cli import _task_from_dict
 from xcode.evals import EvalRunner, EvalTask
 
 from xcode.evals.runner import _build_run_metrics
 from xcode.evals.sandbox import UnsafeEvalTaskError
-from xcode.evals.tasks import SUITES
+from xcode.evals.tasks import SUITES, SUITE_SPECS
 from xcode.tests.fixtures import FakeProvider
-from xcode.evals.schema import TrialResult
+from xcode.evals.schema import EvalReport, EvalTaskSchemaError, TrialResult
 from xcode.evals.runner import _build_memory_metrics
 import pytest
 
@@ -93,13 +95,26 @@ class EvalPipelineTests:
             ]
             assert "tool_use" in [record["type"] for record in records]
             assert "final" in [record["type"] for record in records]
+            manifest = json.loads((Path(tmp) / "run_manifest.json").read_text(encoding="utf-8"))
+            assert manifest["task_ids"] == ["echo-task"]
+            assert manifest["trace_schema_version"] == 1
+            assert manifest["wall_clock_ms"] != "unavailable"
+            assert manifest["termination_reasons"] != "unavailable"
+            report_data = json.loads((Path(tmp) / "report.json").read_text(encoding="utf-8"))
+            metrics = report_data["trials"][0]["metrics"]
+            assert metrics["input_tokens"] == "unavailable"
+            assert metrics["output_tokens"] == "unavailable"
+            history_root = Path(tmp).parent
+            assert (history_root / "run_index.jsonl").exists()
+            assert (history_root / "trend_summary.json").exists()
 
-    def test_eval_runner_reports_disallowed_tool_failure(self) -> None:
+    def test_eval_runner_keeps_tool_policy_graders_diagnostic_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task = EvalTask(
                 id="no-echo",
                 prompt="do not run echo",
                 disallowed_tool_calls=("echo",),
+                expected_answer_contains=("finished",),
             )
             runner = EvalRunner(
                 tasks=(task,),
@@ -109,12 +124,63 @@ class EvalPipelineTests:
 
             report = runner.run()
 
-            assert not (report.success)
-            assert not (report.trials[0].success)
+            assert report.success
+            assert report.trials[0].success
             failing = [
                 grader.name for grader in report.trials[0].graders if not grader.passed
             ]
             assert "disallowed_tool:echo" in failing
+            disallowed = next(
+                grader
+                for grader in report.trials[0].graders
+                if grader.name == "disallowed_tool:echo"
+            )
+            assert not disallowed.required
+
+    def test_eval_runner_records_tool_policy_state_and_trajectory_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task = EvalTask(
+                id="policy-metrics",
+                prompt="find EvalRunner and read the file",
+                expected_tool_calls=("grep_search", "read_file", "read_file"),
+                expected_answer_contains=("EvalRunner",),
+                metadata={
+                    "tool_policy": {
+                        "ordered_tools": ("grep_search", "read_file"),
+                        "argument_contains": (
+                            {"tool": "grep_search", "arguments": {"query": "EvalRunner"}},
+                            {
+                                "tool": "read_file",
+                                "arguments": {"path": "src/xcode/evals/runner.py"},
+                            },
+                        ),
+                        "result_contains": (
+                            {"tool": "grep_search", "substrings": ("EvalRunner",)},
+                            {"tool": "read_file", "substrings": ("class EvalRunner",)},
+                        ),
+                        "answer_contains_from_tool": (
+                            {"tool": "read_file", "substrings": ("EvalRunner",)},
+                        ),
+                    }
+                },
+            )
+
+            report = EvalRunner(
+                tasks=(task,),
+                app_factory=_offline_app_factory,
+                output_dir=Path(tmp),
+            ).run()
+
+            assert report.success
+            trial = report.trials[0]
+            grader_names = {grader.name for grader in trial.graders}
+            assert "tool_policy:ordered_tools" in grader_names
+            assert "tool_policy:arguments:1:grep_search" in grader_names
+            assert "tool_policy:result:2:read_file" in grader_names
+            assert "tool_policy:adopted_result:1:read_file" in grader_names
+            assert trial.metrics["first_expected_tool_step"] == 1
+            assert trial.metrics["repeated_tool_call_count"] == 1
+            assert trial.metrics["unexpected_tool_call_count"] == 0
 
     def test_eval_runner_arun_works_inside_event_loop(self) -> None:
         async def main():
@@ -524,10 +590,57 @@ class EvalPipelineTests:
                 "id": "judge-task",
                 "prompt": "answer",
                 "llm_judge_criteria": ["criteria one", "criteria two"],
+                "llm_judge_required": True,
             }
         )
 
         assert task.llm_judge_criteria == ("criteria one", "criteria two")
+        assert task.llm_judge_required is True
+
+    def test_task_from_dict_rejects_unknown_fields(self) -> None:
+        with pytest.raises(EvalTaskSchemaError, match=r"tasks\[0\]\.unknown"):
+            _task_from_dict(
+                {
+                    "id": "bad-task",
+                    "prompt": "answer",
+                    "unknown": True,
+                }
+            )
+
+    def test_task_from_dict_rejects_invalid_llm_judge_required_type(self) -> None:
+        with pytest.raises(
+            EvalTaskSchemaError,
+            match=r"tasks\[0\]\.llm_judge_required: expected boolean",
+        ):
+            _task_from_dict(
+                {
+                    "id": "bad-judge-required",
+                    "prompt": "answer",
+                    "llm_judge_required": "yes",
+                }
+            )
+
+    def test_task_from_dict_accepts_tool_policy_and_fault_injection_metadata(self) -> None:
+        task = _task_from_dict(
+            {
+                "id": "fault-task",
+                "prompt": "recover",
+                "metadata": {
+                    "tool_policy": {
+                        "ordered_tools": ["grep_search", "read_file"],
+                    },
+                    "fault_injection": {
+                        "scenario": "wrong_path_recovery",
+                    },
+                },
+            }
+        )
+
+        assert task.metadata["tool_policy"]["ordered_tools"] == [
+            "grep_search",
+            "read_file",
+        ]
+        assert task.metadata["fault_injection"]["scenario"] == "wrong_path_recovery"
 
     def test_coding_fixture_suite_is_sandboxed_and_validated(self) -> None:
         tasks = SUITES["coding-fixture"]
@@ -558,6 +671,18 @@ class EvalPipelineTests:
         assert conflict["stale_or_conflicting_titles"] == ("Old timeout workaround",)
         assert len(conflict["offline_memory_blocks"]) == 2
 
+    def test_fault_injection_suite_registers_recovery_tasks(self) -> None:
+        tasks = SUITES["fault-injection"]
+
+        assert len(tasks) == 3
+        assert SUITE_SPECS["fault-injection"].kind == "regression"
+        scenarios = {task.metadata["fault_injection"]["scenario"] for task in tasks}
+        assert scenarios == {
+            "command_failure_retry",
+            "wrong_path_recovery",
+            "provider_abort_degrade",
+        }
+
     def test_all_suite_excludes_real_coding_fixtures(self) -> None:
         all_tasks = SUITES["all"]
 
@@ -565,6 +690,8 @@ class EvalPipelineTests:
         for task in all_tasks:
             assert "fixture_dir" not in task.metadata
             assert "validation" not in task.metadata
+        assert SUITE_SPECS["all"].kind == "regression"
+        assert SUITE_SPECS["capability"].kind == "capability"
 
     def test_eval_cli_lists_builtin_suites(self) -> None:
         output = io.StringIO()
@@ -577,6 +704,8 @@ class EvalPipelineTests:
         assert "coding-fixture" in text
         assert "memory" in text
         assert "tool-policy" in text
+        assert "regression" in text
+        assert "capability" in text
 
     def test_eval_cli_shows_suite_tasks(self) -> None:
         output = io.StringIO()
@@ -601,6 +730,12 @@ class EvalPipelineTests:
             assert "Memory on/off:" in text
             assert "negative_migration" in text
 
+    def test_eval_cli_runs_fault_injection_suite_offline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code = eval_main(["--suite", "fault-injection", "--output-dir", tmp])
+
+        assert exit_code == 0
+
     def test_eval_cli_lists_external_benchmarks(self) -> None:
         output = io.StringIO()
 
@@ -611,13 +746,146 @@ class EvalPipelineTests:
         text = output.getvalue()
         assert "swebench-lite" in text
         assert "terminal-bench" in text
+        assert "catalog-only" in text
+        assert "integrated" in text
+
+    def test_eval_cli_baseline_diff_marks_regressions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            task = EvalTask(
+                id="baseline-task",
+                prompt="answer",
+                expected_answer_contains=("done",),
+                capability="tool.read",
+            )
+            runner = EvalRunner(
+                tasks=(task,),
+                app_factory=lambda _task, _trial: XcodeApp(
+                    agent=StructuredAgent(
+                        provider=FakeProvider(
+                            [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")]
+                        ),
+                        registry=(),
+                    )
+                ),
+                output_dir=output_dir / "baseline",
+            )
+            baseline = runner.run()
+            candidate = EvalReport(
+                run_id="candidate",
+                success=False,
+                output_dir=output_dir / "candidate",
+                tasks=(task,),
+                trials=(
+                    TrialResult(
+                        task_id="baseline-task",
+                        trial_id="baseline-task-1",
+                        success=False,
+                        answer="",
+                        trace_path=Path("trace.jsonl"),
+                        graders=(),
+                    ),
+                ),
+            )
+
+            diff = _compare_report_to_baseline(
+                candidate,
+                json.loads((baseline.output_dir / "report.json").read_text(encoding="utf-8")),
+            )
+
+            assert diff["regression"] == ["baseline-task"]
+            assert "avg_tool_calls" in diff["summary_delta"]
+            assert "task_details" in diff
+            assert diff["task_details"]["baseline-task"]["candidate"]["failure_categories"] == []
+
+    def test_baseline_gate_fails_on_regression(self) -> None:
+        args = type(
+            "Args",
+            (),
+            {
+                "fail_on_regression": True,
+                "max_p95_model_ms_growth": None,
+                "max_avg_token_growth": None,
+                "max_avg_tool_calls_growth": None,
+                "require_grader_pass": [],
+            },
+        )()
+
+        failures = _evaluate_baseline_gates(
+            {
+                "regression": ["shared-task"],
+                "summary_delta": {},
+                "candidate_grader_rates": {},
+            },
+            args,
+        )
+
+        assert failures == ["task regressions detected: shared-task"]
+
+    def test_baseline_diff_artifact_is_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline_dir = Path(tmp) / "baseline"
+            candidate_dir = Path(tmp) / "candidate"
+            baseline_task = EvalTask(
+                id="shared-task",
+                prompt="answer",
+                expected_answer_contains=("done",),
+            )
+            baseline_runner = EvalRunner(
+                tasks=(baseline_task,),
+                app_factory=lambda _task, _trial: XcodeApp(
+                    agent=StructuredAgent(
+                        provider=FakeProvider(
+                            [TextDelta(chunk="done"), FinalMessage(content="", stop_reason="end_turn")]
+                        ),
+                        registry=(),
+                    )
+                ),
+                output_dir=baseline_dir,
+            )
+            baseline_runner.run()
+
+            exit_code = eval_main(
+                [
+                    "--tasks",
+                    str(_write_tasks_json(candidate_dir / "tasks.json", [baseline_task.to_dict()])),
+                    "--output-dir",
+                    str(candidate_dir),
+                    "--baseline",
+                    str(baseline_dir),
+                ]
+            )
+
+            assert exit_code == 0
+            diff_path = candidate_dir / "baseline_diff.json"
+            assert diff_path.exists()
+            diff = json.loads(diff_path.read_text(encoding="utf-8"))
+            assert "task_details" in diff
+            assert "shared-task" in diff["task_details"]
+
+    def test_offline_factory_replays_all_expected_tool_calls(self) -> None:
+        task = EvalTask(
+            id="multi-offline",
+            prompt="do two things",
+            expected_tool_calls=("grep_search", "read_file"),
+            expected_answer_contains=("done",),
+        )
+
+        report = EvalRunner(
+            tasks=(task,),
+            app_factory=_offline_app_factory,
+        ).run()
+
+        grader_names = {grader.name for grader in report.trials[0].graders}
+        assert "expected_tool:grep_search" in grader_names
+        assert "expected_tool:read_file" in grader_names
 
     def test_eval_cli_prints_failed_trial_details(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task = EvalTask(
-                id="no-echo",
+                id="bad-answer",
                 prompt="do not run echo",
-                disallowed_tool_calls=("echo",),
+                expected_answer_contains=("missing",),
             )
             runner = EvalRunner(
                 tasks=(task,),
@@ -632,7 +900,7 @@ class EvalPipelineTests:
 
             text = output.getvalue()
             assert "Failures:" in text
-            assert "disallowed_tool:echo" in text
+            assert "answer_contains:missing" in text
             assert "trace:" in text
 
     def test_load_benchmark_limit_slices_tasks(self) -> None:
@@ -831,6 +1099,12 @@ def _trial(task_id: str, success: bool) -> TrialResult:
         trace_path=Path("trace.jsonl"),
         graders=(),
     )
+
+
+def _write_tasks_json(path: Path, tasks: list[dict[str, object]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
 
 
 if __name__ == "__main__":

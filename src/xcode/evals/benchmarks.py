@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 from typing import Any, Literal
 
+from .adapters.registry import BENCHMARK_ADAPTERS
 from .schema import EvalTask
 
 BenchmarkName = Literal[
@@ -26,6 +27,11 @@ def load_benchmark(
     limit: int | None = None,
 ) -> tuple[EvalTask, ...]:
     """从本地或 URL benchmark 数据文件加载 eval 任务，limit 限制最大返回任务数。"""
+    spec = BENCHMARK_ADAPTERS.get(name)
+    if spec is not None and spec.status != "integrated":
+        raise ValueError(
+            f"benchmark {name!r} is {spec.status} and cannot be run directly"
+        )
     if name == "humaneval":
         tasks = load_humaneval(Path(path))
     elif name == "swebench-lite":

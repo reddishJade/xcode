@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+BenchmarkStatus = Literal["integrated", "export-only", "catalog-only"]
 
 
 @dataclass(frozen=True)
@@ -13,9 +16,19 @@ class BenchmarkAdapterSpec:
     harness: str
     xcode_role: str
     upstream_url: str
+    status: BenchmarkStatus
 
 
 BENCHMARK_ADAPTERS: dict[str, BenchmarkAdapterSpec] = {
+    "humaneval": BenchmarkAdapterSpec(
+        name="humaneval",
+        display_name="HumanEval",
+        purpose="Python single-function completion benchmark.",
+        harness="Prompt-only benchmark loader with LLM/outcome grading",
+        xcode_role="Load completion tasks and score final answers with deterministic and judge graders.",
+        upstream_url="https://github.com/openai/human-eval",
+        status="integrated",
+    ),
     "evalplus-humaneval": BenchmarkAdapterSpec(
         name="evalplus-humaneval",
         display_name="EvalPlus HumanEval+",
@@ -23,6 +36,7 @@ BENCHMARK_ADAPTERS: dict[str, BenchmarkAdapterSpec] = {
         harness="EvalPlus-style pytest fixture",
         xcode_role="Edit solution.py in sandbox; validation command runs tests.",
         upstream_url="https://evalplus.github.io/",
+        status="integrated",
     ),
     "evalplus-mbpp": BenchmarkAdapterSpec(
         name="evalplus-mbpp",
@@ -31,6 +45,7 @@ BENCHMARK_ADAPTERS: dict[str, BenchmarkAdapterSpec] = {
         harness="EvalPlus-style pytest fixture",
         xcode_role="Edit solution.py in sandbox; validation command runs tests.",
         upstream_url="https://evalplus.github.io/",
+        status="integrated",
     ),
     "swebench-lite": BenchmarkAdapterSpec(
         name="swebench-lite",
@@ -39,6 +54,7 @@ BENCHMARK_ADAPTERS: dict[str, BenchmarkAdapterSpec] = {
         harness="SWE-bench official harness",
         xcode_role="Generate candidate patches; harness checks out repo, runs tests, and scores.",
         upstream_url="https://www.swebench.com/SWE-bench/",
+        status="integrated",
     ),
     "swebench-verified": BenchmarkAdapterSpec(
         name="swebench-verified",
@@ -47,6 +63,7 @@ BENCHMARK_ADAPTERS: dict[str, BenchmarkAdapterSpec] = {
         harness="SWE-bench official harness",
         xcode_role="Generate candidate patches; harness checks out repo, runs tests, and scores.",
         upstream_url="https://www.swebench.com/SWE-bench/",
+        status="export-only",
     ),
     "terminal-bench": BenchmarkAdapterSpec(
         name="terminal-bench",
@@ -55,6 +72,7 @@ BENCHMARK_ADAPTERS: dict[str, BenchmarkAdapterSpec] = {
         harness="Terminal-Bench harness",
         xcode_role="Execute tasks as a terminal agent; harness produces scores.",
         upstream_url="https://terminalbench.lol/",
+        status="catalog-only",
     ),
     "aider-polyglot": BenchmarkAdapterSpec(
         name="aider-polyglot",
@@ -63,5 +81,10 @@ BENCHMARK_ADAPTERS: dict[str, BenchmarkAdapterSpec] = {
         harness="Aider Polyglot benchmark",
         xcode_role="Edit code in the task workspace; language test commands produce scores.",
         upstream_url="https://aider.chat/docs/leaderboards/",
+        status="catalog-only",
     ),
 }
+
+INTEGRATED_BENCHMARKS: tuple[str, ...] = tuple(
+    sorted(name for name, spec in BENCHMARK_ADAPTERS.items() if spec.status == "integrated")
+)
