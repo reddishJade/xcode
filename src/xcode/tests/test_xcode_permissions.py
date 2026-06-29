@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+import shutil
 import tempfile
 from xcode.harness.observability import (
     HITLResult,
@@ -735,8 +736,6 @@ class SubagentGatePermissionBoundaryTests:
             FileGrantStore,
         )
 
-        import tempfile
-
         with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
             store = FileGrantStore(Path(f.name))
         try:
@@ -921,8 +920,6 @@ class ToolGateBoundaryResolutionTests:
         (self._root / "secrets").mkdir()
 
     def teardown_method(self, method) -> None:
-        import shutil
-
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _make_file_gate(

@@ -9,6 +9,8 @@ import asyncio
 from queue import Queue
 from threading import Thread
 
+import questionary
+
 from .repl_tools import brief_input
 from xcode.harness.observability import HITLResult
 from xcode.harness.skills import ToolInput, ToolSpec
@@ -47,8 +49,6 @@ def _ask_hitl_choice(tool: ToolSpec, action_input: ToolInput) -> str | None:
 
 def _ask_hitl_choice_directly(tool: ToolSpec, action_input: ToolInput) -> str | None:
     """直接显示授权选择，适用于当前线程没有事件循环的场景。"""
-    import questionary
-
     brief = brief_input(tool.name, action_input)
     return questionary.select(
         f"Authorization required: {tool.name}\nInput: {brief}",

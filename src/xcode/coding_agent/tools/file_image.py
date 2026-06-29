@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 from io import BytesIO
 from pathlib import Path
 from typing import Protocol
+
+import filetype
+from PIL import Image
 
 from xcode.harness.skills import ToolOutput
 
@@ -18,18 +22,12 @@ def _detect_image(path: Path, operations: _ImageFileOperations) -> str | None:
         buf = operations.read_bytes(path)
     except Exception:
         return None
-    import filetype
-
     return filetype.guess_mime(buf)
 
 
 def _read_image(
     path: Path, display_path: str, mime: str, operations: _ImageFileOperations
 ) -> str:
-    import base64
-
-    from PIL import Image
-
     data = operations.read_bytes(path)
     img = Image.open(BytesIO(data))
     orig_w, orig_h = img.width, img.height

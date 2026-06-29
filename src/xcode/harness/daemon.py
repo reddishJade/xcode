@@ -21,6 +21,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+import subprocess
 from typing import Any, Literal
 
 import filelock
@@ -339,8 +340,6 @@ class HeartbeatDaemon:
 
     def check_git_status(self) -> list[dict[str, Any]] | None:
         """运行轻量级工作区脏检查。"""
-        import subprocess
-
         try:
             res = subprocess.run(
                 ["git", "status", "--porcelain"],

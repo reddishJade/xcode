@@ -5,8 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import questionary
+
+from .reasoning_effort import (
+    reasoning_effort_levels_for_transport,
+    supports_reasoning_effort,
+)
 from .setup_wizard import (
     CONFIG_FILENAME,
+    PROVIDER_PRESETS,
     _load_existing_config,
     _save_config,
     _prompt_api_key,
@@ -109,8 +116,6 @@ def _prompt_interactive_profile(
     provider_key: str, preset: dict[str, Any]
 ) -> dict[str, Any] | None:
     """Run the interactive prompts and return profile data, or None if cancelled."""
-    import questionary
-
     api_key = _prompt_api_key(preset)
     if api_key is None:
         return None
@@ -167,7 +172,6 @@ def _find_preset_for_transport(transport: str) -> tuple[str, dict[str, Any]] | N
     provider_key = TRANSPORT_TO_PROVIDER_KEY.get(transport)
     if provider_key is None:
         return None
-    from .setup_wizard import PROVIDER_PRESETS
 
     preset = PROVIDER_PRESETS.get(provider_key)
     if preset is None:
@@ -176,8 +180,6 @@ def _find_preset_for_transport(transport: str) -> tuple[str, dict[str, Any]] | N
 
 
 def _cmd_edit(config_path: Path, name: str) -> None:
-    import questionary
-
     config = _load_existing_config(config_path)
     profiles = config.get("provider", {}).get("model_profiles", {})
 
@@ -240,11 +242,6 @@ def _cmd_edit(config_path: Path, name: str) -> None:
         if not new_model:
             new_model = default_model
 
-    from .reasoning_effort import (
-        reasoning_effort_levels_for_transport,
-        supports_reasoning_effort,
-    )
-
     new_thinking = questionary.select(
         "Thinking:",
         choices=["enabled", "disabled"],
@@ -294,8 +291,6 @@ def _cmd_edit(config_path: Path, name: str) -> None:
 
 
 def _cmd_delete(config_path: Path, name: str) -> None:
-    import questionary
-
     config = _load_existing_config(config_path)
 
     profiles = config.get("provider", {}).get("model_profiles", {})

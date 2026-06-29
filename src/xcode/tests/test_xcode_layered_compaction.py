@@ -416,7 +416,6 @@ class XcodeLayeredCompactionTests:
     def test_edit_file_works_after_compaction(self) -> None:
         from xcode.coding_agent.tools.file import build_file_tools
         from xcode.harness.agent_runtime.compaction import LayeredCompactor
-        import tempfile
         from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmp:

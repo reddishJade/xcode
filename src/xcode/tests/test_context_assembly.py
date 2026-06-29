@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import subprocess
+import asyncio
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -746,7 +747,7 @@ class TestContextAssemblerAgentLoopIntegration:
             convert_to_llm=convert_to_llm,
             max_steps=1,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -777,7 +778,7 @@ class TestContextAssemblerAgentLoopIntegration:
             transform_context=_transform,
             max_steps=1,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -806,7 +807,7 @@ class TestContextAssemblerAgentLoopIntegration:
             transform_context=_transform,
             max_steps=1,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -847,7 +848,7 @@ class TestContextAssemblerAgentLoopIntegration:
             messages=[],
             tools=[EchoTool()],
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -870,7 +871,7 @@ class TestContextAssemblerAgentLoopIntegration:
             context_assembler=assembler,
             max_steps=1,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -901,7 +902,7 @@ class TestContextAssemblerAgentLoopIntegration:
             context_assembler=StepCaptureAssembler(),
             max_steps=3,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -1077,7 +1078,7 @@ class TestContextCollectorWithAssembler:
             context_assembler=CaptureAssembler(),
             max_steps=1,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -1106,7 +1107,7 @@ class TestContextCollectorWithAssembler:
             context_assembler=CaptureAssembler(),
             max_steps=1,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -1141,7 +1142,7 @@ class TestContextCollectorWithAssembler:
             context_assembler=DefaultContextAssembler(),
             max_steps=1,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -1178,7 +1179,7 @@ class TestContextCollectorWithAssembler:
             context_assembler=None,
             max_steps=1,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -1207,7 +1208,7 @@ class TestContextCollectorWithAssembler:
             transform_context=_transform,
             max_steps=1,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(
@@ -1243,7 +1244,7 @@ class TestContextCollectorWithAssembler:
             context_assembler=DefaultContextAssembler(),
             max_steps=1,
         )
-        import asyncio
+
 
         asyncio.run(
             run_agent_loop(

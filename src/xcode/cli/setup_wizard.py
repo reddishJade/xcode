@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import questionary
 from dotenv import dotenv_values
 
 from .reasoning_effort import (
@@ -137,8 +138,6 @@ def _resolve_transport(provider_key: str) -> str:
 
 def _select_provider() -> tuple[str, Any] | None:
     """交互式选择 LLM provider。返回 (key, preset) 或 None（取消）。"""
-    import questionary
-
     choices = {preset["label"]: key for key, preset in PROVIDER_PRESETS.items()}
     provider_label = questionary.select("Select provider:", choices=list(choices)).ask()
     if provider_label is None:
@@ -149,8 +148,6 @@ def _select_provider() -> tuple[str, Any] | None:
 
 def _prompt_api_key(preset: dict[str, Any]) -> str | None:
     """交互式输入 API key。返回 key 或 None（取消）。"""
-    import questionary
-
     env_key = preset["env_key"]
     env_val = os.environ.get(env_key) or ""
     api_key = questionary.text(
@@ -165,8 +162,6 @@ def _prompt_api_key(preset: dict[str, Any]) -> str | None:
 
 def _prompt_base_url(preset: dict[str, Any]) -> str | None:
     """交互式输入 Base URL。返回 URL 或 None（取消）。"""
-    import questionary
-
     default_base_url = preset["base_url"]
     env_base_url = os.environ.get(preset["env_base_url"], "")
     base_url = questionary.text(
@@ -181,8 +176,6 @@ def _prompt_base_url(preset: dict[str, Any]) -> str | None:
 
 def _prompt_model(preset: dict[str, Any]) -> str | None:
     """交互式选择模型。返回模型名或 None（取消）。"""
-    import questionary
-
     if not preset["models"]:
         model = questionary.text("Model name:").ask()
         if model is None:
@@ -207,8 +200,6 @@ def _prompt_model(preset: dict[str, Any]) -> str | None:
 
 def _prompt_thinking_config(transport: str) -> tuple[bool, str | None] | None:
     """交互式配置 thinking 开关和 effort 级别。返回 (thinking, effort) 或 None（取消）。"""
-    import questionary
-
     thinking_choice = questionary.select(
         "Thinking:", choices=["enabled", "disabled"], default="enabled"
     ).ask()
@@ -300,8 +291,6 @@ def _load_existing_config(config_path: Path) -> dict[str, Any]:
 
 def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
     """首次启动配置向导。返回状态和临时配置路径。"""
-    import questionary
-
     print()
     print("=" * 60)
     print("  Welcome to Xcode - AI Coding Agent")

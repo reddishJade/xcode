@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import asdict
 from typing import Any
@@ -150,8 +151,6 @@ def _execute_tool_via_gate(
     build_after_tool_hook 不在此处调用，REPL 手动工具命令不经过 agent 轮次，
     无 session/audit 上下文，且为用户显式输入而非 LLM 决策，不写入审计日志。
     """
-    import asyncio
-
     if agent is None:
         return str(tool.handler(tool_input))
 

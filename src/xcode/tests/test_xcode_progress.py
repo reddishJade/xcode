@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
+import unittest.mock as mock
 from pathlib import Path
 
 from xcode.experimental.orchestration_store import OrchestrationStore
@@ -206,8 +208,6 @@ class TestTaskProgress:
 
     def test_expire_stale_uses_lease_index_avoids_full_scan(self) -> None:
         """expire_stale_runs 通过 lease 索引查找，不遍历 TaskStore.list()。"""
-        import unittest.mock as mock
-
         task = self.store.create("Long task")
         start_run(
             self.store, self.orchestration, task.id, timeout_seconds=1, retry_limit=1
@@ -245,8 +245,6 @@ class TestTaskProgress:
 
     def test_resume_run_warns_on_missing_state(self, caplog) -> None:
         """无 orchestration 文件时记录 warning 并返回 default state。"""
-        import logging
-
         task = self.store.create("task")
         with caplog.at_level(
             logging.WARNING, logger="xcode.experimental.task_progress"
@@ -258,8 +256,6 @@ class TestTaskProgress:
 
     def test_resume_run_warns_on_missing_fields(self, caplog) -> None:
         """orchestration 文件缺字段时记录 warning。"""
-        import logging
-
         task = self.store.create("task")
         # 手动写一个缺 lease_expires_at 的 state 文件
         orch_path = self.root / ".local" / "orchestration" / f"{task.id}.json"
@@ -286,8 +282,6 @@ class TestTaskProgress:
 
     def test_lease_index_rebuilt_on_corruption(self, caplog) -> None:
         """lease 索引损坏时回退全表扫描并重建。"""
-        import logging
-
         task = self.store.create("task")
         start_run(
             self.store, self.orchestration, task.id, timeout_seconds=1, retry_limit=1

@@ -133,8 +133,6 @@ class TestTaskStoreAndMailbox:
 
     def test_send_message_with_metadata(self) -> None:
         """send_message 带 thread_id/priority/expires_at 时写入 event 顶层。"""
-        import json
-
         mailbox = AgentMailbox(self.root)
         mailbox.send_message(
             "agent_a",
@@ -217,8 +215,6 @@ class TestTaskStoreAndMailbox:
 
     def test_old_messages_without_metadata_backward_compatible(self) -> None:
         """旧消息无 priority/thread_id 字段，read 不报错，sort 按 created_at 兜底。"""
-        import json
-
         mailbox = AgentMailbox(self.root)
         # 手动写入旧格式消息（无 priority 字段）
         path = mailbox.inbox_dir / "b.jsonl"
@@ -244,8 +240,6 @@ class TestTaskStoreAndMailbox:
 
     def test_send_mailbox_message_tool_with_metadata(self) -> None:
         """send_mailbox_message 工具透传 priority/thread_id。"""
-        import json
-
         tools = {
             tool.name: tool for tool in build_mailbox_tools(AgentMailbox(self.root))
         }
@@ -284,8 +278,6 @@ class TestTaskStoreAndMailbox:
         result = tools["read_mailbox_messages"].handler(
             {"recipient_id": "b", "sort_by": "priority", "filter_type": "query"}
         )
-        import json
-
         messages = json.loads(result)
         assert len(messages) == 1
         assert messages[0]["type"] == "query"

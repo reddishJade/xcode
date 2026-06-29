@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 
 import tiktoken
@@ -17,6 +18,7 @@ from xcode.agent.messages import (
     UserMessage,
 )
 
+from xcode.agent.types import TextContent, ThinkingContent, ToolCallContent
 
 _ENCODING_CACHE: dict[str, tiktoken.Encoding] = {}
 _DEFAULT_ENCODING = "cl100k_base"
@@ -43,10 +45,6 @@ def estimate_tokens(text: str) -> int:
 
 def estimate_message_tokens(messages: Sequence[AgentMessage]) -> int:
     """估算消息列表的 token 总数。"""
-    import json
-
-    from xcode.agent.types import TextContent, ThinkingContent, ToolCallContent
-
     total = 0
     for msg in messages:
         if isinstance(msg, AssistantMessage):

@@ -11,6 +11,7 @@ import calendar
 import json
 import logging
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -425,6 +426,4 @@ def build_progress_tools(
 
 
 def _state_to_dict(state: TaskRunState) -> dict[str, Any]:
-    from dataclasses import asdict
-
     return asdict(state)

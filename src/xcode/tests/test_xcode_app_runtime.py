@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
+import asyncio
 import tempfile
-from typing import Any
+import time
+from typing import Any, cast
 from unittest.mock import patch
 
 from xcode.harness.assembly import build_project_scoped_registry
@@ -52,8 +54,6 @@ class XcodeAppRuntimeTests:
             provider = MockProvider([])
             app = XcodeApp(agent=StructuredAgent(provider=provider, registry=()))
             return await app.aask("hello")
-
-        import asyncio
 
         assert asyncio.run(main()) == "child done"
 
@@ -624,8 +624,6 @@ class XcodeAppRuntimeTests:
         assert "submit_subagent" in tools
         tools["submit_subagent"].handler({"prompt": "inspect"})
 
-        import time
-
         for _ in range(100):
             if seen_child_tools:
                 break
@@ -656,8 +654,6 @@ class XcodeAppRuntimeTests:
 
         tools = {tool.name: tool for tool in app.registry}
         tools["submit_subagent"].handler({"prompt": "inspect"})
-
-        import time
 
         for _ in range(100):
             if seen_child_tools:
@@ -929,10 +925,6 @@ class TestSharedServicesInjection:
     """PR8/C.1: build_app 统一共享实例。"""
 
     def test_build_app_shares_task_store_across_tools_and_daemon(self) -> None:
-        import tempfile
-        from pathlib import Path
-        from typing import cast
-
         from xcode.harness.config import (
             AgentConfig,
             DaemonRuntimeConfig,
@@ -971,10 +963,6 @@ class TestSharedServicesInjection:
             assert daemon_store_id in task_stores
 
     def test_build_app_shares_mailbox_across_tools_and_daemon(self) -> None:
-        import tempfile
-        from pathlib import Path
-        from typing import cast
-
         from xcode.harness.config import (
             AgentConfig,
             DaemonRuntimeConfig,
@@ -1011,10 +999,6 @@ class TestSharedServicesInjection:
             assert id(app.daemon.mailbox) in mailbox_ids
 
     def test_build_app_shares_worktree_runner_across_tools_and_subagent(self) -> None:
-        import tempfile
-        from pathlib import Path
-        from typing import cast
-
         from xcode.harness.config import ExperimentalRuntimeConfig, XcodeRuntimeConfig
         from xcode.harness.skills import ToolRegistryState
 

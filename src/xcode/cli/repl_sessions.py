@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
+import questionary
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.text import Text
@@ -364,8 +365,6 @@ def _run_session_picker(
     choices: list[tuple[SessionMetadataView, str]],
 ) -> SessionMetadataView | None:
     """显示会话选择器。"""
-    import questionary
-
     questionary_choices = [
         questionary.Choice(title=label, value=session) for session, label in choices
     ]

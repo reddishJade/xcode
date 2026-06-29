@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import unicodedata
 from difflib import unified_diff
 
 
@@ -53,8 +54,6 @@ def strip_bom(content: str) -> tuple[str, str]:
 
 
 def normalize_for_fuzzy_match(text: str) -> str:
-    import unicodedata
-
     result = unicodedata.normalize("NFKC", text)
     result = "\n".join(line.rstrip() for line in result.split("\n"))
     table: dict[str, str] = {

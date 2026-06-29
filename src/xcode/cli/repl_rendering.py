@@ -6,6 +6,7 @@ import shutil
 import sys
 import textwrap
 from collections.abc import Callable, Iterable
+from typing import Any, cast
 
 
 from rich.console import Console
@@ -311,9 +312,7 @@ def create_prompt_session(
     if state is not None:
         bottom_toolbar = make_bottom_toolbar(state)
 
-    from typing import Any, cast as _cast
-
-    session: Any = _cast(Any, PromptSession)(
+    session: Any = cast(Any, PromptSession)(
         multiline=True,
         key_bindings=bindings,
         completer=completer,

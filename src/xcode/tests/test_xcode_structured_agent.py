@@ -5,6 +5,7 @@ import json
 import sys
 import threading
 import tempfile
+import unittest.mock as mock
 
 from unittest.mock import patch
 
@@ -885,8 +886,6 @@ class XcodeStructuredAgentTests:
         assert "Diminishing Returns" in result.answer
 
     def test_transient_error_retry(self) -> None:
-        import unittest.mock as mock
-
         calls = []
 
         def factory(messages, tools) -> list[ProviderEvent]:
@@ -909,8 +908,6 @@ class XcodeStructuredAgentTests:
             assert mock_sleep.call_count == 2
 
     def test_provider_error_retry_exhaustion_returns_fallback_message(self) -> None:
-        import unittest.mock as mock
-
         def factory(_messages, _tools) -> list[ProviderEvent]:
             raise RuntimeError("provider down")
 

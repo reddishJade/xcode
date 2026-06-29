@@ -17,6 +17,8 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import filelock
+
 from xcode.harness.skills import ToolInput, ToolSpec
 
 
@@ -262,8 +264,6 @@ class TaskStore:
 
     @contextmanager
     def locked(self) -> Iterator[None]:
-        import filelock
-
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         lock_file = self.tasks_dir / ".lock_file"
         lock = filelock.FileLock(lock_file, timeout=self.lock_timeout_seconds)

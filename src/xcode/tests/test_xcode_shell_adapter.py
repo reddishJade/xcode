@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import sys as _sys
 import tempfile
 from pathlib import Path
 
@@ -63,8 +65,6 @@ class XcodeShellAdapterTests:
         assert spec.syntax == "posix"
 
     def test_detect_shell_explicit_missing_raises(self) -> None:
-        import shutil
-
         for name in ("fish", "powershell", "zsh"):
             if shutil.which(name) is None:
                 missing = name
@@ -86,8 +86,6 @@ class XcodeShellAdapterTests:
         assert spec.syntax in ("powershell", "cmd", "posix")
 
     def test_detect_shell_respects_shell_env(self) -> None:
-        import sys as _sys
-
         if _sys.platform == "win32":
             pytest.skip("SHELL env var only respected on POSIX")
         original = os.environ.get("SHELL")

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import subprocess
 import tempfile
 import time
 from contextlib import redirect_stderr, redirect_stdout
@@ -15,7 +17,12 @@ from xcode.cli.app_contract import ReplApp
 from xcode.cli.completion import ReplCompleter
 from xcode.cli.commands import PromptText, ReplState
 from xcode.cli.repl import current_effort_options, run_repl
-from xcode.cli.repl_commands import COMMAND_NAMES, HELP_TEXT, handle_command
+from xcode.cli.repl_commands import (
+    COMMAND_NAMES,
+    COMMAND_REGISTRY,
+    HELP_TEXT,
+    handle_command,
+)
 from xcode.cli.repl_rendering import reasoning_preview_lines
 from xcode.cli.repl_rendering import REPL_PROMPT_STYLE
 from xcode.cli.repl_sessions import records_to_agent_messages
@@ -494,8 +501,6 @@ class XcodeReplTests:
 
     def test_undo_uses_registered_tool_spec_for_approval(self) -> None:
         """撤销写入时使用规范工具描述触发授权并恢复文件。"""
-        import subprocess
-
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
             subprocess.run(
@@ -565,8 +570,6 @@ class XcodeReplTests:
 
     def test_undo_denial_keeps_snapshot_record_active(self) -> None:
         """撤销被拒绝时保留活动记录，允许后续重试。"""
-        import subprocess
-
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
             subprocess.run(
@@ -647,6 +650,48 @@ class XcodeReplTests:
             assert "static:" in rendered
             assert "bash = deny" in rendered
             assert "(none)" not in rendered
+
+    def test_permissions_show_global_default_without_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            output = StringIO()
+
+            with redirect_stdout(output):
+                handled = handle_command(
+                    "/permissions",
+                    store,
+                    FakeApp(),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                    static_policy=PermissionPolicy(global_default="ask"),
+                )
+
+            assert not handled
+            rendered = output.getvalue()
+            assert "global_default: ask" in rendered
+            assert "(none" not in rendered
+
+    def test_permissions_empty_state_explains_none(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            output = StringIO()
+
+            with redirect_stdout(output):
+                handled = handle_command(
+                    "/permissions",
+                    store,
+                    FakeApp(),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+            assert not handled
+            assert (
+                "(none: no static rules, restricted dirs, or grants active)"
+                in output.getvalue()
+            )
 
     def test_hooks_command_shows_source_state_and_recent_error(self) -> None:
         """`/hooks` 展示配置来源、启用状态和最近脱敏错误。"""
@@ -1139,11 +1184,28 @@ class XcodeReplTests:
         assert app.agent.activated == ["code-review"]
 
     def test_repl_completer_hides_quit_alias(self) -> None:
-        completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
+        completer = ReplCompleter(
+            Path.cwd(),
+            command_names=COMMAND_NAMES,
+            command_registry=COMMAND_REGISTRY,
+        )
 
         items = completer.complete("/q")
 
-        assert [item.text for item in items] == ["/queue"]
+        assert [item.text for item in items][:2] == ["/exit", "/queue"]
+        assert "/quit" not in COMMAND_NAMES
+
+    def test_repl_completer_shows_canonical_for_revert_alias(self) -> None:
+        completer = ReplCompleter(
+            Path.cwd(),
+            command_names=COMMAND_NAMES,
+            command_registry=COMMAND_REGISTRY,
+        )
+
+        items = completer.complete("/rev")
+
+        assert [item.text for item in items] == ["/undo"]
+        assert "/revert" not in COMMAND_NAMES
 
     def test_repl_completer_suggests_effort_levels(self) -> None:
         completer = ReplCompleter(
@@ -1166,17 +1228,42 @@ class XcodeReplTests:
     def test_handle_command_keeps_quit_alias(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = SessionStore(Path(temp_dir))
+            output = StringIO()
 
-            handled = handle_command(
-                "/quit",
-                store,
-                FakeApp(),
-                FakeRenderer(),
-                ReplState(),
-                FakePrompt([]),
-            )
+            with redirect_stdout(output):
+                handled = handle_command(
+                    "/quit",
+                    store,
+                    FakeApp(),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
 
             assert handled
+            assert COMMAND_REGISTRY["/quit"].canonical == "/exit"
+            assert output.getvalue() == "/exit\n"
+
+    def test_handle_command_keeps_revert_alias_hidden(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SessionStore(Path(temp_dir))
+            output = StringIO()
+
+            with redirect_stdout(output):
+                handled = handle_command(
+                    "/revert --list",
+                    store,
+                    FakeApp(),
+                    FakeRenderer(),
+                    ReplState(),
+                    FakePrompt([]),
+                )
+
+            assert not handled
+            assert "/revert" not in COMMAND_NAMES
+            assert COMMAND_REGISTRY["/revert"].canonical == "/undo"
+            assert output.getvalue().startswith("/undo --list\n")
+            assert "Snapshot undo requires a git repository" in output.getvalue()
 
     def test_queue_command_toggles_without_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2510,8 +2597,6 @@ class FakeRenderer:
 
 
 def _strip_ansi(text: str) -> str:
-    import re
-
     return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
 
 

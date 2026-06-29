@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import time
 from pathlib import Path
@@ -281,8 +282,6 @@ class TestHeartbeatDaemon:
         assert infos["my_custom"].callable_pending is True
         assert infos["my_custom"].persistent is True
         # 持久化文件仍含其名
-        import json
-
         data = json.loads(tasks_file.read_text(encoding="utf-8"))
         custom_names = {e["name"] for e in data["tasks"]}
         assert "my_custom" in custom_names

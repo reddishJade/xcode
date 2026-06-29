@@ -45,6 +45,7 @@ from .repl_settings import (
 from .repl_skills import activate_skill
 from .setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
 from .config_cmd import _cmd_add, _cmd_edit, _cmd_delete
+from .config_cmd import BOOL_FIELDS
 from .repl_tools import run_tool_command
 from xcode.harness.observability import (
     FileGrantStore,
@@ -397,8 +398,6 @@ def _config_cmd_set(
 
 
 def _config_cmd_set_interactive(config: dict[str, Any], config_path: Path) -> None:
-    from .config_cmd import BOOL_FIELDS
-
     profiles = config.setdefault("provider", {}).setdefault("model_profiles", {})
     if not profiles:
         print("No profiles found. Use '/config add <name>' first.")
