@@ -863,27 +863,9 @@ class MemoryManager:
         """执行正式记忆写入与合并。"""
         title = extract_title(block)
         if emit_candidate_trace:
-            self._emit_trace(
-                MemoryTraceEvent(
-                    type="candidate_created",
-                    memory_id=self._memory_id(layer, title) if title else None,
-                    layer=layer,
-                    title=title or None,
-                    source=source,
-                )
-            )
-        if not self.validate_memory_block(block):
-            self._emit_trace(
-                MemoryTraceEvent(
-                    type="rejected",
-                    memory_id=self._memory_id(layer, title) if title else None,
-                    layer=layer,
-                    title=title or None,
-                    rejection_reason="schema_validation_failed",
-                    source=source,
-                )
-            )
-            self._archive_block(block, layer)
+            self._emit_candidate_trace(title, layer, source)
+
+        if not self._reject_invalid_candidate(block, layer, source, title):
             return False
 
         block = with_metadata(
@@ -907,62 +889,141 @@ class MemoryManager:
             utility=utility,
             last_outcome=last_outcome,
         )
+
         existing_records = self.read_memory_records(layer=layer)
         new_title = extract_title(block)
 
         if new_title and existing_records:
-            merged_block = self._merge_with_existing(block, new_title, existing_records)
-            if merged_block is not None:
-                if not self._content_quality_check(merged_block):
-                    self._emit_trace(
-                        MemoryTraceEvent(
-                            type="rejected",
-                            memory_id=self._memory_id(layer, new_title),
-                            layer=layer,
-                            title=new_title,
-                            rejection_reason="merged_quality_gate_failed",
-                            source=source,
-                        )
-                    )
-                    self._archive_block(merged_block, layer)
-                    return False
-                self._emit_trace(
-                    MemoryTraceEvent(
-                        type="superseded",
-                        memory_id=self._memory_id(layer, new_title),
-                        layer=layer,
-                        title=new_title,
-                        source=source,
-                    )
-                )
-                self._replace_block_by_title(new_title, merged_block, layer)
-                self._enforce_lru(layer)
-                self._emit_trace(
-                    MemoryTraceEvent(
-                        type="accepted",
-                        memory_id=self._memory_id(layer, new_title),
-                        layer=layer,
-                        title=new_title,
-                        source=source,
-                    )
-                )
+            if self._try_merge_block(block, new_title, existing_records, layer, source):
                 return True
 
-        rejection_reason = self._quality_rejection_reason(block, existing_records)
-        if rejection_reason is not None:
+        if self._reject_if_low_quality(
+            block, new_title, existing_records, layer, source
+        ):
+            return False
+
+        return self._write_new_block(block, new_title, layer, source)
+
+    def _emit_candidate_trace(
+        self,
+        title: str,
+        layer: MemoryLayer,
+        source: str | None,
+    ) -> None:
+        """发出候选块创建追踪事件。"""
+        self._emit_trace(
+            MemoryTraceEvent(
+                type="candidate_created",
+                memory_id=self._memory_id(layer, title) if title else None,
+                layer=layer,
+                title=title or None,
+                source=source,
+            )
+        )
+
+    def _reject_invalid_candidate(
+        self,
+        block: str,
+        layer: MemoryLayer,
+        source: str | None,
+        title: str,
+    ) -> bool:
+        """校验记忆块 schema，无效则归档并返回 False。"""
+        if self.validate_memory_block(block):
+            return True
+        self._emit_trace(
+            MemoryTraceEvent(
+                type="rejected",
+                memory_id=self._memory_id(layer, title) if title else None,
+                layer=layer,
+                title=title or None,
+                rejection_reason="schema_validation_failed",
+                source=source,
+            )
+        )
+        self._archive_block(block, layer)
+        return False
+
+    def _try_merge_block(
+        self,
+        block: str,
+        new_title: str,
+        existing_records: list[MemoryRecord],
+        layer: MemoryLayer,
+        source: str | None,
+    ) -> bool:
+        """尝试与已有记录合并，合并成功并通过质量门则替换并返回 True。"""
+        merged_block = self._merge_with_existing(block, new_title, existing_records)
+        if merged_block is None:
+            return False
+        if not self._content_quality_check(merged_block):
             self._emit_trace(
                 MemoryTraceEvent(
                     type="rejected",
-                    memory_id=self._memory_id(layer, new_title) if new_title else None,
+                    memory_id=self._memory_id(layer, new_title),
                     layer=layer,
-                    title=new_title or None,
-                    rejection_reason=rejection_reason,
+                    title=new_title,
+                    rejection_reason="merged_quality_gate_failed",
                     source=source,
                 )
             )
-            self._archive_block(block, layer)
+            self._archive_block(merged_block, layer)
             return False
+        self._emit_trace(
+            MemoryTraceEvent(
+                type="superseded",
+                memory_id=self._memory_id(layer, new_title),
+                layer=layer,
+                title=new_title,
+                source=source,
+            )
+        )
+        self._replace_block_by_title(new_title, merged_block, layer)
+        self._enforce_lru(layer)
+        self._emit_trace(
+            MemoryTraceEvent(
+                type="accepted",
+                memory_id=self._memory_id(layer, new_title),
+                layer=layer,
+                title=new_title,
+                source=source,
+            )
+        )
+        return True
 
+    def _reject_if_low_quality(
+        self,
+        block: str,
+        new_title: str,
+        existing_records: list[MemoryRecord],
+        layer: MemoryLayer,
+        source: str | None,
+    ) -> bool:
+        """质量门检查，拒绝则归档并返回 True。"""
+        rejection_reason = self._quality_rejection_reason(block, existing_records)
+        if rejection_reason is None:
+            return False
+        self._emit_trace(
+            MemoryTraceEvent(
+                type="rejected",
+                memory_id=self._memory_id(layer, new_title) if new_title else None,
+                layer=layer,
+                title=new_title or None,
+                rejection_reason=rejection_reason,
+                source=source,
+            )
+        )
+        self._archive_block(block, layer)
+        return True
+
+    def _write_new_block(
+        self,
+        block: str,
+        new_title: str,
+        layer: MemoryLayer,
+        source: str | None,
+    ) -> bool:
+        """将记忆块追加到存储文件。"""
         memory_file = self._memory_file(layer)
         memory_file.parent.mkdir(parents=True, exist_ok=True)
         with memory_file.open("a", encoding="utf-8") as file:
