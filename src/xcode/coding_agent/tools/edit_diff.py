@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+import re
 import unicodedata
 from difflib import unified_diff
 
@@ -296,4 +298,316 @@ def _raise_no_change(path: str, total: int) -> None:
         )
     raise ValueError(
         f"No changes made to {path}. The replacements produced identical content."
+    )
+
+
+REPLACER = Callable[[str, str], Iterator[str]]
+
+
+def _levenshtein(a: str, b: str) -> int:
+    if not a or not b:
+        return len(a) or len(b)
+    prev = list(range(len(b) + 1))
+    curr = [0] * (len(b) + 1)
+    for i, ca in enumerate(a):
+        curr[0] = i + 1
+        for j, cb in enumerate(b):
+            cost = 0 if ca == cb else 1
+            curr[j + 1] = min(curr[j] + 1, prev[j + 1] + 1, prev[j] + cost)
+        prev, curr = curr, prev
+    return prev[len(b)]
+
+
+def _simple_replacer(content: str, find: str) -> Iterator[str]:
+    yield find
+
+
+def _line_trimmed_replacer(content: str, find: str) -> Iterator[str]:
+    original_lines = content.split("\n")
+    search_lines = find.split("\n")
+    if search_lines and search_lines[-1] == "":
+        search_lines.pop()
+    for i in range(len(original_lines) - len(search_lines) + 1):
+        if all(
+            original_lines[i + j].strip() == search_lines[j].strip()
+            for j in range(len(search_lines))
+        ):
+            start = sum(len(original_lines[k]) + 1 for k in range(i))
+            end = start + sum(
+                len(original_lines[i + k]) + (1 if k < len(search_lines) - 1 else 0)
+                for k in range(len(search_lines))
+            )
+            yield content[start:end]
+
+
+def _block_anchor_replacer(content: str, find: str) -> Iterator[str]:
+    original_lines = content.split("\n")
+    search_lines = find.split("\n")
+    if search_lines and search_lines[-1] == "":
+        search_lines.pop()
+    if len(search_lines) < 3:
+        return
+    first_search = search_lines[0].strip()
+    last_search = search_lines[-1].strip()
+    search_block_size = len(search_lines)
+    max_line_delta = max(1, search_block_size // 4)
+
+    candidates: list[tuple[int, int]] = []
+    for i in range(len(original_lines)):
+        if original_lines[i].strip() != first_search:
+            continue
+        for j in range(i + 2, len(original_lines)):
+            if original_lines[j].strip() == last_search:
+                actual_size = j - i + 1
+                if abs(actual_size - search_block_size) <= max_line_delta:
+                    candidates.append((i, j))
+                break
+
+    if not candidates:
+        return
+
+    if len(candidates) == 1:
+        start_line, end_line = candidates[0]
+        similarity = _calc_anchor_similarity(
+            original_lines, search_lines, start_line, end_line
+        )
+        if similarity >= 0.65:
+            yield _extract_block(content, original_lines, start_line, end_line)
+        return
+
+    best_similarity = -1.0
+    best_candidate: tuple[int, int] | None = None
+    for start_line, end_line in candidates:
+        similarity = _calc_anchor_similarity(
+            original_lines, search_lines, start_line, end_line
+        )
+        if similarity > best_similarity:
+            best_similarity = similarity
+            best_candidate = (start_line, end_line)
+    if best_similarity >= 0.65 and best_candidate:
+        yield _extract_block(content, original_lines, *best_candidate)
+
+
+def _calc_anchor_similarity(
+    original_lines: list[str],
+    search_lines: list[str],
+    start_line: int,
+    end_line: int,
+) -> float:
+    inner = min(len(search_lines) - 2, end_line - start_line - 1)
+    if inner <= 0:
+        return 1.0
+    total = 0.0
+    for k in range(1, min(len(search_lines) - 1, end_line - start_line)):
+        ol = original_lines[start_line + k].strip()
+        sl = search_lines[k].strip()
+        max_len = max(len(ol), len(sl))
+        if max_len > 0:
+            total += 1.0 - _levenshtein(ol, sl) / max_len
+    return total / inner
+
+
+def _extract_block(content: str, lines: list[str], start: int, end: int) -> str:
+    start_idx = sum(len(lines[k]) + 1 for k in range(start))
+    end_idx = start_idx + sum(
+        len(lines[k]) + (1 if k < end else 0) for k in range(start, end + 1)
+    )
+    return content[start_idx:end_idx]
+
+
+def _whitespace_normalized_replacer(content: str, find: str) -> Iterator[str]:
+    def normalize_ws(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip()
+
+    norm_find = normalize_ws(find)
+    lines = content.split("\n")
+    for i, line in enumerate(lines):
+        if normalize_ws(line) == norm_find:
+            yield line
+        elif norm_find in normalize_ws(line):
+            words = find.strip().split()
+            if words:
+                pattern = r"\s+".join(re.escape(w) for w in words)
+                m = re.search(pattern, line)
+                if m:
+                    yield m.group(0)
+
+    find_lines = find.split("\n")
+    if len(find_lines) > 1:
+        for i in range(len(lines) - len(find_lines) + 1):
+            block = "\n".join(lines[i : i + len(find_lines)])
+            if normalize_ws(block) == norm_find:
+                yield block
+
+
+def _indentation_flexible_replacer(content: str, find: str) -> Iterator[str]:
+    def remove_indent(text: str) -> str:
+        t_lines = text.split("\n")
+        non_empty = [line for line in t_lines if line.strip()]
+        if not non_empty:
+            return text
+        min_indent = min(len(line) - len(line.lstrip()) for line in non_empty)
+        return "\n".join(
+            line[min_indent:] if line.strip() else line for line in t_lines
+        )
+
+    norm_find = remove_indent(find)
+    content_lines = content.split("\n")
+    find_lines = find.split("\n")
+    for i in range(len(content_lines) - len(find_lines) + 1):
+        block = "\n".join(content_lines[i : i + len(find_lines)])
+        if remove_indent(block) == norm_find:
+            yield block
+
+
+def _escape_normalized_replacer(content: str, find: str) -> Iterator[str]:
+    def unescape(s: str) -> str:
+        return re.sub(
+            r"\\([nrt'\"`\\$])",
+            lambda m: {
+                "n": "\n",
+                "t": "\t",
+                "r": "\r",
+                "'": "'",
+                '"': '"',
+                "`": "`",
+                "\\": "\\",
+                "$": "$",
+            }.get(m.group(1), m.group(0)),
+            s,
+        )
+
+    unescaped = unescape(find)
+    if unescaped in content:
+        yield unescaped
+    lines = content.split("\n")
+    find_lines = unescaped.split("\n")
+    for i in range(len(lines) - len(find_lines) + 1):
+        block = "\n".join(lines[i : i + len(find_lines)])
+        if unescape(block) == unescaped:
+            yield block
+
+
+def _trimmed_boundary_replacer(content: str, find: str) -> Iterator[str]:
+    trimmed = find.strip()
+    if trimmed == find:
+        return
+    if trimmed in content:
+        yield trimmed
+    lines = content.split("\n")
+    find_lines = find.split("\n")
+    for i in range(len(lines) - len(find_lines) + 1):
+        block = "\n".join(lines[i : i + len(find_lines)])
+        if block.strip() == trimmed:
+            yield block
+
+
+def _context_aware_replacer(content: str, find: str) -> Iterator[str]:
+    find_lines = find.split("\n")
+    if find_lines and find_lines[-1] == "":
+        find_lines.pop()
+    if len(find_lines) < 3:
+        return
+    first_line = find_lines[0].strip()
+    last_line = find_lines[-1].strip()
+    content_lines = content.split("\n")
+
+    for i in range(len(content_lines)):
+        if content_lines[i].strip() != first_line:
+            continue
+        for j in range(i + 2, len(content_lines)):
+            if content_lines[j].strip() == last_line:
+                block_lines = content_lines[i : j + 1]
+                if len(block_lines) == len(find_lines):
+                    matching = 0
+                    total = 0
+                    for k in range(1, len(block_lines) - 1):
+                        bl = block_lines[k].strip()
+                        fl = find_lines[k].strip()
+                        if bl or fl:
+                            total += 1
+                            if bl == fl:
+                                matching += 1
+                    if total == 0 or matching / total >= 0.5:
+                        yield "\n".join(block_lines)
+                break
+
+
+def _multi_occurrence_replacer(content: str, find: str) -> Iterator[str]:
+    start = 0
+    while True:
+        idx = content.find(find, start)
+        if idx == -1:
+            break
+        yield find
+        start = idx + len(find)
+
+
+_REPLACERS: list[REPLACER] = [
+    _simple_replacer,
+    _line_trimmed_replacer,
+    _block_anchor_replacer,
+    _whitespace_normalized_replacer,
+    _indentation_flexible_replacer,
+    _escape_normalized_replacer,
+    _trimmed_boundary_replacer,
+    _context_aware_replacer,
+    _multi_occurrence_replacer,
+]
+
+
+def _is_disproportionate_match(search: str, old_string: str) -> bool:
+    old_lines = old_string.count("\n") + 1
+    search_lines = search.count("\n") + 1
+    if search_lines >= max(old_lines + 3, old_lines * 2):
+        return True
+    if old_lines == 1:
+        return False
+    return len(search.strip()) > max(
+        len(old_string.strip()) + 500, len(old_string.strip()) * 4
+    )
+
+
+def apply_fuzzy_replace(
+    content: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool = False,
+) -> str:
+    if old_string == new_string:
+        raise ValueError("No changes to apply: oldString and newString are identical.")
+    if not old_string:
+        raise ValueError(
+            "old_string cannot be empty when editing an existing file. "
+            "Use write for an intentional full-file replacement."
+        )
+
+    not_found = True
+    for replacer in _REPLACERS:
+        for search in replacer(content, old_string):
+            idx = content.find(search)
+            if idx == -1:
+                continue
+            not_found = False
+            if _is_disproportionate_match(search, old_string):
+                raise ValueError(
+                    "Refusing replacement because the matched span is much larger "
+                    "than oldString. Re-read the file and provide the full exact "
+                    "oldString for the intended replacement."
+                )
+            if replace_all:
+                return content.replace(search, new_string)
+            last_idx = content.rfind(search)
+            if idx != last_idx:
+                continue
+            return content[:idx] + new_string + content[idx + len(search) :]
+
+    if not_found:
+        raise ValueError(
+            "Could not find old_string in the file. "
+            "It must match exactly, including all whitespace and newlines."
+        )
+    raise ValueError(
+        "Found multiple matches for old_string. "
+        "Provide more surrounding context to make the match unique."
     )

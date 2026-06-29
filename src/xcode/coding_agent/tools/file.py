@@ -1,4 +1,4 @@
-"""鏂囦欢宸ュ叿娉ㄥ唽鍣ㄤ笌 Schema銆?""
+"""文件工具注册器与 Schema。"""
 
 from __future__ import annotations
 
@@ -44,11 +44,11 @@ WRITE_FILE_SCHEMA = {
     "properties": {
         "path": {
             "type": "string",
-            "description": "Project-relative file path to write.",
+            "description": "The absolute path to the file to write (must be absolute, not relative).",
         },
         "content": {
             "type": "string",
-            "description": "Full UTF-8 file content.",
+            "description": "The content to write to the file.",
         },
     },
     "required": ["path", "content"],
@@ -60,29 +60,22 @@ EDIT_FILE_SCHEMA = {
     "properties": {
         "path": {
             "type": "string",
-            "description": "Project-relative file path to edit.",
+            "description": "The absolute path to the file to modify.",
         },
-        "edits": {
-            "type": "array",
-            "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally.",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "old_text": {
-                        "type": "string",
-                        "description": "Exact text to find. Must match exactly one occurrence.",
-                    },
-                    "new_text": {
-                        "type": "string",
-                        "description": "Replacement text.",
-                    },
-                },
-                "required": ["old_text", "new_text"],
-                "additionalProperties": False,
-            },
+        "old_text": {
+            "type": "string",
+            "description": "The text to replace (must not be empty).",
+        },
+        "new_text": {
+            "type": "string",
+            "description": "The text to replace it with (must be different from old_text).",
+        },
+        "replace_all": {
+            "type": "boolean",
+            "description": "Replace all occurrences of old_text (default false).",
         },
     },
-    "required": ["path"],
+    "required": ["path", "old_text", "new_text"],
     "additionalProperties": False,
 }
 
@@ -104,8 +97,8 @@ def build_file_tools(
     return (
         ToolSpec(
             name="read_file",
-            description="Read a text file inside the project sandbox.",
-            input_hint='JSON: {"path": "src/xcode/main.py", "offset": 1, "limit": 80}',
+            description="Read a file or directory from the local filesystem.",
+            input_hint='JSON: {"path": "/absolute/path/to/file", "offset": 1, "limit": 80}',
             handler=lambda data: _handler(
                 lambda d: _read_file(root, ops, context_state, d), data
             ),
@@ -121,11 +114,10 @@ def build_file_tools(
         ToolSpec(
             name="write_file",
             description=(
-                "Create a new text file or intentionally replace an entire file inside "
-                "the project sandbox. Prefer edit_file for targeted changes to an "
-                "existing file."
+                "Create a new text file or intentionally replace an entire file. "
+                "Prefer edit_file for targeted changes to an existing file."
             ),
-            input_hint='JSON: {"path": "notes.md", "content": "..."}',
+            input_hint='JSON: {"path": "/absolute/path/to/file", "content": "..."}',
             handler=lambda data: _handler(
                 lambda d: _write_file(root, ops, context_state, d), data
             ),
@@ -146,11 +138,11 @@ def build_file_tools(
         ToolSpec(
             name="edit_file",
             description=(
-                "Modify an existing text file with one or more targeted replacements. "
-                "Use this tool when changing existing code or docs so unrelated "
-                "content is preserved."
+                "Modify an existing text file with a targeted replacement. "
+                "old_text must match exactly; the tool uses fuzzy fallback strategies. "
+                "Use write_file for new files or full replacements."
             ),
-            input_hint='JSON: {"path": "src/main.py", "edits": [{"old_text": "...", "new_text": "..."}]}',
+            input_hint='JSON: {"path": "/absolute/path/to/file", "old_text": "...", "new_text": "..."}',
             handler=lambda data: _handler(
                 lambda d: _edit_file(root, ops, context_state, d), data
             ),
@@ -162,20 +154,14 @@ def build_file_tools(
             ),
             prompt_guidelines=(
                 "Use edit_file for precise changes to existing files.",
-                "When changing multiple separate locations in one file, use one edit_file call with multiple entries in edits.",
-                "Each edit_file edits[].old_text is matched against the original file, not after earlier edits are applied.",
-                "Keep edit_file edits[].old_text as small as possible while still unique in the file.",
-                "Do not emit overlapping or nested edit_file edits; merge nearby changes into one edit.",
+                "When editing, provide the full old_text that should be replaced.",
+                "Keep old_text as small as possible while still unique in the file.",
             ),
             examples=[
                 {
-                    "path": "src/main.py",
-                    "edits": [
-                        {
-                            "old_text": "return old_value\n",
-                            "new_text": "return new_value\n",
-                        }
-                    ],
+                    "path": "/abs/path/src/main.py",
+                    "old_text": "return old_value\n",
+                    "new_text": "return new_value\n",
                 }
             ],
         ),

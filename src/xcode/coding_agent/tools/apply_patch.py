@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
-from xcode.harness.skills import ToolInput, ToolOutput, ToolSpec, resolve_project_path
+from xcode.harness.skills import ToolInput, ToolOutput, ToolSpec
 
 from .edit_diff import (
     detect_line_ending,
@@ -26,9 +26,14 @@ from .file_handlers import (
     LocalFileOperations,
     _ensure_write_size,
     _read_text,
+    _format_file,
 )
 from .file_mutation_queue import with_file_mutation
-from .path_utils import display_path, is_path_blocked
+from .path_utils import (
+    display_path,
+    resolve_absolute_path,
+    matches_blocked_pattern,
+)
 
 PatchKind = Literal["add", "update", "delete", "move"]
 LineOp = Literal[" ", "+", "-"]
@@ -40,10 +45,6 @@ APPLY_PATCH_SCHEMA = {
         "patch_text": {
             "type": "string",
             "description": "Full patch text beginning with *** Begin Patch and ending with *** End Patch.",
-        },
-        "patchText": {
-            "type": "string",
-            "description": "Alias for patch_text.",
         },
     },
     "additionalProperties": False,
@@ -103,7 +104,7 @@ def build_apply_patch_tool(
             "Apply a structured patch inside the project sandbox. Supports "
             "Add File, Update File, Delete File, and Move to hunks."
         ),
-        input_hint='JSON: {"patch_text": "*** Begin Patch\\n*** Update File: src/app.py\\n@@\\n-old\\n+new\\n*** End Patch\\n"}',
+        input_hint='JSON: {"patch_text": "*** Begin Patch\\n*** Update File: /abs/path/to/app.py\\n@@\\n-old\\n+new\\n*** End Patch"}',
         handler=apply_patch,
         schema=APPLY_PATCH_SCHEMA,
         group="core",
@@ -276,8 +277,6 @@ def _header_path(line: str, prefix: str) -> str:
 
 def _patch_text(data: ToolInput) -> str:
     raw = data.get("patch_text")
-    if raw is None:
-        raw = data.get("patchText")
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError("patch_text is required")
     return raw
@@ -452,8 +451,11 @@ def _apply_changes(
     def mutate() -> ToolOutput:
         for change in changes:
             _write_change(operations, change)
+            target = change.move_path or change.path
+            if target and change.kind != "delete":
+                _format_file(target)
             if context_state is not None and change.kind != "delete":
-                context_state.record_file(change.move_path or change.path)
+                context_state.record_file(target)
         summary = "\n".join(_summary_line(change) for change in changes)
         diff = "\n".join(_diff_for_change(change) for change in changes)
         return ToolOutput(
@@ -501,14 +503,14 @@ def _existing_text(
         raise ValueError(
             f"apply_patch verification failed: failed to read file: {display}"
         )
-    if is_path_blocked(root, path):
+    if matches_blocked_pattern(path):
         raise ValueError(f"path is blocked: {display}")
     return _read_text(path, operations)
 
 
 def _safe_path(root: Path, raw_path: str) -> Path:
-    path = resolve_project_path(root, raw_path)
-    if is_path_blocked(root, path):
+    path = resolve_absolute_path(root, raw_path)
+    if matches_blocked_pattern(path):
         raise ValueError(f"path is blocked: {display_path(root, path)}")
     return path
 

@@ -73,7 +73,10 @@ class XcodeSandboxedFileToolsTests:
                 {"path": "a.txt", "old_text": "old", "new_text": "updated"}
             )
 
-            assert root / "a.txt" in operations.line_reads or root / "a.txt" in operations.reads
+            assert (
+                root / "a.txt" in operations.line_reads
+                or root / "a.txt" in operations.reads
+            )
             assert root / "b.txt" in operations.writes
             assert root / "a.txt" in operations.writes
             assert root in operations.mkdirs
@@ -259,6 +262,7 @@ class XcodeSandboxedFileToolsTests:
             output = tools["read_file"].handler({"path": str(root)})
             assert "<type>directory</type>" in output
             assert "<entries>" in output
+            assert "</entries>" in output
             assert "file_a.txt" in output
             assert "file_b.txt" in output
             assert "subdir/" in output
@@ -372,6 +376,7 @@ class XcodeSandboxedFileToolsTests:
 
             output = tools["read_file"].handler({"path": "long.txt"})
             assert "... (line truncated to 2000 chars)" in output
+            assert len(long_line[:2000]) == 2000
 
     def test_read_file_empty_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -407,7 +412,7 @@ class XcodeSandboxedFileToolsTests:
             path.write_text("x\nx\n", encoding="utf-8")
             tools = self._tools(root)
 
-            with pytest.raises(ValueError, match="Found 2 occurrences"):
+            with pytest.raises(ValueError, match="Found multiple matches"):
                 tools["edit_file"].handler(
                     {"path": "a.txt", "old_text": "x", "new_text": "y"}
                 )
@@ -540,7 +545,11 @@ class XcodeSandboxedFileToolsTests:
             assert tools["apply_patch"].schema is not None
             assert "offset" in tools["read_file"].schema["properties"]
             assert tools["write_file"].schema["required"] == ["path", "content"]
-            assert tools["edit_file"].schema["required"] == ["path"]
+            assert tools["edit_file"].schema["required"] == [
+                "path",
+                "old_text",
+                "new_text",
+            ]
 
     def test_file_tools_have_prompt_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -557,7 +566,7 @@ class XcodeSandboxedFileToolsTests:
             )
             assert "precise file edits" in edit_snippet
             assert any(
-                "multiple entries in edits" in guideline
+                "old_text" in guideline
                 for guideline in tools["edit_file"].prompt_guidelines
             )
             assert any(
@@ -578,7 +587,7 @@ class XcodeSandboxedFileToolsTests:
                 parse_tool_input(tool, '["a.txt"]')
 
     def test_edit_file_external_modification_uses_old_text_matching(self) -> None:
-        """edit_file 涓嶄緷璧栧搱甯屾牎楠岋紝澶栭儴淇敼鍚?old_text 涓嶅尮閰嶆椂杩斿洖閿欒銆?""
+        """edit_file 不依赖哈希校验，外部修改后 old_text 不匹配时返回错误。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / "a.txt"
@@ -586,7 +595,7 @@ class XcodeSandboxedFileToolsTests:
             tools = self._tools(root)
 
             path.write_text("modified externally", encoding="utf-8")
-            with pytest.raises(ValueError, match="Could not find the exact text"):
+            with pytest.raises(ValueError, match="Could not find old_string"):
                 tools["edit_file"].handler(
                     {
                         "path": "a.txt",

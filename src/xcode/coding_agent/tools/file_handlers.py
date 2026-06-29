@@ -1,5 +1,8 @@
-"""鍙楁矙绠辩害鏉熺殑鏈湴鏂囦欢宸ュ叿銆?
-鏂囦欢宸ュ叿璐熻矗璇诲啓椤圭洰鍐呮枃鏈枃浠讹紝骞跺湪宸ュ叿灞傞泦涓鐞嗚矾寰勮В鏋愩€佹晱鎰熺洰褰?鎷掔粷銆佽緭鍑烘埅鏂拰鍩轰簬 old_text 鐨勬枃浠剁紪杈戯紙鍚ā绯婂尮閰嶏級銆?"""
+"""受沙箱约束的本地文件工具。
+
+文件工具负责读写项目内文本文件，并在工具层集中处理路径解析、敏感目录
+拒绝、输出截断和基于 old_text 的文件编辑（含模糊匹配）。
+"""
 
 from __future__ import annotations
 
@@ -8,6 +11,7 @@ from dataclasses import dataclass
 from difflib import unified_diff
 import json
 from pathlib import Path
+import subprocess
 from typing import Any, Protocol
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
@@ -17,7 +21,7 @@ from xcode.harness.skills import (
     resolve_project_path,
 )
 from .edit_diff import (
-    apply_edits_fuzzy,
+    apply_fuzzy_replace,
     detect_line_ending,
     normalize_to_lf,
     restore_line_endings,
@@ -27,7 +31,6 @@ from .file_image import _detect_image, _read_image
 from .file_mutation_queue import with_file_mutation
 from .path_utils import (
     is_path_blocked,
-    resolve_read_path,
     truncate_output,
     display_path,
     resolve_absolute_path,
@@ -35,7 +38,7 @@ from .path_utils import (
     is_binary_file,
     SAMPLE_BYTES,
 )
-from .truncate import format_size
+
 
 MAX_READ_LIMIT = 2000
 MAX_LINE_LENGTH = 2000
@@ -310,7 +313,7 @@ def _read_directory(
     limit = data.get("limit", MAX_READ_LIMIT)
 
     start = offset - 1
-    sliced = formatted[start:start + limit]
+    sliced = formatted[start : start + limit]
     truncated = start + len(sliced) < len(formatted)
 
     output_parts = [
@@ -345,6 +348,31 @@ def _read_directory(
     )
 
 
+def _format_file(path: Path) -> bool:
+    ext = path.suffix.lower()
+    if ext != ".py":
+        return False
+    try:
+        result = subprocess.run(
+            ["ruff", "format", str(path)],
+            capture_output=True,
+            timeout=30,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _write_safe_path(root: Path, raw_path: str) -> Path:
+    path_str = raw_path.strip().strip("\"'")
+    if not path_str:
+        raise ValueError("path is required")
+    filepath = resolve_absolute_path(root, path_str)
+    if matches_blocked_pattern(filepath):
+        raise ValueError(f"path is blocked: {_display(root, filepath)}")
+    return filepath
+
+
 def _write_file(
     root: Path,
     operations: FileOperations,
@@ -366,7 +394,7 @@ def _parse_write_file_request(
     path_str = str(data.get("path", "")).strip()
     if not path_str:
         raise ValueError("path is required")
-    path = _safe_path(root, path_str)
+    path = _write_safe_path(root, path_str)
     if operations.exists(path) and operations.is_dir(path):
         raise ValueError(f"path is a directory: {_display(root, path)}")
     if "content" not in data:
@@ -383,10 +411,39 @@ def _write_file_impl(
     context_state: ContextualRetrievalState | None,
 ) -> str:
     operations.mkdir(request.path.parent)
-    _write_text(request.path, request.content, "utf-8", operations)
+    display = _display(root, request.path)
+
+    old_content = ""
+    desired_bom = False
+    if operations.exists(request.path):
+        raw = operations.read_bytes(request.path)
+        desired_bom = raw.startswith(b"\xef\xbb\xbf")
+        old_content = raw.decode("utf-8-sig" if desired_bom else "utf-8")
+
+    new_has_bom = request.content.startswith("\ufeff")
+    desired_bom = desired_bom or new_has_bom
+    clean_content = request.content[1:] if new_has_bom else request.content
+
+    diff = "".join(
+        unified_diff(
+            old_content.splitlines(keepends=True),
+            clean_content.splitlines(keepends=True),
+            fromfile=f"a/{display}",
+            tofile=f"b/{display}",
+        )
+    )
+
+    encoding = "utf-8-sig" if desired_bom else "utf-8"
+    _write_text(request.path, clean_content, encoding, operations)
+    _format_file(request.path)
+
     if context_state is not None:
         context_state.record_file(request.path)
-    return f"wrote file: {_display(root, request.path)}"
+
+    return ToolOutput(
+        f"wrote file: {display}\n{diff}",
+        metadata={"patch": diff},
+    )
 
 
 def _edit_file(
@@ -411,7 +468,7 @@ def _parse_edit_file_request(
     path_str = str(prepared.get("path", "")).strip()
     if not path_str:
         raise ValueError("path is required")
-    path = _safe_path(root, path_str)
+    path = _write_safe_path(root, path_str)
     if operations.exists(path) and operations.is_dir(path):
         raise ValueError(f"path is a directory: {_display(root, path)}")
     if not operations.is_file(path):
@@ -439,28 +496,44 @@ def _edit_file_impl(
     bom, clean_content = strip_bom(content)
     ending = detect_line_ending(clean_content)
     normalized = normalize_to_lf(clean_content)
+    display = _display(root, path)
 
-    if request.replace_all and len(request.edits) == 1:
-        edit = request.edits[0]
-        count = normalized.count(edit.old_text)
-        if count == 0:
-            raise ValueError("old_text not found")
-        updated = normalized.replace(edit.old_text, edit.new_text)
-        edit_count = count
-    else:
-        updated, edit_count = apply_edits_fuzzy(
-            normalized, _edit_payloads(request.edits), _display(root, path)
+    updated = normalized
+    total_replacements = 0
+    for i, edit in enumerate(request.edits):
+        try:
+            result = apply_fuzzy_replace(
+                updated,
+                edit.old_text,
+                edit.new_text,
+                replace_all=request.replace_all and len(request.edits) == 1,
+            )
+        except ValueError as e:
+            raise ValueError(f"{e} in {display}")
+        if request.replace_all and len(request.edits) == 1:
+            count = normalized.count(edit.old_text)
+            total_replacements = count
+        else:
+            total_replacements += 1
+        updated = result
+
+    if updated == normalized:
+        raise ValueError(
+            f"No changes made to {display}. The replacement produced identical content."
         )
 
     restored = restore_line_endings(updated, ending)
     final = bom + restored
     _ensure_write_size(final)
     _write_text(path, final, encoding, operations)
+    _format_file(path)
+
     if context_state is not None:
         context_state.record_file(path)
-    diff = _diff_preview(_display(root, path), content, final)
+
+    diff = _diff_preview(display, content, final)
     return ToolOutput(
-        f"edited file: {_display(root, path)} replacements={edit_count}\n{diff}",
+        f"edited file: {display} replacements={total_replacements}\n{diff}",
         metadata={
             "patch": diff,
             "first_changed_line": _first_changed_line(content, final),
@@ -469,11 +542,15 @@ def _edit_file_impl(
 
 
 def _prepare_edit_arguments(data: dict[str, Any]) -> dict[str, Any]:
-    """褰掍竴鍖?LLM 鍙兘杈撳嚭鐨勪笉瑙勮寖 JSON 缁撴瀯銆?
-    LLM 鏈夋椂浼氱敓鎴愪笉绗﹀悎 JSON schema 鐨?edit_file 杈撳叆锛屾鍑芥暟澶勭悊宸茬煡鍋忓樊锛?
-    1. edits 瀛楁琚簭鍒楀寲涓哄瓧绗︿覆 鈫?灏濊瘯 JSON 瑙ｆ瀽骞惰繕鍘熶负鏁扮粍
-    2. old_text/new_text 琚斁鍦ㄩ《灞傝€岄潪 edits 鏁扮粍涓?鈫?鑷姩鍚堝苟鍒?edits 鍐?
-    绉婚櫎鏉′欢锛氬崌绾у埌瓒冲鍙潬鐨勬ā鍨嬬増鏈悗锛屽彲绉婚櫎姝ゅ綊涓€鍖栧眰锛屾敼鐢ㄤ弗鏍?schema 鏍￠獙銆?    """
+    """归一化 LLM 可能输出的不规范 JSON 结构。
+
+    LLM 有时会生成不符合 JSON schema 的 edit_file 输入，此函数处理已知偏差：
+
+    1. edits 字段被序列化为字符串 → 尝试 JSON 解析并还原为数组
+    2. old_text/new_text 被放在顶层而非 edits 数组中 → 自动合并到 edits 内
+
+    移除条件：升级到足够可靠的模型版本后，可移除此归一化层，改用严格 schema 校验。
+    """
     result = dict(data)
 
     raw_edits = result.get("edits")
