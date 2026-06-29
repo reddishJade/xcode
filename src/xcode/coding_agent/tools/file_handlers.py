@@ -1,11 +1,9 @@
-"""受沙箱约束的本地文件工具。
-
-文件工具负责读写项目内文本文件，并在工具层集中处理路径解析、敏感目录
-拒绝、输出截断和基于 old_text 的文件编辑（含模糊匹配）。
-"""
+"""鍙楁矙绠辩害鏉熺殑鏈湴鏂囦欢宸ュ叿銆?
+鏂囦欢宸ュ叿璐熻矗璇诲啓椤圭洰鍐呮枃鏈枃浠讹紝骞跺湪宸ュ叿灞傞泦涓鐞嗚矾寰勮В鏋愩€佹晱鎰熺洰褰?鎷掔粷銆佽緭鍑烘埅鏂拰鍩轰簬 old_text 鐨勬枃浠剁紪杈戯紙鍚ā绯婂尮閰嶏級銆?"""
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from difflib import unified_diff
 import json
@@ -14,8 +12,6 @@ from typing import Any, Protocol
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.harness.skills import (
-    CITATION_SOURCES_METADATA_KEY,
-    CitationSource,
     ToolInput,
     ToolOutput,
     resolve_project_path,
@@ -34,25 +30,20 @@ from .path_utils import (
     resolve_read_path,
     truncate_output,
     display_path,
+    resolve_absolute_path,
+    matches_blocked_pattern,
+    is_binary_file,
+    SAMPLE_BYTES,
 )
-from .truncate import truncate_head, format_size
+from .truncate import format_size
 
-MAX_READ_BYTES = 1_000_000
+MAX_READ_LIMIT = 2000
+MAX_LINE_LENGTH = 2000
+MAX_BYTES = 50 * 1024
+MAX_BYTES_LABEL = "50 KB"
+MAX_LINE_SUFFIX = f"... (line truncated to {MAX_LINE_LENGTH} chars)"
+MAX_FILE_READ_BYTES = 1_000_000
 MAX_WRITE_BYTES = 1_000_000
-
-
-@dataclass(frozen=True)
-class ReadRange:
-    offset: int = 1
-    limit: int | None = None
-
-
-@dataclass(frozen=True)
-class ReadFileRequest:
-    path: Path
-    display_path: str
-    read_range: ReadRange | None
-    image_mime: str | None
 
 
 @dataclass(frozen=True)
@@ -83,6 +74,9 @@ class FileOperations(Protocol):
     def write_bytes(self, path: Path, data: bytes) -> None: ...
     def mkdir(self, path: Path) -> None: ...
     def remove_file(self, path: Path) -> None: ...
+    def iter_lines(self, path: Path) -> Iterator[str]: ...
+    def read_dir_entries(self, path: Path) -> list[tuple[str, bool]]: ...
+    def read_head(self, path: Path, n: int) -> bytes: ...
 
 
 class LocalFileOperations:
@@ -110,6 +104,20 @@ class LocalFileOperations:
     def remove_file(self, path: Path) -> None:
         path.unlink()
 
+    def iter_lines(self, path: Path) -> Iterator[str]:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            for line in f:
+                yield line.rstrip("\r\n")
+
+    def read_dir_entries(self, path: Path) -> list[tuple[str, bool]]:
+        entries = [(entry.name, entry.is_dir()) for entry in path.iterdir()]
+        entries.sort(key=lambda x: x[0].casefold())
+        return entries
+
+    def read_head(self, path: Path, n: int) -> bytes:
+        with open(path, "rb") as f:
+            return f.read(n)
+
 
 def _read_file(
     root: Path,
@@ -117,119 +125,223 @@ def _read_file(
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
-    request = _parse_read_file_request(root, operations, data)
-    if request.image_mime:
-        return _read_image(
-            request.path,
-            request.display_path,
-            request.image_mime,
-            operations,
-        )
-
-    if context_state is not None:
-        context_state.record_file(request.path)
-    text, _encoding = _read_text(request.path, operations)
-
-    if request.read_range is not None:
-        return _read_with_offset_limit(
-            text,
-            request.display_path,
-            request.read_range,
-        )
-
-    return _read_full(text, request.display_path)
-
-
-def _parse_read_file_request(
-    root: Path,
-    operations: FileOperations,
-    data: ToolInput,
-) -> ReadFileRequest:
     path_str = str(data.get("path", "")).strip()
     if not path_str:
         raise ValueError("path is required")
-    path = resolve_read_path(root, path_str)
-    if is_path_blocked(root, path):
-        raise ValueError(f"path is blocked: {_display(root, path)}")
-    if not operations.is_file(path):
-        raise ValueError(f"not a file: {_display(root, path)}")
-    size = operations.size(path)
-    if size > MAX_READ_BYTES:
-        raise ValueError(f"file too large: {size} bytes")
 
-    display = _display(root, path)
-    mime = _detect_image(path, operations)
-    return ReadFileRequest(
-        path=path,
-        display_path=display,
-        read_range=_read_range(data),
-        image_mime=mime,
-    )
+    filepath = resolve_absolute_path(root, path_str)
+    if matches_blocked_pattern(filepath):
+        raise ValueError(f"path is blocked: {_display(root, filepath)}")
 
+    if not operations.exists(filepath):
+        _file_not_found(filepath, root, operations)
 
-def _read_full(text: str, display_path: str) -> str:
-    tr = truncate_head(text)
-    if not tr.truncated:
-        return _tool_output_with_citation(
-            display_path, 1, len(text.splitlines()) or 1, tr.content
+    if context_state is not None:
+        context_state.record_file(filepath)
+
+    display = _display(root, filepath)
+    if operations.is_dir(filepath):
+        return _read_directory(filepath, display, operations, data)
+
+    mime = _detect_image(filepath, operations)
+    if mime is not None:
+        return _read_image(filepath, display, mime, operations)
+
+    sample = operations.read_head(filepath, SAMPLE_BYTES)
+    if is_binary_file(filepath, sample):
+        return ToolOutput(
+            f"Cannot read binary file: {display}",
+            is_error=True,
         )
 
-    if tr.first_line_exceeds_limit:
-        return (
-            f"[Line 1 is {format_size(tr.total_bytes)}, exceeds "
-            f"{format_size(tr.max_bytes)} limit. "
-            f"Use bash: sed -n '1p' {json.dumps(display_path)} | head -c {tr.max_bytes}]"
-        )
-
-    end_line = tr.output_lines
-    continuation = json.dumps({"path": display_path, "offset": end_line + 1})
-    reason = (
-        "lines" if tr.truncated_by == "lines" else format_size(tr.max_bytes) + " limit"
-    )
-    content = (
-        f"{tr.content}\n\n"
-        f"[Showing lines 1-{end_line} of {tr.total_lines} "
-        f"({reason}). "
-        f"Use read_file with {continuation} to continue.]"
-    )
-    return _tool_output_with_citation(display_path, 1, end_line, content)
+    offset = _parse_offset(data)
+    limit = _parse_limit(data)
+    return _read_text_file(filepath, display, offset, limit, operations)
 
 
-def _read_with_offset_limit(
-    text: str,
-    display_path: str,
-    read_range: ReadRange,
-) -> str:
-    lines = text.splitlines()
-    if not lines:
-        return ""
-    start = read_range.offset - 1
-    if start >= len(lines):
+def _parse_offset(data: ToolInput) -> int:
+    raw = data.get("offset")
+    if raw is None:
+        return 1
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError("offset must be an integer")
+    if val < 1:
+        raise ValueError("offset must be positive")
+    return val
+
+
+def _parse_limit(data: ToolInput) -> int:
+    raw = data.get("limit")
+    if raw is None:
+        return MAX_READ_LIMIT
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError("limit must be an integer")
+    if val < 0:
+        raise ValueError("limit must be non-negative")
+    return val if val > 0 else MAX_READ_LIMIT
+
+
+def _file_not_found(filepath: Path, root: Path, operations: FileOperations) -> str:
+    dir_path = filepath.parent
+    base_name = filepath.stem if filepath.suffix else filepath.name
+    suggestions: list[str] = []
+
+    try:
+        if operations.is_dir(dir_path):
+            for entry_name, is_dir in operations.read_dir_entries(dir_path):
+                if (
+                    base_name.lower() in entry_name.lower()
+                    or entry_name.lower() in base_name.lower()
+                ):
+                    suggestions.append(str(dir_path / entry_name))
+                    if len(suggestions) >= 3:
+                        break
+    except OSError:
+        pass
+
+    display = _display(root, filepath)
+    if suggestions:
         raise ValueError(
-            f"offset {read_range.offset} is beyond end of file ({len(lines)} lines total)"
+            f"File not found: {display}\n\n"
+            f"Did you mean one of these?\n"
+            f"{chr(10).join(suggestions)}"
         )
-    end = (
-        len(lines)
-        if read_range.limit is None
-        else min(start + read_range.limit, len(lines))
-    )
-    selected = "\n".join(lines[start:end])
-    selected_truncated = _truncate(selected)
+    raise ValueError(f"File not found: {display}")
 
-    if end < len(lines):
-        continuation: dict[str, int | str] = {
-            "path": display_path,
-            "offset": end + 1,
-        }
-        if read_range.limit is not None:
-            continuation["limit"] = read_range.limit
-        selected_truncated += (
-            f"\n\n[Showing lines {read_range.offset}-{end} of {len(lines)}. "
-            f"Use read_file with {json.dumps(continuation, ensure_ascii=False)} "
-            "to continue.]"
+
+def _truncate_line(line: str) -> str:
+    if len(line) > MAX_LINE_LENGTH:
+        return line[:MAX_LINE_LENGTH] + MAX_LINE_SUFFIX
+    return line
+
+
+def _read_text_file(
+    path: Path,
+    display: str,
+    offset: int,
+    limit: int,
+    operations: FileOperations,
+) -> ToolOutput:
+    start = offset - 1
+    lines: list[str] = []
+    bytes_count = 0
+    total_count = 0
+    more = False
+    cut = False
+
+    for line in operations.iter_lines(path):
+        total_count += 1
+        if total_count <= start:
+            continue
+        if len(lines) >= limit:
+            more = True
+            continue
+        truncated = _truncate_line(line)
+        line_bytes = len(truncated.encode("utf-8")) + (1 if lines else 0)
+        if bytes_count + line_bytes > MAX_BYTES:
+            cut = True
+            more = True
+            break
+        lines.append(truncated)
+        bytes_count += line_bytes
+
+    if total_count < offset and not (total_count == 0 and offset == 1):
+        raise ValueError(
+            f"Offset {offset} is out of range for this file ({total_count} lines)"
         )
-    return _tool_output_with_citation(
-        display_path, read_range.offset, end, selected_truncated
+
+    last_line = offset + len(lines) - 1
+    next_line = offset if not lines else last_line + 1
+
+    output_parts = [
+        f"<path>{display}</path>",
+        "<type>file</type>",
+        "<content>",
+    ]
+    for i, line in enumerate(lines):
+        output_parts.append(f"{i + offset}: {line}")
+
+    if cut:
+        output_parts.append(
+            f"\n(Output capped at {MAX_BYTES_LABEL}. "
+            f"Showing lines {offset}-{last_line}. "
+            f"Use offset={next_line} to continue.)"
+        )
+    elif more:
+        output_parts.append(
+            f"\n(Showing lines {offset}-{last_line} of {total_count}. "
+            f"Use offset={next_line} to continue.)"
+        )
+    else:
+        output_parts.append(f"\n(End of file - total {total_count} lines)")
+    output_parts.append("</content>")
+    text = "\n".join(output_parts)
+
+    return ToolOutput(
+        text,
+        metadata={
+            "display": {
+                "type": "file",
+                "path": display,
+                "text": "\n".join(lines),
+                "lineStart": offset,
+                "lineEnd": last_line,
+                "totalLines": total_count,
+                "truncated": more or cut,
+            },
+        },
+    )
+
+
+def _read_directory(
+    path: Path,
+    display: str,
+    operations: FileOperations,
+    data: ToolInput,
+) -> ToolOutput:
+    items = operations.read_dir_entries(path)
+    formatted = [name + "/" if is_dir else name for name, is_dir in items]
+
+    offset = data.get("offset", 1)
+    limit = data.get("limit", MAX_READ_LIMIT)
+
+    start = offset - 1
+    sliced = formatted[start:start + limit]
+    truncated = start + len(sliced) < len(formatted)
+
+    output_parts = [
+        f"<path>{display}</path>",
+        "<type>directory</type>",
+        "<entries>",
+    ]
+    output_parts.extend(sliced)
+
+    if truncated:
+        output_parts.append(
+            f"\n(Showing {len(sliced)} of {len(formatted)} entries. "
+            f"Use 'offset' parameter to read beyond entry {offset + len(sliced)})"
+        )
+    else:
+        output_parts.append(f"\n({len(formatted)} entries)")
+    output_parts.append("</entries>")
+    text = "\n".join(output_parts)
+
+    return ToolOutput(
+        text,
+        metadata={
+            "display": {
+                "type": "directory",
+                "path": display,
+                "entries": sliced,
+                "offset": offset,
+                "totalEntries": len(formatted),
+                "truncated": truncated,
+            },
+        },
     )
 
 
@@ -357,15 +469,11 @@ def _edit_file_impl(
 
 
 def _prepare_edit_arguments(data: dict[str, Any]) -> dict[str, Any]:
-    """归一化 LLM 可能输出的不规范 JSON 结构。
-
-    LLM 有时会生成不符合 JSON schema 的 edit_file 输入，此函数处理已知偏差：
-
-    1. edits 字段被序列化为字符串 → 尝试 JSON 解析并还原为数组
-    2. old_text/new_text 被放在顶层而非 edits 数组中 → 自动合并到 edits 内
-
-    移除条件：升级到足够可靠的模型版本后，可移除此归一化层，改用严格 schema 校验。
-    """
+    """褰掍竴鍖?LLM 鍙兘杈撳嚭鐨勪笉瑙勮寖 JSON 缁撴瀯銆?
+    LLM 鏈夋椂浼氱敓鎴愪笉绗﹀悎 JSON schema 鐨?edit_file 杈撳叆锛屾鍑芥暟澶勭悊宸茬煡鍋忓樊锛?
+    1. edits 瀛楁琚簭鍒楀寲涓哄瓧绗︿覆 鈫?灏濊瘯 JSON 瑙ｆ瀽骞惰繕鍘熶负鏁扮粍
+    2. old_text/new_text 琚斁鍦ㄩ《灞傝€岄潪 edits 鏁扮粍涓?鈫?鑷姩鍚堝苟鍒?edits 鍐?
+    绉婚櫎鏉′欢锛氬崌绾у埌瓒冲鍙潬鐨勬ā鍨嬬増鏈悗锛屽彲绉婚櫎姝ゅ綊涓€鍖栧眰锛屾敼鐢ㄤ弗鏍?schema 鏍￠獙銆?    """
     result = dict(data)
 
     raw_edits = result.get("edits")
@@ -389,30 +497,6 @@ def _prepare_edit_arguments(data: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _read_range(data: ToolInput) -> ReadRange | None:
-    offset = data.get("offset")
-    limit = data.get("limit")
-    if offset is None and limit is None:
-        return None
-
-    offset_value = 1 if offset is None else _parse_optional_int(offset, "offset")
-    if offset_value < 1:
-        raise ValueError("offset must be positive")
-
-    limit_value = None if limit is None else _parse_optional_int(limit, "limit")
-    if limit_value is not None and limit_value < 0:
-        raise ValueError("limit must be non-negative")
-
-    return ReadRange(offset=offset_value, limit=limit_value)
-
-
-def _parse_optional_int(value: Any, name: str) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-
-
 def read_project_text_file(project_root: Path, raw_path: str) -> str:
     operations = LocalFileOperations()
     root = project_root.resolve()
@@ -420,7 +504,7 @@ def read_project_text_file(project_root: Path, raw_path: str) -> str:
     if not operations.is_file(path):
         raise ValueError(f"not a file: {_display(root, path)}")
     size = operations.size(path)
-    if size > MAX_READ_BYTES:
+    if size > MAX_FILE_READ_BYTES:
         raise ValueError(f"file too large: {size} bytes")
     text, _encoding = _read_text(path, operations)
     return _truncate(text)
@@ -483,36 +567,6 @@ def _first_changed_line(before: str, after: str) -> int | None:
     if len(before_lines) != len(after_lines):
         return min(len(before_lines), len(after_lines)) + 1
     return None
-
-
-def _tool_output_with_citation(
-    path: str,
-    start_line: int,
-    end_line: int,
-    text: str,
-) -> ToolOutput:
-    """创建带 file citation source 的 ToolOutput。"""
-    source = CitationSource(
-        kind="file",
-        path=path,
-        start_line=start_line,
-        end_line=end_line,
-        text=text,
-    )
-    return ToolOutput(
-        text,
-        metadata={
-            CITATION_SOURCES_METADATA_KEY: [
-                {
-                    "kind": source.kind,
-                    "path": source.path,
-                    "start_line": source.start_line,
-                    "end_line": source.end_line,
-                    "text": source.text,
-                }
-            ],
-        },
-    )
 
 
 def _display(root: Path, path: Path) -> str:

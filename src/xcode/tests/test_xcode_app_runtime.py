@@ -759,7 +759,9 @@ class XcodeAppRuntimeTests:
                 )
             }
 
-            assert tools["read_file"].handler({"path": "marker.txt"}) == "worktree"
+            output = tools["read_file"].handler({"path": "marker.txt"})
+            assert "1: worktree" in output
+            assert "End of file - total 1 lines" in output
 
     def test_scoped_child_registry_uses_override_for_bash(self) -> None:
         seen_cwds: list[Path] = []
@@ -868,7 +870,8 @@ class XcodeAppRuntimeTests:
             else:
                 pytest.fail("subagent did not finish")
 
-        assert seen_reads == ["worktree"]
+        assert len(seen_reads) == 1
+        assert "1: worktree" in seen_reads[0]
 
 
 class MockProvider(StreamProvider):

@@ -27,9 +27,6 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
-from xcode.coding_agent.tools.apply_patch import extract_patch_paths
-
-
 PermissionAccess = Literal["read", "write", "execute", "network"]
 DirAccess = Literal["read", "write", "read_write"]
 GrantDecision = Literal["allow", "deny"]
@@ -1101,6 +1098,8 @@ class ActionExtractor:
         )
 
     def _patch_paths(self, tool_input: Mapping[str, object]) -> tuple[str, ...]:
+        from xcode.coding_agent.tools.apply_patch import extract_patch_paths
+
         extracted = extract_patch_paths(dict(tool_input))
         if extracted:
             return extracted

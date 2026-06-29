@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 import tempfile
 from xcode.cli.repl_tools import parse_tool_input
@@ -13,10 +14,20 @@ class RecordingFileOperations(LocalFileOperations):
         self.reads: list[Path] = []
         self.writes: list[Path] = []
         self.mkdirs: list[Path] = []
+        self.line_reads: list[Path] = []
+        self.head_reads: list[Path] = []
 
     def read_bytes(self, path: Path) -> bytes:
         self.reads.append(path)
         return super().read_bytes(path)
+
+    def read_head(self, path: Path, n: int) -> bytes:
+        self.head_reads.append(path)
+        return super().read_head(path, n)
+
+    def iter_lines(self, path: Path) -> Iterator[str]:
+        self.line_reads.append(path)
+        return super().iter_lines(path)
 
     def write_bytes(self, path: Path, data: bytes) -> None:
         self.writes.append(path)
@@ -44,8 +55,10 @@ class XcodeSandboxedFileToolsTests:
 
             output = tools["read_file"].handler({"path": "a.txt", "limit": 2})
 
-            assert "one\ntwo" in output
-            assert '"offset": 3' in output
+            assert "1: one\n2: two" in output
+            assert "offset=3" in output
+            assert "<path>a.txt</path>" in output
+            assert "<type>file</type>" in output
 
     def test_file_tools_use_injected_operations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -60,7 +73,7 @@ class XcodeSandboxedFileToolsTests:
                 {"path": "a.txt", "old_text": "old", "new_text": "updated"}
             )
 
-            assert root / "a.txt" in operations.reads
+            assert root / "a.txt" in operations.line_reads or root / "a.txt" in operations.reads
             assert root / "b.txt" in operations.writes
             assert root / "a.txt" in operations.writes
             assert root in operations.mkdirs
@@ -173,9 +186,8 @@ class XcodeSandboxedFileToolsTests:
                 {"path": "a.txt", "offset": 2, "limit": 2}
             )
 
-            assert "two\nthree" in output
-            assert '"offset": 4' in output
-            assert '"limit": 2' in output
+            assert "2: two\n3: three" in output
+            assert "offset=4" in output
 
     def test_read_file_with_offset_without_limit_reads_to_end(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -185,7 +197,8 @@ class XcodeSandboxedFileToolsTests:
 
             output = tools["read_file"].handler({"path": "a.txt", "offset": 2})
 
-            assert output == "two\nthree"
+            assert "2: two\n3: three" in output
+            assert "End of file - total 3 lines" in output
 
     def test_read_file_rejects_invalid_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -208,16 +221,24 @@ class XcodeSandboxedFileToolsTests:
                 tools["read_file"].handler({"path": "a.txt", "offset": "bad"})
             with pytest.raises(ValueError, match="offset must be positive"):
                 tools["read_file"].handler({"path": "a.txt", "offset": 0})
-            with pytest.raises(ValueError, match="beyond end of file"):
+            with pytest.raises(ValueError, match="Offset 2 is out of range"):
                 tools["read_file"].handler({"path": "a.txt", "offset": 2})
 
-    def test_rejects_absolute_parent_and_sensitive_paths(self) -> None:
+    def test_read_file_accepts_absolute_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("hello", encoding="utf-8")
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler({"path": str(root / "a.txt")})
+            assert "1: hello" in output
+            assert "End of file" in output
+
+    def test_rejects_parent_and_sensitive_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             tools = self._tools(root)
 
-            with pytest.raises(ValueError, match="absolute"):
-                tools["read_file"].handler({"path": str(root / "a.txt")})
             with pytest.raises(ValueError, match="parent-directory"):
                 tools["read_file"].handler({"path": "../secret.txt"})
             with pytest.raises(ValueError, match="blocked"):
@@ -226,6 +247,140 @@ class XcodeSandboxedFileToolsTests:
                 tools["read_file"].handler({"path": "xcode/.local/chroma_db/index"})
             with pytest.raises(ValueError, match="blocked"):
                 tools["read_file"].handler({"path": ".local/chroma_db/index"})
+
+    def test_read_file_directory_listing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "file_a.txt").write_text("a", encoding="utf-8")
+            (root / "file_b.txt").write_text("b", encoding="utf-8")
+            (root / "subdir").mkdir()
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler({"path": str(root)})
+            assert "<type>directory</type>" in output
+            assert "<entries>" in output
+            assert "file_a.txt" in output
+            assert "file_b.txt" in output
+            assert "subdir/" in output
+            assert "3 entries" in output
+
+    def test_read_file_directory_listing_with_offset_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for i in range(5):
+                (root / f"file_{i}.txt").write_text(str(i), encoding="utf-8")
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler(
+                {"path": str(root), "offset": 2, "limit": 2}
+            )
+            assert "file_1.txt" in output
+            assert "file_2.txt" in output
+            assert "file_0.txt" not in output
+            assert "file_3.txt" not in output
+            assert "Use 'offset' parameter to read beyond entry 4" in output
+
+    def test_read_file_file_not_found_suggests_similar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "readme.txt").write_text("content", encoding="utf-8")
+            (root / "reader.py").write_text("code", encoding="utf-8")
+            tools = self._tools(root)
+
+            with pytest.raises(ValueError) as exc_info:
+                tools["read_file"].handler({"path": "readme.md"})
+            msg = str(exc_info.value)
+            assert "File not found" in msg
+            assert "readme.txt" in msg
+
+    def test_read_file_file_not_found_suggests_similar_case_insensitive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "MyFile.txt").write_text("content", encoding="utf-8")
+            (root / "myfile.py").write_text("code", encoding="utf-8")
+            tools = self._tools(root)
+
+            with pytest.raises(ValueError) as exc_info:
+                tools["read_file"].handler({"path": "myfile.md"})
+            msg = str(exc_info.value)
+            assert "File not found" in msg
+            assert "MyFile.txt" in msg or "myfile.py" in msg
+
+    def test_read_file_file_not_found_no_suggestions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tools = self._tools(root)
+
+            with pytest.raises(ValueError, match="File not found: nonexistent"):
+                tools["read_file"].handler({"path": "nonexistent"})
+
+    def test_read_file_binary_extension(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.zip").write_text("not really zip", encoding="utf-8")
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler({"path": "data.zip"})
+            assert "Cannot read binary file" in output
+            assert getattr(output, "is_error", False)
+
+    def test_read_file_binary_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = bytes(range(256))
+            (root / "mixed.bin").write_bytes(raw)
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler({"path": "mixed.bin"})
+            assert "Cannot read binary file" in output
+            assert getattr(output, "is_error", False)
+
+    def test_read_file_structured_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("line1\nline2\nline3", encoding="utf-8")
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler({"path": "a.txt"})
+            metadata = getattr(output, "metadata", {})
+            display = metadata.get("display", {})
+            assert display.get("type") == "file"
+            assert display.get("lineStart") == 1
+            assert display.get("lineEnd") == 3
+            assert display.get("totalLines") == 3
+            assert display.get("truncated") is False
+
+    def test_read_file_directory_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "f1.txt").write_text("a", encoding="utf-8")
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler({"path": str(root)})
+            metadata = getattr(output, "metadata", {})
+            display = metadata.get("display", {})
+            assert display.get("type") == "directory"
+            assert display.get("totalEntries") == 1
+            assert display.get("truncated") is False
+
+    def test_read_file_with_line_truncation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            long_line = "x" * 3000
+            (root / "long.txt").write_text(long_line, encoding="utf-8")
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler({"path": "long.txt"})
+            assert "... (line truncated to 2000 chars)" in output
+
+    def test_read_file_empty_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "empty.txt").write_text("", encoding="utf-8")
+            tools = self._tools(root)
+
+            output = tools["read_file"].handler({"path": "empty.txt"})
+            assert "End of file - total 0 lines" in output
 
     def test_rejects_symlink_escape(self) -> None:
         with (
@@ -423,7 +578,7 @@ class XcodeSandboxedFileToolsTests:
                 parse_tool_input(tool, '["a.txt"]')
 
     def test_edit_file_external_modification_uses_old_text_matching(self) -> None:
-        """edit_file 不依赖哈希校验，外部修改后 old_text 不匹配时返回错误。"""
+        """edit_file 涓嶄緷璧栧搱甯屾牎楠岋紝澶栭儴淇敼鍚?old_text 涓嶅尮閰嶆椂杩斿洖閿欒銆?""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / "a.txt"

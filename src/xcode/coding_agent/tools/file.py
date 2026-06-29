@@ -1,4 +1,4 @@
-"""文件工具注册器与 Schema。"""
+"""鏂囦欢宸ュ叿娉ㄥ唽鍣ㄤ笌 Schema銆?""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ READ_FILE_SCHEMA = {
     "properties": {
         "path": {
             "type": "string",
-            "description": "Project-relative text file path.",
+            "description": "The absolute path to the file or directory to read.",
         },
         "limit": {
             "type": "integer",
