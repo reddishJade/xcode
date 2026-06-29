@@ -7,6 +7,8 @@ import subprocess
 import sys
 from typing import Any, cast
 
+import questionary
+
 from .app_contract import ReplApp
 from .commands import (
     COMMAND_GROUP_EXIT,
@@ -42,6 +44,7 @@ from .repl_settings import (
 )
 from .repl_skills import activate_skill
 from .setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
+from .config_cmd import _cmd_add, _cmd_edit, _cmd_delete
 from .repl_tools import run_tool_command
 from xcode.harness.observability import (
     FileGrantStore,
@@ -253,21 +256,61 @@ def cmd_config(cmd: str, ctx: CommandContext) -> bool:
         print("(some changes may require restart)")
         return False
 
-    if sub == "set":
-        set_parts = cmd.split(maxsplit=4)
-        if len(set_parts) < 5:
-            print("Usage: /config set <profile> <field> <value>")
-            print(
-                "  Fields: transport, chat_model, base_url, api_key, "
-                "thinking, reasoning_effort, clear_thinking, tool_stream"
-            )
-            print("  Use 'null' to clear a field")
+    if sub == "add":
+        parts = cmd.split(maxsplit=2)
+        name = parts[2] if len(parts) >= 3 else questionary.text("Profile name:").ask()
+        if not name:
             return False
-        _, _, name, field, value = set_parts
-        _config_cmd_set(config, config_path, name, field, value)
+        _cmd_add(config_path, name)
         return False
 
-    print("Usage: /config [list|set <profile> <field> <value>|reload]")
+    if sub == "edit":
+        parts = cmd.split(maxsplit=2)
+        if len(parts) >= 3:
+            name = parts[2]
+        else:
+            profiles = config.get("provider", {}).get("model_profiles", {})
+            if not profiles:
+                print("No profiles found. Use '/config add <name>' first.")
+                return False
+            name = questionary.select(
+                "Select profile:", choices=sorted(profiles.keys())
+            ).ask()
+        if not name:
+            return False
+        _cmd_edit(config_path, name)
+        return False
+
+    if sub == "delete":
+        parts = cmd.split(maxsplit=2)
+        if len(parts) >= 3:
+            name = parts[2]
+        else:
+            profiles = config.get("provider", {}).get("model_profiles", {})
+            if not profiles:
+                print("No profiles found.")
+                return False
+            name = questionary.select(
+                "Select profile to delete:", choices=sorted(profiles.keys())
+            ).ask()
+        if not name:
+            return False
+        _cmd_delete(config_path, name)
+        return False
+
+    if sub == "set":
+        set_parts = cmd.split(maxsplit=4)
+        if len(set_parts) >= 5:
+            _, _, name, field, value = set_parts
+            _config_cmd_set(config, config_path, name, field, value)
+            return False
+        _config_cmd_set_interactive(config, config_path)
+        return False
+
+    print(
+        "Usage: /config [list|add <name>|edit <name>|delete <name>"
+        "|set <profile> <field> <value>|reload]"
+    )
     return False
 
 
@@ -336,6 +379,76 @@ def _config_cmd_set(
     profile = profiles[name]
     if isinstance(profile, str):
         print(f"Profile '{name}' is a string alias. Edit main first.")
+        return
+
+    try:
+        coerced = _coerce_config_value(field, value)
+    except ValueError as exc:
+        print(str(exc))
+        return
+
+    if coerced is None:
+        profile.pop(field, None)
+    else:
+        profile[field] = coerced
+
+    _save_config(config, config_path)
+    print(f"  {name}.{field} = {value} (saved to {config_path.name})")
+
+
+def _config_cmd_set_interactive(config: dict[str, Any], config_path: Path) -> None:
+    from .config_cmd import BOOL_FIELDS
+
+    profiles = config.setdefault("provider", {}).setdefault("model_profiles", {})
+    if not profiles:
+        print("No profiles found. Use '/config add <name>' first.")
+        return
+
+    name = questionary.select("Select profile:", choices=sorted(profiles.keys())).ask()
+    if name is None:
+        return
+
+    profile = profiles[name]
+    if isinstance(profile, str):
+        print(f"Profile '{name}' is a string alias. Edit main first.")
+        return
+
+    SET_FIELDS = (
+        ("transport", "Transport"),
+        ("chat_model", "Chat Model"),
+        ("base_url", "Base URL"),
+        ("api_key", "API Key"),
+        ("thinking", "Thinking"),
+        ("reasoning_effort", "Reasoning Effort"),
+        ("clear_thinking", "Clear Thinking"),
+        ("tool_stream", "Tool Stream"),
+    )
+    field_choices = [
+        questionary.Choice(title=f"{label} ({profile.get(key, 'not set')})", value=key)
+        for key, label in SET_FIELDS
+    ]
+    field = questionary.select("Select field to change:", choices=field_choices).ask()
+    if field is None:
+        return
+
+    current = profile.get(field, "")
+    current_str = str(current) if current is not None else "(not set)"
+    if field == "api_key":
+        value = questionary.password(
+            f"API Key (current: {_mask_key(current_str)}):"
+        ).ask()
+    elif field in BOOL_FIELDS:
+        default_choice = "true" if current else "false"
+        value = questionary.select(
+            f"{field}:",
+            choices=["true", "false"],
+            default=default_choice,
+        ).ask()
+    else:
+        value = questionary.text(f"{field} (current: {current_str}):").ask()
+    if value is None:
+        return
+    if not value and field != "api_key":
         return
 
     try:
@@ -438,8 +551,6 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
 
 def _select_act_transition() -> str | None:
     """显示 Act 模式切换菜单。"""
-    import questionary
-
     return questionary.select(
         "Select action:",
         choices=[
@@ -589,7 +700,7 @@ def _has_large_tool_result(
 
 
 def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
-    """列出、撤销或清除权限规则。"""
+    """列出或清除权限规则。"""
     handle_permissions(
         cmd,
         ctx.session_grant_store,
@@ -1293,8 +1404,8 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     ),
     "/config": CommandEntry(
         handler=cmd_config,
-        desc="List, set, or reload provider profiles.",
-        args_desc="[list|set <profile> <field> <value>|reload]",
+        desc="Manage provider profiles interactively.",
+        args_desc="[list|add <name>|edit <name>|delete <name>|set <profile> <field> <value>|reload]",
         accepts_args=True,
         group=COMMAND_GROUP_MODEL,
     ),
@@ -1342,7 +1453,7 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     ),
     "/permissions": CommandEntry(
         handler=cmd_permissions,
-        desc="List / revoke / clear permission rules.",
+        desc="List or clear active permission rules and grants.",
         accepts_args=True,
         group=COMMAND_GROUP_INFO,
     ),
@@ -1409,7 +1520,20 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         group=COMMAND_GROUP_INFO,
     ),
     "/quit": CommandEntry(
-        handler=cmd_exit, desc="Exit the REPL.", visible=False, group=COMMAND_GROUP_EXIT
+        handler=cmd_exit,
+        desc="Alias for /exit.",
+        visible=False,
+        group=COMMAND_GROUP_EXIT,
+        canonical="/exit",
+    ),
+    "/revert": CommandEntry(
+        handler=cmd_undo,
+        desc="Alias for /undo.",
+        args_desc="[N|--list]",
+        accepts_args=True,
+        visible=False,
+        group=COMMAND_GROUP_SESSION_ROLLBACK,
+        canonical="/undo",
     ),
 }
 
@@ -1449,6 +1573,11 @@ def handle_command(
         if command == prefix or (
             entry.accepts_args and command.startswith(prefix + " ")
         ):
+            if entry.canonical is not None:
+                canonical_entry = COMMAND_REGISTRY[entry.canonical]
+                command = entry.canonical + command[len(prefix) :]
+                print(command)
+                return canonical_entry.handler(command, ctx)
             return entry.handler(command, ctx)
     print(f"Unknown command: {command}")
     return False
