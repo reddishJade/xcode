@@ -1,80 +1,83 @@
 # Xcode Agent Guide
 
-Entry point for coding agents working in this repository.
+Entry point for coding agents working in this repository. Keep this file short; use the linked docs for detail.
 
-## 项目概述
+## 项目地图
 
-Xcode 是轻量级 Python Agent 运行骨架。四层架构：
-`ai/` (Provider) → `agent/` (Loop Core) → `harness/` (Runtime Infra) → `coding_agent/` (Coding Product) → `cli/` (UI)
+Xcode 是轻量级 Python Agent 运行骨架，主分层为：
+`ai/` (provider) → `agent/` (loop core) → `harness/` (runtime infra) → `coding_agent/` (coding product) → `cli/` (UI)
+
+代码位于 `src/xcode/`。优先按改动目标定位：
+
+- provider / model 接入：`src/xcode/ai/`
+- agent loop / state / tool 调度：`src/xcode/agent/`
+- runtime / sandbox / harness：`src/xcode/harness/`
+- coding agent 产品逻辑：`src/xcode/coding_agent/`
+- CLI / app 入口：`src/xcode/cli/`
+- 测试：`src/xcode/tests/`
 
 运行路径：`main.py` → `build_app()` → `StructuredAgent` → `Agent` loop → provider stream → tool execution。
 
-**入口**：`xcode` CLI 命令 / `python -m xcode` / `build_app()` 编程式 API。eval 入口：`xcode-eval` / `python -m xcode.evals.cli`。包名 `xcode*`，位于 `src/`。
+入口：
 
-## 引用文档
+- CLI：`xcode` 或 `python -m xcode`
+- 编程式 API：`build_app()`
+- eval：`xcode-eval` 或 `python -m xcode.evals.cli`
 
-阅读以下文档获取细节（按需读取，非全部必读）：
+## 先看哪里
 
-| 文档 | 时机 |
+只读取与你当前任务有关的文档：
+
+| 文档 | 何时查看 |
 |---|---|
-| [docs/evaluation-guide.md](docs/evaluation-guide.md) | 运行测试、lint、typecheck、eval |
-| [docs/git-workflow.md](docs/git-workflow.md) | 提交前 |
-| [docs/code-organization.md](docs/code-organization.md) | 编辑源码结构前 |
-| [docs/source-review.md](docs/source-review.md) | 大规模重构或审查前 |
-| [CONFIG.md](CONFIG.md) | 运行时配置参考 |
+| [docs/code-organization.md](docs/code-organization.md) | 调整源码结构、模块边界、分层职责 |
+| [docs/evaluation-guide.md](docs/evaluation-guide.md) | 运行 lint、typecheck、test、eval |
+| [docs/git-workflow.md](docs/git-workflow.md) | 准备提交前 |
+| [docs/source-review.md](docs/source-review.md) | 做较大改动前的源码审查 |
+| [CONFIG.md](CONFIG.md) | 查看运行时配置、开关、环境变量 |
 
-## 常用命令
+## 常用路径
 
 ```powershell
-# 安装
-uv pip install -e .                          # 运行时
-uv pip install -e ".[dev]"                   # 开发依赖
+# 安装开发依赖
+uv pip install -e ".[dev]"
 
-# 静态检查（lint → typecheck）
-uv run ruff check src/ --fix
-uv run ruff format src/
+# 基本静态检查
+uv run ruff check src/
 uv run pyright src/
 
-# 测试
-uv run pytest src/xcode/tests/ -q --tb=short            # 全部
-uv run pytest src/xcode/tests/test_xcode_file_tools.py -q --tb=short  # 单个
+# 运行相关测试
+uv run pytest src/xcode/tests/ -q --tb=short
 
 # 编译检查
 uv run python -m compileall src
-
-# Eval
-uv run python -m xcode.evals.cli --suite pipeline        # 离线回归
-uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3  # 真实 provider
-uv run python -m xcode.evals.cli --list-suites           # 列出可用套件
-uv run python -m xcode.evals.cli --list-benchmarks       # 列出 benchmark
 ```
 
-## 代码规范
+更多命令、单测示例和 eval 用法见 [docs/evaluation-guide.md](docs/evaluation-guide.md)。
 
-- Python 3.12+，完整类型注解，ruff 格式化（行宽 88），零 `# noqa` / `# type: ignore`
+## 编码约定
+
+- Python 3.12+，完整类型注解，使用 ruff 默认格式（行宽 88）
 - 注释和 docstring 使用简体中文
-- 函数职责单一，纯函数优先，异常捕获具体类型
-- `*args`/`**kwargs` 只在不避免的边界使用；禁止动态 `importlib`/`getattr`/`setattr`
-- 依赖变更视为代码变更，需要 review
-- 不维护向后兼容，除非用户要求
+- 函数职责单一，优先纯函数，捕获具体异常类型
+- 依赖变更视为代码变更，需要一并审查
+- 默认不为旧接口保留兼容层，除非任务明确要求
 
-## 架构约束
+## 仓库约束
 
-- 新工具必须声明 group、risk、schema、read-only 和 concurrency 属性
+- 新工具必须声明 `group`、`risk`、`schema`、`read-only` 和 `concurrency`
 - MCP 工具由 `.local/mcp_config.json` 自动发现并注册
 - `edit_file` 依赖 read-before-edit 指纹校验
 
-## Git 规则
+## 安全与边界
 
-- 只允许 `git add <exact-path>`，不允许 `git add -A` / `git add .`
-- 禁止历史重写操作（reset --hard、checkout .、clean -fd、stash）
-- 每个 commit 只含一个逻辑变更
-- 提交前检查：`git status --short && git diff --cached --stat`
-- commit message 格式：`type: one-line title` + body（英文）
+- 不运行需要真实 provider、外部凭证或付费资源的流程，除非用户明确要求
+- 不提交 secrets、token、凭证文件或包含敏感信息的真实日志
+- 不随意修改 `.local/`、本地环境配置或 MCP 配置，除非任务明确涉及这些文件
+- 需要联网、改依赖或运行真实 eval 前，先确认任务确实需要
 
-## 测试
+## 提交与测试
 
-- `pytest-asyncio`，`asyncio_mode = "auto"`，位于 `src/xcode/tests/`
-- 回归套件（`--suite all`）：`pipeline` + `tool-policy` + `context` + `multi`
-- 仅修改文档时：`git diff --check -- <modified-docs>`
-- 不运行需要外部环境变量的端到端套件（除非明确要求）
+- 提交前阅读 [docs/git-workflow.md](docs/git-workflow.md)
+- 只修改文档时，优先运行 `git diff --check -- <modified-docs>`
+- 不运行依赖外部环境变量的端到端套件，除非用户明确要求
