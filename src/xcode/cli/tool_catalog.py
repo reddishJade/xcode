@@ -19,8 +19,9 @@ from xcode.harness.skills import ToolSpec
 
 from xcode.coding_agent.tools import (
     build_bash_tool,
-    build_code_tools,
     build_file_tools,
+    build_glob_tools,
+    build_grep_tool,
 )
 from xcode.experimental.task_store import TaskStore, build_task_tools
 from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
@@ -33,7 +34,8 @@ type ToolCatalogBuilder = Callable[[], tuple[ToolSpec, ...]]
 CATALOG_COVERED_BUILDERS = frozenset(
     {
         "build_bash_tool",
-        "build_code_tools",
+        "build_glob_tools",
+        "build_grep_tool",
         "build_file_tools",
         "build_load_skill_tool",
         "build_mailbox_tools",
@@ -52,7 +54,7 @@ CATALOG_COVERED_BUILDERS = frozenset(
 def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
     return [
         lambda: build_file_tools(base_tmp),
-        lambda: build_code_tools(base_tmp),
+        lambda: build_glob_tools(base_tmp) + (build_grep_tool(base_tmp),),
         lambda: (build_bash_tool(base_tmp),),
         lambda: build_worktree_tools(
             WorktreeTaskRunner(base_tmp),

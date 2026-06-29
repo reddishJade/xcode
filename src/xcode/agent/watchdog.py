@@ -30,7 +30,7 @@ DEFAULT_READ_TOOLS: frozenset[str] = frozenset(
         "read_file",
         "grep_search",
         "glob_files",
-        "ls",
+        "list_dir",
         "find_files",
     }
 )

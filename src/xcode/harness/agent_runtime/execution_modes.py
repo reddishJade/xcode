@@ -64,7 +64,7 @@ BUILD_TOOL_NAMES = {
     "glob_files",
     "grep_search",
     "find_files",
-    "ls",
+    "list_dir",
     "bash",
     "shell",
     "search_tools",

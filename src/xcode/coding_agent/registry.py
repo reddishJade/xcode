@@ -15,8 +15,9 @@ from xcode.harness.execution_env import ExecutionEnv
 from xcode.harness.skills import ToolSpec
 from xcode.coding_agent.tools import (
     build_bash_tool,
-    build_code_tools,
     build_file_tools,
+    build_glob_tools,
+    build_grep_tool,
 )
 
 if TYPE_CHECKING:
@@ -37,7 +38,8 @@ def build_project_scoped_registry(
     registry += build_file_tools(
         project_root, context_state=contextual_state, cancel_event=cancel_event
     )
-    registry += build_code_tools(project_root, cancel_event=cancel_event)
+    registry += build_glob_tools(project_root, cancel_event=cancel_event)
+    registry += (build_grep_tool(project_root, cancel_event=cancel_event),)
     registry += (
         build_bash_tool(
             project_root,

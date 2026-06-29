@@ -53,7 +53,7 @@ _TOOL_ACTION_PROFILES: dict[str, tuple[str, str]] = {
     "glob_files": ("read", "path"),
     "grep_search": ("read", "path"),
     "find_files": ("read", "path"),
-    "ls": ("read", "path"),
+    "list_dir": ("read", "path"),
     "search_tools": ("read", "none"),
     "write_file": ("write", "path"),
     "edit_file": ("edit", "path"),

@@ -705,6 +705,10 @@ class StructuredBoundaryPolicyEvaluator:
             "write_file",
             "edit_file",
             "apply_patch",
+            "grep_search",
+            "glob_files",
+            "find_files",
+            "list_dir",
         }
     )
     CREDENTIAL_PATH_PARTS = frozenset(
@@ -987,6 +991,10 @@ class ActionExtractor:
         if tool_name == "delete_file":
             return self._path_action(
                 tool_name, tool_input, "write", "delete_file", "write"
+            )
+        if tool_name in ("grep_search", "glob_files", "find_files", "list_dir"):
+            return self._path_action(
+                tool_name, tool_input, "read", tool_name, "read"
             )
         if tool_name.startswith("mcp__"):
             return Action(
