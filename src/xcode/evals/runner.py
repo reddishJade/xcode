@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict
+from collections import defaultdict
 from collections.abc import Callable, Sequence
-from datetime import datetime, UTC
-from pathlib import Path
+from dataclasses import asdict, is_dataclass
+from datetime import UTC, datetime
 import hashlib
 import math
+from pathlib import Path
 import subprocess
 import sys
-import uuid
 from typing import Any
+import uuid
 
-from xcode.harness.app import XcodeApp
 from xcode.harness.agent_runtime import StructuredAgentEvent
+from xcode.harness.app import XcodeApp
 
 from .graders import grade_events, run_llm_judge
 from .reporting import write_report_files
@@ -33,16 +34,19 @@ class EvalRunner:
         app_factory: AppFactory,
         output_dir: Path | None = None,
         trials_per_task: int = 1,
+        suite_name: str | None = None,
+        task_source: str | None = None,
     ) -> None:
         if trials_per_task < 1:
             raise ValueError("trials_per_task must be >= 1")
         self.tasks = tuple(tasks)
         self.app_factory = app_factory
         self.run_id = _new_run_id()
-        self.output_dir = (
-            output_dir or Path.cwd() / ".local" / "eval_runs" / self.run_id
-        )
+        self.output_dir = output_dir or Path.cwd() / ".local" / "eval_runs" / self.run_id
         self.trials_per_task = trials_per_task
+        self.suite_name = suite_name
+        self.task_source = task_source
+        self.started_at = datetime.now(UTC)
 
     def run(self) -> EvalReport:
         return _run_coro_sync(self.arun())
@@ -76,9 +80,16 @@ class EvalRunner:
             success=success,
             output_dir=self.output_dir,
             trials=tuple(trials),
+            tasks=self.tasks,
             metrics=metrics,
         )
-        write_report_files(report)
+        write_report_files(
+            report,
+            started_at=self.started_at,
+            completed_at=datetime.now(UTC),
+            suite_name=self.suite_name,
+            task_source=self.task_source,
+        )
         return report
 
     async def _run_trial(self, task: EvalTask, trial_index: int) -> TrialResult:
@@ -89,6 +100,7 @@ class EvalRunner:
             events: list[StructuredAgentEvent] = []
             answer = ""
             runtime_error: BaseException | None = None
+            started_at = datetime.now(UTC)
 
             project_root = getattr(app.agent, "project_root", None)
             before_evidence = _collect_file_evidence(task, project_root)
@@ -104,17 +116,13 @@ class EvalRunner:
                     trace.record_error(exc)
 
             after_evidence = _collect_file_evidence(task, project_root)
-            evidence_graders = _grade_file_evidence(
-                task, before_evidence, after_evidence
-            )
+            evidence_graders = _grade_file_evidence(task, before_evidence, after_evidence)
             validation_graders, validation_results = run_validation(task, project_root)
             graders = (
                 grade_events(task, events, answer, runtime_error)
                 + evidence_graders
                 + validation_graders
             )
-
-            # LLM-as-judge：当 task.llm_judge_criteria 非空时执行
             if task.llm_judge_criteria:
                 judge_graders = await run_llm_judge(
                     task,
@@ -124,7 +132,9 @@ class EvalRunner:
                 )
                 graders = graders + judge_graders
 
-            success = all(grader.passed for grader in graders)
+            success = all(
+                grader.passed or grader.skipped for grader in graders if grader.required
+            )
             _record_memory_feedback(app, success=success, trial_id=trial_id)
             memory_trace = _collect_memory_trace(app)
             tool_call_count = sum(1 for event in events if event.type == "tool_use")
@@ -138,10 +148,19 @@ class EvalRunner:
                 "event_count": len(events),
                 "tool_calls": tool_call_count,
                 "tool_errors": tool_error_count,
+                "provider_model": getattr(app.agent.provider, "model", None),
+                "provider_type": type(app.agent.provider).__name__,
+                "agent_config": _serialize_agent_config(getattr(app.agent, "config", None)),
+                "wall_clock_ms": round(
+                    (datetime.now(UTC) - started_at).total_seconds() * 1000,
+                    1,
+                ),
             }
             if project_root is not None:
                 metrics["project_root"] = str(project_root)
-            # 从 final event 提取运行级指标
+            trajectory_metrics = _build_trajectory_metrics(task, events)
+            if trajectory_metrics:
+                metrics.update(trajectory_metrics)
             agent_metrics = _extract_agent_metrics(events)
             if agent_metrics:
                 metrics.update(agent_metrics)
@@ -157,6 +176,7 @@ class EvalRunner:
                 metrics["model_patch"] = model_patch
             if validation_results:
                 metrics["validation"] = validation_results_to_dict(validation_results)
+            _fill_unavailable_trial_metrics(metrics)
             return TrialResult(
                 task_id=task.id,
                 trial_id=trial_id,
@@ -182,9 +202,7 @@ def _run_coro_sync(coro):
         return asyncio.run(coro)
     if hasattr(coro, "close"):
         coro.close()
-    raise RuntimeError(
-        "EvalRunner.run cannot run inside an active event loop; use arun"
-    )
+    raise RuntimeError("EvalRunner.run cannot run inside an active event loop; use arun")
 
 
 def _collect_file_evidence(
@@ -257,6 +275,7 @@ def _grade_file_evidence(
                 name=f"file_exists:{rel_path}",
                 passed=exists is expected_exists,
                 details="" if exists is expected_exists else f"exists={exists}",
+                failure_category="evidence" if exists is not expected_exists else None,
             )
         )
         for expected, present in record.get("contains", {}).items():
@@ -265,6 +284,7 @@ def _grade_file_evidence(
                     name=f"file_contains:{rel_path}:{expected}",
                     passed=bool(present),
                     details="" if present else f"missing {expected!r}",
+                    failure_category="evidence" if not present else None,
                 )
             )
         for expected, absent in record.get("not_contains", {}).items():
@@ -273,6 +293,7 @@ def _grade_file_evidence(
                     name=f"file_not_contains:{rel_path}:{expected}",
                     passed=bool(absent),
                     details="" if absent else f"still contains {expected!r}",
+                    failure_category="evidence" if not absent else None,
                 )
             )
         if "changed" in spec:
@@ -285,6 +306,7 @@ def _grade_file_evidence(
                     name=f"file_changed:{rel_path}",
                     passed=changed is expected_changed,
                     details="" if changed is expected_changed else f"changed={changed}",
+                    failure_category="evidence" if changed is not expected_changed else None,
                 )
             )
     return tuple(graders)
@@ -309,7 +331,6 @@ def _string_tuple(value: object) -> tuple[str, ...]:
 
 
 def _collect_model_patch(project_root: Path | None) -> str:
-    """采集 Git 工作区补丁，供外部 benchmark harness 消费。"""
     if project_root is None:
         return ""
     try:
@@ -331,9 +352,18 @@ def _collect_model_patch(project_root: Path | None) -> str:
 _NUMERIC_FIELDS = (
     "llm_calls",
     "estimated_prompt_tokens",
+    "input_tokens",
+    "output_tokens",
     "model_total_ms",
+    "tool_total_ms",
+    "total_observed_ms",
+    "wall_clock_ms",
     "tool_calls",
     "tool_errors",
+    "unexpected_tool_call_count",
+    "unexpected_tool_call_rate",
+    "repeated_tool_call_count",
+    "first_expected_tool_step",
     "steps",
     "memory_retrieval_count",
     "memory_injected_count",
@@ -355,8 +385,8 @@ type MemoryEvalConfig = dict[str, Any]
 def _extract_agent_metrics(events: list[StructuredAgentEvent]) -> dict[str, Any]:
     for event in events:
         if event.type == "final" and hasattr(event.data, "metrics"):
-            agent_m = event.data.metrics
-            if not isinstance(agent_m, dict):
+            agent_metrics = event.data.metrics
+            if not isinstance(agent_metrics, dict):
                 return {}
             metric_names = (
                 "llm_calls",
@@ -368,10 +398,83 @@ def _extract_agent_metrics(events: list[StructuredAgentEvent]) -> dict[str, Any]
                 "total_observed_ms",
                 "steps",
             )
-            metrics = {key: agent_m[key] for key in metric_names if key in agent_m}
+            metrics = {key: agent_metrics[key] for key in metric_names if key in agent_metrics}
             metrics["termination_reason"] = event.data.termination_reason.value
             return metrics
     return {}
+
+
+def _build_trajectory_metrics(
+    task: EvalTask,
+    events: list[StructuredAgentEvent],
+) -> dict[str, Any]:
+    tool_use_events = [
+        event
+        for event in events
+        if event.type == "tool_use" and hasattr(event.data, "name")
+    ]
+    if not tool_use_events:
+        return {}
+    expected_tools = set(task.expected_tool_calls)
+    policy = task.metadata.get("tool_policy")
+    if isinstance(policy, dict):
+        expected_tools.update(_string_tuple(policy.get("ordered_tools", ())))
+        for check in policy.get("argument_contains", ()):
+            if isinstance(check, dict):
+                tool_name = str(check.get("tool", "")).strip()
+                if tool_name:
+                    expected_tools.add(tool_name)
+    unexpected_tool_calls = sum(
+        1 for event in tool_use_events if expected_tools and event.data.name not in expected_tools
+    )
+    seen_tool_names: set[str] = set()
+    repeated_tool_calls = 0
+    for event in tool_use_events:
+        if event.data.name in seen_tool_names:
+            repeated_tool_calls += 1
+        else:
+            seen_tool_names.add(event.data.name)
+    first_expected_tool_step: int | str = "unavailable"
+    if expected_tools:
+        for index, event in enumerate(tool_use_events, start=1):
+            if event.data.name in expected_tools:
+                first_expected_tool_step = index
+                break
+    metrics: dict[str, Any] = {
+        "repeated_tool_call_count": repeated_tool_calls,
+        "unexpected_tool_call_count": unexpected_tool_calls,
+        "unexpected_tool_call_rate": round(
+            unexpected_tool_calls / len(tool_use_events),
+            4,
+        ),
+    }
+    if first_expected_tool_step != "unavailable":
+        metrics["first_expected_tool_step"] = first_expected_tool_step
+    return metrics
+
+
+def _serialize_agent_config(config: object) -> dict[str, Any] | str | None:
+    if config is None:
+        return None
+    if is_dataclass(config):
+        data = asdict(config)
+        return {key: value for key, value in data.items() if isinstance(value, int | float | str | bool | type(None))}
+    return type(config).__name__
+
+
+def _fill_unavailable_trial_metrics(metrics: dict[str, Any]) -> None:
+    defaults: dict[str, Any] = {
+        "input_tokens": "unavailable",
+        "output_tokens": "unavailable",
+        "estimated_prompt_tokens": "unavailable",
+        "model_total_ms": "unavailable",
+        "tool_total_ms": "unavailable",
+        "total_observed_ms": "unavailable",
+        "termination_reason": "unavailable",
+    }
+    for key, default in defaults.items():
+        if key not in metrics or metrics[key] in (None, ""):
+            metrics[key] = default
 
 
 def _collect_memory_trace(app: XcodeApp) -> tuple[Any, ...]:
@@ -392,20 +495,12 @@ def _record_memory_feedback(app: XcodeApp, *, success: bool, trial_id: str) -> N
     manager.record_session_outcome(outcome, source=f"eval:{trial_id}")
 
 
-def _build_memory_metrics(
-    task: EvalTask, memory_trace: Sequence[Any]
-) -> dict[str, Any]:
+def _build_memory_metrics(task: EvalTask, memory_trace: Sequence[Any]) -> dict[str, Any]:
     if not memory_trace:
         return {}
-    retrieved = [
-        event for event in memory_trace if getattr(event, "type", "") == "retrieved"
-    ]
-    injected = [
-        event for event in memory_trace if getattr(event, "type", "") == "injected"
-    ]
-    tool_searched = [
-        event for event in memory_trace if getattr(event, "type", "") == "tool_searched"
-    ]
+    retrieved = [event for event in memory_trace if getattr(event, "type", "") == "retrieved"]
+    injected = [event for event in memory_trace if getattr(event, "type", "") == "injected"]
+    tool_searched = [event for event in memory_trace if getattr(event, "type", "") == "tool_searched"]
     metrics: dict[str, Any] = {
         "memory_retrieval_count": len(retrieved),
         "memory_injected_count": len(injected),
@@ -430,11 +525,9 @@ def _build_memory_metrics(
             sum(retrieval_latencies) / len(retrieval_latencies),
             3,
         )
-
     config = task.metadata.get("memory_eval", {})
     if not isinstance(config, dict):
         return metrics
-
     expected_titles = {
         str(item).strip()
         for item in config.get("expected_titles", ())
@@ -447,15 +540,9 @@ def _build_memory_metrics(
     }
     retrieved_titles = [str(getattr(event, "title", "") or "") for event in retrieved]
     injected_titles = [str(getattr(event, "title", "") or "") for event in injected]
-
     if expected_titles:
-        retrieved_hits = sum(
-            1 for title in expected_titles if title in retrieved_titles
-        )
-        metrics["memory_recall_at_k"] = round(
-            retrieved_hits / max(len(expected_titles), 1),
-            4,
-        )
+        retrieved_hits = sum(1 for title in expected_titles if title in retrieved_titles)
+        metrics["memory_recall_at_k"] = round(retrieved_hits / max(len(expected_titles), 1), 4)
         reciprocal_rank = 0.0
         for index, title in enumerate(retrieved_titles, start=1):
             if title in expected_titles:
@@ -463,9 +550,7 @@ def _build_memory_metrics(
                 break
         metrics["memory_mrr"] = round(reciprocal_rank, 4)
         if injected_titles:
-            irrelevant = sum(
-                1 for title in injected_titles if title not in expected_titles
-            )
+            irrelevant = sum(1 for title in injected_titles if title not in expected_titles)
             metrics["memory_irrelevant_injection_rate"] = round(
                 irrelevant / len(injected_titles),
                 4,
@@ -493,31 +578,27 @@ def _percentile(sorted_values: Sequence[float], p: float) -> float:
 def _build_run_metrics(
     tasks: Sequence[EvalTask], trials: list[TrialResult]
 ) -> dict[str, Any]:
-    passed = sum(1 for t in trials if t.success)
+    passed = sum(1 for trial in trials if trial.success)
     metrics: dict[str, Any] = {
         "task_count": len(tasks),
         "trial_count": len(trials),
         "passed_trials": passed,
     }
-    from collections import defaultdict
-
     task_trials: dict[str, list[bool]] = defaultdict(list)
-    for t in trials:
-        task_trials[t.task_id].append(t.success)
-    k = max(len(v) for v in task_trials.values()) if task_trials else 1
+    for trial in trials:
+        task_trials[trial.task_id].append(trial.success)
+    k = max(len(values) for values in task_trials.values()) if task_trials else 1
     pass_at_k_rates = [
-        _unbiased_pass_at_k(len(values), sum(1 for passed in values if passed), k)
+        _unbiased_pass_at_k(len(values), sum(1 for value in values if value), k)
         for values in task_trials.values()
     ]
-    pass_at_k_count = sum(1 for v in task_trials.values() if any(v))
-    pass_pow_k_count = sum(1 for v in task_trials.values() if all(v))
+    pass_at_k_count = sum(1 for values in task_trials.values() if any(values))
+    pass_pow_k_count = sum(1 for values in task_trials.values() if all(values))
     metrics["trials_per_task"] = k
     metrics["pass@k"] = f"{pass_at_k_count}/{len(task_trials)}"
     metrics["pass^k"] = f"{pass_pow_k_count}/{len(task_trials)}"
     metrics["pass@k_rate"] = (
-        round(sum(pass_at_k_rates) / len(pass_at_k_rates), 4)
-        if pass_at_k_rates
-        else 0.0
+        round(sum(pass_at_k_rates) / len(pass_at_k_rates), 4) if pass_at_k_rates else 0.0
     )
     metrics["pass^k_rate"] = (
         round(pass_pow_k_count / len(task_trials), 4) if task_trials else 0.0
@@ -527,12 +608,22 @@ def _build_run_metrics(
     total_model_ms = 0.0
     total_tool_calls = 0
     total_tool_errors = 0
-    for t in trials:
-        total_llm += t.metrics.get("llm_calls", 0)
-        total_tokens += t.metrics.get("estimated_prompt_tokens", 0)
-        total_model_ms += t.metrics.get("model_total_ms", 0.0)
-        total_tool_calls += t.metrics.get("tool_calls", 0)
-        total_tool_errors += t.metrics.get("tool_errors", 0)
+    for trial in trials:
+        llm_calls = trial.metrics.get("llm_calls", 0)
+        if isinstance(llm_calls, int):
+            total_llm += llm_calls
+        tokens = trial.metrics.get("estimated_prompt_tokens", 0)
+        if isinstance(tokens, int):
+            total_tokens += tokens
+        model_ms = trial.metrics.get("model_total_ms", 0.0)
+        if isinstance(model_ms, int | float):
+            total_model_ms += float(model_ms)
+        tool_calls = trial.metrics.get("tool_calls", 0)
+        if isinstance(tool_calls, int):
+            total_tool_calls += tool_calls
+        tool_errors = trial.metrics.get("tool_errors", 0)
+        if isinstance(tool_errors, int):
+            total_tool_errors += tool_errors
     if total_llm:
         metrics["total_llm_calls"] = total_llm
     if total_tokens:
@@ -542,28 +633,27 @@ def _build_run_metrics(
     metrics["total_tool_calls"] = total_tool_calls
     metrics["total_tool_errors"] = total_tool_errors
     for field in _NUMERIC_FIELDS:
-        values = [t.metrics.get(field, 0) or 0 for t in trials]
-        if all(v == 0 for v in values):
-            continue
-        sv = sorted(values)
-        metrics[f"{field}_distribution"] = {
-            "min": sv[0],
-            "p50": round(_percentile(sv, 50), 1),
-            "p95": round(_percentile(sv, 95), 1),
-            "p99": round(_percentile(sv, 99), 1),
-            "max": sv[-1],
-            "mean": round(sum(sv) / len(sv), 1),
-        }
-    for field in _MEMORY_RATE_FIELDS:
         values = [
-            t.metrics.get(field) for t in trials if t.metrics.get(field) is not None
+            float(value)
+            for trial in trials
+            if isinstance((value := trial.metrics.get(field)), int | float)
         ]
         if not values:
             continue
-        metrics[f"{field}_mean"] = round(
-            sum(float(value) for value in values) / len(values),
-            4,
-        )
+        sorted_values = sorted(values)
+        metrics[f"{field}_distribution"] = {
+            "min": sorted_values[0],
+            "p50": round(_percentile(sorted_values, 50), 1),
+            "p95": round(_percentile(sorted_values, 95), 1),
+            "p99": round(_percentile(sorted_values, 99), 1),
+            "max": sorted_values[-1],
+            "mean": round(sum(sorted_values) / len(sorted_values), 1),
+        }
+    for field in _MEMORY_RATE_FIELDS:
+        values = [trial.metrics.get(field) for trial in trials if trial.metrics.get(field) is not None]
+        if not values:
+            continue
+        metrics[f"{field}_mean"] = round(sum(float(value) for value in values) / len(values), 4)
     memory_ablation = _build_memory_ablation_metrics(tasks, trials)
     if memory_ablation:
         metrics.update(memory_ablation)
@@ -577,10 +667,16 @@ def _build_run_metrics(
         passed_g = sum(1 for grader in evaluated_graders if grader.passed)
         metrics["grader_pass_rate"] = round(passed_g / total_g, 4)
         by_name: dict[str, list[bool]] = {}
+        by_category: dict[str, list[bool]] = {}
         for grader in evaluated_graders:
             by_name.setdefault(grader.name, []).append(grader.passed)
+            category = grader.failure_category or "pass"
+            by_category.setdefault(category, []).append(grader.passed)
         metrics["per_grader_pass_rate"] = {
-            name: round(sum(v) / len(v), 4) for name, v in by_name.items()
+            name: round(sum(values) / len(values), 4) for name, values in by_name.items()
+        }
+        metrics["failure_category_pass_rate"] = {
+            name: round(sum(values) / len(values), 4) for name, values in sorted(by_category.items())
         }
         task_graders: dict[str, list[bool]] = defaultdict(list)
         for trial in trials:
@@ -589,16 +685,14 @@ def _build_run_metrics(
                     continue
                 task_graders[trial.task_id].append(grader.passed)
         metrics["per_task_grader_rate"] = {
-            tid: round(sum(v) / len(v), 4) for tid, v in sorted(task_graders.items())
+            task_id: round(sum(values) / len(values), 4)
+            for task_id, values in sorted(task_graders.items())
         }
     return metrics
 
 
 def _unbiased_pass_at_k(sample_count: int, correct_count: int, k: int) -> float:
-    """使用 HumanEval 无偏估计量计算 pass@k。"""
-    if sample_count <= 0 or correct_count <= 0:
-        return 0.0
-    if k <= 0:
+    if sample_count <= 0 or correct_count <= 0 or k <= 0:
         return 0.0
     if sample_count - correct_count < k:
         return 1.0
@@ -625,11 +719,9 @@ def _build_memory_ablation_metrics(
             continue
         key = (group, _trial_iteration(trial.trial_id))
         grouped.setdefault(key, {})[mode] = trial
-
     paired = [pair for pair in grouped.values() if {"on", "off"} <= pair.keys()]
     if not paired:
         return {}
-
     on_successes = [1.0 if pair["on"].success else 0.0 for pair in paired]
     off_successes = [1.0 if pair["off"].success else 0.0 for pair in paired]
     tool_call_deltas = [
@@ -645,10 +737,7 @@ def _build_memory_ablation_metrics(
         "memory_ablation_pair_count": len(paired),
         "memory_on_success_rate": round(sum(on_successes) / len(paired), 4),
         "memory_off_success_rate": round(sum(off_successes) / len(paired), 4),
-        "memory_success_delta": round(
-            (sum(on_successes) - sum(off_successes)) / len(paired),
-            4,
-        ),
+        "memory_success_delta": round((sum(on_successes) - sum(off_successes)) / len(paired), 4),
         "memory_tool_call_delta_mean": round(
             sum(tool_call_deltas) / len(tool_call_deltas),
             4,

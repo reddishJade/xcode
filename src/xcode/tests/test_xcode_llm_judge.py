@@ -58,6 +58,7 @@ class XcodeLlmJudgeTests:
             prompt="answer",
             expected_answer_contains=("candidate",),
             llm_judge_criteria=("includes required evidence",),
+            llm_judge_required=True,
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             runner = EvalRunner(
@@ -115,6 +116,41 @@ class XcodeLlmJudgeTests:
         assert "SKIP" in report_html
         assert "graders_skipped" in report_csv
 
+    def test_required_judge_unavailable_fails_trial(self) -> None:
+        """required judge 不得以 skipped 方式让 trial 静默通过。"""
+        provider = FakeProvider(
+            [
+                TextDelta(chunk="candidate answer"),
+                FinalMessage(content="", stop_reason="end_turn"),
+            ]
+        )
+        task = EvalTask(
+            id="judge-required-unavailable",
+            prompt="answer",
+            expected_answer_contains=("candidate",),
+            llm_judge_criteria=("includes required evidence",),
+            llm_judge_required=True,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = EvalRunner(
+                tasks=(task,),
+                app_factory=lambda _task, _trial: _app(provider),
+                output_dir=Path(temp_dir),
+            )
+
+            report = runner.run()
+
+        assert not report.success
+        grader = next(
+            grader
+            for grader in report.trials[0].graders
+            if grader.name == "llm_judge:required"
+        )
+        assert not grader.passed
+        assert not grader.skipped
+        assert grader.required
+        assert grader.failure_category == "judge"
+
     def test_missing_judge_provider_returns_explicit_skip(self) -> None:
         """未注入 provider 时返回不影响成败的 skipped grader。"""
         task = EvalTask(
@@ -129,6 +165,22 @@ class XcodeLlmJudgeTests:
         assert graders[0].passed
         assert graders[0].skipped
         assert "unavailable" in graders[0].details
+
+    def test_missing_required_judge_provider_returns_failure(self) -> None:
+        task = EvalTask(
+            id="judge-missing-required",
+            prompt="answer",
+            llm_judge_criteria=("criterion",),
+            llm_judge_required=True,
+        )
+
+        graders = asyncio.run(run_llm_judge(task, "answer", [], None))
+
+        assert len(graders) == 1
+        assert not graders[0].passed
+        assert not graders[0].skipped
+        assert graders[0].required
+        assert graders[0].name == "llm_judge:required"
 
 
 def _app(provider: FakeProvider) -> XcodeApp:

@@ -19,16 +19,21 @@ def grade_events(
     answer: str,
     runtime_error: BaseException | None = None,
 ) -> tuple[GraderResult, ...]:
-    tool_calls = [
-        event.data.name
+    tool_use_events = [
+        event
         for event in events
         if event.type == "tool_use" and hasattr(event.data, "name")
     ]
-    tool_errors = [
+    tool_calls = [event.data.name for event in tool_use_events]
+    tool_results = [
         event
         for event in events
-        if event.type == "tool_result"
-        and getattr(event.data, "status", "ok") not in {"ok", "interrupted"}
+        if event.type == "tool_result" and hasattr(event.data, "tool_use_id")
+    ]
+    tool_errors = [
+        tool_result
+        for tool_result in tool_results
+        if getattr(tool_result.data, "status", "ok") not in {"ok", "interrupted"}
     ]
     graders: list[GraderResult] = []
     graders.append(
@@ -38,6 +43,7 @@ def grade_events(
             details=""
             if runtime_error is None
             else f"{type(runtime_error).__name__}: {runtime_error}",
+            failure_category="environment" if runtime_error is not None else None,
         )
     )
     graders.append(
@@ -47,6 +53,11 @@ def grade_events(
             details="missing final event"
             if not any(event.type == "final" for event in events)
             else "",
+            failure_category=(
+                "stopping_condition"
+                if not any(event.type == "final" for event in events)
+                else None
+            ),
         )
     )
     for expected in task.expected_answer_contains:
@@ -57,6 +68,7 @@ def grade_events(
                 details=""
                 if expected in answer
                 else f"answer did not contain {expected!r}",
+                failure_category="understanding" if expected not in answer else None,
             )
         )
     for tool_name in task.expected_tool_calls:
@@ -67,6 +79,8 @@ def grade_events(
                 details=""
                 if tool_name in tool_calls
                 else f"observed tools: {tool_calls}",
+                failure_category="tool_selection" if tool_name not in tool_calls else None,
+                required=False,
             )
         )
     for tool_name in task.disallowed_tool_calls:
@@ -77,6 +91,10 @@ def grade_events(
                 details=""
                 if tool_name not in tool_calls
                 else f"disallowed tool was called: {tool_name}",
+                failure_category=(
+                    "tool_selection" if tool_name in tool_calls else None
+                ),
+                required=False,
             )
         )
     graders.append(
@@ -88,9 +106,189 @@ def grade_events(
                 if len(tool_errors) <= task.max_tool_errors
                 else f"tool errors {len(tool_errors)} exceeded {task.max_tool_errors}"
             ),
+            failure_category=(
+                "tool_execution"
+                if len(tool_errors) > task.max_tool_errors
+                else None
+            ),
+            required=False,
         )
     )
+    graders.extend(_grade_tool_policy(task, tool_use_events, tool_results, answer))
     return tuple(graders)
+
+
+def _grade_tool_policy(
+    task: EvalTask,
+    tool_use_events: list[StructuredAgentEvent],
+    tool_results: list[StructuredAgentEvent],
+    answer: str,
+) -> list[GraderResult]:
+    policy = task.metadata.get("tool_policy")
+    if not isinstance(policy, dict):
+        return []
+    graders: list[GraderResult] = []
+    tool_names = [event.data.name for event in tool_use_events]
+    result_by_tool_use_id = {
+        str(event.data.tool_use_id): str(getattr(event.data, "content", ""))
+        for event in tool_results
+    }
+    name_by_tool_use_id = {
+        str(event.data.id): str(event.data.name) for event in tool_use_events
+    }
+    ordered_tools = _string_tuple_or_empty(policy.get("ordered_tools"))
+    if ordered_tools:
+        observed_positions: list[int] = []
+        cursor = 0
+        passed = True
+        for tool_name in ordered_tools:
+            try:
+                position = tool_names.index(tool_name, cursor)
+            except ValueError:
+                passed = False
+                break
+            observed_positions.append(position)
+            cursor = position + 1
+        graders.append(
+            GraderResult(
+                name="tool_policy:ordered_tools",
+                passed=passed,
+                details=""
+                if passed
+                else f"expected ordered tools {ordered_tools}, observed {tool_names}",
+                required=False,
+                failure_category="planning" if not passed else None,
+                evidence={
+                    "expected": ordered_tools,
+                    "observed": tool_names,
+                    "positions": observed_positions,
+                },
+            )
+        )
+    for index, check in enumerate(_dict_tuple_or_empty(policy.get("argument_contains")), start=1):
+        tool_name = str(check.get("tool", "")).strip()
+        arguments = check.get("arguments")
+        if not tool_name or not isinstance(arguments, dict):
+            continue
+        matching_call = next(
+            (
+                event
+                for event in tool_use_events
+                if event.data.name == tool_name
+                and _arguments_contain(event.data.input, arguments)
+            ),
+            None,
+        )
+        graders.append(
+            GraderResult(
+                name=f"tool_policy:arguments:{index}:{tool_name}",
+                passed=matching_call is not None,
+                details=""
+                if matching_call is not None
+                else f"missing {tool_name} call containing arguments {arguments!r}",
+                required=False,
+                failure_category="retrieval" if matching_call is None else None,
+                evidence={"tool": tool_name, "arguments": arguments},
+            )
+        )
+    for index, check in enumerate(_dict_tuple_or_empty(policy.get("result_contains")), start=1):
+        tool_name = str(check.get("tool", "")).strip()
+        substrings = _string_tuple_or_empty(check.get("substrings"))
+        if not tool_name or not substrings:
+            continue
+        matching_results = [
+            text
+            for tool_use_id, text in result_by_tool_use_id.items()
+            if name_by_tool_use_id.get(tool_use_id) == tool_name
+        ]
+        passed = any(all(expected in text for expected in substrings) for text in matching_results)
+        graders.append(
+            GraderResult(
+                name=f"tool_policy:result:{index}:{tool_name}",
+                passed=passed,
+                details=""
+                if passed
+                else f"{tool_name} results did not contain {substrings!r}",
+                required=False,
+                failure_category="tool_execution" if not passed else None,
+                evidence={"tool": tool_name, "substrings": substrings},
+            )
+        )
+    for index, check in enumerate(_dict_tuple_or_empty(policy.get("answer_contains_from_tool")), start=1):
+        tool_name = str(check.get("tool", "")).strip()
+        substrings = _string_tuple_or_empty(check.get("substrings"))
+        if not tool_name or not substrings:
+            continue
+        matching_results = [
+            text
+            for tool_use_id, text in result_by_tool_use_id.items()
+            if name_by_tool_use_id.get(tool_use_id) == tool_name
+        ]
+        observed = next(
+            (
+                expected
+                for expected in substrings
+                if any(expected in text for text in matching_results)
+            ),
+            None,
+        )
+        passed = observed is not None and observed in answer
+        graders.append(
+            GraderResult(
+                name=f"tool_policy:adopted_result:{index}:{tool_name}",
+                passed=passed,
+                details=""
+                if passed
+                else f"answer did not adopt any expected {tool_name} result snippet",
+                required=False,
+                failure_category="understanding" if not passed else None,
+                evidence={"tool": tool_name, "substrings": substrings, "answer": answer},
+            )
+        )
+    return graders
+
+
+def _string_tuple_or_empty(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        text = value.strip()
+        return (text,) if text else ()
+    if not isinstance(value, list | tuple):
+        return ()
+    result: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text:
+            result.append(text)
+    return tuple(result)
+
+
+def _dict_tuple_or_empty(value: object) -> tuple[dict[str, object], ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    result: list[dict[str, object]] = []
+    for item in value:
+        if isinstance(item, dict):
+            result.append(item)
+    return tuple(result)
+
+
+def _arguments_contain(
+    observed: object,
+    expected: dict[str, object],
+) -> bool:
+    if not isinstance(observed, dict):
+        return False
+    for key, value in expected.items():
+        if key not in observed:
+            return False
+        actual = observed[key]
+        if isinstance(value, str):
+            if value not in str(actual):
+                return False
+            continue
+        if actual != value:
+            return False
+    return True
 
 
 # ── LLM-as-judge grader ──
@@ -132,7 +330,7 @@ async def run_llm_judge(
         return ()
 
     if judge_provider is None:
-        return _skipped_llm_judge("judge provider is unavailable")
+        return _judge_unavailable(task, "judge provider is unavailable")
 
     tool_calls = [
         f"{event.data.name}({getattr(event.data, 'input', {})})"
@@ -165,26 +363,46 @@ async def run_llm_judge(
             elif isinstance(event, FinalMessage):
                 final_content = event.content
     except Exception as exc:
-        return _skipped_llm_judge(f"judge provider failed: {type(exc).__name__}: {exc}")
+        return _judge_unavailable(
+            task,
+            f"judge provider failed: {type(exc).__name__}: {exc}",
+        )
 
     judge_response = "".join(response_parts).strip() or final_content.strip()
     if not judge_response:
-        return _skipped_llm_judge("judge provider returned no text")
+        return _judge_unavailable(task, "judge provider returned no text")
 
-    parsed = _parse_judge_response(judge_response, task.llm_judge_criteria)
+    parsed = _parse_judge_response(
+        judge_response,
+        task.llm_judge_criteria,
+        required=task.llm_judge_required,
+    )
     if not parsed:
-        return _skipped_llm_judge("judge output could not be parsed")
+        return _judge_unavailable(task, "judge output could not be parsed")
     return parsed
 
 
-def _skipped_llm_judge(reason: str) -> tuple[GraderResult, ...]:
-    """构建不影响 trial 成败的显式 skipped grader。"""
+def _judge_unavailable(task: EvalTask, reason: str) -> tuple[GraderResult, ...]:
+    """根据 task 配置构建 judge unavailable 结果。"""
+    if task.llm_judge_required:
+        return (
+            GraderResult(
+                name="llm_judge:required",
+                passed=False,
+                details=reason,
+                required=True,
+                skipped=False,
+                failure_category="judge",
+            ),
+        )
     return (
         GraderResult(
             name="llm_judge:skipped",
             passed=True,
             details=reason,
             skipped=True,
+            required=False,
+            failure_category="judge",
         ),
     )
 
@@ -192,6 +410,8 @@ def _skipped_llm_judge(reason: str) -> tuple[GraderResult, ...]:
 def _parse_judge_response(
     response: str,
     criteria: tuple[str, ...],
+    *,
+    required: bool,
 ) -> tuple[GraderResult, ...]:
     """解析 LLM judge 的结构化输出。
 
@@ -229,6 +449,8 @@ def _parse_judge_response(
                 name=f"llm_judge:{criterion_name}",
                 passed=passed,
                 details=details,
+                required=required,
+                failure_category="judge" if not passed else None,
             )
         )
 
@@ -246,6 +468,8 @@ def _parse_judge_response(
                     name=f"llm_judge:{key}",
                     passed=False,
                     details=f"judge did not evaluate: {criterion}",
+                    required=required,
+                    failure_category="judge",
                 )
             )
 

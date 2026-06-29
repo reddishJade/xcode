@@ -57,32 +57,14 @@ def run_validation(
 
 def validation_commands(task: EvalTask) -> tuple[str | tuple[str, ...], ...]:
     """读取 task.metadata.validation.commands。"""
-    validation = task.metadata.get("validation", {})
-    if not isinstance(validation, dict):
-        return ()
-    commands = validation.get("commands", ())
-    if not isinstance(commands, list | tuple):
-        return ()
-    parsed: list[str | tuple[str, ...]] = []
-    for command in commands:
-        if isinstance(command, str):
-            parsed.append(command)
-        elif isinstance(command, list | tuple):
-            parsed.append(tuple(str(part) for part in command))
-    return tuple(parsed)
-
-
+    validation = task.metadata.validation
+    return validation.commands if validation is not None else ()
 def validation_timeout_seconds(task: EvalTask) -> float:
     """读取验证命令超时时间，默认 60 秒。"""
-    validation = task.metadata.get("validation", {})
-    if not isinstance(validation, dict):
+    validation = task.metadata.validation
+    if validation is None:
         return 60.0
-    raw_timeout = validation.get("timeout_seconds", 60.0)
-    try:
-        timeout = float(raw_timeout)
-    except (TypeError, ValueError):
-        return 60.0
-    return max(timeout, 1.0)
+    return max(float(validation.timeout_seconds), 1.0)
 
 
 def validation_results_to_dict(

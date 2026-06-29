@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime, UTC
 from html import escape
 import io
 import json
 from pathlib import Path
 from typing import Any
 
-from .schema import EvalReport
+from .schema import (
+    EvalReport,
+    RUN_MANIFEST_SCHEMA_VERSION,
+    TRACE_SCHEMA_VERSION,
+)
 
 _NUMERIC_FIELDS = (
     "llm_calls",
@@ -24,18 +29,48 @@ _NUMERIC_FIELDS = (
 )
 
 
-def write_report_files(report: EvalReport) -> tuple[Path, Path, Path]:
+def write_report_files(
+    report: EvalReport,
+    *,
+    started_at: datetime,
+    completed_at: datetime | None = None,
+    suite_name: str | None = None,
+    task_source: str | None = None,
+) -> tuple[Path, Path, Path, Path]:
     report.output_dir.mkdir(parents=True, exist_ok=True)
     json_path = report.output_dir / "report.json"
     html_path = report.output_dir / "report.html"
     csv_path = report.output_dir / "report.csv"
+    manifest_path = report.output_dir / "run_manifest.json"
     json_path.write_text(
         json.dumps(report_to_dict(report), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     html_path.write_text(report_to_html(report), encoding="utf-8")
     csv_path.write_text(write_csv_report(report), encoding="utf-8")
-    return json_path, html_path, csv_path
+    manifest_path.write_text(
+        json.dumps(
+            run_manifest_to_dict(
+                report,
+                started_at=started_at,
+                completed_at=completed_at or datetime.now(UTC),
+                suite_name=suite_name,
+                task_source=task_source,
+            ),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    _update_run_history_index(
+        report,
+        manifest_path=manifest_path,
+        started_at=started_at,
+        completed_at=completed_at or datetime.now(UTC),
+        suite_name=suite_name,
+        task_source=task_source,
+    )
+    return manifest_path, json_path, html_path, csv_path
 
 
 def write_csv_report(report: EvalReport) -> str:
@@ -78,19 +113,22 @@ def write_csv_report(report: EvalReport) -> str:
         )
     writer.writerow([])
     writer.writerow(["run_id", report.run_id, "success", report.success])
-    for k, v in report.metrics.items():
-        if isinstance(v, dict):
+    writer.writerow(["schema_version", report.schema_version])
+    for key, value in report.metrics.items():
+        if isinstance(value, dict):
             continue
-        writer.writerow([k, v])
+        writer.writerow([key, value])
     return buf.getvalue()
 
 
 def report_to_dict(report: EvalReport) -> dict[str, Any]:
     return {
+        "schema_version": report.schema_version,
         "run_id": report.run_id,
         "success": report.success,
         "output_dir": str(report.output_dir),
         "metrics": report.metrics,
+        "tasks": [task.to_dict() for task in report.tasks],
         "trials": [
             {
                 "task_id": trial.task_id,
@@ -105,6 +143,11 @@ def report_to_dict(report: EvalReport) -> dict[str, Any]:
                         "passed": grader.passed,
                         "skipped": grader.skipped,
                         "details": grader.details,
+                        "score": grader.score,
+                        "required": grader.required,
+                        "weight": grader.weight,
+                        "evidence": grader.evidence,
+                        "failure_category": grader.failure_category,
                     }
                     for grader in trial.graders
                 ],
@@ -114,28 +157,119 @@ def report_to_dict(report: EvalReport) -> dict[str, Any]:
     }
 
 
+def run_manifest_to_dict(
+    report: EvalReport,
+    *,
+    started_at: datetime,
+    completed_at: datetime,
+    suite_name: str | None,
+    task_source: str | None,
+) -> dict[str, Any]:
+    provider_models = sorted(
+        {
+            str(trial.metrics.get("provider_model"))
+            for trial in report.trials
+            if trial.metrics.get("provider_model")
+        }
+    )
+    provider_types = sorted(
+        {
+            str(trial.metrics.get("provider_type"))
+            for trial in report.trials
+            if trial.metrics.get("provider_type")
+        }
+    )
+    agent_configs = [
+        trial.metrics.get("agent_config")
+        for trial in report.trials
+        if trial.metrics.get("agent_config") is not None
+    ]
+    total_wall_clock_ms = round(
+        (completed_at - started_at).total_seconds() * 1000,
+        1,
+    )
+    metrics = report.metrics
+    return {
+        "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
+        "trace_schema_version": TRACE_SCHEMA_VERSION,
+        "report_schema_version": report.schema_version,
+        "run_id": report.run_id,
+        "suite_name": suite_name,
+        "task_source": task_source,
+        "started_at": started_at.astimezone(UTC).isoformat(),
+        "completed_at": completed_at.astimezone(UTC).isoformat(),
+        "task_count": len(report.tasks),
+        "trial_count": len(report.trials),
+        "provider_models": provider_models or ["unavailable"],
+        "provider_types": provider_types or ["unavailable"],
+        "agent_config": agent_configs[0] if agent_configs else "unavailable",
+        "task_ids": [task.id for task in report.tasks],
+        "wall_clock_ms": total_wall_clock_ms,
+        "tokens": _manifest_metric_or_unavailable(metrics, "total_estimated_tokens"),
+        "model_latency_ms": _manifest_metric_or_unavailable(metrics, "total_model_ms"),
+        "tool_calls": _manifest_metric_or_unavailable(metrics, "total_tool_calls"),
+        "tool_errors": _manifest_metric_or_unavailable(metrics, "total_tool_errors"),
+        "avg_tool_latency_ms": _manifest_distribution_mean_or_unavailable(
+            metrics,
+            "tool_total_ms_distribution",
+        ),
+        "avg_model_latency_ms": _manifest_distribution_mean_or_unavailable(
+            metrics,
+            "model_total_ms_distribution",
+        ),
+        "termination_reasons": _manifest_termination_reasons_or_unavailable(report),
+        "token_cost": "unavailable",
+    }
+
+
+def _manifest_metric_or_unavailable(metrics: dict[str, Any], key: str) -> Any:
+    value = metrics.get(key)
+    return value if value not in (None, "") else "unavailable"
+
+
+def _manifest_distribution_mean_or_unavailable(
+    metrics: dict[str, Any],
+    key: str,
+) -> Any:
+    value = metrics.get(key)
+    if not isinstance(value, dict):
+        return "unavailable"
+    mean = value.get("mean")
+    return mean if mean is not None else "unavailable"
+
+
+def _manifest_termination_reasons_or_unavailable(report: EvalReport) -> Any:
+    counts: dict[str, int] = {}
+    for trial in report.trials:
+        reason = trial.metrics.get("termination_reason")
+        if not isinstance(reason, str) or not reason:
+            continue
+        counts[reason] = counts.get(reason, 0) + 1
+    return counts or "unavailable"
+
+
 def report_to_html(report: EvalReport) -> str:
     rows = "\n".join(_trial_row(trial) for trial in report.trials)
     status = "PASS" if report.success else "FAIL"
-    m = report.metrics
-    passed = m.get("passed_trials", 0)
-    total = m.get("trial_count", len(report.trials))
-    grader_rate = m.get("grader_pass_rate")
+    metrics = report.metrics
+    passed = metrics.get("passed_trials", 0)
+    total = metrics.get("trial_count", len(report.trials))
+    grader_rate = metrics.get("grader_pass_rate")
     grader_pct = f"{grader_rate * 100:.1f}%" if grader_rate is not None else "—"
-    pass_at_k = m.get("pass@k", "—")
-    pass_k_rate = m.get("pass@k_rate")
+    pass_at_k = metrics.get("pass@k", "—")
+    pass_k_rate = metrics.get("pass@k_rate")
     pass_k_pct = f"{pass_k_rate * 100:.0f}%" if pass_k_rate is not None else ""
-    pass_pow_k = m.get("pass^k", "—")
-    pass_pow_rate = m.get("pass^k_rate")
+    pass_pow_k = metrics.get("pass^k", "—")
+    pass_pow_rate = metrics.get("pass^k_rate")
     pass_pow_pct = f"{pass_pow_rate * 100:.0f}%" if pass_pow_rate is not None else ""
-    total_llm = m.get("total_llm_calls", 0)
-    total_tokens = m.get("total_estimated_tokens", 0)
-    total_model_ms = m.get("total_model_ms", 0.0)
-    total_tool_calls = m.get("total_tool_calls", 0)
-    total_tool_errors = m.get("total_tool_errors", 0)
-    grader_table = _grader_summary_table(m.get("per_grader_pass_rate", {}))
-    dist_table = _distribution_table_html(m)
-    memory_ablation_table = _memory_ablation_table_html(m)
+    total_llm = metrics.get("total_llm_calls", 0)
+    total_tokens = metrics.get("total_estimated_tokens", 0)
+    total_model_ms = metrics.get("total_model_ms", 0.0)
+    total_tool_calls = metrics.get("total_tool_calls", 0)
+    total_tool_errors = metrics.get("total_tool_errors", 0)
+    grader_table = _grader_summary_table(metrics.get("per_grader_pass_rate", {}))
+    dist_table = _distribution_table_html(metrics)
+    memory_ablation_table = _memory_ablation_table_html(metrics)
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -157,13 +291,9 @@ def report_to_html(report: EvalReport) -> str:
     .skip {{ color: #656d76; font-weight: 600; }}
     code {{ background: #f6f8fa; padding: 2px 4px; border-radius: 4px; }}
     pre {{ white-space: pre-wrap; margin: 0; max-height: 160px; overflow: auto; }}
-    .badge {{ display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin: 2px; }}
-    .badge-pass {{ background: #dafbe1; color: #116329; }}
-    .badge-fail {{ background: #ffebe9; color: #cf222e; }}
     .metric-pill {{ display: inline-block; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 12px; padding: 2px 10px; font-size: 12px; margin: 2px; }}
     .evidence-contains {{ color: #116329; }}
     .evidence-missing {{ color: #cf222e; }}
-    .grader-summary {{ margin-top: 8px; }}
     .grader-bar {{ display: inline-block; height: 10px; border-radius: 3px; vertical-align: middle; }}
     .grader-bar-pass {{ background: #116329; }}
     .grader-bar-fail {{ background: #cf222e; }}
@@ -172,22 +302,23 @@ def report_to_html(report: EvalReport) -> str:
 <body>
   <h1>Xcode Eval Report</h1>
   <div>Run ID: <code>{escape(report.run_id)}</code></div>
-    <div class="summary">
+  <div>Schema Version: <code>{report.schema_version}</code></div>
+  <div class="summary">
     <div class="card"><div class="label">Status</div><div class="value {status.lower()}">{status}</div></div>
     <div class="card"><div class="label">pass@k</div><div class="value">{pass_at_k} {pass_k_pct}</div></div>
     <div class="card"><div class="label">pass^k</div><div class="value">{pass_pow_k} {pass_pow_pct}</div></div>
     <div class="card"><div class="label">Trials</div><div class="value">{passed}/{total}</div></div>
-    <div class="card"><div class="label">Tasks</div><div class="value">{m.get("task_count", 0)}</div></div>
+    <div class="card"><div class="label">Tasks</div><div class="value">{metrics.get("task_count", 0)}</div></div>
     <div class="card"><div class="label">Grader Pass Rate</div><div class="value">{grader_pct}</div></div>
     <div class="card"><div class="label">Tool Calls</div><div class="value">{total_tool_calls}</div></div>
     <div class="card"><div class="label">Tool Errors</div><div class="value">{total_tool_errors}</div></div>
     <div class="card"><div class="label">LLM Calls</div><div class="value">{total_llm}</div></div>
     <div class="card"><div class="label">Est. Tokens</div><div class="value">{total_tokens:,}</div></div>
     <div class="card"><div class="label">Model Latency</div><div class="value">{_fmt_ms(total_model_ms)}</div></div>
-    </div>
-    {grader_table}
-    {dist_table}
-    {memory_ablation_table}
+  </div>
+  {grader_table}
+  {dist_table}
+  {memory_ablation_table}
   <h2>Trials</h2>
   <table>
     <thead>
@@ -203,14 +334,12 @@ def report_to_html(report: EvalReport) -> str:
 
 
 def _fmt_ms(ms: float) -> str:
-    """毫秒格式化为人类可读字符串。"""
     if ms < 1000:
         return f"{ms:.0f}ms"
     return f"{ms / 1000:.1f}s"
 
 
 def _grader_summary_table(per_grader: dict[str, float]) -> str:
-    """生成 grader 维度的通过率汇总表。"""
     if not per_grader:
         return ""
     rows = []
@@ -221,10 +350,10 @@ def _grader_summary_table(per_grader: dict[str, float]) -> str:
             f'<span class="grader-bar grader-bar-pass" style="width:{bar_w}px"></span>'
             f'<span class="grader-bar grader-bar-fail" style="width:{100 - bar_w}px"></span>'
         )
-        cls = "pass" if rate >= 1.0 else "fail"
+        css_class = "pass" if rate >= 1.0 else "fail"
         rows.append(
             f"<tr><td>{escape(name)}</td>"
-            f'<td class="{cls}">{pct}</td>'
+            f'<td class="{css_class}">{pct}</td>'
             f"<td>{bar_html}</td></tr>"
         )
     return (
@@ -236,7 +365,6 @@ def _grader_summary_table(per_grader: dict[str, float]) -> str:
 
 def _trial_row(trial) -> str:
     status = "PASS" if trial.success else "FAIL"
-    # grader 列表
     grader_lines: list[str] = []
     for grader in trial.graders:
         if grader.skipped:
@@ -254,12 +382,12 @@ def _trial_row(trial) -> str:
             f"{': ' + escape(grader.details) if grader.details else ''}"
         )
     graders = "<br>".join(grader_lines)
-    # 指标展示：过滤掉大数组字段，格式化延迟
     skip_keys = {
         "model_latencies_ms",
         "tool_latencies_ms",
         "file_evidence",
         "memory_trace",
+        "agent_config",
     }
     pills = []
     for key, value in sorted(trial.metrics.items()):
@@ -269,7 +397,6 @@ def _trial_row(trial) -> str:
         pills.append(
             f'<span class="metric-pill">{escape(key)}: {escape(display)}</span>'
         )
-    # 文件证据
     evidence_html = _file_evidence_html(trial.metrics.get("file_evidence"))
     metrics_html = " ".join(pills)
     if evidence_html:
@@ -287,7 +414,8 @@ def _trial_row(trial) -> str:
 
 
 def _fmt_metric_value(key: str, value: str | int | float) -> str:
-    """格式化单个指标值用于展示。"""
+    if value == "unavailable":
+        return "unavailable"
     if key in (
         "model_total_ms",
         "tool_total_ms",
@@ -295,9 +423,7 @@ def _fmt_metric_value(key: str, value: str | int | float) -> str:
         "memory_retrieval_latency_ms",
     ):
         return _fmt_ms(float(value))
-    if key == "estimated_prompt_tokens":
-        return f"{int(value):,}"
-    if key == "memory_injected_tokens":
+    if key in {"estimated_prompt_tokens", "memory_injected_tokens"}:
         return f"{int(value):,}"
     if key.startswith("memory_") and key.endswith(("_rate", "_mrr", "_at_k")):
         return f"{float(value) * 100:.1f}%"
@@ -305,7 +431,6 @@ def _fmt_metric_value(key: str, value: str | int | float) -> str:
 
 
 def _file_evidence_html(evidence: list | None) -> str:
-    """将文件证据渲染为可读的 HTML 片段。"""
     if not evidence:
         return ""
     parts = []
@@ -314,23 +439,23 @@ def _file_evidence_html(evidence: list | None) -> str:
         contains = ev.get("contains", {})
         not_contains = ev.get("not_contains", {})
         items = []
-        for k, v in contains.items():
-            cls = "evidence-contains" if v else "evidence-missing"
-            mark = "✓" if v else "✗"
-            items.append(f'<span class="{cls}">{mark} {escape(k)}</span>')
-        for k, v in not_contains.items():
-            cls = "evidence-contains" if v else "evidence-missing"
-            mark = "✓" if v else "✗"
-            items.append(f'<span class="{cls}">{mark} !{escape(k)}</span>')
+        for key, present in contains.items():
+            css_class = "evidence-contains" if present else "evidence-missing"
+            mark = "✓" if present else "✗"
+            items.append(f'<span class="{css_class}">{mark} {escape(key)}</span>')
+        for key, absent in not_contains.items():
+            css_class = "evidence-contains" if absent else "evidence-missing"
+            mark = "✓" if absent else "✗"
+            items.append(f'<span class="{css_class}">{mark} !{escape(key)}</span>')
         if items:
             parts.append(f"<b>{escape(path)}</b>: " + " ".join(items))
     return "<br>".join(parts) if parts else ""
 
 
-def _distribution_table_html(m: dict[str, Any]) -> str:
+def _distribution_table_html(metrics: dict[str, Any]) -> str:
     rows = []
     for key in _NUMERIC_FIELDS:
-        dist = m.get(f"{key}_distribution")
+        dist = metrics.get(f"{key}_distribution")
         if not dist:
             continue
         bar_w = int(dist.get("p50", 0) / max(dist.get("max", 1), 1) * 100)
@@ -356,19 +481,19 @@ def _distribution_table_html(m: dict[str, Any]) -> str:
     )
 
 
-def _memory_ablation_table_html(m: dict[str, Any]) -> str:
-    pair_count = m.get("memory_ablation_pair_count")
+def _memory_ablation_table_html(metrics: dict[str, Any]) -> str:
+    pair_count = metrics.get("memory_ablation_pair_count")
     if not pair_count:
         return ""
     rows = [
         ("Pairs", str(pair_count)),
-        ("Memory On Success", _fmt_ratio(m.get("memory_on_success_rate"))),
-        ("Memory Off Success", _fmt_ratio(m.get("memory_off_success_rate"))),
-        ("Success Delta", _fmt_ratio(m.get("memory_success_delta"))),
-        ("Tool Call Delta", str(m.get("memory_tool_call_delta_mean", "—"))),
+        ("Memory On Success", _fmt_ratio(metrics.get("memory_on_success_rate"))),
+        ("Memory Off Success", _fmt_ratio(metrics.get("memory_off_success_rate"))),
+        ("Success Delta", _fmt_ratio(metrics.get("memory_success_delta"))),
+        ("Tool Call Delta", str(metrics.get("memory_tool_call_delta_mean", "—"))),
         (
             "Negative Migration",
-            _fmt_ratio(m.get("memory_negative_migration_rate")),
+            _fmt_ratio(metrics.get("memory_negative_migration_rate")),
         ),
     ]
     body = "".join(
@@ -386,3 +511,73 @@ def _fmt_ratio(value: Any) -> str:
     if value is None or value == "":
         return "—"
     return f"{float(value) * 100:.1f}%"
+
+
+def _update_run_history_index(
+    report: EvalReport,
+    *,
+    manifest_path: Path,
+    started_at: datetime,
+    completed_at: datetime,
+    suite_name: str | None,
+    task_source: str | None,
+) -> None:
+    history_dir = report.output_dir.parent
+    history_dir.mkdir(parents=True, exist_ok=True)
+    index_path = history_dir / "run_index.jsonl"
+    trend_path = history_dir / "trend_summary.json"
+    entry = {
+        "run_id": report.run_id,
+        "suite_name": suite_name or "ad-hoc",
+        "task_source": task_source or "unknown",
+        "started_at": started_at.astimezone(UTC).isoformat(),
+        "completed_at": completed_at.astimezone(UTC).isoformat(),
+        "success": report.success,
+        "task_count": len(report.tasks),
+        "trial_count": len(report.trials),
+        "pass@k_rate": report.metrics.get("pass@k_rate", "unavailable"),
+        "pass^k_rate": report.metrics.get("pass^k_rate", "unavailable"),
+        "grader_pass_rate": report.metrics.get("grader_pass_rate", "unavailable"),
+        "total_model_ms": report.metrics.get("total_model_ms", "unavailable"),
+        "total_estimated_tokens": report.metrics.get("total_estimated_tokens", "unavailable"),
+        "manifest_path": str(manifest_path),
+        "report_path": str(report.output_dir / "report.json"),
+    }
+    with index_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    trend_path.write_text(
+        json.dumps(_build_trend_summary(index_path), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _build_trend_summary(index_path: Path) -> dict[str, Any]:
+    if not index_path.exists():
+        return {"runs": 0, "by_suite": {}}
+    rows = [
+        json.loads(line)
+        for line in index_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    by_suite: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        by_suite.setdefault(str(row.get("suite_name", "ad-hoc")), []).append(row)
+    summary: dict[str, Any] = {"runs": len(rows), "by_suite": {}}
+    for suite_name, entries in sorted(by_suite.items()):
+        latest = entries[-5:]
+        summary["by_suite"][suite_name] = {
+            "runs": len(entries),
+            "recent_run_ids": [str(entry.get("run_id", "")) for entry in latest],
+            "recent_pass@k_rate_mean": _mean_available(latest, "pass@k_rate"),
+            "recent_grader_pass_rate_mean": _mean_available(latest, "grader_pass_rate"),
+        }
+    return summary
+
+
+def _mean_available(rows: list[dict[str, Any]], key: str) -> Any:
+    values = [float(value) for row in rows if isinstance((value := row.get(key)), int | float)]
+    if not values:
+        return "unavailable"
+    return round(sum(values) / len(values), 4)
