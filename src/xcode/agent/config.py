@@ -67,14 +67,14 @@ class BeforeToolCallContext(BaseModel):
     tool_call: ToolCallContent
     args: ToolArguments
     context: AgentContext
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="forbid")
 
 
 class BeforeToolCallResult(BaseModel):
     block: bool = False
     reason: str = ""
     args: ToolArguments | None = None
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="forbid")
 
 
 class AfterToolCallContext(BaseModel):
@@ -92,7 +92,7 @@ class AfterToolCallResult(BaseModel):
     details: ToolResultDetails | None = None
     is_error: bool | None = None
     terminate: bool | None = None
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="forbid")
 
 
 class ShouldStopAfterTurnContext(BaseModel):
@@ -100,13 +100,13 @@ class ShouldStopAfterTurnContext(BaseModel):
     tool_results: list[ToolResultMessage]
     context: AgentContext
     new_messages: list[AgentMessage]
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="forbid")
 
 
 class AgentLoopTurnUpdate(BaseModel):
     context: AgentContext | None = None
     thinking_level: ThinkingLevel = "off"
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="forbid")
 
 
 # ── 压缩指令 ──

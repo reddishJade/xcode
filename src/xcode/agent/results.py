@@ -12,6 +12,7 @@ from pydantic.functional_validators import SkipValidation
 from enum import StrEnum
 
 from xcode.ai.providers.protocol import StreamProvider
+from .messages import AgentMessage
 
 
 class TerminationReason(StrEnum):
@@ -36,7 +37,7 @@ class AgentLoopMetrics(BaseModel):
 
 
 class AgentLoopResult(BaseModel):
-    messages: list = Field(default_factory=list)
+    messages: list[AgentMessage] = Field(default_factory=list)
     steps: int = 0
     termination_reason: TerminationReason = TerminationReason.COMPLETED
     watchdog_reason: str | None = None
