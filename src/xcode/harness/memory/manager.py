@@ -1616,7 +1616,9 @@ class MemoryManager:
         updated: list[str] = []
         replaced = False
         for block in blocks:
-            existing_record = parse_memory_record(block, layer=cast("MemoryLayer", record.layer))
+            existing_record = parse_memory_record(
+                block, layer=cast("MemoryLayer", record.layer)
+            )
             if existing_record.memory_id == record.memory_id:
                 updated.append(
                     self._rewrite_record_block(existing_record, field_updates)

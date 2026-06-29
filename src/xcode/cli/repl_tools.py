@@ -77,8 +77,7 @@ def run_tool_command(command: str, app: object) -> str:
         action_input = parse_tool_input(selected, raw_input)
     except ValueError as exc:
         return str(exc)
-    agent = getattr(app, "agent", None)
-    return _execute_tool_via_gate(selected, action_input, agent)
+    return _execute_tool_via_gate(selected, action_input, getattr(app, "agent", None))
 
 
 def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:

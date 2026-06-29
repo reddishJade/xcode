@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from xcode.ai.events import Message, ProviderEvent
-from xcode.ai.providers.protocol import StreamProvider
+from xcode.ai.providers.protocol import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
 
 
@@ -18,8 +18,8 @@ class _FallbackSwitchingProvider:
 
     def __init__(
         self,
-        primary: StreamProvider,
-        fallback: StreamProvider,
+        primary: ModelProvider,
+        fallback: ModelProvider,
         error_threshold: int = 3,
         fallback_success_threshold: int = 3,
     ) -> None:
@@ -32,29 +32,28 @@ class _FallbackSwitchingProvider:
         self._using_fallback: bool = False
 
     @property
-    def active_provider(self) -> StreamProvider:
+    def active_provider(self) -> ModelProvider:
         return self._fallback if self._using_fallback else self._primary
 
     @property
     def model(self) -> str:
-        return str(getattr(self.active_provider, "model", "unknown"))
+        return str(self.active_provider.model)
 
     @property
     def base_url(self) -> str:
-        return getattr(self.active_provider, "base_url", "")
+        return self.active_provider.base_url
 
     @property
     def transport(self) -> str:
-        return getattr(self.active_provider, "transport", "")
+        return self.active_provider.transport
 
     @property
     def thinking(self) -> bool:
-        return bool(getattr(self.active_provider, "thinking", True))
+        return self.active_provider.thinking
 
     @property
     def reasoning_effort(self) -> str | None:
-        value = getattr(self.active_provider, "reasoning_effort", None)
-        return str(value) if value is not None else None
+        return self.active_provider.reasoning_effort
 
     def reset_conversation_state(self) -> None:
         """清理主备 provider 的服务端会话状态。"""
@@ -97,7 +96,7 @@ class _FallbackSwitchingProvider:
 
     @staticmethod
     async def _stream_with(
-        provider: StreamProvider,
+        provider: ModelProvider,
         messages: list[Message],
         tools: list[ToolDefinition],
         options: StreamOptions | None,

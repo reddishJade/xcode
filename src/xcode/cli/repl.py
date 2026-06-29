@@ -100,10 +100,11 @@ def current_model_options(app: object) -> tuple[str, ...]:
         all_models.extend(m.id for m in get_models(provider_name))
     agent = getattr(app, "agent", None)
     provider = getattr(agent, "provider", None) if agent else None
-    provider = getattr(provider, "active_provider", provider)
-    current_model = getattr(provider, "model", "") if provider else ""
-    if current_model and current_model not in all_models:
-        all_models.append(current_model)
+    if provider is not None:
+        provider = getattr(provider, "active_provider", provider)
+        current_model = getattr(provider, "model", "") if provider else ""
+        if current_model and current_model not in all_models:
+            all_models.append(current_model)
     return tuple(all_models)
 
 

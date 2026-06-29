@@ -20,6 +20,7 @@ from xcode.harness.skills import ToolRegistryState, ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from xcode.harness.session_todo import SessionTodoState, TodoItem
 from xcode.ai.providers.factory import ProviderSettings, build_provider_bundle
+from xcode.ai.providers.protocol import ModelProvider
 from . import assembly as _assembly
 from .assembly import (
     build_agent,
@@ -67,10 +68,10 @@ class XcodeApp:
         from xcode.ai.providers.factory import ModelProfileProto
 
         if not self._model_profiles:
-            return getattr(self.agent.provider, "model", "unknown")
+            return self.agent.provider.model
         profile_config = self._model_profiles.get(profile)
         if not profile_config:
-            return getattr(self.agent.provider, "model", "unknown")
+            return self.agent.provider.model
         new_cfg: ModelProfileProto = ModelProfileConfig(
             transport=profile_config.transport,
             chat_model=model,
@@ -97,23 +98,23 @@ class XcodeApp:
         return model
 
     def get_model_info(self) -> dict[str, str]:
-        provider = getattr(self.agent, "provider", None)
-        provider = getattr(provider, "active_provider", provider)
-        model_name = getattr(provider, "model", "unknown") if provider else "unknown"
-        base_url = getattr(provider, "base_url", "") if provider else ""
-        transport = getattr(provider, "transport", "") if provider else ""
-        thinking = getattr(provider, "thinking", None)
-        reasoning_effort = getattr(provider, "reasoning_effort", None)
+        provider = self.agent.provider
+        if provider is None:
+            return {"model": "unknown"}
+        if not isinstance(provider, ModelProvider):
+            provider = getattr(provider, "active_provider", None)
+            if not isinstance(provider, ModelProvider):
+                return {"model": "unknown"}
         info: dict[str, str] = {
-            "model": model_name,
-            "base_url": base_url,
-            "transport": transport,
+            "model": provider.model,
+            "base_url": provider.base_url,
+            "transport": provider.transport,
             "profile": "main",
         }
-        if thinking is not None:
-            info["thinking"] = str(thinking)
-        if reasoning_effort:
-            info["reasoning_effort"] = reasoning_effort
+        if provider.thinking:
+            info["thinking"] = str(provider.thinking)
+        if provider.reasoning_effort is not None:
+            info["reasoning_effort"] = provider.reasoning_effort
         return info
 
     def ask(self, question: str) -> str:

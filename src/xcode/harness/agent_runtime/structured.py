@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
 from uuid import uuid4
 
-from xcode.ai.providers.protocol import StreamProvider
+from xcode.ai.providers.protocol import ModelProvider
 
 from ...agent.agent import Agent
 from ...agent.config import AgentContext, BeforeToolCallContext
@@ -74,7 +74,7 @@ __all__ = ["StructuredAgent"]
 class StructuredAgent:
     def __init__(
         self,
-        provider: StreamProvider,
+        provider: ModelProvider,
         registry: tuple[ToolSpec, ...] | ToolRegistryState,
         config: AgentConfig | None = None,
         gate: GateConfig | None = None,
@@ -84,7 +84,7 @@ class StructuredAgent:
         runtime = runtime or AgentRuntimeConfig()
         config = config or runtime.config
 
-        self.provider: StreamProvider = provider
+        self.provider: ModelProvider = provider
         if runtime.fallback_provider is not None:
             self.provider = _FallbackWithRetryPrimary(
                 provider, runtime.fallback_provider
@@ -543,7 +543,9 @@ class StructuredAgent:
             manager.adopt_injected_records(source=source)
         manager.record_session_outcome(outcome, source=source)
 
-    def _memory_outcome_for_result(self, final: StructuredAgentResult) -> MemoryOutcome | None:
+    def _memory_outcome_for_result(
+        self, final: StructuredAgentResult
+    ) -> MemoryOutcome | None:
         answer = final.answer.strip()
         if final.termination_reason is TerminationReason.COMPLETED:
             return "success" if answer else None

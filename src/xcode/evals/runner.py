@@ -691,9 +691,7 @@ def _build_run_metrics(
         ]
         if not raw_values:
             continue
-        metrics[f"{field}_mean"] = round(
-            sum(raw_values) / len(raw_values), 4
-        )
+        metrics[f"{field}_mean"] = round(sum(raw_values) / len(raw_values), 4)
     memory_ablation = _build_memory_ablation_metrics(tasks, trials)
     if memory_ablation:
         metrics.update(memory_ablation)

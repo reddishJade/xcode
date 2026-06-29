@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic.functional_validators import SkipValidation
 
 from .messages import AgentMessage, ToolResultMessage
 from .protocols import AgentToolResult

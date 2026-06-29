@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from xcode.ai.providers.protocol import StreamProvider
+from xcode.ai.providers.protocol import ModelProvider
 
 from ...agent.compaction import (
     extract_prompt_tokens_from_usage,
@@ -96,7 +96,7 @@ class AgentRuntimeConfig:
     compact_controller: CompactController | None = None
     cancellation_token: CancellationToken | None = None
     runtime_context_provider: RuntimeContextProvider | None = None
-    fallback_provider: StreamProvider | None = None
+    fallback_provider: ModelProvider | None = None
     project_root: Path | None = None
     request_hygiene: RequestHygieneConfig | None = None
     skill_registry: SkillRegistry | None = None
@@ -109,14 +109,14 @@ class AgentRuntimeConfig:
 class TurnSnapshot:
     config: AgentConfig
     registry: tuple[ToolSpec, ...]
-    provider: StreamProvider
+    provider: ModelProvider
     runtime_context_provider: RuntimeContextProvider | None
 
 
 def build_turn_snapshot(
     config: AgentConfig,
     registry: tuple[ToolSpec, ...],
-    provider: StreamProvider,
+    provider: ModelProvider,
     runtime_context_provider: RuntimeContextProvider | None,
 ) -> TurnSnapshot:
     return TurnSnapshot(
@@ -391,7 +391,8 @@ def _should_compact(
     if manual_compact_requested and manual_compact_requested():
         return True
     if last_prompt_tokens is not None:
-        model_name = getattr(snapshot.provider, "model", None)
+        provider = snapshot.provider
+        model_name = provider.model if isinstance(provider, ModelProvider) else None
         return last_prompt_tokens >= get_model_soft_threshold(
             str(model_name) if model_name is not None else None
         )

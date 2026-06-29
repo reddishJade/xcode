@@ -145,6 +145,14 @@ class FauxProvider(ModelProvider):
         return self._model
 
     @property
+    def base_url(self) -> str:
+        return ""
+
+    @property
+    def transport(self) -> str:
+        return "faux"
+
+    @property
     def thinking(self) -> bool:
         return self._thinking
 

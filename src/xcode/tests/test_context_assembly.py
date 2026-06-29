@@ -748,7 +748,6 @@ class TestContextAssemblerAgentLoopIntegration:
             max_steps=1,
         )
 
-
         asyncio.run(
             run_agent_loop(
                 prompts=[UserMessage(content="hello")],
@@ -779,7 +778,6 @@ class TestContextAssemblerAgentLoopIntegration:
             max_steps=1,
         )
 
-
         asyncio.run(
             run_agent_loop(
                 prompts=[UserMessage(content="hello")],
@@ -807,7 +805,6 @@ class TestContextAssemblerAgentLoopIntegration:
             transform_context=_transform,
             max_steps=1,
         )
-
 
         asyncio.run(
             run_agent_loop(
@@ -849,7 +846,6 @@ class TestContextAssemblerAgentLoopIntegration:
             tools=[EchoTool()],
         )
 
-
         asyncio.run(
             run_agent_loop(
                 prompts=[UserMessage(content="say hi")],
@@ -871,7 +867,6 @@ class TestContextAssemblerAgentLoopIntegration:
             context_assembler=assembler,
             max_steps=1,
         )
-
 
         asyncio.run(
             run_agent_loop(
@@ -902,7 +897,6 @@ class TestContextAssemblerAgentLoopIntegration:
             context_assembler=StepCaptureAssembler(),
             max_steps=3,
         )
-
 
         asyncio.run(
             run_agent_loop(
@@ -1079,7 +1073,6 @@ class TestContextCollectorWithAssembler:
             max_steps=1,
         )
 
-
         asyncio.run(
             run_agent_loop(
                 prompts=[UserMessage(content="hello")],
@@ -1107,7 +1100,6 @@ class TestContextCollectorWithAssembler:
             context_assembler=CaptureAssembler(),
             max_steps=1,
         )
-
 
         asyncio.run(
             run_agent_loop(
@@ -1142,7 +1134,6 @@ class TestContextCollectorWithAssembler:
             context_assembler=DefaultContextAssembler(),
             max_steps=1,
         )
-
 
         asyncio.run(
             run_agent_loop(
@@ -1180,7 +1171,6 @@ class TestContextCollectorWithAssembler:
             max_steps=1,
         )
 
-
         asyncio.run(
             run_agent_loop(
                 prompts=[UserMessage(content="hello")],
@@ -1208,7 +1198,6 @@ class TestContextCollectorWithAssembler:
             transform_context=_transform,
             max_steps=1,
         )
-
 
         asyncio.run(
             run_agent_loop(
@@ -1244,7 +1233,6 @@ class TestContextCollectorWithAssembler:
             context_assembler=DefaultContextAssembler(),
             max_steps=1,
         )
-
 
         asyncio.run(
             run_agent_loop(

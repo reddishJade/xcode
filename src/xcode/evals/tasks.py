@@ -51,24 +51,26 @@ def coding_fixture() -> tuple[EvalTask, ...]:
             expected_duration_seconds=120,
             difficulty="medium",
             run_mode="real",
-            metadata=TaskMetadata.model_validate({
-                "fixture_dir": "examples/eval/fixtures/tiny-calculator",
-                "validation": validation,
-                "evidence": {
-                    "files": [
-                        {
-                            "path": "calculator.py",
-                            "changed": True,
-                            "contains": ("def subtract", "return left - right"),
-                        },
-                        {
-                            "path": "tests/test_calculator.py",
-                            "changed": True,
-                            "contains": ("test_subtract", "subtract("),
-                        },
-                    ],
-                },
-            }),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "fixture_dir": "examples/eval/fixtures/tiny-calculator",
+                    "validation": validation,
+                    "evidence": {
+                        "files": [
+                            {
+                                "path": "calculator.py",
+                                "changed": True,
+                                "contains": ("def subtract", "return left - right"),
+                            },
+                            {
+                                "path": "tests/test_calculator.py",
+                                "changed": True,
+                                "contains": ("test_subtract", "subtract("),
+                            },
+                        ],
+                    },
+                }
+            ),
         ),
         EvalTask(
             id="fix-divide-by-zero",
@@ -84,19 +86,21 @@ def coding_fixture() -> tuple[EvalTask, ...]:
             expected_duration_seconds=120,
             difficulty="medium",
             run_mode="real",
-            metadata=TaskMetadata.model_validate({
-                "fixture_dir": "examples/eval/fixtures/buggy-math",
-                "validation": validation,
-                "evidence": {
-                    "files": [
-                        {
-                            "path": "math_utils.py",
-                            "changed": True,
-                            "not_contains": ("return 0",),
-                        },
-                    ],
-                },
-            }),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "fixture_dir": "examples/eval/fixtures/buggy-math",
+                    "validation": validation,
+                    "evidence": {
+                        "files": [
+                            {
+                                "path": "math_utils.py",
+                                "changed": True,
+                                "not_contains": ("return 0",),
+                            },
+                        ],
+                    },
+                }
+            ),
         ),
         EvalTask(
             id="add-capitalize-words",
@@ -113,24 +117,26 @@ def coding_fixture() -> tuple[EvalTask, ...]:
             expected_duration_seconds=120,
             difficulty="medium",
             run_mode="real",
-            metadata=TaskMetadata.model_validate({
-                "fixture_dir": "examples/eval/fixtures/string-utils",
-                "validation": validation,
-                "evidence": {
-                    "files": [
-                        {
-                            "path": "string_utils.py",
-                            "changed": True,
-                            "contains": ("def capitalize_words",),
-                        },
-                        {
-                            "path": "tests/test_string_utils.py",
-                            "changed": True,
-                            "contains": ("capitalize_words", "Hello World"),
-                        },
-                    ],
-                },
-            }),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "fixture_dir": "examples/eval/fixtures/string-utils",
+                    "validation": validation,
+                    "evidence": {
+                        "files": [
+                            {
+                                "path": "string_utils.py",
+                                "changed": True,
+                                "contains": ("def capitalize_words",),
+                            },
+                            {
+                                "path": "tests/test_string_utils.py",
+                                "changed": True,
+                                "contains": ("capitalize_words", "Hello World"),
+                            },
+                        ],
+                    },
+                }
+            ),
         ),
         EvalTask(
             id="add-multiply",
@@ -146,24 +152,26 @@ def coding_fixture() -> tuple[EvalTask, ...]:
             expected_duration_seconds=120,
             difficulty="medium",
             run_mode="real",
-            metadata=TaskMetadata.model_validate({
-                "fixture_dir": "examples/eval/fixtures/tiny-calculator",
-                "validation": validation,
-                "evidence": {
-                    "files": [
-                        {
-                            "path": "calculator.py",
-                            "changed": True,
-                            "contains": ("def multiply", "return left * right"),
-                        },
-                        {
-                            "path": "tests/test_calculator.py",
-                            "changed": True,
-                            "contains": ("test_multiply", "multiply("),
-                        },
-                    ],
-                },
-            }),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "fixture_dir": "examples/eval/fixtures/tiny-calculator",
+                    "validation": validation,
+                    "evidence": {
+                        "files": [
+                            {
+                                "path": "calculator.py",
+                                "changed": True,
+                                "contains": ("def multiply", "return left * right"),
+                            },
+                            {
+                                "path": "tests/test_calculator.py",
+                                "changed": True,
+                                "contains": ("test_multiply", "multiply("),
+                            },
+                        ],
+                    },
+                }
+            ),
         ),
     )
 
@@ -192,16 +200,18 @@ def plan_tasks() -> tuple[EvalTask, ...]:
                 "Added grade_tool_errors returning GraderResult.",
                 "Reuses task.max_tool_errors to cap tool errors.",
             ),
-            metadata=TaskMetadata.model_validate({
-                "evidence": {
-                    "files": [
-                        {
-                            "path": "src/xcode/evals/graders.py",
-                            "contains": ("grade_tool_errors", "tool_errors"),
-                        },
-                    ],
-                },
-            }),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "evidence": {
+                        "files": [
+                            {
+                                "path": "src/xcode/evals/graders.py",
+                                "contains": ("grade_tool_errors", "tool_errors"),
+                            },
+                        ],
+                    },
+                }
+            ),
         ),
     )
 
@@ -246,20 +256,22 @@ def memory() -> tuple[EvalTask, ...]:
             prompt="provider timeout retry",
             expected_answer_contains=("done",),
             tags=("memory", "ablation", "offline"),
-            metadata=TaskMetadata.model_validate({
-                "memory_eval": {
-                    "comparison_group": comparison_group,
-                    "mode": "on",
-                    "expected_titles": ("Provider timeout retry",),
-                    "offline_memory_blocks": (
-                        "## Provider timeout retry\n"
-                        "- Context/Query: Provider timeout retry\n"
-                        "- Solution: Retry transient provider failures with backoff\n"
-                        "- Files: src/provider.py\n"
-                        "- Takeaways: Bound retries and preserve the root cause\n",
-                    ),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "memory_eval": {
+                        "comparison_group": comparison_group,
+                        "mode": "on",
+                        "expected_titles": ("Provider timeout retry",),
+                        "offline_memory_blocks": (
+                            "## Provider timeout retry\n"
+                            "- Context/Query: Provider timeout retry\n"
+                            "- Solution: Retry transient provider failures with backoff\n"
+                            "- Files: src/provider.py\n"
+                            "- Takeaways: Bound retries and preserve the root cause\n",
+                        ),
+                    }
                 }
-            }),
+            ),
             **base,
         ),
         EvalTask(
@@ -267,13 +279,15 @@ def memory() -> tuple[EvalTask, ...]:
             prompt="provider timeout retry",
             expected_answer_contains=("done",),
             tags=("memory", "ablation", "offline"),
-            metadata=TaskMetadata.model_validate({
-                "memory_eval": {
-                    "comparison_group": comparison_group,
-                    "mode": "off",
-                    "expected_titles": ("Provider timeout retry",),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "memory_eval": {
+                        "comparison_group": comparison_group,
+                        "mode": "off",
+                        "expected_titles": ("Provider timeout retry",),
+                    }
                 }
-            }),
+            ),
             **base,
         ),
         EvalTask(
@@ -281,26 +295,28 @@ def memory() -> tuple[EvalTask, ...]:
             prompt="provider timeout retry",
             expected_answer_contains=("done",),
             tags=("memory", "ablation", "offline"),
-            metadata=TaskMetadata.model_validate({
-                "memory_eval": {
-                    "comparison_group": conflict_group,
-                    "mode": "on",
-                    "expected_titles": ("Provider timeout retry",),
-                    "stale_or_conflicting_titles": ("Old timeout workaround",),
-                    "offline_memory_blocks": (
-                        "## Provider timeout retry\n"
-                        "- Context/Query: Provider timeout retry\n"
-                        "- Solution: Retry transient provider failures with backoff\n"
-                        "- Files: src/provider.py\n"
-                        "- Takeaways: Bound retries and preserve the root cause\n",
-                        "## Old timeout workaround\n"
-                        "- Context/Query: Provider timeout retry\n"
-                        "- Solution: Retry indefinitely without preserving the root cause\n"
-                        "- Files: legacy/provider.py\n"
-                        "- Takeaways: Legacy workaround kept for stale-conflict eval coverage\n",
-                    ),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "memory_eval": {
+                        "comparison_group": conflict_group,
+                        "mode": "on",
+                        "expected_titles": ("Provider timeout retry",),
+                        "stale_or_conflicting_titles": ("Old timeout workaround",),
+                        "offline_memory_blocks": (
+                            "## Provider timeout retry\n"
+                            "- Context/Query: Provider timeout retry\n"
+                            "- Solution: Retry transient provider failures with backoff\n"
+                            "- Files: src/provider.py\n"
+                            "- Takeaways: Bound retries and preserve the root cause\n",
+                            "## Old timeout workaround\n"
+                            "- Context/Query: Provider timeout retry\n"
+                            "- Solution: Retry indefinitely without preserving the root cause\n"
+                            "- Files: legacy/provider.py\n"
+                            "- Takeaways: Legacy workaround kept for stale-conflict eval coverage\n",
+                        ),
+                    }
                 }
-            }),
+            ),
             **base,
         ),
         EvalTask(
@@ -308,14 +324,16 @@ def memory() -> tuple[EvalTask, ...]:
             prompt="provider timeout retry",
             expected_answer_contains=("done",),
             tags=("memory", "ablation", "offline"),
-            metadata=TaskMetadata.model_validate({
-                "memory_eval": {
-                    "comparison_group": conflict_group,
-                    "mode": "off",
-                    "expected_titles": ("Provider timeout retry",),
-                    "stale_or_conflicting_titles": ("Old timeout workaround",),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "memory_eval": {
+                        "comparison_group": conflict_group,
+                        "mode": "off",
+                        "expected_titles": ("Provider timeout retry",),
+                        "stale_or_conflicting_titles": ("Old timeout workaround",),
+                    }
                 }
-            }),
+            ),
             **base,
         ),
     )
@@ -334,31 +352,33 @@ def tool_use() -> tuple[EvalTask, ...]:
             difficulty="easy",
             run_mode="offline",
             llm_judge_criteria=("Agent used search tool to locate EvalTask.",),
-            metadata=TaskMetadata.model_validate({
-                "tool_policy": {
-                    "argument_contains": (
-                        {
-                            "tool": "grep_search",
-                            "arguments": {
-                                "path": "src/xcode/evals/schema.py",
-                                "query": "EvalTask",
+            metadata=TaskMetadata.model_validate(
+                {
+                    "tool_policy": {
+                        "argument_contains": (
+                            {
+                                "tool": "grep_search",
+                                "arguments": {
+                                    "path": "src/xcode/evals/schema.py",
+                                    "query": "EvalTask",
+                                },
                             },
-                        },
-                    ),
-                    "result_contains": (
-                        {
-                            "tool": "grep_search",
-                            "substrings": ("EvalTask",),
-                        },
-                    ),
-                    "answer_contains_from_tool": (
-                        {
-                            "tool": "grep_search",
-                            "substrings": ("EvalTask",),
-                        },
-                    ),
+                        ),
+                        "result_contains": (
+                            {
+                                "tool": "grep_search",
+                                "substrings": ("EvalTask",),
+                            },
+                        ),
+                        "answer_contains_from_tool": (
+                            {
+                                "tool": "grep_search",
+                                "substrings": ("EvalTask",),
+                            },
+                        ),
+                    }
                 }
-            }),
+            ),
         ),
         EvalTask(
             id="tool-read-file",
@@ -370,16 +390,18 @@ def tool_use() -> tuple[EvalTask, ...]:
             difficulty="easy",
             run_mode="offline",
             llm_judge_criteria=("Agent used read tool to view the specified file.",),
-            metadata=TaskMetadata.model_validate({
-                "tool_policy": {
-                    "argument_contains": (
-                        {
-                            "tool": "read_file",
-                            "arguments": {"path": "src/xcode/evals/__init__.py"},
-                        },
-                    ),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "tool_policy": {
+                        "argument_contains": (
+                            {
+                                "tool": "read_file",
+                                "arguments": {"path": "src/xcode/evals/__init__.py"},
+                            },
+                        ),
+                    }
                 }
-            }),
+            ),
         ),
         EvalTask(
             id="tool-no-write",
@@ -391,11 +413,13 @@ def tool_use() -> tuple[EvalTask, ...]:
             difficulty="easy",
             run_mode="offline",
             llm_judge_criteria=("Agent did not perform any write or edit operations.",),
-            metadata=TaskMetadata.model_validate({
-                "tool_policy": {
-                    "ordered_tools": ("grep_search", "read_file"),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "tool_policy": {
+                        "ordered_tools": ("grep_search", "read_file"),
+                    }
                 }
-            }),
+            ),
         ),
     )
 
@@ -447,11 +471,13 @@ def multi_turn() -> tuple[EvalTask, ...]:
                 "Agent first searched for EvalRunner import locations.",
                 "Agent then read the file from search results.",
             ),
-            metadata=TaskMetadata.model_validate({
-                "tool_policy": {
-                    "ordered_tools": ("grep_search", "read_file"),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "tool_policy": {
+                        "ordered_tools": ("grep_search", "read_file"),
+                    }
                 }
-            }),
+            ),
         ),
     )
 
@@ -473,30 +499,32 @@ def fault_injection() -> tuple[EvalTask, ...]:
             expected_duration_seconds=20,
             difficulty="medium",
             run_mode="offline",
-            metadata=TaskMetadata.model_validate({
-                "fault_injection": {
-                    "scenario": "command_failure_retry",
-                    "expected_failure_category": "tool_execution",
-                },
-                "tool_policy": {
-                    "result_contains": (
-                        {
-                            "tool": "run_tests",
-                            "substrings": ("pytest: command not found",),
-                        },
-                        {
-                            "tool": "run_tests",
-                            "substrings": ("2 passed",),
-                        },
-                    ),
-                    "answer_contains_from_tool": (
-                        {
-                            "tool": "run_tests",
-                            "substrings": ("2 passed", "pytest"),
-                        },
-                    ),
-                },
-            }),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "fault_injection": {
+                        "scenario": "command_failure_retry",
+                        "expected_failure_category": "tool_execution",
+                    },
+                    "tool_policy": {
+                        "result_contains": (
+                            {
+                                "tool": "run_tests",
+                                "substrings": ("pytest: command not found",),
+                            },
+                            {
+                                "tool": "run_tests",
+                                "substrings": ("2 passed",),
+                            },
+                        ),
+                        "answer_contains_from_tool": (
+                            {
+                                "tool": "run_tests",
+                                "substrings": ("2 passed", "pytest"),
+                            },
+                        ),
+                    },
+                }
+            ),
         ),
         EvalTask(
             id="fault-wrong-path-recovery",
@@ -512,33 +540,35 @@ def fault_injection() -> tuple[EvalTask, ...]:
             expected_duration_seconds=20,
             difficulty="medium",
             run_mode="offline",
-            metadata=TaskMetadata.model_validate({
-                "fault_injection": {
-                    "scenario": "wrong_path_recovery",
-                    "expected_failure_category": "retrieval",
-                },
-                "tool_policy": {
-                    "ordered_tools": ("read_file", "grep_search", "read_file"),
-                    "argument_contains": (
-                        {
-                            "tool": "grep_search",
-                            "arguments": {"query": "EvalRunner"},
-                        },
-                    ),
-                    "result_contains": (
-                        {
-                            "tool": "read_file",
-                            "substrings": ("class EvalRunner",),
-                        },
-                    ),
-                    "answer_contains_from_tool": (
-                        {
-                            "tool": "read_file",
-                            "substrings": ("EvalRunner", "runner.py"),
-                        },
-                    ),
-                },
-            }),
+            metadata=TaskMetadata.model_validate(
+                {
+                    "fault_injection": {
+                        "scenario": "wrong_path_recovery",
+                        "expected_failure_category": "retrieval",
+                    },
+                    "tool_policy": {
+                        "ordered_tools": ("read_file", "grep_search", "read_file"),
+                        "argument_contains": (
+                            {
+                                "tool": "grep_search",
+                                "arguments": {"query": "EvalRunner"},
+                            },
+                        ),
+                        "result_contains": (
+                            {
+                                "tool": "read_file",
+                                "substrings": ("class EvalRunner",),
+                            },
+                        ),
+                        "answer_contains_from_tool": (
+                            {
+                                "tool": "read_file",
+                                "substrings": ("EvalRunner", "runner.py"),
+                            },
+                        ),
+                    },
+                }
+            ),
         ),
         EvalTask(
             id="fault-provider-abort-degrade",
@@ -552,12 +582,14 @@ def fault_injection() -> tuple[EvalTask, ...]:
             expected_duration_seconds=10,
             difficulty="medium",
             run_mode="offline",
-            metadata=TaskMetadata.model_validate({
-                "fault_injection": {
-                    "scenario": "provider_abort_degrade",
-                    "expected_failure_category": "environment",
+            metadata=TaskMetadata.model_validate(
+                {
+                    "fault_injection": {
+                        "scenario": "provider_abort_degrade",
+                        "expected_failure_category": "environment",
+                    }
                 }
-            }),
+            ),
         ),
     )
 

@@ -338,9 +338,7 @@ def _ranked_command_matches(
 ) -> list[str]:
     """按命令名和隐藏别名匹配，返回 canonical command。"""
     matched: set[str] = {
-        command
-        for command in command_names
-        if _fuzzy_score(query, command) is not None
+        command for command in command_names if _fuzzy_score(query, command) is not None
     }
     for alias, canonical in aliases.items():
         if _fuzzy_score(query, alias) is not None:

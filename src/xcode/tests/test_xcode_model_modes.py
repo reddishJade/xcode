@@ -144,6 +144,16 @@ class _Provider:
         self.thinking = True
         self.reasoning_effort = "high"
 
+    async def stream(
+        self,
+        messages: list[object],
+        tools: list[object],
+        options: object | None = None,
+        **kwargs: object,
+    ) -> object:
+        return
+        yield  # pragma: no cover
+
 
 class _ProviderWrapper:
     def __init__(self, active_provider: _Provider) -> None:

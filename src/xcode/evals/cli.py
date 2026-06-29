@@ -1295,6 +1295,14 @@ class _StaticProvider(ModelProvider):
         return "offline-static"
 
     @property
+    def base_url(self) -> str:
+        return ""
+
+    @property
+    def transport(self) -> str:
+        return "offline-static"
+
+    @property
     def thinking(self) -> bool:
         return False
 

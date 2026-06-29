@@ -189,7 +189,7 @@ def print_startup_banner(app: object, root: Path) -> None:
     console = Console(file=sys.stdout)
     get_model_info = getattr(app, "get_model_info", None)
     raw_info = get_model_info() if callable(get_model_info) else None
-    info: dict[object, object] = raw_info if isinstance(raw_info, dict) else {}
+    info: dict[str, str] = raw_info if isinstance(raw_info, dict) else {}
     model = str(info.get("model", "unknown")) if info else "unknown"
     thinking = format_thinking(info.get("thinking") if info else None)
     effort = str(info.get("reasoning_effort") or "not set") if info else "not set"

@@ -73,15 +73,17 @@ def load_humaneval(path: Path) -> tuple[EvalTask, ...]:
                 mode="act",
                 expected_answer_contains=(entry_point,) if entry_point else (),
                 tags=("benchmark", "humaneval", "coding"),
-                metadata=TaskMetadata.model_validate({
-                    "benchmark": {
-                        "name": "humaneval",
-                        "task_id": task_id,
-                        "entry_point": entry_point,
-                        "canonical_solution": canonical,
-                        "test": tests,
+                metadata=TaskMetadata.model_validate(
+                    {
+                        "benchmark": {
+                            "name": "humaneval",
+                            "task_id": task_id,
+                            "entry_point": entry_point,
+                            "canonical_solution": canonical,
+                            "test": tests,
+                        }
                     }
-                }),
+                ),
                 llm_judge_criteria=tuple(criteria),
             )
         )
@@ -105,15 +107,17 @@ def load_swebench_lite(path: Path) -> tuple[EvalTask, ...]:
                 prompt=_swebench_prompt(problem, repo, base_commit, tests),
                 mode="act",
                 tags=("benchmark", "swebench-lite", "coding", "repair"),
-                metadata=TaskMetadata.model_validate({
-                    "benchmark": {
-                        "name": "swebench-lite",
-                        "instance_id": instance_id,
-                        "repo": repo,
-                        "base_commit": base_commit,
-                        "test_patch": tests,
+                metadata=TaskMetadata.model_validate(
+                    {
+                        "benchmark": {
+                            "name": "swebench-lite",
+                            "instance_id": instance_id,
+                            "repo": repo,
+                            "base_commit": base_commit,
+                            "test_patch": tests,
+                        }
                     }
-                }),
+                ),
                 llm_judge_criteria=(
                     "Changes directly address the defect described in the problem statement.",
                     "Implementation keeps the patch scope focused, avoiding unrelated refactoring.",
@@ -485,30 +489,32 @@ def _evalplus_task(
         mode="act",
         expected_tool_calls=("read_file", "bash"),
         tags=("benchmark", benchmark_name, "coding", "function"),
-        metadata=TaskMetadata.model_validate({
-            "fixture_dir": str(fixture_dir),
-            "validation": {
-                "commands": ((sys.executable, "-m", "pytest", "tests"),),
-                "timeout_seconds": 30,
-            },
-            "evidence": {
-                "files": [
-                    {
-                        "path": "solution.py",
-                        "changed": True,
-                        "contains": (entry_point,),
-                    }
-                ],
-            },
-            "benchmark": {
-                "name": benchmark_name,
-                "task_id": raw_id,
-                "entry_point": entry_point,
-                "test": tests,
-                "base_input_count": len(base_inputs),
-                "plus_input_count": len(plus_inputs),
-            },
-        }),
+        metadata=TaskMetadata.model_validate(
+            {
+                "fixture_dir": str(fixture_dir),
+                "validation": {
+                    "commands": ((sys.executable, "-m", "pytest", "tests"),),
+                    "timeout_seconds": 30,
+                },
+                "evidence": {
+                    "files": [
+                        {
+                            "path": "solution.py",
+                            "changed": True,
+                            "contains": (entry_point,),
+                        }
+                    ],
+                },
+                "benchmark": {
+                    "name": benchmark_name,
+                    "task_id": raw_id,
+                    "entry_point": entry_point,
+                    "test": tests,
+                    "base_input_count": len(base_inputs),
+                    "plus_input_count": len(plus_inputs),
+                },
+            }
+        ),
     )
 
 
