@@ -126,7 +126,7 @@ class EvalTask(BaseModel):
     disallowed_tool_calls: tuple[str, ...] = ()
     max_tool_errors: int = 0
     tags: tuple[str, ...] = ()
-    metadata: TaskMetadata | dict[str, Any] = Field(default_factory=TaskMetadata)
+    metadata: TaskMetadata = Field(default_factory=TaskMetadata)
     llm_judge_criteria: tuple[str, ...] = ()
     llm_judge_required: StrictBool = False
     version: str = "1"
@@ -147,10 +147,7 @@ class EvalTask(BaseModel):
 
     def requires_project_mutation(self) -> bool:
         """判断任务是否需要直接使用调用方项目根目录。"""
-        meta = self.metadata
-        if isinstance(meta, dict):
-            return True
-        return meta.fixture_dir is None
+        return self.metadata.fixture_dir is None
 
 
 class GraderResult(BaseModel):

@@ -9,7 +9,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Literal
+from typing import Literal, cast
 
 # 质量门阈值
 _MIN_BLOCK_LENGTH = 50
@@ -197,7 +197,7 @@ def parse_memory_type(
 ) -> MemoryType:
     text = (value or "").strip().lower()
     if text in {"semantic", "episodic", "procedural", "preference"}:
-        return text
+        return cast(MemoryType, text)
     combined = " ".join(
         [
             title.lower(),

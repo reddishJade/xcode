@@ -10,7 +10,7 @@ from urllib.request import urlopen
 from typing import Any, Literal
 
 from .adapters.registry import BENCHMARK_ADAPTERS
-from .schema import EvalTask
+from .schema import EvalTask, TaskMetadata
 
 BenchmarkName = Literal[
     "humaneval",
@@ -73,7 +73,7 @@ def load_humaneval(path: Path) -> tuple[EvalTask, ...]:
                 mode="act",
                 expected_answer_contains=(entry_point,) if entry_point else (),
                 tags=("benchmark", "humaneval", "coding"),
-                metadata={
+                metadata=TaskMetadata.model_validate({
                     "benchmark": {
                         "name": "humaneval",
                         "task_id": task_id,
@@ -81,7 +81,7 @@ def load_humaneval(path: Path) -> tuple[EvalTask, ...]:
                         "canonical_solution": canonical,
                         "test": tests,
                     }
-                },
+                }),
                 llm_judge_criteria=tuple(criteria),
             )
         )
@@ -105,7 +105,7 @@ def load_swebench_lite(path: Path) -> tuple[EvalTask, ...]:
                 prompt=_swebench_prompt(problem, repo, base_commit, tests),
                 mode="act",
                 tags=("benchmark", "swebench-lite", "coding", "repair"),
-                metadata={
+                metadata=TaskMetadata.model_validate({
                     "benchmark": {
                         "name": "swebench-lite",
                         "instance_id": instance_id,
@@ -113,7 +113,7 @@ def load_swebench_lite(path: Path) -> tuple[EvalTask, ...]:
                         "base_commit": base_commit,
                         "test_patch": tests,
                     }
-                },
+                }),
                 llm_judge_criteria=(
                     "Changes directly address the defect described in the problem statement.",
                     "Implementation keeps the patch scope focused, avoiding unrelated refactoring.",
@@ -485,7 +485,7 @@ def _evalplus_task(
         mode="act",
         expected_tool_calls=("read_file", "bash"),
         tags=("benchmark", benchmark_name, "coding", "function"),
-        metadata={
+        metadata=TaskMetadata.model_validate({
             "fixture_dir": str(fixture_dir),
             "validation": {
                 "commands": ((sys.executable, "-m", "pytest", "tests"),),
@@ -508,7 +508,7 @@ def _evalplus_task(
                 "base_input_count": len(base_inputs),
                 "plus_input_count": len(plus_inputs),
             },
-        },
+        }),
     )
 
 

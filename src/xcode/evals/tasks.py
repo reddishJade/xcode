@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 from typing import Literal
 
-from .schema import EvalTask
+from .schema import EvalTask, TaskMetadata
 from .validation import validation_commands
 
 """预定义的 eval task 套件。每套侧重一个能力维度。
@@ -51,7 +51,7 @@ def coding_fixture() -> tuple[EvalTask, ...]:
             expected_duration_seconds=120,
             difficulty="medium",
             run_mode="real",
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "fixture_dir": "examples/eval/fixtures/tiny-calculator",
                 "validation": validation,
                 "evidence": {
@@ -68,7 +68,7 @@ def coding_fixture() -> tuple[EvalTask, ...]:
                         },
                     ],
                 },
-            },
+            }),
         ),
         EvalTask(
             id="fix-divide-by-zero",
@@ -84,7 +84,7 @@ def coding_fixture() -> tuple[EvalTask, ...]:
             expected_duration_seconds=120,
             difficulty="medium",
             run_mode="real",
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "fixture_dir": "examples/eval/fixtures/buggy-math",
                 "validation": validation,
                 "evidence": {
@@ -96,7 +96,7 @@ def coding_fixture() -> tuple[EvalTask, ...]:
                         },
                     ],
                 },
-            },
+            }),
         ),
         EvalTask(
             id="add-capitalize-words",
@@ -113,7 +113,7 @@ def coding_fixture() -> tuple[EvalTask, ...]:
             expected_duration_seconds=120,
             difficulty="medium",
             run_mode="real",
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "fixture_dir": "examples/eval/fixtures/string-utils",
                 "validation": validation,
                 "evidence": {
@@ -130,7 +130,7 @@ def coding_fixture() -> tuple[EvalTask, ...]:
                         },
                     ],
                 },
-            },
+            }),
         ),
         EvalTask(
             id="add-multiply",
@@ -146,7 +146,7 @@ def coding_fixture() -> tuple[EvalTask, ...]:
             expected_duration_seconds=120,
             difficulty="medium",
             run_mode="real",
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "fixture_dir": "examples/eval/fixtures/tiny-calculator",
                 "validation": validation,
                 "evidence": {
@@ -163,7 +163,7 @@ def coding_fixture() -> tuple[EvalTask, ...]:
                         },
                     ],
                 },
-            },
+            }),
         ),
     )
 
@@ -192,7 +192,7 @@ def plan_tasks() -> tuple[EvalTask, ...]:
                 "Added grade_tool_errors returning GraderResult.",
                 "Reuses task.max_tool_errors to cap tool errors.",
             ),
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "evidence": {
                     "files": [
                         {
@@ -201,7 +201,7 @@ def plan_tasks() -> tuple[EvalTask, ...]:
                         },
                     ],
                 },
-            },
+            }),
         ),
     )
 
@@ -246,7 +246,7 @@ def memory() -> tuple[EvalTask, ...]:
             prompt="provider timeout retry",
             expected_answer_contains=("done",),
             tags=("memory", "ablation", "offline"),
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "memory_eval": {
                     "comparison_group": comparison_group,
                     "mode": "on",
@@ -259,7 +259,7 @@ def memory() -> tuple[EvalTask, ...]:
                         "- Takeaways: Bound retries and preserve the root cause\n",
                     ),
                 }
-            },
+            }),
             **base,
         ),
         EvalTask(
@@ -267,13 +267,13 @@ def memory() -> tuple[EvalTask, ...]:
             prompt="provider timeout retry",
             expected_answer_contains=("done",),
             tags=("memory", "ablation", "offline"),
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "memory_eval": {
                     "comparison_group": comparison_group,
                     "mode": "off",
                     "expected_titles": ("Provider timeout retry",),
                 }
-            },
+            }),
             **base,
         ),
         EvalTask(
@@ -281,7 +281,7 @@ def memory() -> tuple[EvalTask, ...]:
             prompt="provider timeout retry",
             expected_answer_contains=("done",),
             tags=("memory", "ablation", "offline"),
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "memory_eval": {
                     "comparison_group": conflict_group,
                     "mode": "on",
@@ -300,7 +300,7 @@ def memory() -> tuple[EvalTask, ...]:
                         "- Takeaways: Legacy workaround kept for stale-conflict eval coverage\n",
                     ),
                 }
-            },
+            }),
             **base,
         ),
         EvalTask(
@@ -308,14 +308,14 @@ def memory() -> tuple[EvalTask, ...]:
             prompt="provider timeout retry",
             expected_answer_contains=("done",),
             tags=("memory", "ablation", "offline"),
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "memory_eval": {
                     "comparison_group": conflict_group,
                     "mode": "off",
                     "expected_titles": ("Provider timeout retry",),
                     "stale_or_conflicting_titles": ("Old timeout workaround",),
                 }
-            },
+            }),
             **base,
         ),
     )
@@ -334,7 +334,7 @@ def tool_use() -> tuple[EvalTask, ...]:
             difficulty="easy",
             run_mode="offline",
             llm_judge_criteria=("Agent used search tool to locate EvalTask.",),
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "tool_policy": {
                     "argument_contains": (
                         {
@@ -358,7 +358,7 @@ def tool_use() -> tuple[EvalTask, ...]:
                         },
                     ),
                 }
-            },
+            }),
         ),
         EvalTask(
             id="tool-read-file",
@@ -370,7 +370,7 @@ def tool_use() -> tuple[EvalTask, ...]:
             difficulty="easy",
             run_mode="offline",
             llm_judge_criteria=("Agent used read tool to view the specified file.",),
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "tool_policy": {
                     "argument_contains": (
                         {
@@ -379,7 +379,7 @@ def tool_use() -> tuple[EvalTask, ...]:
                         },
                     ),
                 }
-            },
+            }),
         ),
         EvalTask(
             id="tool-no-write",
@@ -391,11 +391,11 @@ def tool_use() -> tuple[EvalTask, ...]:
             difficulty="easy",
             run_mode="offline",
             llm_judge_criteria=("Agent did not perform any write or edit operations.",),
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "tool_policy": {
                     "ordered_tools": ("grep_search", "read_file"),
                 }
-            },
+            }),
         ),
     )
 
@@ -447,11 +447,11 @@ def multi_turn() -> tuple[EvalTask, ...]:
                 "Agent first searched for EvalRunner import locations.",
                 "Agent then read the file from search results.",
             ),
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "tool_policy": {
                     "ordered_tools": ("grep_search", "read_file"),
                 }
-            },
+            }),
         ),
     )
 
@@ -473,7 +473,7 @@ def fault_injection() -> tuple[EvalTask, ...]:
             expected_duration_seconds=20,
             difficulty="medium",
             run_mode="offline",
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "fault_injection": {
                     "scenario": "command_failure_retry",
                     "expected_failure_category": "tool_execution",
@@ -496,7 +496,7 @@ def fault_injection() -> tuple[EvalTask, ...]:
                         },
                     ),
                 },
-            },
+            }),
         ),
         EvalTask(
             id="fault-wrong-path-recovery",
@@ -512,7 +512,7 @@ def fault_injection() -> tuple[EvalTask, ...]:
             expected_duration_seconds=20,
             difficulty="medium",
             run_mode="offline",
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "fault_injection": {
                     "scenario": "wrong_path_recovery",
                     "expected_failure_category": "retrieval",
@@ -538,7 +538,7 @@ def fault_injection() -> tuple[EvalTask, ...]:
                         },
                     ),
                 },
-            },
+            }),
         ),
         EvalTask(
             id="fault-provider-abort-degrade",
@@ -552,12 +552,12 @@ def fault_injection() -> tuple[EvalTask, ...]:
             expected_duration_seconds=10,
             difficulty="medium",
             run_mode="offline",
-            metadata={
+            metadata=TaskMetadata.model_validate({
                 "fault_injection": {
                     "scenario": "provider_abort_degrade",
                     "expected_failure_category": "environment",
                 }
-            },
+            }),
         ),
     )
 

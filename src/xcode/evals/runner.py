@@ -470,7 +470,7 @@ def _build_trajectory_metrics(
 def _serialize_agent_config(config: object) -> dict[str, Any] | str | None:
     if config is None:
         return None
-    if is_dataclass(config):
+    if is_dataclass(config) and not isinstance(config, type):
         data = asdict(config)
         return {
             key: value
@@ -684,15 +684,15 @@ def _build_run_metrics(
             "mean": round(sum(sorted_values) / len(sorted_values), 1),
         }
     for field in _MEMORY_RATE_FIELDS:
-        values = [
-            trial.metrics.get(field)
+        raw_values: list[float] = [
+            trial.metrics[field]
             for trial in trials
-            if trial.metrics.get(field) is not None
+            if isinstance(trial.metrics.get(field), int | float)
         ]
-        if not values:
+        if not raw_values:
             continue
         metrics[f"{field}_mean"] = round(
-            sum(float(value) for value in values) / len(values), 4
+            sum(raw_values) / len(raw_values), 4
         )
     memory_ablation = _build_memory_ablation_metrics(tasks, trials)
     if memory_ablation:

@@ -53,6 +53,7 @@ from ..skill_activation import (
     ExplicitSkillActivationResult,
     is_skill_activation_content,
 )
+from ..memory.manager import MemoryOutcome
 from ..skills import ApprovalCallback
 
 _PROMPT_VERSION_CACHE: str | None = None
@@ -542,7 +543,7 @@ class StructuredAgent:
             manager.adopt_injected_records(source=source)
         manager.record_session_outcome(outcome, source=source)
 
-    def _memory_outcome_for_result(self, final: StructuredAgentResult) -> str | None:
+    def _memory_outcome_for_result(self, final: StructuredAgentResult) -> MemoryOutcome | None:
         answer = final.answer.strip()
         if final.termination_reason is TerminationReason.COMPLETED:
             return "success" if answer else None

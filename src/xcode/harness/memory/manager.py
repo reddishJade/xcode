@@ -14,7 +14,7 @@ import re
 import time
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from rank_bm25 import BM25Okapi
 
@@ -1612,11 +1612,11 @@ class MemoryManager:
         record: MemoryRecord,
         field_updates: dict[str, str],
     ) -> None:
-        blocks = self.read_memory_blocks(layer=record.layer)
+        blocks = self.read_memory_blocks(layer=cast("MemoryLayerFilter", record.layer))
         updated: list[str] = []
         replaced = False
         for block in blocks:
-            existing_record = parse_memory_record(block, layer=record.layer)
+            existing_record = parse_memory_record(block, layer=cast("MemoryLayer", record.layer))
             if existing_record.memory_id == record.memory_id:
                 updated.append(
                     self._rewrite_record_block(existing_record, field_updates)
@@ -1625,7 +1625,7 @@ class MemoryManager:
             else:
                 updated.append(existing_record.block.rstrip() + "\n")
         if replaced:
-            self._write_blocks(updated, record.layer)
+            self._write_blocks(updated, cast("MemoryLayer", record.layer))
 
     def _rewrite_record_block(
         self,

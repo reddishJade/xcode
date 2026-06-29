@@ -6,6 +6,10 @@ from xcode.ai.events import FinalMessage, TextDelta
 from xcode.ai.providers.protocol import StreamProvider
 from xcode.ai.types import StreamOptions
 from xcode.harness.agent_runtime import StructuredAgentEvent
+from xcode.harness.agent_runtime.events import (
+    ToolResultStructuredEvent,
+    ToolUseStructuredEvent,
+)
 
 from .schema import EvalTask, GraderResult
 
@@ -120,8 +124,8 @@ def grade_events(
 
 def _grade_tool_policy(
     task: EvalTask,
-    tool_use_events: list[StructuredAgentEvent],
-    tool_results: list[StructuredAgentEvent],
+    tool_use_events: list[ToolUseStructuredEvent],
+    tool_results: list[ToolResultStructuredEvent],
     answer: str,
 ) -> list[GraderResult]:
     policy = task.metadata.get("tool_policy")
@@ -345,11 +349,11 @@ async def run_llm_judge(
     if judge_provider is None:
         return _judge_unavailable(task, "judge provider is unavailable")
 
-    tool_calls = [
-        f"{event.data.name}({getattr(event.data, 'input', {})})"
-        for event in events
-        if event.type == "tool_use" and hasattr(event.data, "name")
-    ]
+    tool_calls: list[str] = []
+    for event in events:
+        if event.type == "tool_use":
+            tc = event
+            tool_calls.append(f"{tc.data.name}({tc.data.input})")
     tool_calls_text = "\n".join(tool_calls) if tool_calls else "(no tool calls)"
 
     criteria_list = "\n".join(

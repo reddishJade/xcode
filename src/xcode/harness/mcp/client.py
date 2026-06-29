@@ -22,6 +22,7 @@ from mcp.client.stdio import stdio_client
 from mcp.shared.session import RequestResponder
 from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS as _SDK_PROTOCOL_VERSIONS
 from pydantic import BaseModel
+from pydantic.networks import FileUrl
 
 from xcode.harness.agent_runtime.async_worker import IsolatedAsyncWorker
 
@@ -183,7 +184,7 @@ class McpClient:
                 params,
                 errlog=cast(TextIO, self._stderr.stream),
             ) as (read_stream, write_stream):
-                session_kwargs: dict[str, object] = {
+                session_kwargs: dict[str, Any] = {
                     "read_timeout_seconds": self._timeout_delta(),
                     "message_handler": self._message_handler(),
                     "client_info": types.Implementation(
@@ -221,7 +222,7 @@ class McpClient:
         """向 server 暴露当前允许读取的工作区根目录。"""
         roots = [
             types.Root(
-                uri=path.resolve().as_uri(),
+                uri=FileUrl(path.resolve().as_uri()),
                 name=path.name or str(path.resolve()),
             )
             for path in self._workspace_roots
