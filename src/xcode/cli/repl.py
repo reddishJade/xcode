@@ -80,9 +80,23 @@ def current_effort_options(app: object) -> tuple[str, ...]:
 
 
 def current_model_options(app: object) -> tuple[str, ...]:
-    """返回所有注册的模型 ID 列表（含当前模型，即便非预设）。"""
+    """返回所有注册的模型 ID 列表（含当前模型，即便非预设）。
+
+    只返回已配置 provider 对应的模型。
+    """
+    model_profiles = getattr(app, "_model_profiles", None)
+    configured_providers: set[str] | None = None
+    if model_profiles:
+        configured_providers = set()
+        for profile in model_profiles.values():
+            transport = getattr(profile, "transport", None)
+            if isinstance(transport, str):
+                configured_providers.add(transport.removesuffix("_chat"))
+
     all_models: list[str] = []
     for provider_name in get_providers():
+        if configured_providers and provider_name not in configured_providers:
+            continue
         all_models.extend(m.id for m in get_models(provider_name))
     agent = getattr(app, "agent", None)
     provider = getattr(agent, "provider", None) if agent else None
