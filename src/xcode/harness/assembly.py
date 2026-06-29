@@ -285,30 +285,17 @@ def build_tool_registry(
     closers: list[Callable[[], None]] = []
     shell_spec = detect_shell(runtime_config.tools.shell)
 
-    from xcode.harness.agent_skills import (
-        SkillRegistry,
-        build_skill_search_dirs,
-    )
+    skill_registry = _discover_skills(project_root, runtime_config, skills_dir)
 
-    skill_registry: SkillRegistry | None = SkillRegistry()
-    skill_registry.discover(
-        build_skill_search_dirs(
-            project_root,
-            trust_project_skills=runtime_config.skills.trust_project_skills,
-            skills_dir=skills_dir,
-        )
-    )
-
-    registry = build_project_scoped_registry(
-        project_root=project_root,
+    registry = _build_base_project_registry(
+        project_root,
+        shell_spec,
+        cancel_event,
+        env,
+        skill_registry,
+        todo_state,
         contextual_state=contextual_state,
-        shell_spec=shell_spec,
-        cancel_event=cancel_event,
-        env=env,
-        skill_registry=skill_registry,
     )
-    if todo_state is not None:
-        registry += build_session_todo_tools(todo_state)
     mcp_runtime_registry = McpRuntimeRegistry()
     mcp_runtime_registry.configure_runtime(
         workspace_roots=(project_root,),
@@ -324,12 +311,7 @@ def build_tool_registry(
 
     registry_state = ToolRegistryState(registry)
     subagent_allowlist = set(runtime_config.tools.subagent_tool_allowlist)
-    child_registry = tuple(
-        tool
-        for tool in registry_state.snapshot()
-        if tool.group in ("core", "session")
-        and (tool.name != "update_todo" or tool.name in subagent_allowlist)
-    )
+    child_registry = _build_child_registry(registry_state, subagent_allowlist)
     registry += (build_search_tools_tool(registry_state.snapshot),)
 
     subagent_closers, subagent_tools = _build_subagent_integration(
@@ -365,6 +347,64 @@ def build_tool_registry(
         tuple(closers),
         skill_registry,
         mcp_runtime_registry,
+    )
+
+
+def _discover_skills(
+    project_root: Path,
+    runtime_config: XcodeRuntimeConfig,
+    skills_dir: Path | None,
+) -> SkillRegistry | None:
+    """发现并注册项目与用户技能。"""
+    from xcode.harness.agent_skills import (
+        SkillRegistry,
+        build_skill_search_dirs,
+    )
+
+    skill_registry: SkillRegistry | None = SkillRegistry()
+    skill_registry.discover(
+        build_skill_search_dirs(
+            project_root,
+            trust_project_skills=runtime_config.skills.trust_project_skills,
+            skills_dir=skills_dir,
+        )
+    )
+    return skill_registry
+
+
+def _build_base_project_registry(
+    project_root: Path,
+    shell_spec: ShellSpec,
+    cancel_event: threading.Event | None,
+    env: ExecutionEnv | None,
+    skill_registry: SkillRegistry | None,
+    todo_state: SessionTodoState | None,
+    contextual_state: ContextualRetrievalState | None = None,
+) -> tuple[ToolSpec, ...]:
+    """构建项目级基础工具注册表。"""
+    registry = build_project_scoped_registry(
+        project_root=project_root,
+        contextual_state=contextual_state,
+        shell_spec=shell_spec,
+        cancel_event=cancel_event,
+        env=env,
+        skill_registry=skill_registry,
+    )
+    if todo_state is not None:
+        registry += build_session_todo_tools(todo_state)
+    return registry
+
+
+def _build_child_registry(
+    registry_state: ToolRegistryState,
+    subagent_allowlist: set[str],
+) -> tuple[ToolSpec, ...]:
+    """从主注册表过滤出子代理可用的工具集。"""
+    return tuple(
+        tool
+        for tool in registry_state.snapshot()
+        if tool.group in ("core", "session")
+        and (tool.name != "update_todo" or tool.name in subagent_allowlist)
     )
 
 
