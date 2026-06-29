@@ -212,7 +212,6 @@ def _prompt_thinking_config(transport: str) -> tuple[bool, str | None] | None:
 
 
 def _build_config_data(
-    provider_key: str,
     transport: str,
     model: str,
     base_url: str,
@@ -223,7 +222,6 @@ def _build_config_data(
     """构造配置字典。"""
     config_data: dict[str, Any] = {
         "provider": {
-            "provider_type": provider_key,
             "model_profiles": {
                 "main": {
                     "transport": transport,
@@ -331,7 +329,6 @@ def run_setup_wizard(project_root: Path) -> tuple[str, Path | None]:
         return ("cancelled", None)
 
     config_data = _build_config_data(
-        provider_key,
         transport,
         model,
         base_url,
