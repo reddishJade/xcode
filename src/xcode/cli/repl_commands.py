@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 import subprocess
 import sys
-from typing import cast
+from typing import Any, cast
 
 from .app_contract import ReplApp
 from .commands import (
@@ -41,6 +41,7 @@ from .repl_settings import (
     handle_thinking_command,
 )
 from .repl_skills import activate_skill
+from .setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
 from .repl_tools import run_tool_command
 from xcode.harness.observability import (
     FileGrantStore,
@@ -231,6 +232,125 @@ def cmd_thinking(cmd: str, ctx: CommandContext) -> bool:
     """显示或切换 thinking 开/关。"""
     handle_thinking_command(cmd, ctx.app)
     return False
+
+
+def cmd_config(cmd: str, ctx: CommandContext) -> bool:
+    """管理 provider 配置 profile。"""
+    config_path = ctx.project_root / CONFIG_FILENAME
+    config = _load_existing_config(config_path)
+
+    parts = cmd.split(maxsplit=2)
+    sub = parts[1].strip() if len(parts) >= 2 else ""
+
+    if not sub or sub == "list":
+        _config_cmd_list(config, config_path)
+        return False
+
+    if sub == "reload":
+        print("Reloading config from file...")
+        config = _load_existing_config(config_path)
+        _config_cmd_list(config, config_path)
+        print("(some changes may require restart)")
+        return False
+
+    if sub == "set":
+        set_parts = cmd.split(maxsplit=4)
+        if len(set_parts) < 5:
+            print("Usage: /config set <profile> <field> <value>")
+            print(
+                "  Fields: transport, chat_model, base_url, api_key, "
+                "thinking, reasoning_effort, clear_thinking, tool_stream"
+            )
+            print("  Use 'null' to clear a field")
+            return False
+        _, _, name, field, value = set_parts
+        _config_cmd_set(config, config_path, name, field, value)
+        return False
+
+    print("Usage: /config [list|set <profile> <field> <value>|reload]")
+    return False
+
+
+def _mask_key(key: str) -> str:
+    if len(key) <= 8:
+        return "****"
+    return f"{'*' * max(0, len(key) - 4)}{key[-4:]}"
+
+
+BOOL_CONFIG_FIELDS = frozenset({"thinking", "clear_thinking", "tool_stream"})
+
+
+def _coerce_config_value(field: str, value: str) -> Any:
+    if field in BOOL_CONFIG_FIELDS:
+        if value.lower() in ("true", "1", "yes"):
+            return True
+        if value.lower() in ("false", "0", "no"):
+            return False
+        raise ValueError(f"Invalid bool value for '{field}': {value}")
+    if value.lower() == "null":
+        return None
+    return value
+
+
+def _config_cmd_list(config: dict[str, Any], config_path: Path) -> None:
+    profiles = config.get("provider", {}).get("model_profiles", {})
+    if not profiles:
+        print(f"No profiles found in {config_path.name}.")
+        return
+
+    print(f"Profiles in {config_path.name}:\n")
+    for name, profile in profiles.items():
+        if isinstance(profile, str):
+            print(f"  {name}: (inherits from main, model={profile})")
+            continue
+        print(f"  {name}:")
+        for fname in (
+            "transport",
+            "chat_model",
+            "base_url",
+            "api_key",
+            "thinking",
+            "reasoning_effort",
+            "clear_thinking",
+            "tool_stream",
+        ):
+            val = profile.get(fname)
+            if val is None:
+                continue
+            if fname == "api_key" and val:
+                val = _mask_key(str(val))
+            print(f"    {fname:20s}: {val}")
+        print()
+
+
+def _config_cmd_set(
+    config: dict[str, Any], config_path: Path, name: str, field: str, value: str
+) -> None:
+    profiles = config.setdefault("provider", {}).setdefault("model_profiles", {})
+
+    if name not in profiles:
+        available = ", ".join(sorted(profiles.keys()))
+        print(f"Profile '{name}' not found. Available: {available}")
+        return
+
+    profile = profiles[name]
+    if isinstance(profile, str):
+        print(f"Profile '{name}' is a string alias. Edit main first.")
+        return
+
+    try:
+        coerced = _coerce_config_value(field, value)
+    except ValueError as exc:
+        print(str(exc))
+        return
+
+    if coerced is None:
+        profile.pop(field, None)
+    else:
+        profile[field] = coerced
+
+    _save_config(config, config_path)
+    print(f"  {name}.{field} = {value} (saved to {config_path.name})")
 
 
 def cmd_plan(cmd: str, ctx: CommandContext) -> bool:
@@ -948,8 +1068,6 @@ def cmd_undo(cmd: str, ctx: CommandContext) -> bool:
             print("Nothing to undo (no snapshot records).")
         return False
 
-    from typing import cast
-
     agent = getattr(ctx.app, "agent", None)
     approval_callback = cast(
         "PermissionApprovalCallback | None",
@@ -1170,6 +1288,13 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         handler=cmd_thinking,
         desc="Show current thinking state (on/off).",
         args_desc="on|off",
+        accepts_args=True,
+        group=COMMAND_GROUP_MODEL,
+    ),
+    "/config": CommandEntry(
+        handler=cmd_config,
+        desc="List, set, or reload provider profiles.",
+        args_desc="[list|set <profile> <field> <value>|reload]",
         accepts_args=True,
         group=COMMAND_GROUP_MODEL,
     ),
