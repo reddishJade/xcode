@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 
 SHELL_NAMES = frozenset(
@@ -159,6 +160,17 @@ def _detect_windows_shell() -> ShellSpec:
             continue
         if shutil.which(spec.command_prefix[0]):
             return spec
+    # Git Bash 发现：通过 git 路径推导
+    git_path = shutil.which("git")
+    if git_path:
+        git_bash = Path(git_path).resolve().parent.parent / "bin" / "bash.exe"
+        if git_bash.is_file():
+            return ShellSpec(
+                name="bash",
+                command_prefix=(str(git_bash), "--noprofile", "--norc", "-c"),
+                syntax="posix",
+                login=True,
+            )
     return _KNOWN_SHELLS["cmd"]
 
 
