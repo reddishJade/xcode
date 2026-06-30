@@ -43,8 +43,14 @@ CLI_COLOR_ERROR = "red"
 CLI_COLOR_WARNING = "yellow"
 CLI_COLOR_INFO = "blue"
 CLI_PROMPT_MARKER_STYLE = "ansigreen bold"
+CLI_SHELL_PROMPT_MARKER_STYLE = "ansiyellow bold"
+CLI_FILE_REF_STYLE = "ansicyan bold"
+CLI_SHELL_PREFIX_STYLE = "ansiyellow bold"
 REPL_PROMPT_STYLE = {
     "prompt-marker": CLI_PROMPT_MARKER_STYLE,
+    "prompt-marker.shell": CLI_SHELL_PROMPT_MARKER_STYLE,
+    "file-reference": CLI_FILE_REF_STYLE,
+    "shell-prefix": CLI_SHELL_PREFIX_STYLE,
     "suggestion": "fg:ansibrightblack",
     "completion-menu": "bg:default fg:default",
     "completion-menu.completion": "bg:default fg:default",
@@ -63,6 +69,10 @@ REPL_PROMPT_STYLE = {
 class PromptSessionAdapter:
     def __init__(self, session: PromptLike) -> None:
         self.session = session
+
+    @property
+    def default_buffer(self) -> object | None:
+        return getattr(self.session, "default_buffer", None)
 
     def prompt(self, prompt_text: PromptText) -> str:
         return str(self.session.prompt(prompt_text))
@@ -210,8 +220,59 @@ def clear_terminal_display() -> None:
     print("\033[2J\033[3J\033[H", end="")
 
 
-def input_prompt() -> PromptText:
-    return [("class:prompt-marker", "❯ "), ("", "")]
+class ReplInputLexer:
+    """为 REPL 输入栏高亮 shell 快捷入口和 @file 引用。"""
+
+    _file_ref_pattern = re.compile(r"(?<!\S)@([^\s]+)")
+
+    def lex_document(self, document: Any) -> Callable[[int], list[tuple[str, str]]]:
+        lines: list[str] = getattr(document, "lines", None) or str(
+            getattr(document, "text", "")
+        ).splitlines()
+
+        if not lines:
+            lines = [""]
+
+        def get_line(line_number: int) -> list[tuple[str, str]]:
+            if line_number < 0 or line_number >= len(lines):
+                return []
+            return self._highlight_line(lines[line_number], line_number == 0)
+
+        return get_line
+
+    def _highlight_line(self, line: str, first_line: bool) -> list[tuple[str, str]]:
+        fragments: list[tuple[str, str]] = []
+        cursor = 0
+        if first_line and line.startswith("!"):
+            fragments.append(("class:shell-prefix", "!"))
+            cursor = 1
+
+        for match in self._file_ref_pattern.finditer(line, cursor):
+            if match.start() > cursor:
+                fragments.append(("", line[cursor : match.start()]))
+            fragments.append(("class:file-reference", match.group(0)))
+            cursor = match.end()
+
+        if cursor < len(line):
+            fragments.append(("", line[cursor:]))
+        if not fragments:
+            fragments.append(("", line))
+        return fragments
+
+
+def input_prompt(session: object | None = None) -> PromptText:
+    def current_prompt() -> list[tuple[str, str]]:
+        style = "class:prompt-marker"
+        if session is not None:
+            buffer = getattr(session, "default_buffer", None)
+            text = str(getattr(buffer, "text", ""))
+            if text.startswith("!"):
+                style = "class:prompt-marker.shell"
+        return [(style, "❯ "), ("", "")]
+
+    if session is None:
+        return current_prompt()
+    return current_prompt
 
 
 def format_thinking(value: object) -> str:
@@ -315,6 +376,7 @@ def create_prompt_session(
     session: Any = cast(Any, PromptSession)(
         multiline=True,
         key_bindings=bindings,
+        lexer=ReplInputLexer(),
         completer=completer,
         complete_while_typing=True,
         history=history,

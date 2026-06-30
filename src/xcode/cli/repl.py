@@ -284,7 +284,7 @@ def _read_repl_text(
         prompt_text: PromptText = (
             ""
             if state.exit_pending and time.time() - state.exit_pending < 1.5
-            else input_prompt()
+            else input_prompt(session)
         )
         return session.prompt(prompt_text).strip() or None, False
     except (EOFError, KeyboardInterrupt):

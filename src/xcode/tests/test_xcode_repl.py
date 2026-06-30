@@ -23,8 +23,10 @@ from xcode.cli.repl_commands import (
     HELP_TEXT,
     handle_command,
 )
-from xcode.cli.repl_rendering import reasoning_preview_lines
 from xcode.cli.repl_rendering import REPL_PROMPT_STYLE
+from xcode.cli.repl_rendering import ReplInputLexer
+from xcode.cli.repl_rendering import input_prompt
+from xcode.cli.repl_rendering import reasoning_preview_lines
 from xcode.cli.repl_sessions import records_to_agent_messages
 from xcode.cli.repl_skills import parse_skill_invocation
 from xcode.cli.repl_tools import brief_input, run_tool_command
@@ -1628,6 +1630,25 @@ class XcodeReplTests:
 
         assert completion_styles
         assert all("bg:default" in style for style in completion_styles.values())
+
+    def test_repl_input_lexer_highlights_file_references(self) -> None:
+        document = SimpleNamespace(lines=["read @src/xcode/harness/app.py please"])
+        fragments = ReplInputLexer().lex_document(document)(0)
+
+        assert ("class:file-reference", "@src/xcode/harness/app.py") in fragments
+
+    def test_repl_input_lexer_highlights_shell_prefix(self) -> None:
+        document = SimpleNamespace(lines=["!echo hello"])
+        fragments = ReplInputLexer().lex_document(document)(0)
+
+        assert fragments[0] == ("class:shell-prefix", "!")
+
+    def test_input_prompt_uses_shell_marker_when_buffer_starts_with_bang(self) -> None:
+        session = SimpleNamespace(default_buffer=SimpleNamespace(text="!echo hello"))
+        prompt = input_prompt(session)
+
+        assert callable(prompt)
+        assert prompt()[0] == ("class:prompt-marker.shell", "❯ ")
 
 
 class XcodeReplForkTests:

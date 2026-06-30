@@ -18,7 +18,7 @@ from xcode.harness.snapshot import SnapshotStore
 
 
 VerbosityLevel = Literal["normal", "verbose", "debug"]
-PromptText = str | list[tuple[str, str]]
+PromptText = str | list[tuple[str, str]] | Callable[[], list[tuple[str, str]]]
 
 
 class PromptLike(Protocol):
