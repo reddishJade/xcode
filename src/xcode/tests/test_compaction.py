@@ -138,11 +138,10 @@ class TestShouldCompactTokenAware:
     def test_compact_by_real_tokens(self):
         """测试使用真实 token 触发压缩。"""
         messages = [UserMessage(content=[TextContent(text="test")])]
-        # 真实 token 超过阈值
         assert should_compact_token_aware(
             messages,
             last_prompt_tokens=35000,
-            model_soft_threshold=32000,
+            fallback_threshold=32000,
         )
 
     def test_no_compact_real_tokens_below(self):
@@ -152,7 +151,7 @@ class TestShouldCompactTokenAware:
             should_compact_token_aware(
                 messages,
                 last_prompt_tokens=20000,
-                model_soft_threshold=32000,
+                fallback_threshold=32000,
             )
         )
 
@@ -187,53 +186,51 @@ class TestShouldCompactTokenAware:
 
     def test_priority_real_tokens(self):
         """测试真实 token 优先级高于估算。"""
-        # 消息数很多，但真实 token 未超标
         messages = [UserMessage(content=[TextContent(text="test")]) for _ in range(20)]
         assert not (
             should_compact_token_aware(
                 messages,
                 last_prompt_tokens=20000,
-                model_soft_threshold=32000,
-                compact_threshold=10,  # 消息数已超标
+                fallback_threshold=32000,
+                compact_threshold=10,
             )
         )
 
     def test_real_tokens_with_reserve_triggers_earlier(self) -> None:
         """测试 reserve_tokens 使触发线提前。"""
         messages = [UserMessage(content=[TextContent(text="test")])]
-        # deepseek-v4 有 128k context, reserve=16k → 触发线 112k
-        # last_prompt_tokens=113k 应触发
+        # deepseek-v4: 128k context, reserve=16k → 触发线 112k
         assert should_compact_token_aware(
             messages,
             last_prompt_tokens=113_000,
             model_name="deepseek-v4-flash",
             reserve_tokens=16384,
-            model_soft_threshold=60000,
+            fallback_threshold=60000,
         )
 
     def test_real_tokens_with_reserve_below_threshold(self) -> None:
         """测试 reserve_tokens 未到触发线不压缩。"""
         messages = [UserMessage(content=[TextContent(text="test")])]
         # deepseek-v4: 128k context, reserve=16k → 触发线 112k
-        # last_prompt_tokens=100k 不应触发
+        # 100k < 112k 不应触发
         assert not should_compact_token_aware(
             messages,
             last_prompt_tokens=100_000,
             model_name="deepseek-v4-flash",
             reserve_tokens=16384,
-            model_soft_threshold=60000,
+            fallback_threshold=60000,
         )
 
     def test_reserve_fallback_on_unknown_model(self) -> None:
-        """测试未知模型时 reserve_tokens 回退到 model_soft_threshold。"""
+        """测试未知模型时回退到 fallback_threshold。"""
         messages = [UserMessage(content=[TextContent(text="test")])]
-        # 未知模型，reserve_tokens 被忽略，使用 model_soft_threshold=32000
+        # 未知模型，使用 fallback_threshold=32000
         assert should_compact_token_aware(
             messages,
             last_prompt_tokens=35000,
             model_name="unknown-model",
             reserve_tokens=16384,
-            model_soft_threshold=32000,
+            fallback_threshold=32000,
         )
 
 

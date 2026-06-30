@@ -72,36 +72,26 @@ def should_compact_token_aware(
     messages: Sequence[AgentMessage],
     *,
     last_prompt_tokens: int | None = None,
-    model_soft_threshold: int = 32000,
+    fallback_threshold: int = 32000,
     compact_threshold: int = 0,
     compact_token_threshold: int = 0,
     model_name: str | None = None,
-    reserve_tokens: int = 0,
+    reserve_tokens: int = 16384,
 ) -> bool:
     """基于真实 token 和阈值判断是否需要压缩。
 
-    优先级：
-    1. 如果有 last_prompt_tokens（上次 provider 返回的真实值），用它判断
-       当同时提供 model_name + reserve_tokens 时，
-       使用 context_window - reserve_tokens 作为精确触发线
-    2. 否则回退到本地估算 + 消息数阈值
-
-    设计原因：
-    - provider 返回的 prompt_tokens 比本地估算更准确
-    - 避免上下文接近 model context window 时才触发压缩
+    1. 优先使用 last_prompt_tokens（provider 返回的真实值）
+       context_window - reserve_tokens 作为精确触发线
+    2. 回退到本地估算 + 消息数阈值
     """
-    # 优先使用真实 token 判断（如果有的话，只用它判断）
     if last_prompt_tokens is not None:
-        if model_name and reserve_tokens > 0:
-            trigger = effective_compact_threshold(
-                model_name,
-                reserve_tokens=reserve_tokens,
-                fallback_threshold=model_soft_threshold,
-            )
-            return last_prompt_tokens >= trigger
-        return last_prompt_tokens >= model_soft_threshold
+        trigger = effective_compact_threshold(
+            model_name,
+            reserve_tokens=reserve_tokens,
+            fallback_threshold=fallback_threshold,
+        )
+        return last_prompt_tokens >= trigger
 
-    # 回退到阈值判断（只在没有真实 token 时才使用）
     if compact_threshold > 0 and len(messages) >= compact_threshold:
         return True
 

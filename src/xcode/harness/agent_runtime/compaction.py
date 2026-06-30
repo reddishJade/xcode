@@ -104,7 +104,7 @@ class LayeredCompactor:
         keep_recent_tool_results: int = 2,
         max_tool_result_chars: int = 100,
         max_recent_messages: int = 8,
-        keep_recent_tokens: int = 0,
+        keep_recent_tokens: int = 20000,
         large_tool_output_chars: int = 20_000,
         large_tool_output_head_chars: int = 10_000,
         large_tool_output_tail_chars: int = 10_000,
@@ -178,14 +178,10 @@ class LayeredCompactor:
 
         # 在最终摘要前，从待摘要消息中提取文件操作
         if len(branch_compacted) > self.max_recent_messages + 1:
-            token_count = _compute_recent_count_from_tokens(
+            recent_count = _compute_recent_count_from_tokens(
                 branch_compacted, self.keep_recent_tokens
             )
-            effective_recent = (
-                max(self.max_recent_messages, token_count)
-                if token_count > 0
-                else self.max_recent_messages
-            )
+            effective_recent = min(self.max_recent_messages, recent_count)
             older_start = max(1, len(branch_compacted) - effective_recent)
             older_msgs = branch_compacted[1:older_start]
             self._accumulate_file_ops(older_msgs)
@@ -547,10 +543,8 @@ def _compute_recent_count_from_tokens(
 ) -> int:
     """从后向前扫描消息，累计 token 直到 keep_recent_tokens，返回应保留的消息数。
 
-    始终保留至少 1 条消息（以及系统提示）。返回 0 表示 keep_recent_tokens 未启用。
+    始终保留至少 1 条消息（以及系统提示）。
     """
-    if keep_recent_tokens <= 0:
-        return 0
     accumulated = 0
     count = 0
     # 从最后一条消息开始反向扫描（跳过系统提示 message[0]）
@@ -617,7 +611,7 @@ def _is_tool_result_message(message: dict[str, Any]) -> bool:
 def summarize_messages(
     messages: list[dict[str, Any]],
     max_recent_messages: int = 8,
-    keep_recent_tokens: int = 0,
+    keep_recent_tokens: int = 20000,
     compact_instructions: CompactInstructions | None = None,
     summarize_fn: SummarizeFn | None = None,
     read_files: set[str] | None = None,
@@ -626,17 +620,9 @@ def summarize_messages(
     if len(messages) <= max_recent_messages + 1:
         return messages
 
-    # 使用 token 驱动的保留计数（当 keep_recent_tokens > 0 时）
+    # token 驱动的保留计数：min 确保不超过 max_recent_messages 上限
     token_count = _compute_recent_count_from_tokens(messages, keep_recent_tokens)
-    if token_count > 0:
-        effective_recent = max(max_recent_messages, token_count)
-    elif compact_instructions and compact_instructions.priorities:
-        preserved_count = _preserved_recent_count(
-            messages, compact_instructions, max_recent_messages
-        )
-        effective_recent = max(max_recent_messages, preserved_count)
-    else:
-        effective_recent = max_recent_messages
+    effective_recent = min(max_recent_messages, token_count)
 
     raw_recent_start = max(1, len(messages) - effective_recent)
     # 将切分点对齐到 turn 边界，避免切在 tool result 中间
