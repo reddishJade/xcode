@@ -42,6 +42,15 @@ def _model_info(app: object) -> dict[str, str]:
     return app.get_model_info() if _is_model_control_app(app) else {}
 
 
+PERMISSION_TABS = (
+    "Recently denied",
+    "Allow",
+    "Ask",
+    "Deny",
+    "Workspace",
+)
+
+
 def handle_permissions(
     command: str,
     session_grant_store: InMemoryGrantStore | None,
@@ -199,37 +208,27 @@ def manage_permissions(
     print_permission_overview(config, session_grant_store, permanent_grant_store, store)
 
     while True:
-        choice = questionary.select(
+        tab = questionary.select(
             "Permissions:",
-            choices=[
-                "Add a new rule...",
-                "Allow rules",
-                "Ask rules",
-                "Deny rules",
-                "Workspace",
-                "Recently denied",
-                "Done",
-            ],
-            default="Add a new rule...",
+            choices=[*PERMISSION_TABS, "Done"],
         ).ask()
-        if choice in (None, "Done"):
+        if tab in (None, "Done"):
             return
-        if choice == "Add a new rule...":
-            changed = add_permission_rule_interactive(config, config_path)
-            if changed:
-                _apply_runtime_permission_policy(app, config)
-                print(
-                    f"Saved to {config_path.name}. The current REPL policy was refreshed when possible."
-                )
+        if tab == "Recently denied":
+            _render_recently_denied_tab(store)
+            _pause_permission_tab()
             continue
-        if choice == "Workspace":
-            _print_workspace_permissions(config, restricted_dirs)
+        if tab == "Workspace":
+            if _handle_workspace_tab(config, config_path, project_root, restricted_dirs):
+                print(f"Saved to {config_path.name}. Restart Xcode to reload workspace roots.")
             continue
-        if choice == "Recently denied":
-            _print_recently_denied(store)
-            continue
-        decision = choice.split()[0].lower()
-        _print_rules_for_decision(_security_rules(config), decision)
+        decision = str(tab).lower()
+        changed = _handle_rule_tab(config, config_path, decision)
+        if changed:
+            _apply_runtime_permission_policy(app, config)
+            print(
+                f"Saved to {config_path.name}. The current REPL policy was refreshed when possible."
+            )
 
 
 def print_permission_overview(
@@ -266,35 +265,140 @@ def print_permission_overview(
     print()
 
 
+def _permission_header(active_tab: str) -> str:
+    labels = [
+        f"[{tab}]" if tab == active_tab else tab
+        for tab in PERMISSION_TABS
+    ]
+    return "Permissions  " + "   ".join(labels)
+
+
+def _render_recently_denied_tab(store: object | None) -> None:
+    print(_permission_header("Recently denied"))
+    print()
+    denied = _recently_denied(store)
+    if not denied:
+        print(
+            "   No recent denials. Commands denied by the auto mode classifier will appear here."
+        )
+        print()
+        return
+    for index, item in enumerate(denied, start=1):
+        print(f"   {index}. {item}")
+    print()
+
+
+def _handle_rule_tab(
+    config: dict[str, Any],
+    config_path: Path,
+    decision: str,
+) -> bool:
+    rules = [rule for rule in _security_rules(config) if rule.get("decision") == decision]
+    _render_rule_tab(decision, rules)
+    choices = ["Add a new rule…", "Back"]
+    action = questionary.select(
+        "Select action:",
+        choices=choices,
+        default="Add a new rule…",
+    ).ask()
+    if action != "Add a new rule…":
+        return False
+    return add_permission_rule_interactive(
+        config,
+        config_path,
+        default_decision=decision,
+    )
+
+
+def _render_rule_tab(decision: str, rules: list[dict[str, Any]]) -> None:
+    active = decision.capitalize()
+    print(_permission_header(active))
+    print()
+    guidance = {
+        "allow": "   Xcode won't ask before using allowed tools.",
+        "ask": "   Xcode will always ask for confirmation before using these tools.",
+        "deny": "   Xcode will always reject requests to use denied tools.",
+    }[decision]
+    print(guidance)
+    print("     1. Add a new rule…")
+    for index, rule in enumerate(rules, start=2):
+        print(f"     {index}. {format_permission_rule(rule)}")
+    print()
+
+
+def _handle_workspace_tab(
+    config: dict[str, Any],
+    config_path: Path,
+    project_root: Path,
+    restricted_dirs: tuple[str, ...],
+) -> bool:
+    _render_workspace_tab(config, project_root, restricted_dirs)
+    action = questionary.select(
+        "Select action:",
+        choices=["Add directory…", "Back"],
+        default="Add directory…",
+    ).ask()
+    if action != "Add directory…":
+        return False
+    directory = questionary.text("Directory:", default=str(project_root)).ask()
+    if directory is None or not directory.strip():
+        return False
+    security = config.setdefault("security", {})
+    roots = list(security.get("writable_roots", ()))
+    roots.append(directory.strip())
+    security["writable_roots"] = roots
+    _save_config(config, config_path)
+    return True
+
+
+def _render_workspace_tab(
+    config: dict[str, Any],
+    project_root: Path,
+    restricted_dirs: tuple[str, ...],
+) -> None:
+    print(_permission_header("Workspace"))
+    print()
+    print(
+        "   Xcode can read files in the workspace, and make edits when auto-accept edits is on."
+    )
+    print()
+    print(f"     -  {project_root} (Original working directory)")
+    security = config.get("security", {})
+    writable_roots: object = ()
+    if isinstance(security, dict):
+        writable_roots = security.get("writable_roots", ())
+    if isinstance(writable_roots, list | tuple):
+        for root in writable_roots:
+            print(f"     -  {root}")
+    for directory in restricted_dirs:
+        print(f"     -  {directory} (restricted)")
+    print("     1. Add directory…")
+    print()
+
+
+def _pause_permission_tab() -> None:
+    questionary.select(
+        "Select action:",
+        choices=["Back"],
+        default="Back",
+    ).ask()
+
+
 def add_permission_rule_interactive(
     config: dict[str, Any],
     config_path: Path,
+    *,
+    default_decision: str = "ask",
 ) -> bool:
     decision = questionary.select(
         "Rule decision:",
         choices=["allow", "ask", "deny"],
-        default="ask",
+        default=default_decision,
     ).ask()
     if decision is None:
         return False
 
-    template = questionary.select(
-        "Rule template:",
-        choices=[
-            "Bash(git add *)",
-            "Bash(python *)",
-            "Bash(uv run *)",
-            "PowerShell(uv run *)",
-            "Custom...",
-        ],
-        default="Bash(uv run *)",
-    ).ask()
-    if template is None:
-        return False
-
-    rule = _rule_from_template(str(template), str(decision))
-    if rule is None:
-        rule = _prompt_custom_rule(str(decision))
+    rule = _prompt_custom_rule(str(decision))
     if rule is None:
         return False
 
@@ -305,35 +409,6 @@ def add_permission_rule_interactive(
     _save_config(config, config_path)
     print(f"Added {format_permission_rule(rule)}")
     return True
-
-
-def _rule_from_template(template: str, decision: str) -> dict[str, Any] | None:
-    templates = {
-        "Bash(git add *)": {
-            "tool": "bash",
-            "input_prefix": "git add ",
-            "target_type": "command",
-        },
-        "Bash(python *)": {
-            "tool": "bash",
-            "input_prefix": "python ",
-            "target_type": "command",
-        },
-        "Bash(uv run *)": {
-            "tool": "bash",
-            "input_prefix": "uv run ",
-            "target_type": "command",
-        },
-        "PowerShell(uv run *)": {
-            "tool": "bash",
-            "input_prefix": "uv run ",
-            "target_type": "command",
-        },
-    }
-    base = templates.get(template)
-    if base is None:
-        return None
-    return {"decision": decision, **base}
 
 
 def _prompt_custom_rule(decision: str) -> dict[str, Any] | None:
@@ -410,50 +485,6 @@ def _security_rules(config: dict[str, Any]) -> list[dict[str, Any]]:
         return []
     rules = security.get("rules", ())
     return [rule for rule in rules if isinstance(rule, dict)]
-
-
-def _print_rules_for_decision(rules: list[dict[str, Any]], decision: str) -> None:
-    matched = [rule for rule in rules if rule.get("decision") == decision]
-    title = decision.capitalize()
-    if not matched:
-        print(f"{title} rules: none")
-        return
-    print(f"{title} rules ({len(matched)})")
-    for index, rule in enumerate(matched, start=1):
-        print(f"  {index}. {format_permission_rule(rule)}")
-
-
-def _print_workspace_permissions(
-    config: dict[str, Any],
-    restricted_dirs: tuple[str, ...],
-) -> None:
-    security = config.get("security", {})
-    if not isinstance(security, dict):
-        security = {}
-    configured_restricted = security.get("restricted_dirs", ())
-    if not isinstance(configured_restricted, list | tuple):
-        configured_restricted = ()
-    print("Workspace")
-    print(f"  global_default: {security.get('global_default', 'not set')}")
-    print(f"  approval_policy: {security.get('approval_policy', 'not set')}")
-    print(f"  permission_mode: {security.get('permission_mode', 'not set')}")
-    dirs = tuple(str(item) for item in configured_restricted) or restricted_dirs
-    if not dirs:
-        print("  restricted_dirs: none")
-        return
-    print("  restricted_dirs:")
-    for directory in dirs:
-        print(f"    - {directory}")
-
-
-def _print_recently_denied(store: object | None) -> None:
-    denied = _recently_denied(store)
-    if not denied:
-        print("Recently denied: none")
-        return
-    print(f"Recently denied ({len(denied)})")
-    for index, item in enumerate(denied, start=1):
-        print(f"  {index}. {item}")
 
 
 def _recently_denied(store: object | None) -> list[str]:

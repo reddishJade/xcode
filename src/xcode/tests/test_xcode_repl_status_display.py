@@ -10,6 +10,9 @@ from xcode.cli.repl_settings import add_permission_rule_interactive
 from xcode.cli.repl_settings import format_permission_rule
 from xcode.cli.repl_settings import handle_permissions
 from xcode.cli.repl_settings import print_permission_overview
+from xcode.cli.repl_settings import _render_recently_denied_tab
+from xcode.cli.repl_settings import _render_rule_tab
+from xcode.cli.repl_settings import _render_workspace_tab
 from xcode.cli.repl_tools import run_tool_command
 from xcode.harness.observability import (
     FileGrantStore,
@@ -123,19 +126,31 @@ def test_permission_rule_format_matches_command_templates() -> None:
     )
 
 
-def test_add_permission_rule_interactive_saves_template_rule() -> None:
+def test_add_permission_rule_interactive_saves_custom_rule() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         config_path = Path(temp_dir) / "xcode.config.json"
         config: dict[str, object] = {}
 
-        with patch("questionary.select") as mock_select:
-            mock_select.return_value.ask.side_effect = ["allow", "Bash(uv run *)"]
+        with (
+            patch("questionary.select") as mock_select,
+            patch("questionary.text") as mock_text,
+        ):
+            mock_select.return_value.ask.side_effect = [
+                "allow",
+                "command",
+                "prefix",
+            ]
+            mock_text.return_value.ask.side_effect = [
+                "bash",
+                "",
+                "git add ",
+            ]
             changed = add_permission_rule_interactive(config, config_path)
 
         assert changed
         saved = config_path.read_text(encoding="utf-8")
         assert '"decision": "allow"' in saved
-        assert '"input_prefix": "uv run "' in saved
+        assert '"input_prefix": "git add"' in saved
 
 
 def test_permission_overview_shows_panel_tabs() -> None:
@@ -183,3 +198,53 @@ def test_permissions_default_opens_manager_in_tty() -> None:
     assert "Permissions" in rendered
     assert "Xcode will not ask before using tools matched by Allow rules." in rendered
     assert mock_select.call_args.args[0] == "Permissions:"
+
+
+def test_permission_rule_tabs_render_expected_guidance() -> None:
+    output = StringIO()
+
+    with redirect_stdout(output):
+        _render_rule_tab(
+            "ask",
+            [
+                {
+                    "tool": "bash",
+                    "decision": "ask",
+                    "input_prefix": "uv run ",
+                    "target_type": "command",
+                }
+            ],
+        )
+
+    rendered = output.getvalue()
+    assert "Permissions  Recently denied   Allow   [Ask]   Deny   Workspace" in rendered
+    assert "Xcode will always ask for confirmation" in rendered
+    assert "1. Add a new rule…" in rendered
+    assert "Bash(uv run *): ask" in rendered
+
+
+def test_permission_recent_denials_tab_explains_empty_state() -> None:
+    output = StringIO()
+
+    with redirect_stdout(output):
+        _render_recently_denied_tab(None)
+
+    rendered = output.getvalue()
+    assert "[Recently denied]" in rendered
+    assert "No recent denials" in rendered
+    assert "auto mode classifier" in rendered
+
+
+def test_permission_workspace_tab_lists_root_and_add_directory() -> None:
+    output = StringIO()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        with redirect_stdout(output):
+            _render_workspace_tab({}, root, ())
+
+    rendered = output.getvalue()
+    assert "[Workspace]" in rendered
+    assert "can read files in the workspace" in rendered
+    assert "Original working directory" in rendered
+    assert "1. Add directory…" in rendered
