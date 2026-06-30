@@ -206,12 +206,13 @@ def trim_to_budget(
 
     算法：始终按优先级从高到低排序，依次尝试放入；块能放入则保留，
     不能放入则丢弃且**继续检查低优先级块**（greedy priority-fill）。
-    同优先级内保持原始顺序。纯函数，不修改输入。
+    同优先级内按 token 数升序（small-first），最大化信息密度。
+    纯函数，不修改输入。
 
     注意：不会因为高优先级块放不下就跳过其后的低优先级块。
     这意味着当预算有限时，一个刚好超出预算的小块可能导致所有大块被丢弃。
     """
-    sorted_blocks = sorted(blocks, key=lambda b: b.priority)
+    sorted_blocks = sorted(blocks, key=lambda b: (b.priority, b.get_token_count()))
 
     if budget <= 0:
         return sorted_blocks, []
