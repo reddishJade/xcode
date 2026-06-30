@@ -693,6 +693,9 @@ def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
         ctx.permanent_grant_store,
         static_policy=ctx.static_policy,
         restricted_dirs=ctx.restricted_dirs,
+        project_root=ctx.project_root,
+        app=ctx.app,
+        store=ctx.store,
     )
     return False
 

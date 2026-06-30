@@ -6,6 +6,10 @@ from pathlib import Path
 import tempfile
 
 from xcode.cli.repl_settings import list_permissions
+from xcode.cli.repl_settings import add_permission_rule_interactive
+from xcode.cli.repl_settings import format_permission_rule
+from xcode.cli.repl_settings import handle_permissions
+from xcode.cli.repl_settings import print_permission_overview
 from xcode.cli.repl_tools import run_tool_command
 from xcode.harness.observability import (
     FileGrantStore,
@@ -15,6 +19,7 @@ from xcode.harness.observability import (
     StaticPermission,
 )
 from xcode.harness.skills import ToolSpec
+from unittest.mock import patch
 
 
 class ToolListApp:
@@ -103,3 +108,78 @@ def test_permissions_show_static_rules_and_saved_grants() -> None:
     assert "Restricted directories (1)" in rendered
     assert "Session grants (1)" in rendered
     assert "allow file/read read on path `src/xcode/**`" in rendered
+
+
+def test_permission_rule_format_matches_command_templates() -> None:
+    rule = {
+        "tool": "bash",
+        "decision": "allow",
+        "input_prefix": "uv run ",
+        "target_type": "command",
+    }
+
+    assert format_permission_rule(rule) == (
+        "Bash(uv run *): allow target_type=command"
+    )
+
+
+def test_add_permission_rule_interactive_saves_template_rule() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        config_path = Path(temp_dir) / "xcode.config.json"
+        config: dict[str, object] = {}
+
+        with patch("questionary.select") as mock_select:
+            mock_select.return_value.ask.side_effect = ["allow", "Bash(uv run *)"]
+            changed = add_permission_rule_interactive(config, config_path)
+
+        assert changed
+        saved = config_path.read_text(encoding="utf-8")
+        assert '"decision": "allow"' in saved
+        assert '"input_prefix": "uv run "' in saved
+
+
+def test_permission_overview_shows_panel_tabs() -> None:
+    output = StringIO()
+    config = {
+        "security": {
+            "rules": [
+                {"tool": "bash", "decision": "allow"},
+                {"tool": "write_file", "decision": "ask"},
+                {"tool": "apply_patch", "decision": "deny"},
+            ]
+        }
+    }
+
+    with redirect_stdout(output):
+        print_permission_overview(config, InMemoryGrantStore(), None, None)
+
+    rendered = output.getvalue()
+    assert "Permissions" in rendered
+    assert "Recently denied 0" in rendered
+    assert "Allow 1" in rendered
+    assert "Ask 1" in rendered
+    assert "Deny 1" in rendered
+    assert "Workspace" in rendered
+
+
+def test_permissions_default_opens_manager_in_tty() -> None:
+    output = StringIO()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("questionary.select") as mock_select,
+            redirect_stdout(output),
+        ):
+            mock_select.return_value.ask.return_value = "Done"
+            handle_permissions(
+                "/permissions",
+                InMemoryGrantStore(),
+                None,
+                project_root=Path(temp_dir),
+            )
+
+    rendered = output.getvalue()
+    assert "Permissions" in rendered
+    assert "Xcode will not ask before using tools matched by Allow rules." in rendered
+    assert mock_select.call_args.args[0] == "Permissions:"

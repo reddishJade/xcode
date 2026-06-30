@@ -1,13 +1,19 @@
 from __future__ import annotations
 
-from typing import Protocol, TypeGuard
+from pathlib import Path
+import sys
+from typing import Any, Protocol, TypeGuard
 
+import questionary
+
+from .setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
 from xcode.ai.model_modes import parse_model_mode
 from xcode.harness.observability import (
     FileGrantStore,
     InMemoryGrantStore,
     PermissionPolicy,
 )
+from xcode.harness.observability.permission_model import StaticPermission
 from .reasoning_effort import (
     reasoning_effort_levels_for_transport,
 )
@@ -42,6 +48,9 @@ def handle_permissions(
     permanent_grant_store: FileGrantStore | None,
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
+    project_root: Path | None = None,
+    app: object | None = None,
+    store: object | None = None,
 ) -> None:
     parts = command.split(maxsplit=2)
     sub = parts[1] if len(parts) >= 2 else ""
@@ -51,6 +60,17 @@ def handle_permissions(
         return
     if sub and sub != "list":
         print("Usage: /permissions [list|clear]")
+        return
+    if sub != "list" and project_root is not None and sys.stdin.isatty():
+        manage_permissions(
+            project_root,
+            session_grant_store,
+            permanent_grant_store,
+            static_policy,
+            restricted_dirs,
+            app=app,
+            store=store,
+        )
         return
     list_permissions(
         session_grant_store,
@@ -161,6 +181,336 @@ def list_permissions(
 
     lines.append("Use `/permissions clear` to remove session grants.")
     print("\n".join(lines))
+
+
+def manage_permissions(
+    project_root: Path,
+    session_grant_store: InMemoryGrantStore | None,
+    permanent_grant_store: FileGrantStore | None,
+    static_policy: PermissionPolicy | None = None,
+    restricted_dirs: tuple[str, ...] = (),
+    *,
+    app: object | None = None,
+    store: object | None = None,
+) -> None:
+    """交互式管理权限规则。"""
+    config_path = project_root / CONFIG_FILENAME
+    config = _load_existing_config(config_path)
+    print_permission_overview(config, session_grant_store, permanent_grant_store, store)
+
+    while True:
+        choice = questionary.select(
+            "Permissions:",
+            choices=[
+                "Add a new rule...",
+                "Allow rules",
+                "Ask rules",
+                "Deny rules",
+                "Workspace",
+                "Recently denied",
+                "Done",
+            ],
+            default="Add a new rule...",
+        ).ask()
+        if choice in (None, "Done"):
+            return
+        if choice == "Add a new rule...":
+            changed = add_permission_rule_interactive(config, config_path)
+            if changed:
+                _apply_runtime_permission_policy(app, config)
+                print(
+                    f"Saved to {config_path.name}. The current REPL policy was refreshed when possible."
+                )
+            continue
+        if choice == "Workspace":
+            _print_workspace_permissions(config, restricted_dirs)
+            continue
+        if choice == "Recently denied":
+            _print_recently_denied(store)
+            continue
+        decision = choice.split()[0].lower()
+        _print_rules_for_decision(_security_rules(config), decision)
+
+
+def print_permission_overview(
+    config: dict[str, Any],
+    session_grant_store: InMemoryGrantStore | None,
+    permanent_grant_store: FileGrantStore | None,
+    store: object | None,
+) -> None:
+    """打印类似权限面板的简短概览。"""
+    rules = _security_rules(config)
+    counts = {
+        decision: sum(1 for rule in rules if rule.get("decision") == decision)
+        for decision in ("allow", "ask", "deny")
+    }
+    recent_denied = _recently_denied(store)
+    session_count = len(session_grant_store.records()) if session_grant_store else 0
+    permanent_count = (
+        len(permanent_grant_store.records()) if permanent_grant_store else 0
+    )
+    print("Permissions")
+    print(
+        "  "
+        f"Recently denied {len(recent_denied)}   "
+        f"Allow {counts['allow']}   "
+        f"Ask {counts['ask']}   "
+        f"Deny {counts['deny']}   "
+        "Workspace"
+    )
+    print()
+    print("  Xcode will not ask before using tools matched by Allow rules.")
+    print(
+        f"  Saved grants: session {session_count}, persistent {permanent_count}."
+    )
+    print()
+
+
+def add_permission_rule_interactive(
+    config: dict[str, Any],
+    config_path: Path,
+) -> bool:
+    decision = questionary.select(
+        "Rule decision:",
+        choices=["allow", "ask", "deny"],
+        default="ask",
+    ).ask()
+    if decision is None:
+        return False
+
+    template = questionary.select(
+        "Rule template:",
+        choices=[
+            "Bash(git add *)",
+            "Bash(python *)",
+            "Bash(uv run *)",
+            "PowerShell(uv run *)",
+            "Custom...",
+        ],
+        default="Bash(uv run *)",
+    ).ask()
+    if template is None:
+        return False
+
+    rule = _rule_from_template(str(template), str(decision))
+    if rule is None:
+        rule = _prompt_custom_rule(str(decision))
+    if rule is None:
+        return False
+
+    security = config.setdefault("security", {})
+    rules = list(security.get("rules", ()))
+    rules.append(rule)
+    security["rules"] = rules
+    _save_config(config, config_path)
+    print(f"Added {format_permission_rule(rule)}")
+    return True
+
+
+def _rule_from_template(template: str, decision: str) -> dict[str, Any] | None:
+    templates = {
+        "Bash(git add *)": {
+            "tool": "bash",
+            "input_prefix": "git add ",
+            "target_type": "command",
+        },
+        "Bash(python *)": {
+            "tool": "bash",
+            "input_prefix": "python ",
+            "target_type": "command",
+        },
+        "Bash(uv run *)": {
+            "tool": "bash",
+            "input_prefix": "uv run ",
+            "target_type": "command",
+        },
+        "PowerShell(uv run *)": {
+            "tool": "bash",
+            "input_prefix": "uv run ",
+            "target_type": "command",
+        },
+    }
+    base = templates.get(template)
+    if base is None:
+        return None
+    return {"decision": decision, **base}
+
+
+def _prompt_custom_rule(decision: str) -> dict[str, Any] | None:
+    tool = questionary.text("Tool name or pattern:", default="bash").ask()
+    if tool is None or not tool.strip():
+        return None
+    rule: dict[str, Any] = {"tool": tool.strip(), "decision": decision}
+    target_type = questionary.select(
+        "Target type:",
+        choices=["none", "command", "path", "mcp", "subagent", "skill"],
+        default="none",
+    ).ask()
+    if target_type is None:
+        return None
+    if target_type != "none":
+        rule["target_type"] = target_type
+        target = questionary.text("Target pattern (optional):").ask()
+        if target is None:
+            return None
+        if target.strip():
+            rule["target"] = target.strip()
+    input_kind = questionary.select(
+        "Input match:",
+        choices=["none", "prefix", "contains", "regex"],
+        default="none",
+    ).ask()
+    if input_kind is None:
+        return None
+    if input_kind != "none":
+        value = questionary.text(f"Input {input_kind}:").ask()
+        if value is None or not value.strip():
+            return None
+        rule[f"input_{input_kind}"] = value.strip()
+    return rule
+
+
+def _apply_runtime_permission_policy(app: object | None, config: dict[str, Any]) -> None:
+    if app is None:
+        return
+    agent = getattr(app, "agent", None)
+    if agent is None:
+        return
+    policy = _policy_from_config(config)
+    if hasattr(agent, "permission_policy"):
+        agent.permission_policy = policy
+    gate = getattr(agent, "_gate", None)
+    if gate is not None and hasattr(gate, "_permission_policy"):
+        gate._permission_policy = policy
+
+
+def _policy_from_config(config: dict[str, Any]) -> PermissionPolicy | None:
+    security = config.get("security", {})
+    if not isinstance(security, dict):
+        return None
+    rules: list[StaticPermission] = []
+    for raw in security.get("rules", ()):
+        if not isinstance(raw, dict):
+            continue
+        try:
+            rules.append(StaticPermission.model_validate(raw))
+        except ValueError:
+            continue
+    global_default = security.get("global_default")
+    if not isinstance(global_default, str):
+        global_default = None
+    if not rules and global_default is None:
+        return None
+    return PermissionPolicy(tuple(rules), global_default=global_default)
+
+
+def _security_rules(config: dict[str, Any]) -> list[dict[str, Any]]:
+    security = config.get("security", {})
+    if not isinstance(security, dict):
+        return []
+    rules = security.get("rules", ())
+    return [rule for rule in rules if isinstance(rule, dict)]
+
+
+def _print_rules_for_decision(rules: list[dict[str, Any]], decision: str) -> None:
+    matched = [rule for rule in rules if rule.get("decision") == decision]
+    title = decision.capitalize()
+    if not matched:
+        print(f"{title} rules: none")
+        return
+    print(f"{title} rules ({len(matched)})")
+    for index, rule in enumerate(matched, start=1):
+        print(f"  {index}. {format_permission_rule(rule)}")
+
+
+def _print_workspace_permissions(
+    config: dict[str, Any],
+    restricted_dirs: tuple[str, ...],
+) -> None:
+    security = config.get("security", {})
+    if not isinstance(security, dict):
+        security = {}
+    configured_restricted = security.get("restricted_dirs", ())
+    if not isinstance(configured_restricted, list | tuple):
+        configured_restricted = ()
+    print("Workspace")
+    print(f"  global_default: {security.get('global_default', 'not set')}")
+    print(f"  approval_policy: {security.get('approval_policy', 'not set')}")
+    print(f"  permission_mode: {security.get('permission_mode', 'not set')}")
+    dirs = tuple(str(item) for item in configured_restricted) or restricted_dirs
+    if not dirs:
+        print("  restricted_dirs: none")
+        return
+    print("  restricted_dirs:")
+    for directory in dirs:
+        print(f"    - {directory}")
+
+
+def _print_recently_denied(store: object | None) -> None:
+    denied = _recently_denied(store)
+    if not denied:
+        print("Recently denied: none")
+        return
+    print(f"Recently denied ({len(denied)})")
+    for index, item in enumerate(denied, start=1):
+        print(f"  {index}. {item}")
+
+
+def _recently_denied(store: object | None) -> list[str]:
+    if store is None:
+        return []
+    load_records = getattr(store, "load_records", None)
+    if not callable(load_records):
+        return []
+    try:
+        records = load_records()
+    except (OSError, ValueError, TypeError):
+        return []
+    if not isinstance(records, list | tuple):
+        return []
+    denied: list[str] = []
+    for record in reversed(records):
+        content = getattr(record, "content", None)
+        if not isinstance(content, dict):
+            continue
+        data = content.get("data")
+        if not isinstance(data, dict):
+            continue
+        status = data.get("status")
+        if status not in {"denied", "approval_required"}:
+            continue
+        text = str(data.get("content") or data.get("tool_use_id") or status)
+        denied.append(text)
+        if len(denied) >= 10:
+            break
+    return list(reversed(denied))
+
+
+def format_permission_rule(rule: dict[str, Any]) -> str:
+    decision = str(rule.get("decision", "ask"))
+    label = _tool_label(rule)
+    parts = [f"{label}: {decision}"]
+    target_type = rule.get("target_type")
+    target = rule.get("target")
+    if target_type:
+        parts.append(f"target_type={target_type}")
+    if target:
+        parts.append(f"target={target}")
+    return " ".join(parts)
+
+
+def _tool_label(rule: dict[str, Any]) -> str:
+    tool = str(rule.get("tool", "*"))
+    prefix = rule.get("input_prefix")
+    contains = rule.get("input_contains")
+    regex = rule.get("input_regex")
+    if tool == "bash" and isinstance(prefix, str) and prefix:
+        return f"Bash({prefix}*)"
+    if tool == "bash" and isinstance(contains, str) and contains:
+        return f"Bash(*{contains}*)"
+    if tool == "bash" and isinstance(regex, str) and regex:
+        return f"Bash(/{regex}/)"
+    return tool
 
 
 def _format_grant(record: object) -> str:
