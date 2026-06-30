@@ -495,7 +495,8 @@ class XcodeReplTests:
     def test_tool_list_output_is_visible_markdown_text(self) -> None:
         output = run_tool_command("/tool list", ToolApp())
 
-        assert "Visible tools" in output
+        assert "## Visible Tools" in output
+        assert "- **core**" in output
         assert "<visible tools>" not in output
 
     def test_run_repl_shell_shortcut_runs_bash_tool(self) -> None:
@@ -709,9 +710,9 @@ class XcodeReplTests:
 
             assert code == 0
             rendered = output.getvalue()
-            assert "static:" in rendered
-            assert "bash = deny" in rendered
-            assert "(none)" not in rendered
+            assert "Static rules (1)" in rendered
+            assert "tool `bash` -> deny" in rendered
+            assert "Static rules: none" not in rendered
 
     def test_permissions_show_global_default_without_rules(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -731,7 +732,7 @@ class XcodeReplTests:
 
             assert not handled
             rendered = output.getvalue()
-            assert "global_default: ask" in rendered
+            assert "Default from config: ask" in rendered
             assert "(none" not in rendered
 
     def test_permissions_empty_state_explains_none(self) -> None:
@@ -750,10 +751,9 @@ class XcodeReplTests:
                 )
 
             assert not handled
-            assert (
-                "(none: no static rules, restricted dirs, or grants active)"
-                in output.getvalue()
-            )
+            rendered = output.getvalue()
+            assert "Static rules: none" in rendered
+            assert "Implicit fallback: allow" in rendered
 
     def test_hooks_command_shows_source_state_and_recent_error(self) -> None:
         """`/hooks` 展示配置来源、启用状态和最近脱敏错误。"""
@@ -901,9 +901,9 @@ class XcodeReplTests:
                     )
 
             assert code == 0
-            assert "Visible tools" in renderer.rendered[0]
+            assert "## Visible Tools" in renderer.rendered[0]
             assert "read_file" in renderer.rendered[0]
-            assert "Hidden tools" in renderer.rendered[0]
+            assert "## Hidden Tools" in renderer.rendered[0]
             assert "submit_subagent" in renderer.rendered[0]
 
     def test_run_repl_queue_mode_enqueues_followup(self) -> None:

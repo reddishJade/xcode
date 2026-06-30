@@ -86,24 +86,24 @@ def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:
     catalog = build_tool_catalog()
     enabled_names = {t.name for t in registry}
 
-    lines = ["Visible tools"]
+    lines = [f"## Visible Tools ({len(registry)})", ""]
     core_names = sorted(t.name for t in registry if t.group == "core")
     if core_names:
-        lines.append("  core:")
-        lines.extend(f"    {n}" for n in core_names)
+        lines.append(f"- **core** ({len(core_names)})")
+        lines.extend(f"  - `{n}`" for n in core_names)
 
     noncore_groups = sorted({t.group for t in registry if t.group != "core"})
     for group in noncore_groups:
-        lines.append(f"  {group}:")
         tools_in_group = sorted(
             (t for t in registry if t.group == group), key=lambda item: item.name
         )
+        lines.append(f"- **{group}** ({len(tools_in_group)})")
         for tool in tools_in_group:
             suffix = ""
             if tool.group == "mcp" and "[mcp: " in tool.description:
                 server_name = tool.description.split("[mcp: ")[-1].split("]")[0]
-                suffix = f" [mcp: {server_name}]"
-            lines.append(f"    {tool.name}{suffix}")
+                suffix = f" - MCP server `{server_name}`"
+            lines.append(f"  - `{tool.name}`{suffix}")
 
     all_known = set()
     for group_names in catalog.values():
@@ -111,18 +111,20 @@ def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:
     hidden = sorted(all_known - enabled_names)
     if hidden:
         lines.append("")
-        lines.append("Hidden tools")
+        lines.append(f"## Hidden Tools ({len(hidden)})")
+        lines.append("")
         for group in sorted(catalog):
             group_hidden = sorted(catalog[group] & set(hidden))
             if group_hidden:
-                lines.append(f"  {group}:")
-                lines.extend(f"    {name}" for name in group_hidden)
+                lines.append(f"- **{group}** ({len(group_hidden)})")
+                lines.extend(f"  - `{name}`" for name in group_hidden)
 
     available_groups = sorted(catalog.keys() - {tool.group for tool in registry})
     if available_groups:
         lines.append("")
-        lines.append("Available groups")
-        lines.extend(f"  {group}" for group in available_groups)
+        lines.append("## Available Groups")
+        lines.append("")
+        lines.extend(f"- `{group}`" for group in available_groups)
     return "\n".join(lines)
 
 

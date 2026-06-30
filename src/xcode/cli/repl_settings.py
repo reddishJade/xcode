@@ -65,7 +65,9 @@ def _format_rules(rules: tuple) -> list[str]:
     for rule in rules:
         input_part = _format_rule_input(rule)
         target_part = _format_rule_target(rule)
-        lines.append(f"    {rule.tool} = {rule.decision}{input_part}{target_part}")
+        lines.append(
+            f"  - tool `{rule.tool}` -> {rule.decision}{input_part}{target_part}"
+        )
     return lines
 
 
@@ -101,44 +103,63 @@ def list_permissions(
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
 ) -> None:
-    lines = ["<permissions>"]
-    has_any = False
+    lines = [
+        "Permission Status",
+        "",
+        "Decision order: restricted directories -> static deny/ask rules -> "
+        "saved grants -> static allow/default -> execution-mode and safety checks.",
+        "",
+    ]
 
     if static_policy is not None:
         if static_policy.rules:
-            has_any = True
-            lines.append("  static:")
-            for line in _format_rules(static_policy.rules):
-                lines.append("    " + line)
+            lines.append(f"Static rules ({len(static_policy.rules)})")
+            lines.extend(_format_rules(static_policy.rules))
+            lines.append("")
+        else:
+            lines.append("Static rules: none")
         if static_policy.global_default is not None:
-            has_any = True
-            lines.append(f"  global_default: {static_policy.global_default}")
+            lines.append(f"Default from config: {static_policy.global_default}")
+        else:
+            lines.append("Default from config: not set")
+    else:
+        lines.append("Static rules: none")
+        lines.append("Default from config: not set")
+    lines.append("Implicit fallback: allow unless another policy layer blocks the tool")
+    lines.append("")
 
     if restricted_dirs:
-        has_any = True
-        lines.append("  restricted_dirs:")
+        lines.append(f"Restricted directories ({len(restricted_dirs)})")
         for d in restricted_dirs:
-            lines.append(f"    {d}")
+            lines.append(f"  - `{d}`")
+        lines.append("")
+    else:
+        lines.append("Restricted directories: none")
+        lines.append("")
 
     if session_grant_store is not None:
         records = session_grant_store.records()
         if records:
-            has_any = True
-            lines.append("  session:")
+            lines.append(f"Session grants ({len(records)})")
             for rec in records:
                 lines.append(_format_grant(rec))
+            lines.append("")
+        else:
+            lines.append("Session grants: none")
+            lines.append("")
 
     if permanent_grant_store is not None:
         records = permanent_grant_store.records()
         if records:
-            has_any = True
-            lines.append("  persistent:")
+            lines.append(f"Persistent grants ({len(records)})")
             for rec in records:
                 lines.append(_format_grant(rec))
+            lines.append("")
+        else:
+            lines.append("Persistent grants: none")
+            lines.append("")
 
-    if not has_any:
-        lines.append("  (none: no static rules, restricted dirs, or grants active)")
-    lines.append("</permissions>")
+    lines.append("Use `/permissions clear` to remove session grants.")
     print("\n".join(lines))
 
 
@@ -149,7 +170,13 @@ def _format_grant(record: object) -> str:
     target = getattr(record, "target_pattern", "?")
     acc = getattr(record, "access", "?")
     dec = getattr(record, "decision", "?")
-    return f"    {cap}/{op} on {target} ({acc}) = {dec}"
+    target_kind = getattr(record, "target_kind", "?")
+    scope = getattr(record, "scope", "?")
+    grant_id = getattr(record, "grant_id", "?")
+    return (
+        f"  - {dec} {cap}/{op} {acc} on {target_kind} `{target}` "
+        f"({scope}, id={grant_id})"
+    )
 
 
 def handle_model_command(command: str, app: object) -> None:
