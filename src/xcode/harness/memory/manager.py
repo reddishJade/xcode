@@ -175,6 +175,89 @@ class MemoryManager:
                 records.append(record)
         return records
 
+    # ── 预算控制注入 ──
+
+    def read_budgeted(
+        self,
+        max_tokens: int,
+        layer: MemoryLayerFilter = "all",
+    ) -> list[str]:
+        """按 token 预算读取记忆块，重要性高的优先。"""
+        if max_tokens <= 0:
+            return []
+        from xcode.agent.compaction import estimate_tokens
+
+        records = self.read_memory_records(layer=layer)
+        if not records:
+            return []
+        sorted_records = self._sort_by_importance(records)
+        result: list[str] = []
+        budget = max_tokens
+        for record in sorted_records:
+            packet = self.render_prompt_packet(record)
+            tokens = estimate_tokens(packet)
+            if tokens > budget and result:
+                break
+            if tokens <= budget:
+                result.append(packet)
+                budget -= tokens
+        return result
+
+    def read_budgeted_records(
+        self,
+        max_tokens: int,
+        layer: MemoryLayerFilter = "all",
+    ) -> list[MemoryRecord]:
+        """按 token 预算读取记忆记录，重要性高的优先。"""
+        if max_tokens <= 0:
+            return []
+        from xcode.agent.compaction import estimate_tokens
+
+        records = self.read_memory_records(layer=layer)
+        if not records:
+            return []
+        sorted_records = self._sort_by_importance(records)
+        result: list[MemoryRecord] = []
+        budget = max_tokens
+        for record in sorted_records:
+            packet = self.render_prompt_packet(record)
+            tokens = estimate_tokens(packet)
+            if tokens > budget and result:
+                break
+            if tokens <= budget:
+                result.append(record)
+                budget -= tokens
+        return result
+
+    def _sort_by_importance(
+        self,
+        records: list[MemoryRecord],
+    ) -> list[MemoryRecord]:
+        """按重要性排序：类型 > 状态 > 效用 > 新旧。"""
+        type_rank = {
+            "semantic": 4,
+            "procedural": 3,
+            "preference": 2,
+            "episodic": 1,
+            "": 2,
+        }
+        status_rank = {
+            "active": 3,
+            "needs_review": 2,
+            "deprecated": 0,
+            "superseded": 0,
+            "obsolete": 0,
+        }
+
+        def rank(r: MemoryRecord) -> tuple[int, int, float, float]:
+            t = type_rank.get(r.memory_type, 2)
+            s = status_rank.get(r.status, 1)
+            u = r.utility
+            age = r.modified_at or r.created_at or ""
+            return (t, s, u, age)
+
+        return sorted(records, key=rank, reverse=True)
+
     def _read_blocks_from_file(self, memory_file: Path) -> list[str]:
         """从单个 MEMORY.md 文件解析 H2 记忆块。"""
         if not memory_file.exists():
