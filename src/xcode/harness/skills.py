@@ -147,7 +147,32 @@ def build_tool_prompt(registry: tuple[ToolSpec, ...]) -> str:
         snippet = tool.prompt_snippet or tool.description
         if snippet.strip():
             lines.append(f"- {tool.name}: {snippet.strip()}")
+        param_lines = _compact_tool_params(tool)
+        if param_lines:
+            lines.extend(param_lines)
     return "\n".join(lines) if lines else "(none)"
+
+
+def _compact_tool_params(tool: ToolSpec) -> list[str]:
+    """从工具 schema 生成紧凑的参数列表，用于 tool prompt。"""
+    schema = tool.schema
+    if not schema:
+        return []
+    props = schema.get("properties", {})
+    if not props:
+        return []
+    required = set(schema.get("required", []))
+    param_parts: list[str] = []
+    for name, prop in props.items():
+        typ = prop.get("type", "any")
+        desc = prop.get("description", "")
+        if name in required:
+            param_parts.append(f"  {name}: {typ}")
+        else:
+            param_parts.append(f"  {name}?: {typ}")
+    if param_parts:
+        return ["  Parameters:"] + param_parts
+    return []
 
 
 def build_tool_guidelines(registry: tuple[ToolSpec, ...]) -> str:
