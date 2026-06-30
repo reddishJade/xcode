@@ -1792,19 +1792,42 @@ class XcodeReplForkTests:
             def __init__(self) -> None:
                 self.max_recent_messages = 1
 
+            def __call__(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                result: list[dict[str, Any]] = []
+                for m in messages:
+                    if m.get("role") == "user" and not result:
+                        result.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "[Compressed] "
+                                    "## Goal\n- test\n"
+                                    "## Progress\n- done\n"
+                                    "## Key Decisions\n- foo\n"
+                                    "## Next Steps\n- bar"
+                                ),
+                            }
+                        )
+                    elif m.get("role") != "system":
+                        result.append(m)
+                return result
+
         class FakeAgent:
             def __init__(self) -> None:
-                self.compact_requested = False
                 self.compactor = FakeCompactor()
                 self.approval_callback: ApprovalCallback | None = None
                 self.cancellation_token = CancellationToken()
+                self._history: list[AgentMessage] = []
 
-            def request_compaction(self) -> None:
-                self.compact_requested = True
+            def history_messages(self) -> list[AgentMessage]:
+                return self._history
+
+            def load_history(self, messages: list[AgentMessage]) -> None:
+                self._history = list(messages)
 
             def follow_up(self, msg: AgentMessage) -> None: ...
 
-            def load_history(self, messages: list[AgentMessage]) -> None: ...
+            def request_compaction(self) -> None: ...
 
         class CompactFakeApp:
             def __init__(self) -> None:
@@ -1836,6 +1859,8 @@ class XcodeReplForkTests:
                 )
 
         with tempfile.TemporaryDirectory() as temp_dir:
+            from xcode.agent.messages import SystemMessage, UserMessage
+
             app = CompactFakeApp()
             prompt = FakePrompt([])
             renderer = FakeRenderer()
@@ -1857,6 +1882,12 @@ class XcodeReplForkTests:
                     },
                 },
             )
+            # 给 agent 一些历史消息以触发压缩
+            app.agent._history = [
+                SystemMessage(content="You are a helpful assistant."),
+                UserMessage(content="do something"),
+            ]
+
             with redirect_stdout(StringIO()) as output:
                 handled = handle_command(
                     "/compact",
@@ -1868,11 +1899,14 @@ class XcodeReplForkTests:
                 )
 
             assert not (handled)
-            assert app.agent.compact_requested
-            assert (
-                "Active context compaction requested for the next agent run"
-                in output.getvalue()
-            )
+            output_text = output.getvalue()
+            # 新行为：立即压缩并显示 token 数和结构化摘要
+            assert "Compacted from" in output_text
+            assert "tokens" in output_text
+            assert "saved" in output_text
+            assert "Goal" in output_text
+            assert "Key Decisions" in output_text
+            # 会话日志 tool result 仍被裁剪
             records = store.load_records()
             tool_results = [
                 record.content
@@ -1884,26 +1918,35 @@ class XcodeReplForkTests:
             assert len(tool_results) == 1
             event_data = tool_results[0].get("data")
             assert isinstance(event_data, dict)
-            assert isinstance(event_data, dict)
             content = event_data.get("content")
-            assert isinstance(content, str)
             assert isinstance(content, str)
             assert "compacted" in content
             assert "300 chars removed" in content
 
     def test_run_repl_compact_command_skips_short_clean_session(self) -> None:
+        class FakeCompactor:
+            def __init__(self) -> None:
+                self.max_recent_messages = 1
+
+            def __call__(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                return messages
+
         class FakeAgent:
             def __init__(self) -> None:
-                self.compact_requested = False
+                self.compactor = FakeCompactor()
                 self.approval_callback: ApprovalCallback | None = None
                 self.cancellation_token = CancellationToken()
+                self._history: list[AgentMessage] = []
 
-            def request_compaction(self) -> None:
-                self.compact_requested = True
+            def history_messages(self) -> list[AgentMessage]:
+                return self._history
+
+            def load_history(self, messages: list[AgentMessage]) -> None:
+                self._history = list(messages)
 
             def follow_up(self, msg: AgentMessage) -> None: ...
 
-            def load_history(self, messages: list[AgentMessage]) -> None: ...
+            def request_compaction(self) -> None: ...
 
         class CompactFakeApp:
             def __init__(self) -> None:
@@ -1954,8 +1997,9 @@ class XcodeReplForkTests:
                 )
 
             assert not (handled)
-            assert not (app.agent.compact_requested)
-            assert "No context compaction needed" in output.getvalue()
+            output_text = output.getvalue()
+            # 空历史：应显示 "No messages to compact"
+            assert "No messages to compact" in output_text
 
 
 class FakePrompt:

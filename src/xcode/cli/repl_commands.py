@@ -603,46 +603,97 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
-    """手动触发上下文压缩和会话日志裁剪。"""
+    """手动触发上下文压缩，立即执行完整压缩管线并显示结构化摘要。"""
+    from xcode.agent.compaction import estimate_message_tokens
+    from xcode.agent.message_converter import COMPACTION_SUMMARY_PREFIX
+    from xcode.harness.agent_runtime.agent_helpers import to_dict
+    from xcode.harness.agent_runtime.message_codec import (
+        messages_from_compacted_dicts,
+    )
+
     agent = getattr(ctx.app, "agent", None)
-    should_request_active = _should_request_active_compaction(ctx)
-    if (
-        should_request_active
-        and agent is not None
-        and hasattr(agent, "request_compaction")
-    ):
-        agent.request_compaction()
-        message_count, recent_window = _active_context_compaction_size(ctx)
-        if message_count > recent_window + 1:
-            print(
-                "Active context compaction requested for the next agent run "
-                f"({message_count} messages exceed recent window {recent_window})."
-            )
-        else:
-            print(
-                "Active context compaction requested for the next agent run "
-                "(large tool results present)."
-            )
-    compacted = ctx.store.compact_current_session(max_tool_result_chars=200)
-    if compacted > 0:
-        print(f"Compacted {compacted} large tool results in the session log.")
-        if should_request_active:
-            print(
-                "Token estimates in /context may not shrink until the next agent run "
-                "rebuilds active context."
-            )
-    elif should_request_active:
-        print("No large tool results to compact in the session log.")
-        print(
-            "Token estimates in /context may not shrink until the next agent run "
-            "rebuilds active context."
-        )
+    if agent is None:
+        print("No agent available.")
+        return False
+
+    # 1) 获取 agent 当前消息
+    history_messages = getattr(agent, "history_messages", None)
+    if not callable(history_messages):
+        print("Agent does not expose history.")
+        return False
+    before_msgs = history_messages()
+    if not before_msgs:
+        print("No messages to compact.")
+        return False
+
+    before_tokens = estimate_message_tokens(
+        [to_dict(m) for m in before_msgs]
+    )
+
+    # 2) 检查是否需要压缩
+    compactor = getattr(agent, "compactor", None)
+    if compactor is None:
+        print("No compactor configured.")
+        return False
+
+    load_history = getattr(agent, "load_history", None)
+    if not callable(load_history):
+        print("Agent does not support history replacement.")
+        return False
+
+    # 3) 立即运行压缩
+    dict_messages = [to_dict(m) for m in before_msgs]
+    compacted_dicts = compactor(dict_messages)
+    after_msgs = messages_from_compacted_dicts(compacted_dicts)
+
+    # 4) 提取结构化摘要
+    summary_text = _extract_compact_summary(compacted_dicts)
+    after_tokens = estimate_message_tokens(
+        [to_dict(m) for m in after_msgs]
+    )
+
+    # 5) 替换 agent 历史
+    load_history(after_msgs)
+
+    # 6) 也裁剪会话日志
+    ctx.store.compact_current_session(max_tool_result_chars=200)
+
+    # 7) 打印结构化摘要——类似 pi 的格式
+    saved = before_tokens - after_tokens
+    print(f"\n [compaction]\n")
+    print(f" Compacted from {before_tokens:,} tokens")
+    print()
+    if summary_text:
+        # 去除 [Compressed] 前缀，打印清晰的摘要
+        clean = summary_text
+        if clean.startswith("[Compressed]"):
+            clean = clean[len("[Compressed]"):].strip()
+        # 按行打印，每行不超过终端宽度
+        for line in clean.splitlines():
+            stripped = line.rstrip()
+            if stripped:
+                print(f" {stripped}")
+            else:
+                print()
     else:
-        print(
-            "No context compaction needed: active context is within the recent-message "
-            "window and the session log has no large tool results."
-        )
+        print(" (no summary extracted)")
+    print()
+    print(f" \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
+    print(
+        f" Context compacted: {len(before_msgs)} messages \u2192 {len(after_msgs)} messages"
+        f" ({before_tokens:,} \u2192 {after_tokens:,} tokens, saved {saved:,})"
+    )
     return False
+
+
+def _extract_compact_summary(messages: list[dict[str, Any]]) -> str | None:
+    """从压缩后的消息列表中提取结构化摘要文本。"""
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if role == "user" and isinstance(content, str) and content.startswith("[Compressed]"):
+            return content
+    return None
 
 
 def _should_request_active_compaction(ctx: CommandContext) -> bool:
