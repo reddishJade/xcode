@@ -696,14 +696,10 @@ class TestPermissionSingleGate:
 
     # ── ask/defer path ──
 
-    def test_ask_defer_path_calls_permission_once_blocked(self) -> None:
-        """ask path: PermissionEngine.decide() called once, tool blocked.
-
-        ask blocks when no approval mechanism exists.
-        handler not executed; grant is satisfied on subsequent calls.
-        Full ask/grant cycle is tested in test_xcode_permissions.py.
-        """
-        spec = self._make_spec(self._handler_never)
+    def test_ask_defer_path_calls_permission_once_allowed(self) -> None:
+        """ask path: PermissionEngine.decide() called once, tool allowed via callback."""
+        self._handler_called = False
+        spec = self._make_spec(self._handler_ok)
         gate = self._make_gate(
             PermissionPolicy((StaticPermission(tool=self.TOOL_NAME, decision="ask"),)),
             callback=lambda _t, _i: HITLResult("allow", "session"),
@@ -720,7 +716,8 @@ class TestPermissionSingleGate:
             result = self._run_execution(gate, spec)
 
         assert decide_count[0] == 1, "decide must be called exactly once"
-        assert result.results[0].is_error
+        assert self._handler_called
+        assert not result.results[0].is_error
 
     # ── ToolSpecAdapter direct (no PermissionEngine) ──
 

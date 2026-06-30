@@ -28,7 +28,9 @@ from unittest.mock import patch
 class ToolListApp:
     def __init__(self) -> None:
         self.registry = (
-            ToolSpec("read_file", "Read files.", "path", lambda _value: "", group="core"),
+            ToolSpec(
+                "read_file", "Read files.", "path", lambda _value: "", group="core"
+            ),
             ToolSpec(
                 "mcp__demo__echo",
                 "Echo. [mcp: demo]",
@@ -121,9 +123,7 @@ def test_permission_rule_format_matches_command_templates() -> None:
         "target_type": "command",
     }
 
-    assert format_permission_rule(rule) == (
-        "Bash(uv run *): allow target_type=command"
-    )
+    assert format_permission_rule(rule) == ("Bash(uv run *): allow target_type=command")
 
 
 def test_add_permission_rule_interactive_saves_custom_rule() -> None:

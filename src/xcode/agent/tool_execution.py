@@ -247,7 +247,7 @@ async def _execute_one(
             current_context, assistant_message, tool_call, config, signal, emit
         )
         return result_msg, terminate
-    except BaseException:
+    except Exception:
         logger.exception("Unexpected error executing tool %s", tool_call.name)
         result_msg, terminate = _error_result(
             tool_call, "unexpected tool execution error"
@@ -399,8 +399,7 @@ async def _run_tool_handler(
             content=[
                 TextContent(
                     text=(
-                        f"Tool timed out after {timeout_seconds:g}s: "
-                        f"{tool_call.name}"
+                        f"Tool timed out after {timeout_seconds:g}s: {tool_call.name}"
                     )
                 )
             ]

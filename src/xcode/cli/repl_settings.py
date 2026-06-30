@@ -219,8 +219,12 @@ def manage_permissions(
             _pause_permission_tab()
             continue
         if tab == "Workspace":
-            if _handle_workspace_tab(config, config_path, project_root, restricted_dirs):
-                print(f"Saved to {config_path.name}. Restart Xcode to reload workspace roots.")
+            if _handle_workspace_tab(
+                config, config_path, project_root, restricted_dirs
+            ):
+                print(
+                    f"Saved to {config_path.name}. Restart Xcode to reload workspace roots."
+                )
             continue
         decision = str(tab).lower()
         changed = _handle_rule_tab(config, config_path, decision)
@@ -259,17 +263,12 @@ def print_permission_overview(
     )
     print()
     print("  Xcode will not ask before using tools matched by Allow rules.")
-    print(
-        f"  Saved grants: session {session_count}, persistent {permanent_count}."
-    )
+    print(f"  Saved grants: session {session_count}, persistent {permanent_count}.")
     print()
 
 
 def _permission_header(active_tab: str) -> str:
-    labels = [
-        f"[{tab}]" if tab == active_tab else tab
-        for tab in PERMISSION_TABS
-    ]
+    labels = [f"[{tab}]" if tab == active_tab else tab for tab in PERMISSION_TABS]
     return "Permissions  " + "   ".join(labels)
 
 
@@ -293,7 +292,9 @@ def _handle_rule_tab(
     config_path: Path,
     decision: str,
 ) -> bool:
-    rules = [rule for rule in _security_rules(config) if rule.get("decision") == decision]
+    rules = [
+        rule for rule in _security_rules(config) if rule.get("decision") == decision
+    ]
     _render_rule_tab(decision, rules)
     choices = ["Add a new rule…", "Back"]
     action = questionary.select(
@@ -445,7 +446,9 @@ def _prompt_custom_rule(decision: str) -> dict[str, Any] | None:
     return rule
 
 
-def _apply_runtime_permission_policy(app: object | None, config: dict[str, Any]) -> None:
+def _apply_runtime_permission_policy(
+    app: object | None, config: dict[str, Any]
+) -> None:
     if app is None:
         return
     agent = getattr(app, "agent", None)

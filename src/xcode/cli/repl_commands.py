@@ -876,10 +876,7 @@ def _add_memory(manager: MemoryManager, payload: str) -> bool:
             "Usage: /memory add [project|user] "
             "<title> | <context> | <solution> | <files> | <takeaways>"
         )
-        print(
-            "Short form: /memory add [project|user] "
-            "<title>: <note>"
-        )
+        print("Short form: /memory add [project|user] <title>: <note>")
         return False
 
     title, context, solution, files, takeaways = fields

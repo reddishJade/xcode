@@ -713,10 +713,18 @@ def _build_hook_manager(
 def _external_directories_from_security(
     security: SecurityRuntimeConfig,
 ) -> tuple[ExternalDirectory, ...]:
-    return tuple(
+    dirs: list[ExternalDirectory] = [
         ExternalDirectory(path=Path(ed.path), access=ed.access)
         for ed in security.external_directories
-    )
+    ]
+    # 自动添加 ~/.xcode 和 ~/.agents 为只读外部目录，使 skill 文件可读
+    home = Path.home()
+    for p in (home / ".xcode", home / ".agents"):
+        if p.is_dir():
+            ext = ExternalDirectory(path=p, access="read")
+            if ext not in dirs:
+                dirs.append(ext)
+    return tuple(dirs)
 
 
 def _permission_policy_from_security(

@@ -226,9 +226,10 @@ class ReplInputLexer:
     _file_ref_pattern = re.compile(r"(?<!\S)@([^\s]+)")
 
     def lex_document(self, document: Any) -> Callable[[int], list[tuple[str, str]]]:
-        lines: list[str] = getattr(document, "lines", None) or str(
-            getattr(document, "text", "")
-        ).splitlines()
+        lines: list[str] = (
+            getattr(document, "lines", None)
+            or str(getattr(document, "text", "")).splitlines()
+        )
 
         if not lines:
             lines = [""]
