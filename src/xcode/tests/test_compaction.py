@@ -4,8 +4,10 @@
 """
 
 from xcode.agent.compaction import (
+    effective_compact_threshold,
     estimate_tokens,
     extract_prompt_tokens_from_usage,
+    get_model_context_window,
     get_model_soft_threshold,
     should_compact_token_aware,
 )
@@ -61,6 +63,73 @@ class TestModelSoftThreshold:
         """测试未知模型使用默认阈值。"""
         assert get_model_soft_threshold("unknown-model") == 32000
         assert get_model_soft_threshold(None) == 32000
+
+
+class TestModelContextWindow:
+    """测试模型上下文窗口。"""
+
+    def test_deepseek_v4_window(self) -> None:
+        assert get_model_context_window("deepseek-v4-flash") == 128_000
+
+    def test_deepseek_v3_window(self) -> None:
+        assert get_model_context_window("deepseek-v3-pro") == 128_000
+
+    def test_deepseek_v2_window(self) -> None:
+        assert get_model_context_window("deepseek-v2-chat") == 64_000
+
+    def test_chatglm_window(self) -> None:
+        assert get_model_context_window("glm-4.7") == 256_000
+        assert get_model_context_window("glm-5-flash") == 256_000
+
+    def test_mimo_window(self) -> None:
+        assert get_model_context_window("mimo-v2.5-pro") == 128_000
+
+    def test_gpt4_window(self) -> None:
+        assert get_model_context_window("gpt-4-turbo") == 128_000
+
+    def test_gpt35_window(self) -> None:
+        assert get_model_context_window("gpt-3.5-turbo") == 16_000
+
+    def test_unknown_model(self) -> None:
+        assert get_model_context_window("unknown-model") is None
+        assert get_model_context_window(None) is None
+
+
+class TestEffectiveCompactThreshold:
+    """测试有效触发阈值计算。"""
+
+    def test_with_reserve_on_known_model(self) -> None:
+        # deepseek-v4: 128k context - 16k reserve = 112k
+        assert (
+            effective_compact_threshold(
+                "deepseek-v4-flash", reserve_tokens=16384, fallback_threshold=60000
+            )
+            == 128_000 - 16384
+        )
+
+    def test_fallback_on_unknown_model(self) -> None:
+        assert (
+            effective_compact_threshold(
+                "unknown-model", reserve_tokens=16384, fallback_threshold=32000
+            )
+            == 32000
+        )
+
+    def test_no_reserve_uses_fallback(self) -> None:
+        assert (
+            effective_compact_threshold(
+                "deepseek-v4-flash", reserve_tokens=0, fallback_threshold=60000
+            )
+            == 60000
+        )
+
+    def test_null_model(self) -> None:
+        assert (
+            effective_compact_threshold(
+                None, reserve_tokens=16384, fallback_threshold=32000
+            )
+            == 32000
+        )
 
 
 class TestShouldCompactTokenAware:
@@ -127,6 +196,44 @@ class TestShouldCompactTokenAware:
                 model_soft_threshold=32000,
                 compact_threshold=10,  # 消息数已超标
             )
+        )
+
+    def test_real_tokens_with_reserve_triggers_earlier(self) -> None:
+        """测试 reserve_tokens 使触发线提前。"""
+        messages = [UserMessage(content=[TextContent(text="test")])]
+        # deepseek-v4 有 128k context, reserve=16k → 触发线 112k
+        # last_prompt_tokens=113k 应触发
+        assert should_compact_token_aware(
+            messages,
+            last_prompt_tokens=113_000,
+            model_name="deepseek-v4-flash",
+            reserve_tokens=16384,
+            model_soft_threshold=60000,
+        )
+
+    def test_real_tokens_with_reserve_below_threshold(self) -> None:
+        """测试 reserve_tokens 未到触发线不压缩。"""
+        messages = [UserMessage(content=[TextContent(text="test")])]
+        # deepseek-v4: 128k context, reserve=16k → 触发线 112k
+        # last_prompt_tokens=100k 不应触发
+        assert not should_compact_token_aware(
+            messages,
+            last_prompt_tokens=100_000,
+            model_name="deepseek-v4-flash",
+            reserve_tokens=16384,
+            model_soft_threshold=60000,
+        )
+
+    def test_reserve_fallback_on_unknown_model(self) -> None:
+        """测试未知模型时 reserve_tokens 回退到 model_soft_threshold。"""
+        messages = [UserMessage(content=[TextContent(text="test")])]
+        # 未知模型，reserve_tokens 被忽略，使用 model_soft_threshold=32000
+        assert should_compact_token_aware(
+            messages,
+            last_prompt_tokens=35000,
+            model_name="unknown-model",
+            reserve_tokens=16384,
+            model_soft_threshold=32000,
         )
 
 

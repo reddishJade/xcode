@@ -75,11 +75,15 @@ def should_compact_token_aware(
     model_soft_threshold: int = 32000,
     compact_threshold: int = 0,
     compact_token_threshold: int = 0,
+    model_name: str | None = None,
+    reserve_tokens: int = 0,
 ) -> bool:
     """基于真实 token 和阈值判断是否需要压缩。
 
     优先级：
     1. 如果有 last_prompt_tokens（上次 provider 返回的真实值），用它判断
+       当同时提供 model_name + reserve_tokens 时，
+       使用 context_window - reserve_tokens 作为精确触发线
     2. 否则回退到本地估算 + 消息数阈值
 
     设计原因：
@@ -88,6 +92,13 @@ def should_compact_token_aware(
     """
     # 优先使用真实 token 判断（如果有的话，只用它判断）
     if last_prompt_tokens is not None:
+        if model_name and reserve_tokens > 0:
+            trigger = effective_compact_threshold(
+                model_name,
+                reserve_tokens=reserve_tokens,
+                fallback_threshold=model_soft_threshold,
+            )
+            return last_prompt_tokens >= trigger
         return last_prompt_tokens >= model_soft_threshold
 
     # 回退到阈值判断（只在没有真实 token 时才使用）
@@ -144,3 +155,52 @@ def get_model_soft_threshold(model: str | None) -> int:
 
     # 默认保守值
     return 32000
+
+
+# 模型上下文窗口映射（完整窗口大小，非阈值）
+_MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    # DeepSeek
+    "deepseek-v4": 128_000,
+    "deepseek-v3": 128_000,
+    "deepseek-v2": 64_000,
+    # ChatGLM
+    "glm-4": 256_000,
+    "glm-5": 256_000,
+    # MiMo
+    "mimo": 128_000,
+    # OpenAI
+    "gpt-4": 128_000,
+    "gpt-3.5": 16_000,
+}
+
+
+def get_model_context_window(model: str | None) -> int | None:
+    """获取模型完整的上下文窗口（token 数）。
+
+    在 soft threshold 设计不满足需求时，使用此函数获取窗口大小，
+    再减去 reserve_tokens 得到精确的触发线。
+    返回 None 表示未知模型，由调用方使用 fallback 阈值。
+    """
+    if not model:
+        return None
+    model_lower = model.lower()
+    for prefix, window in _MODEL_CONTEXT_WINDOWS.items():
+        if prefix in model_lower:
+            return window
+    return None
+
+
+def effective_compact_threshold(
+    model: str | None,
+    reserve_tokens: int = 0,
+    fallback_threshold: int = 32000,
+) -> int:
+    """计算有效压缩触发阈值。
+
+    优先使用 model 的上下文窗口减去 reserve_tokens，
+    未知模型回退到 fallback_threshold。
+    """
+    context_window = get_model_context_window(model)
+    if context_window is not None and reserve_tokens > 0:
+        return context_window - reserve_tokens
+    return fallback_threshold

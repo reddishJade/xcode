@@ -49,6 +49,7 @@ class LayeredCompactor:
         compact_instructions: CompactInstructions | None = None,
         summarize_fn: SummarizeFn | None = None,
         active_branch_id: str | None = None,
+        reserve_tokens: int = 16384,
     ) -> None:
         self.transcript_dir = transcript_dir
         self.compact_instructions = compact_instructions
@@ -62,6 +63,7 @@ class LayeredCompactor:
         self.large_tool_output_tail_chars = large_tool_output_tail_chars
         self.compact_token_threshold = compact_token_threshold
         self.budget_trigger_token_ratio = budget_trigger_token_ratio
+        self.reserve_tokens = reserve_tokens
         self.on_compact = on_compact
         self.last_transcript_path: Path | None = None
 

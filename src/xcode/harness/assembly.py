@@ -203,6 +203,7 @@ def build_shared_infra(
     compactor = LayeredCompactor(
         transcript_dir=transcript_dir,
         max_recent_messages=runtime_config.agent.max_recent_messages,
+        reserve_tokens=runtime_config.agent.reserve_tokens,
         on_compact=on_compact,
     )
     return SharedInfra(

@@ -9,6 +9,7 @@ from typing import Any
 from xcode.ai.providers.protocol import ModelProvider
 
 from ...agent.compaction import (
+    effective_compact_threshold,
     extract_prompt_tokens_from_usage,
     get_model_soft_threshold,
 )
@@ -397,9 +398,17 @@ def _should_compact(
     if last_prompt_tokens is not None:
         provider = snapshot.provider
         model_name = provider.model if isinstance(provider, ModelProvider) else None
-        return last_prompt_tokens >= get_model_soft_threshold(
-            str(model_name) if model_name is not None else None
-        )
+        model_str = str(model_name) if model_name is not None else None
+        # 当 reserve_tokens > 0 时，使用 context_window - reserve_tokens
+        # 作为精确触发线；否则回退到 model_soft_threshold
+        if snapshot.config.reserve_tokens > 0:
+            trigger = effective_compact_threshold(
+                model_str,
+                reserve_tokens=snapshot.config.reserve_tokens,
+                fallback_threshold=get_model_soft_threshold(model_str),
+            )
+            return last_prompt_tokens >= trigger
+        return last_prompt_tokens >= get_model_soft_threshold(model_str)
     from .agent_helpers import to_dict
 
     msg_dicts = [to_dict(m) for m in messages]
