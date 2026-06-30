@@ -889,7 +889,7 @@ class XcodeReplTests:
                 "xcode.cli.repl_tools.build_tool_catalog",
                 return_value={
                     "core": {"read_file"},
-                    "subagent": {"delegate_task"},
+                    "subagent": {"subagent"},
                 },
             ):
                 with redirect_stdout(StringIO()):
@@ -901,7 +901,7 @@ class XcodeReplTests:
             assert "## Visible Tools" in renderer.rendered[0]
             assert "read_file" in renderer.rendered[0]
             assert "## Hidden Tools" in renderer.rendered[0]
-            assert "delegate_task" in renderer.rendered[0]
+            assert "subagent" in renderer.rendered[0]
 
     def test_run_repl_queue_mode_enqueues_followup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

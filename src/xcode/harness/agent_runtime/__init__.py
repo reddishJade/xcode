@@ -7,20 +7,20 @@ from .structured import StructuredAgent
 from .events import StructuredAgentEvent
 from .result import RunState, StructuredAgentResult
 from .subagent import (
-    DelegatedTaskResult,
-    DelegatedTaskRunner,
-    build_delegate_task_tools,
+    SubagentResult,
+    SubagentRunner,
+    build_subagent_tools,
 )
 
 __all__ = [
     "CancellationToken",
     "ContextualRetrievalState",
-    "DelegatedTaskResult",
-    "DelegatedTaskRunner",
+    "SubagentResult",
+    "SubagentRunner",
     "RunState",
     "StructuredAgent",
     "StructuredAgentEvent",
     "StructuredAgentResult",
-    "build_delegate_task_tools",
+    "build_subagent_tools",
     "estimate_message_tokens",
 ]

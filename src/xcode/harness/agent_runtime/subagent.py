@@ -16,7 +16,7 @@ from .async_worker import IsolatedAsyncWorker
 
 """子 Agent 委派工具。
 
-模型只看到一个 ``delegate_task`` 工具。工具执行期间同步等待子 Agent 完成，
+模型只看到一个 ``subagent`` 工具。工具执行期间同步等待子 Agent 完成，
 并把子 Agent 的进度通过 tool update 流给终端；最终只把完成摘要返回给父模型。
 """
 
@@ -31,7 +31,7 @@ class SubagentBusyError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class DelegatedTaskResult:
+class SubagentResult:
     """一次委派运行的最终结果。"""
 
     run_id: str
@@ -47,7 +47,7 @@ class DelegatedTaskResult:
     error: str | None = None
 
 
-class DelegatedTaskRunner:
+class SubagentRunner:
     """执行一次子 Agent 委派，并负责并发额度与 worktree 隔离。"""
 
     def __init__(
@@ -85,7 +85,7 @@ class DelegatedTaskRunner:
         model_profile: str | None = None,
         isolation: str | None = None,
         on_update: SubagentUpdate | None = None,
-    ) -> DelegatedTaskResult:
+    ) -> SubagentResult:
         if self._closing:
             raise RuntimeError("subagent runner is shutting down")
         clean_prompt = prompt.strip()
@@ -123,7 +123,7 @@ class DelegatedTaskRunner:
                 on_update,
                 _format_update(run_id, "failed", f"{type(exc).__name__}: {exc}"),
             )
-            return DelegatedTaskResult(
+            return SubagentResult(
                 run_id=run_id,
                 prompt=clean_prompt,
                 model_profile=profile,
@@ -139,7 +139,7 @@ class DelegatedTaskRunner:
 
         finished_at = datetime.now()
         self._emit(on_update, _format_update(run_id, "done", "completed"))
-        return DelegatedTaskResult(
+        return SubagentResult(
             run_id=run_id,
             prompt=clean_prompt,
             model_profile=profile,
@@ -208,8 +208,8 @@ class DelegatedTaskRunner:
             on_update(text)
 
 
-def build_delegate_task_tools(runner: DelegatedTaskRunner) -> tuple[ToolSpec, ...]:
-    def delegate_task(data: ToolInput, on_update: Callable[[str], None] | None) -> str:
+def build_subagent_tools(runner: SubagentRunner) -> tuple[ToolSpec, ...]:
+    def _subagent_handler(data: ToolInput, on_update: Callable[[str], None] | None) -> str:
         result = runner.delegate(
             str(data.get("prompt", "")).strip(),
             model_profile=str(
@@ -218,33 +218,38 @@ def build_delegate_task_tools(runner: DelegatedTaskRunner) -> tuple[ToolSpec, ..
             isolation=str(data.get("isolation", "context")).strip(),
             on_update=on_update,
         )
-        return _render_delegate_result(result)
+        return _render_subagent_result(result)
 
     return (
         ToolSpec(
-            "delegate_task",
+            "subagent",
             (
                 "Delegate a complete task to a subagent and wait for the final "
                 "result. Progress streams to the user; only the final result is "
                 "returned to the parent model. Do not poll for status."
             ),
             'JSON: {"description":"short label","prompt":"...", "model_profile":"subagent", "isolation":"context|worktree"}',
-            lambda data: delegate_task(data, None),
+            lambda data: _subagent_handler(data, None),
             group="subagent",
             counts_as_progress=True,
-            schema=_delegate_task_schema(),
-            streaming_handler=delegate_task,
+            schema=_subagent_schema(),
+            streaming_handler=_subagent_handler,
+            prompt_snippet=(
+                "Delegate a task to a subagent (child agent). "
+                "Use this when the user says 'subagent', 'delegate', 'sub agent', "
+                "or when the task is complex and should be done independently."
+            ),
             prompt_guidelines=(
-                "Use delegate_task for substantial independent investigation or implementation tasks.",
-                "Do not poll delegated tasks; delegate_task waits for completion and streams progress to the user.",
+                "Use subagent for substantial independent investigation or implementation tasks.",
+                "Do not poll delegated tasks; subagent waits for completion and streams progress to the user.",
                 "Give the subagent a complete prompt with scope, expected output, and relevant files.",
             ),
         ),
     )
 
 
-def _delegate_task_schema() -> dict[str, object]:
-    """返回 delegate_task 的参数 schema。"""
+def _subagent_schema() -> dict[str, object]:
+    """返回 subagent 的参数 schema。"""
     return {
         "type": "object",
         "properties": {
@@ -267,7 +272,7 @@ def _delegate_task_schema() -> dict[str, object]:
     }
 
 
-def _render_delegate_result(result: DelegatedTaskResult) -> str:
+def _render_subagent_result(result: SubagentResult) -> str:
     if result.status == "failed":
         return ToolOutput(
             f'<task id="{result.run_id}" state="error">\n'

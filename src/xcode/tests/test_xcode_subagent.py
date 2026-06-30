@@ -10,15 +10,15 @@ from unittest.mock import patch
 import pytest
 
 from xcode.harness.agent_runtime import (
-    DelegatedTaskRunner,
-    build_delegate_task_tools,
+    SubagentRunner,
+    build_subagent_tools,
 )
 from xcode.harness.agent_runtime.async_worker import IsolatedAsyncWorker
 from xcode.harness.agent_runtime.subagent import SubagentBusyError
 
 
 class XcodeSubagentToolTests:
-    def test_delegate_task_waits_for_result_and_streams_updates(self) -> None:
+    def test_subagent_waits_for_result_and_streams_updates(self) -> None:
         updates: list[str] = []
 
         async def run_child(
@@ -32,7 +32,7 @@ class XcodeSubagentToolTests:
                 on_update(f"tool: read_file {prompt}")
             return f"{model_profile}:{prompt}"
 
-        runner = DelegatedTaskRunner(run_child, timeout_seconds=1)
+        runner = SubagentRunner(run_child, timeout_seconds=1)
         try:
             result = runner.delegate(
                 "inspect ai layer",
@@ -50,7 +50,7 @@ class XcodeSubagentToolTests:
         finally:
             runner.shutdown()
 
-    def test_delegate_task_tool_is_single_public_subagent_tool(self) -> None:
+    def test_subagent_tool_is_single_public_subagent_tool(self) -> None:
         async def run_child(
             prompt: str,
             _model_profile: str,
@@ -59,10 +59,10 @@ class XcodeSubagentToolTests:
         ) -> str:
             return f"done {prompt}"
 
-        runner = DelegatedTaskRunner(run_child, timeout_seconds=1)
+        runner = SubagentRunner(run_child, timeout_seconds=1)
         try:
-            tools = build_delegate_task_tools(runner)
-            assert [tool.name for tool in tools] == ["delegate_task"]
+            tools = build_subagent_tools(runner)
+            assert [tool.name for tool in tools] == ["subagent"]
 
             output = tools[0].streaming_handler(
                 {"description": "Inspect", "prompt": "work"},
@@ -88,7 +88,7 @@ class XcodeSubagentToolTests:
                 await asyncio.to_thread(release.wait)
             return prompt
 
-        runner = DelegatedTaskRunner(
+        runner = SubagentRunner(
             run_child,
             timeout_seconds=1,
             max_active_jobs=1,
@@ -119,7 +119,7 @@ class XcodeSubagentToolTests:
             release.set()
             runner.shutdown()
 
-    def test_delegate_task_returns_error_result_and_releases_limit(self) -> None:
+    def test_subagent_returns_error_result_and_releases_limit(self) -> None:
         calls = 0
 
         async def run_child(
@@ -134,7 +134,7 @@ class XcodeSubagentToolTests:
                 await asyncio.sleep(999)
             return "done"
 
-        runner = DelegatedTaskRunner(
+        runner = SubagentRunner(
             run_child,
             timeout_seconds=0.01,
             max_active_jobs=1,
@@ -151,7 +151,7 @@ class XcodeSubagentToolTests:
         finally:
             runner.shutdown()
 
-    def test_delegate_task_tool_marks_failed_runs_as_error(self) -> None:
+    def test_subagent_tool_marks_failed_runs_as_error(self) -> None:
         async def run_child(
             _prompt: str,
             _model_profile: str,
@@ -160,9 +160,9 @@ class XcodeSubagentToolTests:
         ) -> str:
             raise RuntimeError("boom")
 
-        runner = DelegatedTaskRunner(run_child, timeout_seconds=1)
+        runner = SubagentRunner(run_child, timeout_seconds=1)
         try:
-            tool = build_delegate_task_tools(runner)[0]
+            tool = build_subagent_tools(runner)[0]
 
             output = tool.streaming_handler(
                 {"description": "Explode", "prompt": "fail"},
@@ -174,7 +174,7 @@ class XcodeSubagentToolTests:
         finally:
             runner.shutdown()
 
-    def test_delegate_task_passes_model_profile(self) -> None:
+    def test_subagent_passes_model_profile(self) -> None:
         seen: list[tuple[str, str]] = []
 
         async def run_child(
@@ -186,7 +186,7 @@ class XcodeSubagentToolTests:
             seen.append((prompt, model_profile))
             return f"{model_profile}:{prompt}"
 
-        runner = DelegatedTaskRunner(
+        runner = SubagentRunner(
             run_child,
             timeout_seconds=1,
             available_profiles=("main", "subagent"),
@@ -199,7 +199,7 @@ class XcodeSubagentToolTests:
         finally:
             runner.shutdown()
 
-    def test_delegate_task_rejects_unknown_profile(self) -> None:
+    def test_subagent_rejects_unknown_profile(self) -> None:
         async def run_child(
             prompt: str,
             model_profile: str,
@@ -208,7 +208,7 @@ class XcodeSubagentToolTests:
         ) -> str:
             return f"{model_profile}:{prompt}"
 
-        runner = DelegatedTaskRunner(
+        runner = SubagentRunner(
             run_child,
             timeout_seconds=1,
             available_profiles=("subagent",),
@@ -243,7 +243,7 @@ class XcodeSubagentToolTests:
             seen.append((prompt, model_profile, cwd_override))
             return "done"
 
-        runner = DelegatedTaskRunner(
+        runner = SubagentRunner(
             run_child,
             timeout_seconds=1,
             available_profiles=("subagent",),
@@ -274,7 +274,7 @@ class XcodeSubagentToolTests:
                 raise
             return "never"
 
-        runner = DelegatedTaskRunner(run_child, timeout_seconds=0.01)
+        runner = SubagentRunner(run_child, timeout_seconds=0.01)
         try:
             result = runner.delegate("slow")
 
@@ -293,7 +293,7 @@ class XcodeSubagentToolTests:
             await asyncio.sleep(999)
             return "never"
 
-        runner = DelegatedTaskRunner(run_child, timeout_seconds=None)
+        runner = SubagentRunner(run_child, timeout_seconds=None)
         thread = threading.Thread(target=lambda: runner.delegate("slow"), daemon=True)
         thread.start()
         self._wait_active_count(runner, 1)
@@ -324,7 +324,7 @@ class XcodeSubagentToolTests:
 
         assert selector_loop.called
 
-    def _wait_active_count(self, runner: DelegatedTaskRunner, expected: int) -> None:
+    def _wait_active_count(self, runner: SubagentRunner, expected: int) -> None:
         """等待 active job 额度变化。"""
         for _ in range(100):
             if runner.active_job_count == expected:

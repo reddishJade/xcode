@@ -28,9 +28,9 @@ from xcode.harness.config import (
 from xcode.harness.agent_runtime import (
     CancellationToken,
     ContextualRetrievalState,
-    DelegatedTaskRunner,
     StructuredAgent,
-    build_delegate_task_tools,
+    build_subagent_tools,
+    SubagentRunner,
 )
 from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
@@ -573,14 +573,14 @@ def _build_subagent_integration(
             raise RuntimeError("subagent finished without final result")
         return result.answer
 
-    managed_runner = DelegatedTaskRunner(
+    managed_runner = SubagentRunner(
         run_child,
         available_profiles=tuple(child_llms),
         default_profile=PROFILE_SUBAGENT,
         worktree_runner=shared_services.worktree_runner,
         max_active_jobs=config.subagent_workers,
     )
-    return [managed_runner.shutdown], build_delegate_task_tools(managed_runner)
+    return [managed_runner.shutdown], build_subagent_tools(managed_runner)
 
 
 def _format_child_event_update(event: object) -> str | None:

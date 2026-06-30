@@ -39,7 +39,7 @@ CATALOG_COVERED_BUILDERS = frozenset(
         "build_file_tools",
         "build_load_skill_tool",
         "build_mailbox_tools",
-        "build_delegate_task_tools",
+        "build_subagent_tools",
         "build_mcp_tools",
         "build_memory_tools",
         "build_progress_tools",
@@ -104,7 +104,7 @@ def build_tool_catalog() -> dict[str, set[str]]:
                 catalog.setdefault(group, set()).add(spec.name)
 
     if "subagent" not in catalog:
-        catalog["subagent"] = {"delegate_task"}
+        catalog["subagent"] = {"subagent"}
     catalog.setdefault("skills", set()).add("load_skill")
 
     return catalog

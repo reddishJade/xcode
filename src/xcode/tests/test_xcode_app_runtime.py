@@ -69,7 +69,7 @@ class XcodeAppRuntimeTests:
         assert "bash" in names
         assert "grep_search" in names
         assert "create_worktree_task" in names
-        assert "delegate_task" in names
+        assert "subagent" in names
         assert "update_todo" in names
 
     def test_default_tool_groups_do_not_construct_optional_groups(self) -> None:
@@ -83,7 +83,7 @@ class XcodeAppRuntimeTests:
         assert "read_file" in names
         assert "create_worktree_task" in names
         assert "create_task" not in names
-        assert "delegate_task" in names
+        assert "subagent" in names
 
     def test_matching_task_loads_discovered_skill_before_execution(self) -> None:
         class SkillSelectingProvider(StreamProvider):
@@ -379,7 +379,7 @@ class XcodeAppRuntimeTests:
         assert "create_task" not in names
         assert "send_mailbox_message" not in names
         assert "save_task_progress" not in names
-        assert "delegate_task" in names
+        assert "subagent" in names
         assert _layered_compactor(app).on_compact is not None
         assert app.mailbox is None
         assert app.progress is None
@@ -616,8 +616,8 @@ class XcodeAppRuntimeTests:
             )
 
         tools = {tool.name: tool for tool in app.registry}
-        assert "delegate_task" in tools
-        tools["delegate_task"].streaming_handler(
+        assert "subagent" in tools
+        tools["subagent"].streaming_handler(
             {"description": "Inspect", "prompt": "inspect"},
             None,
         )
@@ -625,7 +625,7 @@ class XcodeAppRuntimeTests:
         assert seen_child_tools
         assert "read_file" in seen_child_tools[0]
         assert "update_todo" not in seen_child_tools[0]
-        assert "delegate_task" not in seen_child_tools[0]
+        assert "subagent" not in seen_child_tools[0]
         assert "create_worktree_task" not in seen_child_tools[0]
 
     def test_subagent_can_explicitly_allow_session_todo_tool(self) -> None:
@@ -646,7 +646,7 @@ class XcodeAppRuntimeTests:
             )
 
         tools = {tool.name: tool for tool in app.registry}
-        tools["delegate_task"].streaming_handler(
+        tools["subagent"].streaming_handler(
             {"description": "Inspect", "prompt": "inspect"},
             None,
         )
@@ -693,7 +693,7 @@ class XcodeAppRuntimeTests:
                 app = build_app(project_root=root, runtime_config=runtime_config)
 
             tools = {tool.name: tool for tool in app.registry}
-            result = tools["delegate_task"].streaming_handler(
+            result = tools["subagent"].streaming_handler(
                 {"description": "Inspect", "prompt": "inspect"},
                 None,
             )
@@ -720,7 +720,7 @@ class XcodeAppRuntimeTests:
 
         names = {tool.name for tool in app.registry}
 
-        assert "delegate_task" in names
+        assert "subagent" in names
         assert "submit_subagent" not in names
         assert "check_subagent" not in names
         assert "cancel_subagent" not in names
@@ -837,7 +837,7 @@ class XcodeAppRuntimeTests:
                 app = build_app(project_root=root, runtime_config=runtime_config)
 
             tools = {tool.name: tool for tool in app.registry}
-            result = tools["delegate_task"].streaming_handler(
+            result = tools["subagent"].streaming_handler(
                 {
                     "description": "Inspect",
                     "prompt": "inspect",

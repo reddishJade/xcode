@@ -92,7 +92,7 @@ class ToolCallHandler:
         partial = event_data.partial_result
         if not tool_id or not partial:
             return
-        if event_data.tool_name == "delegate_task":
+        if event_data.tool_name == "subagent":
             self.flush_group()
             self.clear_progress()
             for line in partial.splitlines():
