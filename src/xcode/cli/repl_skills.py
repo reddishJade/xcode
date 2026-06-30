@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
+from xcode.harness.config import ExecutionMode
 from xcode.harness.session import SessionStore
 
 _SKILL_INVOCATION_PATTERN = re.compile(
@@ -37,6 +38,7 @@ def activate_skill(
     app: object,
     store: SessionStore,
     skill_name: str,
+    mode: ExecutionMode | None = None,
 ) -> ExplicitSkillActivationResult:
     """调用运行时激活技能，并将 canonical 工具事件写入会话。"""
     agent = getattr(app, "agent", None)
@@ -48,7 +50,7 @@ def activate_skill(
             message="Skills are disabled for this runtime.",
         )
 
-    result = activate(skill_name)
+    result = activate(skill_name, mode=mode)
     if not isinstance(result, ExplicitSkillActivationResult):
         return ExplicitSkillActivationResult(
             name=skill_name,

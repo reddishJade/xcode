@@ -60,7 +60,7 @@ _TOOL_ACTION_PROFILES: dict[str, tuple[str, str]] = {
     "apply_patch": ("patch", "path"),
     "bash": ("shell", "none"),
     "shell": ("shell", "none"),
-    "load_skill": ("execute", "none"),
+    "load_skill": ("skill", "skill"),
     "update_todo": ("write", "none"),
 }
 

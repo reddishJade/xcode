@@ -33,7 +33,9 @@ class ReplAgent(Protocol):
 
     def available_skill_names(self) -> tuple[str, ...]: ...
 
-    def activate_skill(self, skill_name: str) -> ExplicitSkillActivationResult: ...
+    def activate_skill(
+        self, skill_name: str, mode: ExecutionMode | None = None
+    ) -> ExplicitSkillActivationResult: ...
 
 
 class ModelControlApp(Protocol):

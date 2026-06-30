@@ -32,7 +32,7 @@ DirAccess = Literal["read", "write", "read_write"]
 GrantDecision = Literal["allow", "deny"]
 GrantScope = Literal["once", "session", "permanent"]
 PermissionDecisionV2 = Literal["allow", "ask", "deny"]
-TargetKind = Literal["path", "command", "domain", "mcp", "subagent"]
+TargetKind = Literal["path", "command", "domain", "mcp", "subagent", "skill"]
 type GrantRecordData = dict[str, object]
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ class StaticPermission(BaseModel):
     tool: str
     decision: PermissionDecisionV2
     target: str | None = None
-    target_type: Literal["path", "command", "mcp", "subagent", None] = None
+    target_type: Literal["path", "command", "mcp", "subagent", "skill", None] = None
     input_contains: str | None = None
     input_prefix: str | None = None
     input_regex: str | None = None
@@ -996,6 +996,8 @@ class ActionExtractor:
             return self._path_action(
                 tool_name, tool_input, "read", tool_name, "read"
             )
+        if tool_name == "load_skill":
+            return self._load_skill_action(tool_name, tool_input)
         if tool_name.startswith("mcp__"):
             return Action(
                 tool=tool_name,
@@ -1009,6 +1011,21 @@ class ActionExtractor:
             capability="unknown",
             operation=tool_name,
             targets=(),
+            input=tool_input,
+        )
+
+    def _load_skill_action(
+        self, tool_name: str, tool_input: Mapping[str, object]
+    ) -> Action:
+        name = tool_input.get("name")
+        targets: tuple[Target, ...] = ()
+        if isinstance(name, str) and name.strip():
+            targets = (Target(kind="skill", value=name.strip(), access="read"),)
+        return Action(
+            tool=tool_name,
+            capability="skill",
+            operation="load_skill",
+            targets=targets,
             input=tool_input,
         )
 
@@ -1220,7 +1237,6 @@ def _access_satisfies(dir_access: DirAccess, target_access: PermissionAccess) ->
         return target_access == "read"
     if dir_access == "write":
         return target_access in ("write",)
-    return False
 
 
 def _validate_symlinks_can_resolve(root: Path, relative_path: str) -> None:

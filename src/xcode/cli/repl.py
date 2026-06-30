@@ -209,7 +209,7 @@ def run_repl(
         skill_invocation = parse_skill_invocation(text)
         if skill_invocation is not None:
             skill_name, remaining_text = skill_invocation
-            activation = activate_skill(app, store, skill_name)
+            activation = activate_skill(app, store, skill_name, mode=state.mode)
             print(activation.message)
             if activation.status not in {"activated", "already_active"}:
                 continue

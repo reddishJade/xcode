@@ -233,12 +233,16 @@ class StructuredAgent:
         registry = self._runtime.skill_registry
         return registry.available_names() if registry is not None else ()
 
-    def activate_skill(self, skill_name: str) -> ExplicitSkillActivationResult:
+    def activate_skill(
+        self, skill_name: str, mode: ExecutionMode | None = None
+    ) -> ExplicitSkillActivationResult:
         """通过 canonical load_skill 工具显式激活技能。"""
         name = skill_name.strip()
         unavailable = self._explicit_skill_unavailable(name)
         if unavailable is not None:
             return unavailable
+        if mode is not None:
+            self._mode.set_mode(mode)
         load_skill = next(tool for tool in self.registry if tool.name == "load_skill")
 
         tool_call_id = f"explicit-skill-{uuid4().hex}"

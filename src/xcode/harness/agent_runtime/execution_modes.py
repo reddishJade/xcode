@@ -54,6 +54,10 @@ PLAN_TOOL_NAMES = {
     "read_file",
     "glob_files",
     "grep_search",
+    "find_files",
+    "list_dir",
+    "search_tools",
+    "load_skill",
 }
 
 BUILD_TOOL_NAMES = {
@@ -68,6 +72,7 @@ BUILD_TOOL_NAMES = {
     "bash",
     "shell",
     "search_tools",
+    "load_skill",
 }
 
 
@@ -135,7 +140,7 @@ def mode_notice(mode: ExecutionMode) -> str:
     if mode == "plan":
         return (
             '<execution-mode name="plan">\n'
-            "Plan Mode is active. Tools are limited to read/list/grep and static inspection. "
+            "Plan Mode is active. Use read-only inspection tools only. "
             "Do not modify files or run shell commands. Return only a concise plan.\n"
             "</execution-mode>"
         )

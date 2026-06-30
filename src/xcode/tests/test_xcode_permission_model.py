@@ -243,6 +243,15 @@ class ActionExtractorTests:
         assert action.targets[0].value == "git status --short"
         assert action.targets[0].access == "execute"
 
+    def test_load_skill_extracts_skill_target(self) -> None:
+        action = ActionExtractor().extract("load_skill", {"name": "code-review"})
+
+        assert action.capability == "skill"
+        assert action.operation == "load_skill"
+        assert action.targets[0].kind == "skill"
+        assert action.targets[0].value == "code-review"
+        assert action.targets[0].access == "read"
+
 
 class StructuredBoundaryPolicyTests:
     def _boundary_context(self, root: Path) -> BoundaryContext:
