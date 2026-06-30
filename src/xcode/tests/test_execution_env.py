@@ -50,7 +50,7 @@ class TestSubprocessExecutionEnv:
             result = env.run(
                 [sys.executable, "-c", "import time; time.sleep(5)"],
                 cwd=Path("/"),
-                timeout=10,
+                timeout=10000,  # 10s in ms (long enough for cancel)
                 cancel_event=evt,
             )
             assert result.cancelled

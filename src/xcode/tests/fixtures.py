@@ -28,6 +28,7 @@ class MockExecutionEnv:
         timeout: int = 30,
         cancel_event: threading.Event | None = None,
         on_progress: Callable[[str], None] | None = None,  # noqa: ARG002
+        env: dict[str, str] | None = None,  # noqa: ARG002
     ) -> ExecutionResult:
         self.calls.append((argv, cwd, timeout))
         if self._result_index < len(self._results):

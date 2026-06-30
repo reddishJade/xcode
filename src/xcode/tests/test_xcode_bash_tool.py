@@ -122,5 +122,68 @@ class XcodeBashToolTests:
             assert constraints[0].decision == "ask", cmd
 
 
+class EnvHookTests:
+    """SpawnEnvHook 功能测试。"""
+
+    def test_env_hook_modifies_environment(self) -> None:
+        """env_hook 可以注入自定义环境变量。"""
+        from xcode.coding_agent.tools.bash import SpawnEnvHook
+        from xcode.harness.execution_env import SubprocessExecutionEnv
+
+        captured_env: dict[str, str] = {}
+
+        def my_hook(command: str, cwd: Path, env: dict[str, str]) -> dict[str, str]:
+            env["MY_CUSTOM_VAR"] = "hello_from_hook"
+            nonlocal captured_env
+            captured_env = env
+            return env
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tool = build_bash_tool(
+                Path(tmp),
+                env_hook=my_hook,
+                env=SubprocessExecutionEnv(),
+            )
+            output = tool.handler({"command": "echo done"})
+            assert "done" in output
+            assert captured_env.get("MY_CUSTOM_VAR") == "hello_from_hook"
+
+    def test_env_hook_can_override_path(self) -> None:
+        """env_hook 可以修改 PATH。"""
+        original = []
+
+        def my_hook(command: str, cwd: Path, env: dict[str, str]) -> dict[str, str]:
+            env["PATH"] = "/custom/bin:" + env.get("PATH", "")
+            original.append(env["PATH"])
+            return env
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tool = build_bash_tool(Path(tmp), env_hook=my_hook)
+            tool.handler({"command": "echo ok"})
+            assert "/custom/bin" in original[0]
+
+
+class TruncationCleanupTests:
+    """截断文件清理测试。"""
+
+    def test_cleanup_dry_run(self) -> None:
+        """dry_run 模式不删除文件。"""
+        from xcode.coding_agent.tools.truncation_cleanup import cleanup_truncation_files
+
+        # dry_run 应返回 0 或不报错
+        result = cleanup_truncation_files(max_age_days=0, dry_run=True)
+        assert isinstance(result, int)
+
+    def test_cleanup_no_find_no_remove(self) -> None:
+        """没有匹配文件时不报错。"""
+        from xcode.coding_agent.tools.truncation_cleanup import cleanup_truncation_files
+
+        result = cleanup_truncation_files(
+            max_age_days=7,
+            temp_prefix="nonexistent-prefix-999999",
+        )
+        assert result == 0
+
+
 if __name__ == "__main__":
     pytest.main()

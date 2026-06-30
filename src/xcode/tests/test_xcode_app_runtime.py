@@ -750,7 +750,7 @@ class XcodeAppRuntimeTests:
         seen_cwds: list[Path] = []
 
         class TrackingEnv:
-            def run(self, argv, cwd, timeout=30, cancel_event=None):
+            def run(self, argv, cwd, timeout=30, cancel_event=None, on_progress=None, env=None):  # noqa: ARG002
                 seen_cwds.append(Path(cwd))
                 from xcode.harness.execution_env import ExecutionResult
 

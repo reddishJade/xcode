@@ -40,6 +40,7 @@ class ExecutionEnv(Protocol):
         timeout: int = 30_000,
         cancel_event: threading.Event | None = None,
         on_progress: Callable[[str], None] | None = None,
+        env: dict[str, str] | None = None,
     ) -> ExecutionResult: ...
 
 
@@ -51,8 +52,9 @@ class SubprocessExecutionEnv:
         timeout: int = 30_000,
         cancel_event: threading.Event | None = None,
         on_progress: Callable[[str], None] | None = None,
+        env: dict[str, str] | None = None,
     ) -> ExecutionResult:
-        proc = _start_process(argv, cwd)
+        proc = _start_process(argv, cwd, env=env)
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
         lock = threading.Lock()
@@ -119,7 +121,11 @@ class SubprocessExecutionEnv:
         )
 
 
-def _start_process(argv: list[str], cwd: Path) -> subprocess.Popen[bytes]:
+def _start_process(
+    argv: list[str],
+    cwd: Path,
+    env: dict[str, str] | None = None,
+) -> subprocess.Popen[bytes]:
     if sys.platform == "win32":
         return subprocess.Popen(
             argv,
@@ -127,6 +133,7 @@ def _start_process(argv: list[str], cwd: Path) -> subprocess.Popen[bytes]:
             cwd=cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=env,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
     return subprocess.Popen(
@@ -135,6 +142,7 @@ def _start_process(argv: list[str], cwd: Path) -> subprocess.Popen[bytes]:
         cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
         start_new_session=True,
     )
 

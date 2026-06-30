@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -27,7 +28,10 @@ logger = logging.getLogger("xcode.coding_agent.tools.bash")
 
 
 SpawnHook = Callable[[str, Path], tuple[str, Path]]
-"""Hook to adjust command and cwd before execution. Receives (command, cwd), returns (command, cwd)."""
+"""修改 command 和 cwd 的钩子。输入 (command, cwd)，返回 (command, cwd)。"""
+
+SpawnEnvHook = Callable[[str, Path, dict[str, str]], dict[str, str]]
+"""修改环境变量的钩子。输入 (command, cwd, env)，返回 env。"""
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,7 @@ def build_bash_tool(
     env: ExecutionEnv | None = None,
     command_prefix: str | None = None,
     spawn_hook: SpawnHook | None = None,
+    env_hook: SpawnEnvHook | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> ToolSpec:
     root = project_root.resolve()
@@ -70,7 +75,11 @@ def build_bash_tool(
             command_prefix=command_prefix,
             spawn_hook=spawn_hook,
         )
-        # 流式 accumulator：在 drain 时通过 on_progress 推送实时输出
+        # 计算最终环境变量
+        cmd_env: dict[str, str] | None = None
+        if env_hook:
+            cmd_env = env_hook(plan.command, plan.cwd, dict(**os.environ))
+
         acc = OutputAccumulator(on_progress=on_progress)
         try:
             result = env.run(
@@ -78,10 +87,20 @@ def build_bash_tool(
                 cwd=plan.cwd,
                 timeout=plan.timeout,
                 cancel_event=cancel_event,
-                on_progress=lambda chunk: acc.append(chunk.encode("utf-8", errors="replace")),
+                env=cmd_env,
+                on_progress=lambda chunk: acc.append(
+                    chunk.encode("utf-8", errors="replace")
+                ),
             )
         finally:
-            pass  # accumulator 在 _render 中 close
+            pass
+
+        # 如果运行环境未通过 on_progress 推送输出（如 mock），
+        # 从返回结果中回填 accumulator
+        if acc.total_bytes == 0 and (result.stdout or result.stderr):
+            for raw in [result.stdout.encode(), result.stderr.encode()]:
+                if raw:
+                    acc.append(raw)
 
         output = _render_bash_output(result, acc, plan.timeout)
         return output
