@@ -156,6 +156,7 @@ class AgentLoopConfig(BaseModel):
     provider: Annotated[StreamProvider | None, SkipValidation] = None
     tool_execution: ToolExecutionMode = "parallel"
     tool_workers: int = 4
+    tool_timeout_seconds: float = 120.0
 
     convert_to_llm: MessageConverter | None = None
     transform_context: ContextTransformer | None = None

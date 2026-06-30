@@ -62,6 +62,7 @@ class AgentConfig(BaseModel):
     compact_token_threshold: StrictInt = 0
     max_recent_messages: StrictInt = 10
     tool_workers: StrictInt = 4
+    tool_timeout_seconds: StrictFloat | StrictInt = 120.0
     subagent_workers: StrictInt = 4
     watchdog_repeated_tool_limit: StrictInt = 3
 

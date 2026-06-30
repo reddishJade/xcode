@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -19,7 +20,7 @@ from xcode.agent.config import (
 )
 from xcode.agent.events import AgentEvent, ToolExecutionEndEvent
 from xcode.agent.messages import AssistantMessage
-from xcode.agent.protocols import AgentTool
+from xcode.agent.protocols import AgentTool, AgentToolResult
 from xcode.agent.types import (
     FileContent,
     ImageContent,
@@ -217,6 +218,44 @@ class AgentToolExecutionTests:
         assert not (result.results[0].is_error)
         assert result.results[1].is_error
         assert not (result.results[2].is_error)
+
+    def test_tool_timeout_returns_error_result(self) -> None:
+        """工具超时时返回结构化错误，避免 agent loop 永久挂起。"""
+
+        async def slow_execute(
+            _tool_call_id: str,
+            _args: dict[str, object],
+            _signal: object = None,
+            *,
+            on_update: object = None,
+        ) -> AgentToolResult:
+            await asyncio.sleep(1)
+            return AgentToolResult(content=[TextContent(text="late")])
+
+        tool = SimpleNamespace(
+            name="slow",
+            description="Slow.",
+            parameters=EMPTY_SCHEMA,
+            execution_mode="sequential",
+            builtin=None,
+            execute=slow_execute,
+        )
+        call = ToolCallContent(id="slow-1", name="slow", arguments={})
+
+        result = asyncio.run(
+            execute_tool_calls(
+                AgentContext(tools=cast(list[AgentTool], [tool])),
+                AssistantMessage(content=[call]),
+                [call],
+                AgentLoopConfig(tool_timeout_seconds=0.01),
+                None,
+                lambda _event: None,
+            )
+        )
+
+        assert len(result.results) == 1
+        assert result.results[0].is_error
+        assert "Tool timed out after 0.01s: slow" in str(result.results[0].content)
 
     def test_toolspec_adapter_derives_execution_mode_from_metadata(self) -> None:
         read_tool, write_tool, explicit_parallel = adapt_tool_specs(

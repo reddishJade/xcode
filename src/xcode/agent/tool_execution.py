@@ -311,7 +311,7 @@ async def _execute_one_impl(
         )
 
     tool_result, content, is_error, terminate = await _run_tool_handler(
-        tool, tool_call, args, signal, _on_update
+        tool, tool_call, args, signal, _on_update, config.tool_timeout_seconds
     )
 
     content, is_error, terminate = _run_after_tool_hook(
@@ -380,17 +380,32 @@ async def _run_tool_handler(
     args: ToolArguments,
     signal: CancellationSignal | None,
     on_update: Callable[[AgentToolResult], None],
+    timeout_seconds: float | None,
 ) -> tuple[AgentToolResult, list[ToolResultContentBlock], bool, bool]:
     try:
-        tool_result = await tool.execute(
-            tool_call.id, args, signal, on_update=on_update
-        )
+        execution = tool.execute(tool_call.id, args, signal, on_update=on_update)
+        if timeout_seconds is not None and timeout_seconds > 0:
+            tool_result = await asyncio.wait_for(execution, timeout=timeout_seconds)
+        else:
+            tool_result = await execution
         return (
             tool_result,
             tool_result.content,
             tool_result.is_error,
             tool_result.terminate,
         )
+    except TimeoutError:
+        tool_result = AgentToolResult(
+            content=[
+                TextContent(
+                    text=(
+                        f"Tool timed out after {timeout_seconds:g}s: "
+                        f"{tool_call.name}"
+                    )
+                )
+            ]
+        )
+        return tool_result, tool_result.content, True, False
     except Exception as e:
         tool_result = AgentToolResult(content=[TextContent(text=f"Tool error: {e}")])
         return tool_result, tool_result.content, True, False
