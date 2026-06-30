@@ -1337,6 +1337,180 @@ class ShellAnalysisPolicyEvaluator:
         return tuple(constraints)
 
 
+# ── cmd.exe 分析器 ──
+
+
+class CmdAnalyzer:
+    """cmd.exe 命令的简单分词分析器。
+
+    cmd.exe 没有 tree-sitter 语法文件，使用 shlex 分词 + 命令识别。
+    设计为 fail-closed：不能识别的命令产生 unresolved 效果。
+    """
+
+    # 读文件命令：type, more, find, fc, comp, sort, dir
+    _READ_COMMANDS = frozenset({
+        "type", "more", "find", "fc", "comp", "sort", "dir",
+    })
+    # 写文件命令：copy, xcopy, mkdir, md, attrib, icacls, takeown
+    _WRITE_COMMANDS = frozenset({
+        "copy", "xcopy", "mkdir", "md", "attrib", "icacls", "takeown",
+    })
+    # 删除命令：del, erase, rmdir, rd
+    _DELETE_COMMANDS = frozenset({
+        "del", "erase", "rmdir", "rd",
+    })
+    # 移动/重命名：move, ren, rename
+    _MOVE_COMMANDS = frozenset({
+        "move", "ren", "rename",
+    })
+    # 无文件效果：echo, cls, ver, date, time, cd, chdir, set, prompt, title
+    _SAFE_COMMANDS = frozenset({
+        "echo", "cls", "ver", "date", "time", "cd", "chdir",
+        "set", "prompt", "title", "color", "help",
+    })
+
+    def analyze(self, command: str) -> ShellAnalysis:
+        import shlex
+
+        try:
+            tokens = shlex.split(command, posix=False)
+        except ValueError:
+            tokens = command.split()
+
+        if not tokens:
+            return ShellAnalysis(
+                resolved_paths=(),
+                unresolved_effects=(),
+                primary_command=None,
+                shell_type="cmd",
+                parse_error=False,
+                ast_available=False,
+            )
+
+        resolved: list[Target] = []
+        unresolved: list[UnresolvedEffect] = []
+        seen: set[str] = set()
+
+        # 检测重定向
+        resolved_redirects = self._redirect_targets(command)
+        for t in resolved_redirects:
+            if t.value not in seen:
+                seen.add(t.value)
+                resolved.append(t)
+
+        cmd_name = tokens[0].lower()
+        args = [a.strip("\"'") for a in tokens[1:] if a not in (">", ">>", "<", "2>", "2>>", "1>", "1>>")]
+
+        if cmd_name in self._SAFE_COMMANDS:
+            return ShellAnalysis(
+                resolved_paths=tuple(resolved),
+                unresolved_effects=tuple(unresolved),
+                primary_command=cmd_name,
+                shell_type="cmd",
+                parse_error=False,
+                ast_available=False,
+            )
+
+        if cmd_name in self._READ_COMMANDS:
+            for a in args:
+                if a and not a.startswith("/") and a not in seen:
+                    seen.add(a)
+                    resolved.append(Target(
+                        kind="path", value=a, access="read",
+                        provenance="shell_literal",
+                    ))
+
+        elif cmd_name in self._WRITE_COMMANDS:
+            if cmd_name in ("copy", "xcopy"):
+                # copy src dst → src=read, dst=write
+                if len(args) >= 2:
+                    resolved.append(Target(
+                        kind="path", value=args[0], access="read",
+                        provenance="shell_literal",
+                    ))
+                    resolved.append(Target(
+                        kind="path", value=args[1], access="write",
+                        provenance="shell_literal",
+                    ))
+                elif len(args) == 1:
+                    resolved.append(Target(
+                        kind="path", value=args[0], access="read",
+                        provenance="shell_literal",
+                    ))
+            else:
+                for a in args:
+                    if a and not a.startswith("/") and a not in seen:
+                        seen.add(a)
+                        resolved.append(Target(
+                            kind="path", value=a, access="write",
+                            provenance="shell_literal",
+                        ))
+
+        elif cmd_name in self._DELETE_COMMANDS:
+            for a in args:
+                if a and not a.startswith("/") and a not in seen:
+                    seen.add(a)
+                    resolved.append(Target(
+                        kind="path", value=a, access="delete",
+                        provenance="shell_literal",
+                    ))
+
+        elif cmd_name in self._MOVE_COMMANDS:
+            # move/ren src dst → 两者都是 write
+            for a in args[:2]:
+                if a and not a.startswith("/") and a not in seen:
+                    seen.add(a)
+                    resolved.append(Target(
+                        kind="path", value=a, access="write",
+                        provenance="shell_literal",
+                    ))
+
+        else:
+            # 未知命令 → unresolved
+            unresolved.append(UnresolvedEffect(
+                reason="wrapper_command",
+                fragment=f"cmd.exe unknown command: {cmd_name}",
+            ))
+
+        return ShellAnalysis(
+            resolved_paths=tuple(resolved),
+            unresolved_effects=tuple(unresolved),
+            primary_command=cmd_name,
+            shell_type="cmd",
+            parse_error=False,
+            ast_available=False,
+        )
+
+    @staticmethod
+    def _redirect_targets(command: str) -> list[Target]:
+        """从 cmd 命令中提取重定向目标路径。
+
+        识别 > file, >> file, < file, 2> file 等。
+        """
+        import shlex
+
+        try:
+            tokens = shlex.split(command, posix=False)
+        except ValueError:
+            return []
+
+        results: list[Target] = []
+        redirect_ops = {">", ">>", "1>", "1>>", "2>", "2>>", "<", "0<", "2<"}
+
+        for i, tok in enumerate(tokens):
+            if tok in redirect_ops and i + 1 < len(tokens):
+                path = tokens[i + 1].strip("\"'")
+                if path:
+                    access: PermissionAccess = "write"
+                    if "<" in tok:
+                        access = "read"
+                    results.append(Target(
+                        kind="path", value=path, access=access,
+                        provenance="shell_literal",
+                    ))
+        return results
+
+
 def analyze_shell_command(
     command: str,
     shell_type: str = "posix",
@@ -1345,13 +1519,15 @@ def analyze_shell_command(
 
     Args:
         command: shell 命令文本。
-        shell_type: "posix"（bash/zsh/sh/fish）或 "powershell"。
+        shell_type: "posix"（bash/zsh/sh/fish）、"powershell" 或 "cmd"。
 
     Returns:
         ShellAnalysis 包含可确认路径和不可确认效果。
     """
     if shell_type == "powershell":
         analyzer = PowerShellAnalyzer()
+    elif shell_type == "cmd":
+        analyzer = CmdAnalyzer()
     else:
         analyzer = PosixAnalyzer()
     return analyzer.analyze(command)

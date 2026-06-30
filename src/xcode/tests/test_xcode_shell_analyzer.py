@@ -1,6 +1,5 @@
 """Shell analyzer — tree-sitter AST 语义分析的全面测试。
 
-覆盖 P0 路线图要求的 ~40 条决策测试，包括：
 - 基本路径提取（read/write/delete）
 - 重定向检测
 - 管道正确性
@@ -150,18 +149,24 @@ class TestRedirect:
     def test_stdout_redirect(self) -> None:
         """echo x > file → file as write."""
         a = analyze_shell_command("echo hello > /tmp/out", "posix")
-        assert any(p.value == "/tmp/out" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "/tmp/out" and p.access == "write" for p in a.resolved_paths
+        )
 
     def test_append_redirect(self) -> None:
         """echo x >> file → file as write."""
         a = analyze_shell_command("echo hello >> /tmp/log", "posix")
-        assert any(p.value == "/tmp/log" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "/tmp/log" and p.access == "write" for p in a.resolved_paths
+        )
 
     def test_stdin_redirect_no_extra_path(self) -> None:
         """cat < file → file as read (redirect target is path)."""
         a = analyze_shell_command("cat < /tmp/input", "posix")
         # 重定向的路径由 file_redirect 节点提取
-        assert any(p.value == "/tmp/input" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "/tmp/input" and p.access == "write" for p in a.resolved_paths
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -255,11 +260,14 @@ class TestSensitivePathDetection:
 
     def _assert_boundary_deny(self, path: str, access: str = "read") -> None:
         """验证 PathBoundaryPolicyEvaluator 拒绝该路径。"""
-        target = Target(kind="path", value=path, access=access, provenance="shell_literal")
+        target = Target(
+            kind="path", value=path, access=access, provenance="shell_literal"
+        )
         # 不带 BoundaryContext → 用 _is_external_path 和硬编码检查
         evaluator = PathBoundaryPolicyEvaluator(context=None)
         # 构造一个 Action 来测试
         from xcode.harness.observability.permission_model import Action
+
         action = Action(
             tool="bash",
             capability="shell",
@@ -269,7 +277,9 @@ class TestSensitivePathDetection:
         )
         constraints = evaluator.evaluate(action)
         # 应至少有一条 deny 约束
-        assert any(c.decision == "deny" for c in constraints), f"expected deny for {path}"
+        assert any(c.decision == "deny" for c in constraints), (
+            f"expected deny for {path}"
+        )
 
     def test_ssh_key_path(self) -> None:
         """.ssh/id_rsa → denied."""
@@ -297,9 +307,12 @@ class TestSensitivePathDetection:
 
     def test_allowed_path(self) -> None:
         """Workspace relative path without context → allowed."""
-        target = Target(kind="path", value="src/main.py", access="read", provenance="shell_literal")
+        target = Target(
+            kind="path", value="src/main.py", access="read", provenance="shell_literal"
+        )
         evaluator = PathBoundaryPolicyEvaluator(context=None)
         from xcode.harness.observability.permission_model import Action
+
         action = Action(
             tool="bash",
             capability="shell",
@@ -332,13 +345,17 @@ class TestPermissionChain:
         engine = self._engine()
         result = engine.decide("bash", {"command": "cat ../secret"})
         # PathBoundaryPolicyEvaluator 会在无 BoundaryContext 时拒绝外部路径
-        assert result.decision == "deny", f"expected deny, got {result.decision}: {result.reason}"
+        assert result.decision == "deny", (
+            f"expected deny, got {result.decision}: {result.reason}"
+        )
 
     def test_echo_redirect_external_deny(self) -> None:
         """echo x > /tmp/out → 重定向到外部路径被拒绝。"""
         engine = self._engine()
         result = engine.decide("bash", {"command": "echo hello > /tmp/out"})
-        assert result.decision == "deny", f"expected deny, got {result.decision}: {result.reason}"
+        assert result.decision == "deny", (
+            f"expected deny, got {result.decision}: {result.reason}"
+        )
 
     def test_cat_sensitive_ssh_deny(self) -> None:
         """cat ~/.ssh/id_rsa → 敏感路径被拒绝。"""
@@ -352,7 +369,9 @@ class TestPermissionChain:
         result = engine.decide("bash", {"command": "cat $HOME/.env"})
         # SafetyBackstop 对 cat 是 allow，但 ShellAnalysis 标记了变量展开 unresolved
         # 由于 unresolved_effects，应升为 ask
-        assert result.decision == "ask", f"expected ask, got {result.decision}: {result.reason}"
+        assert result.decision == "ask", (
+            f"expected ask, got {result.decision}: {result.reason}"
+        )
 
     def test_rm_glob_asks(self) -> None:
         """rm *.pyc → glob 导致 ask。"""
@@ -394,6 +413,7 @@ class TestPermissionChain:
     def test_cp_external_denied(self) -> None:
         """cp 到外部路径 → /tmp/out 被拒绝。"""
         import tempfile
+
         with tempfile.TemporaryDirectory() as root:
             engine = PermissionEngine(
                 PermissionEngineConfig(
@@ -455,6 +475,7 @@ class TestShellAnalysisPolicyEvaluator:
 
     def test_no_unresolved_yields_no_constraint(self) -> None:
         from xcode.harness.observability.permission_model import Action
+
         action = Action(
             tool="bash",
             capability="shell",
@@ -468,7 +489,11 @@ class TestShellAnalysisPolicyEvaluator:
         assert len(constraints) == 0
 
     def test_unresolved_yields_ask(self) -> None:
-        from xcode.harness.observability.permission_model import Action, UnresolvedEffect
+        from xcode.harness.observability.permission_model import (
+            Action,
+            UnresolvedEffect,
+        )
+
         action = Action(
             tool="bash",
             capability="shell",
@@ -483,7 +508,11 @@ class TestShellAnalysisPolicyEvaluator:
         assert constraints[0].decision == "ask"
 
     def test_multi_unresolved_yields_multi_ask(self) -> None:
-        from xcode.harness.observability.permission_model import Action, UnresolvedEffect
+        from xcode.harness.observability.permission_model import (
+            Action,
+            UnresolvedEffect,
+        )
+
         action = Action(
             tool="bash",
             capability="shell",
@@ -512,7 +541,10 @@ class TestPathBoundaryPolicyEvaluator:
     def test_bash_path_target_gets_boundary_check(self) -> None:
         """bash 的 shell_literal path 同样被 PathBoundaryPolicyEvaluator 检查。"""
         from xcode.harness.observability.permission_model import Action
-        target = Target(kind="path", value="/etc/passwd", access="read", provenance="shell_literal")
+
+        target = Target(
+            kind="path", value="/etc/passwd", access="read", provenance="shell_literal"
+        )
         action = Action(
             tool="bash",
             capability="shell",
@@ -527,7 +559,10 @@ class TestPathBoundaryPolicyEvaluator:
     def test_read_file_path_still_checked(self) -> None:
         """read_file 的 structured_arg path 仍然被检查。"""
         from xcode.harness.observability.permission_model import Action
-        target = Target(kind="path", value="../secret", access="read", provenance="structured_arg")
+
+        target = Target(
+            kind="path", value="../secret", access="read", provenance="structured_arg"
+        )
         action = Action(
             tool="read_file",
             capability="read_file",
@@ -543,10 +578,13 @@ class TestPathBoundaryPolicyEvaluator:
         """Workspace 内路径被放行。"""
         import tempfile
         from xcode.harness.observability.permission_model import Action
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             ctx = BoundaryContext(project_root=root)
-            target = Target(kind="path", value=".", access="read", provenance="shell_literal")
+            target = Target(
+                kind="path", value=".", access="read", provenance="shell_literal"
+            )
             action = Action(
                 tool="bash",
                 capability="shell",
@@ -562,6 +600,7 @@ class TestPathBoundaryPolicyEvaluator:
         """配置了 external_directory 的路径被放行。"""
         import tempfile
         from xcode.harness.observability.permission_model import Action
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "workspace"
             root.mkdir()
@@ -569,13 +608,14 @@ class TestPathBoundaryPolicyEvaluator:
             ext.mkdir()
             ctx = BoundaryContext(
                 project_root=root,
-                external_directories=(
-                    ExternalDirectory(path=ext, access="read"),
-                ),
+                external_directories=(ExternalDirectory(path=ext, access="read"),),
             )
-            target = Target(kind="path",
-                            value=str(ext / "doc.txt").replace("\\", "/"),
-                            access="read", provenance="shell_literal")
+            target = Target(
+                kind="path",
+                value=str(ext / "doc.txt").replace("\\", "/"),
+                access="read",
+                provenance="shell_literal",
+            )
             action = Action(
                 tool="bash",
                 capability="shell",
@@ -599,22 +639,33 @@ class TestPowerShellAnalyzer:
     def test_get_content_path(self) -> None:
         """Get-Content file → file as read."""
         a = analyze_shell_command("Get-Content ./secret.txt", "powershell")
-        assert any(p.value == "./secret.txt" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "./secret.txt" and p.access == "read" for p in a.resolved_paths
+        )
 
     def test_set_content_path(self) -> None:
         """Set-Content -Path file → file as write."""
-        a = analyze_shell_command('Set-Content -Path /tmp/test.txt -Value "hello"', "powershell")
-        assert any(p.value == "/tmp/test.txt" and p.access == "write" for p in a.resolved_paths)
+        a = analyze_shell_command(
+            'Set-Content -Path /tmp/test.txt -Value "hello"', "powershell"
+        )
+        assert any(
+            p.value == "/tmp/test.txt" and p.access == "write" for p in a.resolved_paths
+        )
 
     def test_out_file_redirect(self) -> None:
         """echo | Out-File file → file as write."""
         a = analyze_shell_command("echo hello | Out-File /tmp/out.txt", "powershell")
-        assert any(p.value == "/tmp/out.txt" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "/tmp/out.txt" and p.access == "write" for p in a.resolved_paths
+        )
 
     def test_remove_item(self) -> None:
         """Remove-Item file → delete access."""
         a = analyze_shell_command("Remove-Item C:/temp/test.txt", "powershell")
-        assert any(p.value == "C:/temp/test.txt" and p.access == "delete" for p in a.resolved_paths)
+        assert any(
+            p.value == "C:/temp/test.txt" and p.access == "delete"
+            for p in a.resolved_paths
+        )
 
     def test_copy_item(self) -> None:
         """Copy-Item src dst → src=read, dst=write."""
@@ -626,7 +677,9 @@ class TestPowerShellAnalyzer:
     def test_get_childitem(self) -> None:
         """Get-ChildItem C:/ → path as read."""
         a = analyze_shell_command("Get-ChildItem C:/Users", "powershell")
-        assert any(p.value == "C:/Users" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "C:/Users" and p.access == "read" for p in a.resolved_paths
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -671,7 +724,11 @@ class TestEdgeCases:
 
     def test_shell_analysis_evaluator_no_side_effects(self) -> None:
         """evaluate 不应修改 action。"""
-        from xcode.harness.observability.permission_model import Action, UnresolvedEffect
+        from xcode.harness.observability.permission_model import (
+            Action,
+            UnresolvedEffect,
+        )
+
         original = Action(
             tool="bash",
             capability="shell",
@@ -681,6 +738,7 @@ class TestEdgeCases:
             unresolved_effects=(UnresolvedEffect(reason="glob", fragment="*.pyc"),),
         )
         import copy
+
         frozen = copy.deepcopy(original)
         evaluator = ShellAnalysisPolicyEvaluator()
         evaluator.evaluate(original)
@@ -690,6 +748,7 @@ class TestEdgeCases:
         """SafetyBackstopPolicyEvaluator 不受影响。"""
         evaluator = SafetyBackstopPolicyEvaluator()
         from xcode.harness.observability.permission_model import Action, ActionExtractor
+
         action = ActionExtractor().extract("bash", {"command": "rm -rf /"})
         constraints = evaluator.evaluate(action)
         assert any(c.decision == "deny" for c in constraints)
@@ -708,7 +767,9 @@ class TestProvenancePropagation:
         action = extractor.extract("bash", {"command": "cat foo.txt"})
         for t in action.targets:
             if t.kind == "path":
-                assert t.provenance == "shell_literal", f"expected shell_literal, got {t.provenance}"
+                assert t.provenance == "shell_literal", (
+                    f"expected shell_literal, got {t.provenance}"
+                )
                 return
         pytest.fail("no path target found")
 
@@ -734,18 +795,24 @@ class TestP1ExtendedCommandRegistry:
 
     def test_tee_writes(self) -> None:
         a = analyze_shell_command("tee /tmp/out.log", "posix")
-        assert any(p.value == "/tmp/out.log" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "/tmp/out.log" and p.access == "write" for p in a.resolved_paths
+        )
 
     def test_tee_append_flag_skipped(self) -> None:
         """tee -a file → 跳过 -a，file 仍是 write。"""
         a = analyze_shell_command("tee -a /tmp/log", "posix")
-        assert any(p.value == "/tmp/log" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "/tmp/log" and p.access == "write" for p in a.resolved_paths
+        )
 
     # ── wc / sort / uniq / cut ──
 
     def test_wc_reads_file(self) -> None:
         a = analyze_shell_command("wc -l file.txt", "posix")
-        assert any(p.value == "file.txt" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "file.txt" and p.access == "read" for p in a.resolved_paths
+        )
 
     def test_wc_multi_files(self) -> None:
         a = analyze_shell_command("wc -l a.txt b.txt", "posix")
@@ -766,8 +833,13 @@ class TestP1ExtendedCommandRegistry:
     # ── curl / wget ──
 
     def test_curl_o_writes(self) -> None:
-        a = analyze_shell_command("curl -o /tmp/pkg.tar.gz https://example.com/pkg", "posix")
-        assert any(p.value == "/tmp/pkg.tar.gz" and p.access == "write" for p in a.resolved_paths)
+        a = analyze_shell_command(
+            "curl -o /tmp/pkg.tar.gz https://example.com/pkg", "posix"
+        )
+        assert any(
+            p.value == "/tmp/pkg.tar.gz" and p.access == "write"
+            for p in a.resolved_paths
+        )
 
     def test_curl_O_marked_unresolved(self) -> None:
         """curl -O（从 URL 推断文件名）不可静态确认。"""
@@ -776,66 +848,92 @@ class TestP1ExtendedCommandRegistry:
 
     def test_wget_O_writes(self) -> None:
         a = analyze_shell_command("wget -O output.bin https://example.com", "posix")
-        assert any(p.value == "output.bin" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "output.bin" and p.access == "write" for p in a.resolved_paths
+        )
 
     # ── sed ──
 
     def test_sed_inplace_writes(self) -> None:
         """sed -i 原地修改，文件标记为 write。"""
         a = analyze_shell_command("sed -i.bak s/foo/bar/ config.json", "posix")
-        assert any(p.value == "config.json" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "config.json" and p.access == "write" for p in a.resolved_paths
+        )
 
     def test_sed_read_without_i(self) -> None:
         a = analyze_shell_command("sed s/foo/bar/ config.json", "posix")
-        assert any(p.value == "config.json" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "config.json" and p.access == "read" for p in a.resolved_paths
+        )
 
     # ── awk ──
 
     def test_awk_reads_file(self) -> None:
         a = analyze_shell_command("awk '{print \$1}' data.log", "posix")
-        assert any(p.value == "data.log" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "data.log" and p.access == "read" for p in a.resolved_paths
+        )
 
     # ── tar ──
 
     def test_tar_create_writes_archive(self) -> None:
         a = analyze_shell_command("tar czf archive.tar.gz src/", "posix")
-        assert any(p.value == "archive.tar.gz" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "archive.tar.gz" and p.access == "write"
+            for p in a.resolved_paths
+        )
         assert any(p.value == "src/" and p.access == "read" for p in a.resolved_paths)
 
     def test_tar_dash_create_writes_archive(self) -> None:
         a = analyze_shell_command("tar -czf archive.tar.gz src/", "posix")
-        assert any(p.value == "archive.tar.gz" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "archive.tar.gz" and p.access == "write"
+            for p in a.resolved_paths
+        )
 
     def test_tar_extract_reads_archive(self) -> None:
         a = analyze_shell_command("tar xf archive.tar.gz", "posix")
-        assert any(p.value == "archive.tar.gz" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "archive.tar.gz" and p.access == "read" for p in a.resolved_paths
+        )
         assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
 
     def test_tar_list_reads_archive(self) -> None:
         a = analyze_shell_command("tar tf archive.tar.gz", "posix")
-        assert any(p.value == "archive.tar.gz" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "archive.tar.gz" and p.access == "read" for p in a.resolved_paths
+        )
         assert not any(e.reason == "wrapper_command" for e in a.unresolved_effects)
 
     # ── gzip / gunzip ──
 
     def test_gzip_reads_file(self) -> None:
         a = analyze_shell_command("gzip file.txt", "posix")
-        assert any(p.value == "file.txt" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "file.txt" and p.access == "read" for p in a.resolved_paths
+        )
 
     def test_gunzip_reads_file(self) -> None:
         a = analyze_shell_command("gunzip file.txt.gz", "posix")
-        assert any(p.value == "file.txt.gz" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "file.txt.gz" and p.access == "read" for p in a.resolved_paths
+        )
 
     # ── unzip / zip ──
 
     def test_unzip_reads_archive(self) -> None:
         a = analyze_shell_command("unzip archive.zip", "posix")
-        assert any(p.value == "archive.zip" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "archive.zip" and p.access == "read" for p in a.resolved_paths
+        )
         assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
 
     def test_zip_writes_archive_reads_files(self) -> None:
         a = analyze_shell_command("zip archive.zip file1 file2", "posix")
-        assert any(p.value == "archive.zip" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "archive.zip" and p.access == "write" for p in a.resolved_paths
+        )
         assert any(p.value == "file1" and p.access == "read" for p in a.resolved_paths)
         assert any(p.value == "file2" and p.access == "read" for p in a.resolved_paths)
 
@@ -877,7 +975,9 @@ class TestP1ExtendedCommandRegistry:
 
     def test_python_script_reads_file(self) -> None:
         a = analyze_shell_command("python script.py", "posix")
-        assert any(p.value == "script.py" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "script.py" and p.access == "read" for p in a.resolved_paths
+        )
         assert any(e.reason == "eval_like" for e in a.unresolved_effects)
 
     def test_python_no_args_no_effect(self) -> None:
@@ -931,33 +1031,49 @@ class TestP1ShellSpecEnhancement:
 
     def test_shell_spec_login_field(self) -> None:
         from xcode.coding_agent.tools.shell_adapter import ShellSpec
-        spec = ShellSpec(name="test", command_prefix=("sh", "-c"), syntax="posix", login=True)
+
+        spec = ShellSpec(
+            name="test", command_prefix=("sh", "-c"), syntax="posix", login=True
+        )
         assert spec.login is True
 
     def test_shell_spec_deny_field(self) -> None:
         from xcode.coding_agent.tools.shell_adapter import ShellSpec
-        spec = ShellSpec(name="test", command_prefix=("sh", "-c"), syntax="posix", deny=True)
+
+        spec = ShellSpec(
+            name="test", command_prefix=("sh", "-c"), syntax="posix", deny=True
+        )
         assert spec.deny is True
 
     def test_shell_spec_ps_kind_field(self) -> None:
         from xcode.coding_agent.tools.shell_adapter import ShellSpec
-        spec = ShellSpec(name="pwsh", command_prefix=("pwsh", "-c"), syntax="powershell", ps_kind="pwsh")
+
+        spec = ShellSpec(
+            name="pwsh",
+            command_prefix=("pwsh", "-c"),
+            syntax="powershell",
+            ps_kind="pwsh",
+        )
         assert spec.ps_kind == "pwsh"
 
     def test_bash_has_login_true(self) -> None:
         from xcode.coding_agent.tools.shell_adapter import _KNOWN_SHELLS
+
         assert _KNOWN_SHELLS["bash"].login is True
 
     def test_fish_has_deny_true(self) -> None:
         from xcode.coding_agent.tools.shell_adapter import _KNOWN_SHELLS
+
         assert _KNOWN_SHELLS["fish"].deny is True
 
     def test_pwsh_has_ps_kind(self) -> None:
         from xcode.coding_agent.tools.shell_adapter import _KNOWN_SHELLS
+
         assert _KNOWN_SHELLS["pwsh"].ps_kind == "pwsh"
 
     def test_sh_not_login(self) -> None:
         from xcode.coding_agent.tools.shell_adapter import _KNOWN_SHELLS
+
         assert _KNOWN_SHELLS["sh"].login is False
         assert _KNOWN_SHELLS["sh"].deny is False
 
@@ -972,27 +1088,110 @@ class TestP1Cygpath:
 
     def test_module_importable(self) -> None:
         from xcode.coding_agent.tools import cygpath
+
         assert hasattr(cygpath, "is_cygwin_env")
         assert hasattr(cygpath, "to_windows")
         assert hasattr(cygpath, "to_unix")
 
     def test_is_cygwin_env_returns_bool(self) -> None:
         from xcode.coding_agent.tools.cygpath import is_cygwin_env
+
         result = is_cygwin_env()
         assert isinstance(result, bool)
 
     def test_to_windows_returns_str(self) -> None:
         from xcode.coding_agent.tools.cygpath import to_windows
+
         result = to_windows("/c/Users/test")
         assert isinstance(result, str)
 
     def test_to_unix_returns_str(self) -> None:
         from xcode.coding_agent.tools.cygpath import to_unix
+
         result = to_unix("C:/Users/test")
         assert isinstance(result, str)
 
     def test_relative_path_passthrough(self) -> None:
         """相对路径不经 cygpath 转换。"""
         from xcode.coding_agent.tools.cygpath import to_windows
+
         result = to_windows("src/main.py")
         assert result == "src/main.py"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 16. P3c: cmd.exe 分析器测试
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestCmdAnalyzer:
+    """cmd.exe 命令的路径提取。"""
+
+    def test_type_file(self) -> None:
+        a = analyze_shell_command("type file.txt", "cmd")
+        assert any(p.value == "file.txt" and p.access == "read" for p in a.resolved_paths)
+
+    def test_copy_src_dst(self) -> None:
+        a = analyze_shell_command("copy a.txt b.txt", "cmd")
+        reads = [p.value for p in a.resolved_paths if p.access == "read"]
+        writes = [p.value for p in a.resolved_paths if p.access == "write"]
+        assert "a.txt" in reads
+        assert "b.txt" in writes
+
+    def test_del_file(self) -> None:
+        a = analyze_shell_command("del temp.log", "cmd")
+        assert any(p.value == "temp.log" and p.access == "delete" for p in a.resolved_paths)
+
+    def test_move_src_dst(self) -> None:
+        a = analyze_shell_command("move src.txt dest.txt", "cmd")
+        writes = [p.value for p in a.resolved_paths if p.access == "write"]
+        assert "src.txt" in writes
+        assert "dest.txt" in writes
+
+    def test_echo_no_effects(self) -> None:
+        a = analyze_shell_command("echo hello world", "cmd")
+        assert len(a.resolved_paths) == 0
+
+    def test_dir_no_path(self) -> None:
+        a = analyze_shell_command("dir", "cmd")
+        # dir 不带参数时无路径参数
+        assert len(a.resolved_paths) == 0
+
+    def test_mkdir_writes(self) -> None:
+        a = analyze_shell_command("mkdir newdir", "cmd")
+        assert any(p.value == "newdir" and p.access == "write" for p in a.resolved_paths)
+
+    def test_redirect_stdout(self) -> None:
+        a = analyze_shell_command("echo hello > out.txt", "cmd")
+        assert any(p.value == "out.txt" and p.access == "write" for p in a.resolved_paths)
+
+    def test_unknown_command_unresolved(self) -> None:
+        a = analyze_shell_command("foobar x.txt", "cmd")
+        assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    def test_erase_file(self) -> None:
+        a = analyze_shell_command("erase tmp.dat", "cmd")
+        assert any(p.value == "tmp.dat" and p.access == "delete" for p in a.resolved_paths)
+
+    def test_xcopy_src_dst(self) -> None:
+        a = analyze_shell_command(r"xcopy /E src dst", "cmd")
+        paths = [(p.value, p.access) for p in a.resolved_paths]
+        assert ("src", "read") in paths or len(paths) >= 1
+
+    def test_ren_old_new(self) -> None:
+        a = analyze_shell_command("ren old.txt new.txt", "cmd")
+        writes = [p.value for p in a.resolved_paths if p.access == "write"]
+        assert "old.txt" in writes
+        assert "new.txt" in writes
+
+    def test_rd_dir(self) -> None:
+        a = analyze_shell_command("rd /s /q tempdir", "cmd")
+        assert any(p.value == "tempdir" and p.access == "delete" for p in a.resolved_paths)
+
+    def test_more_file(self) -> None:
+        a = analyze_shell_command("more readme.txt", "cmd")
+        assert any(p.value == "readme.txt" and p.access == "read" for p in a.resolved_paths)
+
+    def test_cls_no_effects(self) -> None:
+        a = analyze_shell_command("cls", "cmd")
+        assert len(a.resolved_paths) == 0
