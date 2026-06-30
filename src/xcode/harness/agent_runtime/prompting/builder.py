@@ -97,44 +97,54 @@ class SystemPromptBuilder:
 
 class StableRegionBuilder:
     def __init__(self) -> None:
-        self._stable_cache: str | None = None
-        self._stable_key: PromptCacheKey | None = None
+        self._invariant_cache: str | None = None
+        self._invariant_key: frozenset | None = None
+        self._full_cache: str | None = None
+        self._full_key: PromptCacheKey | None = None
         self._tool_prompt_cache: str | None = None
         self._tool_prompt_key: PromptCacheKey | None = None
 
     def build(self, context: PromptContext, enabled: set[str]) -> str:
         stable_enabled = enabled.intersection(STABLE_PROMPT_MODULE_ORDER)
         registry_key = _registry_prompt_key(context.registry)
-        stable_key = (
-            registry_key,
-            frozenset(stable_enabled),
-        )
 
-        if self._stable_cache is not None and self._stable_key == stable_key:
-            return self._stable_cache
+        # 不变模块（identity、tool_discipline、citations、search_strategy）
+        # 不依赖工具注册表，可独立缓存
+        invariant_enabled = stable_enabled - {"tools"}
+        inv_key = frozenset(invariant_enabled)
+        if self._invariant_cache is None or self._invariant_key != inv_key:
+            inv_parts: list[str] = []
+            for module in STABLE_PROMPT_MODULE_ORDER:
+                if module not in invariant_enabled:
+                    continue
+                match module:
+                    case "identity":
+                        inv_parts.append(CORE_IDENTITY)
+                    case "tool_discipline":
+                        inv_parts.append(TOOL_DISCIPLINE)
+                    case "citations":
+                        inv_parts.append(CITATION_INSTRUCTION)
+                    case "search_strategy":
+                        inv_parts.append(SEARCH_STRATEGY)
+            self._invariant_cache = "\n\n".join(inv_parts) if inv_parts else ""
+            self._invariant_key = inv_key
 
-        stable_parts: list[str] = []
-        for module in STABLE_PROMPT_MODULE_ORDER:
-            if module not in enabled:
-                continue
-            match module:
-                case "identity":
-                    stable_parts.append(CORE_IDENTITY)
-                case "tool_discipline":
-                    stable_parts.append(TOOL_DISCIPLINE)
-                case "tools":
-                    stable_parts.append(
-                        self._tool_prompt_section(context.registry, registry_key)
-                    )
-                case "citations":
-                    stable_parts.append(CITATION_INSTRUCTION)
-                case "search_strategy":
-                    stable_parts.append(SEARCH_STRATEGY)
+        # tools 模块依赖注册表
+        tool_section = ""
+        if "tools" in stable_enabled:
+            tool_section = self._tool_prompt_section(context.registry, registry_key)
 
-        stable_prompt = "\n\n".join(stable_parts)
-        self._stable_cache = stable_prompt
-        self._stable_key = stable_key
-        return stable_prompt
+        # 组合完整 stable prompt
+        parts = [p for p in [self._invariant_cache, tool_section] if p]
+        full = "\n\n".join(parts)
+
+        # 缓存完整结果，方便外部命中
+        full_key = (registry_key, frozenset(stable_enabled))
+        if self._full_cache is None or self._full_key != full_key:
+            self._full_cache = full
+            self._full_key = full_key
+
+        return full
 
     def _tool_prompt_section(
         self, registry: tuple[ToolSpec, ...], registry_key: PromptCacheKey
