@@ -121,10 +121,6 @@ class ReplCompleter(Completer):
                 display_meta=meta,
             )
 
-    async def get_completions_async(self, document, complete_event):
-        for completion in self.get_completions(document, complete_event):
-            yield completion
-
     def complete(self, text_before_cursor: str) -> list[CompletionItem]:
         if (
             text_before_cursor.startswith("/effort")
@@ -187,10 +183,14 @@ class ReplCompleter(Completer):
         if len(parts) > 2:
             return []
         partial = parts[1] if len(parts) == 2 else ""
+        matched = [
+            name
+            for name in self._current_skill_options()
+            if name.startswith(partial) and name != partial
+        ]
         return [
             CompletionItem(name, -len(partial), "skill")
-            for name in self._current_skill_options()
-            if name.startswith(partial)
+            for name in matched
         ]
 
     def _complete_skill_reference(self, text: str) -> list[CompletionItem]:
