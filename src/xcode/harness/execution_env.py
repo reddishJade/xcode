@@ -1,3 +1,5 @@
+"""进程执行环境：子进程管理的同步实现。"""
+
 from __future__ import annotations
 
 import logging
@@ -7,7 +9,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -35,8 +37,9 @@ class ExecutionEnv(Protocol):
         self,
         argv: list[str],
         cwd: Path,
-        timeout: int = 30,
+        timeout: int = 30_000,
         cancel_event: threading.Event | None = None,
+        on_progress: Callable[[str], None] | None = None,
     ) -> ExecutionResult: ...
 
 
@@ -45,8 +48,9 @@ class SubprocessExecutionEnv:
         self,
         argv: list[str],
         cwd: Path,
-        timeout: int = 30,
+        timeout: int = 30_000,
         cancel_event: threading.Event | None = None,
+        on_progress: Callable[[str], None] | None = None,
     ) -> ExecutionResult:
         proc = _start_process(argv, cwd)
         stdout_chunks: list[bytes] = []
@@ -55,27 +59,35 @@ class SubprocessExecutionEnv:
         cancelled = False
         timed_out = False
 
-        def _drain(src: Iterable[bytes] | None, dest: list[bytes]) -> None:
+        def _drain(
+            src: Iterable[bytes] | None,
+            dest: list[bytes],
+            is_stderr: bool = False,
+        ) -> None:
             if src is None:
                 return
             try:
                 for raw in src:
                     with lock:
                         dest.append(raw)
+                    if on_progress:
+                        text = raw.decode("utf-8", errors="replace")
+                        on_progress(text)
             except Exception:
                 logger.debug("error draining process output", exc_info=True)
 
         out_thread = threading.Thread(
-            target=_drain, args=(proc.stdout, stdout_chunks), daemon=True
+            target=_drain, args=(proc.stdout, stdout_chunks, False), daemon=True
         )
         err_thread = threading.Thread(
-            target=_drain, args=(proc.stderr, stderr_chunks), daemon=True
+            target=_drain, args=(proc.stderr, stderr_chunks, True), daemon=True
         )
         out_thread.start()
         err_thread.start()
 
         try:
-            deadline = time.monotonic() + timeout
+            # timeout 现在是毫秒
+            deadline = time.monotonic() + (timeout / 1000.0)
             while proc.poll() is None:
                 if time.monotonic() >= deadline:
                     _kill_process(proc)
@@ -128,20 +140,6 @@ def _start_process(argv: list[str], cwd: Path) -> subprocess.Popen[bytes]:
 
 
 def _kill_process(proc: subprocess.Popen) -> None:
-    """终止进程，优雅终止失败后强制杀死。
-
-    平台差异处理：
-    - Unix: 发送 SIGTERM 到进程组，优雅终止子进程树
-    - Windows: 使用 terminate() 发送 CTRL_BREAK_EVENT
-
-    两阶段终止策略：
-    1. 先发送 SIGTERM，等待 TERMINATE_GRACE_SECONDS（3秒）
-    2. 若进程仍未退出，升级为 SIGKILL（Unix）或 taskkill /F（Windows）
-
-    设计原因：
-    优雅终止允许进程清理资源（关闭文件、刷新缓冲），
-    强制杀死确保不会无限等待挂起的进程。
-    """
     if proc.poll() is not None:
         return
     try:
