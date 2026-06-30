@@ -40,6 +40,7 @@ class LayeredCompactor:
         keep_recent_tool_results: int = 2,
         max_tool_result_chars: int = 100,
         max_recent_messages: int = 8,
+        keep_recent_tokens: int = 0,
         large_tool_output_chars: int = 20_000,
         large_tool_output_head_chars: int = 10_000,
         large_tool_output_tail_chars: int = 10_000,
@@ -58,6 +59,7 @@ class LayeredCompactor:
         self.keep_recent_tool_results = keep_recent_tool_results
         self.max_tool_result_chars = max_tool_result_chars
         self.max_recent_messages = max_recent_messages
+        self.keep_recent_tokens = keep_recent_tokens
         self.large_tool_output_chars = large_tool_output_chars
         self.large_tool_output_head_chars = large_tool_output_head_chars
         self.large_tool_output_tail_chars = large_tool_output_tail_chars
@@ -101,6 +103,7 @@ class LayeredCompactor:
         final_messages = summarize_messages(
             branch_compacted,
             max_recent_messages=self.max_recent_messages,
+            keep_recent_tokens=self.keep_recent_tokens,
             compact_instructions=self.compact_instructions,
             summarize_fn=self.summarize_fn,
         )
@@ -365,16 +368,43 @@ def build_summarize_prompt(older: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _compute_recent_count_from_tokens(
+    messages: list[dict[str, Any]],
+    keep_recent_tokens: int,
+) -> int:
+    """从后向前扫描消息，累计 token 直到 keep_recent_tokens，返回应保留的消息数。
+
+    始终保留至少 1 条消息（以及系统提示）。返回 0 表示 keep_recent_tokens 未启用。
+    """
+    if keep_recent_tokens <= 0:
+        return 0
+    accumulated = 0
+    count = 0
+    # 从最后一条消息开始反向扫描（跳过系统提示 message[0]）
+    for i in range(len(messages) - 1, 0, -1):
+        tokens = estimate_message_tokens([messages[i]])
+        if accumulated + tokens > keep_recent_tokens and count > 0:
+            break
+        accumulated += tokens
+        count += 1
+    return max(count, 1)
+
+
 def summarize_messages(
     messages: list[dict[str, Any]],
     max_recent_messages: int = 8,
+    keep_recent_tokens: int = 0,
     compact_instructions: CompactInstructions | None = None,
     summarize_fn: SummarizeFn | None = None,
 ) -> list[dict[str, Any]]:
     if len(messages) <= max_recent_messages + 1:
         return messages
 
-    if compact_instructions and compact_instructions.priorities:
+    # 使用 token 驱动的保留计数（当 keep_recent_tokens > 0 时）
+    token_count = _compute_recent_count_from_tokens(messages, keep_recent_tokens)
+    if token_count > 0:
+        effective_recent = max(max_recent_messages, token_count)
+    elif compact_instructions and compact_instructions.priorities:
         preserved_count = _preserved_recent_count(
             messages, compact_instructions, max_recent_messages
         )

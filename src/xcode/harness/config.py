@@ -61,6 +61,7 @@ class AgentConfig(BaseModel):
     compact_threshold: StrictInt = 0
     compact_token_threshold: StrictInt = 0
     max_recent_messages: StrictInt = 10
+    keep_recent_tokens: StrictInt = 20000
     reserve_tokens: StrictInt = 16384
     tool_workers: StrictInt = 4
     tool_timeout_seconds: StrictFloat | StrictInt = 120.0
