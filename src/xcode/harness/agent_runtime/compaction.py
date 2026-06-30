@@ -19,6 +19,11 @@ from ..skills import ToolSpec
 """分层上下文压缩工具。"""
 
 
+# 文件操作工具名集合（用于累积文件跟踪）
+_READ_TOOLS: frozenset[str] = frozenset({"read_file", "read"})
+_MODIFY_TOOLS: frozenset[str] = frozenset({"edit_file", "write_file", "write", "edit", "apply_patch"})
+
+
 class CompactController:
     def __init__(self) -> None:
         self._requested = False
@@ -68,6 +73,15 @@ class LayeredCompactor:
         self.reserve_tokens = reserve_tokens
         self.on_compact = on_compact
         self.last_transcript_path: Path | None = None
+        # 累积文件跟踪（跨压缩轮次）
+        self._cumulative_read_files: set[str] = set()
+        self._cumulative_modified_files: set[str] = set()
+
+    def _accumulate_file_ops(self, messages: list[dict[str, Any]]) -> None:
+        """从消息中提取文件操作，合并到累积跟踪状态。"""
+        reads, modifies = _extract_file_ops_from_messages(messages)
+        self._cumulative_read_files.update(reads)
+        self._cumulative_modified_files.update(modifies)
 
     def __call__(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         compacted = stale_snip_file_reads(messages)
@@ -100,12 +114,28 @@ class LayeredCompactor:
                 branch_compacted, self.transcript_dir
             )
 
+        # 在最终摘要前，从待摘要消息中提取文件操作
+        if len(branch_compacted) > self.max_recent_messages + 1:
+            token_count = _compute_recent_count_from_tokens(
+                branch_compacted, self.keep_recent_tokens
+            )
+            effective_recent = (
+                max(self.max_recent_messages, token_count)
+                if token_count > 0
+                else self.max_recent_messages
+            )
+            older_start = max(1, len(branch_compacted) - effective_recent)
+            older_msgs = branch_compacted[1:older_start]
+            self._accumulate_file_ops(older_msgs)
+
         final_messages = summarize_messages(
             branch_compacted,
             max_recent_messages=self.max_recent_messages,
             keep_recent_tokens=self.keep_recent_tokens,
             compact_instructions=self.compact_instructions,
             summarize_fn=self.summarize_fn,
+            read_files=self._cumulative_read_files,
+            modified_files=self._cumulative_modified_files,
         )
         if len(final_messages) > 1:
             second_msg = final_messages[1]
@@ -396,6 +426,8 @@ def summarize_messages(
     keep_recent_tokens: int = 0,
     compact_instructions: CompactInstructions | None = None,
     summarize_fn: SummarizeFn | None = None,
+    read_files: set[str] | None = None,
+    modified_files: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     if len(messages) <= max_recent_messages + 1:
         return messages
@@ -451,6 +483,14 @@ def summarize_messages(
         "role": "user",
         "content": summary_content,
     }
+    # 注入累积文件操作信息到摘要
+    if read_files or modified_files:
+        tracked = _render_file_tracking(
+            read_files or set(), modified_files or set()
+        )
+        if tracked:
+            summary_content += "\n\n" + tracked
+
     return [messages[0], summary, *protected_older, *messages[recent_start:]]
 
 
@@ -654,6 +694,53 @@ def build_compact_tool(controller: CompactController) -> ToolSpec:
             "additionalProperties": False,
         },
     )
+
+
+def _extract_file_ops_from_messages(
+    messages: list[dict[str, Any]],
+) -> tuple[set[str], set[str]]:
+    """从消息列表中提取所有被读取和修改的文件路径。
+
+    Returns:
+        (read_files, modified_files) 两组集合
+    """
+    read_files: set[str] = set()
+    modified_files: set[str] = set()
+
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not (isinstance(part, dict) and part.get("type") == "tool_use"):
+                continue
+            tool_name = str(part.get("name", ""))
+            tool_input = part.get("input", {})
+            if not isinstance(tool_input, dict):
+                continue
+            path = str(tool_input.get("path", "") or "").strip()
+            if not path:
+                continue
+            if tool_name in _READ_TOOLS:
+                read_files.add(path)
+            elif tool_name in _MODIFY_TOOLS:
+                modified_files.add(path)
+
+    return read_files, modified_files
+
+
+def _render_file_tracking(read_files: set[str], modified_files: set[str]) -> str:
+    """将文件跟踪信息渲染为 XML 标签块。"""
+    parts: list[str] = []
+    if read_files:
+        paths = "\n".join(sorted(read_files))
+        parts.append(f"<read-files>\n{paths}\n</read-files>")
+    if modified_files:
+        paths = "\n".join(sorted(modified_files))
+        parts.append(f"<modified-files>\n{paths}\n</modified-files>")
+    return "\n".join(parts)
 
 
 def _content_preview(content: str | list[dict[str, Any]] | None) -> str:
