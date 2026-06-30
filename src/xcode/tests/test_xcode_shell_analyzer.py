@@ -720,3 +720,279 @@ class TestProvenancePropagation:
                 assert t.provenance == "structured_arg"
                 return
         pytest.fail("no path target found")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 13. P1: 扩展命令注册测试
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestP1ExtendedCommandRegistry:
+    """P1 新增的 ~30 条命令注册的验证。"""
+
+    # ── tee ──
+
+    def test_tee_writes(self) -> None:
+        a = analyze_shell_command("tee /tmp/out.log", "posix")
+        assert any(p.value == "/tmp/out.log" and p.access == "write" for p in a.resolved_paths)
+
+    def test_tee_append_flag_skipped(self) -> None:
+        """tee -a file → 跳过 -a，file 仍是 write。"""
+        a = analyze_shell_command("tee -a /tmp/log", "posix")
+        assert any(p.value == "/tmp/log" and p.access == "write" for p in a.resolved_paths)
+
+    # ── wc / sort / uniq / cut ──
+
+    def test_wc_reads_file(self) -> None:
+        a = analyze_shell_command("wc -l file.txt", "posix")
+        assert any(p.value == "file.txt" and p.access == "read" for p in a.resolved_paths)
+
+    def test_wc_multi_files(self) -> None:
+        a = analyze_shell_command("wc -l a.txt b.txt", "posix")
+        assert len([p for p in a.resolved_paths if p.access == "read"]) == 2
+
+    def test_sort_reads_file(self) -> None:
+        a = analyze_shell_command("sort data.txt", "posix")
+        assert any(p.value == "data.txt" for p in a.resolved_paths)
+
+    def test_uniq_reads_file(self) -> None:
+        a = analyze_shell_command("uniq -c output.txt", "posix")
+        assert any(p.value == "output.txt" for p in a.resolved_paths)
+
+    def test_cut_reads_file(self) -> None:
+        a = analyze_shell_command("cut -d, -f1 data.csv", "posix")
+        assert any(p.value == "data.csv" for p in a.resolved_paths)
+
+    # ── curl / wget ──
+
+    def test_curl_o_writes(self) -> None:
+        a = analyze_shell_command("curl -o /tmp/pkg.tar.gz https://example.com/pkg", "posix")
+        assert any(p.value == "/tmp/pkg.tar.gz" and p.access == "write" for p in a.resolved_paths)
+
+    def test_curl_O_marked_unresolved(self) -> None:
+        """curl -O（从 URL 推断文件名）不可静态确认。"""
+        a = analyze_shell_command("curl -O https://example.com/file", "posix")
+        assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    def test_wget_O_writes(self) -> None:
+        a = analyze_shell_command("wget -O output.bin https://example.com", "posix")
+        assert any(p.value == "output.bin" and p.access == "write" for p in a.resolved_paths)
+
+    # ── sed ──
+
+    def test_sed_inplace_writes(self) -> None:
+        """sed -i 原地修改，文件标记为 write。"""
+        a = analyze_shell_command("sed -i.bak s/foo/bar/ config.json", "posix")
+        assert any(p.value == "config.json" and p.access == "write" for p in a.resolved_paths)
+
+    def test_sed_read_without_i(self) -> None:
+        a = analyze_shell_command("sed s/foo/bar/ config.json", "posix")
+        assert any(p.value == "config.json" and p.access == "read" for p in a.resolved_paths)
+
+    # ── awk ──
+
+    def test_awk_reads_file(self) -> None:
+        a = analyze_shell_command("awk '{print \$1}' data.log", "posix")
+        assert any(p.value == "data.log" and p.access == "read" for p in a.resolved_paths)
+
+    # ── tar ──
+
+    def test_tar_create_writes_archive(self) -> None:
+        a = analyze_shell_command("tar czf archive.tar.gz src/", "posix")
+        assert any(p.value == "archive.tar.gz" and p.access == "write" for p in a.resolved_paths)
+        assert any(p.value == "src/" and p.access == "read" for p in a.resolved_paths)
+
+    def test_tar_dash_create_writes_archive(self) -> None:
+        a = analyze_shell_command("tar -czf archive.tar.gz src/", "posix")
+        assert any(p.value == "archive.tar.gz" and p.access == "write" for p in a.resolved_paths)
+
+    def test_tar_extract_reads_archive(self) -> None:
+        a = analyze_shell_command("tar xf archive.tar.gz", "posix")
+        assert any(p.value == "archive.tar.gz" and p.access == "read" for p in a.resolved_paths)
+        assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    def test_tar_list_reads_archive(self) -> None:
+        a = analyze_shell_command("tar tf archive.tar.gz", "posix")
+        assert any(p.value == "archive.tar.gz" and p.access == "read" for p in a.resolved_paths)
+        assert not any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    # ── gzip / gunzip ──
+
+    def test_gzip_reads_file(self) -> None:
+        a = analyze_shell_command("gzip file.txt", "posix")
+        assert any(p.value == "file.txt" and p.access == "read" for p in a.resolved_paths)
+
+    def test_gunzip_reads_file(self) -> None:
+        a = analyze_shell_command("gunzip file.txt.gz", "posix")
+        assert any(p.value == "file.txt.gz" and p.access == "read" for p in a.resolved_paths)
+
+    # ── unzip / zip ──
+
+    def test_unzip_reads_archive(self) -> None:
+        a = analyze_shell_command("unzip archive.zip", "posix")
+        assert any(p.value == "archive.zip" and p.access == "read" for p in a.resolved_paths)
+        assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    def test_zip_writes_archive_reads_files(self) -> None:
+        a = analyze_shell_command("zip archive.zip file1 file2", "posix")
+        assert any(p.value == "archive.zip" and p.access == "write" for p in a.resolved_paths)
+        assert any(p.value == "file1" and p.access == "read" for p in a.resolved_paths)
+        assert any(p.value == "file2" and p.access == "read" for p in a.resolved_paths)
+
+    # ── pip / npm / npx ──
+
+    def test_pip_install_unresolved(self) -> None:
+        a = analyze_shell_command("pip install requests", "posix")
+        assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    def test_pip_list_no_op(self) -> None:
+        """pip list 不修改系统，无效果。"""
+        a = analyze_shell_command("pip list --outdated", "posix")
+        assert len(a.resolved_paths) == 0
+        assert len(a.unresolved_effects) == 0
+
+    def test_npm_install_unresolved(self) -> None:
+        a = analyze_shell_command("npm install lodash", "posix")
+        assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    def test_npx_unresolved(self) -> None:
+        a = analyze_shell_command("npx http-server", "posix")
+        assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    # ── make / cargo ──
+
+    def test_make_unresolved(self) -> None:
+        a = analyze_shell_command("make all", "posix")
+        assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    def test_cargo_build_unresolved(self) -> None:
+        a = analyze_shell_command("cargo build", "posix")
+        assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    def test_cargo_test_allowed(self) -> None:
+        a = analyze_shell_command("cargo test", "posix")
+        assert any(e.reason == "wrapper_command" for e in a.unresolved_effects)
+
+    # ── python / node ──
+
+    def test_python_script_reads_file(self) -> None:
+        a = analyze_shell_command("python script.py", "posix")
+        assert any(p.value == "script.py" and p.access == "read" for p in a.resolved_paths)
+        assert any(e.reason == "eval_like" for e in a.unresolved_effects)
+
+    def test_python_no_args_no_effect(self) -> None:
+        a = analyze_shell_command("python", "posix")
+        assert len(a.resolved_paths) == 0
+
+    def test_node_script_reads_file(self) -> None:
+        a = analyze_shell_command("node app.js", "posix")
+        assert any(p.value == "app.js" and p.access == "read" for p in a.resolved_paths)
+        assert any(e.reason == "eval_like" for e in a.unresolved_effects)
+
+    # ── du / df ──
+
+    def test_du_reads_path(self) -> None:
+        a = analyze_shell_command("du -sh .", "posix")
+        assert any(p.value == "." and p.access == "read" for p in a.resolved_paths)
+
+    def test_df_no_path_default(self) -> None:
+        a = analyze_shell_command("df -h", "posix")
+        assert len(a.resolved_paths) == 0
+
+    # ── diff3 / comm ──
+
+    def test_diff3_reads_files(self) -> None:
+        a = analyze_shell_command("diff3 mine.txt older.txt yours.txt", "posix")
+        assert len([p for p in a.resolved_paths if p.access == "read"]) == 3
+
+    # ── sed 脚本模式区分 ──
+
+    def test_sed_script_not_path(self) -> None:
+        """sed s/foo/bar/ 不是文件路径。"""
+        a = analyze_shell_command("sed s/a/b/ config.json", "posix")
+        paths = [p.value for p in a.resolved_paths]
+        assert "s/a/b/" not in paths
+        assert "config.json" in paths
+
+    def test_sed_address_not_path(self) -> None:
+        """sed /pattern/d 的 /pattern/ 不是路径。"""
+        a = analyze_shell_command("sed /^foo/d file.txt", "posix")
+        paths = [p.value for p in a.resolved_paths]
+        assert "file.txt" in paths
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 14. P1: ShellSpec 增强测试
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestP1ShellSpecEnhancement:
+    """ShellSpec 新增字段的验证。"""
+
+    def test_shell_spec_login_field(self) -> None:
+        from xcode.coding_agent.tools.shell_adapter import ShellSpec
+        spec = ShellSpec(name="test", command_prefix=("sh", "-c"), syntax="posix", login=True)
+        assert spec.login is True
+
+    def test_shell_spec_deny_field(self) -> None:
+        from xcode.coding_agent.tools.shell_adapter import ShellSpec
+        spec = ShellSpec(name="test", command_prefix=("sh", "-c"), syntax="posix", deny=True)
+        assert spec.deny is True
+
+    def test_shell_spec_ps_kind_field(self) -> None:
+        from xcode.coding_agent.tools.shell_adapter import ShellSpec
+        spec = ShellSpec(name="pwsh", command_prefix=("pwsh", "-c"), syntax="powershell", ps_kind="pwsh")
+        assert spec.ps_kind == "pwsh"
+
+    def test_bash_has_login_true(self) -> None:
+        from xcode.coding_agent.tools.shell_adapter import _KNOWN_SHELLS
+        assert _KNOWN_SHELLS["bash"].login is True
+
+    def test_fish_has_deny_true(self) -> None:
+        from xcode.coding_agent.tools.shell_adapter import _KNOWN_SHELLS
+        assert _KNOWN_SHELLS["fish"].deny is True
+
+    def test_pwsh_has_ps_kind(self) -> None:
+        from xcode.coding_agent.tools.shell_adapter import _KNOWN_SHELLS
+        assert _KNOWN_SHELLS["pwsh"].ps_kind == "pwsh"
+
+    def test_sh_not_login(self) -> None:
+        from xcode.coding_agent.tools.shell_adapter import _KNOWN_SHELLS
+        assert _KNOWN_SHELLS["sh"].login is False
+        assert _KNOWN_SHELLS["sh"].deny is False
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 15. P1: Cygpath 工具测试
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestP1Cygpath:
+    """Cygwin 路径转换工具验证。"""
+
+    def test_module_importable(self) -> None:
+        from xcode.coding_agent.tools import cygpath
+        assert hasattr(cygpath, "is_cygwin_env")
+        assert hasattr(cygpath, "to_windows")
+        assert hasattr(cygpath, "to_unix")
+
+    def test_is_cygwin_env_returns_bool(self) -> None:
+        from xcode.coding_agent.tools.cygpath import is_cygwin_env
+        result = is_cygwin_env()
+        assert isinstance(result, bool)
+
+    def test_to_windows_returns_str(self) -> None:
+        from xcode.coding_agent.tools.cygpath import to_windows
+        result = to_windows("/c/Users/test")
+        assert isinstance(result, str)
+
+    def test_to_unix_returns_str(self) -> None:
+        from xcode.coding_agent.tools.cygpath import to_unix
+        result = to_unix("C:/Users/test")
+        assert isinstance(result, str)
+
+    def test_relative_path_passthrough(self) -> None:
+        """相对路径不经 cygpath 转换。"""
+        from xcode.coding_agent.tools.cygpath import to_windows
+        result = to_windows("src/main.py")
+        assert result == "src/main.py"

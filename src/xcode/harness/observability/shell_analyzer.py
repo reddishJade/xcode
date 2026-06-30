@@ -351,6 +351,340 @@ def _eval_cmd(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
     ]
 
 
+# ── 扩展 POSIX 命令注册 ──
+
+
+@_REGISTRY.register("tee", syntax="posix")
+def _tee(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """tee [options] [file...] — 写入文件。"""
+    args = [a for a in argv[1:] if not _is_flag(a)]
+    return [_effect_from_arg(a, "write") for a in args if _is_path_like(a)]
+
+
+@_REGISTRY.register("wc", syntax="posix")
+@_REGISTRY.register("sort", syntax="posix")
+@_REGISTRY.register("uniq", syntax="posix")
+@_REGISTRY.register("cut", syntax="posix")
+@_REGISTRY.register("comm", syntax="posix")
+def _read_file_simple(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """wc/sort/uniq/cut/comm [options] [file...] — 读文件。
+
+    跳过 -- 和短选项；对短选项不自动跳过下一参数，
+    因为 -l、-w、-c 等不取值。只收集非 flag 路径参数。
+    """
+    effects: list[FileEffect | UnresolvedEffect] = []
+    for arg in argv[1:]:
+        if arg == "--":
+            continue
+        if arg.startswith("-"):
+            continue
+        if _is_path_like(arg):
+            effects.append(_effect_from_arg(arg, "read"))
+    return effects
+
+
+@_REGISTRY.register("diff3", syntax="posix")
+def _two_file_cmd(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """diff3 file1 file2 file3 — 比较三个文件（只读）。"""
+    args = [a for a in argv[1:] if not _is_flag(a)]
+    return [_effect_from_arg(a, "read") for a in args if _is_path_like(a)]
+
+
+@_REGISTRY.register("du", syntax="posix")
+@_REGISTRY.register("df", syntax="posix")
+def _disk_cmd(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """du/df [path...] — 磁盘使用（只读）。"""
+    args = [a for a in argv[1:] if not _is_flag(a)]
+    return [_effect_from_arg(a, "read") for a in args if _is_path_like(a)]
+
+
+@_REGISTRY.register("curl", syntax="posix")
+def _curl(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """curl [options] [URL...] — 下载文件。
+
+    -o/--output file → write
+    -O/--remote-name → write (文件名从 URL 推断，不可静态分析)
+    """
+    effects: list[FileEffect | UnresolvedEffect] = []
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-o", "--output") and i + 1 < len(argv):
+            effects.append(_effect_from_arg(argv[i + 1], "write"))
+            i += 2
+            continue
+        if arg in ("-O", "--remote-name"):
+            effects.append(
+                UnresolvedEffect(
+                    reason="wrapper_command",
+                    fragment="curl -O: filename from URL",
+                )
+            )
+            i += 1
+            continue
+        if arg.startswith("-"):
+            i += 1
+            continue
+        # 非 flag 参数通常是 URL，不是文件路径
+        i += 1
+    return effects
+
+
+@_REGISTRY.register("wget", syntax="posix")
+def _wget(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """wget [options] [URL...] — 下载文件。
+
+    -O/--output-document file → write
+    """
+    effects: list[FileEffect | UnresolvedEffect] = []
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-O", "--output-document") and i + 1 < len(argv):
+            effects.append(_effect_from_arg(argv[i + 1], "write"))
+            i += 2
+            continue
+        if arg.startswith("-"):
+            i += 1
+            continue
+        i += 1
+    return effects
+
+
+@_REGISTRY.register("sed", syntax="posix")
+def _sed(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """sed [options] [script] [file...] — 流编辑器。
+
+    -i[SUFFIX] → 原地修改文件（write）
+    位置参数中的文件 → read（如果 -i 则为 write）
+    """
+    inplace = False
+    files: list[str] = []
+    seen_script = False  # sed 脚本已遇到
+    skip_next = False
+    for arg in argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("-i"):
+            inplace = True
+            continue
+        if arg == "--":
+            skip_next = False
+            continue
+        if arg.startswith("-"):
+            if _is_short_option_with_value(arg) and arg not in ("-e", "--expression"):
+                skip_next = True
+            continue
+        if not seen_script and _is_sed_script(arg):
+            seen_script = True
+            continue
+        if _is_path_like(arg):
+            files.append(arg)
+    if not files:
+        return []
+    access: PermissionAccess = "write" if inplace else "read"
+    return [_effect_from_arg(f, access) for f in files]
+
+
+@_REGISTRY.register("awk", syntax="posix")
+def _awk(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """awk [options] [script] [file...] — 模式扫描（读文件）。"""
+    effects: list[FileEffect | UnresolvedEffect] = []
+    skip_next = False
+    for arg in argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("-"):
+            if _is_short_option_with_value(arg):
+                skip_next = True
+            continue
+        if _is_path_like(arg):
+            effects.append(_effect_from_arg(arg, "read"))
+    return effects
+
+
+@_REGISTRY.register("tar", syntax="posix")
+def _tar(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """tar [options] [file...] — 归档工具。
+
+    创建模式（-c）：写入 archive file
+    提取模式（-x）：读取 archive file，写入目标
+    列出模式（-t）：只读
+    """
+    create = False
+    extract = False
+    list_mode = False
+    archive_file: str | None = None
+    args: list[str] = []
+    pending_f = False  # 下一个非 flag 参数是 archive 文件名
+    seen_action = False  # 已经处理过动作字母（c/x/t）
+
+    def _parse_flags(chars: str) -> None:
+        """解析 tar flag 字符串（可能来自 -czf 或裸 czf）。"""
+        nonlocal create, extract, list_mode, pending_f, seen_action
+        for ch in chars:
+            if ch == "c":
+                create = True
+                seen_action = True
+            elif ch == "x":
+                extract = True
+                seen_action = True
+            elif ch == "t":
+                list_mode = True
+                seen_action = True
+            elif ch == "f":
+                pending_f = True
+
+    for arg in argv[1:]:
+        if pending_f:
+            archive_file = arg
+            pending_f = False
+            continue
+        if arg.startswith("-"):
+            _parse_flags(arg.lstrip("-"))
+            continue
+        # GNU tar 允许裸标志（不带 -）：tar czf archive...
+        if not seen_action and arg.isalpha():
+            _parse_flags(arg)
+            continue
+        if archive_file is None and pending_f:
+            archive_file = arg
+            pending_f = False
+            continue
+        args.append(arg)
+
+    effects: list[FileEffect | UnresolvedEffect] = []
+    if archive_file:
+        if create:
+            effects.append(_effect_from_arg(archive_file, "write"))
+        elif extract:
+            effects.append(_effect_from_arg(archive_file, "read"))
+            effects.append(
+                UnresolvedEffect(
+                    reason="wrapper_command",
+                    fragment="tar -x: extracts to cwd",
+                )
+            )
+        else:
+            effects.append(_effect_from_arg(archive_file, "read"))
+    if extract and not archive_file:
+        # tar xf without explicit file (reads from stdin)
+        effects.append(
+            UnresolvedEffect(reason="wrapper_command", fragment="tar: extracts from stdin")
+        )
+    for a in args:
+        effects.append(_effect_from_arg(a, "read"))
+    return effects
+
+
+@_REGISTRY.register("gzip", syntax="posix")
+@_REGISTRY.register("gunzip", syntax="posix")
+@_REGISTRY.register("bzip2", syntax="posix")
+@_REGISTRY.register("bunzip2", syntax="posix")
+@_REGISTRY.register("xz", syntax="posix")
+@_REGISTRY.register("unxz", syntax="posix")
+def _compress_cmd(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """gzip/gunzip/bzip2/bunzip2/xz/unxz [file...]
+
+    压缩：read → write（原地替换为 .gz 文件）
+    解压：read → delete（原地删除源文件）
+    """
+    args = [a for a in argv[1:] if not _is_flag(a)]
+    effects: list[FileEffect | UnresolvedEffect] = []
+    for a in args:
+        if _is_path_like(a):
+            effects.append(_effect_from_arg(a, "read"))
+    return effects
+
+
+@_REGISTRY.register("unzip", syntax="posix")
+def _unzip(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """unzip [options] archive[.zip] [file...] — 解压。"""
+    args = [a for a in argv[1:] if not _is_flag(a)]
+    effects: list[FileEffect | UnresolvedEffect] = []
+    if args:
+        effects.append(_effect_from_arg(args[0], "read"))
+        effects.append(
+            UnresolvedEffect(
+                reason="wrapper_command", fragment="unzip: extracts to cwd"
+            )
+        )
+    return effects
+
+
+@_REGISTRY.register("zip", syntax="posix")
+def _zip(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """zip [options] archive[.zip] [file...] — 压缩。"""
+    args = [a for a in argv[1:] if not _is_flag(a)]
+    effects: list[FileEffect | UnresolvedEffect] = []
+    if len(args) >= 1:
+        effects.append(_effect_from_arg(args[0], "write"))
+    for a in args[1:]:
+        if _is_path_like(a):
+            effects.append(_effect_from_arg(a, "read"))
+    return effects
+
+
+@_REGISTRY.register("pip", syntax="posix")
+@_REGISTRY.register("pip3", syntax="posix")
+def _pip(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """pip install/uninstall → 修改系统 Python 包（write）。"""
+    if len(argv) > 1 and argv[1] in ("install", "uninstall", "download"):
+        return [UnresolvedEffect(reason="wrapper_command", fragment="pip: modifies packages")]
+    return []
+
+
+@_REGISTRY.register("npm", syntax="posix")
+def _npm(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """npm install/build → 修改 node_modules。"""
+    if len(argv) > 1 and argv[1] in ("install", "ci", "add", "update", "audit fix"):
+        return [UnresolvedEffect(reason="wrapper_command", fragment="npm: modifies node_modules")]
+    if len(argv) > 1 and argv[1] in ("run", "exec"):
+        return [UnresolvedEffect(reason="wrapper_command", fragment="npm run: dynamic execution")]
+    return []
+
+
+@_REGISTRY.register("npx", syntax="posix")
+def _npx(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """npx [command] — 临时执行包（动态）。"""
+    return [UnresolvedEffect(reason="wrapper_command", fragment="npx: dynamic execution")]
+
+
+@_REGISTRY.register("make", syntax="posix")
+def _make(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """make [target...] — 运行构建。"""
+    return [UnresolvedEffect(reason="wrapper_command", fragment="make: build tool")]
+
+
+@_REGISTRY.register("cargo", syntax="posix")
+def _cargo(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """cargo build/test → 构建 Rust 项目。"""
+    if len(argv) > 1 and argv[1] in ("build", "test", "check", "run"):
+        return [UnresolvedEffect(reason="wrapper_command", fragment="cargo: build tool")]
+    return []
+
+
+@_REGISTRY.register("python", syntax="posix")
+@_REGISTRY.register("python3", syntax="posix")
+@_REGISTRY.register("node", syntax="posix")
+def _interpreter(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """python/node [script] — 脚本解释器，无法静态分析。"""
+    args = [a for a in argv[1:] if not _is_flag(a) and not a.startswith("-")]
+    effects: list[FileEffect | UnresolvedEffect] = []
+    if args:
+        # 第一个非 flag 参数通常是脚本文件（读）
+        effects.append(_effect_from_arg(args[0], "read"))
+        effects.append(
+            UnresolvedEffect(
+                reason="eval_like",
+                fragment=f"{argv[0]}: dynamic execution of {args[0]}",
+            )
+        )
+    return effects
+
+
 # ── PowerShell 命令注册 ──
 
 
@@ -438,6 +772,68 @@ def _ps_select_string(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
         # 管道输入，无法静态分析
         pass
     return effects
+
+
+@_REGISTRY.register("invoke-webrequest", syntax="powershell")
+@_REGISTRY.register("iwr", syntax="powershell")
+@_REGISTRY.register("wget", syntax="powershell")
+@_REGISTRY.register("curl", syntax="powershell")
+def _ps_webrequest(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """Invoke-WebRequest / iwr / wget / curl — 下载文件。
+
+    -OutFile file → write
+    """
+    for i, arg in enumerate(argv):
+        if arg.lower() in ("-outfile", "-out_file"):
+            if i + 1 < len(argv):
+                return [_effect_from_arg(argv[i + 1], "write")]
+    # 没有 -OutFile 时输出到管道，无文件效果
+    return []
+
+
+@_REGISTRY.register("invoke-restmethod", syntax="powershell")
+@_REGISTRY.register("irm", syntax="powershell")
+def _ps_restmethod(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """Invoke-RestMethod — REST API 调用（网络，无直接文件效果）。"""
+    return []
+
+
+@_REGISTRY.register("new-item", syntax="powershell")
+@_REGISTRY.register("ni", syntax="powershell")
+def _ps_new_item(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """New-Item -Path file -Type Directory/File → write。"""
+    return _ps_path_param_effects(argv, "write")
+
+
+@_REGISTRY.register("rename-item", syntax="powershell")
+@_REGISTRY.register("ren", syntax="powershell")
+@_REGISTRY.register("rni", syntax="powershell")
+def _ps_rename_item(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """Rename-Item old new → 两者都是 write。"""
+    paths = _ps_extract_paths(argv)
+    return [_effect_from_arg(p, "write") for p in paths[:2]]
+
+
+@_REGISTRY.register("start-process", syntax="powershell")
+@_REGISTRY.register("saps", syntax="powershell")
+def _ps_start_process(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """Start-Process — 启动进程。"""
+    for i, arg in enumerate(argv):
+        if arg.lower() in ("-filepath", "-file_path"):
+            if i + 1 < len(argv):
+                return [
+                    UnresolvedEffect(
+                        reason="wrapper_command",
+                        fragment=f"Start-Process {argv[i+1]}: runs executable",
+                    )
+                ]
+    return []
+
+
+@_REGISTRY.register("measure-command", syntax="powershell")
+def _ps_measure_command(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
+    """Measure-Command — 性能测量，无文件效果。"""
+    return []
 
 
 # ── POSIX AST 分析器 ──
@@ -1006,6 +1402,28 @@ def _is_path_like(arg: str) -> bool:
 
 def _is_flag(arg: str) -> bool:
     return arg.startswith("-")
+
+
+def _is_sed_script(arg: str) -> bool:
+    """判断参数是否为 sed 脚本（非文件路径）。
+
+    典型模式：s/foo/bar/g, /pattern/d, 或是简单数字地址
+    """
+    # 替换命令模式
+    if arg.startswith("s/") or arg.startswith("y/"):
+        return True
+    # 地址模式：/pattern/ 或数字
+    if arg.startswith("/") and arg.endswith("/"):
+        return True
+    # 纯数字或 $（行地址）
+    if arg in {"$"} or arg.isdigit():
+        return True
+    # 逗号分隔的范围地址：1,5 或 /pat1/,/pat2/
+    if "," in arg:
+        parts = arg.split(",")
+        if all(p.strip().isdigit() or (p.strip().startswith("/") and p.strip().endswith("/")) or p.strip() == "$" for p in parts):
+            return True
+    return False
 
 
 def _is_short_option_with_value(arg: str) -> bool:

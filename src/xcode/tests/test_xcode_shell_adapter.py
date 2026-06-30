@@ -65,7 +65,7 @@ class XcodeShellAdapterTests:
         assert spec.syntax == "posix"
 
     def test_detect_shell_explicit_missing_raises(self) -> None:
-        for name in ("fish", "powershell", "zsh"):
+        for name in ("ksh", "dash", "zsh"):
             if shutil.which(name) is None:
                 missing = name
                 break
@@ -74,6 +74,12 @@ class XcodeShellAdapterTests:
         with pytest.raises(RuntimeError) as exc_info:
             detect_shell(missing)
         assert "not found on PATH" in str(exc_info.value)
+
+    def test_detect_shell_explicit_denied_raises(self) -> None:
+        """明确指定拒绝的 shell（fish）引发 RuntimeError。"""
+        with pytest.raises(RuntimeError) as exc_info:
+            detect_shell("fish")
+        assert "unsupported" in str(exc_info.value).lower()
 
     def test_detect_shell_unknown_name_raises(self) -> None:
         with pytest.raises(ValueError) as exc_info:
