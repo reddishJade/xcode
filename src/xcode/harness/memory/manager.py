@@ -1162,6 +1162,123 @@ class MemoryManager:
             )
         return blocks
 
+    # ── 结构化摘要处理（Goal/Progress/Key Decisions/Next Steps）──
+
+    @staticmethod
+    def _parse_structured_summary(
+        summary: str,
+    ) -> dict[str, str]:
+        """将结构化压缩摘要解析为 sections。
+
+        返回格式：{"goal": "...", "progress": "...", "key decisions": "...", "next steps": "..."}
+        """
+        content = summary.removeprefix("[Compressed]").strip()
+        sections: dict[str, str] = {}
+        current_key = None
+        current_lines: list[str] = []
+        for raw_line in content.splitlines():
+            stripped = raw_line.strip()
+            if stripped.startswith("## "):
+                if current_key is not None:
+                    sections[current_key] = "\n".join(current_lines).strip()
+                current_key = stripped[3:].strip().lower()
+                current_lines = []
+            elif current_key is not None:
+                current_lines.append(stripped)
+        if current_key is not None:
+            sections[current_key] = "\n".join(current_lines).strip()
+        return sections
+
+    def consolidate_structured(self, summary: str) -> None:
+        """从结构化压缩摘要（Goal/Progress/Key Decisions/Next Steps）提取可复用记忆。
+
+        主要来源：
+        - Key Decisions → 架构决策记忆块
+        - Goal → 项目上下文（首次出现时）
+        """
+        sections = self._parse_structured_summary(summary)
+
+        # 提取 Key Decisions 中的每一行决策
+        decisions_text = sections.get("key decisions", "")
+        decisions = self._extract_bullet_items(decisions_text)
+        for decision_text in decisions:
+            block = self._decision_to_memory_block(decision_text)
+            if block is not None:
+                self._ingest_consolidation_candidate(
+                    block,
+                    source="consolidation",
+                    layer="project",
+                )
+
+        # Goal → project context（仅当文件为空时）
+        goal = sections.get("goal", "").strip()
+        if goal and len(goal) > 30 and self._should_seed_project_context(goal):
+            block = (
+                f"## Project context\n"
+                f"- Context/Query: {goal.split(chr(10))[0] if chr(10) in goal else goal}\n"
+                f"- Solution: (learn from ongoing work)\n"
+                f"- Files: (see project)\n"
+                f"- Takeaways: {goal[:200]}"
+            )
+            self._ingest_consolidation_candidate(
+                block,
+                source="consolidation",
+                layer="project",
+            )
+
+    @staticmethod
+    def _extract_bullet_items(text: str) -> list[str]:
+        """从 markdown 文本中提取列表项。"""
+        items: list[str] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("- "):
+                item = line[2:].strip()
+                if item:
+                    items.append(item)
+            elif line.startswith("* "):
+                item = line[2:].strip()
+                if item:
+                    items.append(item)
+            elif line.startswith("1. ") or line.startswith("2. ") or line.startswith("3. "):
+                item = line[3:].strip()
+                if item:
+                    items.append(item)
+        return items
+
+    def _decision_to_memory_block(self, decision_text: str) -> str | None:
+        """将一条决策文本转换为 MEMORY.md 兼容的记忆块。"""
+        decision_text = decision_text.strip()
+        if not decision_text or len(decision_text) < 10:
+            return None
+        # 去除 **加粗** 标记
+        clean = decision_text.replace("**", "").strip()
+        # 按冒号分割决策标题与内容
+        if ": " in clean:
+            title_part, _, body_part = clean.partition(": ")
+            title = f"Decision: {title_part.strip()}"
+        else:
+            title = f"Decision: {clean[:60].rstrip(':').strip()}"
+            body_part = clean
+        return (
+            f"## {title}\n"
+            f"- Context/Query: {body_part[:200]}\n"
+            f"- Solution: {body_part[:200]}\n"
+            f"- Files: (see project)\n"
+            f"- Takeaways: {body_part[:200]}\n"
+            f"- status: active\n"
+            f"- validity: derived\n"
+            f"- memory-type: semantic\n"
+        )
+
+    def _should_seed_project_context(self, goal: str) -> bool:
+        """判断是否应该将目标写入 project context。
+
+        仅在 MEMORY.md 尚无 Project context 块时写入。
+        """
+        records = self.read_memory_records(layer="project")
+        return not any(r.title.lower().startswith("project context") for r in records)
+
     def _is_memory_attempt(self, block: str) -> bool:
         has_field = any(
             f in block for f in ["Context/Query", "Solution", "Files", "Takeaways"]

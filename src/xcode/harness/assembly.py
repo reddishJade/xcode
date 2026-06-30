@@ -198,14 +198,28 @@ def build_shared_infra(
     )
     from xcode.harness.memory import MemoryManager
 
-    on_compact = MemoryManager(project_root).consolidate
+    memory_manager = MemoryManager(project_root)
+    on_compact = memory_manager.consolidate
+    on_compact_structured = memory_manager.consolidate_structured
+
+    def _combined_on_compact(summary: str) -> None:
+        """压缩时同时做向后兼容抽取和结构化抽取。"""
+        on_compact(summary)
+        on_compact_structured(summary)
+
+    checkpoint_dir = (
+        resolve_config_path(project_root, runtime_config.paths.sessions_dir)
+        if runtime_config.paths.sessions_dir
+        else project_root / ".xcode" / "checkpoints"
+    )
 
     compactor = LayeredCompactor(
         transcript_dir=transcript_dir,
+        checkpoint_dir=checkpoint_dir,
         max_recent_messages=runtime_config.agent.max_recent_messages,
         keep_recent_tokens=runtime_config.agent.keep_recent_tokens,
         reserve_tokens=runtime_config.agent.reserve_tokens,
-        on_compact=on_compact,
+        on_compact=_combined_on_compact,
     )
     return SharedInfra(
         contextual_state=contextual_state,
