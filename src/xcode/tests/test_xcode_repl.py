@@ -448,9 +448,7 @@ class XcodeReplTests:
     def test_run_repl_skill_activation_uses_current_build_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = ExplicitSkillApp()
-            prompt = FakePrompt(
-                ["/build", "$code-review inspect this patch", "/exit"]
-            )
+            prompt = FakePrompt(["/build", "$code-review inspect this patch", "/exit"])
 
             with redirect_stdout(StringIO()):
                 code = run_repl(app, Path(temp_dir), prompt)
@@ -1602,24 +1600,23 @@ class XcodeReplTests:
         assert [item.text for item in cached] == ["first.txt"]
         assert [item.text for item in refreshed] == ["first.txt", "second.txt"]
 
-    def test_repl_completer_supports_prompt_toolkit_async_api(self) -> None:
+    def test_repl_completer_returns_expected_completions(self) -> None:
         try:
+            from prompt_toolkit.completion import CompleteEvent
             from prompt_toolkit.document import Document
         except ImportError:
             pytest.skip("prompt_toolkit is not installed")
 
         completer = ReplCompleter(Path.cwd(), command_names=COMMAND_NAMES)
 
-        async def collect():
-            return [
-                completion.text
-                async for completion in completer.get_completions_async(
-                    Document("/pl"),
-                    cast(Any, None),
-                )
-            ]
+        completions = list(
+            completer.get_completions(
+                Document("/pl"),
+                CompleteEvent(),
+            )
+        )
 
-        assert asyncio.run(collect()) == ["/plan"]
+        assert [comp.text for comp in completions] == ["/plan"]
 
     def test_repl_completion_menu_style_uses_default_background(self) -> None:
         completion_styles = {
