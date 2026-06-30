@@ -133,6 +133,7 @@ def build_turn_context_messages(
     mode: ExecutionMode,
     snapshot: TurnSnapshot,
     resumed_notice: str | None,
+    memory_overview: str | None = None,
 ) -> list[AgentMessage]:
     typed: list[AgentMessage] = []
     notice = mode_notice(mode)
@@ -141,6 +142,8 @@ def build_turn_context_messages(
         parts = list(snapshot.runtime_context_provider(question))
     if resumed_notice is not None:
         parts.append(f"<session-notices>\n{resumed_notice}\n</session-notices>")
+    if memory_overview:
+        parts.append(memory_overview)
     if notice:
         parts.append(notice)
     if parts:

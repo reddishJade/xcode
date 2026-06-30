@@ -442,8 +442,18 @@ class StructuredAgent:
         self.cancellation_token.reset()
         self._correlation.reset(self.session_id)
 
+        # 恢复会话时构建记忆概览
+        memory_overview: str | None = None
+        if self._resumed_notice is not None and self._memory_manager is not None:
+            from .prompting.builder import render_memory_overview
+            memory_overview = render_memory_overview(self._memory_manager)
+
         context_messages = build_turn_context_messages(
-            question, effective_mode, snapshot, self._resumed_notice
+            question,
+            effective_mode,
+            snapshot,
+            self._resumed_notice,
+            memory_overview=memory_overview,
         )
         self._resumed_notice = None
         history_messages = context_messages + self.history_messages()

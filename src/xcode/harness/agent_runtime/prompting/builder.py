@@ -342,6 +342,24 @@ def _render_memory_context(
     return "\n".join(lines)
 
 
+def render_memory_overview(manager: MemoryManager) -> str:
+    """渲染全量记忆概览，用于恢复会话时注入。"""
+    records = manager.read_memory_records(layer="all")
+    if not records:
+        return ""
+    lines = [
+        "<memory-overview>",
+        "Cross-session project memory. These are prior learnings and decisions",
+        "from previous sessions. Treat them as background context.",
+    ]
+    for record in records:
+        packet = manager.render_prompt_packet(record)
+        if packet:
+            lines.append(packet)
+    lines.append("</memory-overview>")
+    return "\n".join(lines)
+
+
 def _environment_info(project_root: Path, shell_spec: ShellSpec | None = None) -> str:
     lines = [
         "<environment>",
