@@ -318,7 +318,7 @@ class PermissionEngine:
         verdict: Verdict,
     ) -> ApprovalCandidate | None:
         """当 shadow verdict 为 ask 时，预测 engine-level grant/callback 结果。"""
-        if action.tool not in StructuredBoundaryPolicyEvaluator.STRUCTURED_TOOLS:
+        if not action.targets:
             return None
         if verdict.decision != "ask":
             return None

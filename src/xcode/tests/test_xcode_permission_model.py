@@ -1288,9 +1288,10 @@ class ShadowApprovalCandidateTests:
 
         assert result.shadow_approval_candidate is None
 
-    # ── edge: non-structured tool → no candidate ──
+    # ── edge: bash with command target → now gets shadow approval candidate ──
+    # (STRUCTURED_TOOLS gate removed; any action with targets participates)
 
-    def test_non_structured_tool_no_candidate(self) -> None:
+    def test_bash_with_targets_gets_shadow_candidate(self) -> None:
         engine = self._engine(
             static_policy=PermissionPolicy(
                 (StaticPermission(tool="bash", decision="ask"),)
@@ -1298,7 +1299,10 @@ class ShadowApprovalCandidateTests:
         )
         result = engine.decide("bash", {"command": "echo hello"})
 
-        assert result.shadow_approval_candidate is None
+        # bash maintenant obtient un shadow_approval_candidate
+        # car il a des targets (kind="command")
+        assert result.shadow_approval_candidate is not None
+        assert result.shadow_approval_candidate.would_resolve == "would_call_approval"
 
     # ── fingerprint shape: matches expected fields ──
 

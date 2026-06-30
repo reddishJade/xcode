@@ -27,12 +27,22 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
-PermissionAccess = Literal["read", "write", "execute", "network"]
+PermissionAccess = Literal["read", "write", "execute", "network", "delete"]
 DirAccess = Literal["read", "write", "read_write"]
 GrantDecision = Literal["allow", "deny"]
 GrantScope = Literal["once", "session", "permanent"]
 PermissionDecisionV2 = Literal["allow", "ask", "deny"]
 TargetKind = Literal["path", "command", "domain", "mcp", "subagent", "skill"]
+ProvenanceKind = Literal["structured_arg", "shell_literal"]
+UnresolvedReason = Literal[
+    "variable_expansion",
+    "glob",
+    "command_substitution",
+    "wrapper_command",
+    "eval_like",
+    "parse_error",
+    "unsupported_shell",
+]
 type GrantRecordData = dict[str, object]
 
 logger = logging.getLogger(__name__)
@@ -61,16 +71,26 @@ class StaticPermission(BaseModel):
 
 
 class Target(BaseModel):
-    """动作作用的具体对象。"""
+    """动作作用的具体对象。
+
+    provenance 标记路径来源：
+    - structured_arg: 来自工具 schema 直接提供的 path 参数（如 read_file(path=...)）
+    - shell_literal:  来自 shell 命令文本的推理结果（如 bash 中的 cat path）
+    """
 
     model_config = ConfigDict(extra="forbid")
     kind: TargetKind
     value: str
     access: PermissionAccess
+    provenance: ProvenanceKind = "structured_arg"
 
 
 class Action(BaseModel):
-    """一次工具调用归一化后的权限判断输入。"""
+    """一次工具调用归一化后的权限判断输入。
+
+    unresolved_effects 仅在 capability="shell" 时有意义，
+    由 ShellAnalyzer 从 shell 命令文本中提取的不可静态确认效果。
+    """
 
     model_config = ConfigDict(extra="forbid")
     tool: str
@@ -78,6 +98,19 @@ class Action(BaseModel):
     operation: str
     targets: tuple[Target, ...]
     input: Mapping[str, object]
+    unresolved_effects: tuple[UnresolvedEffect, ...] = ()
+
+
+class UnresolvedEffect(BaseModel):
+    """Shell 命令中无法静态确认的文件效果。
+
+    这些效果不应直接放行；如果 SafetyBackstop 没有拒绝，
+    至少应升为 ask 等待用户确认。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    reason: UnresolvedReason
+    fragment: str
 
 
 class Constraint(BaseModel):
@@ -696,21 +729,16 @@ class StaticPolicyEvaluator:
         )
 
 
-class StructuredBoundaryPolicyEvaluator:
-    """结构化文件工具的路径边界策略。"""
+class PathBoundaryPolicyEvaluator:
+    """路径边界策略：对所有 Target(kind="path") 生效，不再限定工具名。
 
-    STRUCTURED_TOOLS = frozenset(
-        {
-            "read_file",
-            "write_file",
-            "edit_file",
-            "apply_patch",
-            "grep_search",
-            "glob_files",
-            "find_files",
-            "list_dir",
-        }
-    )
+    无论路径来自结构化参数（read_file path=...）还是 shell 命令推理（bash cat path），
+    只要 target.kind == "path" 就执行边界检查。
+
+    provenance="shell_literal" 的路径在展开 ~、变量时若失败，
+    会通过 _check_restrictions 返回 deny（无法安全确认的路径不放行）。
+    """
+
     CREDENTIAL_PATH_PARTS = frozenset(
         {
             ".aws",
@@ -734,9 +762,6 @@ class StructuredBoundaryPolicyEvaluator:
         self._context = context
 
     def evaluate(self, action: Action) -> tuple[Constraint, ...]:
-        if action.tool not in self.STRUCTURED_TOOLS:
-            return ()
-
         constraints: list[Constraint] = []
         for target in action.targets:
             if target.kind != "path":
@@ -889,6 +914,10 @@ class StructuredBoundaryPolicyEvaluator:
         return candidate.relative_to(resolved_root).as_posix() or "."
 
 
+# 向后兼容别名
+StructuredBoundaryPolicyEvaluator = PathBoundaryPolicyEvaluator
+
+
 class _BoundaryEscapeError(ValueError):
     """路径解析后离开工作区边界。"""
 
@@ -929,12 +958,17 @@ def evaluate_policy_constraints(
             global_default=global_default,
             action_input=action_input,
         ),
-        StructuredBoundaryPolicyEvaluator(boundary_context),
+        PathBoundaryPolicyEvaluator(boundary_context),
     ]
     if safety_backstop_enabled:
         from ._safety_backstop import SafetyBackstopPolicyEvaluator
 
         evaluators.append(SafetyBackstopPolicyEvaluator())
+        # ShellAnalysisPolicyEvaluator 紧跟 SafetyBackstop：
+        # SafetyBackstop 做命令级 deny/ask，ShellAnalysis 做路径级 unresolved→ask
+        from .shell_analyzer import ShellAnalysisPolicyEvaluator
+
+        evaluators.append(ShellAnalysisPolicyEvaluator())
     evaluators.extend(hook_constraint_providers)
     constraints: list[Constraint] = []
     for evaluator in evaluators:
@@ -1069,22 +1103,35 @@ class ActionExtractor:
     def _bash_action(self, tool_name: str, tool_input: Mapping[str, object]) -> Action:
         command = tool_input.get("command")
         targets: tuple[Target, ...] = ()
+        unresolved_effects: tuple[UnresolvedEffect, ...] = ()
         if isinstance(command, str) and command.strip():
             normalized_command = command.strip()
-            targets = (
-                Target(kind="command", value=normalized_command, access="execute"),
-                *self._shell_path_targets(normalized_command),
-            )
+            # 优先使用 tree-sitter AST 分析路径
+            analysis = self._analyze_command(normalized_command, "posix")
+            if analysis.ast_available:
+                targets = (
+                    Target(kind="command", value=normalized_command, access="execute"),
+                    *analysis.resolved_paths,
+                )
+                unresolved_effects = analysis.unresolved_effects
+            else:
+                # AST 不可用时（tree-sitter 未安装）fallback 到 shlex
+                targets = (
+                    Target(kind="command", value=normalized_command, access="execute"),
+                    *self._shell_path_targets(normalized_command),
+                )
         return Action(
             tool=tool_name,
             capability="shell",
             operation="run_command",
             targets=targets,
             input=tool_input,
+            unresolved_effects=unresolved_effects,
         )
 
     def _shell_action(self, tool_name: str, tool_input: Mapping[str, object]) -> Action:
         targets: list[Target] = []
+        all_unresolved: list[UnresolvedEffect] = []
         for command in self._shell_commands(tool_input):
             normalized_command = command.strip()
             if not normalized_command:
@@ -1092,14 +1139,48 @@ class ActionExtractor:
             targets.append(
                 Target(kind="command", value=normalized_command, access="execute")
             )
-            targets.extend(self._shell_path_targets(normalized_command))
+            analysis = self._analyze_command(normalized_command, "posix")
+            targets.extend(analysis.resolved_paths)
+            all_unresolved.extend(analysis.unresolved_effects)
+            if not analysis.ast_available:
+                targets.extend(self._shell_path_targets(normalized_command))
         return Action(
             tool=tool_name,
             capability="shell",
             operation="run_command",
             targets=tuple(targets),
             input=tool_input,
+            unresolved_effects=tuple(all_unresolved),
         )
+
+    def _analyze_command(
+        self,
+        command: str,
+        shell_type: str = "posix",
+    ) -> object:
+        """运行 ShellAnalyzer 对命令做 AST 语义分析。
+
+        返回 ShellAnalysis（shell_analyzer 模块导出）。
+        如果 shell_analyzer 不可用，返回一个空的 ShellAnalysis。
+        """
+        try:
+            from .shell_analyzer import ShellAnalysis, analyze_shell_command
+
+            return analyze_shell_command(command, shell_type)
+        except ImportError:
+            # 如果 shell_analyzer 模块不存在，返回空结果
+            return type(
+                "_EmptyAnalysis",
+                (),
+                {
+                    "resolved_paths": (),
+                    "unresolved_effects": (),
+                    "primary_command": None,
+                    "shell_type": shell_type,
+                    "parse_error": True,
+                    "ast_available": False,
+                },
+            )()
 
     def _shell_path_targets(self, command: str) -> tuple[Target, ...]:
         """从已知文件系统命令中保守提取路径参数。"""
@@ -1116,7 +1197,12 @@ class ActionExtractor:
             "read" if command_name in _READ_FILESYSTEM_COMMANDS else "write"
         )
         return tuple(
-            Target(kind="path", value=_normalize_path_text(path), access=access)
+            Target(
+                kind="path",
+                value=_normalize_path_text(path),
+                access=access,
+                provenance="shell_literal",
+            )
             for path in path_arguments
         )
 
