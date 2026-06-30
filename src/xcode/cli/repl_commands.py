@@ -471,6 +471,9 @@ def cmd_plan(cmd: str, ctx: CommandContext) -> bool:
     print(
         "Plan Mode enabled. Read-only inspection tools are available; edits and shell are blocked."
     )
+    parts = cmd.split(maxsplit=1)
+    if len(parts) == 2 and parts[1].strip():
+        ctx.state.pending_inject = parts[1].strip()
     return False
 
 
@@ -490,12 +493,7 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
     if len(parts) == 2 and parts[1].strip() == "--clear":
         is_clear = True
 
-    choice = "1" if is_clear else None
-    if choice is None:
-        choice = _select_act_transition()
-        if choice is None:
-            print("Cancelled.")
-            return False
+    choice = "1" if is_clear else "2"
 
     if choice == "1":
         records = ctx.store.load_records()
@@ -546,26 +544,6 @@ def cmd_act(cmd: str, ctx: CommandContext) -> bool:
     else:
         print(f"Invalid choice: {choice}")
     return False
-
-
-def _select_act_transition() -> str | None:
-    """显示 Act 模式切换菜单。"""
-    return questionary.select(
-        "Select action:",
-        choices=[
-            questionary.Choice(
-                title="Clear and Act (Clear context, keep plan, and act)",
-                value="1",
-            ),
-            questionary.Choice(
-                title="Keep and Act (Keep current context and act directly)",
-                value="2",
-            ),
-            questionary.Choice(title="Build Mode", value="3"),
-            questionary.Choice(title="Continue in Plan Mode", value="4"),
-        ],
-        default="2",
-    ).ask()
 
 
 def cmd_verbose(cmd: str, ctx: CommandContext) -> bool:
@@ -648,8 +626,17 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     compacted = ctx.store.compact_current_session(max_tool_result_chars=200)
     if compacted > 0:
         print(f"Compacted {compacted} large tool results in the session log.")
+        if should_request_active:
+            print(
+                "Token estimates in /context may not shrink until the next agent run "
+                "rebuilds active context."
+            )
     elif should_request_active:
         print("No large tool results to compact in the session log.")
+        print(
+            "Token estimates in /context may not shrink until the next agent run "
+            "rebuilds active context."
+        )
     else:
         print(
             "No context compaction needed: active context is within the recent-message "
@@ -792,12 +779,16 @@ def cmd_tool(cmd: str, ctx: CommandContext) -> bool:
 
 def cmd_skill(cmd: str, ctx: CommandContext) -> bool:
     """显式激活一个已发现的技能。"""
-    parts = cmd.split(maxsplit=1)
-    if len(parts) != 2 or not parts[1].strip():
-        print("Usage: /skill NAME")
+    parts = cmd.split(maxsplit=2)
+    if len(parts) < 2 or not parts[1].strip():
+        print("Usage: /skill NAME [prompt]")
         return False
-    result = activate_skill(ctx.app, ctx.store, parts[1].strip())
+    result = activate_skill(ctx.app, ctx.store, parts[1].strip(), mode=ctx.state.mode)
     print(result.message)
+    if result.status in {"activated", "already_active"} and len(parts) == 3:
+        prompt = parts[2].strip()
+        if prompt:
+            ctx.state.pending_inject = prompt
     return False
 
 
@@ -820,6 +811,10 @@ def cmd_memory(cmd: str, ctx: CommandContext) -> bool:
     print(
         "       /memory add [project|user] "
         "<title> | <context> | <solution> | <files> | <takeaways>"
+    )
+    print(
+        "Example: /memory add project Title | Context here | Solution here | "
+        "src/file.py | Key takeaway"
     )
     return False
 
@@ -870,10 +865,17 @@ def _add_memory(manager: MemoryManager, payload: str) -> bool:
         value = remainder.strip()
 
     fields = [field.strip() for field in value.split("|")]
+    if len(fields) == 1 and fields[0]:
+        title, context = _split_memory_shorthand(fields[0])
+        fields = [title, context, context, ".", context]
     if len(fields) != 5 or any(not field for field in fields):
         print(
             "Usage: /memory add [project|user] "
             "<title> | <context> | <solution> | <files> | <takeaways>"
+        )
+        print(
+            "Short form: /memory add [project|user] "
+            "<title>: <note>"
         )
         return False
 
@@ -896,6 +898,18 @@ def _add_memory(manager: MemoryManager, payload: str) -> bool:
     print(f"Added {layer} memory: {title}")
     print(f"Path: {memory_file}")
     return False
+
+
+def _split_memory_shorthand(text: str) -> tuple[str, str]:
+    """将自然语言记忆简写拆成标题和正文。"""
+    for separator in ("：", ":"):
+        title, found, body = text.partition(separator)
+        if found and title.strip() and body.strip():
+            return title.strip(), body.strip()
+    words = text.split(maxsplit=1)
+    if len(words) == 2:
+        return words[0].strip(), words[1].strip()
+    return text.strip(), text.strip()
 
 
 def cmd_exit(cmd: str, ctx: CommandContext) -> bool:
@@ -1411,6 +1425,8 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/plan": CommandEntry(
         handler=cmd_plan,
         desc="Enter Plan Mode: read-only inspection tools, no edits or shell.",
+        args_desc="[prompt]",
+        accepts_args=True,
         group=COMMAND_GROUP_MODE,
     ),
     "/build": CommandEntry(

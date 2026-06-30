@@ -209,10 +209,23 @@ class ReplCompleter(Completer):
         if marker is None:
             return []
         partial, start_position = marker
-        return [
+        indexed_items = [
             CompletionItem(path, start_position, "file")
             for path in self._matching_project_files(partial)
         ]
+        if indexed_items:
+            return indexed_items
+        directory_items = _matching_files(
+            self.project_root,
+            partial,
+            self._directory_cache,
+        )
+        if directory_items:
+            return [
+                CompletionItem(path, start_position, "file")
+                for path in directory_items[:MAX_FILE_COMPLETIONS]
+            ]
+        return []
 
     def _matching_project_files(self, partial: str) -> list[str]:
         """使用短生命周期项目索引补全 @file。"""
@@ -522,9 +535,10 @@ def _matching_files(
         if directory_cache is not None:
             directory_cache[directory] = tuple(candidates)
 
+    normalized_prefix = partial.replace("\\", "/")
     for candidate in candidates:
         name = Path(candidate.rstrip("/")).name
-        if name.startswith(name_prefix):
+        if name.startswith(name_prefix) or candidate.startswith(normalized_prefix):
             matches.append(candidate)
         if len(matches) >= MAX_FILE_COMPLETIONS:
             break

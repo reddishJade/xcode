@@ -86,7 +86,7 @@ def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:
     catalog = build_tool_catalog()
     enabled_names = {t.name for t in registry}
 
-    lines = ["<visible tools>"]
+    lines = ["Visible tools"]
     core_names = sorted(t.name for t in registry if t.group == "core")
     if core_names:
         lines.append("  core:")
@@ -104,26 +104,25 @@ def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:
                 server_name = tool.description.split("[mcp: ")[-1].split("]")[0]
                 suffix = f" [mcp: {server_name}]"
             lines.append(f"    {tool.name}{suffix}")
-    lines.append("</visible tools>")
 
     all_known = set()
     for group_names in catalog.values():
         all_known.update(group_names)
     hidden = sorted(all_known - enabled_names)
     if hidden:
-        lines.append("<hidden tools>")
+        lines.append("")
+        lines.append("Hidden tools")
         for group in sorted(catalog):
             group_hidden = sorted(catalog[group] & set(hidden))
             if group_hidden:
                 lines.append(f"  {group}:")
                 lines.extend(f"    {name}" for name in group_hidden)
-        lines.append("</hidden tools>")
 
     available_groups = sorted(catalog.keys() - {tool.group for tool in registry})
     if available_groups:
-        lines.append("<available groups>")
+        lines.append("")
+        lines.append("Available groups")
         lines.extend(f"  {group}" for group in available_groups)
-        lines.append("</available groups>")
     return "\n".join(lines)
 
 

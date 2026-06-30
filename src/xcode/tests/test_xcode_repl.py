@@ -35,6 +35,7 @@ from xcode.harness.agent_runtime import (
     CancellationToken,
     StructuredAgentResult,
 )
+from xcode.harness.agent_runtime.execution_modes import registry_for_mode
 from xcode.harness.observability import (
     ExternalHookDiagnostic,
     HITLResult,
@@ -411,16 +412,69 @@ class XcodeReplTests:
                 ["/plan", "first", "/build", "second", "/act", "third", "/exit"]
             )
 
-            with (
-                patch(
-                    "xcode.cli.repl_commands._select_act_transition", return_value="2"
-                ),
-                redirect_stdout(StringIO()),
-            ):
+            with redirect_stdout(StringIO()):
                 code = run_repl(app, Path(temp_dir), prompt)
 
             assert code == 0
             assert app.modes == ["plan", "build", "act"]
+
+    def test_run_repl_plan_command_accepts_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = CapturingApp()
+            prompt = FakePrompt(["/plan inspect only", "/exit"])
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            assert code == 0
+            assert app.seen == ["inspect only"]
+            assert app.modes == ["plan"]
+
+    def test_run_repl_skill_command_accepts_followup_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = ExplicitSkillApp()
+            prompt = FakePrompt(["/skill code-review inspect this patch", "/exit"])
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            assert code == 0
+            assert app.questions == ["inspect this patch"]
+            assert app.agent.activated == ["code-review"]
+            assert app.agent.activation_modes == ["act"]
+
+    def test_run_repl_skill_activation_uses_current_build_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = ExplicitSkillApp()
+            prompt = FakePrompt(
+                ["/build", "$code-review inspect this patch", "/exit"]
+            )
+
+            with redirect_stdout(StringIO()):
+                code = run_repl(app, Path(temp_dir), prompt)
+
+            assert code == 0
+            assert app.questions == ["inspect this patch"]
+            assert app.agent.activated == ["code-review"]
+            assert app.agent.activation_modes == ["build"]
+
+    def test_plan_mode_registry_keeps_safe_discovery_and_skills(self) -> None:
+        registry = (
+            ToolSpec("read_file", "Read.", "text", lambda _value: ""),
+            ToolSpec("list_dir", "List.", "text", lambda _value: ""),
+            ToolSpec("search_tools", "Search tools.", "text", lambda _value: ""),
+            ToolSpec("load_skill", "Load skill.", "text", lambda _value: ""),
+            ToolSpec("write_file", "Write.", "text", lambda _value: ""),
+            ToolSpec("bash", "Shell.", "text", lambda _value: ""),
+        )
+
+        names = {tool.name for tool in registry_for_mode(registry, "plan")}
+        build_names = {tool.name for tool in registry_for_mode(registry, "build")}
+
+        assert {"read_file", "list_dir", "search_tools", "load_skill"} <= names
+        assert "write_file" not in names
+        assert "bash" not in names
+        assert "load_skill" in build_names
 
     def test_run_repl_tool_command_runs_registered_tool(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -435,6 +489,12 @@ class XcodeReplTests:
 
             assert code == 0
             assert renderer.rendered == ["hello"]
+
+    def test_tool_list_output_is_visible_markdown_text(self) -> None:
+        output = run_tool_command("/tool list", ToolApp())
+
+        assert "Visible tools" in output
+        assert "<visible tools>" not in output
 
     def test_run_repl_shell_shortcut_runs_bash_tool(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -839,9 +899,9 @@ class XcodeReplTests:
                     )
 
             assert code == 0
-            assert "<visible tools>" in renderer.rendered[0]
+            assert "Visible tools" in renderer.rendered[0]
             assert "read_file" in renderer.rendered[0]
-            assert "<hidden tools" in renderer.rendered[0]
+            assert "Hidden tools" in renderer.rendered[0]
             assert "submit_subagent" in renderer.rendered[0]
 
     def test_run_repl_queue_mode_enqueues_followup(self) -> None:
@@ -1919,7 +1979,9 @@ class _StubAgent:
     def available_skill_names(self) -> tuple[str, ...]:
         return ()
 
-    def activate_skill(self, skill_name: str) -> ExplicitSkillActivationResult:
+    def activate_skill(
+        self, skill_name: str, mode: object = None
+    ) -> ExplicitSkillActivationResult:
         return ExplicitSkillActivationResult(
             name=skill_name,
             status="disabled",
@@ -1966,12 +2028,16 @@ class ExplicitSkillAgent(_StubAgent):
 
     def __init__(self) -> None:
         self.activated: list[str] = []
+        self.activation_modes: list[object] = []
 
     def available_skill_names(self) -> tuple[str, ...]:
         return ("code-review",)
 
-    def activate_skill(self, skill_name: str) -> ExplicitSkillActivationResult:
+    def activate_skill(
+        self, skill_name: str, mode: object = None
+    ) -> ExplicitSkillActivationResult:
         self.activated.append(skill_name)
+        self.activation_modes.append(mode)
         return ExplicitSkillActivationResult(
             name=skill_name,
             status="activated",
