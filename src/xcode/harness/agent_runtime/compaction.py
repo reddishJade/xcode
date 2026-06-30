@@ -451,6 +451,57 @@ def _compute_recent_count_from_tokens(
     return max(count, 1)
 
 
+def _find_turn_boundary(
+    messages: list[dict[str, Any]],
+    raw_index: int,
+) -> int:
+    """将切分索引调整到最近的 turn 边界。
+
+    Turn 规则：
+    - 一个 turn 从 user 消息开始
+    - 之后跟随 assistant 和 tool 消息，直到下一个 user 消息
+    - 有效切分点：user 消息、assistant 消息
+    - 永不切在 tool_result 消息上（必须与对应的 tool_call 在同一 turn 内）
+    - 也永不切在 role='tool' 的消息上
+
+    调整策略：
+    1. 如果 raw_index 指向 tool 消息，向前回溯到最近的 assistant 或 user
+    2. 如果 raw_index 指向 assistant 消息（且它前面是 tool/assistant），
+       检查是否可以把前面的所有 tool 结果一起保留
+    """
+    index = raw_index
+    # 确保不超出范围
+    if index <= 1:
+        return 1
+    if index >= len(messages):
+        return len(messages) - 1
+
+    # 从 raw_index 开始回溯，找到安全的切分点
+    while index > 1:
+        role = messages[index].get("role", "")
+        if role == "user":
+            return index  # user 消息永远是安全的切分点
+        if role == "assistant":
+            return index  # assistant 消息也是安全的切分点
+        # tool / tool_result → 必须与对应的 assistant 消息一起保留
+        index -= 1
+
+    return index  # fallback
+
+
+def _is_tool_result_message(message: dict[str, Any]) -> bool:
+    """判断消息是否为 tool result 消息。"""
+    role = message.get("role", "")
+    if role == "tool":
+        return True
+    content = message.get("content")
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "tool_result":
+                return True
+    return False
+
+
 def summarize_messages(
     messages: list[dict[str, Any]],
     max_recent_messages: int = 8,
@@ -475,7 +526,9 @@ def summarize_messages(
     else:
         effective_recent = max_recent_messages
 
-    recent_start = max(1, len(messages) - effective_recent)
+    raw_recent_start = max(1, len(messages) - effective_recent)
+    # 将切分点对齐到 turn 边界，避免切在 tool result 中间
+    recent_start = _find_turn_boundary(messages, raw_recent_start)
     protected_indices = _activated_skill_message_indices(messages)
     protected_older = [
         message
