@@ -1802,9 +1802,11 @@ class XcodeReplForkTests:
                                 "content": (
                                     "[Compressed] "
                                     "## Goal\n- test\n"
+                                    "## Constraints & Preferences\n- none\n"
                                     "## Progress\n- done\n"
                                     "## Key Decisions\n- foo\n"
-                                    "## Next Steps\n- bar"
+                                    "## Next Steps\n- bar\n"
+                                    "## Critical Context\n- none"
                                 ),
                             }
                         )
@@ -1905,7 +1907,9 @@ class XcodeReplForkTests:
             assert "tokens" in output_text
             assert "saved" in output_text
             assert "Goal" in output_text
+            assert "Constraints & Preferences" in output_text
             assert "Key Decisions" in output_text
+            assert "Critical Context" in output_text
             # 会话日志 tool result 仍被裁剪
             records = store.load_records()
             tool_results = [

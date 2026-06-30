@@ -1253,7 +1253,9 @@ class MemoryManager:
     ) -> dict[str, str]:
         """将结构化压缩摘要解析为 sections。
 
-        返回格式：{"goal": "...", "progress": "...", "key decisions": "...", "next steps": "..."}
+        返回格式：
+        {"goal": "...", "constraints & preferences": "...", "progress": "...",
+         "key decisions": "...", "next steps": "...", "critical context": "..."}
         """
         content = summary.removeprefix("[Compressed]").strip()
         sections: dict[str, str] = {}

@@ -565,6 +565,8 @@ SUMMARIZE_SYSTEM_PROMPT = (
     "Use the following format:\n\n"
     "## Goal\n"
     "[What the user is trying to accomplish]\n\n"
+    "## Constraints & Preferences\n"
+    "[Requirements, constraints, and preferences mentioned by the user]\n\n"
     "## Progress\n"
     "### Done\n"
     "- [x] [Completed tasks]\n\n"
@@ -573,7 +575,9 @@ SUMMARIZE_SYSTEM_PROMPT = (
     "## Key Decisions\n"
     "- **[Decision]**: [Rationale]\n\n"
     "## Next Steps\n"
-    "1. [What should happen next]\n"
+    "1. [What should happen next]\n\n"
+    "## Critical Context\n"
+    "[Data, variables, working branch, key file paths needed to continue seamlessly]\n"
     "Output only the summary, no preamble."
 )
 
@@ -581,6 +585,9 @@ SUMMARIZE_SYSTEM_PROMPT = (
 # 结构化摘要文本标签（用于纯文本 fallback）
 _STRUCTURED_FALLBACK_TEMPLATE = """## Goal
 {goal}
+
+## Constraints & Preferences
+{constraints}
 
 ## Progress
 ### Done
@@ -593,7 +600,10 @@ _STRUCTURED_FALLBACK_TEMPLATE = """## Goal
 {decisions}
 
 ## Next Steps
-{next_steps}"""
+{next_steps}
+
+## Critical Context
+{critical_context}"""
 
 
 def build_summarize_prompt(older: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -995,9 +1005,11 @@ def _fallback_structured_summary(older: list[dict[str, Any]]) -> str:
     """
     # 提取各角色消息预览
     goals: list[str] = []
+    constraints: list[str] = []
     done_items: list[str] = []
     decisions: list[str] = []
     next_steps: list[str] = []
+    critical: list[str] = []
 
     for message in older:
         preview = _content_preview(message.get("content"))
@@ -1007,15 +1019,24 @@ def _fallback_structured_summary(older: list[dict[str, Any]]) -> str:
             goals.append(entry)
         elif role == "assistant":
             done_items.append(entry)
+        elif role == "tool" or role == "tool_result":
+            # 工具调用中被读取或修改的文件
+            content = message.get("content", "")
+            if isinstance(content, str):
+                for line in content.splitlines():
+                    if "read(" in line or "write(" in line or "edit(" in line:
+                        critical.append(f"- file operation: {line.strip()[:120]}")
         else:
             next_steps.append(entry)
 
     return _STRUCTURED_FALLBACK_TEMPLATE.format(
         goal="\n".join(goals) if goals else "Continue previous work",
+        constraints="\n".join(constraints) if constraints else "(see context)",
         done="\n".join(done_items) if done_items else "Work in progress",
         in_progress="(see recent messages)",
         decisions="\n".join(decisions) if decisions else "(see context)",
         next_steps="\n".join(next_steps) if next_steps else "Continue from summary",
+        critical_context="\n".join(critical) if critical else "(see context)",
     )
 
 
