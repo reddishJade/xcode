@@ -339,6 +339,7 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
             'JSON: {"prompt":"...", "model_profile":"subagent", "isolation":"context|worktree"}',
             submit_subagent,
             group="subagent",
+            counts_as_progress=True,
             schema=_submit_subagent_schema(),
         ),
         ToolSpec(
@@ -347,6 +348,7 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
             'JSON: {"job_id":"..."}',
             check_subagent,
             group="subagent",
+            read_only=True,
             schema=_job_id_schema(),
         ),
         ToolSpec(
@@ -355,6 +357,7 @@ def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpe
             'JSON: {"job_id":"..."}',
             cancel_subagent,
             group="subagent",
+            read_only=True,
             schema=_job_id_schema(),
         ),
     )
