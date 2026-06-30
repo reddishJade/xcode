@@ -364,6 +364,9 @@ def build_loop_config(
         max_consecutive_continuations=3,
         min_continuation_tokens=500,
         watchdog_repeated_tool_limit=snapshot.config.watchdog_repeated_tool_limit,
+        watchdog_repeated_tool_skip=frozenset(
+            spec.name for spec in registry if spec.read_only
+        ),
         max_consecutive_idle_steps=4,
         should_compact=should_compact_fn,
         compact=compact_fn,

@@ -177,6 +177,9 @@ class AgentLoopConfig(BaseModel):
 
     # 看门狗限制（经验阈值，可根据实际任务调整）
     watchdog_repeated_tool_limit: int = 3  # 连续重复同一工具签名 3 次则终止
+    watchdog_repeated_tool_skip: frozenset[str] = (
+        frozenset()
+    )  # 豁免重复检测的工具名集合
     max_consecutive_idle_steps: int = 4  # 连续 4 次工具调用无产出则终止
 
     should_compact: ShouldCompactHook | None = None
