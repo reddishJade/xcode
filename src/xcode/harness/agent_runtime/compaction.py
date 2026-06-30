@@ -383,11 +383,42 @@ type SummarizeFn = Callable[[list[dict[str, Any]]], str | Awaitable[str]]
 """可选的 LLM 摘要函数。接收旧消息列表，返回摘要文本。"""
 
 
+# 结构化摘要格式（镜像 pi 的摘要设计，便于 LLM 理解和消费）
 SUMMARIZE_SYSTEM_PROMPT = (
-    "Summarize the following conversation turns into a concise summary. "
+    "Summarize the following conversation turns into a structured markdown summary. "
     "Preserve architecture decisions, file changes, and TODO items. "
+    "Use the following format:\n\n"
+    "## Goal\n"
+    "[What the user is trying to accomplish]\n\n"
+    "## Progress\n"
+    "### Done\n"
+    "- [x] [Completed tasks]\n\n"
+    "### In Progress\n"
+    "- [ ] [Current work]\n\n"
+    "## Key Decisions\n"
+    "- **[Decision]**: [Rationale]\n\n"
+    "## Next Steps\n"
+    "1. [What should happen next]\n"
     "Output only the summary, no preamble."
 )
+
+
+# 结构化摘要文本标签（用于纯文本 fallback）
+_STRUCTURED_FALLBACK_TEMPLATE = """## Goal
+{goal}
+
+## Progress
+### Done
+{done}
+
+### In Progress
+{in_progress}
+
+## Key Decisions
+{decisions}
+
+## Next Steps
+{next_steps}"""
 
 
 def build_summarize_prompt(older: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -468,11 +499,7 @@ def summarize_messages(
         if not summary_content.startswith("[Compressed]"):
             summary_content = "[Compressed]\n" + summary_content
     else:
-        summary_lines = []
-        for message in older:
-            content = _content_preview(message.get("content"))
-            summary_lines.append(f"- {message.get('role')}: {content}")
-        summary_content = "[Compressed]\n" + "\n".join(summary_lines)
+        summary_content = "[Compressed]\n" + _fallback_structured_summary(older)
 
     if compact_instructions and compact_instructions.frozen_identifiers:
         summary_content = _protect_identifiers(
@@ -741,6 +768,37 @@ def _render_file_tracking(read_files: set[str], modified_files: set[str]) -> str
         paths = "\n".join(sorted(modified_files))
         parts.append(f"<modified-files>\n{paths}\n</modified-files>")
     return "\n".join(parts)
+
+
+def _fallback_structured_summary(older: list[dict[str, Any]]) -> str:
+    """生成结构化摘要的纯文本 fallback 版本。
+
+    当没有 LLM summarize_fn 时使用，输出的格式与 LLM 摘要一致。
+    """
+    # 提取各角色消息预览
+    goals: list[str] = []
+    done_items: list[str] = []
+    decisions: list[str] = []
+    next_steps: list[str] = []
+
+    for message in older:
+        preview = _content_preview(message.get("content"))
+        role = message.get("role", "")
+        entry = f"- {role}: {preview}"
+        if role == "user":
+            goals.append(entry)
+        elif role == "assistant":
+            done_items.append(entry)
+        else:
+            next_steps.append(entry)
+
+    return _STRUCTURED_FALLBACK_TEMPLATE.format(
+        goal="\n".join(goals) if goals else "Continue previous work",
+        done="\n".join(done_items) if done_items else "Work in progress",
+        in_progress="(see recent messages)",
+        decisions="\n".join(decisions) if decisions else "(see context)",
+        next_steps="\n".join(next_steps) if next_steps else "Continue from summary",
+    )
 
 
 def _content_preview(content: str | list[dict[str, Any]] | None) -> str:
