@@ -5,7 +5,9 @@ from datetime import datetime
 from pathlib import Path
 import subprocess
 import sys
+from collections.abc import Callable
 from typing import Any, cast
+from xcode.agent.messages import AgentMessage
 
 import questionary
 
@@ -605,7 +607,6 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
 def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     """手动触发上下文压缩，立即执行完整压缩管线并显示结构化摘要。"""
     from xcode.agent.compaction import estimate_message_tokens
-    from xcode.agent.message_converter import COMPACTION_SUMMARY_PREFIX
     from xcode.harness.agent_runtime.agent_helpers import to_dict
     from xcode.harness.agent_runtime.message_codec import (
         messages_from_compacted_dicts,
@@ -621,14 +622,12 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     if not callable(history_messages):
         print("Agent does not expose history.")
         return False
-    before_msgs = history_messages()
+    before_msgs = cast(list[AgentMessage], history_messages())
     if not before_msgs:
         print("No messages to compact.")
         return False
 
-    before_tokens = estimate_message_tokens(
-        [to_dict(m) for m in before_msgs]
-    )
+    before_tokens = estimate_message_tokens(before_msgs)
 
     # 2) 检查是否需要压缩
     compactor = getattr(agent, "compactor", None)
@@ -642,18 +641,16 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
         return False
 
     # 3) 立即运行压缩
-    dict_messages = [to_dict(m) for m in before_msgs]
-    compacted_dicts = compactor(dict_messages)
+    dict_messages: list[dict[str, Any]] = [to_dict(m) for m in before_msgs]
+    compacted_dicts: list[dict[str, Any]] = cast(Callable, compactor)(dict_messages)
     after_msgs = messages_from_compacted_dicts(compacted_dicts)
 
     # 4) 提取结构化摘要
     summary_text = _extract_compact_summary(compacted_dicts)
-    after_tokens = estimate_message_tokens(
-        [to_dict(m) for m in after_msgs]
-    )
+    after_tokens = estimate_message_tokens(after_msgs)
 
     # 5) 替换 agent 历史
-    load_history(after_msgs)
+    cast(Callable, load_history)(after_msgs)
 
     # 6) 也裁剪会话日志
     ctx.store.compact_current_session(max_tool_result_chars=200)
@@ -680,7 +677,7 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     print()
     print(f" \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
     print(
-        f" Context compacted: {len(before_msgs)} messages \u2192 {len(after_msgs)} messages"
+        f" Context compacted: {len(list(before_msgs))} messages \u2192 {len(list(after_msgs))} messages"
         f" ({before_tokens:,} \u2192 {after_tokens:,} tokens, saved {saved:,})"
     )
     return False
@@ -694,46 +691,6 @@ def _extract_compact_summary(messages: list[dict[str, Any]]) -> str | None:
         if role == "user" and isinstance(content, str) and content.startswith("[Compressed]"):
             return content
     return None
-
-
-def _should_request_active_compaction(ctx: CommandContext) -> bool:
-    """判断当前活跃上下文是否超过摘要保留窗口。"""
-    agent = getattr(ctx.app, "agent", None)
-    if agent is None or not hasattr(agent, "request_compaction"):
-        return False
-    message_count, recent_window = _active_context_compaction_size(ctx)
-    return message_count > recent_window + 1 or _has_large_tool_result(ctx)
-
-
-def _active_context_compaction_size(ctx: CommandContext) -> tuple[int, int]:
-    """返回可见会话消息数量和活跃上下文最近消息窗口。"""
-    records = ctx.store.load_records()
-    message_count = sum(
-        1 for record in records if record.type in {"system", "user", "assistant"}
-    )
-    agent = getattr(ctx.app, "agent", None)
-    compactor = getattr(agent, "compactor", None) if agent is not None else None
-    recent_window = getattr(compactor, "max_recent_messages", 8)
-    if not isinstance(recent_window, int):
-        recent_window = 8
-    return message_count, recent_window
-
-
-def _has_large_tool_result(
-    ctx: CommandContext, max_tool_result_chars: int = 200
-) -> bool:
-    """判断会话日志中是否存在需要裁剪的大工具结果。"""
-    for record in ctx.store.load_records():
-        if record.type != "event" or not isinstance(record.content, dict):
-            continue
-        if record.content.get("type") != "tool_result":
-            continue
-        data = record.content.get("data")
-        if not isinstance(data, dict) or "content" not in data:
-            continue
-        if len(str(data["content"])) > max_tool_result_chars:
-            return True
-    return False
 
 
 def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:

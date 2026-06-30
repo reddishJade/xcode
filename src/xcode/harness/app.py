@@ -20,7 +20,6 @@ from xcode.harness.skills import ToolRegistryState, ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from xcode.harness.session_todo import SessionTodoState, TodoItem
 from xcode.ai.providers.factory import ProviderSettings, build_provider_bundle
-from xcode.ai.providers.protocol import ModelProvider
 from . import assembly as _assembly
 from .assembly import (
     build_agent,
@@ -99,22 +98,17 @@ class XcodeApp:
 
     def get_model_info(self) -> dict[str, str]:
         provider = self.agent.provider
-        if provider is None:
-            return {"model": "unknown"}
-        if not isinstance(provider, ModelProvider):
-            provider = getattr(provider, "active_provider", None)
-            if not isinstance(provider, ModelProvider):
-                return {"model": "unknown"}
+        active = getattr(provider, "active_provider", provider)
         info: dict[str, str] = {
-            "model": provider.model,
-            "base_url": provider.base_url,
-            "transport": provider.transport,
+            "model": active.model,
+            "base_url": active.base_url,
+            "transport": active.transport,
             "profile": "main",
         }
-        if provider.thinking:
-            info["thinking"] = str(provider.thinking)
-        if provider.reasoning_effort is not None:
-            info["reasoning_effort"] = provider.reasoning_effort
+        if active.thinking:
+            info["thinking"] = str(active.thinking)
+        if active.reasoning_effort is not None:
+            info["reasoning_effort"] = active.reasoning_effort
         return info
 
     def ask(self, question: str) -> str:

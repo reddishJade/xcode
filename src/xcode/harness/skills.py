@@ -165,7 +165,6 @@ def _compact_tool_params(tool: ToolSpec) -> list[str]:
     param_parts: list[str] = []
     for name, prop in props.items():
         typ = prop.get("type", "any")
-        desc = prop.get("description", "")
         if name in required:
             param_parts.append(f"  {name}: {typ}")
         else:

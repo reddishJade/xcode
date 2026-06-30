@@ -145,8 +145,6 @@ class Agent:
                 if event is None:
                     break
                 yield event
-            if error_slot is not None:
-                raise error_slot
         finally:
             if not task.done():
                 task.cancel()
@@ -154,3 +152,6 @@ class Agent:
                     await task
                 except asyncio.CancelledError:
                     pass
+            # error_slot 在此处抛出，因为 finally 是生成器退出前最后执行的代码
+            if error_slot is not None:
+                raise error_slot

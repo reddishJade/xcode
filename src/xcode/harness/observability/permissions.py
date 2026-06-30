@@ -24,7 +24,6 @@ from .permission_model import (
     PolicyEvaluator,
     PermissionResolver,
     StaticPermission,
-    StructuredBoundaryPolicyEvaluator,
     Verdict,
     compute_shadow_approval_candidate,
     create_grant_record,

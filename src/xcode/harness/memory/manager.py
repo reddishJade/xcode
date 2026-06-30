@@ -249,7 +249,7 @@ class MemoryManager:
             "obsolete": 0,
         }
 
-        def rank(r: MemoryRecord) -> tuple[int, int, float, float]:
+        def rank(r: MemoryRecord) -> tuple[int, int, float, str | None]:
             t = type_rank.get(r.memory_type, 2)
             s = status_rank.get(r.status, 1)
             u = r.utility

@@ -1157,14 +1157,14 @@ class ActionExtractor:
         self,
         command: str,
         shell_type: str = "posix",
-    ) -> object:
+    ) -> Any:
         """运行 ShellAnalyzer 对命令做 AST 语义分析。
 
         返回 ShellAnalysis（shell_analyzer 模块导出）。
         如果 shell_analyzer 不可用，返回一个空的 ShellAnalysis。
         """
         try:
-            from .shell_analyzer import ShellAnalysis, analyze_shell_command
+            from .shell_analyzer import analyze_shell_command
 
             return analyze_shell_command(command, shell_type)
         except ImportError:

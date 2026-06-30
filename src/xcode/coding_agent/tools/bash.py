@@ -16,7 +16,6 @@ from xcode.harness.execution_env import (
     SubprocessExecutionEnv,
 )
 from xcode.harness.skills import ToolInput, ToolSpec
-from .cygpath import to_windows as cygpath_to_windows
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 from ._constants import (

@@ -195,7 +195,7 @@ def _file_not_found(filepath: Path, root: Path, operations: FileOperations) -> s
 
     try:
         if operations.is_dir(dir_path):
-            for entry_name, is_dir in operations.read_dir_entries(dir_path):
+            for entry_name, _ in operations.read_dir_entries(dir_path):
                 if (
                     base_name.lower() in entry_name.lower()
                     or entry_name.lower() in base_name.lower()
@@ -500,7 +500,7 @@ def _edit_file_impl(
 
     updated = normalized
     total_replacements = 0
-    for i, edit in enumerate(request.edits):
+    for edit in request.edits:
         try:
             result = apply_fuzzy_replace(
                 updated,

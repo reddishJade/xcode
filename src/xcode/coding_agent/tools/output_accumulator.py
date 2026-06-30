@@ -169,9 +169,7 @@ class OutputAccumulator:
         if self._persisted_output is not None:
             return
         persisted = PersistedOutputFile(self._temp_prefix)
-        # 写入所有已收集的数据
-        all_bytes = b"".join(e.text.encode("utf-8", errors="replace") for e in self._list)
-        # 但 PersistedOutputFile.write_existing 接受 list[bytes]
+        # PersistedOutputFile.write_existing 接受 list[bytes]
         # 我们用 append 逐个写
         for entry in self._list:
             persisted.append(entry.text.encode("utf-8", errors="replace"))

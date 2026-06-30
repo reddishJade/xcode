@@ -13,18 +13,16 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 from .permission_model import (
     PermissionAccess,
     Target,
     UnresolvedEffect,
-    UnresolvedReason,
 )
-from .permission_model import Action, Constraint, PolicyEvaluator
+from .permission_model import Action, Constraint
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +33,16 @@ _HAS_TREE_SITTER = False
 _HAS_BASH = False
 _HAS_PWSH = False
 
-try:
-    from tree_sitter import Language, Parser, Tree  # noqa: F401
+Language: Any = None
+Parser: Any = None
+Tree: Any = None
 
+try:
+    from tree_sitter import Language as _Language, Parser as _Parser, Tree as _Tree  # noqa: F401
+
+    Language = _Language
+    Parser = _Parser
+    Tree = _Tree
     _HAS_TREE_SITTER = True
 except ImportError:
     logger.info("tree-sitter not available; shell AST analysis disabled")
@@ -83,7 +88,7 @@ class ShellAnalysis:
     """不能静态确认的文件效果。"""
     primary_command: str | None
     """主命令名（cat/rm/git/...），小写。"""
-    shell_type: Literal["posix", "powershell"]
+    shell_type: Literal["posix", "powershell", "cmd"]
     parse_error: bool
     """tree-sitter 是否返回 ERROR 节点。"""
     ast_available: bool
@@ -108,7 +113,7 @@ class CommandSemanticsRegistry:
         command: str,
         syntax: Literal["posix", "powershell"] = "posix",
         priority: int = 0,
-    ) -> callable:
+    ) -> Callable:
         """装饰器注册命令语义处理器。
 
         priority 用于处理同名命令不同语法的优先级（越高越优先）。
@@ -145,7 +150,7 @@ class CommandSemanticsRegistry:
         return list(handler(argv))
 
 
-type _ArgHandler = callable[[list[str]], list[FileEffect | UnresolvedEffect]]
+type _ArgHandler = Callable[[list[str]], list[FileEffect | UnresolvedEffect]]
 
 
 # ── 内置命令注册 ──
@@ -844,7 +849,7 @@ class PosixAnalyzer:
 
     def __init__(self, registry: CommandSemanticsRegistry | None = None) -> None:
         self._registry = registry or _REGISTRY
-        self._parser: Parser | None = None
+        self._parser: Any = None
         if _HAS_BASH and _HAS_TREE_SITTER:
             self._parser = Parser(_BASH_LANGUAGE)
 
@@ -891,7 +896,7 @@ class PosixAnalyzer:
         self,
         command: str,
         text: bytes,
-        node: object,
+        node: Any,
         resolved: list[Target],
         unresolved: list[UnresolvedEffect],
         seen_args: set[str],
@@ -964,7 +969,7 @@ class PosixAnalyzer:
         self,
         command: str,
         text: bytes,
-        node: object,
+        node: Any,
         resolved: list[Target],
         unresolved: list[UnresolvedEffect],
         seen_args: set[str],
@@ -1079,7 +1084,7 @@ class PosixAnalyzer:
     def _handle_redirect_node(
         self,
         text: bytes,
-        node: object,
+        node: Any,
         resolved: list[Target],
         unresolved: list[UnresolvedEffect],
         seen_args: set[str],
@@ -1120,7 +1125,7 @@ class PowerShellAnalyzer:
 
     def __init__(self, registry: CommandSemanticsRegistry | None = None) -> None:
         self._registry = registry or _REGISTRY
-        self._parser: Parser | None = None
+        self._parser: Any = None
         if _HAS_PWSH and _HAS_TREE_SITTER:
             self._parser = Parser(_PWSH_LANGUAGE)
 
@@ -1164,7 +1169,7 @@ class PowerShellAnalyzer:
         self,
         command: str,
         text: bytes,
-        node: object,
+        node: Any,
         resolved: list[Target],
         unresolved: list[UnresolvedEffect],
         seen_args: set[str],
@@ -1205,7 +1210,7 @@ class PowerShellAnalyzer:
         self,
         command: str,
         text: bytes,
-        node: object,
+        node: Any,
         resolved: list[Target],
         unresolved: list[UnresolvedEffect],
         seen_args: set[str],
@@ -1272,7 +1277,7 @@ class PowerShellAnalyzer:
     def _handle_redirect_node(
         self,
         text: bytes,
-        node: object,
+        node: Any,
         resolved: list[Target],
         unresolved: list[UnresolvedEffect],
         seen_args: set[str],
@@ -1536,7 +1541,7 @@ def analyze_shell_command(
 # ── 辅助函数 ──
 
 
-def _child_by_field(node: object, field_name: str) -> object | None:
+def _child_by_field(node: Any, field_name: str) -> Any | None:
     """获取 tree-sitter 节点的命名子节点（field child）。
 
     tree-sitter 0.25+ 的 Node 对象通常有 child_by_field_name 方法。
@@ -1546,7 +1551,7 @@ def _child_by_field(node: object, field_name: str) -> object | None:
     return None
 
 
-def _first_name_word(node: object) -> object | None:
+def _first_name_word(node: Any) -> Any | None:
     """从 command_name 或类似节点中提取首个子 word 节点。
 
     command_name 的 child 可能是 word、word_with_tilde_expansion、
