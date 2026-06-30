@@ -223,10 +223,17 @@ def _build_prompt_guidelines(
         f" Project root: {root.as_posix()}"
     )
 
-    # timeout 指引
+    # 运行时变量
+    import sys as _sys
+    import tempfile as _tempfile
+
     guidelines.append(
-        "If not specified, commands time out after "
+        f"If not specified, commands time out after "
         f"{DEFAULT_TIMEOUT_SECONDS * 1000}ms."
+    )
+    guidelines.append(
+        f"OS: {_sys.platform}, Shell: {spec.name}, "
+        f"Temp dir: {_tempfile.gettempdir()}"
     )
 
     return tuple(guidelines)

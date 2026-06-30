@@ -40,6 +40,15 @@ def build_grep_tool(
         read_only=True,
         concurrency_safe=True,
         group="core",
+        prompt_guidelines=(
+            "Use grep_search to find strings in file contents (not filenames).",
+            "Supports full regex: 'log.*Error', 'function\\s+\\w+'.",
+            "Combine with glob (*.py, *.{ts,tsx}) to narrow search scope.",
+            "Use context=N to show N lines of surrounding context.",
+            "Use ignore_case=true for case-insensitive search.",
+            "Use literal=true to search plain text without regex escaping.",
+            "Prefer grep_search over bash grep/rg for content search.",
+        ),
         schema={
             "type": "object",
             "properties": {
