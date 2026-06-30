@@ -266,7 +266,6 @@ class ExperimentalRuntimeConfig(BaseModel):
     tasks: StrictBool = False
     mailbox: StrictBool = False
     progress: StrictBool = False
-    worktree: StrictBool = False
 
 
 class XcodeRuntimeConfig(BaseModel):

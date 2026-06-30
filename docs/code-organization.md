@@ -102,6 +102,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `execution_env.py` | `ExecutionEnv` protocol、`SubprocessExecutionEnv`、`SandboxExecutionEnv` |
 | `daemon.py` | `HeartbeatDaemon` |
 | `snapshot.py` | Git tree 文件快照、每轮 pre/post snapshot、undo |
+| `worktree.py` | Git worktree 隔离 backend；subagent worktree isolation 依赖 |
 | `skill_activation.py` | Skill activation 内容解析 |
 | `skills_registry.py` | Skill 发现、索引、懒加载 |
 | `session_todo.py` | 主 agent 会话级 `update_todo` 工具与内存状态 |
@@ -115,7 +116,7 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `memory/tools.py` | `memory` group 的只读 `search_memory` ToolSpec |
 | `agent_runtime/` | StructuredAgent 运行时 |
 | `agent_runtime/structured.py` | `StructuredAgent`（harness 对 agent loop 的适配器） |
-| `agent_runtime/subagent.py` | `ManagedSubagentRunner`、subagent 工具 |
+| `agent_runtime/subagent.py` | `DelegatedTaskRunner`、`delegate_task` 工具 |
 | `agent_runtime/compaction.py` | `CompactController`、`LayeredCompactor` |
 | `agent_runtime/prompting/` | 系统提示词构造 |
 | `agent_runtime/prompting/builder.py` | `SystemPromptBuilder`、`build_runtime_context_provider` |
@@ -177,7 +178,6 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 | `task_progress.py` | `progress` group：长任务 checklist 和 lease |
 | `orchestration_store.py` | progress 运行编排状态 |
 | `mailbox.py` | 基于共享本地文件系统的跨进程 mailbox |
-| `worktree.py` | Git worktree 工具和 subagent 隔离 |
 
 ### `src/xcode/cli/` — UI 层
 
@@ -223,8 +223,8 @@ cli/ ──→ coding_agent/ ──→ harness/ ──→ agent/ ──→ ai/
 `core`（`read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`search_tools`）
 → `session`（`update_todo`）
 → `skills`（`load_skill`）
-→ `subagent`（`submit_subagent`、`check_subagent`、`cancel_subagent`）
-→ `worktree`（实验，`experimental.worktree`）
+→ `subagent`（`delegate_task`）
+→ `worktree`（`create_worktree_task`、`remove_worktree_task`、`list_worktrees`、`prune_stale_worktrees`）
 → `tasks`（实验，`experimental.tasks`）
 → `mailbox`（实验，`experimental.mailbox`）
 → `progress`（实验，`experimental.progress`，依赖 tasks）

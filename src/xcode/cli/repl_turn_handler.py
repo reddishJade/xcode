@@ -92,6 +92,16 @@ class ToolCallHandler:
         partial = event_data.partial_result
         if not tool_id or not partial:
             return
+        if event_data.tool_name == "delegate_task":
+            self.flush_group()
+            self.clear_progress()
+            for line in partial.splitlines():
+                clean = line.strip()
+                if clean:
+                    self.live_console.print(
+                        Text(f"  Subagent: {clean}", style=CLI_COLOR_TOOL)
+                    )
+            return
         if self._progress_tool_id != tool_id:
             self._clear_progress()
             self._progress_tool_id = tool_id

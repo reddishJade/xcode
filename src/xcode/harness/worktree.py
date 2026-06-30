@@ -1,4 +1,4 @@
-"""托管实现任务使用的 Git worktree 隔离工具。
+"""托管 Git worktree 隔离基础设施。
 
 worktree 元数据持久化到 ``.local/worktrees/index.json``，进程重启后可恢复。
 ``prune_stale`` 清理 git 已 prune 但目录残留的孤儿 worktree。
@@ -20,7 +20,7 @@ import filelock
 
 from xcode.harness.skills import ToolInput, ToolSpec
 
-logger = logging.getLogger("xcode.experimental.worktree")
+logger = logging.getLogger("xcode.harness.worktree")
 
 CommandRunner = Callable[[list[str], Path], str]
 

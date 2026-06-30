@@ -28,9 +28,16 @@ from xcode.harness.config import (
 from xcode.harness.agent_runtime import (
     CancellationToken,
     ContextualRetrievalState,
-    ManagedSubagentRunner,
+    DelegatedTaskRunner,
     StructuredAgent,
-    build_managed_subagent_tools,
+    build_delegate_task_tools,
+)
+from xcode.harness.agent_runtime.events import (
+    FinalStructuredEvent,
+    TextDeltaStructuredEvent,
+    ToolResultStructuredEvent,
+    ToolUpdateStructuredEvent,
+    ToolUseStructuredEvent,
 )
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
@@ -68,7 +75,7 @@ class SharedServices:
 
     task_store: Any | None = None
     mailbox: Any | None = None
-    worktree_runner: Any | None = None
+    worktree_runner: Any = None
     orchestration_store: Any | None = None
 
 
@@ -84,9 +91,7 @@ def build_shared_services(
     return SharedServices(
         task_store=_build_task_store(project_root) if experimental.tasks else None,
         mailbox=_build_mailbox(project_root) if experimental.mailbox else None,
-        worktree_runner=(
-            _build_worktree_runner(project_root) if experimental.worktree else None
-        ),
+        worktree_runner=_build_worktree_runner(project_root),
         orchestration_store=(
             _build_orchestration_store(project_root) if experimental.progress else None
         ),
@@ -106,7 +111,7 @@ def _build_mailbox(project_root: Path) -> Any:
 
 
 def _build_worktree_runner(project_root: Path) -> Any:
-    from xcode.experimental.worktree import WorktreeTaskRunner
+    from xcode.harness.worktree import WorktreeTaskRunner
 
     return WorktreeTaskRunner(project_root)
 
@@ -419,10 +424,9 @@ def _extend_registry_with_features(
     from xcode.harness.mcp import build_mcp_tools
 
     registry += build_mcp_tools(project_root, mcp_runtime_registry)
-    if shared_services.worktree_runner is not None:
-        from xcode.experimental.worktree import build_worktree_tools
+    from xcode.harness.worktree import build_worktree_tools
 
-        registry += build_worktree_tools(shared_services.worktree_runner)
+    registry += build_worktree_tools(shared_services.worktree_runner)
     if shared_services.task_store is not None:
         from xcode.experimental.task_store import build_task_tools
 
@@ -478,7 +482,12 @@ def _build_subagent_integration(
         else None
     )
 
-    async def run_child(prompt, model_profile=PROFILE_SUBAGENT, cwd_override=None):
+    async def run_child(
+        prompt,
+        model_profile=PROFILE_SUBAGENT,
+        cwd_override=None,
+        on_update=None,
+    ):
         child_root = project_root.resolve()
         child_contextual_state = contextual_state
         effective_registry = child_registry
@@ -514,7 +523,7 @@ def _build_subagent_integration(
         memory_manager = MemoryManager(child_root)
 
         subagent_session_id = f"subagent-{uuid4().hex[:8]}"
-        result = await StructuredAgent(
+        child_agent = StructuredAgent(
             provider=child_llms[model_profile],
             registry=effective_registry,
             config=config,
@@ -552,17 +561,51 @@ def _build_subagent_integration(
                 ),
                 todo_state=child_todo_state,
             ),
-        ).run_async(prompt)
+        )
+        result = None
+        async for event in child_agent.arun_stream(prompt):
+            update = _format_child_event_update(event)
+            if update and on_update is not None:
+                on_update(update)
+            if isinstance(event, FinalStructuredEvent):
+                result = event.data
+        if result is None:
+            raise RuntimeError("subagent finished without final result")
         return result.answer
 
-    managed_runner = ManagedSubagentRunner(
+    managed_runner = DelegatedTaskRunner(
         run_child,
         available_profiles=tuple(child_llms),
         default_profile=PROFILE_SUBAGENT,
         worktree_runner=shared_services.worktree_runner,
         max_active_jobs=config.subagent_workers,
     )
-    return [managed_runner.shutdown], build_managed_subagent_tools(managed_runner)
+    return [managed_runner.shutdown], build_delegate_task_tools(managed_runner)
+
+
+def _format_child_event_update(event: object) -> str | None:
+    """将子 Agent 结构化事件压缩为用户可见的委派进度。"""
+    if isinstance(event, TextDeltaStructuredEvent):
+        text = _single_line(event.data)
+        return f"text: {text}" if text else None
+    if isinstance(event, ToolUseStructuredEvent):
+        args = json.dumps(event.data.input, ensure_ascii=False, sort_keys=True)
+        return f"tool: {event.data.name} {args[:240]}"
+    if isinstance(event, ToolUpdateStructuredEvent):
+        text = _single_line(event.data.partial_result)
+        return f"{event.data.tool_name}: {text}" if text else None
+    if isinstance(event, ToolResultStructuredEvent):
+        text = _single_line(event.data.content)
+        status = "ok" if event.data.status == "ok" else "error"
+        return f"tool_result: {status} {text[:240]}"
+    if isinstance(event, FinalStructuredEvent):
+        reason = event.data.termination_reason.value
+        return f"final: {reason}"
+    return None
+
+
+def _single_line(text: str) -> str:
+    return " ".join(text.strip().split())[:240]
 
 
 # ── 可选服务 ──

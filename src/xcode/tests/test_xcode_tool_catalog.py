@@ -36,12 +36,9 @@ class ToolCatalogConsistencyTests:
         assert "update_todo" in catalog["session"]
         assert "search_tools" in catalog["core"]
         assert "apply_patch" in catalog["core"]
+        assert "create_worktree_task" in catalog["worktree"]
         assert "load_skill" in catalog["skills"]
-        assert catalog["subagent"] == {
-            "submit_subagent",
-            "check_subagent",
-            "cancel_subagent",
-        }
+        assert catalog["subagent"] == {"delegate_task"}
 
 
 def _tool_builder_calls(tree: ast.AST) -> set[str]:

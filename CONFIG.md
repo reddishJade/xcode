@@ -4,9 +4,8 @@
 
 配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地 `.local/settings.json` → 环境变量 `XCODE_SANDBOX_MODE`、`XCODE_PERMISSION_MODE`、`XCODE_APPROVAL_POLICY`。
 
-**没有配置文件时**启用正式内置能力（`core`、`subagent`、`memory`，以及存在
-可见 skill 时的 `skills`）；`worktree`、`tasks`、`mailbox`、`progress` 和
-daemon 仍需显式启用。零配置可用。
+**没有配置文件时**启用正式内置能力（`core`、`subagent`、`worktree`、`memory`，以及存在
+可见 skill 时的 `skills`）；`tasks`、`mailbox`、`progress` 和 daemon 仍需显式启用。零配置可用。
 
 ---
 
@@ -106,7 +105,7 @@ xcode config delete subagent                          # 删除 subagent profile
 | `compact_token_threshold` | int | `0` | token 阈值；0 关闭 |
 | `max_recent_messages` | int | `10` | 压缩时保留的近期消息数 |
 | `tool_workers` | int | `4` | 单个 parallel batch 的最大活跃工具数；小于 1 时按 1 执行 |
-| `subagent_workers` | int | `4` | 最大活跃 subagent job 数；超限时 `submit_subagent` 返回 busy |
+| `subagent_workers` | int | `4` | 最大活跃 delegated subagent 运行数；超限时 `delegate_task` 返回 busy |
 | `watchdog_repeated_tool_limit` | int | `3` | 连续重复同一工具阈值 |
 
 ---
@@ -264,8 +263,8 @@ Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
 |---|---|---|
 | `core` | 始终 | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`shell`、`search_tools` |
 | `skills` | 发现 skill 时 | `load_skill` |
-| `subagent` | 始终 | `submit_subagent`、`check_subagent`、`cancel_subagent` |
-| `worktree` | `experimental.worktree` | `create_worktree_task`、`remove_worktree_task` |
+| `subagent` | 始终 | `delegate_task` |
+| `worktree` | 始终 | `create_worktree_task`、`remove_worktree_task`、`list_worktrees`、`prune_stale_worktrees` |
 | `tasks` | `experimental.tasks` | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
 | `mailbox` | `experimental.mailbox` | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
 | `progress` | `experimental.progress` 且 `experimental.tasks` | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
@@ -292,15 +291,13 @@ MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺
 | `tasks` | bool | `false` | 持久化任务图和 Kanban 工具 |
 | `mailbox` | bool | `false` | 基于共享本地文件系统的跨进程 mailbox |
 | `progress` | bool | `false` | 长任务进度和 lease；要求同时启用 `tasks` |
-| `worktree` | bool | `false` | Git worktree 工具和 subagent worktree 隔离 |
 
 ```json
 {
   "experimental": {
     "tasks": true,
     "mailbox": true,
-    "progress": true,
-    "worktree": true
+    "progress": true
   }
 }
 ```

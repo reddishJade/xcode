@@ -110,7 +110,7 @@ def update_repeated_tool_watchdog(
     - 签名完全相同（包括参数）才视为无效重复
 
     豁免规则：watchdog_repeated_tool_skip 中的工具名不参与重复计数，
-    这允许 check_subagent 等只读轮询工具重复调用而不触发看门狗。
+    用于允许低风险只读观察类工具重复调用而不触发看门狗。
     """
     if tool_calls and tool_calls[0].name in config.watchdog_repeated_tool_skip:
         state.repeated_tool_count = 0

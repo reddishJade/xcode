@@ -11,19 +11,19 @@ import threading
 from typing import Literal
 
 from ..config import PROFILE_SUBAGENT
-from ..skills import ToolInput, ToolSpec
+from ..skills import ToolInput, ToolOutput, ToolSpec
 from .async_worker import IsolatedAsyncWorker
-from ...agent.messages import BranchSummaryMessage
 
-"""子 Agent 任务工具。
+"""子 Agent 委派工具。
 
-父 Agent 只接收子 Agent 的摘要结果；子 Agent 使用独立事件循环运行，避免把
-父 Agent 的 async 上下文和 Windows 线程事件循环细节混在一起。
+模型只看到一个 ``delegate_task`` 工具。工具执行期间同步等待子 Agent 完成，
+并把子 Agent 的进度通过 tool update 流给终端；最终只把完成摘要返回给父模型。
 """
 
-SubagentStatus = Literal["running", "done", "cancelled", "failed"]
-RunChild = Callable[[str, str, Path | None], Awaitable[str]]
-SubagentLifecycleCallback = Callable[["SubagentLifecycleEvent"], None]
+SubagentIsolation = Literal["context", "worktree"]
+SubagentStatus = Literal["running", "done", "failed"]
+SubagentUpdate = Callable[[str], None]
+RunChild = Callable[[str, str, Path | None, SubagentUpdate | None], Awaitable[str]]
 
 
 class SubagentBusyError(RuntimeError):
@@ -31,61 +31,25 @@ class SubagentBusyError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class SubagentStartEvent:
-    """子 Agent 任务开始事件。"""
+class DelegatedTaskResult:
+    """一次委派运行的最终结果。"""
 
-    job_id: str
+    run_id: str
     prompt: str
     model_profile: str
-    isolation: str
-    cwd_override: Path | None = None
-    worktree_task_id: str | None = None
-    type: str = "subagent_start"
-
-
-@dataclass(frozen=True)
-class SubagentEndEvent:
-    """子 Agent 任务结束事件。"""
-
-    job_id: str
+    isolation: SubagentIsolation
     status: SubagentStatus
-    error: str | None = None
-    type: str = "subagent_end"
-
-
-type SubagentLifecycleEvent = SubagentStartEvent | SubagentEndEvent
-
-
-@dataclass
-class SubagentJob:
-    """子 Agent 任务状态。"""
-
-    id: str
-    prompt: str
-    model_profile: str
-    created_at: datetime
-    timeout_seconds: float | None
-    future: concurrent.futures.Future[str]
-    isolation: str = "context"
+    answer: str
+    started_at: datetime
+    finished_at: datetime
     cwd_override: Path | None = None
     worktree_task_id: str | None = None
-    end_event_emitted: bool = False
-
-    def status(self) -> SubagentStatus:
-        if self.future.cancelled():
-            return "cancelled"
-        if not self.future.done():
-            return "running"
-        try:
-            self.future.result()
-        except concurrent.futures.CancelledError:
-            return "cancelled"
-        except Exception:
-            return "failed"
-        return "done"
+    error: str | None = None
 
 
-class ManagedSubagentRunner:
+class DelegatedTaskRunner:
+    """执行一次子 Agent 委派，并负责并发额度与 worktree 隔离。"""
+
     def __init__(
         self,
         run_child: RunChild,
@@ -94,7 +58,6 @@ class ManagedSubagentRunner:
         default_profile: str = PROFILE_SUBAGENT,
         worktree_runner=None,
         worker: IsolatedAsyncWorker | None = None,
-        lifecycle_callback: SubagentLifecycleCallback | None = None,
         max_active_jobs: int = 4,
     ) -> None:
         self.run_child = run_child
@@ -102,316 +65,243 @@ class ManagedSubagentRunner:
         self.available_profiles = available_profiles
         self.default_profile = default_profile
         self.worktree_runner = worktree_runner
-        self.lifecycle_callback = lifecycle_callback
         self.max_active_jobs = max(1, max_active_jobs)
         self._worker = worker or IsolatedAsyncWorker(name="xcode-subagent-worker")
-        self._jobs: dict[str, SubagentJob] = {}
-        self._active_job_ids: set[str] = set()
+        self._active_run_ids: set[str] = set()
         self._lock = threading.Lock()
         self._ids = itertools.count(1)
         self._closing = False
 
-    def submit(
+    @property
+    def active_job_count(self) -> int:
+        """返回当前占用 subagent 执行额度的运行数。"""
+        with self._lock:
+            return len(self._active_run_ids)
+
+    def delegate(
         self,
         prompt: str,
+        *,
         model_profile: str | None = None,
         isolation: str | None = None,
-    ) -> str:
+        on_update: SubagentUpdate | None = None,
+    ) -> DelegatedTaskResult:
         if self._closing:
             raise RuntimeError("subagent runner is shutting down")
-
+        clean_prompt = prompt.strip()
+        if not clean_prompt:
+            raise ValueError("prompt is required")
         profile = (model_profile or self.default_profile).strip()
         if profile not in self.available_profiles:
             raise ValueError(_unknown_profile(profile, self.available_profiles))
-        with self._lock:
-            if len(self._active_job_ids) >= self.max_active_jobs:
-                raise SubagentBusyError(
-                    "subagent busy: "
-                    f"{len(self._active_job_ids)}/{self.max_active_jobs} active"
-                )
-            job_id = f"subagent-{next(self._ids)}"
-            self._active_job_ids.add(job_id)
+
+        run_id = self._reserve_run_id()
+        started_at = datetime.now()
         try:
             isolation_mode, cwd_override, worktree_task_id = self._resolve_isolation(
-                prompt, isolation
+                clean_prompt, isolation
             )
-        except Exception:
-            self._release_active(job_id)
-            raise
+            self._emit(
+                on_update,
+                _format_update(
+                    run_id,
+                    "started",
+                    f"profile={profile} isolation={isolation_mode}",
+                ),
+            )
+            answer = self._run_child_blocking(
+                clean_prompt,
+                profile,
+                cwd_override,
+                lambda text: self._emit(
+                    on_update, _format_update(run_id, "event", text)
+                ),
+            )
+        except Exception as exc:
+            finished_at = datetime.now()
+            self._emit(
+                on_update,
+                _format_update(run_id, "failed", f"{type(exc).__name__}: {exc}"),
+            )
+            return DelegatedTaskResult(
+                run_id=run_id,
+                prompt=clean_prompt,
+                model_profile=profile,
+                isolation=_coerce_isolation(isolation),
+                status="failed",
+                answer="",
+                started_at=started_at,
+                finished_at=finished_at,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        finally:
+            self._release_run_id(run_id)
 
+        finished_at = datetime.now()
+        self._emit(on_update, _format_update(run_id, "done", "completed"))
+        return DelegatedTaskResult(
+            run_id=run_id,
+            prompt=clean_prompt,
+            model_profile=profile,
+            isolation=isolation_mode,
+            status="done",
+            answer=answer,
+            started_at=started_at,
+            finished_at=finished_at,
+            cwd_override=cwd_override,
+            worktree_task_id=worktree_task_id,
+        )
+
+    def shutdown(self) -> None:
+        self._closing = True
+        self._worker.close()
+        with self._lock:
+            self._active_run_ids.clear()
+
+    def _reserve_run_id(self) -> str:
+        with self._lock:
+            if len(self._active_run_ids) >= self.max_active_jobs:
+                raise SubagentBusyError(
+                    "subagent busy: "
+                    f"{len(self._active_run_ids)}/{self.max_active_jobs} active"
+                )
+            run_id = f"subagent-{next(self._ids)}"
+            self._active_run_ids.add(run_id)
+            return run_id
+
+    def _release_run_id(self, run_id: str) -> None:
+        with self._lock:
+            self._active_run_ids.discard(run_id)
+
+    def _run_child_blocking(
+        self,
+        prompt: str,
+        profile: str,
+        cwd_override: Path | None,
+        on_update: SubagentUpdate | None,
+    ) -> str:
         async def entry() -> str:
-            coro = self.run_child(prompt, profile, cwd_override)
+            coro = self.run_child(prompt, profile, cwd_override, on_update)
             if self.timeout_seconds is None:
                 return await coro
             return await asyncio.wait_for(coro, timeout=self.timeout_seconds)
 
-        entry_coro = entry()
+        future = self._worker.submit(entry())
         try:
-            future = self._worker.submit(entry_coro)
-        except Exception:
-            entry_coro.close()
-            self._release_active(job_id)
-            raise
-        job = SubagentJob(
-            id=job_id,
-            prompt=prompt,
-            model_profile=profile,
-            created_at=datetime.now(),
-            timeout_seconds=self.timeout_seconds,
-            future=future,
-            isolation=isolation_mode,
-            cwd_override=cwd_override,
-            worktree_task_id=worktree_task_id,
-        )
-        with self._lock:
-            self._jobs[job_id] = job
-        future.add_done_callback(lambda _future: self._release_active(job_id))
-        self._emit_start(job)
-        return job_id
-
-    def status(self, job_id: str) -> str:
-        with self._lock:
-            job = self._jobs.get(job_id)
-        if job is None:
-            return "unknown"
-        return job.status()
-
-    @property
-    def active_job_count(self) -> int:
-        """返回当前占用 subagent 执行额度的 job 数。"""
-        with self._lock:
-            return len(self._active_job_ids)
-
-    def result(self, job_id: str, timeout: float | None = None) -> str:
-        job = self._require_job(job_id)
-        try:
-            result = job.future.result(timeout=timeout)
+            return future.result()
         except concurrent.futures.CancelledError:
-            self._emit_end(job, "cancelled")
-            raise
-        except Exception as exc:
-            self._emit_end(job, "failed", f"{type(exc).__name__}: {exc}")
-            raise
-        else:
-            self._emit_end(job, "done")
-            return result
-        finally:
-            if job.future.done():
-                with self._lock:
-                    self._jobs.pop(job_id, None)
-
-    def job_prompt(self, job_id: str) -> str:
-        """返回指定 job 的 prompt 文本。"""
-        job = self._require_job(job_id)
-        return job.prompt
-
-    def cancel(self, job_id: str) -> str:
-        with self._lock:
-            job = self._jobs.get(job_id)
-        if job is None:
-            return f"unknown job: {job_id}"
-        ok = job.future.cancel()
-        if ok:
-            self._emit_end(job, "cancelled")
-        if job.future.done():
-            with self._lock:
-                self._jobs.pop(job_id, None)
-        return "cancel requested" if ok else "already completed"
-
-    def sweep_finished(self) -> None:
-        with self._lock:
-            finished = [
-                job_id for job_id, job in self._jobs.items() if job.future.done()
-            ]
-            for job_id in finished:
-                self._jobs.pop(job_id, None)
-
-    def shutdown(self, drain_timeout: float = 2.0) -> None:
-        self._closing = True
-        with self._lock:
-            futures = [
-                job.future for job in self._jobs.values() if not job.future.done()
-            ]
-        for future in futures:
-            future.cancel()
-        if futures:
-            concurrent.futures.wait(futures, timeout=drain_timeout)
-        self._worker.close()
-        with self._lock:
-            self._jobs.clear()
-            self._active_job_ids.clear()
+            raise RuntimeError("subagent run was cancelled") from None
 
     def _resolve_isolation(
         self, prompt: str, isolation: str | None
-    ) -> tuple[str, Path | None, str | None]:
-        isolation_mode = (isolation or "context").strip() or "context"
+    ) -> tuple[SubagentIsolation, Path | None, str | None]:
+        isolation_mode = _coerce_isolation(isolation)
         if isolation_mode == "worktree":
             if self.worktree_runner is None:
                 raise ValueError("worktree isolation requires the worktree tool group")
             task = self.worktree_runner.create(_task_name(prompt))
             return isolation_mode, Path(task.path).resolve(), task.id
-        if isolation_mode not in ("context", "none"):
-            raise ValueError(f"unknown subagent isolation: {isolation_mode}")
         return isolation_mode, None, None
 
-    def _require_job(self, job_id: str) -> SubagentJob:
-        with self._lock:
-            try:
-                return self._jobs[job_id]
-            except KeyError:
-                raise KeyError(f"unknown subagent job: {job_id}") from None
+    def _emit(self, on_update: SubagentUpdate | None, text: str) -> None:
+        if on_update is not None:
+            on_update(text)
 
-    def _release_active(self, job_id: str) -> None:
-        """释放完成、取消或超时 job 的 active 额度。"""
-        with self._lock:
-            self._active_job_ids.discard(job_id)
 
-    def _emit_start(self, job: SubagentJob) -> None:
-        if self.lifecycle_callback is None:
-            return
-        self.lifecycle_callback(
-            SubagentStartEvent(
-                job_id=job.id,
-                prompt=job.prompt,
-                model_profile=job.model_profile,
-                isolation=job.isolation,
-                cwd_override=job.cwd_override,
-                worktree_task_id=job.worktree_task_id,
-            )
+def build_delegate_task_tools(runner: DelegatedTaskRunner) -> tuple[ToolSpec, ...]:
+    def delegate_task(data: ToolInput, on_update: Callable[[str], None] | None) -> str:
+        result = runner.delegate(
+            str(data.get("prompt", "")).strip(),
+            model_profile=str(
+                data.get("model_profile", runner.default_profile)
+            ).strip(),
+            isolation=str(data.get("isolation", "context")).strip(),
+            on_update=on_update,
         )
-
-    def _emit_end(
-        self,
-        job: SubagentJob,
-        status: SubagentStatus,
-        error: str | None = None,
-    ) -> None:
-        if self.lifecycle_callback is None or job.end_event_emitted:
-            return
-        job.end_event_emitted = True
-        self.lifecycle_callback(
-            SubagentEndEvent(job_id=job.id, status=status, error=error)
-        )
-
-
-def build_managed_subagent_tools(runner: ManagedSubagentRunner) -> tuple[ToolSpec, ...]:
-    def submit_subagent(data: ToolInput) -> str:
-        prompt = str(data.get("prompt", "")).strip()
-        if not prompt:
-            raise ValueError("prompt is required")
-        model_profile = str(data.get("model_profile", runner.default_profile)).strip()
-        isolation = str(data.get("isolation", "context")).strip()
-        try:
-            job_id = runner.submit(prompt, model_profile, isolation)
-        except (SubagentBusyError, ValueError) as exc:
-            return str(exc)
-        return f"subagent job {job_id} submitted"
-
-    def check_subagent(data: ToolInput) -> str:
-        job_id = str(data.get("job_id", "")).strip()
-        if not job_id:
-            raise ValueError("job_id is required")
-        status = runner.status(job_id)
-        if status in ("unknown", "running", "cancelled"):
-            return f"status={status}"
-        if status == "failed":
-            try:
-                runner.result(job_id)
-            except Exception as exc:
-                return f"status=failed\n{type(exc).__name__}: {exc}"
-        prompt = runner.job_prompt(job_id)
-        try:
-            raw_result = runner.result(job_id)
-            return f"status=done\n{build_branch_summary(job_id, prompt, raw_result).summary}"
-        except KeyError as exc:
-            return str(exc)
-
-    def cancel_subagent(data: ToolInput) -> str:
-        job_id = str(data.get("job_id", "")).strip()
-        if not job_id:
-            raise ValueError("job_id is required")
-        return runner.cancel(job_id)
+        return _render_delegate_result(result)
 
     return (
         ToolSpec(
-            "submit_subagent",
-            "Submit a subagent task. Use isolation=worktree to run from an isolated worktree cwd.",
-            'JSON: {"prompt":"...", "model_profile":"subagent", "isolation":"context|worktree"}',
-            submit_subagent,
+            "delegate_task",
+            (
+                "Delegate a complete task to a subagent and wait for the final "
+                "result. Progress streams to the user; only the final result is "
+                "returned to the parent model. Do not poll for status."
+            ),
+            'JSON: {"description":"short label","prompt":"...", "model_profile":"subagent", "isolation":"context|worktree"}',
+            lambda data: delegate_task(data, None),
             group="subagent",
             counts_as_progress=True,
-            schema=_submit_subagent_schema(),
-        ),
-        ToolSpec(
-            "check_subagent",
-            "Check a subagent job.",
-            'JSON: {"job_id":"..."}',
-            check_subagent,
-            group="subagent",
-            read_only=True,
-            schema=_job_id_schema(),
-        ),
-        ToolSpec(
-            "cancel_subagent",
-            "Cancel a subagent job.",
-            'JSON: {"job_id":"..."}',
-            cancel_subagent,
-            group="subagent",
-            read_only=True,
-            schema=_job_id_schema(),
+            schema=_delegate_task_schema(),
+            streaming_handler=delegate_task,
+            prompt_guidelines=(
+                "Use delegate_task for substantial independent investigation or implementation tasks.",
+                "Do not poll delegated tasks; delegate_task waits for completion and streams progress to the user.",
+                "Give the subagent a complete prompt with scope, expected output, and relevant files.",
+            ),
         ),
     )
 
 
-def _submit_subagent_schema() -> dict[str, object]:
-    """返回 submit_subagent 的参数 schema。"""
+def _delegate_task_schema() -> dict[str, object]:
+    """返回 delegate_task 的参数 schema。"""
     return {
         "type": "object",
         "properties": {
-            "prompt": {"type": "string"},
+            "description": {
+                "type": "string",
+                "description": "Short 3-7 word label for the delegated task.",
+            },
+            "prompt": {
+                "type": "string",
+                "description": "Complete task prompt for the subagent.",
+            },
             "model_profile": {"type": "string"},
             "isolation": {
                 "type": "string",
                 "enum": ["context", "worktree"],
             },
         },
-        "required": ["prompt"],
+        "required": ["description", "prompt"],
         "additionalProperties": False,
     }
 
 
-def _job_id_schema() -> dict[str, object]:
-    """返回只接受 job_id 的子 Agent 工具参数 schema。"""
-    return {
-        "type": "object",
-        "properties": {"job_id": {"type": "string"}},
-        "required": ["job_id"],
-        "additionalProperties": False,
-    }
+def _render_delegate_result(result: DelegatedTaskResult) -> str:
+    if result.status == "failed":
+        return ToolOutput(
+            f'<task id="{result.run_id}" state="error">\n'
+            f"<summary>Delegated task failed</summary>\n"
+            f"<task_error>{result.error or 'unknown error'}</task_error>\n"
+            "</task>",
+            is_error=True,
+        )
+    answer = result.answer.strip() or "(no output)"
+    lines = [
+        f'<task id="{result.run_id}" state="completed">',
+        f"<summary>Delegated task completed: {result.prompt[:80]}</summary>",
+    ]
+    if result.worktree_task_id:
+        lines.append(f"<worktree>{result.worktree_task_id}</worktree>")
+    lines.extend(["<task_result>", answer, "</task_result>", "</task>"])
+    return "\n".join(lines)
 
 
-def _unknown_profile(model_profile: str, profiles) -> str:
+def _format_update(run_id: str, status: str, message: str) -> str:
+    clean = " ".join(message.strip().split())
+    return f"[{run_id}] {status}: {clean}" if clean else f"[{run_id}] {status}"
+
+
+def _coerce_isolation(isolation: str | None) -> SubagentIsolation:
+    value = (isolation or "context").strip() or "context"
+    if value not in ("context", "worktree"):
+        raise ValueError(f"unknown subagent isolation: {value}")
+    return value
+
+
+def _unknown_profile(model_profile: str, profiles: tuple[str, ...]) -> str:
     available = ", ".join(sorted(profiles)) or "(none)"
     return f"unknown model_profile: {model_profile}; available: {available}"
-
-
-def build_branch_summary(
-    job_id: str,
-    prompt: str,
-    result: str,
-) -> BranchSummaryMessage:
-    lines = result.strip().splitlines()
-    summary_lines = [f"Task: {prompt[:80]}"]
-    output_lines = [line for line in lines if line.strip()][:5]
-    if output_lines:
-        summary_lines.append("Results:")
-        summary_lines.extend(f"  {line}" for line in output_lines)
-    if len(lines) > 5:
-        summary_lines.append(f"  (... {len(lines) - 5} more lines)")
-    return BranchSummaryMessage(
-        summary="\n".join(summary_lines),
-        from_id=job_id,
-    )
 
 
 def _task_name(prompt: str) -> str:

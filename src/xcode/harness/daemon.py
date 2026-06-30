@@ -28,7 +28,7 @@ import filelock
 
 from xcode.experimental.mailbox import AgentMailbox
 from xcode.experimental.task_store import CLAIMED, PENDING, TaskStore
-from xcode.experimental.worktree import WorktreeTaskRunner
+from xcode.harness.worktree import WorktreeTaskRunner
 
 logger = logging.getLogger("xcode.harness.daemon")
 

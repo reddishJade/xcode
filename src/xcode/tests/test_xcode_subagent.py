@@ -7,82 +7,126 @@ import threading
 import time
 from unittest.mock import patch
 
-from xcode.harness.agent_runtime.async_worker import IsolatedAsyncWorker
-from xcode.harness.agent_runtime import (
-    ManagedSubagentRunner,
-    SubagentEndEvent,
-    SubagentStartEvent,
-    build_managed_subagent_tools,
-)
-from xcode.harness.agent_runtime.subagent import SubagentBusyError
 import pytest
+
+from xcode.harness.agent_runtime import (
+    DelegatedTaskRunner,
+    build_delegate_task_tools,
+)
+from xcode.harness.agent_runtime.async_worker import IsolatedAsyncWorker
+from xcode.harness.agent_runtime.subagent import SubagentBusyError
 
 
 class XcodeSubagentToolTests:
+    def test_delegate_task_waits_for_result_and_streams_updates(self) -> None:
+        updates: list[str] = []
+
+        async def run_child(
+            prompt: str,
+            model_profile: str,
+            cwd_override: Path | None,
+            on_update,
+        ) -> str:
+            assert cwd_override is None
+            if on_update is not None:
+                on_update(f"tool: read_file {prompt}")
+            return f"{model_profile}:{prompt}"
+
+        runner = DelegatedTaskRunner(run_child, timeout_seconds=1)
+        try:
+            result = runner.delegate(
+                "inspect ai layer",
+                model_profile="subagent",
+                on_update=updates.append,
+            )
+
+            assert result.status == "done"
+            assert result.answer == "subagent:inspect ai layer"
+            assert any("started" in update for update in updates)
+            assert any(
+                "tool: read_file inspect ai layer" in update for update in updates
+            )
+            assert any("done" in update for update in updates)
+        finally:
+            runner.shutdown()
+
+    def test_delegate_task_tool_is_single_public_subagent_tool(self) -> None:
+        async def run_child(
+            prompt: str,
+            _model_profile: str,
+            _cwd_override: Path | None,
+            _on_update,
+        ) -> str:
+            return f"done {prompt}"
+
+        runner = DelegatedTaskRunner(run_child, timeout_seconds=1)
+        try:
+            tools = build_delegate_task_tools(runner)
+            assert [tool.name for tool in tools] == ["delegate_task"]
+
+            output = tools[0].streaming_handler(
+                {"description": "Inspect", "prompt": "work"},
+                None,
+            )
+
+            assert 'state="completed"' in output
+            assert "done work" in output
+            assert "status=running" not in output
+        finally:
+            runner.shutdown()
+
     def test_active_job_limit_returns_busy_and_releases_on_finish(self) -> None:
-        """完成的 job 自动释放独立 subagent 额度。"""
         release = threading.Event()
 
         async def run_child(
-            prompt: str, _model_profile: str, _cwd_override: Path | None
+            prompt: str,
+            _model_profile: str,
+            _cwd_override: Path | None,
+            _on_update,
         ) -> str:
             if prompt == "hold":
                 await asyncio.to_thread(release.wait)
             return prompt
 
-        runner = ManagedSubagentRunner(
+        runner = DelegatedTaskRunner(
             run_child,
             timeout_seconds=1,
             max_active_jobs=1,
         )
+        errors: list[BaseException] = []
+
+        def hold_run() -> None:
+            try:
+                runner.delegate("hold")
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=hold_run)
         try:
-            first = runner.submit("hold")
-            assert runner.active_job_count == 1
+            thread.start()
+            self._wait_active_count(runner, 1)
             with pytest.raises(SubagentBusyError, match="1/1 active"):
-                runner.submit("blocked")
+                runner.delegate("blocked")
 
             release.set()
-            self._wait_status(runner, first, "done")
+            thread.join(timeout=2)
+            assert not thread.is_alive()
+            assert errors == []
             self._wait_active_count(runner, 0)
 
-            second = runner.submit("next")
-            self._wait_status(runner, second, "done")
-            assert runner.result(second) == "next"
-        finally:
-            runner.shutdown()
-
-    def test_busy_tool_result_is_explicit(self) -> None:
-        """submit_subagent 在额度耗尽时返回明确 busy 状态。"""
-        release = threading.Event()
-
-        async def run_child(
-            _prompt: str, _model_profile: str, _cwd_override: Path | None
-        ) -> str:
-            await asyncio.to_thread(release.wait)
-            return "done"
-
-        runner = ManagedSubagentRunner(
-            run_child,
-            timeout_seconds=1,
-            max_active_jobs=1,
-        )
-        try:
-            tools = {tool.name: tool for tool in build_managed_subagent_tools(runner)}
-            tools["submit_subagent"].handler({"prompt": "first"})
-
-            output = tools["submit_subagent"].handler({"prompt": "second"})
-
-            assert "subagent busy" in output
+            assert runner.delegate("next").answer == "next"
         finally:
             release.set()
             runner.shutdown()
 
-    def test_timeout_releases_active_job_limit(self) -> None:
-        """超时失败后可立即提交新的 subagent job。"""
+    def test_delegate_task_returns_error_result_and_releases_limit(self) -> None:
         calls = 0
 
         async def run_child(
-            _prompt: str, _model_profile: str, _cwd_override: Path | None
+            _prompt: str,
+            _model_profile: str,
+            _cwd_override: Path | None,
+            _on_update,
         ) -> str:
             nonlocal calls
             calls += 1
@@ -90,166 +134,88 @@ class XcodeSubagentToolTests:
                 await asyncio.sleep(999)
             return "done"
 
-        runner = ManagedSubagentRunner(
+        runner = DelegatedTaskRunner(
             run_child,
             timeout_seconds=0.01,
             max_active_jobs=1,
         )
         try:
-            first = runner.submit("slow")
-            self._wait_status(runner, first, "failed")
+            first = runner.delegate("slow")
+            assert first.status == "failed"
+            assert "TimeoutError" in (first.error or "")
             self._wait_active_count(runner, 0)
 
-            second = runner.submit("fast")
-            self._wait_status(runner, second, "done")
-            assert runner.result(second) == "done"
+            second = runner.delegate("fast")
+            assert second.status == "done"
+            assert second.answer == "done"
         finally:
             runner.shutdown()
 
-    def test_cancel_releases_active_job_limit(self) -> None:
-        """取消完成后释放额度，允许后续提交。"""
-
+    def test_delegate_task_tool_marks_failed_runs_as_error(self) -> None:
         async def run_child(
-            prompt: str, _model_profile: str, _cwd_override: Path | None
+            _prompt: str,
+            _model_profile: str,
+            _cwd_override: Path | None,
+            _on_update,
         ) -> str:
-            if prompt == "slow":
-                await asyncio.sleep(999)
-            return "done"
+            raise RuntimeError("boom")
 
-        runner = ManagedSubagentRunner(
-            run_child,
-            timeout_seconds=None,
-            max_active_jobs=1,
-        )
+        runner = DelegatedTaskRunner(run_child, timeout_seconds=1)
         try:
-            first = runner.submit("slow")
-            assert runner.cancel(first) == "cancel requested"
-            self._wait_active_count(runner, 0)
+            tool = build_delegate_task_tools(runner)[0]
 
-            second = runner.submit("fast")
-            self._wait_status(runner, second, "done")
-            assert runner.result(second) == "done"
+            output = tool.streaming_handler(
+                {"description": "Explode", "prompt": "fail"},
+                None,
+            )
+
+            assert 'state="error"' in output
+            assert getattr(output, "is_error") is True
         finally:
             runner.shutdown()
 
-    def test_managed_subagent_runner_tracks_real_async_lifecycle(self) -> None:
-        async def run_child(
-            prompt: str, model_profile: str, cwd_override: Path | None
-        ) -> str:
-            await asyncio.sleep(0.05)
-            return f"{model_profile}:{prompt}:{cwd_override}"
-
-        runner = ManagedSubagentRunner(run_child, timeout_seconds=1)
-        try:
-            job_id = runner.submit("work")
-
-            assert runner.status(job_id) == "running"
-            self._wait_status(runner, job_id, "done")
-            assert runner.result(job_id) == "subagent:work:None"
-            assert runner.status(job_id) == "unknown"
-        finally:
-            runner.shutdown()
-
-    def test_managed_subagent_tools_submit_and_check(self) -> None:
-        async def run_child(
-            prompt: str, _model_profile: str, _cwd_override: Path | None
-        ) -> str:
-            return f"done {prompt}"
-
-        runner = ManagedSubagentRunner(run_child, timeout_seconds=1)
-        try:
-            tools = {tool.name: tool for tool in build_managed_subagent_tools(runner)}
-
-            submitted = tools["submit_subagent"].handler({"prompt": "work"})
-            job_id = submitted.split()[2]
-            self._wait_status(runner, job_id, "done")
-            checked = tools["check_subagent"].handler({"job_id": job_id})
-
-            assert "status=done" in checked
-            assert "done work" in checked
-            assert runner.status(job_id) == "unknown"
-        finally:
-            runner.shutdown()
-
-    def test_managed_subagent_runner_emits_lifecycle_events(self) -> None:
-        events: list[SubagentStartEvent | SubagentEndEvent] = []
-
-        async def run_child(
-            prompt: str, model_profile: str, cwd_override: Path | None
-        ) -> str:
-            return f"{model_profile}:{prompt}:{cwd_override}"
-
-        runner = ManagedSubagentRunner(
-            run_child,
-            timeout_seconds=1,
-            lifecycle_callback=events.append,
-        )
-        try:
-            job_id = runner.submit("work")
-            self._wait_status(runner, job_id, "done")
-
-            assert runner.result(job_id) == "subagent:work:None"
-
-            assert [event.type for event in events] == [
-                "subagent_start",
-                "subagent_end",
-            ]
-            start = events[0]
-            end = events[1]
-            assert isinstance(start, SubagentStartEvent)
-            assert isinstance(end, SubagentEndEvent)
-            assert isinstance(start, SubagentStartEvent)
-            assert isinstance(end, SubagentEndEvent)
-            assert start.job_id == job_id
-            assert start.model_profile == "subagent"
-            assert start.isolation == "context"
-            assert end.job_id == job_id
-            assert end.status == "done"
-        finally:
-            runner.shutdown()
-
-    def test_managed_subagent_runner_passes_model_profile(self) -> None:
+    def test_delegate_task_passes_model_profile(self) -> None:
         seen: list[tuple[str, str]] = []
 
         async def run_child(
-            prompt: str, model_profile: str, _cwd_override: Path | None
+            prompt: str,
+            model_profile: str,
+            _cwd_override: Path | None,
+            _on_update,
         ) -> str:
             seen.append((prompt, model_profile))
             return f"{model_profile}:{prompt}"
 
-        runner = ManagedSubagentRunner(
+        runner = DelegatedTaskRunner(
             run_child,
             timeout_seconds=1,
             available_profiles=("main", "subagent"),
         )
         try:
-            job_id = runner.submit("work", "main")
-            self._wait_status(runner, job_id, "done")
+            result = runner.delegate("work", model_profile="main")
 
-            assert runner.result(job_id) == "main:work"
+            assert result.answer == "main:work"
             assert seen == [("work", "main")]
         finally:
             runner.shutdown()
 
-    def test_managed_subagent_tools_reject_unknown_profile(self) -> None:
+    def test_delegate_task_rejects_unknown_profile(self) -> None:
         async def run_child(
-            prompt: str, model_profile: str, _cwd_override: Path | None
+            prompt: str,
+            model_profile: str,
+            _cwd_override: Path | None,
+            _on_update,
         ) -> str:
             return f"{model_profile}:{prompt}"
 
-        runner = ManagedSubagentRunner(
+        runner = DelegatedTaskRunner(
             run_child,
             timeout_seconds=1,
             available_profiles=("subagent",),
         )
         try:
-            tools = {tool.name: tool for tool in build_managed_subagent_tools(runner)}
-
-            output = tools["submit_subagent"].handler(
-                {"prompt": "work", "model_profile": "missing"}
-            )
-
-            assert "unknown model_profile: missing" in output
+            with pytest.raises(ValueError, match="unknown model_profile: missing"):
+                runner.delegate("work", model_profile="missing")
         finally:
             runner.shutdown()
 
@@ -269,22 +235,25 @@ class XcodeSubagentToolTests:
                 )()
 
         async def run_child(
-            prompt: str, model_profile: str, cwd_override: Path | None
+            prompt: str,
+            model_profile: str,
+            cwd_override: Path | None,
+            _on_update,
         ) -> str:
             seen.append((prompt, model_profile, cwd_override))
             return "done"
 
-        runner = ManagedSubagentRunner(
+        runner = DelegatedTaskRunner(
             run_child,
             timeout_seconds=1,
             available_profiles=("subagent",),
             worktree_runner=FakeWorktreeRunner(),
         )
         try:
-            job_id = runner.submit("work on files", isolation="worktree")
-            self._wait_status(runner, job_id, "done")
+            result = runner.delegate("work on files", isolation="worktree")
 
-            assert runner.result(job_id) == "done"
+            assert result.answer == "done"
+            assert result.worktree_task_id == "wt123"
             assert seen == [("work on files", "subagent", Path("sandbox").resolve())]
         finally:
             runner.shutdown()
@@ -293,7 +262,10 @@ class XcodeSubagentToolTests:
         cancelled = []
 
         async def run_child(
-            _prompt: str, _model_profile: str, _cwd_override: Path | None
+            _prompt: str,
+            _model_profile: str,
+            _cwd_override: Path | None,
+            _on_update,
         ) -> str:
             try:
                 await asyncio.sleep(999)
@@ -302,33 +274,34 @@ class XcodeSubagentToolTests:
                 raise
             return "never"
 
-        runner = ManagedSubagentRunner(run_child, timeout_seconds=0.01)
+        runner = DelegatedTaskRunner(run_child, timeout_seconds=0.01)
         try:
-            job_id = runner.submit("slow")
-            self._wait_status(runner, job_id, "failed")
+            result = runner.delegate("slow")
 
-            with pytest.raises(TimeoutError):
-                runner.result(job_id)
+            assert result.status == "failed"
             assert cancelled == [True]
         finally:
             runner.shutdown()
 
     def test_shutdown_cancels_running_job_without_hanging(self) -> None:
         async def run_child(
-            _prompt: str, _model_profile: str, _cwd_override: Path | None
+            _prompt: str,
+            _model_profile: str,
+            _cwd_override: Path | None,
+            _on_update,
         ) -> str:
             await asyncio.sleep(999)
             return "never"
 
-        runner = ManagedSubagentRunner(run_child, timeout_seconds=None)
-        job_id = runner.submit("slow")
-        assert runner.status(job_id) == "running"
+        runner = DelegatedTaskRunner(run_child, timeout_seconds=None)
+        thread = threading.Thread(target=lambda: runner.delegate("slow"), daemon=True)
+        thread.start()
+        self._wait_active_count(runner, 1)
 
         started = time.perf_counter()
-        runner.shutdown(drain_timeout=0.1)
+        runner.shutdown()
 
         assert time.perf_counter() - started < 2.0
-        assert runner.status(job_id) == "unknown"
         assert runner.active_job_count == 0
 
     def test_windows_worker_uses_selector_event_loop(self) -> None:
@@ -351,17 +324,8 @@ class XcodeSubagentToolTests:
 
         assert selector_loop.called
 
-    def _wait_status(
-        self, runner: ManagedSubagentRunner, job_id: str, expected: str
-    ) -> None:
-        for _ in range(100):
-            if runner.status(job_id) == expected:
-                return
-            time.sleep(0.01)
-        pytest.fail(f"subagent did not reach {expected}: {runner.status(job_id)}")
-
-    def _wait_active_count(self, runner: ManagedSubagentRunner, expected: int) -> None:
-        """等待 active job 额度释放。"""
+    def _wait_active_count(self, runner: DelegatedTaskRunner, expected: int) -> None:
+        """等待 active job 额度变化。"""
         for _ in range(100):
             if runner.active_job_count == expected:
                 return
@@ -373,7 +337,3 @@ class XcodeSubagentToolTests:
 
 async def _immediate(value: str) -> str:
     return value
-
-
-if __name__ == "__main__":
-    pytest.main()

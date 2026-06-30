@@ -62,7 +62,7 @@ class IsolatedAsyncWorker:
 
         self._closed = True
         self._submit_queue.put(None)
-        if self._thread is not None:
+        if self._thread is not None and self._thread.ident is not None:
             self._thread.join(timeout=5.0)
 
     def _thread_main(self) -> None:

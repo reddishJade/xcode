@@ -24,7 +24,7 @@ from xcode.coding_agent.tools import (
     build_grep_tool,
 )
 from xcode.experimental.task_store import TaskStore, build_task_tools
-from xcode.experimental.worktree import WorktreeTaskRunner, build_worktree_tools
+from xcode.harness.worktree import WorktreeTaskRunner, build_worktree_tools
 from xcode.harness.session_todo import build_session_todo_tools, SessionTodoState
 from xcode.harness.assembly import build_search_tools_tool
 from xcode.harness.memory import MemoryManager, build_memory_tools
@@ -39,7 +39,7 @@ CATALOG_COVERED_BUILDERS = frozenset(
         "build_file_tools",
         "build_load_skill_tool",
         "build_mailbox_tools",
-        "build_managed_subagent_tools",
+        "build_delegate_task_tools",
         "build_mcp_tools",
         "build_memory_tools",
         "build_progress_tools",
@@ -104,7 +104,7 @@ def build_tool_catalog() -> dict[str, set[str]]:
                 catalog.setdefault(group, set()).add(spec.name)
 
     if "subagent" not in catalog:
-        catalog["subagent"] = {"submit_subagent", "check_subagent", "cancel_subagent"}
+        catalog["subagent"] = {"delegate_task"}
     catalog.setdefault("skills", set()).add("load_skill")
 
     return catalog

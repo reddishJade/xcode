@@ -5,7 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 import asyncio
 import tempfile
-import time
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -24,7 +23,6 @@ from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.config import (
     AgentConfig,
-    ExperimentalRuntimeConfig,
     ObservabilityRuntimeConfig,
     PathsRuntimeConfig,
     SecurityRuntimeConfig,
@@ -57,7 +55,7 @@ class XcodeAppRuntimeTests:
 
         assert asyncio.run(main()) == "child done"
 
-    def test_default_tool_groups_hide_extensions(self) -> None:
+    def test_default_tool_groups_include_core_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             app = build_app(
                 project_root=Path(tmp),
@@ -70,8 +68,8 @@ class XcodeAppRuntimeTests:
         assert "apply_patch" in names
         assert "bash" in names
         assert "grep_search" in names
-        assert "create_worktree_task" not in names
-        assert "submit_subagent" in names
+        assert "create_worktree_task" in names
+        assert "delegate_task" in names
         assert "update_todo" in names
 
     def test_default_tool_groups_do_not_construct_optional_groups(self) -> None:
@@ -83,9 +81,9 @@ class XcodeAppRuntimeTests:
 
         names = {tool.name for tool in app.registry}
         assert "read_file" in names
-        assert "create_worktree_task" not in names
+        assert "create_worktree_task" in names
         assert "create_task" not in names
-        assert "submit_subagent" in names
+        assert "delegate_task" in names
 
     def test_matching_task_loads_discovered_skill_before_execution(self) -> None:
         class SkillSelectingProvider(StreamProvider):
@@ -365,7 +363,7 @@ class XcodeAppRuntimeTests:
         assert app.mailbox is None
         assert app.progress is None
 
-    def test_default_config_excludes_experimental_tool_groups(self) -> None:
+    def test_default_config_excludes_remaining_experimental_tool_groups(self) -> None:
         """默认配置不注册实验工具组。"""
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             app = build_app(
@@ -377,11 +375,11 @@ class XcodeAppRuntimeTests:
         assert "read_file" in names
         assert "bash" in names
         assert "grep_search" in names
-        assert "create_worktree_task" not in names
+        assert "create_worktree_task" in names
         assert "create_task" not in names
         assert "send_mailbox_message" not in names
         assert "save_task_progress" not in names
-        assert "submit_subagent" in names
+        assert "delegate_task" in names
         assert _layered_compactor(app).on_compact is not None
         assert app.mailbox is None
         assert app.progress is None
@@ -416,13 +414,11 @@ class XcodeAppRuntimeTests:
 
         assert captured["cancel_event"] is app.agent.cancellation_token
 
-    def test_worktree_tools_require_experimental_flag(self) -> None:
+    def test_worktree_tools_are_core_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             app = build_app(
                 project_root=Path(tmp),
-                runtime_config=XcodeRuntimeConfig(
-                    experimental=ExperimentalRuntimeConfig(worktree=True)
-                ),
+                runtime_config=XcodeRuntimeConfig(),
             )
 
         names = {tool.name for tool in app.registry}
@@ -609,9 +605,7 @@ class XcodeAppRuntimeTests:
 
     def test_subagent_inherits_only_enabled_core_tools(self) -> None:
         seen_child_tools: list[list[str]] = []
-        runtime_config = XcodeRuntimeConfig(
-            experimental=ExperimentalRuntimeConfig(worktree=True)
-        )
+        runtime_config = XcodeRuntimeConfig()
         with (
             tempfile.TemporaryDirectory() as tmp,
             _patched_provider_bundle(seen_child_tools),
@@ -622,18 +616,16 @@ class XcodeAppRuntimeTests:
             )
 
         tools = {tool.name: tool for tool in app.registry}
-        assert "submit_subagent" in tools
-        tools["submit_subagent"].handler({"prompt": "inspect"})
-
-        for _ in range(100):
-            if seen_child_tools:
-                break
-            time.sleep(0.01)
+        assert "delegate_task" in tools
+        tools["delegate_task"].streaming_handler(
+            {"description": "Inspect", "prompt": "inspect"},
+            None,
+        )
 
         assert seen_child_tools
         assert "read_file" in seen_child_tools[0]
         assert "update_todo" not in seen_child_tools[0]
-        assert "submit_subagent" not in seen_child_tools[0]
+        assert "delegate_task" not in seen_child_tools[0]
         assert "create_worktree_task" not in seen_child_tools[0]
 
     def test_subagent_can_explicitly_allow_session_todo_tool(self) -> None:
@@ -654,12 +646,10 @@ class XcodeAppRuntimeTests:
             )
 
         tools = {tool.name: tool for tool in app.registry}
-        tools["submit_subagent"].handler({"prompt": "inspect"})
-
-        for _ in range(100):
-            if seen_child_tools:
-                break
-            time.sleep(0.01)
+        tools["delegate_task"].streaming_handler(
+            {"description": "Inspect", "prompt": "inspect"},
+            None,
+        )
 
         assert seen_child_tools
         assert "update_todo" in seen_child_tools[0]
@@ -691,9 +681,7 @@ class XcodeAppRuntimeTests:
             llms={"main": provider, "subagent": provider},
             embedding=object(),
         )
-        runtime_config = XcodeRuntimeConfig(
-            experimental=ExperimentalRuntimeConfig(worktree=True)
-        )
+        runtime_config = XcodeRuntimeConfig()
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -705,17 +693,11 @@ class XcodeAppRuntimeTests:
                 app = build_app(project_root=root, runtime_config=runtime_config)
 
             tools = {tool.name: tool for tool in app.registry}
-            submitted = tools["submit_subagent"].handler({"prompt": "inspect"})
-            job_id = submitted.split()[2]
-            for _ in range(100):
-                checked = tools["check_subagent"].handler({"job_id": job_id})
-                if "status=done" in checked:
-                    break
-                import time
-
-                time.sleep(0.01)
-            else:
-                pytest.fail("subagent did not finish")
+            result = tools["delegate_task"].streaming_handler(
+                {"description": "Inspect", "prompt": "inspect"},
+                None,
+            )
+            assert 'state="completed"' in result
 
         assert seen_messages
         first_msg = seen_messages[0][0]
@@ -738,9 +720,10 @@ class XcodeAppRuntimeTests:
 
         names = {tool.name for tool in app.registry}
 
-        assert "submit_subagent" in names
-        assert "check_subagent" in names
-        assert "cancel_subagent" in names
+        assert "delegate_task" in names
+        assert "submit_subagent" not in names
+        assert "check_subagent" not in names
+        assert "cancel_subagent" not in names
 
     def test_scoped_child_registry_uses_override_for_file_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -833,9 +816,7 @@ class XcodeAppRuntimeTests:
                     id="wt123", path=worktree, branch=f"xcode/{name}"
                 )
 
-        runtime_config = XcodeRuntimeConfig(
-            experimental=ExperimentalRuntimeConfig(worktree=True)
-        )
+        runtime_config = XcodeRuntimeConfig()
         provider = ReadingProvider()
         bundle = SimpleNamespace(
             llm=provider,
@@ -849,26 +830,22 @@ class XcodeAppRuntimeTests:
             with (
                 patch("xcode.harness.app.build_provider_bundle", return_value=bundle),
                 patch(
-                    "xcode.experimental.worktree.WorktreeTaskRunner",
+                    "xcode.harness.worktree.WorktreeTaskRunner",
                     lambda project_root: FakeWorktreeRunner(project_root),
                 ),
             ):
                 app = build_app(project_root=root, runtime_config=runtime_config)
 
             tools = {tool.name: tool for tool in app.registry}
-            submitted = tools["submit_subagent"].handler(
-                {"prompt": "inspect", "isolation": "worktree"}
+            result = tools["delegate_task"].streaming_handler(
+                {
+                    "description": "Inspect",
+                    "prompt": "inspect",
+                    "isolation": "worktree",
+                },
+                None,
             )
-            job_id = submitted.split()[2]
-            for _ in range(100):
-                checked = tools["check_subagent"].handler({"job_id": job_id})
-                if "status=done" in checked:
-                    break
-                import time
-
-                time.sleep(0.01)
-            else:
-                pytest.fail("subagent did not finish")
+            assert 'state="completed"' in result
 
         assert len(seen_reads) == 1
         assert "1: worktree" in seen_reads[0]
@@ -1003,7 +980,7 @@ class TestSharedServicesInjection:
             assert id(app.daemon.mailbox) in mailbox_ids
 
     def test_build_app_shares_worktree_runner_across_tools_and_subagent(self) -> None:
-        from xcode.harness.config import ExperimentalRuntimeConfig, XcodeRuntimeConfig
+        from xcode.harness.config import XcodeRuntimeConfig
         from xcode.harness.skills import ToolRegistryState
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -1011,9 +988,7 @@ class TestSharedServicesInjection:
             with _patched_provider_bundle([]):
                 app = build_app(
                     project_root=root,
-                    runtime_config=XcodeRuntimeConfig(
-                        experimental=ExperimentalRuntimeConfig(worktree=True)
-                    ),
+                    runtime_config=XcodeRuntimeConfig(),
                 )
 
             registry_state = cast(ToolRegistryState, app.registry)

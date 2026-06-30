@@ -241,7 +241,7 @@ cli → coding_agent → harness → agent → ai
 
 ## L5 · Extension / MCP / Skill
 
-状态：部分实现。
+状态：已实现。
 
 ### 核心文件
 
@@ -250,7 +250,7 @@ cli → coding_agent → harness → agent → ai
 - `src/xcode/harness/skills.py`
 - `src/xcode/harness/skills_registry.py`
 - `src/xcode/cli/repl_skills.py`
-- `src/xcode/experimental/worktree.py`
+- `src/xcode/harness/worktree.py`
 
 ### 已实现
 
@@ -563,27 +563,22 @@ ExecutionModeState
 
 ### 已实现
 
-- `submit_subagent`、`check_subagent`、`cancel_subagent`。
-- `ManagedSubagentRunner` 使用独立线程和 asyncio event loop。
+- `delegate_task` 单入口委派工具。
+- `DelegatedTaskRunner` 使用独立线程和 asyncio event loop。
+- 子 agent 的 text/tool/result/final 事件通过 tool update 实时流回 REPL。
 - context 和 worktree 两种隔离方式。
 - model profile 选择。
 - 默认 120 秒 timeout。
-- start/end lifecycle event。
 - 父 agent 为 child 构造独立 StructuredAgent、ToolGate、HookManager 和
   ContextualRetrievalState。
 - child registry 排除 MCP 工具。
 - worktree 隔离模式。
-- `result()` 和 `cancel()` 会在任务完成后移除对应 job；`shutdown()` 清空全部
-  job。
+- 父模型只接收最终 `<task>` 结果，不再承担轮询状态检查。
 
 ### 当前限制
 
 - child registry 不包含 subagent tools，因此仅支持一层 subagent。
 - 没有 child → parent、child ↔ child 消息通道。
-- 没有进度事件和流式输出；父 agent 只能 poll `check_subagent`。
-- Branch summary 只保留有限结果摘要。
-- `sweep_finished()` 没有定时自动调用；如果调用方既不 check/cancel，也不关闭
-  runner，已完成 job 会继续保留。
 - context isolation 共享工作目录，不能避免并发文件修改冲突。
 
 ---
