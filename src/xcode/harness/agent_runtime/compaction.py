@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any
+from uuid import uuid4
 
 from xcode.agent.compaction import estimate_tokens
 from xcode.agent.message_converter import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
@@ -17,6 +18,64 @@ from ..skill_activation import is_skill_activation_content
 from ..skills import ToolSpec
 
 """分层上下文压缩工具。"""
+
+
+# ── 会话树条目类型（用于无损历史追踪）──
+
+
+class CompactionEntry:
+    """压缩条目，记录一次压缩操作的元数据。
+
+    当 LayeredCompactor 执行压缩时，创建此条目并追加到会话树中。
+    完整的消息历史可通过 transcript JSONL + entries 重建。
+    """
+
+    def __init__(
+        self,
+        summary: str,
+        first_kept_entry_id: str,
+        tokens_before: int,
+        read_files: set[str] | None = None,
+        modified_files: set[str] | None = None,
+        parent_id: str | None = None,
+        entry_id: str | None = None,
+    ) -> None:
+        self.id: str = entry_id or uuid4().hex[:12]
+        self.parent_id: str | None = parent_id
+        self.type: str = "compaction"
+        self.timestamp: float = datetime.now(timezone.utc).timestamp()
+        self.summary: str = summary
+        self.first_kept_entry_id: str = first_kept_entry_id
+        self.tokens_before: int = tokens_before
+        self.read_files: tuple[str, ...] = tuple(sorted(read_files or set()))
+        self.modified_files: tuple[str, ...] = tuple(sorted(modified_files or set()))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "parent_id": self.parent_id,
+            "type": self.type,
+            "timestamp": self.timestamp,
+            "summary": self.summary,
+            "first_kept_entry_id": self.first_kept_entry_id,
+            "tokens_before": self.tokens_before,
+            "read_files": list(self.read_files),
+            "modified_files": list(self.modified_files),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CompactionEntry:
+        entry = cls.__new__(cls)
+        entry.id = str(data.get("id", uuid4().hex[:12]))
+        entry.parent_id = data.get("parent_id")
+        entry.type = "compaction"
+        entry.timestamp = float(data.get("timestamp", 0))
+        entry.summary = str(data.get("summary", ""))
+        entry.first_kept_entry_id = str(data.get("first_kept_entry_id", ""))
+        entry.tokens_before = int(data.get("tokens_before", 0))
+        entry.read_files = tuple(data.get("read_files", []) or [])
+        entry.modified_files = tuple(data.get("modified_files", []) or [])
+        return entry
 
 
 # 文件操作工具名集合（用于累积文件跟踪）
@@ -76,6 +135,9 @@ class LayeredCompactor:
         # 累积文件跟踪（跨压缩轮次）
         self._cumulative_read_files: set[str] = set()
         self._cumulative_modified_files: set[str] = set()
+        # 会话树条目（用于无损历史追踪）
+        self.entries: list[CompactionEntry] = []
+        self._last_entry_id: str | None = None
 
     def _accumulate_file_ops(self, messages: list[dict[str, Any]]) -> None:
         """从消息中提取文件操作，合并到累积跟踪状态。"""
@@ -145,11 +207,61 @@ class LayeredCompactor:
                 content_val = second_msg.get("content")
                 assert isinstance(content_val, str)
                 cleaned_content = context_collapse_clean(content_val)
+                # 当实际发生压缩时，创建 CompactionEntry 追加到会话树
+                # 使用系统提示的 id 作为 first_kept_entry_id 锚点
+                first_kept_idx = len(final_messages) - 1
+                # 从保留的消息中找第一个 user 或 assistant 消息作为锚点
+                for i in range(1, len(final_messages)):
+                    role = final_messages[i].get("role", "")
+                    if role in ("user", "assistant"):
+                        first_kept_idx = i
+                        break
+
+                entry = CompactionEntry(
+                    summary=cleaned_content,
+                    first_kept_entry_id=f"idx:{first_kept_idx}",
+                    tokens_before=len(messages),
+                    read_files=set(self._cumulative_read_files),
+                    modified_files=set(self._cumulative_modified_files),
+                    parent_id=self._last_entry_id,
+                )
+                self.entries.append(entry)
+                self._last_entry_id = entry.id
+
                 second_msg["content"] = cleaned_content
                 if self.on_compact is not None:
                     self.on_compact(cleaned_content)
 
         return final_messages
+
+    def save_entries(self, path: Path) -> None:
+        """将会话树条目持久化到 JSONL 文件。"""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            for entry in self.entries:
+                f.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
+
+    def load_entries(self, path: Path) -> None:
+        """从 JSONL 文件加载会话树条目。"""
+        if not path.exists():
+            return
+        loaded: list[CompactionEntry] = []
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        data = json.loads(line)
+                        loaded.append(CompactionEntry.from_dict(data))
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+        self.entries = loaded
+        if loaded:
+            self._last_entry_id = loaded[-1].id
+
+    def entries_dicts(self) -> list[dict[str, Any]]:
+        """返回所有条目的 dict 列表，用于序列化。"""
+        return [e.to_dict() for e in self.entries]
 
 
 def context_collapse_clean(content: str) -> str:
