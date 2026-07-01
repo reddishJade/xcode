@@ -19,8 +19,6 @@ Xcode 是轻量级 Python Agent 运行骨架。四层架构：
 |---|---|
 | [docs/evaluation-guide.md](docs/evaluation-guide.md) | 运行测试、lint、typecheck、eval |
 | [docs/git-workflow.md](docs/git-workflow.md) | 提交前 |
-| [docs/code-organization.md](docs/code-organization.md) | 编辑源码结构前 |
-| [docs/source-review.md](docs/source-review.md) | 大规模重构或审查前 |
 | [CONFIG.md](CONFIG.md) | 运行时配置参考 |
 
 ## 常用命令

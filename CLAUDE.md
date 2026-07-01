@@ -122,7 +122,5 @@ uv run python -m xcode.evals.cli --list-benchmarks          # 列出 benchmark
 | 文档 | 内容 |
 |---|---|
 | [CONFIG.md](CONFIG.md) | 运行时配置完整参考（provider、agent、security、hooks、tools、prompt 等） |
-| [docs/code-organization.md](docs/code-organization.md) | 每个模块的详细职责和文件清单 |
-| [docs/source-review.md](docs/source-review.md) | 源码级架构审查：数据流、权限边界、隔离面 |
 | [docs/evaluation-guide.md](docs/evaluation-guide.md) | Eval 框架、套件、grader、benchmark adapter 使用指南 |
 | [docs/git-workflow.md](docs/git-workflow.md) | Git 操作详细规则 |
