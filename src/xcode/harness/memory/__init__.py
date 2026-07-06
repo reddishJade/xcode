@@ -1,5 +1,6 @@
 """Project- and user-scoped durable memory services."""
 
+from .collector import MemoryCollector
 from .governance import (
     GovernedMemoryEvidence,
     MemoryEvidenceInput,
@@ -12,6 +13,7 @@ from .governance import (
     MemoryProposalStatus,
 )
 from .governed_manager import GovernedMemoryManager, GovernedMemoryManager as MemoryManager
+from .layered_governance import LayeredMemoryGovernance
 from .manager import (
     MemoryLayer,
     MemoryLayerFilter,
@@ -31,6 +33,8 @@ from .tools import build_memory_tools
 __all__ = [
     "GovernedMemoryEvidence",
     "GovernedMemoryManager",
+    "LayeredMemoryGovernance",
+    "MemoryCollector",
     "MemoryEvidence",
     "MemoryEvidenceInput",
     "MemoryGovernance",
