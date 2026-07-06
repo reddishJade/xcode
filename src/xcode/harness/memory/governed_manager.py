@@ -9,6 +9,8 @@ subclass intercepts only externally meaningful durable-write origins:
   instead of writing directly to ``MEMORY.md``.
 * a governance-approved write receives immutable proposal and evidence IDs before
   it reaches the Markdown store, preserving a complete read-back audit chain.
+* retrieval is not adoption: a memory must be explicitly referenced before a
+  successful turn can increase its utility or outcome counts.
 
 All other callers retain the base manager's behavior so low-level migration,
 fixtures, and deterministic storage operations are not silently reclassified as
@@ -29,12 +31,14 @@ from .manager import (
     MemoryLayer,
     MemoryManager as BaseMemoryManager,
     MemoryRerankPolicy,
+    MemoryOutcome,
+    _SessionMemoryUsage,
 )
-from .parsing import MemoryEvidence, MemoryType, extract_title
+from .parsing import MemoryEvidence, MemoryRecord, MemoryType, extract_title
 
 
 class GovernedMemoryManager(BaseMemoryManager):
-    """Public manager that routes user and consolidation writes through policy."""
+    """Public manager that routes durable writes and feedback through policy."""
 
     def __init__(
         self,
@@ -111,6 +115,39 @@ class GovernedMemoryManager(BaseMemoryManager):
             evidence=evidence,
             layer=layer,
         )
+
+    def adopt_injected_records(self, *, source: str = "session") -> int:
+        """Adopt only memory records explicitly referenced by the final answer."""
+        records_by_layer = {
+            layer: {
+                record.memory_id: record
+                for record in self.read_memory_records(layer=layer)
+            }
+            for layer in ("project", "user")
+        }
+        adopted: list[MemoryRecord] = []
+        for (layer, memory_id), usage in self._session_usage.items():
+            if not usage.injected or not usage.referenced or usage.adopted:
+                continue
+            record = records_by_layer[layer].get(memory_id)
+            if record is not None:
+                adopted.append(record)
+        if not adopted:
+            return 0
+        self.record_adopted_records(adopted, source=source)
+        return len(adopted)
+
+    def _feedback_fields_for_record(
+        self,
+        record: MemoryRecord,
+        usage: _SessionMemoryUsage,
+        outcome: MemoryOutcome,
+    ) -> dict[str, str]:
+        """Preserve prior outcome when a record was merely retrieved or injected."""
+        fields = super()._feedback_fields_for_record(record, usage, outcome)
+        if not usage.adopted:
+            fields["last-outcome"] = record.last_outcome or "unobserved"
+        return fields
 
     def consolidate(self, summary: str) -> None:
         """Create pending proposals from legacy compact-summary candidates."""
