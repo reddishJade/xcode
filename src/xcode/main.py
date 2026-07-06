@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-
 import sys
 
 from .cli.config_cmd import handle_config_command
+from .cli.memory_cmd import handle_memory_command
 from .cli.repl import run_repl
 from .cli.setup_wizard import has_valid_config, run_setup_wizard
-from .harness.config import discover_runtime_config, resolve_config_path
 from .harness.app import build_app
+from .harness.config import discover_runtime_config, resolve_config_path
 
 
 def _build_config_parser(subparsers) -> None:
@@ -75,7 +75,7 @@ def _build_config_parser(subparsers) -> None:
             "Set a single field value in a profile without interactive prompts. "
             "Useful for quick changes or scripting.\n\n"
             "Available fields: transport, chat_model, base_url, api_key, "
-            "thinking (bool), reasoning_effort, clear_thinking (bool), tool_stream (bool)"
+            "thinking (bool), reasoning_effort, clear_thinking, tool_stream"
         ),
     )
     set_p.add_argument("name", help="Profile name")
@@ -86,6 +86,68 @@ def _build_config_parser(subparsers) -> None:
 
 def _build_setup_parser(subparsers) -> None:
     subparsers.add_parser("setup", help="Run the provider setup wizard")
+
+
+def _build_memory_parser(subparsers) -> None:
+    memory_parser = subparsers.add_parser(
+        "memory",
+        help="Inspect and explicitly approve durable-memory proposals",
+        description=(
+            "Inspect governed durable memory without starting an agent. "
+            "Approval and rejection are direct user actions and require --yes.\n\n"
+            "Use --project-root before the memory command, for example:\n"
+            "  xcode --project-root . memory proposals\n"
+            "  xcode --project-root . memory approve mp_... --yes"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    memory_parser.set_defaults(memory_action="proposals")
+    memory_sub = memory_parser.add_subparsers(dest="memory_action")
+
+    proposals_p = memory_sub.add_parser(
+        "proposals", help="List project and user memory proposals"
+    )
+    proposals_p.add_argument(
+        "--status",
+        choices=["all", "pending", "approved", "rejected", "applied", "failed"],
+        default="pending",
+        help="Proposal status filter.",
+    )
+
+    approve_p = memory_sub.add_parser(
+        "approve", help="Approve one pending proposal and write its memory"
+    )
+    approve_p.add_argument("proposal_id", help="The mp_* proposal identifier.")
+    approve_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm this durable memory write.",
+    )
+    approve_p.add_argument(
+        "--approver",
+        default="cli_user",
+        help="Audit label for the user who approves the proposal.",
+    )
+
+    reject_p = memory_sub.add_parser(
+        "reject", help="Reject one pending proposal without writing memory"
+    )
+    reject_p.add_argument("proposal_id", help="The mp_* proposal identifier.")
+    reject_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm this rejection.",
+    )
+    reject_p.add_argument(
+        "--reason",
+        default="rejected_by_user",
+        help="Reason recorded in the proposal ledger.",
+    )
+
+    memory_sub.add_parser(
+        "audit",
+        help="Check durable memory records against proposal and evidence provenance",
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -119,6 +181,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command")
     _build_config_parser(subparsers)
     _build_setup_parser(subparsers)
+    _build_memory_parser(subparsers)
     return parser.parse_args(argv)
 
 
@@ -137,8 +200,10 @@ def main() -> int:
             pass
         return 0
 
-    temp_config: Path | None = None
+    if args.command == "memory":
+        return handle_memory_command(args, project_root)
 
+    temp_config: Path | None = None
     if not has_valid_config(project_root):
         if sys.stdin.isatty():
             try:
@@ -150,13 +215,12 @@ def main() -> int:
             if status == "no_save" and config_path is not None:
                 temp_config = config_path
                 args.config = config_path
-        else:
-            if not has_valid_config(project_root):
-                print(
-                    "No API key configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, "
-                    "or DEEPSEEK_API_KEY in .env or environment.",
-                    file=sys.stderr,
-                )
+        elif not has_valid_config(project_root):
+            print(
+                "No API key configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, "
+                "or DEEPSEEK_API_KEY in .env or environment.",
+                file=sys.stderr,
+            )
 
     try:
         runtime_config = discover_runtime_config(project_root, args.config)
@@ -189,11 +253,17 @@ def _run(args, runtime_config) -> int:
             )
         if args.continue_:
             return run_repl(
-                app, sessions_dir, auto_continue=True, project_root=args.project_root
+                app,
+                sessions_dir,
+                auto_continue=True,
+                project_root=args.project_root,
             )
         if args.resume:
             return run_repl(
-                app, sessions_dir, resume_latest=True, project_root=args.project_root
+                app,
+                sessions_dir,
+                resume_latest=True,
+                project_root=args.project_root,
             )
         return run_repl(app, sessions_dir, project_root=args.project_root)
     finally:
