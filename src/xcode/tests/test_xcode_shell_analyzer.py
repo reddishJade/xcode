@@ -20,6 +20,7 @@ from xcode.harness.observability.permission_model import (
     PathBoundaryPolicyEvaluator,
     BoundaryContext,
     ExternalDirectory,
+    Rule,
     Target,
 )
 from xcode.harness.observability.permissions import (
@@ -31,7 +32,7 @@ from xcode.harness.observability.shell_analyzer import (
     ShellAnalysisPolicyEvaluator,
     analyze_shell_command,
 )
-from xcode.harness.observability import SafetyBackstopPolicyEvaluator
+
 import pytest
 
 
@@ -326,13 +327,15 @@ class TestSensitivePathDetection:
 
 
 class TestPermissionChain:
-    """从 ActionExtractor → SafetyBackstop → ShellAnalysis → PathBoundary 的完整链路。"""
+    """从 ActionExtractor → RuleMatcher → ShellAnalysis → PathBoundary 的完整链路。"""
 
     def _engine(self, policy: PermissionPolicy | None = None) -> PermissionEngine:
         return PermissionEngine(
             PermissionEngineConfig(
                 static_policy=policy,
                 project_root=Path("/workspace"),
+                mode_ruleset=(Rule(action="bash", effect="allow"),),
+                mode_fallback="ask",
             )
         )
 
@@ -363,7 +366,7 @@ class TestPermissionChain:
         """cat $HOME/.env → 变量展开导致 ask。"""
         engine = self._engine()
         result = engine.decide("bash", {"command": "cat $HOME/.env"})
-        # SafetyBackstop 对 cat 是 allow，但 ShellAnalysis 标记了变量展开 unresolved
+        # bash 工具规则默认 allow，但 ShellAnalysis 标记了变量展开 unresolved
         # 由于 unresolved_effects，应升为 ask
         assert result.decision == "ask", (
             f"expected ask, got {result.decision}: {result.reason}"
@@ -381,27 +384,27 @@ class TestPermissionChain:
         result = engine.decide("bash", {"command": "xargs rm"})
         assert result.decision == "ask"
 
-    def test_safe_command_allowed(self) -> None:
-        """echo hello → allow（安全无副作用）。"""
+    def test_safe_command_defaults_to_allow(self) -> None:
+        """echo hello → build profile 默认允许 bash 工具执行。"""
         engine = self._engine()
         result = engine.decide("bash", {"command": "echo hello"})
         assert result.decision == "allow"
 
-    def test_git_status_allowed(self) -> None:
-        """git status → allow（Bucket C）。"""
+    def test_git_status_defaults_to_allow(self) -> None:
+        """git status → build profile 默认允许 bash 工具执行。"""
         engine = self._engine()
         result = engine.decide("bash", {"command": "git status --short"})
         assert result.decision == "allow"
 
-    def test_rm_root_denied_nonbypassable(self) -> None:
-        """rm -rf / → SafetyBackstop non-bypassable deny。"""
+    def test_rm_root_denied_by_path_boundary(self) -> None:
+        """rm -rf / → ShellAnalyzer 提取根路径后由路径边界拒绝。"""
         engine = self._engine()
         result = engine.decide("bash", {"command": "rm -rf /"})
         assert result.decision == "deny"
         assert result.blocked
 
-    def test_ls_allowed(self) -> None:
-        """ls -la → allow（Bucket C）。"""
+    def test_ls_defaults_to_allow(self) -> None:
+        """ls -la → build profile 默认允许 bash 工具执行。"""
         engine = self._engine()
         result = engine.decide("bash", {"command": "ls -la"})
         assert result.decision == "allow"
@@ -739,15 +742,6 @@ class TestEdgeCases:
         evaluator = ShellAnalysisPolicyEvaluator()
         evaluator.evaluate(original)
         assert original.unresolved_effects == frozen.unresolved_effects
-
-    def test_safety_backstop_still_works(self) -> None:
-        """SafetyBackstopPolicyEvaluator 不受影响。"""
-        evaluator = SafetyBackstopPolicyEvaluator()
-        from xcode.harness.observability.permission_model import ActionExtractor
-
-        action = ActionExtractor().extract("bash", {"command": "rm -rf /"})
-        constraints = evaluator.evaluate(action)
-        assert any(c.decision == "deny" for c in constraints)
 
 
 # ═══════════════════════════════════════════════════════════════════

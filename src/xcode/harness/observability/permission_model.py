@@ -1,18 +1,15 @@
 """四轴权限模型的数据结构、动作提取和约束解析。
 
 本模块职责（请勿盲目拆分）：
-- 核心权限数据模型：Action, Target, Constraint, Verdict, GrantRecord, etc.
+- 核心权限数据模型：Action, Target, Constraint, Verdict, GrantRecord, Rule, etc.
 - GrantStore 协议及实现：InMemoryGrantStore, FileGrantStore
 - PermissionResolver（约束优先级解析）
 - ModePolicyEvaluator, StaticPolicyEvaluator, StructuredBoundaryPolicyEvaluator
 - evaluate_policy_constraints（编排所有 evaluator）
 - ActionExtractor 及路径辅助函数
+- Rule / MODE_DEFAULT_RULES / PLAN_DEFAULT_RULES / ACT_DEFAULT_RULES
 
-SafetyBackstopPolicyEvaluator 及其 shell 命令分类已拆至 _safety_backstop.py。
-_safety_backstop 从本模块导入 Action/Constraint 等共享模型类型；
-本模块在 evaluate_policy_constraints 内局部导入 SafetyBackstopPolicyEvaluator
-以避免 import-time 循环。其余分组（grant store / resolver / evaluators / extractor）
-紧密关联，拆分需要谨慎评估依赖边界。
+Rule 是三态模式规则的核心数据结构，由 RuleMatcher（rule_matcher.py）消费。
 """
 
 from __future__ import annotations
@@ -43,9 +40,82 @@ UnresolvedReason = Literal[
     "parse_error",
     "unsupported_shell",
 ]
+
 type GrantRecordData = dict[str, object]
 
 logger = logging.getLogger(__name__)
+
+
+class Rule(BaseModel):
+    """权限规则：匹配条件 + 决策。
+
+    非 shell 工具（write_file, read_file 等）只匹配 action + resource_pattern。
+    shell 工具优先匹配结构化字段（command, subcommand, flags），
+    resource_pattern 作为额外路径约束。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: str = Field(description="工具名或通配符，如 'bash', 'write_file', '*'")
+    effect: PermissionDecisionV2 = Field(description="决策: allow / ask / deny")
+
+    # ── 结构化 shell 匹配字段 ──
+    command: str | None = Field(
+        default=None,
+        description="shell 主命令，如 'git', 'rm', 'docker'",
+    )
+    subcommand: str | None = Field(
+        default=None,
+        description="精确子命令，如 'push'",
+    )
+    subcommand_in: set[str] | None = Field(
+        default=None,
+        description="匹配任一子命令，如 {'status', 'diff', 'log'}",
+    )
+    flags_any: set[str] | None = Field(
+        default=None,
+        description="含任一 flag 即匹配，如 {'--force', '-f'}",
+    )
+    flags_all: set[str] | None = Field(
+        default=None,
+        description="含全部 flag 才匹配",
+    )
+
+    # ── 通配符降级字段（非 shell 工具 或 路径约束）──
+    resource_pattern: str | None = Field(
+        default=None,
+        description=(
+            "通配符路径/资源模式。非 shell 工具使用此字段匹配 target.value；"
+            "shell 工具中此项作为额外路径约束。"
+        ),
+    )
+
+
+# ── 三态默认 ruleset ──
+
+MODE_DEFAULT_RULES: dict[str, tuple[Rule, ...]] = {}
+"""各执行模式的默认 ruleset，在 execution_modes.py 初始化时填充。
+
+拆分原因：默认 ruleset 引用了 Python 模块级常量定义在此处，
+避免在此处产生循环导入。
+
+填充方式：
+  MODE_DEFAULT_RULES["plan"] = PLAN_DEFAULT_RULES
+  MODE_DEFAULT_RULES["build"] = build 模式工具级默认规则
+  MODE_DEFAULT_RULES["act"] = ACT_DEFAULT_RULES
+"""
+
+PLAN_DEFAULT_RULES: tuple[Rule, ...] = ()
+"""plan 模式默认规则由 execution_modes.py 填充。
+
+plan 的兜底是 deny（不弹 HITL）；只读工具和计划文件例外显式 allow。
+"""
+
+ACT_DEFAULT_RULES: tuple[Rule, ...] = ()
+"""act 模式默认规则由 execution_modes.py 填充。写入和 shell 默认 ask。"""
+
+
+ExecutionMode = Literal["plan", "build", "act"]
 
 
 class ExternalDirectory(BaseModel):
@@ -104,7 +174,7 @@ class Action(BaseModel):
 class UnresolvedEffect(BaseModel):
     """Shell 命令中无法静态确认的文件效果。
 
-    这些效果不应直接放行；如果 SafetyBackstop 没有拒绝，
+    这些效果不应直接放行；如果规则匹配没有拒绝，
     至少应升为 ask 等待用户确认。
     """
 
@@ -120,7 +190,6 @@ class Constraint(BaseModel):
     decision: PermissionDecisionV2
     source: str
     reason: str
-    non_bypassable: bool = False
     target_pattern: str | None = None
     operation: str | None = None
     access: PermissionAccess | None = None
@@ -362,7 +431,7 @@ class PermissionResolver:
     DEFAULT_REASON = "no constraints produced; default allow"
 
     def resolve(self, constraints: tuple[Constraint, ...]) -> Verdict:
-        """按 non-bypassable deny > deny > ask > allow 解析约束。"""
+        """按 deny > ask > allow 解析约束。"""
         if not constraints:
             return Verdict(
                 decision="allow",
@@ -383,12 +452,6 @@ class PermissionResolver:
         )
 
     def _winning_constraint(self, constraints: tuple[Constraint, ...]) -> Constraint:
-        non_bypassable_denies = tuple(
-            c for c in constraints if c.decision == "deny" and c.non_bypassable
-        )
-        if non_bypassable_denies:
-            return non_bypassable_denies[0]
-
         explicit_denies = tuple(c for c in constraints if c.decision == "deny")
         if explicit_denies:
             return explicit_denies[0]
@@ -410,6 +473,39 @@ class PolicyEvaluator(Protocol):
     def evaluate(self, action: Action) -> tuple[Constraint, ...]: ...
 
 
+_COMMAND_GRANT_ARITY: dict[tuple[str, ...], int] = {
+    ("git",): 2,
+    ("npm", "run"): 3,
+    ("pnpm", "run"): 3,
+    ("yarn", "run"): 3,
+    ("bun", "run"): 3,
+    ("aws", "s3", "ls"): 3,
+}
+
+
+def _command_grant_pattern(command: str) -> str:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return command
+    if not tokens:
+        return command
+    lowered = tuple(token.lower() for token in tokens)
+    arity = 1
+    for prefix, prefix_arity in _COMMAND_GRANT_ARITY.items():
+        if lowered[: len(prefix)] == prefix:
+            arity = min(prefix_arity, len(tokens))
+            break
+    prefix = " ".join(tokens[:arity])
+    return f"{prefix} *"
+
+
+def _grant_target_pattern(target: Target) -> str:
+    if target.kind == "command":
+        return _command_grant_pattern(target.value)
+    return target.value
+
+
 def create_grant_record(
     action: Action,
     target: Target,
@@ -424,7 +520,7 @@ def create_grant_record(
         capability=action.capability,
         operation=action.operation,
         target_kind=target.kind,
-        target_pattern=target.value,
+        target_pattern=_grant_target_pattern(target),
         access=target.access,
         decision=decision,
         scope=scope,
@@ -549,7 +645,9 @@ def _grant_matches_target(
     if record.access != target.access:
         return False
     if target.kind != "path":
-        return record.target_pattern == target.value
+        from .rule_matcher import _wildcard_match
+
+        return _wildcard_match(target.value, record.target_pattern, cross_path=True)
     return _path_pattern_matches(
         record.target_pattern,
         target.value,
@@ -813,7 +911,6 @@ class PathBoundaryPolicyEvaluator:
                 decision="deny",
                 source="boundary",
                 reason=f"path cannot be resolved safely: {path_str}: {exc}",
-                non_bypassable=target.access in ("write", "execute"),
                 target_pattern=path_str,
                 operation=action.operation,
                 access=target.access,
@@ -862,7 +959,6 @@ class PathBoundaryPolicyEvaluator:
                 decision="deny",
                 source="boundary",
                 reason=f"git metadata path is blocked: {original_path}",
-                non_bypassable=target.access == "write",
                 target_pattern=check_path,
                 operation=action.operation,
                 access=target.access,
@@ -933,7 +1029,6 @@ def evaluate_policy_constraints(
     static_policy: Any = None,
     action_input: str | None = None,
     boundary_context: BoundaryContext | None = None,
-    safety_backstop_enabled: bool = False,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
 ) -> tuple[Constraint, ...]:
     """运行已接入的 shadow policy evaluators 和 hook constraint providers。
@@ -960,15 +1055,6 @@ def evaluate_policy_constraints(
         ),
         PathBoundaryPolicyEvaluator(boundary_context),
     ]
-    if safety_backstop_enabled:
-        from ._safety_backstop import SafetyBackstopPolicyEvaluator
-
-        evaluators.append(SafetyBackstopPolicyEvaluator())
-        # ShellAnalysisPolicyEvaluator 紧跟 SafetyBackstop：
-        # SafetyBackstop 做命令级 deny/ask，ShellAnalysis 做路径级 unresolved→ask
-        from .shell_analyzer import ShellAnalysisPolicyEvaluator
-
-        evaluators.append(ShellAnalysisPolicyEvaluator())
     evaluators.extend(hook_constraint_providers)
     constraints: list[Constraint] = []
     for evaluator in evaluators:
@@ -999,6 +1085,7 @@ class ActionExtractor:
                 operation=action.operation,
                 targets=action.targets,
                 input=action.input,
+                unresolved_effects=action.unresolved_effects,
             )
         return action
 

@@ -5,8 +5,7 @@ import tempfile
 from xcode.cli.repl_tools import parse_tool_input
 from xcode.coding_agent.tools import build_bash_tool
 from xcode.coding_agent.tools.bash import OutputAccumulator
-from xcode.harness.observability._safety_backstop import SafetyBackstopPolicyEvaluator
-from xcode.harness.observability.permission_model import ActionExtractor
+
 import pytest
 
 
@@ -92,34 +91,6 @@ class XcodeBashToolTests:
             assert Path(full_path).read_text(encoding="utf-8") == "one\ntwo\nthree\n"
         finally:
             Path(full_path).unlink(missing_ok=True)
-
-    def test_safety_backstop_covers_old_classification(self) -> None:
-        """SafetyBackstopPolicy 覆盖旧的 evaluate_command_risk 分类。"""
-        evaluator = SafetyBackstopPolicyEvaluator()
-
-        def _action(cmd: str):
-            return ActionExtractor().extract("bash", {"command": cmd})
-
-        # rm 非根路径 → ask (Bucket B)
-        for cmd in ["rm -rf ./tmp", "rm -rf /tmp/xcode-demo"]:
-            constraints = evaluator.evaluate(_action(cmd))
-            assert constraints[0].decision == "ask", cmd
-
-        # rm 根路径 → deny non-bypassable (Bucket A)
-        for cmd in ["rm -rf /", "rm -fr /*"]:
-            constraints = evaluator.evaluate(_action(cmd))
-            assert constraints[0].decision == "deny", cmd
-            assert constraints[0].non_bypassable
-
-        # 系统路径递归修改 → deny non-bypassable (Bucket A)
-        for cmd in ["rm -rf /etc", "chmod -R 777 /usr", "chown -R root /var"]:
-            constraints = evaluator.evaluate(_action(cmd))
-            assert constraints[0].decision == "deny", cmd
-
-        # 非系统路径递归权限变更 → ask (Bucket B)
-        for cmd in ["chmod -R 777 ./tmp", "chown -R root ~/xcode/tmp"]:
-            constraints = evaluator.evaluate(_action(cmd))
-            assert constraints[0].decision == "ask", cmd
 
 
 class EnvHookTests:

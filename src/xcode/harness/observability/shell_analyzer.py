@@ -262,7 +262,7 @@ def _diff_cmd(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
 
 @_REGISTRY.register("git", syntax="posix")
 def _git(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
-    # git 大多数子命令读 .git 目录；写操作 git reset --hard 会被 SafetyBackstop 处理
+    # git 大多数子命令读 .git 目录；写操作由权限系统处理
     return []
 
 
@@ -1113,7 +1113,7 @@ class PosixAnalyzer:
                         )
                     )
 
-        # SafetyBackstop 的风格标记：路径含 .. 或绝对路径的检测在
+        # 路径含 .. 或绝对路径的检测在
         # PathBoundaryPolicyEvaluator 中进行，这里不做重复工作
 
     def _handle_redirect_node(
@@ -1359,10 +1359,8 @@ class ShellAnalysisPolicyEvaluator:
     此 evaluator 读取 action.unresolved_effects（由 ActionExtractor
     或 ShellAnalyzer 负责填充），为每个 unresolved 效果生成 ask 约束。
 
-    与 SafetyBackstopPolicyEvaluator 的关系：
-    - SafetyBackstop 做命令级三桶分类（命令名模式匹配）
-    - ShellAnalysisPolicyEvaluator 做路径级 AST 语义分析
-    - 两者是互补的，SafetyBackstop 的 deny 会覆盖任何 ask
+    ShellAnalysisPolicyEvaluator 做路径级 AST 语义分析，
+    为每个 unresolved 效果生成 ask 约束。
     """
 
     def evaluate(self, action: Action) -> tuple[Constraint, ...]:

@@ -18,17 +18,19 @@ from .permission_model import (
     ApprovalCandidate,
     ApprovalResult,
     BoundaryContext,
+    Constraint,
     ExternalDirectory,
     GrantRecord,
     GrantStore,
     PolicyEvaluator,
     PermissionResolver,
+    Rule,
     StaticPermission,
     Verdict,
     compute_shadow_approval_candidate,
     create_grant_record,
-    evaluate_policy_constraints,
 )
+from .rule_matcher import first_match as rule_first_match, merge_rulesets as rule_merge
 from .permission_model import GrantDecision as _GrantDecision
 from .permission_model import GrantScope as _GrantScope
 
@@ -62,10 +64,10 @@ class PermissionPolicy:
     def __init__(
         self,
         rules: tuple[StaticPermission, ...] = (),
-        global_default: str | None = None,
+        global_default: PermissionDecision | None = None,
     ) -> None:
-        self.rules = rules
-        self.global_default = global_default
+        self.rules: tuple[StaticPermission, ...] = rules
+        self.global_default: PermissionDecision | None = global_default
 
 
 def _approval_metadata(
@@ -133,6 +135,14 @@ class PermissionEngineConfig:
     permanent_grant_store: GrantStore | None = None
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
     tool_action_profiles: dict[str, tuple[str, str]] = field(default_factory=dict)
+
+    # ── 三态 ruleset 支持 ──
+    mode_ruleset: tuple[Rule, ...] = ()
+    """当前执行模式的默认 ruleset。由 execution_modes.py 在切换 mode 时设置。"""
+    user_ruleset: tuple[Rule, ...] = ()
+    """用户配置中当前模式的规则 override。从 xcode.config.json 加载。"""
+    mode_fallback: PermissionDecision = "ask"
+    """未匹配任何规则时的默认决策。plan='deny', build='allow', act='ask'。"""
 
 
 class PermissionEngine:
@@ -234,17 +244,12 @@ class PermissionEngine:
         )
 
         if verdict.decision == "deny":
-            metadata: PermissionMetadata | None = None
-            winning = verdict.winning_constraint
-            if winning is not None and winning.non_bypassable:
-                metadata = {"non_bypassable": True}
             return PermissionEngineResult(
                 decision="deny",
                 blocked=True,
                 reason=verdict.reason,
                 matched_rule=verdict.source,
                 source=verdict.source,
-                metadata=metadata,
             )
 
         if verdict.decision == "allow":
@@ -301,16 +306,110 @@ class PermissionEngine:
         *,
         execution_decision: PermissionDecision | None,
     ) -> Verdict:
-        """解析当前已接入的 shadow policy constraints。"""
-        constraints = evaluate_policy_constraints(
-            action,
-            execution_decision=execution_decision,
-            static_policy=self._config.static_policy,
-            boundary_context=self._boundary_context(),
-            safety_backstop_enabled=True,
-            hook_constraint_providers=self._config.hook_constraint_providers,
+        """通过规则匹配生成权限裁决。
+
+        使用 RuleMatcher 对 action 做规则匹配。
+        PathBoundary 安全网和 ModePolicy 仍然保留。
+        """
+        # Step 1: PathBoundary 安全网
+        from .permission_model import PathBoundaryPolicyEvaluator
+
+        ctx = self._boundary_context()
+        boundary_constraints: tuple[Constraint, ...] = PathBoundaryPolicyEvaluator(
+            ctx
+        ).evaluate(action)
+        for c in boundary_constraints:
+            if c.decision == "deny":
+                return Verdict(
+                    decision="deny",
+                    source="boundary",
+                    reason=c.reason,
+                    winning_constraint=c,
+                    constraints=(c,),
+                )
+
+        # Step 2: ModePolicy 仍保留（execution_decision 来自 check_call）
+        mode_constraints: tuple[Constraint, ...] = ()
+        if execution_decision is not None:
+            from .permission_model import ModePolicyEvaluator
+
+            mode_constraints = ModePolicyEvaluator(execution_decision).evaluate(action)
+            for c in mode_constraints:
+                if c.decision == "deny":
+                    return Verdict(
+                        decision="deny",
+                        source="mode",
+                        reason=c.reason,
+                        winning_constraint=c,
+                        constraints=(c,),
+                    )
+
+        # Step 3: StaticPolicy（用户配置的静态规则）
+        static_constraints: tuple[Constraint, ...] = ()
+        if self._config.static_policy is not None:
+            from .permission_model import StaticPolicyEvaluator
+
+            static_constraints = StaticPolicyEvaluator(
+                self._config.static_policy.rules,
+                global_default=self._config.static_policy.global_default,
+            ).evaluate(action)
+
+        # Step 4: ShellAnalysis 不可解析效果 → ask
+        shell_constraints: tuple[Constraint, ...] = ()
+        if action.capability == "shell" and action.unresolved_effects:
+            from .shell_analyzer import ShellAnalysisPolicyEvaluator
+
+            shell_constraints = ShellAnalysisPolicyEvaluator().evaluate(action)
+
+        # Step 5: RuleMatcher 三态 ruleset 匹配
+        rules = rule_merge(
+            self._config.user_ruleset,
+            self._config.mode_ruleset,
         )
-        return PermissionResolver().resolve(constraints)
+        shell_command = self._extract_shell_command(action)
+        matched_rule = rule_first_match(
+            action,
+            rules,
+            shell_command=shell_command,
+        )
+
+        # Step 6: 合并约束
+        all_constraints = (
+            mode_constraints
+            + static_constraints
+            + boundary_constraints
+            + shell_constraints
+        )
+        resolver_verdict = PermissionResolver().resolve(all_constraints)
+
+        # 合并 RuleMatcher 与 resolver：
+        #   RuleMatcher 提供 mode/user 规则决策（主决策源）
+        #   Resolver 处理 PathBoundary/Mode/Static 约束（安全网 + 静态规则）
+        #   两者冲突时，较严格的一方获胜
+        if matched_rule is not None:
+            rule_decision = matched_rule.effect
+        else:
+            rule_decision = self._config.mode_fallback
+
+        # 取较严格的决策：deny > ask > allow
+        decision_priority = {"allow": 0, "ask": 1, "deny": 2}
+        final_decision = resolver_verdict.decision
+        if decision_priority[rule_decision] > decision_priority[final_decision]:
+            final_decision = rule_decision
+
+        if final_decision != resolver_verdict.decision:
+            return Verdict(
+                decision=final_decision,
+                source="rule_matcher",
+                reason=(
+                    f"rule={rule_decision}, resolver={resolver_verdict.decision} "
+                    f"({'matched rule' if matched_rule else 'fallback'})"
+                ),
+                winning_constraint=None,
+                constraints=all_constraints,
+            )
+
+        return resolver_verdict
 
     def _compute_shadow_approval(
         self,
@@ -329,6 +428,15 @@ class PermissionEngine:
             permanent_grant_store=self._config.permanent_grant_store,
             boundary_context=self._boundary_context(),
         )
+
+    def _extract_shell_command(self, action: Action) -> str | None:
+        """从 action 的 targets 中提取 shell 命令字符串。"""
+        if action.capability != "shell":
+            return None
+        for target in action.targets:
+            if target.kind == "command":
+                return target.value
+        return None
 
     def _boundary_context(self) -> BoundaryContext | None:
         if self._config.project_root is None:

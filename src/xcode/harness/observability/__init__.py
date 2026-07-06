@@ -28,7 +28,7 @@ from .hooks import (
     PostToolEvent,
     PreToolEvent,
 )
-from ._safety_backstop import SafetyBackstopPolicyEvaluator
+
 from .permission_model import (
     Action,
     ActionExtractor,
@@ -119,7 +119,7 @@ __all__ = [
     "PathBoundaryPolicyEvaluator",
     "PosixAnalyzer",
     "PowerShellAnalyzer",
-    "SafetyBackstopPolicyEvaluator",
+
     "ShellAnalysis",
     "ShellAnalysisPolicyEvaluator",
     "UnresolvedEffect",

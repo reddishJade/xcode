@@ -20,23 +20,19 @@ from xcode.harness.observability import (
     PermissionResolver,
     StaticPermission,
     StaticPolicyEvaluator,
+    create_grant_record,
     evaluate_policy_constraints,
 )
 from pydantic import ValidationError
 from xcode.harness.config import SecurityExternalDirectory, SecurityRuntimeConfig
-from xcode.harness.observability._safety_backstop import (
-    _is_dd_device_write,
-    _is_root_recursive_deletion,
-    _is_short_flag_with_r,
-    _normalize_backslash_continuation,
-    _split_compound_command,
-)
 from xcode.harness.observability.permission_model import (
     DirAccess,
     ExternalDirectory,
     PermissionAccess,
     PolicyEvaluator,
+    Rule,
     SessionGrantStoreManager,
+    Target,
 )
 from xcode.harness.skills import ToolSpec
 import pytest
@@ -64,8 +60,105 @@ def _grant(
     )
 
 
+class RuleMatcherIntegrationTests:
+    def test_action_profile_preserves_shell_unresolved_effects(self) -> None:
+        action = ActionExtractor().extract(
+            "bash",
+            {"command": "cat *.py"},
+            action_profile=("shell", "none"),
+        )
+
+        assert action.capability == "shell"
+        assert action.unresolved_effects
+
+    def test_structured_rule_requires_present_subcommand(self) -> None:
+        from xcode.harness.observability.rule_matcher import evaluate as rule_evaluate
+
+        action = Action(
+            tool="bash",
+            capability="shell",
+            operation="run_command",
+            targets=(Target(kind="command", value="git", access="execute"),),
+            input={"command": "git"},
+        )
+
+        decision = rule_evaluate(
+            action,
+            (Rule(action="bash", command="git", subcommand="status", effect="allow"),),
+            fallback="ask",
+            shell_command="git",
+        )
+
+        assert decision == "ask"
+
+    def test_user_ruleset_overrides_default_rules(self) -> None:
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                mode_ruleset=(Rule(action="bash", effect="ask"),),
+                user_ruleset=(
+                    Rule(
+                        action="bash",
+                        command="rm",
+                        flags_any={"-fr"},
+                        effect="allow",
+                    ),
+                ),
+                mode_fallback="ask",
+                tool_action_profiles={"bash": ("shell", "none")},
+            )
+        )
+
+        result = engine.decide("bash", {"command": "rm -rf tmp"})
+
+        assert result.decision == "allow"
+        assert not result.blocked
+
+
+class CommandGrantPatternTests:
+    def test_command_grant_generalizes_git_subcommand_argument(self) -> None:
+        action = ActionExtractor().extract("bash", {"command": "git checkout main"})
+        grant = create_grant_record(
+            action,
+            action.targets[0],
+            decision="allow",
+            scope="session",
+        )
+
+        assert grant.target_pattern == "git checkout *"
+
+        store = InMemoryGrantStore((grant,))
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="bash", decision="ask"),)
+                ),
+                session_grant_store=store,
+            )
+        )
+
+        result = engine.decide("bash", {"command": "git checkout feature"})
+
+        assert result.decision == "allow"
+        assert result.matched_rule == "session_grant"
+
+    def test_command_grant_tail_wildcard_matches_bare_command(self) -> None:
+        action = ActionExtractor().extract("bash", {"command": "git add README.md"})
+        grant = create_grant_record(
+            action,
+            action.targets[0],
+            decision="allow",
+            scope="session",
+        )
+        store = InMemoryGrantStore((grant,))
+
+        bare_action = ActionExtractor().extract("bash", {"command": "git add"})
+        match = store.lookup(bare_action, bare_action.targets[0])
+
+        assert match is grant
+
+
 class PermissionResolverTests:
-    def test_non_bypassable_deny_beats_everything(self) -> None:
+    def test_explicit_deny_beats_everything_even_when_late(self) -> None:
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
@@ -75,7 +168,6 @@ class PermissionResolverTests:
                     decision="deny",
                     source="safety",
                     reason="root delete",
-                    non_bypassable=True,
                 ),
             )
         )
@@ -283,7 +375,6 @@ class StructuredBoundaryPolicyTests:
 
         assert verdict.decision == "deny"
         assert verdict.winning_constraint is not None
-        assert not (verdict.winning_constraint.non_bypassable)
         assert "sensitive path" in verdict.reason
 
     def test_credential_path_produces_deny_constraint(self) -> None:
@@ -293,26 +384,23 @@ class StructuredBoundaryPolicyTests:
 
         assert verdict.decision == "deny"
         assert verdict.winning_constraint is not None
-        assert not (verdict.winning_constraint.non_bypassable)
         assert "sensitive path" in verdict.reason
 
-    def test_git_read_produces_bypassable_deny_constraint(self) -> None:
+    def test_git_read_produces_deny_constraint(self) -> None:
         action = ActionExtractor().extract("read_file", {"path": ".git/config"})
 
         verdict = PermissionResolver().resolve(evaluate_policy_constraints(action))
 
         assert verdict.decision == "deny"
         assert verdict.winning_constraint is not None
-        assert not (verdict.winning_constraint.non_bypassable)
 
-    def test_git_write_produces_non_bypassable_deny_constraint(self) -> None:
+    def test_git_write_produces_deny_constraint(self) -> None:
         action = ActionExtractor().extract("edit_file", {"path": ".git/config"})
 
         verdict = PermissionResolver().resolve(evaluate_policy_constraints(action))
 
         assert verdict.decision == "deny"
         assert verdict.winning_constraint is not None
-        assert verdict.winning_constraint.non_bypassable
 
     def test_external_path_produces_deny_constraint(self) -> None:
         action = ActionExtractor().extract("read_file", {"path": "../secret.txt"})
@@ -332,7 +420,7 @@ class StructuredBoundaryPolicyTests:
         assert verdict.decision == "deny"
         assert "workspace blocked path" in verdict.reason
 
-    def test_symlink_escape_read_produces_bypassable_deny_constraint(self) -> None:
+    def test_symlink_escape_read_produces_deny_constraint(self) -> None:
         with tempfile.TemporaryDirectory() as root_text:
             root = Path(root_text)
             outside = root.parent / f"{root.name}-outside.txt"
@@ -353,7 +441,6 @@ class StructuredBoundaryPolicyTests:
 
             assert verdict.decision == "deny"
             assert verdict.winning_constraint is not None
-            assert not (verdict.winning_constraint.non_bypassable)
             assert "outside all approved roots" in verdict.reason
             outside.unlink()
 
@@ -381,7 +468,7 @@ class StructuredBoundaryPolicyTests:
             assert "path resolved outside workspace boundary: link.txt" in caplog.text
             outside.unlink()
 
-    def test_symlink_to_git_write_produces_non_bypassable_deny(self) -> None:
+    def test_symlink_to_git_write_produces_deny(self) -> None:
         with tempfile.TemporaryDirectory() as root_text:
             root = Path(root_text)
             git_dir = root / ".git"
@@ -405,11 +492,10 @@ class StructuredBoundaryPolicyTests:
 
             assert verdict.decision == "deny"
             assert verdict.winning_constraint is not None
-            assert verdict.winning_constraint.non_bypassable
             assert "git metadata" in verdict.reason
             assert verdict.winning_constraint.target_pattern == ".git/config"
 
-    def test_resolution_error_read_produces_bypassable_deny(self) -> None:
+    def test_resolution_error_read_produces_deny(self) -> None:
         with tempfile.TemporaryDirectory() as root_text:
             root = Path(root_text)
             loop = root / "loop"
@@ -428,10 +514,9 @@ class StructuredBoundaryPolicyTests:
 
             assert verdict.decision == "deny"
             assert verdict.winning_constraint is not None
-            assert not (verdict.winning_constraint.non_bypassable)
             assert "cannot be resolved safely" in verdict.reason
 
-    def test_resolution_error_write_produces_non_bypassable_deny(self) -> None:
+    def test_resolution_error_write_produces_deny(self) -> None:
         with tempfile.TemporaryDirectory() as root_text:
             root = Path(root_text)
             loop = root / "loop"
@@ -450,7 +535,6 @@ class StructuredBoundaryPolicyTests:
 
             assert verdict.decision == "deny"
             assert verdict.winning_constraint is not None
-            assert verdict.winning_constraint.non_bypassable
             assert "cannot be resolved safely" in verdict.reason
 
     def test_mode_constraint_participates_in_resolver(self) -> None:
@@ -955,6 +1039,7 @@ class PermissionEngineShadowTests:
         engine = PermissionEngine(
             PermissionEngineConfig(
                 shadow_model_enabled=True,
+                mode_fallback="allow",
             )
         )
 
@@ -967,7 +1052,6 @@ class PermissionEngineShadowTests:
         assert not (result.blocked)
         assert result.decision == "allow"
         assert result.shadow_action is not None
-        assert result.shadow_verdict is not None
         assert result.shadow_verdict is not None
         assert result.shadow_verdict.decision == "allow"
         assert result.shadow_diff is None
@@ -1279,10 +1363,14 @@ class ShadowApprovalCandidateTests:
     # ── edge: shadow verdict not ask → no candidate ──
 
     def test_shadow_verdict_allow_no_candidate(self) -> None:
-        engine = self._engine(
-            static_policy=PermissionPolicy(
-                (StaticPermission(tool="read_file", decision="allow"),)
-            ),
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                static_policy=PermissionPolicy(
+                    (StaticPermission(tool="read_file", decision="allow"),)
+                ),
+                shadow_model_enabled=True,
+                mode_fallback="allow",
+            )
         )
         result = engine.decide("read_file", {"path": "src/foo.py"})
 
@@ -1400,7 +1488,7 @@ class ApprovalCutoverEnabledTests:
     def test_allow_verdict_short_circuits(self) -> None:
         """resolver 返回 allow → 短接，不查找授权，不回调。"""
         cb = self._RecordingCallback()
-        engine = self._cutover_engine()
+        engine = PermissionEngine(PermissionEngineConfig(mode_fallback="allow"))
         result = engine.decide(
             "read_file",
             {"path": "src/test.py"},
@@ -1607,99 +1695,6 @@ class ApprovalCutoverEnabledTests:
         assert record.target_pattern == "src/foo.py"
 
 
-class SafetyBackstopHelperTests:
-    """SafetyBackstopPolicy 辅助函数的单元测试。"""
-
-    # ── Bug 1: dd device write ──
-
-    def test_dd_of_dev_is_device_write(self) -> None:
-        assert _is_dd_device_write("dd if=/dev/zero of=/dev/sda")
-
-    def test_dd_of_backup_is_not_device_write(self) -> None:
-        assert not (_is_dd_device_write("dd if=/dev/zero of=backup.img"))
-
-    def test_dd_of_dev_nvme_is_device_write(self) -> None:
-        assert _is_dd_device_write("dd if=/dev/random of=/dev/nvme0n1")
-
-    def test_non_dd_not_device_write(self) -> None:
-        assert not (_is_dd_device_write("cat /dev/sda"))
-
-    # ── Bug 2: flag-after-path root deletion ──
-
-    def test_rm_root_with_flag_before(self) -> None:
-        assert _is_root_recursive_deletion("rm -rf /")
-
-    def test_rm_root_with_flag_after(self) -> None:
-        assert _is_root_recursive_deletion("rm / -rf")
-
-    def test_rm_root_glob_with_flag_after(self) -> None:
-        assert _is_root_recursive_deletion("rm /* -rf")
-
-    def test_rm_root_flag_separate(self) -> None:
-        assert _is_root_recursive_deletion("rm -r /")
-
-    def test_rm_non_root_not_recursive(self) -> None:
-        assert not (_is_root_recursive_deletion("rm file.py"))
-
-    def test_rm_non_root_with_flag(self) -> None:
-        assert not (_is_root_recursive_deletion("rm -rf some_dir/"))
-
-    # ── Bug 3: short flag with r ──
-
-    def test_short_flag_rf_matches(self) -> None:
-        assert _is_short_flag_with_r("-rf")
-
-    def test_short_flag_Rf_matches(self) -> None:
-        assert _is_short_flag_with_r("-Rf")
-
-    def test_short_flag_r_matches(self) -> None:
-        assert _is_short_flag_with_r("-r")
-
-    def test_long_flag_double_dash_does_not_match(self) -> None:
-        assert not (_is_short_flag_with_r("--recursive"))
-
-    def test_long_flag_version_does_not_match(self) -> None:
-        assert not (_is_short_flag_with_r("-version"))
-
-    def test_long_flag_format_does_not_match(self) -> None:
-        assert not (_is_short_flag_with_r("-format"))
-
-    def test_dr_still_matches_as_conservative(self) -> None:
-        """-dr 是短 flag 组合且含 r，保守匹配可接受。"""
-        assert _is_short_flag_with_r("-dr")
-
-    # ── Bug 5: backslash newline normalization ──
-
-    def test_backslash_newline_normalized(self) -> None:
-        raw = "git status \\\n  && rm -rf /"
-        normalized = _normalize_backslash_continuation(raw)
-        assert "\\\n" not in normalized
-        assert "   " in normalized
-        segments = _split_compound_command(normalized)
-        assert len(segments) == 2
-        assert "rm -rf /" in segments
-
-    def test_backslash_newline_single_command(self) -> None:
-        raw = "echo hello \\\n world"
-        normalized = _normalize_backslash_continuation(raw)
-        segments = _split_compound_command(normalized)
-        assert len(segments) == 1
-
-    def test_no_backslash_unchanged(self) -> None:
-        raw = "git status && rm -rf /"
-        assert _normalize_backslash_continuation(raw) == raw
-
-    # ── compound split stability ──
-
-    def test_compound_and_splits_correctly(self) -> None:
-        segments = _split_compound_command("git status && rm -rf /")
-        assert segments == ["git status", "rm -rf /"]
-
-    def test_compound_pipe_splits_correctly(self) -> None:
-        segments = _split_compound_command("ls | grep foo")
-        assert segments == ["ls", "grep foo"]
-
-
 class ShellCutoverTests:
     """Shell 命令的统一 resolver 路径测试。"""
 
@@ -1714,60 +1709,57 @@ class ShellCutoverTests:
             handler=lambda _: "",
         )
 
-    def test_safety_backstop_ask_for_unknown(self) -> None:
-        """未知命令 → SafetyBackstop 返回 ask。"""
-        engine = self._engine()
-        tool_input: dict[str, object] = {"command": "curl example.com"}
+    def test_build_shell_profile_allows_without_approval(self) -> None:
+        """build 默认 profile 将 bash 作为工具整体放行。"""
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                mode_ruleset=(Rule(action="bash", effect="allow"),),
+                mode_fallback="ask",
+            )
+        )
         result = engine.decide(
             "bash",
-            tool_input,
+            {"command": "echo hello"},
             tool_spec=self._bash_tool_spec(),
         )
-        assert result.decision == "ask"
-        assert result.blocked
 
-    def test_bucket_a_deny_no_callback(self) -> None:
-        """Bucket A 命令 → blocked=True, 不调用 callback。"""
+        assert result.decision == "allow"
+        assert not result.blocked
+
+    def test_user_shell_rule_denies_without_callback(self) -> None:
+        """用户配置的 shell 规则命中时可以拒绝命令。"""
         calls: list[object] = []
 
         def cb(_tool_spec: object, _tool_input: dict[str, object]) -> HITLResult:
             calls.append("called")
             return HITLResult(decision="allow", scope="once")
 
-        engine = self._engine()
-        tool_input: dict[str, object] = {"command": "rm -rf /"}
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                user_ruleset=(
+                    Rule(
+                        action="bash",
+                        command="rm",
+                        flags_any={"-fr"},
+                        effect="deny",
+                    ),
+                ),
+                mode_fallback="ask",
+            )
+        )
         result = engine.decide(
             "bash",
-            tool_input,
+            {"command": "rm -rf /"},
             tool_spec=self._bash_tool_spec(),
             approval_callback=cb,
         )
+
         assert result.decision == "deny"
         assert result.blocked
         assert len(calls) == 0
 
-    def test_bucket_c_allow_no_callback(self) -> None:
-        """Bucket C 命令 → allow, 不调用 callback。"""
-        calls: list[object] = []
-
-        def cb(_tool_spec: object, _tool_input: dict[str, object]) -> HITLResult:
-            calls.append("called")
-            return HITLResult(decision="allow", scope="once")
-
-        engine = self._engine()
-        tool_input: dict[str, object] = {"command": "git status"}
-        result = engine.decide(
-            "bash",
-            tool_input,
-            tool_spec=self._bash_tool_spec(),
-            approval_callback=cb,
-        )
-        assert result.decision == "allow"
-        assert not (result.blocked)
-        assert len(calls) == 0
-
-    def test_bucket_b_ask_calls_callback_once_scope(self) -> None:
-        """Bucket B 命令 → callback 被调用, once scope, 无 grant store 写入。"""
+    def test_confirmation_rule_calls_callback_once_scope(self) -> None:
+        """确认规则命中时 callback 被调用，once scope 不写 grant store。"""
         calls: list[HITLResult] = []
 
         def cb(_tool_spec: object, _tool_input: dict[str, object]) -> HITLResult:
@@ -1775,7 +1767,7 @@ class ShellCutoverTests:
             calls.append(result)
             return result
 
-        engine = self._engine()
+        engine = PermissionEngine(PermissionEngineConfig(mode_fallback="ask"))
         tool_input: dict[str, object] = {"command": "rm some_file.py"}
         result = engine.decide(
             "bash",
@@ -1788,13 +1780,13 @@ class ShellCutoverTests:
         assert len(calls) == 1
         assert calls[0].scope == "once"
 
-    def test_bucket_b_ask_callback_deny(self) -> None:
-        """Bucket B 命令 + callback 返回 deny → blocked=True。"""
+    def test_confirmation_rule_callback_deny(self) -> None:
+        """确认规则命中且 callback 返回 deny 时 blocked=True。"""
 
         def cb(_tool_spec: object, _tool_input: dict[str, object]) -> HITLResult:
             return HITLResult(decision="deny", scope="once")
 
-        engine = self._engine()
+        engine = PermissionEngine(PermissionEngineConfig(mode_fallback="ask"))
         tool_input: dict[str, object] = {"command": "rm some_file.py"}
         result = engine.decide(
             "bash",
@@ -1806,7 +1798,7 @@ class ShellCutoverTests:
         assert result.blocked
 
     def test_non_shell_tool_unaffected(self) -> None:
-        engine = self._engine()
+        engine = PermissionEngine(PermissionEngineConfig(mode_fallback="allow"))
         tool_input: dict[str, object] = {"path": "some_file.py"}
         result = engine.decide(
             "read_file",
@@ -1818,23 +1810,34 @@ class ShellCutoverTests:
                 handler=lambda _: "",
             ),
         )
-        # 无 static policy → 默认 allow
+        # mode_fallback="allow" → 默认 allow
         assert result.decision == "allow"
         assert not (result.blocked)
 
-    def test_non_bypassable_deny_flagged_in_metadata(self) -> None:
-        """non-bypassable deny 约束在 metadata 中标记。"""
-        engine = self._engine()
-        tool_input: dict[str, object] = {"command": "rm -rf /"}
+    def test_user_deny_rule_denies_without_metadata_flag(self) -> None:
+        """用户配置的 deny 规则拒绝命令，不再附带特殊 metadata。"""
+        engine = PermissionEngine(
+            PermissionEngineConfig(
+                user_ruleset=(
+                    Rule(
+                        action="bash",
+                        command="rm",
+                        flags_any={"-fr"},
+                        effect="deny",
+                    ),
+                ),
+                mode_fallback="ask",
+            )
+        )
         result = engine.decide(
             "bash",
-            tool_input,
+            {"command": "rm -rf /"},
             tool_spec=self._bash_tool_spec(),
         )
+
         assert result.decision == "deny"
         assert result.blocked
-        assert result.metadata is not None
-        assert result.metadata.get("non_bypassable")
+        assert result.metadata is None
 
 
 # ── STEP 5 hook invariant test helpers ──
@@ -1871,24 +1874,6 @@ class HookInvariantTests:
 
     maxDiff = None
 
-    def test_hook_allow_cannot_override_safety_backstop_deny(self) -> None:
-        """Hook 返回 allow 不能覆盖 SafetyBackstop 的 non-bypassable deny。"""
-        always_allow_hook: PolicyEvaluator = _AlwaysAllowHook()
-        action = ActionExtractor().extract("bash", {"command": "rm -rf /"})
-
-        constraints = evaluate_policy_constraints(
-            action,
-            execution_decision="allow",
-            safety_backstop_enabled=True,
-            hook_constraint_providers=(always_allow_hook,),
-        )
-
-        verdict = PermissionResolver().resolve(constraints)
-        assert verdict.decision == "deny"
-        assert verdict.winning_constraint is not None
-        assert verdict.winning_constraint.non_bypassable is True
-        assert verdict.winning_constraint.source == "safety_backstop"
-
     def test_hook_allow_cannot_override_static_deny(self) -> None:
         """Hook 返回 allow 不能覆盖 StaticPolicy 的 explicit deny。"""
         always_allow_hook: PolicyEvaluator = _AlwaysAllowHook()
@@ -1901,7 +1886,6 @@ class HookInvariantTests:
             action,
             execution_decision="allow",
             static_policy=static_policy,
-            safety_backstop_enabled=True,
             hook_constraint_providers=(always_allow_hook,),
         )
 
@@ -1917,7 +1901,6 @@ class HookInvariantTests:
         constraints = evaluate_policy_constraints(
             action,
             execution_decision="allow",
-            safety_backstop_enabled=True,
             hook_constraint_providers=(always_allow_hook,),
         )
 
@@ -1932,7 +1915,6 @@ class HookInvariantTests:
         constraints = evaluate_policy_constraints(
             action,
             execution_decision="allow",
-            safety_backstop_enabled=True,
             hook_constraint_providers=(always_deny_hook,),
         )
 
@@ -2043,8 +2025,8 @@ class StaticPolicyLastMatchWinsTests:
         constraints = evaluator.evaluate(action)
         assert len(constraints) == 0
 
-    def test_non_bypassable_deny_still_beats_static_allow(self) -> None:
-        """PermissionResolver: non_bypassable deny > static allow."""
+    def test_deny_still_beats_static_allow(self) -> None:
+        """PermissionResolver: deny > static allow."""
         resolver = PermissionResolver()
         verdict = resolver.resolve(
             (
@@ -2052,8 +2034,7 @@ class StaticPolicyLastMatchWinsTests:
                 Constraint(
                     decision="deny",
                     source="safety",
-                    reason="non-bypassable deny",
-                    non_bypassable=True,
+                    reason="deny",
                 ),
             )
         )
