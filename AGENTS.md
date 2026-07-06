@@ -27,6 +27,12 @@ uv run pytest src/xcode/tests/test_xcode_file_tools.py -q --tb=short  # 单个
 
 # 编译检查
 uv run python -m compileall src
+```
+
+## 执行模式与权限
+
+`plan` 仅允许只读和维护 `.xcode/plans/*.md`，`build` 默认允许全部工具，
+`act` 默认询问写入和 shell；用户规则按 findLast 覆盖 mode 默认规则。
 
 ## 代码规范
 

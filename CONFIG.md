@@ -110,6 +110,57 @@ xcode config delete subagent                          # 删除 subagent profile
 
 ---
 
+## execution_modes
+
+执行模式是同一 agent 上可切换的权限 profile。`agent.execution_mode` 选择启动模式，
+REPL 可在运行时切换；切换不会丢失会话上下文。
+
+| mode | 工具可见性 | 内置规则与 fallback |
+|---|---|---|
+| `plan` | 只读工具，以及 `write_file` / `edit_file` | 只读允许；仅允许写入或编辑 `.xcode/plans/*.md`；fallback=`deny`，不进入 HITL |
+| `build` | 全部工具 | 读、写和 shell 允许；fallback=`allow` |
+| `act` | 全部工具 | 只读允许，写和 shell 询问；fallback=`ask` |
+
+每个 mode 可配置 `rules` 数组。用户规则追加到内置规则之后，匹配采用 findLast
+语义（最后一条匹配规则生效），所以用户规则优先。fallback 不作为 catch-all `*`
+规则存储。
+
+```json
+{
+  "execution_modes": {
+    "build": {
+      "rules": [
+        {"action": "bash", "effect": "ask", "command": "git", "subcommand": "push"},
+        {"action": "write_file", "effect": "deny", "resource_pattern": "secrets/**"}
+      ]
+    },
+    "act": {
+      "rules": [
+        {"action": "bash", "effect": "allow", "command": "git", "subcommand_in": ["status", "diff"]}
+      ]
+    }
+  }
+}
+```
+
+规则字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `action` | string | 必填，工具名或通配符，如 `bash`、`write_file`、`*` |
+| `effect` | string | 必填，`allow`、`ask`、`deny` |
+| `command` | string/null | shell 主命令，可使用通配符 |
+| `subcommand` | string/null | shell 精确子命令 |
+| `subcommand_in` | string[]/null | shell 子命令集合，命中任一个即可 |
+| `flags_any` | string[]/null | 至少包含一个指定 flag |
+| `flags_all` | string[]/null | 必须包含全部指定 flag |
+| `resource_pattern` | string/null | 非 shell 的目标路径通配符；shell 中作为额外资源约束 |
+
+结构化条件缺少对应的命令信息时不匹配。短 flag 会排序归一化，例如 `-rf` 与
+`-fr` 等价。复合 shell 命令目前只按第一段提取结构化字段，规则需要据此保守配置。
+
+---
+
 ## request_hygiene
 
 控制发给模型的消息历史压缩策略，不影响磁盘完整历史。
@@ -209,7 +260,11 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 {"tool": "*", "decision": "deny"}
 ```
 
-规则按声明顺序匹配，最后匹配的规则生效（last-match-wins）。无规则匹配时使用 `global_default`。与全局 resolver 优先级 `non_bypassable_deny > deny > ask > allow` 配合，Boundary 和安全 evaluator 产生的 `deny` 不受静态 `allow` 规则覆盖。
+`security.rules` 是独立于 `execution_modes` ruleset 的旧静态策略。规则按声明顺序
+匹配，最后匹配的规则生效；无规则匹配时使用 `global_default`。路径边界、mode
+policy、静态策略、shell 可解析性与 mode ruleset 的结果取更严格决策，优先级为
+`deny > ask > allow`。静态策略因此可以收紧 mode 权限，但不能通过 `allow` 放宽其他
+策略产生的 `ask` 或 `deny`。
 
 ### external_directories 示例
 

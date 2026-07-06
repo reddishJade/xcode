@@ -79,7 +79,10 @@ uv run pytest src/xcode/tests/test_xcode_file_tools.py -q --tb=short # 单个测
 
 ### 权限模型
 
-`PermissionEngine` 统一处理权限决策、HITL 审批和输出脱敏。权限规则通过 `security.rules` 配置，按声明顺序遍历，最后匹配的规则生效（last-match-wins）。全局 resolver 优先级：`non_bypassable_deny > deny > ask > allow`。
+`PermissionEngine` 统一处理权限决策、HITL 审批和输出脱敏。执行模式是同一
+agent 上可切换的权限 profile：`plan` 仅允许只读和维护 `.xcode/plans/*.md`，
+`build` 默认允许全部工具，`act` 默认询问写入和 shell；用户 ruleset 按 findLast
+覆盖 mode 默认规则，其他安全策略与其取 `deny > ask > allow` 中更严格的结果。
 
 ## 代码规范
 
