@@ -16,9 +16,10 @@ from xcode.agent.context_assembly import (
     ContextScope,
     ContextTrust,
     DefaultContextAssembler,
+    sanitize_assembled_messages,
 )
 from xcode.agent.context_collector import ContextCollectionInput, InstructionCollector
-from xcode.agent.messages import UserMessage
+from xcode.agent.messages import SystemMessage, UserMessage
 
 
 def test_workspace_instruction_defaults_to_workspace_policy() -> None:
@@ -131,6 +132,26 @@ def test_trusted_host_policy_can_be_injected_as_system() -> None:
 
     assert [message.role for message in result.messages] == ["system", "user"]
     assert result.messages[0].content == "Host instruction."
+
+
+def test_provider_boundary_demotes_custom_assembler_system_message() -> None:
+    original = [
+        SystemMessage(content="Trusted host prompt."),
+        UserMessage(content="Continue."),
+    ]
+    sanitized = sanitize_assembled_messages(
+        original_messages=original,
+        assembled_messages=[
+            SystemMessage(content="Trusted host prompt."),
+            SystemMessage(content="Untrusted injected instruction."),
+            UserMessage(content="Continue."),
+        ],
+        trusted_system_blocks=[],
+    )
+
+    assert [message.role for message in sanitized] == ["system", "user", "user"]
+    assert "system_target=demoted" in sanitized[1].content
+    assert "Untrusted injected instruction." in sanitized[1].content
 
 
 def test_user_context_render_includes_typed_contract() -> None:
