@@ -7,7 +7,8 @@ from typing import cast
 from xcode.harness.skills import ToolInput, ToolSpec
 
 from .governance import MemoryLedger, MemoryProposal, MemoryProposalStatus
-from .manager import MemoryLayerFilter, MemoryManager, MemoryRetrievalContext
+from .governed_manager import GovernedMemoryManager
+from .manager import MemoryLayer, MemoryLayerFilter, MemoryManager, MemoryRetrievalContext
 from .parsing import MemoryRecord
 
 
@@ -73,7 +74,7 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
             lines.append("governance=legacy_or_untracked")
             return "\n".join(lines)
 
-        proposal = _find_proposal(MemoryLedger(manager.root), proposal_id)
+        proposal = _find_proposal(_ledger_for(manager, record.layer), proposal_id)
         if proposal is None:
             lines.append(f"proposal={proposal_id} status=missing_from_ledger")
             return "\n".join(lines)
@@ -96,13 +97,13 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
         return "\n".join(lines)
 
     def list_memory_proposals(data: ToolInput) -> str:
-        """Render governance proposals without changing approval state."""
+        """Render proposals across project and user ledgers without changing state."""
         status = str(data.get("status", "pending")).strip().lower() or "pending"
         valid_statuses = {"all", *(item.value for item in MemoryProposalStatus)}
         if status not in valid_statuses:
             return "status must be one of: " + ", ".join(sorted(valid_statuses))
 
-        proposals = MemoryLedger(manager.root).list_proposals()
+        proposals = _all_proposals(manager)
         if status != "all":
             proposals = tuple(
                 proposal for proposal in proposals if proposal.status.value == status
@@ -149,122 +150,52 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
             schema={
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Natural-language memory search query.",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 10,
-                        "default": 3,
-                    },
-                    "scope": {
-                        "type": "string",
-                        "description": "Optional scope used to rerank matching records.",
-                    },
-                    "current_file": {
-                        "type": "string",
-                        "description": "Current file relevant to the task.",
-                    },
-                    "symbols": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Relevant code symbols for retrieval and reranking.",
-                    },
-                    "error_messages": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Relevant error messages or failure signatures.",
-                    },
-                    "task_phase": {
-                        "type": "string",
-                        "description": "Current task phase, such as debug, implement, or verify.",
-                    },
-                    "modules": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Relevant project modules or subsystems.",
-                    },
-                    "recent_files": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Recent files already made relevant by the task.",
-                    },
-                    "layer": {
-                        "type": "string",
-                        "enum": ["all", "project", "user"],
-                        "default": "all",
-                    },
+                    "query": {"type": "string", "description": "Natural-language memory search query."},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 3},
+                    "scope": {"type": "string", "description": "Optional scope used to rerank matching records."},
+                    "current_file": {"type": "string", "description": "Current file relevant to the task."},
+                    "symbols": {"type": "array", "items": {"type": "string"}, "description": "Relevant code symbols for retrieval and reranking."},
+                    "error_messages": {"type": "array", "items": {"type": "string"}, "description": "Relevant error messages or failure signatures."},
+                    "task_phase": {"type": "string", "description": "Current task phase, such as debug, implement, or verify."},
+                    "modules": {"type": "array", "items": {"type": "string"}, "description": "Relevant project modules or subsystems."},
+                    "recent_files": {"type": "array", "items": {"type": "string"}, "description": "Recent files already made relevant by the task."},
+                    "layer": {"type": "string", "enum": ["all", "project", "user"], "default": "all"},
                 },
                 "required": ["query"],
                 "additionalProperties": False,
             },
             read_only=True,
             group="memory",
-            prompt_snippet=(
-                "Search opt-in project and user memory when prior decisions or "
-                "solutions may affect the task."
-            ),
+            prompt_snippet="Search opt-in project and user memory when prior decisions or solutions may affect the task.",
         ),
         ToolSpec(
             name="explain_memory",
-            description=(
-                "Explain one memory record's scope, governance proposal, and "
-                "evidence provenance. This tool is read-only."
-            ),
+            description="Explain one memory record's scope, governance proposal, and evidence provenance. This tool is read-only.",
             input_hint='JSON: {"memory_id": "mem_abcd1234"}',
             handler=explain_memory,
             schema={
                 "type": "object",
-                "properties": {
-                    "memory_id": {
-                        "type": "string",
-                        "description": "The mem_* identifier returned by a memory digest or search.",
-                    }
-                },
+                "properties": {"memory_id": {"type": "string", "description": "The mem_* identifier returned by a memory digest or search."}},
                 "required": ["memory_id"],
                 "additionalProperties": False,
             },
             read_only=True,
             group="memory",
-            prompt_snippet=(
-                "Use explain_memory when a retrieved memory could materially affect "
-                "the task and its provenance or scope needs verification."
-            ),
+            prompt_snippet="Use explain_memory when a retrieved memory could materially affect the task and its provenance or scope needs verification.",
         ),
         ToolSpec(
             name="list_memory_proposals",
-            description=(
-                "List evidence-backed memory proposals and their approval state. "
-                "This tool is read-only and cannot approve or apply a proposal."
-            ),
+            description="List evidence-backed memory proposals and their approval state. This tool is read-only and cannot approve or apply a proposal.",
             input_hint='JSON: {"status": "pending"}',
             handler=list_memory_proposals,
             schema={
                 "type": "object",
-                "properties": {
-                    "status": {
-                        "type": "string",
-                        "enum": [
-                            "all",
-                            "pending",
-                            "approved",
-                            "rejected",
-                            "applied",
-                            "failed",
-                        ],
-                        "default": "pending",
-                    }
-                },
+                "properties": {"status": {"type": "string", "enum": ["all", "pending", "approved", "rejected", "applied", "failed"], "default": "pending"}},
                 "additionalProperties": False,
             },
             read_only=True,
             group="memory",
-            prompt_snippet=(
-                "Inspect pending memory proposals when a prior learning may need "
-                "human review. Do not treat a pending proposal as durable memory."
-            ),
+            prompt_snippet="Inspect pending memory proposals when a prior learning may need human review. Do not treat a pending proposal as durable memory.",
         ),
     )
 
@@ -276,10 +207,25 @@ def _find_record(manager: MemoryManager, memory_id: str) -> MemoryRecord | None:
     return None
 
 
-def _find_proposal(
-    ledger: MemoryLedger,
-    proposal_id: str,
-) -> MemoryProposal | None:
+def _ledger_for(manager: MemoryManager, layer: str) -> MemoryLedger:
+    if isinstance(manager, GovernedMemoryManager) and layer in {"project", "user"}:
+        return manager.governance.ledger_for(cast(MemoryLayer, layer))
+    return MemoryLedger(manager.root)
+
+
+def _all_proposals(manager: MemoryManager) -> tuple[MemoryProposal, ...]:
+    if isinstance(manager, GovernedMemoryManager):
+        proposals = [
+            proposal
+            for ledger in manager.governance.ledgers()
+            for proposal in ledger.list_proposals()
+        ]
+    else:
+        proposals = list(MemoryLedger(manager.root).list_proposals())
+    return tuple(sorted(proposals, key=lambda proposal: (proposal.created_at, proposal.proposal_id)))
+
+
+def _find_proposal(ledger: MemoryLedger, proposal_id: str) -> MemoryProposal | None:
     try:
         return ledger.get_proposal(proposal_id)
     except KeyError:
@@ -291,7 +237,6 @@ def _csv_values(value: str) -> tuple[str, ...]:
 
 
 def _parse_limit(value: object) -> int:
-    """Constrain user input to a safe result range."""
     if isinstance(value, int):
         parsed = value
     elif isinstance(value, str):
@@ -305,7 +250,6 @@ def _parse_limit(value: object) -> int:
 
 
 def _optional_text(value: object) -> str | None:
-    """Normalize optional input to non-empty text."""
     if value is None:
         return None
     text = str(value).strip()
@@ -313,7 +257,6 @@ def _optional_text(value: object) -> str | None:
 
 
 def _optional_list(value: object) -> tuple[str, ...]:
-    """Normalize optional input to a tuple of text values."""
     if value is None:
         return ()
     if isinstance(value, str):
