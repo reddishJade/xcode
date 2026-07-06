@@ -6,7 +6,7 @@ from typing import cast
 
 from xcode.harness.skills import ToolInput, ToolSpec
 
-from .governance import MemoryLedger, MemoryProposalStatus
+from .governance import MemoryLedger, MemoryProposal, MemoryProposalStatus
 from .manager import MemoryLayerFilter, MemoryManager, MemoryRetrievalContext
 from .parsing import MemoryRecord
 
@@ -276,7 +276,10 @@ def _find_record(manager: MemoryManager, memory_id: str) -> MemoryRecord | None:
     return None
 
 
-def _find_proposal(ledger: MemoryLedger, proposal_id: str) -> object | None:
+def _find_proposal(
+    ledger: MemoryLedger,
+    proposal_id: str,
+) -> MemoryProposal | None:
     try:
         return ledger.get_proposal(proposal_id)
     except KeyError:
