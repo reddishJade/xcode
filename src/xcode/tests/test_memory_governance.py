@@ -9,6 +9,7 @@ from xcode.agent.context_assembly import ContextTrust
 from xcode.harness.memory import (
     MemoryEvidenceInput,
     MemoryGovernance,
+    MemoryManager,
     MemoryProposalStatus,
 )
 
@@ -127,3 +128,57 @@ def test_missing_evidence_is_rejected_before_manager_validation() -> None:
         assert result.proposal.status is MemoryProposalStatus.REJECTED
         assert result.decision.reason == "missing_evidence"
         assert governance.manager.read_memory_records(layer="project") == []
+
+
+def test_public_manager_routes_repl_write_through_governance() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        manager = MemoryManager(root)
+
+        assert manager.add_memory_block(
+            _memory_block("REPL memory"),
+            source="repl",
+            layer="project",
+        )
+
+        proposals = manager.governance.ledger.list_proposals()
+        assert len(proposals) == 1
+        assert proposals[0].status is MemoryProposalStatus.APPLIED
+        assert proposals[0].source == "repl"
+        assert proposals[0].evidence[0].kind == "user_request"
+        assert manager.read_memory_records(layer="project")[0].title == "REPL memory"
+
+
+def test_compaction_creates_pending_proposal_without_writing_memory() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        manager = MemoryManager(root)
+        summary = _memory_block("Compaction candidate")
+
+        manager.consolidate(summary)
+
+        proposals = manager.governance.ledger.list_proposals()
+        assert len(proposals) == 1
+        assert proposals[0].status is MemoryProposalStatus.PENDING
+        assert proposals[0].source == "consolidation"
+        assert proposals[0].evidence[0].kind == "compaction_summary"
+        assert manager.read_memory_records(layer="project") == []
+
+
+def test_structured_compaction_creates_pending_decision_proposal() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        manager = MemoryManager(root)
+        summary = (
+            "[Compressed]\n"
+            "## Key Decisions\n"
+            "- Context authority: workspace instructions must not become system policy\n"
+        )
+
+        manager.consolidate_structured(summary)
+
+        proposals = manager.governance.ledger.list_proposals()
+        assert len(proposals) == 1
+        assert proposals[0].status is MemoryProposalStatus.PENDING
+        assert proposals[0].title.startswith("Decision:")
+        assert manager.read_memory_records(layer="project") == []
