@@ -91,13 +91,15 @@ def _build_setup_parser(subparsers) -> None:
 def _build_memory_parser(subparsers) -> None:
     memory_parser = subparsers.add_parser(
         "memory",
-        help="Inspect and explicitly approve durable-memory proposals",
+        help="Inspect and explicitly manage durable-memory proposals",
         description=(
             "Inspect governed durable memory without starting an agent. "
-            "Approval and rejection are direct user actions and require --yes.\n\n"
+            "Approval, rejection, and retirement are direct user actions and "
+            "require --yes.\n\n"
             "Use --project-root before the memory command, for example:\n"
             "  xcode --project-root . memory proposals\n"
-            "  xcode --project-root . memory approve mp_... --yes"
+            "  xcode --project-root . memory approve mp_... --yes\n"
+            "  xcode --project-root . memory retire mem_... --yes"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -142,6 +144,21 @@ def _build_memory_parser(subparsers) -> None:
         "--reason",
         default="rejected_by_user",
         help="Reason recorded in the proposal ledger.",
+    )
+
+    retire_p = memory_sub.add_parser(
+        "retire", help="Archive one active memory through a retirement proposal"
+    )
+    retire_p.add_argument("memory_id", help="The mem_* identifier to retire.")
+    retire_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm this retirement and archive operation.",
+    )
+    retire_p.add_argument(
+        "--reason",
+        default="retired_by_user",
+        help="Reason written to the retirement archive and ledger evidence.",
     )
 
     memory_sub.add_parser(
