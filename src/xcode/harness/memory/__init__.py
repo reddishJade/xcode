@@ -13,6 +13,11 @@ from .governance import (
     MemoryProposalStatus,
 )
 from .governed_manager import GovernedMemoryManager, GovernedMemoryManager as MemoryManager
+from .integrity import (
+    MemoryIntegrityIssue,
+    MemoryIntegrityReport,
+    audit_memory_integrity,
+)
 from .layered_governance import LayeredMemoryGovernance
 from .manager import (
     MemoryLayer,
@@ -38,6 +43,8 @@ __all__ = [
     "MemoryEvidence",
     "MemoryEvidenceInput",
     "MemoryGovernance",
+    "MemoryIntegrityIssue",
+    "MemoryIntegrityReport",
     "MemoryLayer",
     "MemoryLayerFilter",
     "MemoryLedger",
@@ -54,5 +61,6 @@ __all__ = [
     "MemorySearchEvalResult",
     "MemoryTraceEvent",
     "MemoryType",
+    "audit_memory_integrity",
     "build_memory_tools",
 ]
