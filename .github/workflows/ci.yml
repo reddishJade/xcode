@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: quality (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: windows-latest
+            python-version: "3.12"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.26"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Install project and development dependencies
+        run: uv sync --extra dev
+
+      - name: Check formatting
+        run: uv run ruff format --check src/
+
+      - name: Lint
+        run: uv run ruff check src/
+
+      - name: Type check
+        run: uv run pyright src/
+
+      - name: Compile
+        run: uv run python -m compileall -q src/
+
+      - name: Test
+        run: uv run pytest src/xcode/tests/ -q --tb=short
+
+      - name: Minimize uv cache
+        if: always()
+        run: uv cache prune --ci
+
+  offline-regression:
+    name: offline regression
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.26"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install project and development dependencies
+        run: uv sync --extra dev
+
+      - name: Run offline regression suite
+        run: >-
+          uv run python -m xcode.evals.cli
+          --suite regression
+          --output-dir .local/eval_runs/ci
+
+      - name: Upload regression reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-regression-reports
+          path: .local/eval_runs/ci/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Minimize uv cache
+        if: always()
+        run: uv cache prune --ci
+
+  package:
+    name: package
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.26"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Build source distribution and wheel
+        run: uv build
+
+      - name: Validate package metadata
+        run: uvx twine check dist/*
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcode-agent-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Minimize uv cache
+        if: always()
+        run: uv cache prune --ci
+
+  required:
+    name: required
+    if: always()
+    needs:
+      - quality
+      - offline-regression
+      - package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all required jobs passed
+        shell: bash
+        run: |
+          test "${{ needs.quality.result }}" = "success"
+          test "${{ needs.offline-regression.result }}" = "success"
+          test "${{ needs.package.result }}" = "success"
