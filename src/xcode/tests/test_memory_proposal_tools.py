@@ -31,6 +31,36 @@ def test_list_memory_proposals_is_read_only_and_shows_evidence(tmp_path: Path) -
     assert not manager.memory_file.exists()
 
 
+def test_explain_memory_shows_linked_governance_provenance(tmp_path: Path) -> None:
+    manager = MemoryManager(tmp_path)
+    assert manager.add_memory_block(_candidate_block(), source="repl", layer="project")
+    record = manager.read_memory_records(layer="project")[0]
+    tools = {tool.name: tool for tool in build_memory_tools(manager)}
+
+    output = tools["explain_memory"].handler({"memory_id": record.memory_id})
+
+    proposal = manager.governance.ledger.list_proposals()[0]
+    assert tools["explain_memory"].read_only
+    assert f"proposal={proposal.proposal_id} status=applied" in output
+    assert f"ledger_evidence_ids={proposal.evidence[0].evidence_id}" in output
+    assert f"evidence[linked] id={proposal.evidence[0].evidence_id}" in output
+    assert "trust=trusted_user" in output
+
+
+def test_explain_memory_marks_legacy_record_without_inventing_provenance(
+    tmp_path: Path,
+) -> None:
+    manager = MemoryManager(tmp_path)
+    assert manager.add_memory_block(_candidate_block(), source="fixture", layer="project")
+    record = manager.read_memory_records(layer="project")[0]
+    tools = {tool.name: tool for tool in build_memory_tools(manager)}
+
+    output = tools["explain_memory"].handler({"memory_id": record.memory_id})
+
+    assert "governance=legacy_or_untracked" in output
+    assert "proposal=" not in output
+
+
 def test_list_memory_proposals_rejects_unknown_status(tmp_path: Path) -> None:
     manager = MemoryManager(tmp_path)
     tool = next(
