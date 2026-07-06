@@ -63,7 +63,6 @@ def build_runtime_context_provider(
         modules=modules,
         shell_spec=shell_spec,
         todo_state=todo_state,
-        memory_manager=None,
     )
     return RuntimeContextProvider(
         system_context=system_context,
