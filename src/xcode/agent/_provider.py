@@ -29,6 +29,7 @@ from xcode.agent.context_assembly import (
     sanitize_assembled_messages,
 )
 from xcode.agent.context_collector import ContextCollectionInput
+from xcode.agent.context_sanitizer import demote_embedded_memory_sections
 from xcode.agent.events import (
     AgentEvent,
     MessageUpdateEvent,
@@ -97,6 +98,7 @@ async def call_provider(
         assembled_messages=messages,
         trusted_system_blocks=trusted_system_blocks,
     )
+    messages = demote_embedded_memory_sections(messages)
 
     convert_fn = config.convert_to_llm or (lambda msgs: [])
     llm_messages = convert_fn(messages)
