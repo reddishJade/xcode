@@ -85,7 +85,7 @@ class GovernedMemoryManager(BaseMemoryManager):
                 memory_type=memory_type,
                 status=status,
                 validity=validity,
-                supersedes=superses,
+                supersedes=supersedes,
                 evidence=evidence,
                 layer=layer,
             )
