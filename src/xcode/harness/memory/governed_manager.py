@@ -93,11 +93,14 @@ class GovernedMemoryManager(BaseMemoryManager):
         title = extract_title(block)
         if not title:
             return False
+        effective_scope = scope or (
+            "user_global" if layer == "user" else str(self.root.resolve())
+        )
         result = self.governance.add_explicit_user_memory(
             block=block,
             title=title,
             layer=layer,
-            scope=scope,
+            scope=effective_scope,
             source="repl",
             memory_type=memory_type,
         )
