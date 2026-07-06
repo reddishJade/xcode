@@ -45,6 +45,7 @@ class HITLResult:
 
     decision: HITLDecision
     scope: HITLScope
+    suggestion: str = ""
 
 
 PermissionToolSpec = Any
@@ -584,13 +585,17 @@ class PermissionEngine:
         hitl = approval_callback(tool_spec, tool_input or {})
 
         if hitl.decision == "deny":
+            metadata = _approval_metadata("deny", hitl.scope)
+            if hitl.suggestion:
+                metadata = dict(metadata)
+                metadata["suggestion"] = hitl.suggestion
             return PermissionEngineResult(
                 decision="deny",
                 blocked=True,
                 reason=(f"tool {action.tool} denied by user{DENIED_BY_USER_GUIDANCE}"),
                 matched_rule=MATCHED_STATIC_ASK,
                 source=SOURCE_SESSION,
-                metadata=_approval_metadata("deny", hitl.scope),
+                metadata=metadata,
                 approval_result=ApprovalResult(decision="deny", scope=hitl.scope),
             )
 

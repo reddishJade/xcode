@@ -73,6 +73,7 @@ class BeforeToolCallContext(BaseModel):
 class BeforeToolCallResult(BaseModel):
     block: bool = False
     reason: str = ""
+    suggestion: str = ""
     args: ToolArguments | None = None
     model_config = ConfigDict(extra="forbid")
 

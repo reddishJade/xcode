@@ -280,10 +280,10 @@ async def _execute_one_impl(
         current_context, assistant_message, tool_call, args, config, signal
     )
     if before_result is not None and before_result.block:
-        return _error_result(
-            tool_call,
-            before_result.reason or "Tool execution was blocked",
-        )
+        message = before_result.reason or "Tool execution was blocked"
+        if before_result.suggestion:
+            message = f"{message}\n\nSuggestion: {before_result.suggestion}"
+        return _error_result(tool_call, message)
     if before_result is not None and before_result.args is not None:
         args = before_result.args
         tool_call = tool_call.model_copy(update={"arguments": args})

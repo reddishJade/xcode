@@ -18,18 +18,6 @@
 
 ## P1 — 严重问题（行为可接受，但必须改）
 
-### HITL 缺少超时和预览——Deny 应携带 suggestion
-
-- 弹窗没有超时——用户离开终端 agent 永远等下去
-- 预览只有 `brief_input`（一行摘要），不显示文件 diff、命令预期效果、多工具执行计划
-- Deny 只有 reason，没有 suggestion 引导模型替代操作
-
-- **位置**：`cli/repl_hitl.py` → `ReplHITLHandler`
-- **建议方向**：
-  - 添加可配置超时（默认 300s）→ 超时自动 deny
-  - `BeforeToolCallResult` 添加 `suggestion` 字段，携带"不能做 X，请做 Y 替代"
-  - 预览层展示 edit_file diff、bash 命令解析、多工具的上下文
-
 ---
 
 ### Compaction `summarize_fn` 未接入——摘要生成是纯规则的

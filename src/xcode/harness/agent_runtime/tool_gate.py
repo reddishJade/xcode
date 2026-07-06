@@ -428,7 +428,12 @@ class ToolGate:
         )
         self._last_perm_results[tool_call_id] = result
         if result.blocked:
-            return BeforeToolCallResult(block=True, reason=result.reason)
+            suggestion = ""
+            if result.metadata:
+                suggestion = str(result.metadata.get("suggestion", ""))
+            return BeforeToolCallResult(
+                block=True, reason=result.reason, suggestion=suggestion
+            )
         return None
 
 
