@@ -96,7 +96,9 @@ class TestWatchdogInterference:
     应留给空闲看门狗处理，避免 "repeated tool call" 掩盖根因。
     """
 
-    def _make_call(self, name: str = "write_file", path: str = "/test/file.txt") -> ToolCallContent:
+    def _make_call(
+        self, name: str = "write_file", path: str = "/test/file.txt"
+    ) -> ToolCallContent:
         return ToolCallContent(id="call_1", name=name, arguments={"path": path})
 
     def _make_result(self, is_error: bool) -> ToolResultMessage:
@@ -147,7 +149,9 @@ class TestWatchdogInterference:
 
         # 多次连续失败调用，重复计数始终为 0
         for _ in range(5):
-            reason = update_repeated_tool_watchdog(state, [call], config, [error_result])
+            reason = update_repeated_tool_watchdog(
+                state, [call], config, [error_result]
+            )
             assert reason is None, f"全部失败不应触发重复看门狗: {reason}"
             assert state.repeated_tool_count == 0
 
@@ -165,7 +169,9 @@ class TestWatchdogInterference:
         assert state.repeated_tool_count == 1
 
         # 然后一次失败→重置计数
-        assert update_repeated_tool_watchdog(state, [call], config, [error_result]) is None
+        assert (
+            update_repeated_tool_watchdog(state, [call], config, [error_result]) is None
+        )
         assert state.repeated_tool_count == 0
         assert state.last_tool_signature is None
 
@@ -179,12 +185,18 @@ class TestWatchdogInterference:
         call_b = self._make_call(path="/b.txt")
         ok_result = self._make_result(is_error=False)
 
-        assert update_repeated_tool_watchdog(state, [call_a], config, [ok_result]) is None
-        assert update_repeated_tool_watchdog(state, [call_a], config, [ok_result]) is None
+        assert (
+            update_repeated_tool_watchdog(state, [call_a], config, [ok_result]) is None
+        )
+        assert (
+            update_repeated_tool_watchdog(state, [call_a], config, [ok_result]) is None
+        )
         assert state.repeated_tool_count == 1
 
         # 参数变化→重置
-        assert update_repeated_tool_watchdog(state, [call_b], config, [ok_result]) is None
+        assert (
+            update_repeated_tool_watchdog(state, [call_b], config, [ok_result]) is None
+        )
         assert state.repeated_tool_count == 0
 
     # ── 部分失败（混合结果）→ 重复看门狗仍触发 ──

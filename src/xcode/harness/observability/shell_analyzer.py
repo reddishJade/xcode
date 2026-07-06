@@ -284,7 +284,7 @@ def _find(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
             effects.append(
                 UnresolvedEffect(
                     reason="wrapper_command",
-                    fragment=f"find -exec {argv[i+1]}: paths from find output",
+                    fragment=f"find -exec {argv[i + 1]}: paths from find output",
                 )
             )
             break  # 不再继续解析
@@ -350,9 +350,7 @@ def _source_cmd(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
 @_REGISTRY.register("eval", syntax="posix")
 def _eval_cmd(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
     return [
-        UnresolvedEffect(
-            reason="eval_like", fragment="eval: fully dynamic execution"
-        )
+        UnresolvedEffect(reason="eval_like", fragment="eval: fully dynamic execution")
     ]
 
 
@@ -577,7 +575,9 @@ def _tar(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
     if extract and not archive_file:
         # tar xf without explicit file (reads from stdin)
         effects.append(
-            UnresolvedEffect(reason="wrapper_command", fragment="tar: extracts from stdin")
+            UnresolvedEffect(
+                reason="wrapper_command", fragment="tar: extracts from stdin"
+            )
         )
     for a in args:
         effects.append(_effect_from_arg(a, "read"))
@@ -637,7 +637,11 @@ def _zip(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
 def _pip(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
     """pip install/uninstall → 修改系统 Python 包（write）。"""
     if len(argv) > 1 and argv[1] in ("install", "uninstall", "download"):
-        return [UnresolvedEffect(reason="wrapper_command", fragment="pip: modifies packages")]
+        return [
+            UnresolvedEffect(
+                reason="wrapper_command", fragment="pip: modifies packages"
+            )
+        ]
     return []
 
 
@@ -645,16 +649,26 @@ def _pip(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
 def _npm(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
     """npm install/build → 修改 node_modules。"""
     if len(argv) > 1 and argv[1] in ("install", "ci", "add", "update", "audit fix"):
-        return [UnresolvedEffect(reason="wrapper_command", fragment="npm: modifies node_modules")]
+        return [
+            UnresolvedEffect(
+                reason="wrapper_command", fragment="npm: modifies node_modules"
+            )
+        ]
     if len(argv) > 1 and argv[1] in ("run", "exec"):
-        return [UnresolvedEffect(reason="wrapper_command", fragment="npm run: dynamic execution")]
+        return [
+            UnresolvedEffect(
+                reason="wrapper_command", fragment="npm run: dynamic execution"
+            )
+        ]
     return []
 
 
 @_REGISTRY.register("npx", syntax="posix")
 def _npx(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
     """npx [command] — 临时执行包（动态）。"""
-    return [UnresolvedEffect(reason="wrapper_command", fragment="npx: dynamic execution")]
+    return [
+        UnresolvedEffect(reason="wrapper_command", fragment="npx: dynamic execution")
+    ]
 
 
 @_REGISTRY.register("make", syntax="posix")
@@ -667,7 +681,9 @@ def _make(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
 def _cargo(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
     """cargo build/test → 构建 Rust 项目。"""
     if len(argv) > 1 and argv[1] in ("build", "test", "check", "run"):
-        return [UnresolvedEffect(reason="wrapper_command", fragment="cargo: build tool")]
+        return [
+            UnresolvedEffect(reason="wrapper_command", fragment="cargo: build tool")
+        ]
     return []
 
 
@@ -829,7 +845,7 @@ def _ps_start_process(argv: list[str]) -> list[FileEffect | UnresolvedEffect]:
                 return [
                     UnresolvedEffect(
                         reason="wrapper_command",
-                        fragment=f"Start-Process {argv[i+1]}: runs executable",
+                        fragment=f"Start-Process {argv[i + 1]}: runs executable",
                     )
                 ]
     return []
@@ -904,7 +920,9 @@ class PosixAnalyzer:
         """递归遍历 AST 节点。"""
         # 处理命令节点
         if node.type == "command":
-            self._handle_command_node(command, text, node, resolved, unresolved, seen_args)
+            self._handle_command_node(
+                command, text, node, resolved, unresolved, seen_args
+            )
             return  # 不递归进子命令（command 的 child 是 word，非子命令）
 
         if node.type == "redirected_statement":
@@ -914,8 +932,14 @@ class PosixAnalyzer:
                     self._handle_command_node(
                         command, text, child, resolved, unresolved, seen_args
                     )
-                elif child.type in ("file_redirect", "herestring_redirect", "heredoc_redirect"):
-                    self._handle_redirect_node(text, child, resolved, unresolved, seen_args)
+                elif child.type in (
+                    "file_redirect",
+                    "herestring_redirect",
+                    "heredoc_redirect",
+                ):
+                    self._handle_redirect_node(
+                        text, child, resolved, unresolved, seen_args
+                    )
             return
 
         if node.type in ("file_redirect", "herestring_redirect", "heredoc_redirect"):
@@ -935,7 +959,9 @@ class PosixAnalyzer:
         # 子 shell 和命令替换 → 标记 unresolved
         if node.type == "subshell":
             unresolved.append(
-                UnresolvedEffect(reason="command_substitution", fragment="(...) subshell")
+                UnresolvedEffect(
+                    reason="command_substitution", fragment="(...) subshell"
+                )
             )
             # 仍然递归分析内部命令
             for child in node.children:
@@ -986,7 +1012,9 @@ class PosixAnalyzer:
 
         if cmd_name_node is None:
             unresolved.append(
-                UnresolvedEffect(reason="parse_error", fragment="no command name in AST")
+                UnresolvedEffect(
+                    reason="parse_error", fragment="no command name in AST"
+                )
             )
             return
 
@@ -994,11 +1022,18 @@ class PosixAnalyzer:
         cmd_name_text_node = _first_name_word(cmd_name_node)
         if cmd_name_text_node is None:
             unresolved.append(
-                UnresolvedEffect(reason="parse_error", fragment="empty command_name in AST")
+                UnresolvedEffect(
+                    reason="parse_error", fragment="empty command_name in AST"
+                )
             )
             return
 
-        cmd_name = text[cmd_name_text_node.start_byte : cmd_name_text_node.end_byte].decode().strip().lower()
+        cmd_name = (
+            text[cmd_name_text_node.start_byte : cmd_name_text_node.end_byte]
+            .decode()
+            .strip()
+            .lower()
+        )
 
         # 构建 argv：命令名本身 + 同级的 word/string 参数
         argv = [cmd_name]
@@ -1175,7 +1210,9 @@ class PowerShellAnalyzer:
         seen_args: set[str],
     ) -> None:
         if node.type == "command":
-            self._handle_command_node(command, text, node, resolved, unresolved, seen_args)
+            self._handle_command_node(
+                command, text, node, resolved, unresolved, seen_args
+            )
             return
 
         if node.type == "pipeline":
@@ -1220,7 +1257,12 @@ class PowerShellAnalyzer:
         if cmd_name_node is None:
             return
 
-        cmd_name = text[cmd_name_node.start_byte : cmd_name_node.end_byte].decode().strip().lower()
+        cmd_name = (
+            text[cmd_name_node.start_byte : cmd_name_node.end_byte]
+            .decode()
+            .strip()
+            .lower()
+        )
 
         # Extract all arguments from command_elements
         argv = [cmd_name]
@@ -1334,8 +1376,7 @@ class ShellAnalysisPolicyEvaluator:
                     decision="ask",
                     source="shell_analysis",
                     reason=(
-                        f"unresolved shell effect: {effect.reason}"
-                        f" - {effect.fragment}"
+                        f"unresolved shell effect: {effect.reason} - {effect.fragment}"
                     ),
                 )
             )
@@ -1353,26 +1394,63 @@ class CmdAnalyzer:
     """
 
     # 读文件命令：type, more, find, fc, comp, sort, dir
-    _READ_COMMANDS = frozenset({
-        "type", "more", "find", "fc", "comp", "sort", "dir",
-    })
+    _READ_COMMANDS = frozenset(
+        {
+            "type",
+            "more",
+            "find",
+            "fc",
+            "comp",
+            "sort",
+            "dir",
+        }
+    )
     # 写文件命令：copy, xcopy, mkdir, md, attrib, icacls, takeown
-    _WRITE_COMMANDS = frozenset({
-        "copy", "xcopy", "mkdir", "md", "attrib", "icacls", "takeown",
-    })
+    _WRITE_COMMANDS = frozenset(
+        {
+            "copy",
+            "xcopy",
+            "mkdir",
+            "md",
+            "attrib",
+            "icacls",
+            "takeown",
+        }
+    )
     # 删除命令：del, erase, rmdir, rd
-    _DELETE_COMMANDS = frozenset({
-        "del", "erase", "rmdir", "rd",
-    })
+    _DELETE_COMMANDS = frozenset(
+        {
+            "del",
+            "erase",
+            "rmdir",
+            "rd",
+        }
+    )
     # 移动/重命名：move, ren, rename
-    _MOVE_COMMANDS = frozenset({
-        "move", "ren", "rename",
-    })
+    _MOVE_COMMANDS = frozenset(
+        {
+            "move",
+            "ren",
+            "rename",
+        }
+    )
     # 无文件效果：echo, cls, ver, date, time, cd, chdir, set, prompt, title
-    _SAFE_COMMANDS = frozenset({
-        "echo", "cls", "ver", "date", "time", "cd", "chdir",
-        "set", "prompt", "title", "color", "help",
-    })
+    _SAFE_COMMANDS = frozenset(
+        {
+            "echo",
+            "cls",
+            "ver",
+            "date",
+            "time",
+            "cd",
+            "chdir",
+            "set",
+            "prompt",
+            "title",
+            "color",
+            "help",
+        }
+    )
 
     def analyze(self, command: str) -> ShellAnalysis:
         import shlex
@@ -1404,7 +1482,11 @@ class CmdAnalyzer:
                 resolved.append(t)
 
         cmd_name = tokens[0].lower()
-        args = [a.strip("\"'") for a in tokens[1:] if a not in (">", ">>", "<", "2>", "2>>", "1>", "1>>")]
+        args = [
+            a.strip("\"'")
+            for a in tokens[1:]
+            if a not in (">", ">>", "<", "2>", "2>>", "1>", "1>>")
+        ]
 
         if cmd_name in self._SAFE_COMMANDS:
             return ShellAnalysis(
@@ -1420,62 +1502,92 @@ class CmdAnalyzer:
             for a in args:
                 if a and not a.startswith("/") and a not in seen:
                     seen.add(a)
-                    resolved.append(Target(
-                        kind="path", value=a, access="read",
-                        provenance="shell_literal",
-                    ))
+                    resolved.append(
+                        Target(
+                            kind="path",
+                            value=a,
+                            access="read",
+                            provenance="shell_literal",
+                        )
+                    )
 
         elif cmd_name in self._WRITE_COMMANDS:
             if cmd_name in ("copy", "xcopy"):
                 # copy src dst → src=read, dst=write
                 if len(args) >= 2:
-                    resolved.append(Target(
-                        kind="path", value=args[0], access="read",
-                        provenance="shell_literal",
-                    ))
-                    resolved.append(Target(
-                        kind="path", value=args[1], access="write",
-                        provenance="shell_literal",
-                    ))
+                    resolved.append(
+                        Target(
+                            kind="path",
+                            value=args[0],
+                            access="read",
+                            provenance="shell_literal",
+                        )
+                    )
+                    resolved.append(
+                        Target(
+                            kind="path",
+                            value=args[1],
+                            access="write",
+                            provenance="shell_literal",
+                        )
+                    )
                 elif len(args) == 1:
-                    resolved.append(Target(
-                        kind="path", value=args[0], access="read",
-                        provenance="shell_literal",
-                    ))
+                    resolved.append(
+                        Target(
+                            kind="path",
+                            value=args[0],
+                            access="read",
+                            provenance="shell_literal",
+                        )
+                    )
             else:
                 for a in args:
                     if a and not a.startswith("/") and a not in seen:
                         seen.add(a)
-                        resolved.append(Target(
-                            kind="path", value=a, access="write",
-                            provenance="shell_literal",
-                        ))
+                        resolved.append(
+                            Target(
+                                kind="path",
+                                value=a,
+                                access="write",
+                                provenance="shell_literal",
+                            )
+                        )
 
         elif cmd_name in self._DELETE_COMMANDS:
             for a in args:
                 if a and not a.startswith("/") and a not in seen:
                     seen.add(a)
-                    resolved.append(Target(
-                        kind="path", value=a, access="delete",
-                        provenance="shell_literal",
-                    ))
+                    resolved.append(
+                        Target(
+                            kind="path",
+                            value=a,
+                            access="delete",
+                            provenance="shell_literal",
+                        )
+                    )
 
         elif cmd_name in self._MOVE_COMMANDS:
             # move/ren src dst → 两者都是 write
             for a in args[:2]:
                 if a and not a.startswith("/") and a not in seen:
                     seen.add(a)
-                    resolved.append(Target(
-                        kind="path", value=a, access="write",
-                        provenance="shell_literal",
-                    ))
+                    resolved.append(
+                        Target(
+                            kind="path",
+                            value=a,
+                            access="write",
+                            provenance="shell_literal",
+                        )
+                    )
 
         else:
             # 未知命令 → unresolved
-            unresolved.append(UnresolvedEffect(
-                reason="wrapper_command",
-                fragment=f"cmd.exe unknown command: {cmd_name}",
-            ))
+            unresolved.append(
+                UnresolvedEffect(
+                    reason="wrapper_command",
+                    fragment=f"cmd.exe unknown command: {cmd_name}",
+                )
+            )
 
         return ShellAnalysis(
             resolved_paths=tuple(resolved),
@@ -1509,10 +1621,14 @@ class CmdAnalyzer:
                     access: PermissionAccess = "write"
                     if "<" in tok:
                         access = "read"
-                    results.append(Target(
-                        kind="path", value=path, access=access,
-                        provenance="shell_literal",
-                    ))
+                    results.append(
+                        Target(
+                            kind="path",
+                            value=path,
+                            access=access,
+                            provenance="shell_literal",
+                        )
+                    )
         return results
 
 
@@ -1602,7 +1718,12 @@ def _is_sed_script(arg: str) -> bool:
     # 逗号分隔的范围地址：1,5 或 /pat1/,/pat2/
     if "," in arg:
         parts = arg.split(",")
-        if all(p.strip().isdigit() or (p.strip().startswith("/") and p.strip().endswith("/")) or p.strip() == "$" for p in parts):
+        if all(
+            p.strip().isdigit()
+            or (p.strip().startswith("/") and p.strip().endswith("/"))
+            or p.strip() == "$"
+            for p in parts
+        ):
             return True
     return False
 

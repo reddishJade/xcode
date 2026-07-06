@@ -233,6 +233,7 @@ def build_app(
 
     # 为 LayeredCompactor 接入 LLM 驱动的摘要生成，替代纯规则 fallback
     from xcode.harness.agent_runtime.compaction import build_compact_summarize_fn
+
     infra.compactor.summarize_fn = build_compact_summarize_fn(providers.llm)
 
     agent = build_agent(

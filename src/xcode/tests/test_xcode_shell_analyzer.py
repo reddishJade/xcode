@@ -1125,7 +1125,9 @@ class TestCmdAnalyzer:
 
     def test_type_file(self) -> None:
         a = analyze_shell_command("type file.txt", "cmd")
-        assert any(p.value == "file.txt" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "file.txt" and p.access == "read" for p in a.resolved_paths
+        )
 
     def test_copy_src_dst(self) -> None:
         a = analyze_shell_command("copy a.txt b.txt", "cmd")
@@ -1136,7 +1138,9 @@ class TestCmdAnalyzer:
 
     def test_del_file(self) -> None:
         a = analyze_shell_command("del temp.log", "cmd")
-        assert any(p.value == "temp.log" and p.access == "delete" for p in a.resolved_paths)
+        assert any(
+            p.value == "temp.log" and p.access == "delete" for p in a.resolved_paths
+        )
 
     def test_move_src_dst(self) -> None:
         a = analyze_shell_command("move src.txt dest.txt", "cmd")
@@ -1155,11 +1159,15 @@ class TestCmdAnalyzer:
 
     def test_mkdir_writes(self) -> None:
         a = analyze_shell_command("mkdir newdir", "cmd")
-        assert any(p.value == "newdir" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "newdir" and p.access == "write" for p in a.resolved_paths
+        )
 
     def test_redirect_stdout(self) -> None:
         a = analyze_shell_command("echo hello > out.txt", "cmd")
-        assert any(p.value == "out.txt" and p.access == "write" for p in a.resolved_paths)
+        assert any(
+            p.value == "out.txt" and p.access == "write" for p in a.resolved_paths
+        )
 
     def test_unknown_command_unresolved(self) -> None:
         a = analyze_shell_command("foobar x.txt", "cmd")
@@ -1167,7 +1175,9 @@ class TestCmdAnalyzer:
 
     def test_erase_file(self) -> None:
         a = analyze_shell_command("erase tmp.dat", "cmd")
-        assert any(p.value == "tmp.dat" and p.access == "delete" for p in a.resolved_paths)
+        assert any(
+            p.value == "tmp.dat" and p.access == "delete" for p in a.resolved_paths
+        )
 
     def test_xcopy_src_dst(self) -> None:
         a = analyze_shell_command(r"xcopy /E src dst", "cmd")
@@ -1182,11 +1192,15 @@ class TestCmdAnalyzer:
 
     def test_rd_dir(self) -> None:
         a = analyze_shell_command("rd /s /q tempdir", "cmd")
-        assert any(p.value == "tempdir" and p.access == "delete" for p in a.resolved_paths)
+        assert any(
+            p.value == "tempdir" and p.access == "delete" for p in a.resolved_paths
+        )
 
     def test_more_file(self) -> None:
         a = analyze_shell_command("more readme.txt", "cmd")
-        assert any(p.value == "readme.txt" and p.access == "read" for p in a.resolved_paths)
+        assert any(
+            p.value == "readme.txt" and p.access == "read" for p in a.resolved_paths
+        )
 
     def test_cls_no_effects(self) -> None:
         a = analyze_shell_command("cls", "cmd")

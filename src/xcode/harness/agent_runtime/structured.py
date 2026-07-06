@@ -449,6 +449,7 @@ class StructuredAgent:
         memory_overview: str | None = None
         if self._resumed_notice is not None and self._memory_manager is not None:
             from .prompting.builder import render_memory_overview
+
             memory_overview = render_memory_overview(self._memory_manager)
 
         context_messages = build_turn_context_messages(

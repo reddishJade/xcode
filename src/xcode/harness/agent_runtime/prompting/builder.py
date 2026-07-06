@@ -338,9 +338,7 @@ def _render_memory_context(
         return ""
 
     # 按 token 预算裁剪
-    budgeted = manager.read_budgeted_records(
-        max_tokens=max_tokens, layer="all"
-    )
+    budgeted = manager.read_budgeted_records(max_tokens=max_tokens, layer="all")
     if not budgeted:
         return ""
     # 取 BM25 召回与预算裁剪的交集

@@ -80,7 +80,9 @@ class CompactionEntry:
 
 # 文件操作工具名集合（用于累积文件跟踪）
 _READ_TOOLS: frozenset[str] = frozenset({"read_file", "read"})
-_MODIFY_TOOLS: frozenset[str] = frozenset({"edit_file", "write_file", "write", "edit", "apply_patch"})
+_MODIFY_TOOLS: frozenset[str] = frozenset(
+    {"edit_file", "write_file", "write", "edit", "apply_patch"}
+)
 
 
 class CompactController:
@@ -157,12 +159,14 @@ class LayeredCompactor:
         # 解析结构化摘要
         sections = self._parse_checkpoint_sections(summary)
 
-        read_list = "\n".join(
-            f"  - {f}" for f in sorted(self._cumulative_read_files)
-        ) or "  (none)"
-        modified_list = "\n".join(
-            f"  - {f}" for f in sorted(self._cumulative_modified_files)
-        ) or "  (none)"
+        read_list = (
+            "\n".join(f"  - {f}" for f in sorted(self._cumulative_read_files))
+            or "  (none)"
+        )
+        modified_list = (
+            "\n".join(f"  - {f}" for f in sorted(self._cumulative_modified_files))
+            or "  (none)"
+        )
 
         content = (
             "# Session checkpoint\n"
@@ -740,9 +744,7 @@ def summarize_messages(
     }
     # 注入累积文件操作信息到摘要
     if read_files or modified_files:
-        tracked = _render_file_tracking(
-            read_files or set(), modified_files or set()
-        )
+        tracked = _render_file_tracking(read_files or set(), modified_files or set())
         if tracked:
             summary_content += "\n\n" + tracked
 

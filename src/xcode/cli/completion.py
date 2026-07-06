@@ -188,10 +188,7 @@ class ReplCompleter(Completer):
             for name in self._current_skill_options()
             if name.startswith(partial) and name != partial
         ]
-        return [
-            CompletionItem(name, -len(partial), "skill")
-            for name in matched
-        ]
+        return [CompletionItem(name, -len(partial), "skill") for name in matched]
 
     def _complete_skill_reference(self, text: str) -> list[CompletionItem]:
         """补全行首 `$skill-name` 语法。"""

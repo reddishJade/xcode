@@ -209,7 +209,9 @@ class SubagentRunner:
 
 
 def build_subagent_tools(runner: SubagentRunner) -> tuple[ToolSpec, ...]:
-    def _subagent_handler(data: ToolInput, on_update: Callable[[str], None] | None) -> str:
+    def _subagent_handler(
+        data: ToolInput, on_update: Callable[[str], None] | None
+    ) -> str:
         result = runner.delegate(
             str(data.get("prompt", "")).strip(),
             model_profile=str(

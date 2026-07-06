@@ -155,8 +155,7 @@ class OutputAccumulator:
 
         # 首次超限 → 惰性 spill
         if self._persisted_output is None and (
-            self._total_bytes > self._max_bytes
-            or self._total_lines > self._max_lines
+            self._total_bytes > self._max_bytes or self._total_lines > self._max_lines
         ):
             self._spill()
 

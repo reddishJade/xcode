@@ -141,8 +141,7 @@ def _build_schema(shell_syntax: str) -> dict[str, Any]:
         "workdir": {
             "type": "string",
             "description": (
-                "Working directory relative to project root."
-                " Defaults to project root."
+                "Working directory relative to project root. Defaults to project root."
             ),
         },
     }
@@ -181,40 +180,50 @@ def _build_prompt_guidelines(
         ps_ver = spec.ps_kind or "powershell"
         if ps_ver == "powershell":
             # PowerShell 5.1 不支持 &&
-            guidelines.extend([
-                "PowerShell 5.1 detected: use `;` to chain commands (`&&` is NOT supported).",
-                "Example: `cd src; dir` or `Set-Location src; Get-ChildItem`",
-            ])
+            guidelines.extend(
+                [
+                    "PowerShell 5.1 detected: use `;` to chain commands (`&&` is NOT supported).",
+                    "Example: `cd src; dir` or `Set-Location src; Get-ChildItem`",
+                ]
+            )
         else:
             # pwsh 7+
-            guidelines.extend([
-                "PowerShell 7+ detected: use `&&` or `;` to chain commands.",
-                "Example: `cd src && dir` or `cd src; dir`",
-            ])
-        guidelines.extend([
-            "Use `|` for pipelines (Out-File, Select-Object, etc.).",
-            "Quote paths with spaces using single quotes (').",
-            "Use `cd` to change directory before running commands.",
-            "Common file commands: Get-Content (read), Set-Content (write), "
-            "Remove-Item (del), Copy-Item, Move-Item, New-Item, Out-File",
-        ])
+            guidelines.extend(
+                [
+                    "PowerShell 7+ detected: use `&&` or `;` to chain commands.",
+                    "Example: `cd src && dir` or `cd src; dir`",
+                ]
+            )
+        guidelines.extend(
+            [
+                "Use `|` for pipelines (Out-File, Select-Object, etc.).",
+                "Quote paths with spaces using single quotes (').",
+                "Use `cd` to change directory before running commands.",
+                "Common file commands: Get-Content (read), Set-Content (write), "
+                "Remove-Item (del), Copy-Item, Move-Item, New-Item, Out-File",
+            ]
+        )
     elif syntax == "cmd":
-        guidelines.extend([
-            "Use `&&` or `&` to chain commands in cmd.exe.",
-            "Example: `cd src && dir`",
-            "Use `cd /d` to change drives (e.g. `cd /d D:/projects`).",
-            "Common file commands: type (read), copy (read+write), "
-            "del/erase (delete), move/ren (write), mkdir (write), dir (list)",
-        ])
+        guidelines.extend(
+            [
+                "Use `&&` or `&` to chain commands in cmd.exe.",
+                "Example: `cd src && dir`",
+                "Use `cd /d` to change drives (e.g. `cd /d D:/projects`).",
+                "Common file commands: type (read), copy (read+write), "
+                "del/erase (delete), move/ren (write), mkdir (write), dir (list)",
+            ]
+        )
     else:
-        guidelines.extend([
-            "Chain commands with `&&` (stop on error) or `;` (always continue).",
-            "Example: `cd src && cat file.txt`",
-            "Use `cd` to change directory before running commands.",
-            "Use single quotes (') for paths with spaces in bash.",
-            "Common file commands: cat (read), cp (read+write), mv (write), "
-            "rm (delete), grep/rg (search), curl/wget (download), tar (archive)",
-        ])
+        guidelines.extend(
+            [
+                "Chain commands with `&&` (stop on error) or `;` (always continue).",
+                "Example: `cd src && cat file.txt`",
+                "Use `cd` to change directory before running commands.",
+                "Use single quotes (') for paths with spaces in bash.",
+                "Common file commands: cat (read), cp (read+write), mv (write), "
+                "rm (delete), grep/rg (search), curl/wget (download), tar (archive)",
+            ]
+        )
 
     # workdir 指引
     guidelines.append(
@@ -227,12 +236,10 @@ def _build_prompt_guidelines(
     import tempfile as _tempfile
 
     guidelines.append(
-        f"If not specified, commands time out after "
-        f"{DEFAULT_TIMEOUT_SECONDS * 1000}ms."
+        f"If not specified, commands time out after {DEFAULT_TIMEOUT_SECONDS * 1000}ms."
     )
     guidelines.append(
-        f"OS: {_sys.platform}, Shell: {spec.name}, "
-        f"Temp dir: {_tempfile.gettempdir()}"
+        f"OS: {_sys.platform}, Shell: {spec.name}, Temp dir: {_tempfile.gettempdir()}"
     )
 
     return tuple(guidelines)
