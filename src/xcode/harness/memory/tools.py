@@ -1,8 +1,4 @@
-"""Memory 工具注册。
-
-该模块仅暴露只读检索工具；记忆写入由压缩 consolidation 或显式
-`/memory add` 命令完成。
-"""
+"""Read-only memory retrieval and proposal-inspection tools."""
 
 from __future__ import annotations
 
@@ -10,14 +6,15 @@ from typing import cast
 
 from xcode.harness.skills import ToolInput, ToolSpec
 
+from .governance import MemoryLedger, MemoryProposalStatus
 from .manager import MemoryLayerFilter, MemoryManager, MemoryRetrievalContext
 
 
 def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
-    """构建 opt-in memory 工具组。"""
+    """Build opt-in memory tools without exposing proposal approval to the agent."""
 
     def search_memory(data: ToolInput) -> str:
-        """跨项目级与用户级记忆检索并渲染来源。"""
+        """Search project and user memory and render source metadata."""
         query = str(data.get("query", "")).strip()
         if not query:
             return "query is required"
@@ -55,6 +52,45 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
 
         rendered = [manager.render_search_result(record) for record in records]
         return "\n\n".join(rendered)
+
+    def list_memory_proposals(data: ToolInput) -> str:
+        """Render governance proposals without changing approval state."""
+        status = str(data.get("status", "pending")).strip().lower() or "pending"
+        valid_statuses = {"all", *(item.value for item in MemoryProposalStatus)}
+        if status not in valid_statuses:
+            allowed = ", ".join(sorted(valid_statuses))
+            return f"status must be one of: {allowed}"
+
+        proposals = MemoryLedger(manager.root).list_proposals()
+        if status != "all":
+            proposals = tuple(
+                proposal
+                for proposal in proposals
+                if proposal.status.value == status
+            )
+        if not proposals:
+            label = "matching" if status == "all" else status
+            return f"No {label} memory proposals."
+
+        lines = [f"Memory proposals ({len(proposals)}):"]
+        for proposal in proposals:
+            lines.append(
+                f"- [{proposal.status.value}] {proposal.proposal_id}: {proposal.title}"
+            )
+            lines.append(
+                f"  operation={proposal.operation} layer={proposal.layer} "
+                f"source={proposal.source} requester={proposal.requester}"
+            )
+            if proposal.scope:
+                lines.append(f"  scope={proposal.scope}")
+            if proposal.decision_reason:
+                lines.append(f"  decision={proposal.decision_reason}")
+            evidence = "; ".join(
+                f"{item.kind}:{item.reference} trust={item.trust.value}"
+                for item in proposal.evidence
+            )
+            lines.append(f"  evidence={evidence or '(none)'}")
+        return "\n".join(lines)
 
     return (
         ToolSpec(
@@ -132,11 +168,44 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
                 "solutions may affect the task."
             ),
         ),
+        ToolSpec(
+            name="list_memory_proposals",
+            description=(
+                "List evidence-backed memory proposals and their approval state. "
+                "This tool is read-only and cannot approve or apply a proposal."
+            ),
+            input_hint='JSON: {"status": "pending"}',
+            handler=list_memory_proposals,
+            schema={
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "all",
+                            "pending",
+                            "approved",
+                            "rejected",
+                            "applied",
+                            "failed",
+                        ],
+                        "default": "pending",
+                    }
+                },
+                "additionalProperties": False,
+            },
+            read_only=True,
+            group="memory",
+            prompt_snippet=(
+                "Inspect pending memory proposals when a prior learning may need "
+                "human review. Do not treat a pending proposal as durable memory."
+            ),
+        ),
     )
 
 
 def _parse_limit(value: object) -> int:
-    """将工具输入限制到安全结果范围。"""
+    """Constrain user input to a safe result range."""
     if isinstance(value, int):
         parsed = value
     elif isinstance(value, str):
@@ -150,7 +219,7 @@ def _parse_limit(value: object) -> int:
 
 
 def _optional_text(value: object) -> str | None:
-    """将可选输入规范化为非空文本。"""
+    """Normalize optional input to non-empty text."""
     if value is None:
         return None
     text = str(value).strip()
@@ -158,7 +227,7 @@ def _optional_text(value: object) -> str | None:
 
 
 def _optional_list(value: object) -> tuple[str, ...]:
-    """将工具输入规范化为文本元组。"""
+    """Normalize optional input to a tuple of text values."""
     if value is None:
         return ()
     if isinstance(value, str):
