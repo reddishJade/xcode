@@ -101,7 +101,7 @@ def _build_memory_parser(subparsers) -> None:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    memory_parser.set_defaults(memory_action="proposals")
+    memory_parser.set_defaults(memory_action="proposals", status="pending")
     memory_sub = memory_parser.add_subparsers(dest="memory_action")
 
     proposals_p = memory_sub.add_parser(
