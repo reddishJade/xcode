@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 from xcode.agent.context_assembly import (
     ContextAssemblyInput,
     ContextAuthority,
@@ -14,6 +17,7 @@ from xcode.agent.context_assembly import (
     ContextTrust,
     DefaultContextAssembler,
 )
+from xcode.agent.context_collector import ContextCollectionInput, InstructionCollector
 from xcode.agent.messages import UserMessage
 
 
@@ -83,6 +87,32 @@ def test_workspace_system_request_is_demoted_to_user_context() -> None:
     rendered = result.messages[0].content
     assert "system_target=demoted" in rendered
     assert "authority=workspace_policy" in rendered
+
+
+def test_instruction_collector_marks_agents_md_as_workspace_untrusted() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "AGENTS.md").write_text("Run focused tests.", encoding="utf-8")
+        block = InstructionCollector(project_root=root).collect(
+            ContextCollectionInput(project_root=root)
+        )[0]
+
+        assert block.source is ContextBlockSource.INSTRUCTION
+        assert block.target is ContextBlockTarget.SYSTEM
+        assert block.authority is ContextAuthority.WORKSPACE_POLICY
+        assert block.trust is ContextTrust.WORKSPACE_UNTRUSTED
+        assert block.scope is ContextScope.REPOSITORY
+        assert block.scope_key == str(root.resolve())
+        assert block.provenance.origin == "instruction_collector"
+        assert block.provenance.locator == "AGENTS.md"
+
+        result = DefaultContextAssembler().assemble(
+            ContextAssemblyInput(
+                messages=[UserMessage(content="continue")],
+                context_blocks=[block],
+            )
+        )
+        assert [message.role for message in result.messages] == ["user", "user"]
 
 
 def test_trusted_host_policy_can_be_injected_as_system() -> None:
