@@ -29,7 +29,6 @@ class PromptLike(Protocol):
 class ReplState:
     mode: ExecutionMode = "act"
     verbosity: VerbosityLevel = "normal"
-    approved_plan: str | None = None
     exit_pending: float = 0.0
     pending_partial: tuple[str, str] | None = None
     pending_inject: str | None = None

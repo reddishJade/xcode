@@ -301,20 +301,13 @@ def run_repl(
         expanded_text, references = expand_file_references(text, root)
         if references:
             store.append("event", file_reference_event(references))
-        agent_text = expanded_text
-        if state.approved_plan is not None:
-            agent_text = (
-                f"<approved-plan>\n{state.approved_plan}\n</approved-plan>\n"
-                f"{expanded_text}"
-            )
-            state.approved_plan = None
         ctx = _AgentTurnContext(
             app=app,
             store=store,
             renderer=markdown_renderer,
             state=state,
             session=session,
-            text=agent_text,
+            text=expanded_text,
         )
         _run_snapshotted_turn(ctx, snapshot_store)
 

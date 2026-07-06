@@ -1688,22 +1688,6 @@ class XcodeReplForkTests:
             fork_records = store.load_records()
             assert "fork msg" in [r.content for r in fork_records]
 
-    def test_fork_into_validates_type(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            store = SessionStore(Path(temp_dir))
-            with pytest.raises(ValueError):
-                store.fork_into("invalid")
-
-    def test_fork_into_all_fork_types(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            for ft in ("explore", "verify", "isolate"):
-                store = SessionStore(Path(temp_dir))
-                store.append("user", "test")
-                store.fork_into(ft)
-                meta = store.current_metadata()
-                assert meta is not None
-                assert meta.fork_type == ft
-
     def test_fork_preserves_parent_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             sessions = Path(temp_dir) / ".local" / "sessions"
@@ -1726,21 +1710,11 @@ class XcodeReplForkTests:
             parent_meta = store.current_metadata()
             assert parent_meta is not None
             parent_id = parent_meta.id
-            store.fork_into("verify")
+            store.fork_into()
             # 执行 fork 后 list_session_infos 应显示 parent_id
             views = store.list_session_infos(limit=10)
             fork_view = next(v for v in views if v.id != parent_id)
             assert fork_view.parent_id == parent_id
-            assert fork_view.fork_type == "verify"
-
-    def test_fork_into_default_type_is_none(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            store = SessionStore(Path(temp_dir))
-            store.append("user", "hello")
-            store.fork_into()
-            meta = store.current_metadata()
-            assert meta is not None
-            assert meta.fork_type is None
 
     def test_switch_branch_resumes_branch_by_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1748,7 +1722,7 @@ class XcodeReplForkTests:
             store.append("user", "parent")
             parent = store.current_metadata()
             assert parent is not None
-            store.fork_into("explore")
+            store.fork_into()
             branch = store.current_metadata()
             assert branch is not None
             store.resume(parent.id)
@@ -1764,7 +1738,7 @@ class XcodeReplForkTests:
             store.append("user", "parent")
             parent = store.current_metadata()
             assert parent is not None
-            store.fork_into("verify")
+            store.fork_into()
             branch = store.current_metadata()
             assert branch is not None
             store.append("assistant", "branch answer")

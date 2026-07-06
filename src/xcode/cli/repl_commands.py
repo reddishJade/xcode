@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 import subprocess
 import sys
@@ -59,7 +58,7 @@ from xcode.harness.observability import (
 )
 from xcode.harness.memory import MemoryLayer, MemoryLayerFilter, MemoryManager
 from xcode.harness.skills import ToolSpec
-from xcode.harness.session import FORK_TYPES, SessionStore
+from xcode.harness.session import SessionStore
 from xcode.harness.snapshot import SnapshotStore, TurnSnapshotRecord
 
 
@@ -80,18 +79,12 @@ def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
 
 def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
     """从当前会话创建独立分支。"""
-    parts = cmd.split(maxsplit=1)
-    fork_type = parts[1].strip() if len(parts) == 2 else None
-    if fork_type is not None and fork_type not in FORK_TYPES:
-        print(f"fork_type must be one of {sorted(FORK_TYPES)}, got {fork_type!r}")
-        return False
     parent_session_id = ctx.store.session_id
-    meta = ctx.store.fork_into(fork_type)
+    meta = ctx.store.fork_into()
     if ctx.snapshot_store is not None:
         ctx.snapshot_store.fork_session(parent_session_id, meta.id)
     sync_agent_history(ctx.app, ctx.store)
-    label = f" ({fork_type})" if fork_type else ""
-    print(f'Forked: "{meta.title}"{label}')
+    print(f'Forked: "{meta.title}"')
     return False
 
 
@@ -145,7 +138,7 @@ def cmd_tree(cmd: str, ctx: CommandContext) -> bool:
     for node in nodes:
         indent = "  " * node.depth
         prefix = "└─ " if node.depth > 0 else ""
-        branch = "🌿 " if node.fork_type else "  "
+        branch = ""
         marker = " ← current" if node.is_current else ""
         label = f"{branch}{node.title}"
         print(f"{indent}{prefix}{label}{marker}")
@@ -489,62 +482,9 @@ def cmd_build(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_act(cmd: str, ctx: CommandContext) -> bool:
-    """进入 Act Mode 恢复工具使用权限，支持 --clear 选项。"""
-    is_clear = False
-    parts = cmd.split(maxsplit=1)
-    if len(parts) == 2 and parts[1].strip() == "--clear":
-        is_clear = True
-
-    choice = "1" if is_clear else "2"
-
-    if choice == "1":
-        records = ctx.store.load_records()
-        last_assistant_content = None
-        for record in reversed(records):
-            if record.type == "assistant":
-                last_assistant_content = record.content
-                break
-
-        if not last_assistant_content or not str(last_assistant_content).strip():
-            print(
-                "Error: No plan found in the last assistant reply. Cannot Clear and Act."
-            )
-            return False
-
-        parent_id = ctx.store.current_path.stem.removeprefix("session-")
-        plan_text = (
-            f"# Approved Plan (Forked from {parent_id})\n"
-            f"Date: {datetime.now().isoformat(timespec='seconds')}\n\n"
-            f"{last_assistant_content}"
-        )
-
-        plan_file = ctx.store.artifacts_dir / f"plan-{parent_id}.md"
-        try:
-            plan_file.write_text(plan_text, encoding="utf-8")
-        except OSError as exc:
-            print(f"Warning: Failed to write plan artifact: {exc}")
-
-        meta = ctx.store.fork_clean_into(
-            "isolate", title=f"Act Continuation of Plan {parent_id}"
-        )
-        sync_agent_history(ctx.app, ctx.store)
-
-        ctx.state.approved_plan = str(last_assistant_content)
-        ctx.state.mode = "act"
-        print(f'Clean Fork created: "{meta.title}"')
-        print("Act Mode enabled with approved plan.")
-    elif choice == "2":
-        ctx.state.mode = "act"
-        print("Act Mode enabled. Normal tool use restored within policy.")
-    elif choice == "3":
-        ctx.state.mode = "build"
-        print(
-            "Build Mode enabled. Ordinary file mutations are allowed; high-risk actions require approval."
-        )
-    elif choice == "4":
-        print("Continuing in Plan Mode.")
-    else:
-        print(f"Invalid choice: {choice}")
+    """进入 Act Mode，恢复全部工具使用权限。"""
+    ctx.state.mode = "act"
+    print("Act Mode enabled. Normal tool use restored within policy.")
     return False
 
 
@@ -664,7 +604,7 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
         # 去除 [Compressed] 前缀，打印清晰的摘要
         clean = summary_text
         if clean.startswith("[Compressed]"):
-            clean = clean[len("[Compressed]"):].strip()
+            clean = clean[len("[Compressed]") :].strip()
         # 按行打印，每行不超过终端宽度
         for line in clean.splitlines():
             stripped = line.rstrip()
@@ -675,7 +615,9 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     else:
         print(" (no summary extracted)")
     print()
-    print(" \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
+    print(
+        " \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+    )
     print(
         f" Context compacted: {len(list(before_msgs))} messages \u2192 {len(list(after_msgs))} messages"
         f" ({before_tokens:,} \u2192 {after_tokens:,} tokens, saved {saved:,})"
@@ -688,7 +630,11 @@ def _extract_compact_summary(messages: list[dict[str, Any]]) -> str | None:
     for msg in messages:
         role = msg.get("role", "")
         content = msg.get("content", "")
-        if role == "user" and isinstance(content, str) and content.startswith("[Compressed]"):
+        if (
+            role == "user"
+            and isinstance(content, str)
+            and content.startswith("[Compressed]")
+        ):
             return content
     return None
 
@@ -1368,8 +1314,6 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/fork": CommandEntry(
         handler=cmd_fork,
         desc="Fork current session into an independent branch.",
-        args_desc="[explore|verify|isolate]",
-        accepts_args=True,
         group=COMMAND_GROUP_SESSION_BRANCH,
     ),
     "/rewind": CommandEntry(

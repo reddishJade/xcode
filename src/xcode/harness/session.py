@@ -8,7 +8,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationError
 import shutil
 from collections.abc import Callable
 
@@ -33,9 +33,6 @@ SESSION_STORAGE_PROTOCOL = "jsonl-v1"
 SESSION_RECOVERY_BOUNDARY = "current_transcript_and_session_tree"
 
 
-FORK_TYPES = frozenset(["explore", "verify", "isolate"])
-
-
 class SessionRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -55,14 +52,6 @@ class SessionMetadata(BaseModel):
     created_at: str
     updated_at: str
     parent_id: str | None = None
-    fork_type: str | None = None
-
-    @field_validator("fork_type")
-    @classmethod
-    def _validate_fork_type(cls, v: str | None) -> str | None:
-        if v is not None and v not in FORK_TYPES:
-            return None
-        return v
 
 
 class SessionProtocolInfo(BaseModel):
@@ -117,15 +106,10 @@ class SessionStore:
 
     def _fork_base(
         self,
-        fork_type: str | None,
         make_title: Callable[[SessionMetadata], str],
         make_summary: Callable[[SessionMetadata], str],
         copy_transcript: bool,
     ) -> SessionMetadata:
-        if fork_type is not None and fork_type not in FORK_TYPES:
-            raise ValueError(
-                f"fork_type must be one of {FORK_TYPES}, got {fork_type!r}"
-            )
         with self._lock:
             parent = self.ensure_metadata()
             fork_path = self._new_path()
@@ -141,28 +125,16 @@ class SessionStore:
                 created_at=now,
                 updated_at=now,
                 parent_id=parent.id,
-                fork_type=fork_type,
             )
             self._upsert_metadata(meta)
             self.current_path = fork_path
             return meta
 
-    def fork_into(self, fork_type: str | None = None) -> SessionMetadata:
+    def fork_into(self) -> SessionMetadata:
         return self._fork_base(
-            fork_type=fork_type,
             make_title=lambda p: f"Fork of {p.title}",
             make_summary=lambda p: p.summary,
             copy_transcript=True,
-        )
-
-    def fork_clean_into(
-        self, fork_type: str | None = None, title: str | None = None
-    ) -> SessionMetadata:
-        return self._fork_base(
-            fork_type=fork_type,
-            make_title=lambda p: title or f"Clean Fork of {p.title}",
-            make_summary=lambda _: "Conversation started (clean fork).",
-            copy_transcript=False,
         )
 
     def load_records(self, path: Path | None = None) -> list[SessionRecord]:
@@ -327,7 +299,6 @@ class SessionStore:
             created_at=current.created_at,
             updated_at=datetime.now(UTC).isoformat(timespec="seconds"),
             parent_id=current.parent_id,
-            fork_type=current.fork_type,
         )
         self._upsert_metadata(metadata)
         return metadata
@@ -459,7 +430,6 @@ class SessionStore:
             path=path,
             project_path=metadata.project_path,
             parent_id=metadata.parent_id,
-            fork_type=metadata.fork_type,
         )
 
     def _relative_transcript_path(self, path: Path) -> str:
@@ -564,7 +534,6 @@ class SessionMetadataView:
     path: Path
     project_path: str = ""
     parent_id: str | None = None
-    fork_type: str | None = None
 
 
 def _make_title(text: str | None) -> str:
@@ -607,7 +576,6 @@ def _truncate(text: str, limit: int) -> str:
 class TreeNode:
     id: str
     title: str
-    fork_type: str | None
     depth: int
     is_current: bool
     is_leaf: bool
@@ -655,7 +623,6 @@ def _walk_tree(
             TreeNode(
                 id=meta.id,
                 title=meta.title,
-                fork_type=meta.fork_type,
                 depth=depth,
                 is_current=is_current,
                 is_leaf=meta.id not in children,

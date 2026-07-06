@@ -18,21 +18,6 @@
 
 ## P1 — 严重问题（行为可接受，但必须改）
 
----
-
-### Compaction `summarize_fn` 未接入——摘要生成是纯规则的
-
-`LayeredCompactor` 创建时没有传入 `summarize_fn`，`summarize_messages()` 走 `_fallback_structured_summary()` 纯规则分支。不调用 LLM，token 成本为零，但摘要质量受限：只提取消息角色、工具名、预定义节关键词，没有语义理解。
-
-与 Memory 的 `consolidate_structured()` 问题同源——LLM 介入的接口预留了但没落地。
-
-- **位置**：`harness/assembly.py` → `build_shared_infra()` → `LayeredCompactor()` 构造
-- **建议方向**：
-  - 接入 `summarize_fn`：复用 provider 或使用独立的 cheap model（如 deepseek-chat）生成结构化摘要
-  - `summarize_messages()` 中已有 LLM 路径的完整骨架（`if summarize_fn: raw = summarize_fn(older)`），只需传入即可
-  - 需评估：每次 compaction 的 LLM 调用 token 成本 vs 摘要质量提升的收益
-
----
 
 ### `/plan` `/build` `/act` 模式重构——build 应中间态
 
@@ -55,14 +40,6 @@
 
 ## P2 — 中等重要
 
-### 重复看门狗 + 空闲看门狗可能互相干扰
-
-当工具连续失败时（如磁盘满→write_file 持续失败），重复看门狗（3 次）在空闲看门狗（4 次）之前触发，但终止信息说"重复工具调用"而不是"工具持续失败"——掩盖了根因。
-
-- **位置**：`agent/watchdog.py` → `update_repeated_tool_watchdog()`, `update_idle_tool_watchdog()`
-- **建议方向**：重复看门狗只在"工具成功但模型还在重复调用"时触发。如果连续相同的调用每次都失败，归给空闲看门狗。
-
----
 
 ### Shell 命令 grant matching 是精确匹配而非模式匹配
 
@@ -82,25 +59,9 @@
 
 ---
 
-### fork_type 语义未落地——explore 和 verify 行为无区别
-
-Fork 类型在 `session_index.json` 中记录了 `fork_type` 字段，但没有任何运行时逻辑根据 `fork_type` 改变行为。explore 和 verify 都复制完整 transcript，行为一致。
-
-- **位置**：`harness/session.py` → `FORK_TYPES`, `_fork_base()`
-- **建议方向**：要么注入运行时语义（explore 可写、verify 只读），要么移除未使用的 fork_type 值。
-
----
 
 ## P3 — 值得改进的设计细节
 
-### `/act --clear` 语义不明确
-
-是 mode switch 解耦后的残余接口。mode switch 不再重置状态，但 `--clear` 作为独立 flag 保留下来，语义既不 mode switch 也不全量重置。
-
-- **位置**：`cli/repl_commands.py` → 搜索 `--clear`
-- **建议**：移除或重命名为语义更清晰的操作。
-
----
 
 ### `watchdog_repeated_tool_skip` 豁免列表配置安全风险未评估
 
