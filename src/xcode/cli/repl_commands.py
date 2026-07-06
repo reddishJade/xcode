@@ -657,7 +657,7 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
 
     # 7) 打印结构化摘要——类似 pi 的格式
     saved = before_tokens - after_tokens
-    print(f"\n [compaction]\n")
+    print("\n [compaction]\n")
     print(f" Compacted from {before_tokens:,} tokens")
     print()
     if summary_text:
@@ -675,7 +675,7 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     else:
         print(" (no summary extracted)")
     print()
-    print(f" \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
+    print(" \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
     print(
         f" Context compacted: {len(list(before_msgs))} messages \u2192 {len(list(after_msgs))} messages"
         f" ({before_tokens:,} \u2192 {after_tokens:,} tokens, saved {saved:,})"

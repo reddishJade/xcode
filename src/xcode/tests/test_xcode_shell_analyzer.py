@@ -26,14 +26,10 @@ from xcode.harness.observability.permissions import (
     PermissionEngine,
     PermissionEngineConfig,
     PermissionPolicy,
-    StaticPermission,
 )
 from xcode.harness.observability.shell_analyzer import (
-    ShellAnalysis,
     ShellAnalysisPolicyEvaluator,
     analyze_shell_command,
-    PosixAnalyzer,
-    PowerShellAnalyzer,
 )
 from xcode.harness.observability import SafetyBackstopPolicyEvaluator
 import pytest
@@ -747,7 +743,7 @@ class TestEdgeCases:
     def test_safety_backstop_still_works(self) -> None:
         """SafetyBackstopPolicyEvaluator 不受影响。"""
         evaluator = SafetyBackstopPolicyEvaluator()
-        from xcode.harness.observability.permission_model import Action, ActionExtractor
+        from xcode.harness.observability.permission_model import ActionExtractor
 
         action = ActionExtractor().extract("bash", {"command": "rm -rf /"})
         constraints = evaluator.evaluate(action)

@@ -195,16 +195,16 @@ def _build_prompt_guidelines(
             "Use `|` for pipelines (Out-File, Select-Object, etc.).",
             "Quote paths with spaces using single quotes (').",
             "Use `cd` to change directory before running commands.",
-            f"Common file commands: Get-Content (read), Set-Content (write), "
-            f"Remove-Item (del), Copy-Item, Move-Item, New-Item, Out-File",
+            "Common file commands: Get-Content (read), Set-Content (write), "
+            "Remove-Item (del), Copy-Item, Move-Item, New-Item, Out-File",
         ])
     elif syntax == "cmd":
         guidelines.extend([
             "Use `&&` or `&` to chain commands in cmd.exe.",
             "Example: `cd src && dir`",
             "Use `cd /d` to change drives (e.g. `cd /d D:/projects`).",
-            f"Common file commands: type (read), copy (read+write), "
-            f"del/erase (delete), move/ren (write), mkdir (write), dir (list)",
+            "Common file commands: type (read), copy (read+write), "
+            "del/erase (delete), move/ren (write), mkdir (write), dir (list)",
         ])
     else:
         guidelines.extend([
@@ -212,8 +212,8 @@ def _build_prompt_guidelines(
             "Example: `cd src && cat file.txt`",
             "Use `cd` to change directory before running commands.",
             "Use single quotes (') for paths with spaces in bash.",
-            f"Common file commands: cat (read), cp (read+write), mv (write), "
-            f"rm (delete), grep/rg (search), curl/wget (download), tar (archive)",
+            "Common file commands: cat (read), cp (read+write), mv (write), "
+            "rm (delete), grep/rg (search), curl/wget (download), tar (archive)",
         ])
 
     # workdir 指引

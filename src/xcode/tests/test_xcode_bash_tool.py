@@ -127,7 +127,6 @@ class EnvHookTests:
 
     def test_env_hook_modifies_environment(self) -> None:
         """env_hook 可以注入自定义环境变量。"""
-        from xcode.coding_agent.tools.bash import SpawnEnvHook
         from xcode.harness.execution_env import SubprocessExecutionEnv
 
         captured_env: dict[str, str] = {}
