@@ -1,11 +1,4 @@
-"""Provider 交互逻辑。
-
-从 agent_loop.py 提取的 provider 调用、事件收集和消息组装逻辑。
-
-**提取的设计原因**：
-- 关注点分离：agent_loop.py 专注于循环编排，_provider.py 专注于 LLM 交互
-- 测试隔离：provider 交互逻辑可以独立测试
-"""
+"""Provider 交互逻辑。"""
 
 from __future__ import annotations
 
@@ -24,14 +17,18 @@ from xcode.ai.events import (
     ToolCallEvent,
     UsageUpdate,
 )
-from xcode.ai.providers.protocol import StreamProvider
 from xcode.ai.providers.codec import provider_function_name
+from xcode.ai.providers.protocol import StreamProvider
 from xcode.ai.types import ToolDefinition
-from xcode.agent.context_assembly import ContextAssemblyInput, ContextBlock
-from xcode.agent.context_collector import ContextCollectionInput
-from xcode.agent.types import TextContent, ToolCallContent
 from xcode.agent.config import AgentContext, AgentLoopConfig
-from xcode.agent.results import AgentLoopMetrics
+from xcode.agent.context_assembly import (
+    ContextAssemblyInput,
+    ContextBlock,
+    ContextBlockTarget,
+    normalize_context_blocks,
+    sanitize_assembled_messages,
+)
+from xcode.agent.context_collector import ContextCollectionInput
 from xcode.agent.events import (
     AgentEvent,
     MessageUpdateEvent,
@@ -39,6 +36,8 @@ from xcode.agent.events import (
 )
 from xcode.agent.messages import AssistantMessage
 from xcode.agent.protocols import AgentTool, CancellationSignal, ContentBlock
+from xcode.agent.results import AgentLoopMetrics
+from xcode.agent.types import TextContent, ToolCallContent
 
 
 @dataclass
@@ -56,10 +55,11 @@ async def call_provider(
     provider: StreamProvider,
     current_step: int = 0,
 ) -> _ProviderResponse:
-    messages = context.messages
+    """收集、规范化、组装并最终发送当前 provider 请求。"""
+    original_messages = list(context.messages)
+    messages = list(context.messages)
     blocks: list[ContextBlock] = []
 
-    # 1. 收集阶段：仅当有 assembler 消费时才运行 collector
     if config.context_collectors and config.context_assembler:
         collect_input = ContextCollectionInput(
             system_prompt=context.system_prompt,
@@ -67,9 +67,12 @@ async def call_provider(
             tools=list(context.tools or []),
             current_step=current_step,
         )
-        blocks = config.context_collectors.collect(collect_input)
+        blocks = normalize_context_blocks(config.context_collectors.collect(collect_input))
 
-    # 2. 组装阶段：将 blocks 注入消息列表
+    trusted_system_blocks = [
+        block for block in blocks if block.target is ContextBlockTarget.SYSTEM
+    ]
+
     if config.context_assembler:
         assembly_input = ContextAssemblyInput(
             system_prompt=context.system_prompt,
@@ -79,11 +82,21 @@ async def call_provider(
             current_step=current_step,
         )
         assembly_result = config.context_assembler.assemble(assembly_input)
-        messages = assembly_result.messages
+        messages = sanitize_assembled_messages(
+            original_messages=original_messages,
+            assembled_messages=assembly_result.messages,
+            trusted_system_blocks=trusted_system_blocks,
+        )
 
-    # 3. 旧版 transform_context 仍保留
     if config.transform_context:
         messages = config.transform_context(messages, signal)
+
+    # transform_context 是旧扩展点，仍必须经过同一 provider 边界复核。
+    messages = sanitize_assembled_messages(
+        original_messages=original_messages,
+        assembled_messages=messages,
+        trusted_system_blocks=trusted_system_blocks,
+    )
 
     convert_fn = config.convert_to_llm or (lambda msgs: [])
     llm_messages = convert_fn(messages)
@@ -117,8 +130,8 @@ async def _collect_provider_events(
         async for event in provider.stream(llm_messages, tool_definitions, **kwargs):
             events.append(event)
         return events
-    except Exception as e:
-        return [FinalMessage(content=f"Provider error: {e}", stop_reason="error")]
+    except Exception as exc:
+        return [FinalMessage(content=f"Provider error: {exc}", stop_reason="error")]
 
 
 def _provider_events_to_response(
@@ -186,9 +199,7 @@ def _append_text_delta(
     text_parts.append(event.chunk)
     emit(
         _message_update_event(
-            AssistantMessage(
-                content=[TextContent(text="".join(text_parts))],
-            )
+            AssistantMessage(content=[TextContent(text="".join(text_parts))])
         )
     )
 
@@ -212,25 +223,25 @@ def _tools_to_definitions(tools: list[AgentTool] | None) -> list[ToolDefinition]
     if not tools:
         return []
     result: list[ToolDefinition] = []
-    for t in tools:
-        desc = t.description
-        examples = getattr(t, "examples", [])
+    for tool in tools:
+        description = tool.description
+        examples = getattr(tool, "examples", [])
         if examples:
             example_lines = ["\n", "Examples:"]
-            for ex in examples:
+            for example in examples:
                 example_lines.append(
-                    f"  - {ex.get('name', '')}: "
-                    f"input={json.dumps(ex.get('input', {}), ensure_ascii=False)}, "
-                    f'output="{ex.get("output", "")}"'
+                    f"  - {example.get('name', '')}: "
+                    f"input={json.dumps(example.get('input', {}), ensure_ascii=False)}, "
+                    f'output="{example.get("output", "")}"'
                 )
-            desc += "\n".join(example_lines)
-        builtin = getattr(t, "builtin", None)
-        provider_name = provider_function_name(t.name)
+            description += "\n".join(example_lines)
+        builtin = getattr(tool, "builtin", None)
+        provider_name = provider_function_name(tool.name)
         result.append(
             ToolDefinition(
                 name=provider_name,
-                description=desc,
-                parameters=dict(t.parameters),
+                description=description,
+                parameters=dict(tool.parameters),
                 builtin=builtin if isinstance(builtin, dict) else None,
             )
         )
