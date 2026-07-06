@@ -21,8 +21,12 @@ from typing import Sequence
 
 from xcode.agent.context_assembly import ContextTrust
 
-from .governance import MemoryEvidenceInput, MemoryGovernance
-from .manager import MemoryLayer, MemoryManager as BaseMemoryManager
+from .governance import MemoryEvidenceInput, MemoryGovernance, MemoryProposalStatus
+from .manager import (
+    MemoryLayer,
+    MemoryManager as BaseMemoryManager,
+    MemoryRerankPolicy,
+)
 from .parsing import MemoryEvidence, MemoryType, extract_title
 
 
@@ -32,11 +36,22 @@ class GovernedMemoryManager(BaseMemoryManager):
     def __init__(
         self,
         root: Path,
-        *args: object,
+        max_blocks: int = 0,
+        user_memory_file: Path | None = None,
+        min_retrieval_score: float = 0.2,
+        min_confidence: float = 0.0,
+        rerank_policy: MemoryRerankPolicy | None = None,
+        *,
         governance: MemoryGovernance | None = None,
-        **kwargs: object,
     ) -> None:
-        super().__init__(root, *args, **kwargs)
+        super().__init__(
+            root,
+            max_blocks=max_blocks,
+            user_memory_file=user_memory_file,
+            min_retrieval_score=min_retrieval_score,
+            min_confidence=min_confidence,
+            rerank_policy=rerank_policy,
+        )
         self._governance = governance
 
     @property
@@ -70,7 +85,7 @@ class GovernedMemoryManager(BaseMemoryManager):
                 memory_type=memory_type,
                 status=status,
                 validity=validity,
-                supersedes=supersedes,
+                supersedes=superses,
                 evidence=evidence,
                 layer=layer,
             )
@@ -86,7 +101,7 @@ class GovernedMemoryManager(BaseMemoryManager):
             source="repl",
             memory_type=memory_type,
         )
-        return result.proposal.status.value == "applied"
+        return result.proposal.status is MemoryProposalStatus.APPLIED
 
     def consolidate(self, summary: str) -> None:
         """Create pending proposals from legacy compact-summary candidates."""
@@ -116,7 +131,7 @@ class GovernedMemoryManager(BaseMemoryManager):
     def _propose_consolidation_candidate(self, block: str, summary: str) -> None:
         """Preserve the old scope filter but never bypass promotion approval."""
         if not self._has_reusable_scope(block):
-            # Keep the existing rejection/archive behavior for non-reusable content.
+            # The base implementation only archives and traces this rejected candidate.
             self._ingest_consolidation_candidate(
                 block,
                 source="consolidation",
