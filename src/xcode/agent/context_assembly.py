@@ -8,6 +8,7 @@
 - 增量接入：transform_context 继续完全正常工作
 - 确定性：优先级排序、预算裁剪、过期过滤均为纯函数
 - 可审计：每个上下文块都带有 authority、trust、scope 和 provenance
+- 非旁路：只有可信 host policy 可作为 SystemMessage 注入
 """
 
 from __future__ import annotations
@@ -40,10 +41,10 @@ class ContextBlockSource(StrEnum):
 
 
 class ContextBlockTarget(StrEnum):
-    """上下文块的注入目标。
+    """上下文块的请求注入目标。
 
-    SYSTEM 仅保留给 host/core policy。来自 workspace、memory、工具结果或
-    外部内容的块不得在迁移完成后以 SYSTEM authority 注入。
+    SYSTEM 不是权限授予。DefaultContextAssembler 会独立检查 authority 与
+    trust；不满足条件的 SYSTEM 请求会被降级为 USER_CONTEXT。
     """
 
     SYSTEM = "system"
@@ -148,9 +149,9 @@ class ContextExpiry:
 class ContextBlock:
     """单个上下文块。
 
-    authority、trust、scope 与 provenance 是上下文信任契约的一部分。当前
-    Phase 0a 仅完成类型化和来源默认值；后续迁移会由 assembler 强制执行
-    SYSTEM 注入边界与 Memory 的 USER_CONTEXT-only 约束。
+    authority、trust、scope 与 provenance 是上下文信任契约的一部分。
+    target 仅表达请求位置；真正的 SystemMessage 注入必须通过
+    `_is_system_eligible` 的 host-policy 信任检查。
     """
 
     source: ContextBlockSource
@@ -257,7 +258,12 @@ def trim_to_budget(
 
 
 class DefaultContextAssembler:
-    """默认上下文组装器。"""
+    """默认上下文组装器。
+
+    SystemMessage 注入由 authority + trust 强制控制。任何非 host policy 的
+    SYSTEM 请求均保留内容但降级为 USER_CONTEXT，以避免丢失任务相关信息，
+    同时保证 workspace 文件、技能、记忆与外部内容无法获得 system authority。
+    """
 
     def assemble(self, input: ContextAssemblyInput) -> ContextAssemblyResult:
         messages = list(input.messages)
@@ -282,12 +288,8 @@ class DefaultContextAssembler:
         used_blocks, budget_dropped = trim_to_budget(valid_blocks, budget, total_tokens)
         dropped.extend(budget_dropped)
         if used_blocks:
-            system_blocks = [
-                block for block in used_blocks if block.target == ContextBlockTarget.SYSTEM
-            ]
-            user_blocks = [
-                block for block in used_blocks if block.target != ContextBlockTarget.SYSTEM
-            ]
+            system_blocks = [block for block in used_blocks if _is_system_eligible(block)]
+            user_blocks = [block for block in used_blocks if not _is_system_eligible(block)]
 
             insert_idx = 0
             for index, message in enumerate(messages):
@@ -317,6 +319,15 @@ class DefaultContextAssembler:
         )
 
 
+def _is_system_eligible(block: ContextBlock) -> bool:
+    """只有可信 host policy 可以进入 SystemMessage。"""
+    return (
+        block.target is ContextBlockTarget.SYSTEM
+        and block.authority is ContextAuthority.HOST_POLICY
+        and block.trust is ContextTrust.TRUSTED_HOST
+    )
+
+
 def _is_expired(block: ContextBlock, turn: int, step: int) -> bool:
     """判断块是否过期（相对期限，从 created_turn/created_step 算起）。"""
     if block.expiry is None or block.expiry.never:
@@ -334,6 +345,8 @@ def _block_to_text(block: ContextBlock) -> str:
         f"trust={block.trust.value}",
         f"scope={block.scope.value}",
     ]
+    if block.target is ContextBlockTarget.SYSTEM and not _is_system_eligible(block):
+        fields.append("system_target=demoted")
     if block.scope_key:
         fields.append(f"scope_key={block.scope_key}")
     if block.provenance.locator:
