@@ -1040,6 +1040,55 @@ def _fallback_structured_summary(older: list[dict[str, Any]]) -> str:
     )
 
 
+def build_compact_summarize_fn(llm: object) -> SummarizeFn:
+    """构建 LLM 驱动的压缩摘要函数。
+
+    使用 provider 生成结构化摘要，替代纯规则 _fallback_structured_summary。
+    遵循与 memory manager 一致的 async 处理模式。
+
+    参数：
+        llm: 实现 ModelProvider 协议的 LLM provider 实例。
+
+    返回：
+        可供 LayeredCompactor 使用的 SummarizeFn。
+    """
+
+    async def _summarize_async(older: list[dict[str, Any]]) -> str:
+        """异步调用 provider 生成摘要。"""
+        from xcode.ai.events import TextDelta
+        from xcode.ai.types import StreamOptions
+
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT},
+            *older,
+        ]
+        text_parts: list[str] = []
+        async for event in llm.stream(  # type: ignore[union-attr]
+            messages=messages,
+            tools=[],
+            options=StreamOptions(max_tokens=4096),
+        ):
+            if isinstance(event, TextDelta):
+                text_parts.append(event.chunk)
+        return "".join(text_parts).strip()
+
+    def summarize(older: list[dict[str, Any]]) -> str:
+        """同步封装，兼容已有事件循环。"""
+        if not older:
+            return ""
+        try:
+            loop = asyncio.get_running_loop()
+            future = asyncio.run_coroutine_threadsafe(
+                _summarize_async(older),
+                loop,
+            )
+            return future.result(timeout=60)
+        except RuntimeError:
+            return asyncio.run(_summarize_async(older))
+
+    return summarize
+
+
 def _content_preview(content: str | list[dict[str, Any]] | None) -> str:
     if isinstance(content, list):
         rendered = []
