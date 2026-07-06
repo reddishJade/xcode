@@ -27,9 +27,6 @@ from xcode.agent.messages import (
 from xcode.agent.protocols import AgentTool
 
 
-# ── 来源、权限与信任模型 ──
-
-
 class ContextBlockSource(StrEnum):
     """上下文块的来源类别。"""
 
@@ -54,10 +51,7 @@ class ContextBlockTarget(StrEnum):
 
 
 class ContextAuthority(StrEnum):
-    """上下文可以影响 Agent 的权限来源。
-
-    authority 描述“它是谁”，不代表其内容一定为真；真实性由 trust 描述。
-    """
+    """上下文可以影响 Agent 的权限来源。"""
 
     HOST_POLICY = "host_policy"
     USER_REQUEST = "user_request"
@@ -88,11 +82,7 @@ class ContextScope(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ContextProvenance:
-    """可审计的上下文来源。
-
-    origin 是产生该块的系统组件；locator 指向文件、会话、工具调用或其他
-    可复查位置。evidence_ids 保留未来 Memory Evidence Ledger 的稳定入口。
-    """
+    """可审计的上下文来源。"""
 
     origin: str = ""
     locator: str = ""
@@ -131,15 +121,8 @@ _DEFAULT_SCOPE_BY_SOURCE: dict[ContextBlockSource, ContextScope] = {
 }
 
 
-# ── 优先级与过期策略 ──
-
-
 class ContextPriority(IntEnum):
-    """上下文块的优先级等级。
-
-    数值越小优先级越高。在预算紧张时低优先级块先被裁剪。
-    注意：即使 CRITICAL 块也可能因整个预算被 base messages 耗尽而被丢弃。
-    """
+    """上下文块的优先级等级。"""
 
     CRITICAL = 0
     HIGH = 10
@@ -159,9 +142,6 @@ class ContextExpiry:
     def never(self) -> bool:
         """是否永不过期。"""
         return self.max_turns <= 0 and self.max_steps <= 0
-
-
-# ── 上下文块 ──
 
 
 @dataclass
@@ -212,9 +192,6 @@ class ContextBlock:
         return estimate_tokens(self.content)
 
 
-# ── 组装输入/输出 ──
-
-
 @dataclass
 class ContextAssemblyInput:
     """上下文组装器的输入。"""
@@ -249,9 +226,6 @@ class ContextAssembler(Protocol):
         ...
 
 
-# ── 预算裁剪 ──
-
-
 def trim_to_budget(
     blocks: list[ContextBlock],
     budget: int,
@@ -263,7 +237,6 @@ def trim_to_budget(
     的块被丢弃，但继续检查后续较小块以最大化实际可用信息量。
     """
     sorted_blocks = sorted(blocks, key=lambda b: (b.priority, b.get_token_count()))
-
     if budget <= 0:
         return sorted_blocks, []
 
@@ -280,27 +253,16 @@ def trim_to_budget(
             remaining -= tokens
         else:
             dropped.append(block)
-
     return used, dropped
 
 
-# ── 默认组装器 ──
-
-
 class DefaultContextAssembler:
-    """默认上下文组装器。
-
-    - 未配置 context_blocks 时，messages 原样返回。
-    - 配置了 context_blocks 时，按优先级排序后注入。
-    - 超出 token_budget 时按贪心策略裁剪。
-    - 过期块自动排除。
-    """
+    """默认上下文组装器。"""
 
     def assemble(self, input: ContextAssemblyInput) -> ContextAssemblyResult:
         messages = list(input.messages)
         total_tokens = _estimate_messages_tokens(messages)
         budget = input.token_budget
-
         if not input.context_blocks:
             return ContextAssemblyResult(
                 messages=messages,
@@ -319,7 +281,6 @@ class DefaultContextAssembler:
 
         used_blocks, budget_dropped = trim_to_budget(valid_blocks, budget, total_tokens)
         dropped.extend(budget_dropped)
-
         if used_blocks:
             system_blocks = [
                 block for block in used_blocks if block.target == ContextBlockTarget.SYSTEM
@@ -340,7 +301,6 @@ class DefaultContextAssembler:
                     SystemMessage(content=block.content) for block in system_blocks
                 ]
                 insert_idx += len(system_blocks)
-
             if user_blocks:
                 messages[insert_idx:insert_idx] = [
                     UserMessage(content=_block_to_text(block)) for block in user_blocks
@@ -357,9 +317,6 @@ class DefaultContextAssembler:
         )
 
 
-# ── 辅助函数 ──
-
-
 def _is_expired(block: ContextBlock, turn: int, step: int) -> bool:
     """判断块是否过期（相对期限，从 created_turn/created_step 算起）。"""
     if block.expiry is None or block.expiry.never:
@@ -370,9 +327,9 @@ def _is_expired(block: ContextBlock, turn: int, step: int) -> bool:
 
 
 def _block_to_text(block: ContextBlock) -> str:
-    """将辅助上下文渲染为可审计、不可伪装为 host policy 的用户上下文。"""
+    """渲染辅助上下文，保留稳定来源标签并附加类型化信任契约。"""
+    source_tag = f"[{block.source.value}]"
     fields = [
-        f"source={block.source.value}",
         f"authority={block.authority.value}",
         f"trust={block.trust.value}",
         f"scope={block.scope.value}",
@@ -383,7 +340,7 @@ def _block_to_text(block: ContextBlock) -> str:
         fields.append(f"locator={block.provenance.locator}")
     if block.metadata:
         fields.extend(f"{key}={value}" for key, value in block.metadata.items())
-    return f"[context {' '.join(fields)}]\n{block.content}"
+    return f"{source_tag} ({' '.join(fields)})\n{block.content}"
 
 
 def _estimate_messages_tokens(messages: list[AgentMessage]) -> int:
