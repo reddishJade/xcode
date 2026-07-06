@@ -43,8 +43,12 @@ from ..observability import (
     RuntimeCorrelation,
     hook_correlation_fields,
 )
-from ..observability.permission_model import GrantStore, PolicyEvaluator
-from ..observability.permission_model import ExternalDirectory
+from ..observability.permission_model import (
+    ExternalDirectory,
+    GrantStore,
+    PolicyEvaluator,
+    Rule,
+)
 from ..skills import ApprovalCallback, ToolSpec
 from ..agent_skills import SkillRegistry
 from ..memory import MemoryManager
@@ -85,6 +89,7 @@ class GateConfig:
     session_grant_store: GrantStore | None = None
     session_grant_store_provider: Callable[[], GrantStore | None] | None = None
     permanent_grant_store: GrantStore | None = None
+    user_rulesets: dict[str, tuple[Rule, ...]] = field(default_factory=dict)
     correlation: RuntimeCorrelation | None = None
 
 

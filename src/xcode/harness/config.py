@@ -108,6 +108,30 @@ class SecurityExternalDirectory(BaseModel):
     access: DirAccess = "read"
 
 
+class ModeRuleRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: str = Field(min_length=1)
+    effect: Literal["allow", "ask", "deny"]
+    command: str | None = None
+    subcommand: str | None = None
+    subcommand_in: tuple[str, ...] | None = None
+    flags_any: tuple[str, ...] | None = None
+    flags_all: tuple[str, ...] | None = None
+    resource_pattern: str | None = None
+
+
+class ModeRulesetRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rules: tuple[ModeRuleRuntimeConfig, ...] = ()
+
+
+class ExecutionModesRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    plan: ModeRulesetRuntimeConfig = Field(default_factory=ModeRulesetRuntimeConfig)
+    build: ModeRulesetRuntimeConfig = Field(default_factory=ModeRulesetRuntimeConfig)
+    act: ModeRulesetRuntimeConfig = Field(default_factory=ModeRulesetRuntimeConfig)
+
+
 class SecurityRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     permission_mode: PermissionMode = "normal"
@@ -288,6 +312,9 @@ class XcodeRuntimeConfig(BaseModel):
     )
     request_hygiene: RequestHygieneConfig = Field(default_factory=RequestHygieneConfig)
     security: SecurityRuntimeConfig = Field(default_factory=SecurityRuntimeConfig)
+    execution_modes: ExecutionModesRuntimeConfig = Field(
+        default_factory=ExecutionModesRuntimeConfig
+    )
 
 
 # ── 序列化 / 反序列化 ──

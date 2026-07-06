@@ -39,7 +39,9 @@ from ..observability import (
 from ..observability.permission_model import (
     ExternalDirectory,
     GrantStore,
+    MODE_DEFAULT_RULES,
     PolicyEvaluator,
+    Rule,
 )
 from ..skills import (
     ApprovalCallback,
@@ -84,6 +86,9 @@ class ToolGateSnapshot:
     external_directories: tuple[ExternalDirectory, ...] = ()
     session_grant_store: GrantStore | None = None
     permanent_grant_store: GrantStore | None = None
+    mode_ruleset: tuple[Rule, ...] = ()
+    user_ruleset: tuple[Rule, ...] = ()
+    mode_fallback: PermissionDecision = "ask"
 
 
 class ToolGate:
@@ -117,8 +122,12 @@ class ToolGate:
         session_grant_store: GrantStore | None = None,
         session_grant_store_provider: Callable[[], GrantStore | None] | None = None,
         permanent_grant_store: GrantStore | None = None,
+        user_ruleset: tuple[Rule, ...] = (),
+        user_rulesets: dict[str, tuple[Rule, ...]] | None = None,
     ) -> None:
         self._mode = mode_state
+        self._user_ruleset = user_ruleset
+        self._user_rulesets = user_rulesets or {}
         self._approval_callback = approval_callback
         self._permission_policy = permission_policy
         self._restricted_dirs = restricted_dirs
@@ -143,8 +152,46 @@ class ToolGate:
             return self._session_grant_store_provider()
         return self._session_grant_store
 
+    def _ruleset_for_mode(self, mode_name: str) -> tuple[Rule, ...]:
+        configured = self._user_rulesets.get(mode_name)
+        if configured is not None:
+            return configured
+        return self._user_ruleset
+
+    def _default_ruleset_for_mode(self, mode_name: str) -> tuple[Rule, ...]:
+        rules = MODE_DEFAULT_RULES.get(mode_name, ())
+        if mode_name != "plan" or self._project_root is None:
+            return rules
+        plan_pattern = (
+            self._project_root.resolve() / ".xcode" / "plans" / "*.md"
+        ).as_posix()
+        return rules + (
+            Rule(
+                action="write_file",
+                effect="allow",
+                resource_pattern=plan_pattern,
+            ),
+            Rule(
+                action="edit_file",
+                effect="allow",
+                resource_pattern=plan_pattern,
+            ),
+        )
+
+    @staticmethod
+    def _fallback_for_mode(mode_name: str) -> PermissionDecision:
+        if mode_name == "plan":
+            return "deny"
+        if mode_name == "build":
+            return "allow"
+        return "ask"
+
     def snapshot(self) -> ToolGateSnapshot:
+        mode_name = self._mode.current_mode
+        default_rules = self._default_ruleset_for_mode(mode_name)
+        fallback = self._fallback_for_mode(mode_name)
         return ToolGateSnapshot(
+            user_ruleset=self._ruleset_for_mode(mode_name),
             approval_callback=self._approval_callback,
             permission_policy=self._permission_policy,
             tool_map={},
@@ -154,11 +201,17 @@ class ToolGate:
             external_directories=self._external_directories,
             session_grant_store=self._resolve_session_store(),
             permanent_grant_store=self._permanent_grant_store,
+            mode_ruleset=default_rules,
+            mode_fallback=fallback,
         )
 
     def snapshot_for(self, registry: tuple[ToolSpec, ...]) -> ToolGateSnapshot:
         """为单个 turn 创建包含工具映射的门控快照。"""
+        mode_name = self._mode.current_mode
+        default_rules = self._default_ruleset_for_mode(mode_name)
+        fallback = self._fallback_for_mode(mode_name)
         return ToolGateSnapshot(
+            user_ruleset=self._ruleset_for_mode(mode_name),
             approval_callback=self._approval_callback,
             permission_policy=self._permission_policy,
             tool_map={tool.name: tool for tool in registry},
@@ -168,6 +221,8 @@ class ToolGate:
             external_directories=self._external_directories,
             session_grant_store=self._resolve_session_store(),
             permanent_grant_store=self._permanent_grant_store,
+            mode_ruleset=default_rules,
+            mode_fallback=fallback,
         )
 
     def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
@@ -417,6 +472,9 @@ class ToolGate:
                 session_grant_store=snapshot.session_grant_store,
                 permanent_grant_store=snapshot.permanent_grant_store,
                 tool_action_profiles=action_profiles,
+                mode_ruleset=snapshot.mode_ruleset,
+                user_ruleset=snapshot.user_ruleset,
+                mode_fallback=snapshot.mode_fallback,
             )
         )
         result = engine.decide(

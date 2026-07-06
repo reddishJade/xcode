@@ -459,10 +459,11 @@ class XcodeReplTests:
 
     def test_plan_mode_registry_keeps_safe_discovery_and_skills(self) -> None:
         registry = (
-            ToolSpec("read_file", "Read.", "text", lambda _value: ""),
-            ToolSpec("list_dir", "List.", "text", lambda _value: ""),
-            ToolSpec("search_tools", "Search tools.", "text", lambda _value: ""),
-            ToolSpec("load_skill", "Load skill.", "text", lambda _value: ""),
+            ToolSpec("read_file", "Read.", "text", lambda _value: "", read_only=True),
+            ToolSpec("list_dir", "List.", "text", lambda _value: "", read_only=True),
+            ToolSpec("search_tools", "Search tools.", "text", lambda _value: "", read_only=True),
+            ToolSpec("load_skill", "Load skill.", "text", lambda _value: "", read_only=True),
+            ToolSpec("edit_file", "Edit.", "text", lambda _value: ""),
             ToolSpec("write_file", "Write.", "text", lambda _value: ""),
             ToolSpec("bash", "Shell.", "text", lambda _value: ""),
         )
@@ -471,6 +472,7 @@ class XcodeReplTests:
         build_names = {tool.name for tool in registry_for_mode(registry, "build")}
 
         assert {"read_file", "list_dir", "search_tools", "load_skill"} <= names
+        assert "edit_file" in names
         assert "write_file" not in names
         assert "bash" not in names
         assert "load_skill" in build_names

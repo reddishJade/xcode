@@ -12,12 +12,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from xcode.harness.execution_env import ExecutionEnv
 
 from xcode.harness.config import (
     AgentConfig,
+    ModeRuleRuntimeConfig,
     PROFILE_MAIN,
     PROFILE_SUBAGENT,
     SecurityRuntimeConfig,
@@ -49,11 +50,13 @@ from xcode.harness.observability import (
     JsonlAuditLogger,
     HookManager,
     InMemoryGrantStore,
+    PermissionDecision,
     PermissionPolicy,
 )
 from xcode.harness.observability.permission_model import ExternalDirectory
 from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
+from xcode.harness.observability.permission_model import Rule
 from xcode.harness.skills import ToolInput, ToolRegistryState, ToolSpec
 from xcode.harness.session_todo import (
     build_session_todo_tools,
@@ -574,6 +577,7 @@ def _build_subagent_integration(
                 ),
                 external_directories=_external_directories_from_security(sec),
                 session_grant_store=InMemoryGrantStore(session_id=subagent_session_id),
+                user_rulesets=_mode_rulesets_from_runtime_config(runtime_config),
             ),
             runtime=AgentRuntimeConfig(
                 runtime_context_provider=build_runtime_context_provider(
@@ -712,6 +716,7 @@ def build_agent(
             external_hooks_cwd=project_root,
             audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
             external_directories=_external_directories_from_security(sec),
+            user_rulesets=_mode_rulesets_from_runtime_config(runtime_config),
         ),
         runtime=AgentRuntimeConfig(
             compactor=compactor,
@@ -784,6 +789,38 @@ def _build_hook_manager(
     return manager
 
 
+def _rule_from_runtime_config(rule: ModeRuleRuntimeConfig) -> Rule:
+    return Rule(
+        action=rule.action,
+        effect=rule.effect,
+        command=rule.command,
+        subcommand=rule.subcommand,
+        subcommand_in=set(rule.subcommand_in)
+        if rule.subcommand_in is not None
+        else None,
+        flags_any=set(rule.flags_any) if rule.flags_any is not None else None,
+        flags_all=set(rule.flags_all) if rule.flags_all is not None else None,
+        resource_pattern=rule.resource_pattern,
+    )
+
+
+def _mode_rulesets_from_runtime_config(
+    runtime_config: XcodeRuntimeConfig,
+) -> dict[str, tuple[Rule, ...]]:
+    modes = runtime_config.execution_modes
+    result: dict[str, tuple[Rule, ...]] = {}
+    for mode_name, ruleset in (
+        ("plan", modes.plan),
+        ("build", modes.build),
+        ("act", modes.act),
+    ):
+        if ruleset.rules:
+            result[mode_name] = tuple(
+                _rule_from_runtime_config(rule) for rule in ruleset.rules
+            )
+    return result
+
+
 def _external_directories_from_security(
     security: SecurityRuntimeConfig,
 ) -> tuple[ExternalDirectory, ...]:
@@ -823,4 +860,6 @@ def _permission_policy_from_security(
         global_default = "ask"
     if not rules and global_default is None:
         return None
-    return PermissionPolicy(tuple(rules), global_default=global_default)
+    return PermissionPolicy(
+        tuple(rules), global_default=cast(PermissionDecision, global_default)
+    )

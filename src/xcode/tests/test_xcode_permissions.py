@@ -60,7 +60,7 @@ class XcodePermissionsTests:
             raise RuntimeError("boom")
 
         tool = ToolSpec("fail", "Fail.", "text", fail)
-        result = PermissionEngine(PermissionEngineConfig()).decide(
+        result = PermissionEngine(PermissionEngineConfig(mode_fallback="allow")).decide(
             "fail", {}, tool_spec=tool
         )
         assert not (result.blocked)
@@ -92,6 +92,7 @@ class XcodePermissionsTests:
                 static_policy=PermissionPolicy(
                     (StaticPermission(tool="danger", decision="allow"),)
                 ),
+                mode_fallback="allow",
             )
         )
         result = engine.decide("danger", {"input": "go"}, tool_spec=tool)
@@ -123,7 +124,9 @@ class XcodePermissionsTests:
         assert result.matched_rule == "restricted_dirs"
 
     def test_restricted_dirs_does_not_match_plain_text(self) -> None:
-        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        engine = PermissionEngine(
+            PermissionEngineConfig(restricted_dirs=("secrets",), mode_fallback="allow")
+        )
         result = engine.decide(
             "echo",
             {"input": "the secrets directory is documented"},
@@ -133,7 +136,9 @@ class XcodePermissionsTests:
     def test_restricted_dirs_rejects_prefix_collision_only_when_contained(
         self,
     ) -> None:
-        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        engine = PermissionEngine(
+            PermissionEngineConfig(restricted_dirs=("secrets",), mode_fallback="allow")
+        )
         result = engine.decide(
             "read_file",
             {"path": "secrets-copy/key.txt"},
@@ -141,7 +146,9 @@ class XcodePermissionsTests:
         assert not (result.blocked)
 
     def test_restricted_dirs_checks_all_patch_targets(self) -> None:
-        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        engine = PermissionEngine(
+            PermissionEngineConfig(restricted_dirs=("secrets",), mode_fallback="allow")
+        )
         result = engine.decide(
             "apply_patch",
             {"paths": ["src/app.py", "secrets/key.txt"]},
@@ -150,7 +157,9 @@ class XcodePermissionsTests:
         assert result.matched_rule == "restricted_dirs"
 
     def test_restricted_dirs_checks_patch_text_targets(self) -> None:
-        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        engine = PermissionEngine(
+            PermissionEngineConfig(restricted_dirs=("secrets",), mode_fallback="allow")
+        )
         result = engine.decide(
             "apply_patch",
             {
@@ -168,7 +177,9 @@ class XcodePermissionsTests:
         assert result.matched_rule == "restricted_dirs"
 
     def test_restricted_dirs_asks_for_unparseable_filesystem_command(self) -> None:
-        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        engine = PermissionEngine(
+            PermissionEngineConfig(restricted_dirs=("secrets",), mode_fallback="allow")
+        )
         result = engine.decide(
             "bash",
             {"command": 'rm "unterminated'},
@@ -216,7 +227,9 @@ class XcodePermissionsTests:
         assert result.blocked
 
     def test_restricted_dirs_checks_shell_path_target(self) -> None:
-        engine = PermissionEngine(PermissionEngineConfig(restricted_dirs=("secrets",)))
+        engine = PermissionEngine(
+            PermissionEngineConfig(restricted_dirs=("secrets",), mode_fallback="allow")
+        )
         result = engine.decide(
             "bash",
             {"command": "cat secrets/key.txt"},
@@ -258,6 +271,7 @@ class XcodePermissionsTests:
                     rules=(StaticPermission(tool="read_file", decision="allow"),),
                     global_default="ask",
                 ),
+                mode_fallback="allow",
             )
         )
         allowed = engine.decide("read_file", {"path": "a.txt"})
@@ -267,14 +281,14 @@ class XcodePermissionsTests:
         assert unknown.decision == "ask"
 
     def test_permission_engine_default_allow(self) -> None:
-        engine = PermissionEngine(PermissionEngineConfig())
+        engine = PermissionEngine(PermissionEngineConfig(mode_fallback="allow"))
         result = engine.decide("any_tool", {"input": "anything"})
         assert not (result.blocked)
         assert result.matched_rule == "default"
 
     def test_permission_engine_high_risk_approval(self) -> None:
         # High-risk approval path removed (STEP 5). Default allow.
-        engine = PermissionEngine(PermissionEngineConfig())
+        engine = PermissionEngine(PermissionEngineConfig(mode_fallback="allow"))
         result = engine.decide("danger", {"input": "hello"})
         assert not (result.blocked)
 
@@ -328,6 +342,49 @@ class XcodePermissionsTests:
         assert "deny for bash" in result.reason
         assert not (called)
 
+    def test_tool_gate_user_ruleset_overrides_build_default_allow(self) -> None:
+        from xcode.harness.observability.permission_model import Rule
+
+        mode = ExecutionModeState()
+        mode.set_mode("build")
+        tool = ToolSpec("bash", "Bash.", "command", lambda v: "", schema=INPUT_SCHEMA)
+        gate = ToolGate(
+            mode_state=mode,
+            approval_callback=None,
+            permission_policy=None,
+            hook_manager=None,
+            audit_logger=None,
+            session_id="test",
+            user_rulesets={
+                "build": (
+                    Rule(
+                        action="bash",
+                        effect="deny",
+                        command="git",
+                        subcommand="push",
+                    ),
+                )
+            },
+        )
+        hook = gate.build_before_tool_hook(gate.snapshot_for((tool,)))
+
+        result = hook(
+            BeforeToolCallContext(
+                assistant_message=AssistantMessage(content=[]),
+                tool_call=ToolCallContent(
+                    id="x",
+                    name="bash",
+                    arguments={"command": "git push"},
+                ),
+                args={"command": "git push"},
+                context=AgentContext(),
+            ),
+            None,
+        )
+
+        assert result is not None
+        assert result.block
+
     def test_structured_agent_uses_permission_policy(self) -> None:
         from xcode.ai.events import ProviderEvent
 
@@ -361,7 +418,7 @@ class XcodePermissionsTests:
 
         result = agent.run("go")
 
-        assert "deny for echo" in result.messages[2]["content"][0]["content"]
+        assert "deny for echo" in result.messages[3]["content"][0]["content"]
 
     def test_structured_agent_approval_callback_setter_updates_gate(self) -> None:
         from xcode.ai.events import ProviderEvent
@@ -392,7 +449,7 @@ class XcodePermissionsTests:
 
         result = agent.run("go")
 
-        assert result.messages[2]["content"][0]["content"] == "go"
+        assert result.messages[3]["content"][0]["content"] == "go"
 
     def test_permission_allows_then_handler_raises(self) -> None:
         def fail_handler(_value: dict) -> str:
@@ -473,8 +530,8 @@ class SubagentGatePermissionBoundaryTests:
     但应继承 SecurityRuntimeConfig 的非交互式策略。
     """
 
-    def test_subagent_dangerous_shell_blocked_by_safety_backstop(self) -> None:
-        """Bucket A 命令即使无静态策略也被 SafetyBackstop 阻断。"""
+    def test_subagent_blocked_rule_blocks_shell(self) -> None:
+        """阻断规则即使无静态策略也会拒绝命令。"""
         mode = ExecutionModeState()
         tool = ToolSpec("bash", "Bash.", "command", lambda v: "", schema=INPUT_SCHEMA)
         gate = ToolGate(
@@ -501,8 +558,8 @@ class SubagentGatePermissionBoundaryTests:
         assert result is not None
         assert result.block
 
-    def test_subagent_bucket_b_blocked_no_approval_callback(self) -> None:
-        """Bucket B ask 命令因无 approval_callback 被阻断。"""
+    def test_subagent_confirmation_rule_blocked_no_approval_callback(self) -> None:
+        """确认规则因无 approval_callback 被阻断。"""
         mode = ExecutionModeState()
         tool = ToolSpec("bash", "Bash.", "command", lambda v: "", schema=INPUT_SCHEMA)
         gate = ToolGate(
@@ -530,8 +587,9 @@ class SubagentGatePermissionBoundaryTests:
         assert result.block
 
     def test_subagent_allowed_shell_runs(self) -> None:
-        """Bucket C 已知安全命令通过。"""
+        """build profile 默认允许 shell 命令通过。"""
         mode = ExecutionModeState()
+        mode.set_mode("build")
         tool = ToolSpec("bash", "Bash.", "command", lambda v: "", schema=INPUT_SCHEMA)
         gate = ToolGate(
             mode_state=mode,
@@ -588,6 +646,7 @@ class SubagentGatePermissionBoundaryTests:
     def test_subagent_global_default_ask(self) -> None:
         """子代理使用 global_default="ask"，仅显式 allow 的工具可通过。"""
         mode = ExecutionModeState()
+        mode.set_mode("build")
         read_tool = ToolSpec(
             "read_file", "Read.", "path", lambda v: "", schema=INPUT_SCHEMA
         )
@@ -831,7 +890,7 @@ class SubagentGatePermissionBoundaryTests:
             ),
         )
         result = agent.run("go")
-        assert "deny for echo" in result.messages[2]["content"][0]["content"]
+        assert "deny for echo" in result.messages[3]["content"][0]["content"]
 
     def test_subagent_structured_agent_audit_emitted(self) -> None:
         """子代理 StructuredAgent 的 GateConfig 带 audit_logger 时发出审计。"""
@@ -898,6 +957,8 @@ class SubagentGatePermissionBoundaryTests:
             ],
         ]
         provider = FakeProvider(responses)
+        from xcode.harness.observability.permission_model import Rule
+
         agent = StructuredAgent(
             provider=provider,
             registry=(
@@ -911,6 +972,7 @@ class SubagentGatePermissionBoundaryTests:
             ),
             gate=GateConfig(
                 hook_manager=hook_manager,
+                user_rulesets={"act": (Rule(action="echo", effect="allow"),)},
             ),
         )
         agent.run("go")
@@ -944,6 +1006,7 @@ class ToolGateBoundaryResolutionTests:
         self, project_root: Path | None = None
     ) -> tuple[ToolGate, ToolGateSnapshot]:
         mode = ExecutionModeState()
+        mode.set_mode("build")
         tool = ToolSpec(
             "write_file", "Write.", "path", lambda v: "", schema=self.PATH_SCHEMA
         )

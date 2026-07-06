@@ -306,6 +306,64 @@ class XcodeRuntimeConfigTests:
             assert config.experimental.mailbox
             assert config.experimental.progress
 
+    def test_loads_execution_mode_rulesets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "xcode.config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "execution_modes": {
+                            "build": {
+                                "rules": [
+                                    {
+                                        "action": "bash",
+                                        "effect": "deny",
+                                        "command": "git",
+                                        "subcommand": "push",
+                                        "flags_any": ["--force"],
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_runtime_config(path)
+
+        rule = config.execution_modes.build.rules[0]
+        assert rule.action == "bash"
+        assert rule.effect == "deny"
+        assert rule.command == "git"
+        assert rule.subcommand == "push"
+        assert rule.flags_any == ("--force",)
+
+        from xcode.harness.assembly import _mode_rulesets_from_runtime_config
+
+        rulesets = _mode_rulesets_from_runtime_config(config)
+        assert rulesets["build"][0].effect == "deny"
+        assert rulesets["build"][0].flags_any == {"--force"}
+
+    def test_rejects_invalid_execution_mode_rule_effect(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "xcode.config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "execution_modes": {
+                            "build": {"rules": [{"action": "bash", "effect": "maybe"}]}
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with pytest.raises(
+                ValueError, match="execution_modes.build.rules.0.effect"
+            ):
+                load_runtime_config(path)
+
     def test_loads_external_hook_config(self) -> None:
         """外部 hook 声明转换为类型化 argv 配置。"""
         with tempfile.TemporaryDirectory() as tmp:
