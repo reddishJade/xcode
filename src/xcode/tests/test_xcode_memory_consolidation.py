@@ -3,28 +3,27 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from xcode.harness.agent_runtime.compaction import LayeredCompactor
-from xcode.harness.memory import MemoryManager
 import pytest
+
+from xcode.harness.agent_runtime.compaction import LayeredCompactor
+from xcode.harness.memory import MemoryManager, MemoryProposalStatus
 
 
 class TestMemoryConsolidationHook:
-    def setup_method(self, method) -> None:
+    def setup_method(self, method: object) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.manager = MemoryManager(self.root)
 
-    def teardown_method(self, method) -> None:
+    def teardown_method(self, method: object) -> None:
         self.temp_dir.cleanup()
 
-    def test_consolidation_hook_triggers_on_compaction(self) -> None:
-        # Create a compactor with 2 recent messages max to force compaction
+    def test_consolidation_hook_creates_pending_proposal_on_compaction(self) -> None:
+        """Compaction produces a reviewable proposal, never a direct memory write."""
         compactor = LayeredCompactor(
-            max_recent_messages=2, on_compact=self.manager.consolidate
+            max_recent_messages=2,
+            on_compact=self.manager.consolidate,
         )
-
-        # Build a message list that has more than 3 messages (max_recent + 1)
-        # We inject a memory block inside the user/assistant content to see if it is consolidated!
         valid_block = (
             "## Incident 99: Memory compaction works\n"
             "- Context/Query: Compaction test runs\n"
@@ -32,7 +31,6 @@ class TestMemoryConsolidationHook:
             "- Files: compaction.py\n"
             "- Takeaways: Clean and elegant\n"
         )
-
         messages = [
             {"role": "system", "content": "System prompt"},
             {"role": "user", "content": "Normal user message"},
@@ -41,26 +39,22 @@ class TestMemoryConsolidationHook:
             {"role": "assistant", "content": "Latest assistant reply"},
         ]
 
-        # Trigger compaction
         final_messages = compactor(messages)
 
-        # Compactor should summarize the older messages (index 1 to 2)
-        # Check that the summary message was created and starts with [Compressed]
         assert len(final_messages) < len(messages)
         assert final_messages[1]["role"] == "user"
         assert final_messages[1]["content"].startswith("[Compressed]")
+        assert not self.manager.memory_file.exists()
 
-        assert self.manager.memory_file.exists()
-        memory_text = self.manager.memory_file.read_text(encoding="utf-8")
-        assert "Incident 99: Memory compaction works" in memory_text
-        trace_events = self.manager.drain_trace_events()
-        assert [event.type for event in trace_events] == [
-            "candidate_created",
-            "accepted",
-        ]
-        assert trace_events[1].title == "Incident 99: Memory compaction works"
+        proposals = self.manager.governance.ledger.list_proposals()
+        assert len(proposals) == 1
+        assert proposals[0].status is MemoryProposalStatus.PENDING
+        assert proposals[0].title == "Incident 99: Memory compaction works"
+        assert proposals[0].source == "consolidation"
+        assert proposals[0].evidence[0].kind == "compaction_summary"
 
     def test_consolidate_rejects_ephemeral_session_only_memory(self) -> None:
+        """The old scope gate still rejects and archives session-only candidates."""
         ephemeral_block = (
             "## Incident 100: Session-only compaction flow\n"
             "- Context/Query: This session only compaction failure test\n"
@@ -71,14 +65,13 @@ class TestMemoryConsolidationHook:
         self.manager.consolidate(f"[Compressed]\n{ephemeral_block}")
 
         assert not self.manager.memory_file.exists()
+        assert self.manager.governance.ledger.list_proposals() == ()
         archive_files = list(self.manager.archive_dir.glob("*.md"))
         assert len(archive_files) == 1
         archive_text = archive_files[0].read_text(encoding="utf-8")
         assert "Incident 100: Session-only compaction flow" in archive_text
         trace_events = self.manager.drain_trace_events()
-        assert [event.type for event in trace_events] == [
-            "rejected",
-        ]
+        assert [event.type for event in trace_events] == ["rejected"]
         assert trace_events[0].rejection_reason == "scope_gate_failed"
 
 
