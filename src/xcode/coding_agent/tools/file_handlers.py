@@ -1,7 +1,7 @@
 """受沙箱约束的本地文件工具。
 
 文件工具负责读写项目内文本文件，并在工具层集中处理路径解析、敏感目录
-拒绝、输出截断和基于 old_text 的文件编辑（含模糊匹配）。
+拒绝、输出截断和基于 old_text 的精确文件编辑。
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ from xcode.harness.skills import (
     ToolOutput,
     resolve_project_path,
 )
-from .edit_diff import (
-    apply_fuzzy_replace,
+from .text_edit import (
+    apply_text_replacement,
     detect_line_ending,
     normalize_to_lf,
     restore_line_endings,
@@ -502,7 +502,7 @@ def _edit_file_impl(
     total_replacements = 0
     for edit in request.edits:
         try:
-            result = apply_fuzzy_replace(
+            result = apply_text_replacement(
                 updated,
                 edit.old_text,
                 edit.new_text,

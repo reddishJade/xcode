@@ -414,7 +414,10 @@ class XcodeLayeredCompactionTests:
         assert "truncated" in content
 
     def test_edit_file_works_after_compaction(self) -> None:
-        from xcode.coding_agent.tools.file import build_file_tools
+        from xcode.coding_agent.tools import (
+            build_read_file_tool,
+            build_write_file_tools,
+        )
         from xcode.harness.agent_runtime.compaction import LayeredCompactor
         from pathlib import Path
 
@@ -423,7 +426,7 @@ class XcodeLayeredCompactionTests:
             file_path = root / "test_compact.txt"
             file_path.write_text("original content for compact", encoding="utf-8")
 
-            tools = build_file_tools(root)
+            tools = (build_read_file_tool(root), *build_write_file_tools(root))
             edit_tool = next(t for t in tools if t.name == "edit_file")
 
             messages: list[dict[str, Any]] = [

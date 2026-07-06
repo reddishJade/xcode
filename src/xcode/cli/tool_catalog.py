@@ -2,7 +2,7 @@
 
 每次调用 `build_tool_catalog()` 都会在临时上下文中扫描所有注册的构建函数，
 返回 `{group: set_of_tool_names}`。新增工具或修改 group 后无需手动更新任何列表。
-新增 `build_*_tools()` 入口时必须同步加入 `_builders()`，确保目录和实际 registry
+新增工具 builder 入口时必须同步加入 `_builders()`，确保目录和实际 registry
 保持一致。
 
 导入此模块本身没有副作用；build_tool_catalog() 调用各构建函数时使用
@@ -18,10 +18,12 @@ from pathlib import Path
 from xcode.harness.skills import ToolSpec
 
 from xcode.coding_agent.tools import (
+    build_apply_patch_tool,
     build_bash_tool,
-    build_file_tools,
     build_glob_tools,
     build_grep_tool,
+    build_read_file_tool,
+    build_write_file_tools,
 )
 from xcode.experimental.task_store import TaskStore, build_task_tools
 from xcode.harness.worktree import WorktreeTaskRunner, build_worktree_tools
@@ -33,27 +35,31 @@ type ToolCatalogBuilder = Callable[[], tuple[ToolSpec, ...]]
 
 CATALOG_COVERED_BUILDERS = frozenset(
     {
+        "build_apply_patch_tool",
         "build_bash_tool",
         "build_glob_tools",
         "build_grep_tool",
-        "build_file_tools",
         "build_load_skill_tool",
         "build_mailbox_tools",
-        "build_subagent_tools",
         "build_mcp_tools",
         "build_memory_tools",
         "build_progress_tools",
+        "build_read_file_tool",
         "build_search_tools_tool",
         "build_session_todo_tools",
+        "build_subagent_tools",
         "build_task_tools",
         "build_worktree_tools",
+        "build_write_file_tools",
     }
 )
 
 
 def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
     return [
-        lambda: build_file_tools(base_tmp),
+        lambda: (build_read_file_tool(base_tmp),),
+        lambda: build_write_file_tools(base_tmp),
+        lambda: (build_apply_patch_tool(base_tmp),),
         lambda: build_glob_tools(base_tmp) + (build_grep_tool(base_tmp),),
         lambda: (build_bash_tool(base_tmp),),
         lambda: build_worktree_tools(

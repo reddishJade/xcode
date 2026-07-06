@@ -10,7 +10,10 @@ class XcodePublicApiTests:
     def test_experimental_tools_are_not_reexported_from_tools(self) -> None:
         assert not (hasattr(tools, "WorktreeTaskRunner"))
         assert not (hasattr(tools, "build_worktree_tools"))
-        assert hasattr(tools, "build_file_tools")
+        assert not hasattr(tools, "build_file_tools")
+        assert hasattr(tools, "build_read_file_tool")
+        assert hasattr(tools, "build_write_file_tools")
+        assert hasattr(tools, "build_apply_patch_tool")
 
     def test_eval_is_not_reexported_from_core(self) -> None:
         assert not (hasattr(core, "load_eval_questions"))

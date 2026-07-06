@@ -15,7 +15,7 @@ from typing import Literal, cast
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.harness.skills import ToolInput, ToolOutput, ToolSpec
 
-from .edit_diff import (
+from .text_edit import (
     detect_line_ending,
     normalize_to_lf,
     restore_line_endings,

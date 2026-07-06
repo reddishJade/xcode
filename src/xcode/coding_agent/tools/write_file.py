@@ -1,4 +1,4 @@
-"""文件工具注册器与 Schema。"""
+"""write_file 与 edit_file 工具注册器与 Schema。"""
 
 from __future__ import annotations
 
@@ -7,37 +7,8 @@ from pathlib import Path
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.harness.skills import ToolSpec
-from .apply_patch import build_apply_patch_tool
-from .file_handlers import (
-    _edit_file,
-    _read_file,
-    _write_file,
-    FileOperations,
-    LocalFileOperations,
-)
 
-MAX_READ_BYTES = 1_000_000
-MAX_WRITE_BYTES = 1_000_000
-
-READ_FILE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "path": {
-            "type": "string",
-            "description": "The absolute path to the file or directory to read.",
-        },
-        "limit": {
-            "type": "integer",
-            "description": "Optional max number of lines to return.",
-        },
-        "offset": {
-            "type": "integer",
-            "description": "Optional 1-based line number to start reading from.",
-        },
-    },
-    "required": ["path"],
-    "additionalProperties": False,
-}
+from .file_handlers import FileOperations, LocalFileOperations, _edit_file, _write_file
 
 WRITE_FILE_SCHEMA = {
     "type": "object",
@@ -80,7 +51,7 @@ EDIT_FILE_SCHEMA = {
 }
 
 
-def build_file_tools(
+def build_write_file_tools(
     project_root: Path,
     context_state: ContextualRetrievalState | None = None,
     operations: FileOperations | None = None,
@@ -95,22 +66,6 @@ def build_file_tools(
         return fn(data)
 
     return (
-        ToolSpec(
-            name="read_file",
-            description="Read a file or directory from the local filesystem.",
-            input_hint='JSON: {"path": "/absolute/path/to/file", "offset": 1, "limit": 80}',
-            handler=lambda data: _handler(
-                lambda d: _read_file(root, ops, context_state, d), data
-            ),
-            schema=READ_FILE_SCHEMA,
-            read_only=True,
-            concurrency_safe=True,
-            group="core",
-            prompt_snippet="Read a text file inside the project sandbox",
-            prompt_guidelines=(
-                "Use read_file offset and limit to continue reading long files.",
-            ),
-        ),
         ToolSpec(
             name="write_file",
             description=(
@@ -139,7 +94,7 @@ def build_file_tools(
             name="edit_file",
             description=(
                 "Modify an existing text file with a targeted replacement. "
-                "old_text must match exactly; the tool uses fuzzy fallback strategies. "
+                "old_text must match exactly, including whitespace and newlines. "
                 "Use write_file for new files or full replacements."
             ),
             input_hint='JSON: {"path": "/absolute/path/to/file", "old_text": "...", "new_text": "..."}',
@@ -164,10 +119,5 @@ def build_file_tools(
                     "new_text": "return new_value\n",
                 }
             ],
-        ),
-        build_apply_patch_tool(
-            root,
-            context_state=context_state,
-            operations=ops,
         ),
     )

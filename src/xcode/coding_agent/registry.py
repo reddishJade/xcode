@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING
 from xcode.harness.execution_env import ExecutionEnv
 from xcode.harness.skills import ToolSpec
 from xcode.coding_agent.tools import (
+    build_apply_patch_tool,
     build_bash_tool,
-    build_file_tools,
     build_glob_tools,
     build_grep_tool,
+    build_read_file_tool,
+    build_write_file_tools,
 )
 
 if TYPE_CHECKING:
@@ -35,8 +37,23 @@ def build_project_scoped_registry(
     skill_registry: SkillRegistry | None = None,
 ) -> tuple[ToolSpec, ...]:
     registry: tuple[ToolSpec, ...] = ()
-    registry += build_file_tools(
-        project_root, context_state=contextual_state, cancel_event=cancel_event
+    registry += (
+        build_read_file_tool(
+            project_root,
+            context_state=contextual_state,
+            cancel_event=cancel_event,
+        ),
+    )
+    registry += build_write_file_tools(
+        project_root,
+        context_state=contextual_state,
+        cancel_event=cancel_event,
+    )
+    registry += (
+        build_apply_patch_tool(
+            project_root,
+            context_state=contextual_state,
+        ),
     )
     registry += build_glob_tools(project_root, cancel_event=cancel_event)
     registry += (build_grep_tool(project_root, cancel_event=cancel_event),)

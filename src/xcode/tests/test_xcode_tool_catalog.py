@@ -50,7 +50,9 @@ def _tool_builder_calls(tree: ast.AST) -> set[str]:
         name = _called_name(node.func)
         if name is None:
             continue
-        if name == "build_bash_tool" or name.endswith("_tools"):
+        if name.startswith("build_") and (
+            name.endswith("_tool") or name.endswith("_tools")
+        ):
             names.add(name)
         elif name in {"build_load_skill_tool", "build_search_tools_tool"}:
             names.add(name)

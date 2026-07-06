@@ -4,7 +4,11 @@ from collections.abc import Iterator
 from pathlib import Path
 import tempfile
 from xcode.cli.repl_tools import parse_tool_input
-from xcode.coding_agent.tools import build_file_tools
+from xcode.coding_agent.tools import (
+    build_apply_patch_tool,
+    build_read_file_tool,
+    build_write_file_tools,
+)
 from xcode.coding_agent.tools.file_handlers import LocalFileOperations
 import pytest
 
@@ -40,11 +44,21 @@ class RecordingFileOperations(LocalFileOperations):
 
 class XcodeSandboxedFileToolsTests:
     def _tools(self, root: Path):
-        return {tool.name: tool for tool in build_file_tools(root)}
+        tools = (
+            build_read_file_tool(root),
+            *build_write_file_tools(root),
+            build_apply_patch_tool(root),
+        )
+        return {tool.name: tool for tool in tools}
 
     def _tools_with_operations(self, root: Path, operations: RecordingFileOperations):
         return {
-            tool.name: tool for tool in build_file_tools(root, operations=operations)
+            tool.name: tool
+            for tool in (
+                build_read_file_tool(root, operations=operations),
+                *build_write_file_tools(root, operations=operations),
+                build_apply_patch_tool(root, operations=operations),
+            )
         }
 
     def test_read_file_with_limit_and_truncation(self) -> None:
@@ -429,6 +443,24 @@ class XcodeSandboxedFileToolsTests:
             assert "--- a/a.txt" in output
             assert "+++ b/a.txt" in output
             assert path.read_text(encoding="utf-8") == "y\ny\n"
+
+    def test_edit_file_requires_exact_whitespace_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "a.txt"
+            path.write_text("alpha    beta\n", encoding="utf-8")
+            tools = self._tools(root)
+
+            with pytest.raises(ValueError, match="Could not find old_string"):
+                tools["edit_file"].handler(
+                    {
+                        "path": "a.txt",
+                        "old_text": "alpha beta",
+                        "new_text": "changed",
+                    }
+                )
+
+            assert path.read_text(encoding="utf-8") == "alpha    beta\n"
 
     def test_edit_file_preserves_utf8_sig_encoding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
