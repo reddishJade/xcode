@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import queue
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -70,6 +71,54 @@ from xcode.harness.snapshot import (
 from xcode.agent.messages import UserMessage
 
 
+# ---------------------------------------------------------------------------
+# Windows prompt_toolkit shutdown noise suppression
+#
+# On Windows, prompt_toolkit's Win32 input handler (_Win32Handles) has a
+# race with asyncio.Runner.close().  During process exit (double Ctrl+C):
+#   Runner.__exit__ → close() → shutdown_default_executor() sets
+#   _executor_shutdown_called = True, then runs run_until_complete to await
+#   the shutdown thread.  The event loop is still processing callbacks at
+#   this point, so a late Win32 ready() callback fires and calls
+#   loop.run_in_executor(), which hits _check_default_executor() and raises
+#   RuntimeError("Executor shutdown has been called").  The default asyncio
+#   exception handler prints the full traceback to stderr — ugly but harmless.
+# ---------------------------------------------------------------------------
+
+
+def _suppress_windows_ptk_shutdown_noise() -> None:
+    """Patch asyncio.new_event_loop on Windows to suppress the harmless
+    RuntimeError that prompt_toolkit's Win32 input handler triggers during
+    REPL exit."""
+    if sys.platform != "win32":
+        return
+
+    _original_new_event_loop = asyncio.new_event_loop
+
+    if getattr(_original_new_event_loop, "_xcode_patched", False):
+        return
+
+    def _handler(
+        loop: asyncio.AbstractEventLoop,
+        context: dict[str, object],
+    ) -> None:
+        exc = context.get("exception")
+        if isinstance(exc, RuntimeError):
+            msg = str(exc)
+            if "Executor shutdown has been called" in msg:
+                return  # suppress — expected during prompt_toolkit exit
+        # Fall through to the default handler
+        loop.default_exception_handler(context)
+
+    def _patched_new_event_loop() -> asyncio.AbstractEventLoop:
+        loop = _original_new_event_loop()
+        loop.set_exception_handler(_handler)
+        return loop
+
+    _patched_new_event_loop._xcode_patched = True  # type: ignore[attr-defined]
+    asyncio.new_event_loop = _patched_new_event_loop
+
+
 def current_effort_options(app: object) -> tuple[str, ...]:
     """返回当前 active provider 支持的 reasoning effort 选项。"""
     agent = getattr(app, "agent", None)
@@ -118,6 +167,7 @@ def run_repl(
     renderer: MarkdownRenderer | None = None,
     project_root: Path | None = None,
 ) -> int:
+    _suppress_windows_ptk_shutdown_noise()
     root = (project_root or sessions_dir).resolve()
     store = SessionStore(sessions_dir, project_root=root)
     markdown_renderer = renderer or TerminalMarkdownRenderer()
