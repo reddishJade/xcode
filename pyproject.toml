@@ -55,7 +55,6 @@ markers = [
 
 [project.scripts]
 xcode = "xcode.main:main"
-xcode-eval = "xcode.evals.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

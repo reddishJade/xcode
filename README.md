@@ -222,28 +222,6 @@ xcode.config.json               ← 项目级
 uv run pytest src/xcode/tests -q --tb=short
 ```
 
-### Eval 工作流
-
-```powershell
-# 列出可用 eval 套件
-uv run python -m xcode.evals.cli --list-suites
-
-# 运行 pipeline 套件
-uv run python -m xcode.evals.cli --suite pipeline
-
-# 运行 tool-policy 套件
-uv run python -m xcode.evals.cli --suite tool-policy
-
-# 运行真实模型 eval（需要配置 API key）
-uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3
-
-# 基准测试
-uv run python -m xcode.evals.cli --list-benchmarks
-uv run python -m xcode.evals.cli --real --benchmark evalplus-humaneval --benchmark-path <url> --trials 1
-```
-
-更多说明见 [docs/evaluation-guide.md](docs/evaluation-guide.md)。
-
 ---
 
 ## 开发指南
@@ -275,7 +253,7 @@ uv run pyright src/
 | [CONFIG.md](CONFIG.md) | 运行时配置参考 |
 | [docs/code-organization.md](docs/code-organization.md) | 模块职责与工具组映射 |
 | [docs/source-review.md](docs/source-review.md) | 源码级架构审查 |
-| [docs/evaluation-guide.md](docs/evaluation-guide.md) | 测试和 eval 工作流 |
+
 
 ---
 

@@ -9,18 +9,6 @@ Xcode 是轻量级 Python Agent 运行骨架。四层架构：
 
 运行路径：`main.py` → `build_app()` → `StructuredAgent` → `Agent` loop → provider stream → tool execution。
 
-**入口**：`xcode` CLI 命令 / `python -m xcode` / `build_app()` 编程式 API。eval 入口：`xcode-eval` / `python -m xcode.evals.cli`。包名 `xcode*`，位于 `src/`。
-
-## 引用文档
-
-阅读以下文档获取细节（按需读取，非全部必读）：
-
-| 文档 | 时机 |
-|---|---|
-| [docs/evaluation-guide.md](docs/evaluation-guide.md) | 运行测试、lint、typecheck、eval |
-| [docs/git-workflow.md](docs/git-workflow.md) | 提交前 |
-| [CONFIG.md](CONFIG.md) | 运行时配置参考 |
-
 ## 常用命令
 
 ```powershell
@@ -40,27 +28,15 @@ uv run pytest src/xcode/tests/test_xcode_file_tools.py -q --tb=short  # 单个
 # 编译检查
 uv run python -m compileall src
 
-# Eval
-uv run python -m xcode.evals.cli --suite pipeline        # 离线回归
-uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3  # 真实 provider
-uv run python -m xcode.evals.cli --list-suites           # 列出可用套件
-uv run python -m xcode.evals.cli --list-benchmarks       # 列出 benchmark
-```
-
 ## 代码规范
 
 - Python 3.12+，完整类型注解，ruff 格式化（行宽 88），零 `# noqa` / `# type: ignore`
 - 注释和 docstring 使用简体中文
 - 函数职责单一，纯函数优先，异常捕获具体类型
-- `*args`/`**kwargs` 只在不避免的边界使用；禁止动态 `importlib`/`getattr`/`setattr`
+- `*args`/`**kwargs` 只在不避免的边界使用
+- 禁止动态 `importlib`/`getattr`/`setattr`
 - 依赖变更视为代码变更，需要 review
 - 不维护向后兼容，除非用户要求
-
-## 架构约束
-
-- 新工具必须声明 group、risk、schema、read-only 和 concurrency 属性
-- MCP 工具由 `.local/mcp_config.json` 自动发现并注册
-- `edit_file` 依赖 read-before-edit 指纹校验
 
 ## Git 规则
 

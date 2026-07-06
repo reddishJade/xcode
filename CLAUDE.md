@@ -12,7 +12,6 @@ Xcode 是轻量级 Python Agent 运行骨架，四层架构：
 运行路径：`main.py` → `build_app()` → `StructuredAgent` → `Agent` loop → provider stream → tool execution。
 
 **入口**：`xcode` CLI / `python -m xcode` / `build_app()` 编程式 API。
-**Eval 入口**：`xcode-eval` / `python -m xcode.evals.cli`。
 
 ## 常用命令
 
@@ -33,12 +32,6 @@ uv run python -m compileall src
 uv run pytest src/xcode/tests/ -q --tb=short                         # 全部测试
 uv run pytest src/xcode/tests/test_xcode_file_tools.py -q --tb=short # 单个测试文件
 
-# Eval 回归
-uv run python -m xcode.evals.cli --suite all               # 离线回归集合
-uv run python -m xcode.evals.cli --suite pipeline           # 单个套件
-uv run python -m xcode.evals.cli --real --suite coding-fixture --trials 3  # 真实 provider
-uv run python -m xcode.evals.cli --list-suites              # 列出可用套件
-uv run python -m xcode.evals.cli --list-benchmarks          # 列出 benchmark
 ```
 
 ## 架构要点
@@ -110,7 +103,7 @@ uv run python -m xcode.evals.cli --list-benchmarks          # 列出 benchmark
 ## 测试
 
 - `pytest-asyncio`，`asyncio_mode = "auto"`，测试位于 `src/xcode/tests/`
-- 71 个测试文件覆盖核心装配、provider、runtime、coding tools、observability、REPL 和 evals
+- 71 个测试文件覆盖核心装配、provider、runtime、coding tools、observability、REPL
 - 回归套件（`--suite all`）：`pipeline` + `tool-policy` + `context` + `multi`
 - 仅修改文档时：`git diff --check -- <modified-docs>`
 - 不运行需要外部环境变量的端到端套件（除非明确要求）
@@ -122,5 +115,4 @@ uv run python -m xcode.evals.cli --list-benchmarks          # 列出 benchmark
 | 文档 | 内容 |
 |---|---|
 | [CONFIG.md](CONFIG.md) | 运行时配置完整参考（provider、agent、security、hooks、tools、prompt 等） |
-| [docs/evaluation-guide.md](docs/evaluation-guide.md) | Eval 框架、套件、grader、benchmark adapter 使用指南 |
 | [docs/git-workflow.md](docs/git-workflow.md) | Git 操作详细规则 |
