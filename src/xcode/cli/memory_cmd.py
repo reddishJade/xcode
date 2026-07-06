@@ -14,6 +14,7 @@ from xcode.harness.memory import (
     MemoryManager,
     MemoryProposal,
     MemoryProposalStatus,
+    MemoryRecord,
     audit_memory_integrity,
 )
 
@@ -36,6 +37,13 @@ def handle_memory_command(args: Namespace, project_root: Path) -> int:
         return _reject(
             manager,
             str(args.proposal_id),
+            yes=bool(args.yes),
+            reason=str(args.reason),
+        )
+    if action == "retire":
+        return _retire(
+            manager,
+            str(args.memory_id),
             yes=bool(args.yes),
             reason=str(args.reason),
         )
@@ -129,6 +137,38 @@ def _reject(
     return 0
 
 
+def _retire(
+    manager: MemoryManager,
+    memory_id: str,
+    *,
+    yes: bool,
+    reason: str,
+) -> int:
+    record = _get_record(manager, memory_id)
+    if record is None:
+        print(f"Unknown memory: {memory_id}")
+        return 2
+    _print_retirement_preview(record, reason)
+    if not yes:
+        print("Re-run with --yes to retire this memory and move it to archive.")
+        return 2
+
+    result = manager.governance.retire_explicit_user_memory(
+        record,
+        source="cli",
+        reason=reason,
+    )
+    proposal = result.proposal
+    if proposal.status is not MemoryProposalStatus.APPLIED:
+        print(f"Retirement failed for {memory_id}: {proposal.decision_reason}")
+        return 1
+    print(
+        f"Retired {memory_id}: proposal={proposal.proposal_id} "
+        f"archive_reason={reason}"
+    )
+    return 0
+
+
 def _audit(manager: MemoryManager) -> int:
     report = audit_memory_integrity(manager)
     print(
@@ -165,6 +205,13 @@ def _get_proposal(manager: MemoryManager, proposal_id: str) -> MemoryProposal | 
         return None
 
 
+def _get_record(manager: MemoryManager, memory_id: str) -> MemoryRecord | None:
+    for record in manager.read_memory_records(layer="all"):
+        if record.memory_id == memory_id:
+            return record
+    return None
+
+
 def _print_confirmation_preview(action: str, proposal: MemoryProposal) -> None:
     print(f"About to {action} memory proposal {proposal.proposal_id}:")
     print(f"  title={proposal.title}")
@@ -175,3 +222,10 @@ def _print_confirmation_preview(action: str, proposal: MemoryProposal) -> None:
             f"  evidence={evidence.evidence_id} {evidence.kind}:"
             f"{evidence.reference} trust={evidence.trust.value}"
         )
+
+
+def _print_retirement_preview(record: MemoryRecord, reason: str) -> None:
+    print(f"About to retire memory {record.memory_id}:")
+    print(f"  title={record.title}")
+    print(f"  layer={record.layer} scope={record.scope or '(unscoped)'}")
+    print(f"  reason={reason}")
