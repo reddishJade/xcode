@@ -29,9 +29,14 @@ from xcode.agent.protocols import AgentTool
 
 
 class ContextBlockSource(StrEnum):
-    """上下文块的来源类别。"""
+    """上下文块的来源类别。
+
+    INSTRUCTION 是 host 生成的稳定指令来源。仓库文件和用户配置的项目指令
+    必须使用 WORKSPACE_INSTRUCTION，不能借用 INSTRUCTION 获得 system authority。
+    """
 
     INSTRUCTION = "instruction"
+    WORKSPACE_INSTRUCTION = "workspace_instruction"
     SKILL = "skill"
     ACTIVE_DIFF = "active_diff"
     NOTES = "notes"
@@ -92,7 +97,8 @@ class ContextProvenance:
 
 
 _DEFAULT_AUTHORITY_BY_SOURCE: dict[ContextBlockSource, ContextAuthority] = {
-    ContextBlockSource.INSTRUCTION: ContextAuthority.WORKSPACE_POLICY,
+    ContextBlockSource.INSTRUCTION: ContextAuthority.HOST_POLICY,
+    ContextBlockSource.WORKSPACE_INSTRUCTION: ContextAuthority.WORKSPACE_POLICY,
     ContextBlockSource.SKILL: ContextAuthority.WORKSPACE_POLICY,
     ContextBlockSource.ACTIVE_DIFF: ContextAuthority.OBSERVATION,
     ContextBlockSource.NOTES: ContextAuthority.OBSERVATION,
@@ -102,7 +108,8 @@ _DEFAULT_AUTHORITY_BY_SOURCE: dict[ContextBlockSource, ContextAuthority] = {
 }
 
 _DEFAULT_TRUST_BY_SOURCE: dict[ContextBlockSource, ContextTrust] = {
-    ContextBlockSource.INSTRUCTION: ContextTrust.WORKSPACE_UNTRUSTED,
+    ContextBlockSource.INSTRUCTION: ContextTrust.TRUSTED_HOST,
+    ContextBlockSource.WORKSPACE_INSTRUCTION: ContextTrust.WORKSPACE_UNTRUSTED,
     ContextBlockSource.SKILL: ContextTrust.WORKSPACE_UNTRUSTED,
     ContextBlockSource.ACTIVE_DIFF: ContextTrust.VERIFIED_TOOL,
     ContextBlockSource.NOTES: ContextTrust.WORKSPACE_UNTRUSTED,
@@ -112,7 +119,8 @@ _DEFAULT_TRUST_BY_SOURCE: dict[ContextBlockSource, ContextTrust] = {
 }
 
 _DEFAULT_SCOPE_BY_SOURCE: dict[ContextBlockSource, ContextScope] = {
-    ContextBlockSource.INSTRUCTION: ContextScope.REPOSITORY,
+    ContextBlockSource.INSTRUCTION: ContextScope.SESSION,
+    ContextBlockSource.WORKSPACE_INSTRUCTION: ContextScope.REPOSITORY,
     ContextBlockSource.SKILL: ContextScope.REPOSITORY,
     ContextBlockSource.ACTIVE_DIFF: ContextScope.WORKTREE,
     ContextBlockSource.NOTES: ContextScope.REPOSITORY,
