@@ -48,6 +48,7 @@ from ..observability.permission_model import ExternalDirectory
 from ..skills import ApprovalCallback, ToolSpec
 from ..agent_skills import SkillRegistry
 from ..memory import MemoryManager
+from ..memory.collector import MemoryCollector
 from ..session_todo import SessionTodoState
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
@@ -112,6 +113,7 @@ class TurnSnapshot:
     registry: tuple[ToolSpec, ...]
     provider: ModelProvider
     runtime_context_provider: RuntimeContextProvider | None
+    memory_manager: MemoryManager | None = None
 
 
 def build_turn_snapshot(
@@ -120,11 +122,16 @@ def build_turn_snapshot(
     provider: ModelProvider,
     runtime_context_provider: RuntimeContextProvider | None,
 ) -> TurnSnapshot:
+    bound_manager = getattr(runtime_context_provider, "memory_manager", None)
+    memory_manager = (
+        bound_manager if isinstance(bound_manager, MemoryManager) else None
+    )
     return TurnSnapshot(
         config=config,
         registry=registry,
         provider=provider,
         runtime_context_provider=runtime_context_provider,
+        memory_manager=memory_manager,
     )
 
 
@@ -135,6 +142,14 @@ def build_turn_context_messages(
     resumed_notice: str | None,
     memory_overview: str | None = None,
 ) -> list[AgentMessage]:
+    """Build host-owned system context only.
+
+    ``memory_overview`` is intentionally ignored during the read-path cutover.
+    Durable memory is injected exclusively by ``MemoryCollector`` as typed user
+    context; retaining this parameter keeps the function callable while older
+    resume callers are removed in the same migration series.
+    """
+    _ = memory_overview
     typed: list[AgentMessage] = []
     notice = mode_notice(mode)
     parts: list[str] = []
@@ -142,8 +157,6 @@ def build_turn_context_messages(
         parts = list(snapshot.runtime_context_provider(question))
     if resumed_notice is not None:
         parts.append(f"<session-notices>\n{resumed_notice}\n</session-notices>")
-    if memory_overview:
-        parts.append(memory_overview)
     if notice:
         parts.append(notice)
     if parts:
@@ -318,7 +331,6 @@ def build_loop_config(
             )
         return None
 
-    # 构建上下文收集器 + 组装器
     registry_: ContextCollectorRegistry | None = None
     assembler: DefaultContextAssembler | None = None
     if project_root is not None:
@@ -342,6 +354,13 @@ def build_loop_config(
             if task_provider is not None:
                 registry_.register(TaskStateCollector(task_provider))
         registry_.register(NotesCollector(project_root))
+        if snapshot.memory_manager is not None:
+            registry_.register(
+                MemoryCollector(
+                    snapshot.memory_manager,
+                    project_root=project_root,
+                )
+            )
         sr = skill_registry
         if sr is None:
             sr = SkillRegistry()
@@ -402,7 +421,6 @@ def _should_compact(
         provider = snapshot.provider
         model_name = provider.model if isinstance(provider, ModelProvider) else None
         model_str = str(model_name) if model_name is not None else None
-        # 使用 context_window - reserve_tokens 作为精确触发线
         trigger = effective_compact_threshold(
             model_str,
             reserve_tokens=snapshot.config.reserve_tokens,
