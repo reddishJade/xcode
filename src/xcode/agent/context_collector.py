@@ -5,7 +5,7 @@
 
 本模块是 prompt 构建的两个系统之一（另一个见 prompting/builder.py）。
 职责边界：
-- 项目指令 → InstructionCollector（SYSTEM 目标）
+- 项目指令 → InstructionCollector（workspace_policy；请求 SYSTEM 但会被 assembler 降级）
 - 活动 diff 摘要  → ActiveDiffCollector（USER_CONTEXT 目标）
 - 最近验证失败   → RecentValidationCollector（USER_CONTEXT 目标）
 - 任务/计划状态   → TaskStateCollector（USER_CONTEXT 目标）
@@ -26,6 +26,7 @@ git preflight、contextual retrieval、session 通知。
 - 未注册 collector 时，collect() 返回空列表，不影响现有行为
 - collector 按注册顺序运行，输出拼接后传递给 assembler 做优先级排序
 - 单个 collector 失败时跳过（log + continue），不阻断其他 collector
+- workspace 文件只能细化项目工作方式，不能获得 host/system authority
 """
 
 from __future__ import annotations
@@ -38,10 +39,14 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from xcode.agent.context_assembly import (
+    ContextAuthority,
     ContextBlock,
     ContextBlockSource,
     ContextBlockTarget,
     ContextPriority,
+    ContextProvenance,
+    ContextScope,
+    ContextTrust,
 )
 from xcode.agent.messages import AgentMessage, ToolResultMessage
 from xcode.agent.protocols import AgentTool
@@ -80,7 +85,7 @@ class ContextCollector(Protocol):
     """
 
     def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
-        """从特定来源收集上下文块。返回空列表表示无可用块。"""
+        """从特定来源收集 ContextBlock 列表。返回空列表表示无可用块。"""
         ...
 
 
@@ -95,8 +100,7 @@ class ContextCollectorRegistry:
 
     错误处理（log + skip，非 fail-fast）：
 
-    与 tool_execution._execute_one（行 185-190）、
-    _provider._collect_provider_events（行 119-120）
+    与 tool_execution._execute_one、_provider._collect_provider_events
     采用相同约定：单个 component 失败时记录日志并产生 fallback 值，
     不阻断整体流程。异常永不传播给调用方。
     """
@@ -109,10 +113,7 @@ class ContextCollectorRegistry:
         self._collectors.append(collector)
 
     def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
-        """依次调用所有注册的 collector，返回合并后的块列表。
-
-        单个 collector 抛异常时记录日志并跳过，不阻断其他 collector。
-        """
+        """依次调用所有注册的 collector，返回合并后的块列表。"""
         all_blocks: list[ContextBlock] = []
         for collector in self._collectors:
             try:
@@ -134,6 +135,7 @@ class ContextCollectorRegistry:
 
 # ── 指令收集器 ──
 
+
 _INSTRUCTION_PRIORITY_MAP: dict[str, ContextPriority] = {
     "critical": ContextPriority.CRITICAL,
     "high": ContextPriority.HIGH,
@@ -153,12 +155,12 @@ class InstructionSource:
 
 
 class InstructionCollector:
-    """从配置的指令源 + 默认 AGENTS.md 收集指令。
+    """从配置的指令源 + 默认 AGENTS.md 收集 workspace policy。
 
-    配置在 prompt.instructions 中（PromptRuntimeConfig）。
-    空配置时回退到 AGENTS.md。
-    非空配置时：先收集配置源，再收集回退文件。
-    配置源与回退文件按解析后的路径去重，已配置源优先。
+    该 collector 读取的所有内容都来自 workspace 或用户项目配置，不是 host
+    policy。为了保持旧调用方的 target 兼容性，它仍请求 SYSTEM；但会显式标记
+    `workspace_policy + workspace_untrusted`，DefaultContextAssembler 因而将其
+    非旁路地降级为 USER_CONTEXT。
     """
 
     def __init__(
@@ -196,9 +198,10 @@ class InstructionCollector:
 
         blocks: list[ContextBlock] = []
         configured_paths: set[Path] = set()
+        scope_key = str(root.resolve())
 
         # 1. 配置源（按解析路径去重，首个配置源优先）
-        for source in self._sources:
+        for index, source in enumerate(self._sources):
             if source.type == "file":
                 assert source.path is not None
                 path = root / source.path
@@ -206,10 +209,17 @@ class InstructionCollector:
                 if resolved in configured_paths:
                     continue
                 configured_paths.add(resolved)
-                blocks.extend(self._collect_file(path, source.priority))
+                blocks.extend(self._collect_file(path, source.priority, root, scope_key))
             else:
                 assert source.content is not None
-                blocks.extend(self._collect_inline(source.content, source.priority))
+                blocks.extend(
+                    self._collect_inline(
+                        source.content,
+                        source.priority,
+                        scope_key,
+                        f"prompt.instructions[{index}]",
+                    )
+                )
 
         # 2. 回退 AGENTS.md
         agents_path = root / "AGENTS.md"
@@ -217,42 +227,80 @@ class InstructionCollector:
             content = agents_path.read_text(encoding="utf-8", errors="replace").strip()
             if content:
                 blocks.append(
-                    ContextBlock(
-                        source=ContextBlockSource.INSTRUCTION,
-                        target=ContextBlockTarget.SYSTEM,
-                        priority=ContextPriority.CRITICAL,
+                    _workspace_instruction_block(
                         content=_prepare_manifest(content),
+                        priority=ContextPriority.CRITICAL,
+                        scope_key=scope_key,
+                        locator="AGENTS.md",
                     )
                 )
 
         return blocks
 
     @staticmethod
-    def _collect_file(path: Path, priority: ContextPriority) -> list[ContextBlock]:
+    def _collect_file(
+        path: Path,
+        priority: ContextPriority,
+        root: Path,
+        scope_key: str,
+    ) -> list[ContextBlock]:
         if not path.is_file():
             return []
         content = path.read_text(encoding="utf-8", errors="replace").strip()
         if not content:
             return []
+        try:
+            locator = str(path.resolve().relative_to(root.resolve()))
+        except ValueError:
+            locator = str(path.resolve())
         return [
-            ContextBlock(
-                source=ContextBlockSource.INSTRUCTION,
-                target=ContextBlockTarget.SYSTEM,
-                priority=priority,
+            _workspace_instruction_block(
                 content=_prepare_manifest(content),
+                priority=priority,
+                scope_key=scope_key,
+                locator=locator,
             )
         ]
 
     @staticmethod
-    def _collect_inline(content: str, priority: ContextPriority) -> list[ContextBlock]:
+    def _collect_inline(
+        content: str,
+        priority: ContextPriority,
+        scope_key: str,
+        locator: str,
+    ) -> list[ContextBlock]:
         return [
-            ContextBlock(
-                source=ContextBlockSource.INSTRUCTION,
-                target=ContextBlockTarget.SYSTEM,
-                priority=priority,
+            _workspace_instruction_block(
                 content=_prepare_manifest(content),
+                priority=priority,
+                scope_key=scope_key,
+                locator=locator,
             )
         ]
+
+
+def _workspace_instruction_block(
+    *,
+    content: str,
+    priority: ContextPriority,
+    scope_key: str,
+    locator: str,
+) -> ContextBlock:
+    """构造明确受限的 workspace instruction block。"""
+    return ContextBlock(
+        source=ContextBlockSource.INSTRUCTION,
+        target=ContextBlockTarget.SYSTEM,
+        priority=priority,
+        content=content,
+        authority=ContextAuthority.WORKSPACE_POLICY,
+        trust=ContextTrust.WORKSPACE_UNTRUSTED,
+        scope=ContextScope.REPOSITORY,
+        scope_key=scope_key,
+        provenance=ContextProvenance(
+            origin="instruction_collector",
+            locator=locator,
+        ),
+    )
 
 
 # 大小治理常量
@@ -343,7 +391,7 @@ def _condense_manifest(text: str) -> str:
 
 
 def _extract_key_sections(text: str) -> list[str]:
-    """提取 Markdown 中匹配 MANIFEST_KEY_SECTIONS 的 ## 节。"""
+    """提取 Markdown 中匹配的 ##/### 关键节。"""
     sections: list[str] = []
     current_heading = ""
     current_lines: list[str] = []
@@ -384,11 +432,7 @@ def _drop_fenced_blocks(lines: list[str]) -> list[str]:
 
 
 def _prepare_manifest(text: str) -> str:
-    """根据两级大小策略准备指令文本。
-
-    ≤ MANIFEST_MAX_BYTES：原样返回
-    > MANIFEST_MAX_BYTES：压缩后返回
-    """
+    """根据两级大小策略准备指令文本。"""
     source_bytes = _utf8_size(text)
     if source_bytes <= MANIFEST_MAX_BYTES:
         return text
@@ -397,8 +441,8 @@ def _prepare_manifest(text: str) -> str:
 
 # ── 活动 diff 收集器 ──
 
-ACTIVE_DIFF_MAX_BYTES: int = 8 * 1024  # 8KB —— 活动 diff 摘要上限
-_DIFF_CMD_TIMEOUT: int = 5  # 秒
+ACTIVE_DIFF_MAX_BYTES: int = 8 * 1024
+_DIFF_CMD_TIMEOUT: int = 5
 
 _ACTIVE_DIFF_TRUNCATED_MARKER = (
     "<active-diff-truncated>Diff truncated because it exceeded the maximum "
@@ -425,17 +469,7 @@ def _run_git(root: Path, *args: str) -> str | None:
 
 
 class ActiveDiffCollector:
-    """从当前 git 工作树收集活动修改摘要的 collector。
-
-    运行 git diff --stat 和 --cached --stat 获取文件级统计，
-    再收集短 diff 摘录。产出 USER_CONTEXT 目标、HIGH 优先级的块。
-
-    优先级为 HIGH：活动 diff 是当前任务的即时上下文，但不应抢占
-    系统指令。大小由 ACTIVE_DIFF_MAX_BYTES（8KB）限制，超出时
-    截断添加 <active-diff-truncated> 标记。
-
-    失败时不抛出异常，记录日志后返回空列表。
-    """
+    """从当前 git 工作树收集活动修改摘要的 collector。"""
 
     def __init__(self, project_root: Path | None = None) -> None:
         self._project_root = project_root
@@ -453,7 +487,6 @@ class ActiveDiffCollector:
         if not has_staged and not has_unstaged:
             return []
 
-        # 构建统计摘要
         stat_parts: list[str] = []
         if has_staged:
             assert stat_staged is not None
@@ -467,18 +500,12 @@ class ActiveDiffCollector:
             stat_parts.append(stat_unstaged.strip())
         stat_summary = "\n".join(stat_parts)
 
-        # 构建理想正文（统计 + 摘录）
         excerpt_block = _build_diff_excerpt_block(root, has_staged, has_unstaged)
-        if excerpt_block is not None:
-            ideal = stat_summary + "\n\n" + excerpt_block
-        else:
-            ideal = stat_summary
+        ideal = stat_summary + "\n\n" + excerpt_block if excerpt_block is not None else stat_summary
 
-        # 判断是否需要截断
         marker = _ACTIVE_DIFF_TRUNCATED_MARKER
         marker_bytes = _utf8_size(marker)
         ideal_bytes = _utf8_size(ideal)
-
         if ideal_bytes <= ACTIVE_DIFF_MAX_BYTES:
             body = ideal
         else:
@@ -489,7 +516,6 @@ class ActiveDiffCollector:
 
         if not body.strip():
             return []
-
         return [
             ContextBlock(
                 source=ContextBlockSource.ACTIVE_DIFF,
@@ -503,12 +529,7 @@ class ActiveDiffCollector:
 def _build_diff_excerpt_block(
     root: Path, has_staged: bool, has_unstaged: bool
 ) -> str | None:
-    """构建 diff 摘录块（含 <diff-excerpt> 包装）。
-
-    优先收集 unstaged diff，若为空则收集 staged diff。
-    上下文行数（-U）设为 1 以保持紧凑。
-    摘录内部超过 30 行时截断并添加省略标记。
-    """
+    """构建 diff 摘录块（含 <diff-excerpt> 包装）。"""
     if has_unstaged:
         raw = _run_git(root, "diff", "--unified=1", "--no-color")
     elif has_staged:
@@ -520,13 +541,10 @@ def _build_diff_excerpt_block(
         return None
 
     lines = raw.splitlines()
-    excerpt: str
     if len(lines) <= 30:
         excerpt = raw.strip()
     else:
-        excerpt = "\n".join(lines[:30]) + (
-            f"\n[... {len(lines) - 30} diff lines omitted ...]"
-        )
+        excerpt = "\n".join(lines[:30]) + f"\n[... {len(lines) - 30} diff lines omitted ...]"
     return "<diff-excerpt>\n" + excerpt + "\n</diff-excerpt>"
 
 
@@ -534,10 +552,7 @@ def _build_diff_excerpt_block(
 
 
 def _apply_size_budget(content: str, max_bytes: int, marker: str) -> str:
-    """将内容限制在 max_bytes 字节内，超出时截断并追加完整标记。
-
-    返回空字符串表示内容或标记完全无法放入预算。
-    """
+    """将内容限制在 max_bytes 字节内，超出时截断并追加完整标记。"""
     if not content:
         return ""
     if _utf8_size(content) <= max_bytes:
@@ -551,14 +566,12 @@ def _apply_size_budget(content: str, max_bytes: int, marker: str) -> str:
 
 # ── 最近验证/测试失败收集器 ──
 
-
 RECENT_VALIDATION_MAX_BYTES: int = 4 * 1024
 _RECENT_VALIDATION_TRUNCATED_MARKER = (
     "<validation-truncated>Failure excerpt truncated. "
     "Use the original command to see full output."
     "</validation-truncated>"
 )
-
 _VALIDATION_TOOL_NAMES: frozenset[str] = frozenset({"bash", "shell"})
 
 
@@ -577,22 +590,9 @@ def _extract_tool_result_text(content: object) -> str:
 
 
 class RecentValidationCollector:
-    """收集最近失败的验证/测试命令。
+    """收集最近失败的验证/测试命令。"""
 
-    扫描 input.messages 中最近的 ToolResultMessage，
-    查找 is_error=True 且 tool_name 为 bash/shell 类型的执行错误。
-    无失败时返回 []。
-    成功执行的验证命令不产生块。
-
-    优先级 HIGH：验证失败是当前回合的关键上下文。
-    大小限制 RECENT_VALIDATION_MAX_BYTES（4KB），超出时截断。
-    失败时记录日志并返回 []。
-    """
-
-    def __init__(
-        self,
-        max_bytes: int = RECENT_VALIDATION_MAX_BYTES,
-    ) -> None:
+    def __init__(self, max_bytes: int = RECENT_VALIDATION_MAX_BYTES) -> None:
         self._max_bytes = max_bytes
 
     def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
@@ -627,7 +627,6 @@ class RecentValidationCollector:
 
 # ── 任务状态收集器 ──
 
-
 TASK_STATE_MAX_BYTES: int = 4 * 1024
 _TASK_STATE_TRUNCATED_MARKER = (
     "<task-state-truncated>Task state truncated. "
@@ -636,15 +635,7 @@ _TASK_STATE_TRUNCATED_MARKER = (
 
 
 class TaskStateCollector:
-    """收集当前任务/计划状态。
-
-    通过一个可调用 provider 获取状态文本。provider 返回空字符串时返回 []。
-    无 provider 配置时返回 []。
-
-    优先级 HIGH：任务状态是当前回合的关键上下文。
-    大小限制 TASK_STATE_MAX_BYTES（4KB），超出时截断。
-    provider 抛出异常时记录日志并返回 []。
-    """
+    """收集当前任务/计划状态。"""
 
     def __init__(
         self,
@@ -683,28 +674,17 @@ class TaskStateCollector:
 
 # ── 笔记收集器 ──
 
-
 NOTES_MAX_BYTES: int = 4 * 1024
-NOTES_MAX_FILE_BYTES: int = 64 * 1024  # 单文件跳过阈值
+NOTES_MAX_FILE_BYTES: int = 64 * 1024
 _NOTES_TRUNCATED_MARKER = (
     "<notes-truncated>Notes truncated. "
     "Read individual files for full content.</notes-truncated>"
 )
-
 _NOTES_ALLOWED_SUFFIXES: frozenset[str] = frozenset({".md", ".txt"})
 
 
 class NotesCollector:
-    """从 .local/notes/ 收集笔记文件。
-
-    读取 .local/notes/ 目录下的小型文本/标记文件。
-    按路径名确定顺序排序，限制总输出大小。
-    忽略缺失目录、超大文件和禁止的后缀。
-
-    优先级 MEDIUM：笔记是辅助参考，非即时关键上下文。
-    大小限制 NOTES_MAX_BYTES（4KB），超出时截断。
-    失败时记录日志并返回 []。
-    """
+    """从 .local/notes/ 收集笔记文件。"""
 
     def __init__(
         self,
@@ -723,11 +703,11 @@ class NotesCollector:
             return []
         try:
             files = sorted(
-                p
-                for p in notes_dir.iterdir()
-                if p.is_file()
-                and p.suffix.lower() in _NOTES_ALLOWED_SUFFIXES
-                and p.stat().st_size <= NOTES_MAX_FILE_BYTES
+                path
+                for path in notes_dir.iterdir()
+                if path.is_file()
+                and path.suffix.lower() in _NOTES_ALLOWED_SUFFIXES
+                and path.stat().st_size <= NOTES_MAX_FILE_BYTES
             )
         except Exception:
             logger.exception("NotesCollector: failed to list notes dir")
@@ -736,17 +716,16 @@ class NotesCollector:
         parts: list[str] = []
         total_bytes = 0
         marker = _NOTES_TRUNCATED_MARKER
-
-        for f in files:
+        for path in files:
             try:
-                text = f.read_text(encoding="utf-8", errors="replace").strip()
+                text = path.read_text(encoding="utf-8", errors="replace").strip()
             except Exception:
                 continue
             if not text:
                 continue
-            header = f"--- {f.name} ---"
+            header = f"--- {path.name} ---"
             item = f"{header}\n{text}"
-            item_bytes = _utf8_size(item) + 1  # +1 for separator newline
+            item_bytes = _utf8_size(item) + 1
             if total_bytes + item_bytes > self._max_bytes:
                 remaining = self._max_bytes - total_bytes
                 if _utf8_size(marker) <= remaining:
@@ -758,7 +737,6 @@ class NotesCollector:
         if not parts:
             return []
         body = "\n".join(parts)
-
         return [
             ContextBlock(
                 source=ContextBlockSource.NOTES,
@@ -771,4 +749,4 @@ class NotesCollector:
 
 # ── 技能收集器 ──
 # 摘要注入在此完成；完整正文通过 load_skill 工具懒加载。
-# SkillIndexCollector 定义在 xcode.harness.skills_registry 中。
+# SkillIndexCollector 定义在 xcode.harness.agent_skills 中。
