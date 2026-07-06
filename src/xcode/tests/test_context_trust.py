@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from xcode.agent.context_assembly import (
+    ContextAssemblyInput,
     ContextAuthority,
     ContextBlock,
     ContextBlockSource,
     ContextBlockTarget,
+    ContextPriority,
     ContextProvenance,
     ContextScope,
     ContextTrust,
     DefaultContextAssembler,
-    ContextAssemblyInput,
 )
 from xcode.agent.messages import UserMessage
 
@@ -20,7 +21,7 @@ def test_workspace_instruction_defaults_to_workspace_policy() -> None:
     block = ContextBlock(
         source=ContextBlockSource.INSTRUCTION,
         content="Repository instructions",
-        priority=10,
+        priority=ContextPriority.HIGH,
     )
 
     assert block.authority is ContextAuthority.WORKSPACE_POLICY
@@ -33,7 +34,7 @@ def test_memory_defaults_to_non_system_memory_authority() -> None:
     block = ContextBlock(
         source=ContextBlockSource.MEMORY,
         content="Prior validated result",
-        priority=20,
+        priority=ContextPriority.MEDIUM,
     )
 
     assert block.target is ContextBlockTarget.USER_CONTEXT
@@ -51,7 +52,7 @@ def test_explicit_context_contract_is_preserved() -> None:
     block = ContextBlock(
         source=ContextBlockSource.MEMORY,
         content="Validated procedure",
-        priority=20,
+        priority=ContextPriority.MEDIUM,
         authority=ContextAuthority.MEMORY,
         trust=ContextTrust.VERIFIED_TOOL,
         scope=ContextScope.REPOSITORY,
@@ -68,7 +69,7 @@ def test_user_context_render_includes_typed_contract() -> None:
     block = ContextBlock(
         source=ContextBlockSource.MEMORY,
         content="Use the verified command.",
-        priority=20,
+        priority=ContextPriority.MEDIUM,
         scope=ContextScope.REPOSITORY,
         scope_key="repo:example",
         provenance=ContextProvenance(locator="memory:abc123"),
