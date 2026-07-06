@@ -1,12 +1,13 @@
 """上下文组装模块——结构化上下文块管理与组装。
 
 提供 ContextBlock、ContextAssembler 等数据模型和基础组件，
-用于按来源、优先级、token 预算和过期策略管理上下文窗口。
+用于按来源、权限边界、信任级别、作用域、token 预算和过期策略管理上下文窗口。
 
 设计原则：
 - 默认无行为变更：未配置 assembler 时，消息流完全不改变
 - 增量接入：transform_context 继续完全正常工作
 - 确定性：优先级排序、预算裁剪、过期过滤均为纯函数
+- 可审计：每个上下文块都带有 authority、trust、scope 和 provenance
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from xcode.agent.messages import (
 from xcode.agent.protocols import AgentTool
 
 
-# ── 来源枚举 ──
+# ── 来源、权限与信任模型 ──
 
 
 class ContextBlockSource(StrEnum):
@@ -38,23 +39,99 @@ class ContextBlockSource(StrEnum):
     NOTES = "notes"
     RECENT_VALIDATION = "recent_validation"
     TASK_STATE = "task_state"
-
-
-# ── 注入目标枚举 ──
+    MEMORY = "memory"
 
 
 class ContextBlockTarget(StrEnum):
     """上下文块的注入目标。
 
-    SYSTEM:       块作为 SystemMessage 注入（用于项目指令等系统级上下文）。
-    USER_CONTEXT: 块作为 UserMessage 注入（用于技能、计划、提示等辅助上下文）。
+    SYSTEM 仅保留给 host/core policy。来自 workspace、memory、工具结果或
+    外部内容的块不得在迁移完成后以 SYSTEM authority 注入。
     """
 
     SYSTEM = "system"
     USER_CONTEXT = "user_context"
 
 
-# ── 优先级枚举 ──
+class ContextAuthority(StrEnum):
+    """上下文可以影响 Agent 的权限来源。
+
+    authority 描述“它是谁”，不代表其内容一定为真；真实性由 trust 描述。
+    """
+
+    HOST_POLICY = "host_policy"
+    USER_REQUEST = "user_request"
+    WORKSPACE_POLICY = "workspace_policy"
+    MEMORY = "memory"
+    OBSERVATION = "observation"
+
+
+class ContextTrust(StrEnum):
+    """上下文内容的信任等级。"""
+
+    TRUSTED_HOST = "trusted_host"
+    TRUSTED_USER = "trusted_user"
+    VERIFIED_TOOL = "verified_tool"
+    RUNTIME_INTERNAL = "runtime_internal"
+    WORKSPACE_UNTRUSTED = "workspace_untrusted"
+    EXTERNAL_UNTRUSTED = "external_untrusted"
+
+
+class ContextScope(StrEnum):
+    """上下文块可复用的最大作用域。"""
+
+    SESSION = "session"
+    WORKTREE = "worktree"
+    REPOSITORY = "repository"
+    USER_GLOBAL = "user_global"
+
+
+@dataclass(frozen=True, slots=True)
+class ContextProvenance:
+    """可审计的上下文来源。
+
+    origin 是产生该块的系统组件；locator 指向文件、会话、工具调用或其他
+    可复查位置。evidence_ids 保留未来 Memory Evidence Ledger 的稳定入口。
+    """
+
+    origin: str = ""
+    locator: str = ""
+    evidence_ids: tuple[str, ...] = ()
+    content_hash: str = ""
+
+
+_DEFAULT_AUTHORITY_BY_SOURCE: dict[ContextBlockSource, ContextAuthority] = {
+    ContextBlockSource.INSTRUCTION: ContextAuthority.WORKSPACE_POLICY,
+    ContextBlockSource.SKILL: ContextAuthority.WORKSPACE_POLICY,
+    ContextBlockSource.ACTIVE_DIFF: ContextAuthority.OBSERVATION,
+    ContextBlockSource.NOTES: ContextAuthority.OBSERVATION,
+    ContextBlockSource.RECENT_VALIDATION: ContextAuthority.OBSERVATION,
+    ContextBlockSource.TASK_STATE: ContextAuthority.OBSERVATION,
+    ContextBlockSource.MEMORY: ContextAuthority.MEMORY,
+}
+
+_DEFAULT_TRUST_BY_SOURCE: dict[ContextBlockSource, ContextTrust] = {
+    ContextBlockSource.INSTRUCTION: ContextTrust.WORKSPACE_UNTRUSTED,
+    ContextBlockSource.SKILL: ContextTrust.WORKSPACE_UNTRUSTED,
+    ContextBlockSource.ACTIVE_DIFF: ContextTrust.VERIFIED_TOOL,
+    ContextBlockSource.NOTES: ContextTrust.WORKSPACE_UNTRUSTED,
+    ContextBlockSource.RECENT_VALIDATION: ContextTrust.VERIFIED_TOOL,
+    ContextBlockSource.TASK_STATE: ContextTrust.RUNTIME_INTERNAL,
+    ContextBlockSource.MEMORY: ContextTrust.RUNTIME_INTERNAL,
+}
+
+_DEFAULT_SCOPE_BY_SOURCE: dict[ContextBlockSource, ContextScope] = {
+    ContextBlockSource.INSTRUCTION: ContextScope.REPOSITORY,
+    ContextBlockSource.SKILL: ContextScope.REPOSITORY,
+    ContextBlockSource.ACTIVE_DIFF: ContextScope.WORKTREE,
+    ContextBlockSource.NOTES: ContextScope.REPOSITORY,
+    ContextBlockSource.RECENT_VALIDATION: ContextScope.WORKTREE,
+    ContextBlockSource.TASK_STATE: ContextScope.SESSION,
+    ContextBlockSource.MEMORY: ContextScope.SESSION,
+}
+
+
+# ── 优先级与过期策略 ──
 
 
 class ContextPriority(IntEnum):
@@ -62,7 +139,6 @@ class ContextPriority(IntEnum):
 
     数值越小优先级越高。在预算紧张时低优先级块先被裁剪。
     注意：即使 CRITICAL 块也可能因整个预算被 base messages 耗尽而被丢弃。
-    居中留白便于将来在现有等级之间插入新等级。
     """
 
     CRITICAL = 0
@@ -72,24 +148,12 @@ class ContextPriority(IntEnum):
     BACKGROUND = 40
 
 
-# ── 过期策略 ──
-
-
 @dataclass
 class ContextExpiry:
-    """上下文块的过期策略（相对期限）。
-
-    每个字段表示从块创建 (created_turn/created_step) 起经过的轮/步数上限。
-    所有字段默认 0 表示永不过期。
-
-    expires_after_use 暂未实现（需要跨轮状态追踪），已从数据模型中移除。
-    """
+    """上下文块的过期策略（相对期限）。"""
 
     max_turns: int = 0
-    """创建后最多保留 N 轮。0 表示不限。"""
-
     max_steps: int = 0
-    """创建后最多保留 N 步。0 表示不限。"""
 
     @property
     def never(self) -> bool:
@@ -104,15 +168,9 @@ class ContextExpiry:
 class ContextBlock:
     """单个上下文块。
 
-    source:     来源标识
-    priority:   优先级（排序用）
-    content:    文本内容
-    token_count:预计算的 token 数，None 表示首次使用时估算
-    expiry:     过期策略（相对期限，从 created_turn/created_step 算起）
-    created_turn:  块创建时的轮数（由调用方设置，用于相对过期判断）
-    created_step:  块创建时的步数（由调用方设置，用于相对过期判断）
-    metadata:   附加元数据
-    block_id:   可选的唯一 ID，用于去重和审计
+    authority、trust、scope 与 provenance 是上下文信任契约的一部分。当前
+    Phase 0a 仅完成类型化和来源默认值；后续迁移会由 assembler 强制执行
+    SYSTEM 注入边界与 Memory 的 USER_CONTEXT-only 约束。
     """
 
     source: ContextBlockSource
@@ -125,6 +183,27 @@ class ContextBlock:
     created_step: int = 0
     metadata: dict[str, object] = field(default_factory=dict)
     block_id: str = ""
+    authority: ContextAuthority | None = None
+    trust: ContextTrust | None = None
+    scope: ContextScope | None = None
+    scope_key: str = ""
+    provenance: ContextProvenance = field(default_factory=ContextProvenance)
+
+    def __post_init__(self) -> None:
+        """补齐基于来源的安全默认值，保留调用方的显式声明。"""
+        if self.authority is None:
+            self.authority = _DEFAULT_AUTHORITY_BY_SOURCE[self.source]
+        if self.trust is None:
+            self.trust = _DEFAULT_TRUST_BY_SOURCE[self.source]
+        if self.scope is None:
+            self.scope = _DEFAULT_SCOPE_BY_SOURCE[self.source]
+        if not self.provenance.origin:
+            self.provenance = ContextProvenance(
+                origin=self.source.value,
+                locator=self.provenance.locator,
+                evidence_ids=self.provenance.evidence_ids,
+                content_hash=self.provenance.content_hash,
+            )
 
     def get_token_count(self) -> int:
         """获取 token 数，未预计算时即时估算。"""
@@ -138,17 +217,7 @@ class ContextBlock:
 
 @dataclass
 class ContextAssemblyInput:
-    """上下文组装器的输入。
-
-    system_prompt: 系统提示词
-    messages:      当前消息列表
-    tools:         当前可用工具
-    context_blocks:待注入的上下文块（由调用方根据场景提供）
-    current_turn:  当前回合数（用于过期判断）
-    current_step:  当前步骤数（用于过期判断）
-    token_budget:  token 预算上限，0 表示不限
-    state:         扩展状态字典
-    """
+    """上下文组装器的输入。"""
 
     system_prompt: str = ""
     messages: list[AgentMessage] = field(default_factory=list)
@@ -162,15 +231,7 @@ class ContextAssemblyInput:
 
 @dataclass
 class ContextAssemblyResult:
-    """上下文组装器的输出。
-
-    messages:        最终消息列表（发送给 provider）
-    blocks_used:     实际使用的上下文块
-    blocks_dropped:  因预算或过期被丢弃的块
-    total_tokens:    总 token 数
-    token_budget:    本次的 token 预算
-    budget_remaining:剩余预算
-    """
+    """上下文组装器的输出。"""
 
     messages: list[AgentMessage] = field(default_factory=list)
     blocks_used: list[ContextBlock] = field(default_factory=list)
@@ -180,14 +241,8 @@ class ContextAssemblyResult:
     budget_remaining: int = 0
 
 
-# ── 组装器协议 ──
-
-
 class ContextAssembler(Protocol):
-    """上下文组装器协议。
-
-    实现此协议的类型可以插入到 AgentLoopConfig.context_assembler 中。
-    """
+    """上下文组装器协议。"""
 
     def assemble(self, input: ContextAssemblyInput) -> ContextAssemblyResult:
         """组装上下文，返回结构化结果。"""
@@ -204,13 +259,8 @@ def trim_to_budget(
 ) -> tuple[list[ContextBlock], list[ContextBlock]]:
     """按预算裁剪块列表，返回 (used, dropped)。
 
-    算法：始终按优先级从高到低排序，依次尝试放入；块能放入则保留，
-    不能放入则丢弃且**继续检查低优先级块**（greedy priority-fill）。
-    同优先级内按 token 数升序（small-first），最大化信息密度。
-    纯函数，不修改输入。
-
-    注意：不会因为高优先级块放不下就跳过其后的低优先级块。
-    这意味着当预算有限时，一个刚好超出预算的小块可能导致所有大块被丢弃。
+    按优先级从高到低依次尝试放入；同优先级内按 token 数升序。不能放入
+    的块被丢弃，但继续检查后续较小块以最大化实际可用信息量。
     """
     sorted_blocks = sorted(blocks, key=lambda b: (b.priority, b.get_token_count()))
 
@@ -220,7 +270,6 @@ def trim_to_budget(
     used: list[ContextBlock] = []
     dropped: list[ContextBlock] = []
     remaining = budget - base_tokens
-
     if remaining <= 0:
         return [], sorted_blocks
 
@@ -241,10 +290,10 @@ def trim_to_budget(
 class DefaultContextAssembler:
     """默认上下文组装器。
 
-    - 未配置 context_blocks 时，messages 原样返回
-    - 配置了 context_blocks 时，按优先级排序后注入
-    - 超出 token_budget 时从低优先级开始裁剪
-    - 过期的块自动排除
+    - 未配置 context_blocks 时，messages 原样返回。
+    - 配置了 context_blocks 时，按优先级排序后注入。
+    - 超出 token_budget 时按贪心策略裁剪。
+    - 过期块自动排除。
     """
 
     def assemble(self, input: ContextAssemblyInput) -> ContextAssemblyResult:
@@ -260,7 +309,6 @@ class DefaultContextAssembler:
                 budget_remaining=budget - total_tokens if budget > 0 else 0,
             )
 
-        # 过滤过期块
         valid_blocks: list[ContextBlock] = []
         dropped: list[ContextBlock] = []
         for block in input.context_blocks:
@@ -269,49 +317,36 @@ class DefaultContextAssembler:
             else:
                 valid_blocks.append(block)
 
-        # 预算裁剪
-        used_blocks: list[ContextBlock]
-        budget_dropped: list[ContextBlock]
         used_blocks, budget_dropped = trim_to_budget(valid_blocks, budget, total_tokens)
         dropped.extend(budget_dropped)
 
-        # 注入上下文块到消息列表
-        # 核心系统提示词保持第一；
-        # SYSTEM 目标块 -> SystemMessage（在已有系统消息之后注入）
-        # USER_CONTEXT 目标块 -> UserMessage（在所有 SystemMessage 之后注入）
         if used_blocks:
             system_blocks = [
-                b for b in used_blocks if b.target == ContextBlockTarget.SYSTEM
+                block for block in used_blocks if block.target == ContextBlockTarget.SYSTEM
             ]
             user_blocks = [
-                b for b in used_blocks if b.target != ContextBlockTarget.SYSTEM
+                block for block in used_blocks if block.target != ContextBlockTarget.SYSTEM
             ]
 
-            # 找最后一个连续 SystemMessage 之后的位置
             insert_idx = 0
-            for i, m in enumerate(messages):
-                role = getattr(m, "role", "")
-                if role == "system":
-                    insert_idx = i + 1
+            for index, message in enumerate(messages):
+                if getattr(message, "role", "") == "system":
+                    insert_idx = index + 1
                 else:
                     break
 
             if system_blocks:
-                system_messages = [
-                    SystemMessage(content=b.content) for b in system_blocks
+                messages[insert_idx:insert_idx] = [
+                    SystemMessage(content=block.content) for block in system_blocks
                 ]
-                messages[insert_idx:insert_idx] = system_messages
-                insert_idx += len(system_messages)
+                insert_idx += len(system_blocks)
 
             if user_blocks:
-                user_messages = [
-                    UserMessage(content=_block_to_text(b)) for b in user_blocks
+                messages[insert_idx:insert_idx] = [
+                    UserMessage(content=_block_to_text(block)) for block in user_blocks
                 ]
-                messages[insert_idx:insert_idx] = user_messages
 
-        # 重新计算总 token
         final_total = _estimate_messages_tokens(messages)
-
         return ContextAssemblyResult(
             messages=messages,
             blocks_used=used_blocks,
@@ -327,37 +362,36 @@ class DefaultContextAssembler:
 
 def _is_expired(block: ContextBlock, turn: int, step: int) -> bool:
     """判断块是否过期（相对期限，从 created_turn/created_step 算起）。"""
-    if block.expiry is None:
+    if block.expiry is None or block.expiry.never:
         return False
-    if block.expiry.never:
-        return False
-    if (
-        block.expiry.max_turns > 0
-        and turn - block.created_turn >= block.expiry.max_turns
-    ):
+    if block.expiry.max_turns > 0 and turn - block.created_turn >= block.expiry.max_turns:
         return True
-    if (
-        block.expiry.max_steps > 0
-        and step - block.created_step >= block.expiry.max_steps
-    ):
-        return True
-    return False
+    return block.expiry.max_steps > 0 and step - block.created_step >= block.expiry.max_steps
 
 
 def _block_to_text(block: ContextBlock) -> str:
-    source_tag = f"[{block.source.value}]"
+    """将辅助上下文渲染为可审计、不可伪装为 host policy 的用户上下文。"""
+    fields = [
+        f"source={block.source.value}",
+        f"authority={block.authority.value}",
+        f"trust={block.trust.value}",
+        f"scope={block.scope.value}",
+    ]
+    if block.scope_key:
+        fields.append(f"scope_key={block.scope_key}")
+    if block.provenance.locator:
+        fields.append(f"locator={block.provenance.locator}")
     if block.metadata:
-        meta_str = " ".join(f"{k}={v}" for k, v in block.metadata.items())
-        return f"{source_tag} ({meta_str})\n{block.content}"
-    return f"{source_tag}\n{block.content}"
+        fields.extend(f"{key}={value}" for key, value in block.metadata.items())
+    return f"[context {' '.join(fields)}]\n{block.content}"
 
 
 def _estimate_messages_tokens(messages: list[AgentMessage]) -> int:
     total = 0
-    for msg in messages:
-        if isinstance(msg, (CompactionSummaryMessage, BranchSummaryMessage)):
-            total += estimate_tokens(msg.summary)
+    for message in messages:
+        if isinstance(message, (CompactionSummaryMessage, BranchSummaryMessage)):
+            total += estimate_tokens(message.summary)
         else:
-            raw = msg.content if isinstance(msg.content, str) else str(msg.content)
+            raw = message.content if isinstance(message.content, str) else str(message.content)
             total += estimate_tokens(raw)
     return total
