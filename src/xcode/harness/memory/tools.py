@@ -1,4 +1,4 @@
-"""Read-only memory retrieval, provenance, and proposal-inspection tools."""
+"""Read-only memory retrieval, provenance, proposal, and integrity tools."""
 
 from __future__ import annotations
 
@@ -8,15 +8,15 @@ from xcode.harness.skills import ToolInput, ToolSpec
 
 from .governance import MemoryLedger, MemoryProposal, MemoryProposalStatus
 from .governed_manager import GovernedMemoryManager
+from .integrity import audit_memory_integrity
 from .manager import MemoryLayer, MemoryLayerFilter, MemoryManager, MemoryRetrievalContext
 from .parsing import MemoryRecord
 
 
 def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
-    """Build opt-in memory tools without exposing proposal approval to the agent."""
+    """Build memory tools without exposing proposal approval to the agent."""
 
     def search_memory(data: ToolInput) -> str:
-        """Search project and user memory and render source metadata."""
         query = str(data.get("query", "")).strip()
         if not query:
             return "query is required"
@@ -27,10 +27,6 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
         layer = str(data.get("layer", "all"))
         if layer not in {"all", "project", "user"}:
             return "layer must be one of: all, project, user"
-        symbols = _optional_list(data.get("symbols"))
-        error_messages = _optional_list(data.get("error_messages"))
-        modules = _optional_list(data.get("modules"))
-        recent_files = _optional_list(data.get("recent_files"))
 
         records = manager.search_memory_records(
             query,
@@ -42,11 +38,11 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
                 query=query,
                 scope=scope,
                 current_file=current_file,
-                symbols=symbols,
-                error_messages=error_messages,
+                symbols=_optional_list(data.get("symbols")),
+                error_messages=_optional_list(data.get("error_messages")),
                 task_phase=task_phase,
-                modules=modules,
-                recent_files=recent_files,
+                modules=_optional_list(data.get("modules")),
+                recent_files=_optional_list(data.get("recent_files")),
             ),
         )
         if not records:
@@ -54,7 +50,6 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
         return "\n\n".join(manager.render_search_result(record) for record in records)
 
     def explain_memory(data: ToolInput) -> str:
-        """Explain one durable memory record and its governed provenance."""
         memory_id = str(data.get("memory_id", "")).strip()
         if not memory_id:
             return "memory_id is required"
@@ -97,7 +92,6 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
         return "\n".join(lines)
 
     def list_memory_proposals(data: ToolInput) -> str:
-        """Render proposals across project and user ledgers without changing state."""
         status = str(data.get("status", "pending")).strip().lower() or "pending"
         valid_statuses = {"all", *(item.value for item in MemoryProposalStatus)}
         if status not in valid_statuses:
@@ -126,10 +120,28 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
             if proposal.decision_reason:
                 lines.append(f"  decision={proposal.decision_reason}")
             evidence = "; ".join(
-                f"{item.evidence_id} {item.kind}:{item.reference} trust={item.trust.value}"
+                f"{item.evidence_id} {item.kind}:{item.reference} "
+                f"trust={item.trust.value}"
                 for item in proposal.evidence
             )
             lines.append(f"  evidence={evidence or '(none)'}")
+        return "\n".join(lines)
+
+    def audit_memory(data: ToolInput) -> str:
+        del data
+        report = audit_memory_integrity(manager)
+        lines = [
+            "Memory integrity:",
+            f"checked={report.checked_records}",
+            f"governed={report.governed_records}",
+            f"legacy={report.legacy_records}",
+            f"status={'ok' if report.ok else 'failed'}",
+        ]
+        for issue in report.issues:
+            lines.append(
+                f"- {issue.code} memory={issue.memory_id} "
+                f"layer={issue.layer}: {issue.detail}"
+            )
         return "\n".join(lines)
 
     return (
@@ -142,7 +154,8 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
             input_hint=(
                 'JSON: {"query": "provider timeout", "limit": 3, '
                 '"scope": "providers", "current_file": "src/provider.py", '
-                '"symbols": ["ProviderClient"], "error_messages": ["connection timeout"], '
+                '"symbols": ["ProviderClient"], '
+                '"error_messages": ["connection timeout"], '
                 '"task_phase": "debug", "modules": ["providers"], '
                 '"recent_files": ["src/provider.py"], "layer": "all"}'
             ),
@@ -150,52 +163,142 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
             schema={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Natural-language memory search query."},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 3},
-                    "scope": {"type": "string", "description": "Optional scope used to rerank matching records."},
-                    "current_file": {"type": "string", "description": "Current file relevant to the task."},
-                    "symbols": {"type": "array", "items": {"type": "string"}, "description": "Relevant code symbols for retrieval and reranking."},
-                    "error_messages": {"type": "array", "items": {"type": "string"}, "description": "Relevant error messages or failure signatures."},
-                    "task_phase": {"type": "string", "description": "Current task phase, such as debug, implement, or verify."},
-                    "modules": {"type": "array", "items": {"type": "string"}, "description": "Relevant project modules or subsystems."},
-                    "recent_files": {"type": "array", "items": {"type": "string"}, "description": "Recent files already made relevant by the task."},
-                    "layer": {"type": "string", "enum": ["all", "project", "user"], "default": "all"},
+                    "query": {
+                        "type": "string",
+                        "description": "Natural-language memory search query.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 3,
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional scope used to rerank matching records.",
+                    },
+                    "current_file": {
+                        "type": "string",
+                        "description": "Current file relevant to the task.",
+                    },
+                    "symbols": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Relevant symbols for retrieval and reranking.",
+                    },
+                    "error_messages": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Relevant failure signatures.",
+                    },
+                    "task_phase": {
+                        "type": "string",
+                        "description": "Current task phase, such as debug or verify.",
+                    },
+                    "modules": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Relevant project modules or subsystems.",
+                    },
+                    "recent_files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Recent files relevant to the task.",
+                    },
+                    "layer": {
+                        "type": "string",
+                        "enum": ["all", "project", "user"],
+                        "default": "all",
+                    },
                 },
                 "required": ["query"],
                 "additionalProperties": False,
             },
             read_only=True,
             group="memory",
-            prompt_snippet="Search opt-in project and user memory when prior decisions or solutions may affect the task.",
+            prompt_snippet=(
+                "Search opt-in project and user memory when prior decisions or "
+                "solutions may affect the task."
+            ),
         ),
         ToolSpec(
             name="explain_memory",
-            description="Explain one memory record's scope, governance proposal, and evidence provenance. This tool is read-only.",
+            description=(
+                "Explain one memory record's scope, governance proposal, and "
+                "evidence provenance. This tool is read-only."
+            ),
             input_hint='JSON: {"memory_id": "mem_abcd1234"}',
             handler=explain_memory,
             schema={
                 "type": "object",
-                "properties": {"memory_id": {"type": "string", "description": "The mem_* identifier returned by a memory digest or search."}},
+                "properties": {
+                    "memory_id": {
+                        "type": "string",
+                        "description": "The mem_* identifier from a memory digest or search.",
+                    }
+                },
                 "required": ["memory_id"],
                 "additionalProperties": False,
             },
             read_only=True,
             group="memory",
-            prompt_snippet="Use explain_memory when a retrieved memory could materially affect the task and its provenance or scope needs verification.",
+            prompt_snippet=(
+                "Use explain_memory when a retrieved memory could materially affect "
+                "the task and its provenance or scope needs verification."
+            ),
         ),
         ToolSpec(
             name="list_memory_proposals",
-            description="List evidence-backed memory proposals and their approval state. This tool is read-only and cannot approve or apply a proposal.",
+            description=(
+                "List evidence-backed memory proposals and their approval state. "
+                "This tool is read-only and cannot approve or apply a proposal."
+            ),
             input_hint='JSON: {"status": "pending"}',
             handler=list_memory_proposals,
             schema={
                 "type": "object",
-                "properties": {"status": {"type": "string", "enum": ["all", "pending", "approved", "rejected", "applied", "failed"], "default": "pending"}},
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "all",
+                            "pending",
+                            "approved",
+                            "rejected",
+                            "applied",
+                            "failed",
+                        ],
+                        "default": "pending",
+                    }
+                },
                 "additionalProperties": False,
             },
             read_only=True,
             group="memory",
-            prompt_snippet="Inspect pending memory proposals when a prior learning may need human review. Do not treat a pending proposal as durable memory.",
+            prompt_snippet=(
+                "Inspect pending memory proposals when a prior learning may need "
+                "human review. Do not treat a pending proposal as durable memory."
+            ),
+        ),
+        ToolSpec(
+            name="audit_memory_integrity",
+            description=(
+                "Audit durable memory records against their proposal, evidence, "
+                "scope, and layer provenance. This tool is read-only."
+            ),
+            input_hint="JSON: {}",
+            handler=audit_memory,
+            schema={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            read_only=True,
+            group="memory",
+            prompt_snippet=(
+                "Use audit_memory_integrity when memory provenance needs a release "
+                "or debugging check."
+            ),
         ),
     )
 
@@ -222,7 +325,12 @@ def _all_proposals(manager: MemoryManager) -> tuple[MemoryProposal, ...]:
         ]
     else:
         proposals = list(MemoryLedger(manager.root).list_proposals())
-    return tuple(sorted(proposals, key=lambda proposal: (proposal.created_at, proposal.proposal_id)))
+    return tuple(
+        sorted(
+            proposals,
+            key=lambda proposal: (proposal.created_at, proposal.proposal_id),
+        )
+    )
 
 
 def _find_proposal(ledger: MemoryLedger, proposal_id: str) -> MemoryProposal | None:
