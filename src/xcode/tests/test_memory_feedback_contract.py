@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from xcode.harness.memory import MemoryManager
+from xcode.harness.memory import MemoryManager, MemoryRecord
 
 
 def _block() -> str:
@@ -17,7 +17,7 @@ def _block() -> str:
     )
 
 
-def _retrieve_and_inject(manager: MemoryManager):
+def _retrieve_and_inject(manager: MemoryManager) -> MemoryRecord:
     record = manager.search_memory_records(
         "How should provider timeout retries work?",
         source="collector",
