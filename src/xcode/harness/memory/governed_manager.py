@@ -23,12 +23,8 @@ from typing import Sequence
 
 from xcode.agent.context_assembly import ContextTrust
 
-from .governance import (
-    MemoryEvidenceInput,
-    MemoryGovernance,
-    MemoryProposal,
-    MemoryProposalStatus,
-)
+from .governance import MemoryEvidenceInput, MemoryProposal, MemoryProposalStatus
+from .layered_governance import LayeredMemoryGovernance
 from .manager import (
     MemoryLayer,
     MemoryManager as BaseMemoryManager,
@@ -49,7 +45,7 @@ class GovernedMemoryManager(BaseMemoryManager):
         min_confidence: float = 0.0,
         rerank_policy: MemoryRerankPolicy | None = None,
         *,
-        governance: MemoryGovernance | None = None,
+        governance: LayeredMemoryGovernance | None = None,
     ) -> None:
         super().__init__(
             root,
@@ -62,10 +58,10 @@ class GovernedMemoryManager(BaseMemoryManager):
         self._governance = governance
 
     @property
-    def governance(self) -> MemoryGovernance:
-        """Lazily create a governance coordinator bound to this storage manager."""
+    def governance(self) -> LayeredMemoryGovernance:
+        """Lazily create layer-aware governance bound to this storage manager."""
         if self._governance is None:
-            self._governance = MemoryGovernance(self.root, manager=self)
+            self._governance = LayeredMemoryGovernance(self.root, manager=self)
         return self._governance
 
     def add_memory_block(
@@ -213,7 +209,7 @@ class GovernedMemoryManager(BaseMemoryManager):
             return None
         candidates = [
             proposal
-            for proposal in self.governance.ledger.list_proposals()
+            for proposal in self.governance.ledger_for(layer).list_proposals()
             if proposal.status is MemoryProposalStatus.APPROVED
             and proposal.layer == layer
             and proposal.title.casefold() == title.casefold()
