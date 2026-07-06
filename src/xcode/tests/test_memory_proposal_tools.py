@@ -61,6 +61,20 @@ def test_explain_memory_marks_legacy_record_without_inventing_provenance(
     assert "proposal=" not in output
 
 
+def test_audit_memory_integrity_tool_reports_governed_state(tmp_path: Path) -> None:
+    manager = MemoryManager(tmp_path)
+    assert manager.add_memory_block(_candidate_block(), source="repl", layer="project")
+    tools = {tool.name: tool for tool in build_memory_tools(manager)}
+
+    output = tools["audit_memory_integrity"].handler({})
+
+    assert tools["audit_memory_integrity"].read_only
+    assert "checked=1" in output
+    assert "governed=1" in output
+    assert "legacy=0" in output
+    assert "status=ok" in output
+
+
 def test_list_memory_proposals_rejects_unknown_status(tmp_path: Path) -> None:
     manager = MemoryManager(tmp_path)
     tool = next(
