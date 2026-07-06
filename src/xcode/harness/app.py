@@ -174,9 +174,9 @@ def build_app(
     )
     infra = build_shared_infra(project_root, cfg.runtime_config)
     shared_services = _assembly.build_shared_services(project_root, cfg.runtime_config)
-    from xcode.harness.memory import MemoryManager
 
-    memory_manager = MemoryManager(project_root)
+    # 使用共享的 MemoryManager 实例，确保 compactor 和 agent 使用同一实例
+    memory_manager = infra.memory_manager
 
     providers = build_provider_bundle(
         ProviderSettings(
@@ -210,9 +210,27 @@ def build_app(
         skills_dir=cfg.skills_dir,
         external_hook_runner=external_hook_runner,
         todo_state=todo_state,
+        memory_manager=memory_manager,
     )
 
     fallback_provider = providers.llms.get("fallback")
+    # 创建 LLM provider 后，为 MemoryManager 接入 LLM 记忆质量评判和语义检索
+    from xcode.harness.memory.manager import (
+        build_memory_consolidate_judge_fn,
+        build_memory_embedding_fn,
+        build_memory_judge_fn,
+        build_memory_reference_judge_fn,
+    )
+
+    memory_manager.set_judge_fn(build_memory_judge_fn(providers.llm))
+    memory_manager.set_consolidate_judge_fn(
+        build_memory_consolidate_judge_fn(providers.llm)
+    )
+    memory_manager.set_reference_judge_fn(
+        build_memory_reference_judge_fn(providers.llm)
+    )
+    memory_manager.set_embedding_fn(build_memory_embedding_fn())
+
     agent = build_agent(
         project_root=project_root,
         llm=providers.llm,

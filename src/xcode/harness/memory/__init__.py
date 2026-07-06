@@ -1,11 +1,20 @@
 """项目级与用户级长期记忆管理。"""
 
 from .manager import (
+    MemoryConsolidateJudgeFn,
+    MemoryEmbeddingFn,
+    MemoryJudgeFn,
+    MemoryJudgeResult,
     MemoryLayer,
     MemoryLayerFilter,
     MemoryManager,
+    MemoryReferenceJudgeFn,
     MemoryRerankPolicy,
     MemoryRetrievalContext,
+    build_memory_consolidate_judge_fn,
+    build_memory_embedding_fn,
+    build_memory_judge_fn,
+    build_memory_reference_judge_fn,
 )
 from .parsing import (
     MemoryEvidence,
@@ -18,6 +27,9 @@ from .parsing import (
 from .tools import build_memory_tools
 
 __all__ = [
+    "MemoryEmbeddingFn",
+    "MemoryJudgeFn",
+    "MemoryJudgeResult",
     "MemoryLayer",
     "MemoryLayerFilter",
     "MemoryManager",
@@ -28,6 +40,12 @@ __all__ = [
     "MemorySearchEvalCase",
     "MemorySearchEvalResult",
     "MemoryTraceEvent",
+    "MemoryConsolidateJudgeFn",
+    "MemoryReferenceJudgeFn",
     "MemoryType",
+    "build_memory_consolidate_judge_fn",
+    "build_memory_embedding_fn",
+    "build_memory_judge_fn",
+    "build_memory_reference_judge_fn",
     "build_memory_tools",
 ]

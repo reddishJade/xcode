@@ -144,6 +144,7 @@ class SharedInfra:
     cancellation_token: CancellationToken
     compact_controller: CompactController
     compactor: LayeredCompactor
+    memory_manager: Any | None = None
 
 
 # ── 配置解析 ──
@@ -199,13 +200,19 @@ def build_shared_infra(
     from xcode.harness.memory import MemoryManager
 
     memory_manager = MemoryManager(project_root)
-    on_compact = memory_manager.consolidate
-    on_compact_structured = memory_manager.consolidate_structured
 
     def _combined_on_compact(summary: str) -> None:
-        """压缩时同时做向后兼容抽取和结构化抽取。"""
-        on_compact(summary)
-        on_compact_structured(summary)
+        """压缩时从摘要提取记忆并检测消费端反馈。
+
+        - consolidate：从结构化摘要的 Key Decisions / Goal 节抽取记忆
+        - record_explicit_references：子串匹配检测摘要是否引用了已注入的记忆
+        - record_llm_references：LLM 补充检测隐式引用（当配置了 reference_judge_fn 时）
+        - record_compaction_referenced_feedback：对引用的记忆做采纳 + utility 更新
+        """
+        memory_manager.consolidate(summary)
+        memory_manager.record_explicit_references(summary)
+        memory_manager.record_llm_references(summary)
+        memory_manager.record_compaction_referenced_feedback()
 
     checkpoint_dir = (
         resolve_config_path(project_root, runtime_config.paths.sessions_dir)
@@ -226,6 +233,7 @@ def build_shared_infra(
         cancellation_token=cancellation_token,
         compact_controller=compact_controller,
         compactor=compactor,
+        memory_manager=memory_manager,
     )
 
 
@@ -293,6 +301,7 @@ def build_tool_registry(
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     external_hook_runner: ExternalHookRunner | None = None,
     todo_state: SessionTodoState | None = None,
+    memory_manager: Any | None = None,
 ) -> tuple[
     ToolRegistryState,
     ShellSpec,
@@ -435,6 +444,7 @@ def _extend_registry_with_features(
     mcp_runtime_registry: McpRuntimeRegistry,
     runtime_config: XcodeRuntimeConfig,
     shared_services: SharedServices,
+    memory_manager: Any | None = None,
 ) -> tuple[ToolSpec, ...]:
     """添加可选功能工具到注册表，复用共享实例。"""
     from xcode.harness.mcp import build_mcp_tools
@@ -465,9 +475,14 @@ def _extend_registry_with_features(
             shared_services.orchestration_store,
             summary_path=progress_summary,
         )
-    from xcode.harness.memory import MemoryManager, build_memory_tools
+    from xcode.harness.memory import build_memory_tools
 
-    registry += build_memory_tools(MemoryManager(project_root))
+    if memory_manager is not None:
+        registry += build_memory_tools(memory_manager)
+    else:
+        from xcode.harness.memory import MemoryManager
+
+        registry += build_memory_tools(MemoryManager(project_root))
     return registry
 
 

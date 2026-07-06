@@ -16,21 +16,6 @@
 
 ---
 
-## P0 — 设计缺陷
-
-### Memory 系统缺少 LLM 介入——纯规则提取无法判断"什么值得记住"
-
-`consolidate_structured()` 从压缩摘要的 Key Decisions 节提取列表项填模板，写入 MEMORY.md。没有 LLM 参与判断"这个决策值得记录吗"、"用什么样的表述最适合未来检索"。检索只有 BM25，没有语义理解。没有反馈闭环验证注入的记忆是否被模型使用。
-
-- **位置**：`harness/memory/manager.py` → `consolidate_structured()`, `_decision_to_memory_block()`
-- **检索**：`harness/memory/manager.py` → `search_memory_records()` → BM25 + 重排
-- **建议方向**：
-  - 写入端：small LLM 判断"这个决策是否值得记录"，结构化输出（scope / related_files / confidence）
-  - 检索端：语义 embedding + BM25 混合检索
-  - 消费端：注入后在 message 中标记来源，compaction 时检测"注入的记忆是否被引用"，反馈给 MemoryManager 做 utility 更新
-
----
-
 ## P1 — 严重问题（行为可接受，但必须改）
 
 ### HITL 缺少超时和预览——Deny 应携带 suggestion

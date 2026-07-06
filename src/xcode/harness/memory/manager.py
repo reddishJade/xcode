@@ -10,11 +10,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
 import json
-import re
 import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal, cast
+
+from collections.abc import Callable
 
 from rank_bm25 import BM25Okapi
 
@@ -42,6 +43,45 @@ from .parsing import (
 type MemoryLayer = Literal["project", "user"]
 type MemoryLayerFilter = Literal["all", "project", "user"]
 type MemoryOutcome = Literal["success", "failure", "corrected"]
+
+
+@dataclass(frozen=True)
+class MemoryJudgeResult:
+    """LLM 记忆质量评判的结构化输出。"""
+
+    is_worth_remembering: bool
+    confidence: float = 0.5
+    scope: str | None = None
+    related_files: tuple[str, ...] = ()
+    suggested_title: str = ""
+    suggested_context: str = ""
+    suggested_solution: str = ""
+    suggested_takeaways: str = ""
+    reasoning: str = ""
+
+
+type MemoryJudgeFn = Callable[[str], MemoryJudgeResult]
+"""可选的 LLM 记忆质量评估函数。接收一条决策文本，返回结构化评判结果。"""
+
+
+type MemoryEmbeddingFn = Callable[[str], list[float]]
+"""可选的语义嵌入函数。接收文本，返回 float 向量。"""
+
+
+type MemoryConsolidateJudgeFn = Callable[[str], list[MemoryJudgeResult]]
+"""可选的节级 LLM 记忆质量评估函数。
+
+接收完整 Key Decisions 节文本，返回 0+ 条结构化评判结果。
+LLM 可以一次看到所有决策的前后文，做合并、筛选、重组。
+"""
+
+
+type MemoryReferenceJudgeFn = Callable[[str, list[str]], list[str]]
+"""可选的 LLM 引用检测函数。
+
+接收(文本, 候选记忆标题列表)，返回被引用的记忆标题列表。
+用于补充纯子串匹配的不足，检测隐式引用。
+"""
 
 
 @dataclass
@@ -134,8 +174,19 @@ class MemoryManager:
         min_retrieval_score: float = 0.2,
         min_confidence: float = 0.0,
         rerank_policy: MemoryRerankPolicy | None = None,
+        judge_fn: MemoryJudgeFn | None = None,
+        embedding_fn: MemoryEmbeddingFn | None = None,
+        consolidate_judge_fn: MemoryConsolidateJudgeFn | None = None,
+        reference_judge_fn: MemoryReferenceJudgeFn | None = None,
     ) -> None:
-        """创建项目级与用户级并行的记忆管理器。"""
+        """创建项目级与用户级并行的记忆管理器。
+
+        参数：
+            judge_fn: 可选的 LLM 记忆质量评估函数。接收决策文本，返回结构化评判结果。
+                      启用后在 consolidation 中使用 LLM 判断替代纯模板抽取。
+            embedding_fn: 可选的语义嵌入函数。接收文本返回 float 向量，
+                           启用后在检索中结合 BM25 做混合排序。
+        """
         self.root = root
         self.memory_file = root / "MEMORY.md"
         self.user_memory_file = user_memory_file or (
@@ -147,6 +198,12 @@ class MemoryManager:
         self.min_retrieval_score = min_retrieval_score
         self.min_confidence = min_confidence
         self.rerank_policy = rerank_policy or MemoryRerankPolicy()
+        self.judge_fn: MemoryJudgeFn | None = judge_fn
+        self.embedding_fn: MemoryEmbeddingFn | None = embedding_fn
+        self.consolidate_judge_fn: MemoryConsolidateJudgeFn | None = (
+            consolidate_judge_fn
+        )
+        self.reference_judge_fn: MemoryReferenceJudgeFn | None = reference_judge_fn
         self._trace_events: list[MemoryTraceEvent] = []
         self._session_usage: dict[tuple[str, str], _SessionMemoryUsage] = {}
 
@@ -1207,45 +1264,7 @@ class MemoryManager:
                 return "\n".join(lines) + "\n"
         return None
 
-    def consolidate(self, summary: str) -> None:
-        """从压缩摘要中提取可复用记忆并直接写入正式存储。"""
-        for block in self._extract_summary_blocks(summary):
-            if self._is_memory_attempt(block):
-                self._ingest_consolidation_candidate(
-                    block,
-                    source="consolidation",
-                    layer="project",
-                )
-
-    def _extract_summary_blocks(self, summary: str) -> list[str]:
-        """从 compact summary 中提取 H2 结构块。"""
-        content = summary.removeprefix("[Compressed]").strip()
-        if "## " not in content:
-            return []
-        normalized_lines: list[str] = []
-        for raw_line in content.splitlines():
-            stripped = raw_line.strip()
-            if stripped.startswith("- ") and "## " in stripped:
-                stripped = stripped[stripped.index("## ") :]
-            normalized_lines.append(stripped)
-        normalized = "\n".join(normalized_lines)
-        normalized = re.sub(
-            r"\s-\s(?=[A-Za-z][A-Za-z0-9_/-]*:)",
-            "\n- ",
-            normalized,
-        )
-        blocks: list[str] = []
-        for part in normalized.split("## "):
-            fragment = part.strip()
-            if not fragment:
-                continue
-            block = "## " + fragment
-            blocks.append(
-                "\n".join(line.strip() for line in block.splitlines() if line.strip())
-            )
-        return blocks
-
-    # ── 结构化摘要处理（Goal/Progress/Key Decisions/Next Steps）──
+    # ── 摘要处理（Goal/Progress/Key Decisions/Next Steps）──
 
     @staticmethod
     def _parse_structured_summary(
@@ -1274,26 +1293,24 @@ class MemoryManager:
             sections[current_key] = "\n".join(current_lines).strip()
         return sections
 
-    def consolidate_structured(self, summary: str) -> None:
-        """从结构化压缩摘要（Goal/Progress/Key Decisions/Next Steps）提取可复用记忆。
+    def consolidate(self, summary: str) -> None:
+        """从压缩摘要中提取可复用记忆并写入正式存储。
 
-        主要来源：
-        - Key Decisions → 架构决策记忆块
-        - Goal → 项目上下文（首次出现时）
+        解析 Goal/Progress/Key Decisions/Next Steps 结构化格式的摘要，
+        从 Key Decisions 节提取架构决策记忆，从 Goal 节提取项目上下文（首次出现时）。
+
+        当配置了 consolidate_judge_fn 时，将整个 Key Decisions 节文本交给 LLM，
+        由 LLM 一次完成筛选、合并、重组；否则逐条子弹走 judge_fn 或纯模板回退。
         """
         sections = self._parse_structured_summary(summary)
 
-        # 提取 Key Decisions 中的每一行决策
-        decisions_text = sections.get("key decisions", "")
-        decisions = self._extract_bullet_items(decisions_text)
-        for decision_text in decisions:
-            block = self._decision_to_memory_block(decision_text)
-            if block is not None:
-                self._ingest_consolidation_candidate(
-                    block,
-                    source="consolidation",
-                    layer="project",
-                )
+        # Key Decisions：优先使用节级 LLM 评判
+        decisions_text = sections.get("key decisions", "").strip()
+        if decisions_text:
+            if self.consolidate_judge_fn is not None:
+                self._consolidate_with_section_judge(decisions_text)
+            else:
+                self._consolidate_with_bullet_judge(decisions_text)
 
         # Goal → project context（仅当文件为空时）
         goal = sections.get("goal", "").strip()
@@ -1311,6 +1328,78 @@ class MemoryManager:
                 layer="project",
             )
 
+    def _consolidate_with_section_judge(self, decisions_text: str) -> None:
+        """使用节级 LLM 评判整个 Key Decisions 节。
+
+        LLM 一次看到所有决策的前后文，可以合并相关条目、
+        过滤低价值决策、重组表述。
+        """
+        try:
+            results = self.consolidate_judge_fn(decisions_text)  # type: ignore[misc]
+        except Exception:
+            # 节级评判失败时降级到逐条评判
+            self._consolidate_with_bullet_judge(decisions_text)
+            return
+
+        for result in results:
+            if not result.is_worth_remembering:
+                self._emit_trace(
+                    MemoryTraceEvent(
+                        type="rejected",
+                        memory_id=None,
+                        layer="project",
+                        title="",
+                        rejection_reason="llm_judge_rejected",
+                        source="consolidation",
+                    )
+                )
+                continue
+            block = self._build_block_from_judge_result(result)
+            if block is not None:
+                self._ingest_consolidation_candidate(
+                    block,
+                    source="consolidation",
+                    layer="project",
+                )
+
+    def _consolidate_with_bullet_judge(self, decisions_text: str) -> None:
+        """逐条子弹评判（回退路径：无 consolidate_judge_fn 时使用）。"""
+        decisions = self._extract_bullet_items(decisions_text)
+        for decision_text in decisions:
+            block = self._decision_to_memory_block(decision_text)
+            if block is not None:
+                self._ingest_consolidation_candidate(
+                    block,
+                    source="consolidation",
+                    layer="project",
+                )
+
+    def _build_block_from_judge_result(self, result: MemoryJudgeResult) -> str | None:
+        """从 MemoryJudgeResult 构建记忆块。"""
+        if not result.suggested_title:
+            return None
+        title = result.suggested_title
+        context = result.suggested_context or ""
+        solution = result.suggested_solution or ""
+        takeaways = result.suggested_takeaways or ""
+        files = (
+            ", ".join(result.related_files) if result.related_files else "(see project)"
+        )
+        lines = [
+            f"## {title}",
+            f"- Context/Query: {context}",
+            f"- Solution: {solution}",
+            f"- Files: {files}",
+            f"- Takeaways: {takeaways}",
+            f"- Confidence: {result.confidence:.2f}",
+            "- status: active",
+            "- validity: derived",
+            "- memory-type: semantic",
+        ]
+        if result.scope:
+            lines.append(f"- Scope: {result.scope}")
+        return "\n".join(lines) + "\n"
+
     @staticmethod
     def _extract_bullet_items(text: str) -> list[str]:
         """从 markdown 文本中提取列表项。"""
@@ -1325,17 +1414,98 @@ class MemoryManager:
                 item = line[2:].strip()
                 if item:
                     items.append(item)
-            elif line.startswith("1. ") or line.startswith("2. ") or line.startswith("3. "):
+            elif (
+                line.startswith("1. ")
+                or line.startswith("2. ")
+                or line.startswith("3. ")
+            ):
                 item = line[3:].strip()
                 if item:
                     items.append(item)
         return items
 
+    def set_judge_fn(self, judge_fn: MemoryJudgeFn | None) -> None:
+        """运行时设置 LLM 记忆质量评判函数。"""
+        self.judge_fn = judge_fn
+        # 未单独设置 consolidate_judge_fn 时同步
+        if self.consolidate_judge_fn is None:
+            self.consolidate_judge_fn = None
+
+    def set_embedding_fn(self, embedding_fn: MemoryEmbeddingFn | None) -> None:
+        """运行时设置语义嵌入函数。"""
+        self.embedding_fn = embedding_fn
+
+    def set_consolidate_judge_fn(
+        self, consolidate_judge_fn: MemoryConsolidateJudgeFn | None
+    ) -> None:
+        """运行时设置节级 LLM 记忆质量评判函数。"""
+        self.consolidate_judge_fn = consolidate_judge_fn
+
+    def set_reference_judge_fn(
+        self, reference_judge_fn: MemoryReferenceJudgeFn | None
+    ) -> None:
+        """运行时设置 LLM 引用检测函数。"""
+        self.reference_judge_fn = reference_judge_fn
+
     def _decision_to_memory_block(self, decision_text: str) -> str | None:
-        """将一条决策文本转换为 MEMORY.md 兼容的记忆块。"""
+        """将一条决策文本转换为 MEMORY.md 兼容的记忆块。
+
+        当配置了 judge_fn 时，使用 LLM 判断该决策是否值得记录
+        并生成结构化内容；否则回退到纯模板提取。
+        """
         decision_text = decision_text.strip()
         if not decision_text or len(decision_text) < 10:
             return None
+
+        if self.judge_fn is not None:
+            return self._llm_decision_to_memory_block(decision_text)
+
+        return self._template_decision_to_memory_block(decision_text)
+
+    def _llm_decision_to_memory_block(self, decision_text: str) -> str | None:
+        """使用 LLM judge_fn 评判决策并生成结构化记忆块。"""
+        result = self.judge_fn(decision_text)  # type: ignore[misc]
+        if not result.is_worth_remembering:
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="rejected",
+                    memory_id=None,
+                    layer="project",
+                    title="",
+                    rejection_reason="llm_judge_rejected",
+                    source="consolidation",
+                )
+            )
+            return None
+
+        # 使用 LLM 的结构化输出构建记忆块
+        title = result.suggested_title or f"Decision: {decision_text[:60]}"
+        context = result.suggested_context or decision_text[:200]
+        solution = result.suggested_solution or decision_text[:200]
+        takeaways = result.suggested_takeaways or decision_text[:200]
+        files = (
+            ", ".join(result.related_files) if result.related_files else "(see project)"
+        )
+        scope_line = f"\n- Scope: {result.scope}" if result.scope else ""
+        return (
+            f"## {title}\n"
+            f"- Context/Query: {context}\n"
+            f"- Solution: {solution}\n"
+            f"- Files: {files}\n"
+            f"- Takeaways: {takeaways}\n"
+            f"- Confidence: {result.confidence:.2f}\n"
+            f"- status: active\n"
+            f"- validity: derived\n"
+            f"- memory-type: semantic"
+            f"{scope_line}\n"
+        )
+
+    def _template_decision_to_memory_block(self, decision_text: str) -> str | None:
+        """纯模板方式将决策文本转换为记忆块。
+
+        作为 _decision_to_memory_block 的 fallback 路径，
+        在未配置 judge_fn 时使用。
+        """
         # 去除 **加粗** 标记
         clean = decision_text.replace("**", "").strip()
         # 按冒号分割决策标题与内容
@@ -1363,14 +1533,6 @@ class MemoryManager:
         """
         records = self.read_memory_records(layer="project")
         return not any(r.title.lower().startswith("project context") for r in records)
-
-    def _is_memory_attempt(self, block: str) -> bool:
-        has_field = any(
-            f in block for f in ["Context/Query", "Solution", "Files", "Takeaways"]
-        )
-        return block.strip().startswith("## ") and (
-            has_field or "incident" in block.lower()
-        )
 
     def _ingest_consolidation_candidate(
         self,
@@ -1682,6 +1844,79 @@ class MemoryManager:
         self.record_adopted_records(adopted_records, source=source)
         return len(adopted_records)
 
+    def record_compaction_referenced_feedback(self) -> int:
+        """在 compaction 时，对已被引用的记忆执行采纳 + 成功反馈。
+
+        仅在 record_explicit_references 之后调用，不会影响未引用的记忆。
+        """
+        records_by_layer = {
+            current_layer: {
+                record.memory_id: record
+                for record in self.read_memory_records(layer=current_layer)
+            }
+            for current_layer in self._selected_layers("all")
+        }
+        updated = 0
+        for (layer, memory_id), usage in list(self._session_usage.items()):
+            if not usage.referenced or usage.adopted:
+                continue
+            record = records_by_layer.get(layer, {}).get(memory_id)
+            if record is None:
+                continue
+            # 标记为已采纳
+            usage.adopted = True
+            # 即时写回一条成功反馈
+            next_fields = self._feedback_fields_for_record(record, usage, "success")
+            self._replace_record_by_memory_id(record, next_fields)
+            updated += 1
+        return updated
+
+    def record_llm_references(self, text: str) -> int:
+        """使用 LLM reference_judge_fn 检测文本是否引用了已注入的记忆。
+
+        作为 record_explicit_references 的补充，可以捕获隐式引用。
+        需要先配置 reference_judge_fn。
+        """
+        if self.reference_judge_fn is None:
+            return 0
+
+        # 收集已注入但未确认引用的记忆
+        candidate_titles: list[str] = []
+        title_to_key: dict[str, tuple[str, str]] = {}
+        records_by_layer = {
+            current_layer: {
+                record.memory_id: record
+                for record in self.read_memory_records(layer=current_layer)
+            }
+            for current_layer in self._selected_layers("all")
+        }
+        for (layer, memory_id), usage in self._session_usage.items():
+            if not usage.injected or usage.referenced:
+                continue
+            record = records_by_layer.get(layer, {}).get(memory_id)
+            if record is None:
+                continue
+            candidate_titles.append(record.title)
+            title_to_key[record.title.lower()] = (layer, memory_id)
+
+        if not candidate_titles:
+            return 0
+
+        try:
+            matched_titles = self.reference_judge_fn(text, candidate_titles)
+        except Exception:
+            return 0
+
+        matched = 0
+        for title in matched_titles:
+            key = title_to_key.get(title.lower())
+            if key is not None:
+                usage = self._session_usage.get(key)
+                if usage is not None and not usage.referenced:
+                    usage.referenced = True
+                    matched += 1
+        return matched
+
     def record_explicit_references(self, text: str) -> int:
         """根据最终回答中的显式 memory_id 或标题标记被引用的记忆。"""
         normalized = text.casefold()
@@ -1872,6 +2107,124 @@ class MemoryManager:
     def _elapsed_ms(self, started_at: float) -> float:
         return round((time.perf_counter() - started_at) * 1000, 3)
 
+    # ── 混合检索（语义 + BM25）──
+
+    def hybrid_search_memory_records(
+        self,
+        query: str,
+        limit: int = 3,
+        scope: str | None = None,
+        layer: MemoryLayerFilter = "all",
+        *,
+        source: str = "api",
+        track_usage: bool = True,
+        retrieval_context: MemoryRetrievalContext | None = None,
+        semantic_weight: float = 0.4,
+    ) -> list[MemoryRecord]:
+        """语义嵌入 + BM25 混合检索。
+
+        当配置了 embedding_fn 时，结合语义相似度与 BM25 词法分数做混合排序；
+        否则回退到纯 BM25 检索。
+        """
+        if self.embedding_fn is None:
+            return self.search_memory_records(
+                query,
+                limit=limit,
+                scope=scope,
+                layer=layer,
+                source=source,
+                track_usage=track_usage,
+                retrieval_context=retrieval_context,
+            )
+
+        started_at = time.perf_counter()
+        context = self._coerce_retrieval_context(
+            query,
+            scope=scope,
+            retrieval_context=retrieval_context,
+        )
+        candidates = self.retrieve_memory_candidates(
+            context,
+            layer=layer,
+        )
+        if not candidates or limit <= 0:
+            if source == "tool":
+                self._emit_trace(
+                    MemoryTraceEvent(
+                        type="tool_searched",
+                        latency_ms=self._elapsed_ms(started_at),
+                        source=source,
+                    )
+                )
+            return []
+
+        # BM25 分数已在 candidate 的 score 字段上
+        bm25_scores = {c.memory_id: c.score for c in candidates}
+
+        # 语义嵌入
+        try:
+            query_vec = self.embedding_fn(context.lexical_text())
+            block_texts = [record.block for record in candidates]
+            block_vecs = [self.embedding_fn(block) for block in block_texts]
+            semantic_scores = {
+                record.memory_id: _cosine_similarity(query_vec, bv)
+                for record, bv in zip(candidates, block_vecs)
+            }
+        except Exception:
+            # 嵌入失败时降级到纯 BM25
+            semantic_scores = {c.memory_id: 0.0 for c in candidates}
+
+        # 混合：semantic_weight * 语义 + (1 - semantic_weight) * BM25
+        max_bm25 = max(bm25_scores.values()) if bm25_scores else 1.0
+        max_sem = max(semantic_scores.values()) if semantic_scores else 1.0
+        for record in candidates:
+            bm25_norm = bm25_scores.get(record.memory_id, 0.0) / max(max_bm25, 1e-8)
+            sem_norm = semantic_scores.get(record.memory_id, 0.0) / max(max_sem, 1e-8)
+            combined = sem_norm * semantic_weight + bm25_norm * (1.0 - semantic_weight)
+            combined *= max(max_bm25, 1e-8)  # rescale to original magnitude
+
+        ranked = sorted(
+            candidates,
+            key=lambda r: (
+                -(
+                    semantic_scores.get(r.memory_id, 0.0)
+                    / max(max_sem, 1e-8)
+                    * semantic_weight
+                    + bm25_scores.get(r.memory_id, 0.0)
+                    / max(max_bm25, 1e-8)
+                    * (1.0 - semantic_weight)
+                )
+                * max(max_bm25, 1e-8),
+                r.title,
+            ),
+        )
+
+        elapsed_ms = self._elapsed_ms(started_at)
+        if track_usage and ranked:
+            self._touch_lru(ranked)
+            self._mark_session_usage(ranked, usage="retrieved")
+        for record in ranked[:limit]:
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="retrieved",
+                    memory_id=self._memory_id(record.layer, record.title),
+                    layer=record.layer,
+                    title=record.title,
+                    score=record.score,
+                    latency_ms=elapsed_ms,
+                    source=source,
+                )
+            )
+        if source == "tool":
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="tool_searched",
+                    latency_ms=elapsed_ms,
+                    source=source,
+                )
+            )
+        return ranked[:limit]
+
     def render_prompt_packet(self, record: MemoryRecord) -> str:
         """将记忆渲染为短小、可审计的 prompt packet。"""
         lines = [
@@ -1941,3 +2294,417 @@ class MemoryManager:
         if record.confidence_value is None:
             return True
         return record.confidence_value >= self.min_confidence
+
+
+# ── 模块级辅助函数 ──
+
+
+_NGRAM_DIM = 256
+
+
+def _ngram_hash_vector(text: str, dim: int = _NGRAM_DIM) -> list[float]:
+    """字符 n-gram 哈希向量，零依赖的语义嵌入。"""
+    normalized = text.lower().strip()
+    if not normalized:
+        return [0.0] * dim
+    vec = [0.0] * dim
+    for i in range(len(normalized) - 1):
+        ngram = normalized[i : i + 2]
+        idx = hash(ngram) % dim
+        vec[idx] += 1.0
+    for i in range(len(normalized) - 2):
+        ngram = normalized[i : i + 3]
+        idx = hash(ngram) % dim
+        vec[idx] += 1.0
+    for token in normalized.split():
+        idx = hash(token) % dim
+        vec[idx] += 2.0
+    vec = [max(0.0, v) ** 0.5 for v in vec]
+    norm = sum(v * v for v in vec) ** 0.5
+    if norm > 1e-10:
+        vec = [v / norm for v in vec]
+    return vec
+
+
+def build_memory_embedding_fn() -> MemoryEmbeddingFn:
+    """构建语义嵌入函数。
+
+    优先使用 sentence-transformers（需独立安装），
+    回退到零依赖的字符 n-gram 哈希向量。
+    """
+    try:
+        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+
+        def embed(text: str) -> list[float]:
+            return model.encode(text).tolist()  # type: ignore[no-any-return]
+
+        return embed
+    except ImportError:
+        import logging
+
+        logging.getLogger(__name__).info(
+            "sentence-transformers not installed; using n-gram hash embedding. "
+            "Install with: pip install sentence-transformers"
+        )
+        return _ngram_hash_vector
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """计算两个向量的余弦相似度。"""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(y * y for y in b) ** 0.5
+    if norm_a < 1e-10 or norm_b < 1e-10:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def build_memory_judge_fn(
+    llm: object,
+    *,
+    model: str | None = None,
+    provider_id: str = "main",
+) -> MemoryJudgeFn:
+    """使用 LLM provider 构建记忆质量评估函数。
+
+    生成一个 MemoryJudgeFn，对传入的决策文本调用 provider 做结构化判断。
+    使用 JSON mode 输出，确保 LLM 返回可解析的结构化结果。
+
+    参数：
+        llm: 实现了 ModelProvider 协议的 LLM provider 实例。
+        model: 可选，指定使用的模型名（如 "deepseek-chat"）。
+              为 None 时使用 provider 的默认模型。
+        provider_id: 可选的 provider 标识，仅用于 trace 事件。
+
+    返回：
+        一个 MemoryJudgeFn 可调用对象。
+    """
+    system_prompt = (
+        "You are a memory quality judge. Your task is to evaluate whether a single "
+        "decision extracted from a conversation is worth remembering for future sessions.\n\n"
+        "Output JSON with exactly these fields:\n"
+        '{"is_worth_remembering": true/false, '
+        '"confidence": 0.0-1.0, '
+        '"scope": "subsystem name or null", '
+        '"related_files": ["file1.py"], '
+        '"suggested_title": "Decision: <short title>", '
+        '"suggested_context": "What problem or question led to this decision", '
+        '"suggested_solution": "What was decided", '
+        '"suggested_takeaways": "Why this matters and what to remember", '
+        '"reasoning": "Brief explanation of the judgment"}\n\n'
+        "Guidelines:\n"
+        "- Set is_worth_remembering=false if: ephemeral/temp state, obvious fixes, "
+        "personal preference, trivial config changes.\n"
+        "- Set is_worth_remembering=true if: architecture decisions, API design choices, "
+        "non-obvious bug fixes, dependency choices, important constraints.\n"
+        "- confidence should reflect how certain you are about the judgment.\n"
+        "- scope should be the subsystem or module this decision affects, or null.\n"
+        "- related_files should list specific files involved, if inferrable.\n"
+        "- suggested_title should start with 'Decision: ' and be concise.\n"
+        "- Output ONLY valid JSON, no other text.\n"
+    )
+
+    def judge(decision_text: str) -> MemoryJudgeResult:
+        """调用 provider 评判单条决策（同步接口，兼容运行中的 event loop）。"""
+        if not decision_text.strip() or len(decision_text.strip()) < 10:
+            return MemoryJudgeResult(
+                is_worth_remembering=False,
+                confidence=0.0,
+                reasoning="decision text too short",
+            )
+
+        try:
+            import asyncio
+
+            user_prompt = f"Evaluate this decision:\n{decision_text}"
+
+            # 在已有事件循环中使用 run_coroutine_threadsafe，
+            # 否则使用 asyncio.run（同步上下文）
+            try:
+                loop = asyncio.get_running_loop()
+                future = asyncio.run_coroutine_threadsafe(
+                    _judge_async(llm, system_prompt, user_prompt),
+                    loop,
+                )
+                raw = future.result(timeout=30)
+            except RuntimeError:
+                raw = asyncio.run(_judge_async(llm, system_prompt, user_prompt))
+
+            result = _parse_judge_json(raw)
+            return result
+        except Exception as exc:
+            # LLM 调用失败时保守降级：记录但不拒绝
+            return MemoryJudgeResult(
+                is_worth_remembering=True,
+                confidence=0.3,
+                reasoning=f"LLM judge failed, conservative fallback: {exc}",
+            )
+
+    return judge
+
+
+def build_memory_consolidate_judge_fn(
+    llm: object,
+) -> MemoryConsolidateJudgeFn:
+    """构建节级 LLM 记忆质量评估函数。
+
+    与 build_memory_judge_fn 不同，此函数接收完整的 Key Decisions 节文本，
+    LLM 一次看到所有决策的前后文，可以合并相关条目、过滤低价值决策、重组表述。
+
+    输出 JSON 数组，每个元素与 MemoryJudgeResult 的字段一致。
+    """
+    system_prompt = (
+        "You are a memory consolidation judge. Review the full list of decisions "
+        "extracted from a conversation session and decide which are worth remembering.\n\n"
+        "Rules:\n"
+        "- Merge related decisions into one record when they are about the same topic.\n"
+        "- Drop ephemeral/obvious/trivial decisions (temp fixes, obvious config changes).\n"
+        "- Keep architecture decisions, API design choices, non-obvious bug fixes, "
+        "dependency choices, important constraints.\n"
+        "- For each kept decision, rewrite it clearly for future retrieval.\n\n"
+        "Output a JSON array. Each element has these fields:\n"
+        '{"is_worth_remembering": true/false, '
+        '"confidence": 0.0-1.0, '
+        '"scope": "subsystem name or null", '
+        '"related_files": ["file1.py"], '
+        '"suggested_title": "Decision: <concise title>", '
+        '"suggested_context": "What problem or question led to this decision", '
+        '"suggested_solution": "What was decided", '
+        '"suggested_takeaways": "Why this matters", '
+        '"reasoning": "Why kept/merged/dropped"}\n\n'
+        "Output ONLY valid JSON array, no other text.\n"
+    )
+
+    def judge_section(section_text: str) -> list[MemoryJudgeResult]:
+        if not section_text.strip():
+            return []
+        try:
+            import asyncio
+
+            user_prompt = f"Consolidate these decisions:\n\n{section_text}"
+            try:
+                loop = asyncio.get_running_loop()
+                future = asyncio.run_coroutine_threadsafe(
+                    _judge_async(llm, system_prompt, user_prompt),
+                    loop,
+                )
+                raw = future.result(timeout=60)
+            except RuntimeError:
+                raw = asyncio.run(_judge_async(llm, system_prompt, user_prompt))
+
+            return _parse_judge_json_array(raw)
+        except Exception:
+            return []
+
+    return judge_section
+
+
+def build_memory_reference_judge_fn(
+    llm: object,
+) -> MemoryReferenceJudgeFn:
+    """构建 LLM 引用检测函数。
+
+    接收(compaction 摘要文本, 候选记忆标题列表)，
+    返回被引用的记忆标题列表。用于补充纯子串匹配的不足。
+    """
+    system_prompt = (
+        "You are a reference detector. Given a text summary and a list of known "
+        "memory records (each with a title), determine which memory records the "
+        "summary implicitly or explicitly references.\n\n"
+        "Output ONLY a JSON array of referenced memory titles, e.g. "
+        '["Decision: Use Redis", "Decision: Layered architecture"].\n'
+        "Return empty array [] if none are referenced.\n"
+        "Be inclusive: if the summary uses the same concept, decision, or finding "
+        "as a memory record, consider it referenced even if the exact title is not used.\n"
+    )
+
+    def detect_references(text: str, candidates: list[str]) -> list[str]:
+        if not text.strip() or not candidates:
+            return []
+        try:
+            import asyncio
+
+            candidates_text = "\n".join(f"- {c}" for c in candidates)
+            user_prompt = (
+                f"Text:\n{text[:2000]}\n\n"
+                f"Memory records:\n{candidates_text}\n\n"
+                f"Which memory titles are referenced in the text?"
+            )
+            try:
+                loop = asyncio.get_running_loop()
+                future = asyncio.run_coroutine_threadsafe(
+                    _judge_async(llm, system_prompt, user_prompt),
+                    loop,
+                )
+                raw = future.result(timeout=30)
+            except RuntimeError:
+                raw = asyncio.run(_judge_async(llm, system_prompt, user_prompt))
+
+            return _parse_reference_json_list(raw, candidates)
+        except Exception:
+            return []
+
+    return detect_references
+
+
+async def _judge_async(
+    llm: object,
+    system_prompt: str,
+    user_prompt: str,
+) -> str:
+    """异步调用 provider 进行评判。"""
+    from xcode.ai.events import TextDelta
+    from xcode.ai.types import StreamOptions
+
+    messages: list[dict[str, object]] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    try:
+        text_parts: list[str] = []
+        async for event in llm.stream(  # type: ignore[union-attr]
+            messages=messages,
+            tools=[],
+            options=StreamOptions(max_tokens=1024),
+        ):
+            if isinstance(event, TextDelta):
+                text_parts.append(event.chunk)
+        return "".join(text_parts)
+    except Exception:
+        return json.dumps(
+            {
+                "is_worth_remembering": True,
+                "confidence": 0.3,
+                "scope": None,
+                "related_files": [],
+                "suggested_title": "",
+                "suggested_context": "",
+                "suggested_solution": "",
+                "suggested_takeaways": "",
+                "reasoning": "sync fallback: provider stream failed",
+            }
+        )
+
+
+def _parse_judge_json(raw: str) -> MemoryJudgeResult:
+    """解析 LLM 返回的 JSON，提取 MemoryJudgeResult。"""
+    import json
+    import re
+
+    # 尝试解析 JSON（处理可能的 markdown 包裹）
+    text = raw.strip()
+    # 移除 ```json 和 ``` 包裹
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # 尝试从文本中提取 JSON 块
+        match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
+        if match:
+            try:
+                data = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                data = {}
+        else:
+            data = {}
+
+    return MemoryJudgeResult(
+        is_worth_remembering=bool(data.get("is_worth_remembering", True)),
+        confidence=float(data.get("confidence", 0.5)),
+        scope=str(data.get("scope")) if data.get("scope") else None,
+        related_files=tuple(str(f) for f in (data.get("related_files") or []) if f),
+        suggested_title=str(data.get("suggested_title", "")),
+        suggested_context=str(data.get("suggested_context", "")),
+        suggested_solution=str(data.get("suggested_solution", "")),
+        suggested_takeaways=str(data.get("suggested_takeaways", "")),
+        reasoning=str(data.get("reasoning", "")),
+    )
+
+
+def _parse_judge_json_array(raw: str) -> list[MemoryJudgeResult]:
+    """解析 LLM 返回的 JSON 数组，提取 MemoryJudgeResult 列表。"""
+    import json
+    import re
+
+    text = raw.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    try:
+        data_list = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\[[\s\S]*\]", text, re.DOTALL)
+        if match:
+            try:
+                data_list = json.loads(match.group(0))
+            except (json.JSONDecodeError, TypeError):
+                data_list = []
+        else:
+            data_list = []
+
+    if not isinstance(data_list, list):
+        return []
+
+    results: list[MemoryJudgeResult] = []
+    for item in data_list:
+        if not isinstance(item, dict):
+            continue
+        results.append(
+            MemoryJudgeResult(
+                is_worth_remembering=bool(item.get("is_worth_remembering", True)),
+                confidence=float(item.get("confidence", 0.5)),
+                scope=str(item.get("scope")) if item.get("scope") else None,
+                related_files=tuple(
+                    str(f) for f in (item.get("related_files") or []) if f
+                ),
+                suggested_title=str(item.get("suggested_title", "")),
+                suggested_context=str(item.get("suggested_context", "")),
+                suggested_solution=str(item.get("suggested_solution", "")),
+                suggested_takeaways=str(item.get("suggested_takeaways", "")),
+                reasoning=str(item.get("reasoning", "")),
+            )
+        )
+    return results
+
+
+def _parse_reference_json_list(raw: str, candidates: list[str]) -> list[str]:
+    """解析 LLM 返回的 JSON 引用标题列表。"""
+    import json
+    import re
+
+    text = raw.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    try:
+        titles = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\[[\s\S]*\]", text, re.DOTALL)
+        if match:
+            try:
+                titles = json.loads(match.group(0))
+            except (json.JSONDecodeError, TypeError):
+                titles = []
+        else:
+            titles = []
+
+    if not isinstance(titles, list):
+        return []
+
+    # 只返回与候选匹配的标题（模糊匹配）
+    result: list[str] = []
+    candidate_lower = {c.lower(): c for c in candidates}
+    for title in titles:
+        t = str(title).strip()
+        if t.lower() in candidate_lower:
+            result.append(candidate_lower[t.lower()])
+        else:
+            # 尝试部分匹配
+            for c_lower, c_orig in candidate_lower.items():
+                if t.lower() in c_lower or c_lower in t.lower():
+                    result.append(c_orig)
+                    break
+    return result
