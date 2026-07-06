@@ -1,4 +1,4 @@
-"""项目级与用户级长期记忆管理。"""
+"""Project- and user-scoped durable memory services."""
 
 from .governance import (
     GovernedMemoryEvidence,
@@ -11,10 +11,10 @@ from .governance import (
     MemoryProposalResult,
     MemoryProposalStatus,
 )
+from .governed_manager import GovernedMemoryManager, GovernedMemoryManager as MemoryManager
 from .manager import (
     MemoryLayer,
     MemoryLayerFilter,
-    MemoryManager,
     MemoryRerankPolicy,
     MemoryRetrievalContext,
 )
@@ -30,6 +30,7 @@ from .tools import build_memory_tools
 
 __all__ = [
     "GovernedMemoryEvidence",
+    "GovernedMemoryManager",
     "MemoryEvidence",
     "MemoryEvidenceInput",
     "MemoryGovernance",
