@@ -21,10 +21,10 @@ from xcode.harness.memory import (
 def handle_memory_command(args: Namespace, project_root: Path) -> int:
     """Execute a user-owned memory administration subcommand."""
     manager = MemoryManager(project_root)
-    action = str(getattr(args, "memory_action", "") or "proposals")
+    action = str(args.memory_action or "proposals")
 
     if action == "proposals":
-        return _list_proposals(manager, str(getattr(args, "status", "pending")))
+        return _list_proposals(manager, str(args.status))
     if action == "approve":
         return _approve(
             manager,
