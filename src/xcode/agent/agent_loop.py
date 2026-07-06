@@ -280,7 +280,7 @@ async def _run_loop(
 
         # ── 重复工具看门狗 ──
         repeated_watchdog_reason = update_repeated_tool_watchdog(
-            state, tool_calls, config
+            state, tool_calls, config, tool_results
         )
         if repeated_watchdog_reason:
             return _finish_loop(

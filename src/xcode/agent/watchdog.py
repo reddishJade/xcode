@@ -102,6 +102,7 @@ def update_repeated_tool_watchdog(
     state: _LoopRunState,
     tool_calls: list[ToolCallContent],
     config: AgentLoopConfig,
+    tool_results: list[ToolResultMessage],
 ) -> str | None:
     """检测工具调用是否重复，防止无限循环。
 
@@ -111,6 +112,11 @@ def update_repeated_tool_watchdog(
 
     豁免规则：watchdog_repeated_tool_skip 中的工具名不参与重复计数，
     用于允许低风险只读观察类工具重复调用而不触发看门狗。
+
+    与空闲看门狗的协作规则（避免互相干扰）：
+    - 如果连续相同的调用每次都失败（所有结果是 error），重复看门狗不计入重复次数，
+      留给空闲看门狗处理，避免 "repeated tool call" 掩盖工具持续失败的根因。
+    - 如果至少一次调用成功，重复看门狗正常计数。
     """
     if tool_calls and tool_calls[0].name in config.watchdog_repeated_tool_skip:
         state.repeated_tool_count = 0
@@ -119,7 +125,12 @@ def update_repeated_tool_watchdog(
 
     sig = tool_calls_signature(tool_calls)
     if sig == state.last_tool_signature:
-        state.repeated_tool_count += 1
+        # 如果所有工具结果都是错误，归空闲看门狗处理，不增加重复计数
+        if all(r.is_error for r in tool_results):
+            state.repeated_tool_count = 0
+            state.last_tool_signature = None
+        else:
+            state.repeated_tool_count += 1
     else:
         state.repeated_tool_count = 0
         state.last_tool_signature = sig
