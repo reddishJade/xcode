@@ -6,8 +6,8 @@ from argparse import Namespace
 from pathlib import Path
 
 from xcode.cli.memory_cmd import handle_memory_command
-from xcode.main import parse_args
 from xcode.harness.memory import MemoryManager, MemoryProposalStatus
+from xcode.main import parse_args
 
 
 def _block() -> str:
@@ -92,3 +92,24 @@ def test_memory_parser_defaults_to_pending_proposals(tmp_path: Path) -> None:
     assert args.command == "memory"
     assert args.memory_action == "proposals"
     assert args.status == "pending"
+
+
+def test_memory_parser_accepts_explicit_retirement(tmp_path: Path) -> None:
+    args = parse_args(
+        [
+            "--project-root",
+            str(tmp_path),
+            "memory",
+            "retire",
+            "mem_abc123",
+            "--yes",
+            "--reason",
+            "obsolete",
+        ]
+    )
+
+    assert args.command == "memory"
+    assert args.memory_action == "retire"
+    assert args.memory_id == "mem_abc123"
+    assert args.yes is True
+    assert args.reason == "obsolete"
