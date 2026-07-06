@@ -230,6 +230,8 @@ def _cmd_edit(config_path: Path, name: str) -> None:
 
     model_choices = [*(preset.get("models", [])), "Custom (enter name)"]
     default_model = current_model or preset["default_model"]
+    if default_model not in model_choices:
+        model_choices.insert(0, default_model)
     new_model = questionary.select(
         "Model:", choices=model_choices, default=default_model
     ).ask()
