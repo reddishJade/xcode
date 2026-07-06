@@ -18,7 +18,7 @@ __pycache__/
 # --- 环境与配置 ——
 .env
 .local/
-.venv/
+.venv*/
 opencode.json*
 uv.lock
 xcode.config.json
