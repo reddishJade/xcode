@@ -7,6 +7,8 @@ subclass intercepts only externally meaningful durable-write origins:
   evidence-backed proposal that may apply immediately.
 * compaction consolidation is automation and therefore creates pending proposals
   instead of writing directly to ``MEMORY.md``.
+* a governance-approved write receives immutable proposal and evidence IDs before
+  it reaches the Markdown store, preserving a complete read-back audit chain.
 
 All other callers retain the base manager's behavior so low-level migration,
 fixtures, and deterministic storage operations are not silently reclassified as
@@ -21,7 +23,12 @@ from typing import Sequence
 
 from xcode.agent.context_assembly import ContextTrust
 
-from .governance import MemoryEvidenceInput, MemoryGovernance, MemoryProposalStatus
+from .governance import (
+    MemoryEvidenceInput,
+    MemoryGovernance,
+    MemoryProposal,
+    MemoryProposalStatus,
+)
 from .manager import (
     MemoryLayer,
     MemoryManager as BaseMemoryManager,
@@ -75,36 +82,39 @@ class GovernedMemoryManager(BaseMemoryManager):
         evidence: Sequence[MemoryEvidence] = (),
         layer: MemoryLayer = "project",
     ) -> bool:
-        """Apply explicit REPL writes through the evidence/promotion contract."""
-        if source != "repl":
-            return super().add_memory_block(
-                block,
-                source=source,
-                scope=scope,
-                confidence=confidence,
-                memory_type=memory_type,
-                status=status,
-                validity=validity,
-                supersedes=supersedes,
-                evidence=evidence,
-                layer=layer,
+        """Route user intent and approved governance writes through explicit paths."""
+        if source == "repl":
+            title = extract_title(block)
+            if not title:
+                return False
+            effective_scope = scope or (
+                "user_global" if layer == "user" else str(self.root.resolve())
             )
+            result = self.governance.add_explicit_user_memory(
+                block=block,
+                title=title,
+                layer=layer,
+                scope=effective_scope,
+                source="repl",
+                memory_type=memory_type,
+            )
+            return result.proposal.status is MemoryProposalStatus.APPLIED
 
-        title = extract_title(block)
-        if not title:
-            return False
-        effective_scope = scope or (
-            "user_global" if layer == "user" else str(self.root.resolve())
-        )
-        result = self.governance.add_explicit_user_memory(
-            block=block,
-            title=title,
-            layer=layer,
-            scope=effective_scope,
-            source="repl",
+        if source is not None and source.startswith("governance:"):
+            block = self._attach_governance_provenance(block, source=source, layer=layer)
+
+        return super().add_memory_block(
+            block,
+            source=source,
+            scope=scope,
+            confidence=confidence,
             memory_type=memory_type,
+            status=status,
+            validity=validity,
+            supersedes=supersedes,
+            evidence=evidence,
+            layer=layer,
         )
-        return result.proposal.status is MemoryProposalStatus.APPLIED
 
     def consolidate(self, summary: str) -> None:
         """Create pending proposals from legacy compact-summary candidates."""
@@ -134,7 +144,6 @@ class GovernedMemoryManager(BaseMemoryManager):
     def _propose_consolidation_candidate(self, block: str, summary: str) -> None:
         """Preserve the old scope filter but never bypass promotion approval."""
         if not self._has_reusable_scope(block):
-            # The base implementation only archives and traces this rejected candidate.
             self._ingest_consolidation_candidate(
                 block,
                 source="consolidation",
@@ -163,3 +172,56 @@ class GovernedMemoryManager(BaseMemoryManager):
                 ),
             ),
         )
+
+    def _attach_governance_provenance(
+        self,
+        block: str,
+        *,
+        source: str,
+        layer: MemoryLayer,
+    ) -> str:
+        """Add immutable ledger backreferences to the matching approved proposal."""
+        proposal = self._find_approved_proposal(block, source=source, layer=layer)
+        if proposal is None:
+            return block
+
+        existing_keys = {
+            line[2:].split(":", 1)[0].strip().lower()
+            for line in block.splitlines()
+            if line.startswith("- ") and ":" in line
+        }
+        additions: list[str] = []
+        if "proposal-id" not in existing_keys:
+            additions.append(f"- Proposal-ID: {proposal.proposal_id}")
+        if "ledger-evidence-ids" not in existing_keys:
+            evidence_ids = ", ".join(item.evidence_id for item in proposal.evidence)
+            additions.append(f"- Ledger-Evidence-IDs: {evidence_ids}")
+        if not additions:
+            return block
+        return block.rstrip() + "\n" + "\n".join(additions) + "\n"
+
+    def _find_approved_proposal(
+        self,
+        block: str,
+        *,
+        source: str,
+        layer: MemoryLayer,
+    ) -> MemoryProposal | None:
+        """Identify the one approved proposal authorized to perform this write."""
+        title = extract_title(block)
+        if not title:
+            return None
+        candidates = [
+            proposal
+            for proposal in self.governance.ledger.list_proposals()
+            if proposal.status is MemoryProposalStatus.APPROVED
+            and proposal.layer == layer
+            and proposal.title.casefold() == title.casefold()
+            and source == f"governance:{proposal.source}"
+            and _normalized_block(proposal.block) == _normalized_block(block)
+        ]
+        return candidates[0] if len(candidates) == 1 else None
+
+
+def _normalized_block(block: str) -> str:
+    return "\n".join(line.rstrip() for line in block.strip().splitlines())
