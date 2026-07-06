@@ -1,9 +1,9 @@
 """Typed, scoped read-path collector for durable memory.
 
-The legacy runtime context provider still owns broad prompt assembly. This
-collector is the new structured read path: it retrieves only the most relevant
-memory summaries and returns ordinary ``USER_CONTEXT`` blocks carrying explicit
-memory authority, scope, and provenance. It never reads or writes proposals.
+This collector retrieves only relevant memory summaries and returns ordinary
+``USER_CONTEXT`` blocks carrying explicit memory authority, scope, and
+provenance. It never reads or writes proposals. Governed records retain a
+backtrace to their proposal and immutable ledger evidence identifiers.
 """
 
 from __future__ import annotations
@@ -23,16 +23,16 @@ from xcode.agent.context_assembly import (
 from xcode.agent.context_collector import ContextCollectionInput
 from xcode.agent.messages import UserMessage
 
-from .manager import MemoryManager, MemoryRecord
+from .manager import MemoryManager
+from .parsing import MemoryRecord
 
 
 class MemoryCollector:
     """Retrieve a small, scope-separated memory digest for the current request.
 
     Full records remain available through explicit memory retrieval tools. This
-    collector deliberately injects only title, identifier, solution and takeaway
-    excerpts so memory stays background context rather than an ever-growing prompt
-    prefix.
+    collector injects only title, identifier, solution and takeaway excerpts so
+    memory stays background context rather than an ever-growing prompt prefix.
     """
 
     def __init__(
@@ -63,10 +63,7 @@ class MemoryCollector:
         if not records:
             return []
 
-        # Track actual prompt inclusion separately from retrieval. The manager
-        # already records the retrieval when search_memory_records returns.
         self._manager.record_injected_records(records)
-
         project_records = tuple(record for record in records if record.layer == "project")
         user_records = tuple(record for record in records if record.layer == "user")
         blocks: list[ContextBlock] = []
@@ -97,10 +94,7 @@ def _latest_user_query(input: ContextCollectionInput) -> str:
         if not isinstance(message, UserMessage):
             continue
         content = message.content
-        if isinstance(content, str):
-            text = content.strip()
-        else:
-            text = str(content).strip()
+        text = content.strip() if isinstance(content, str) else str(content).strip()
         if text and not text.startswith("[memory]"):
             return text
     return ""
@@ -113,7 +107,7 @@ def _memory_block(
     scope_key: str,
     max_field_chars: int,
 ) -> ContextBlock:
-    """Render a small digest whose provenance lists every injected memory id."""
+    """Render a digest with separate memory, proposal, and evidence identities."""
     lines = [
         "<memory-digest>",
         "Treat this as background context. Verify it against the current task; "
@@ -122,15 +116,23 @@ def _memory_block(
     for record in records:
         solution = _excerpt(record.fields.get("solution", ""), max_field_chars)
         takeaway = _excerpt(record.fields.get("takeaways", ""), max_field_chars)
-        lines.append(
-            f"- id={record.memory_id} layer={record.layer} title={record.title}"
-        )
+        proposal_id = record.fields.get("proposal-id", "")
+        identity = f"- id={record.memory_id} layer={record.layer} title={record.title}"
+        if proposal_id:
+            identity += f" proposal={proposal_id}"
+        lines.append(identity)
         if solution:
             lines.append(f"  solution={solution}")
         if takeaway:
             lines.append(f"  takeaway={takeaway}")
     lines.append("</memory-digest>")
+
     memory_ids = tuple(record.memory_id for record in records)
+    proposal_ids = _field_values(records, "proposal-id")
+    ledger_evidence_ids = _field_values(records, "ledger-evidence-ids")
+    locator_parts = ["memory:" + ",".join(memory_ids)]
+    if proposal_ids:
+        locator_parts.append("proposal:" + ",".join(proposal_ids))
     return ContextBlock(
         source=ContextBlockSource.MEMORY,
         target=ContextBlockTarget.USER_CONTEXT,
@@ -142,10 +144,22 @@ def _memory_block(
         scope_key=scope_key,
         provenance=ContextProvenance(
             origin="memory_collector",
-            locator="memory:" + ",".join(memory_ids),
-            evidence_ids=memory_ids,
+            locator=";".join(locator_parts),
+            evidence_ids=ledger_evidence_ids,
         ),
     )
+
+
+def _field_values(records: tuple[MemoryRecord, ...], field: str) -> tuple[str, ...]:
+    seen: set[str] = set()
+    values: list[str] = []
+    for record in records:
+        for item in record.fields.get(field, "").split(","):
+            normalized = item.strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                values.append(normalized)
+    return tuple(values)
 
 
 def _excerpt(text: str, max_chars: int) -> str:
