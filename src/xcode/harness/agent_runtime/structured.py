@@ -165,6 +165,7 @@ class StructuredAgent:
             self._todo_state.replace([])
         if self._runtime.skill_registry is not None:
             self._runtime.skill_registry.clear_activations()
+        self._gate.clear_session_grants()
         self._reset_provider_conversation_state()
 
     @property
@@ -201,6 +202,8 @@ class StructuredAgent:
         self._history = deepcopy(messages)
         if self._runtime.skill_registry is not None:
             self._runtime.skill_registry.restore_activations(messages)
+        if not messages:
+            self._gate.clear_session_grants()
         self._reset_provider_conversation_state()
 
     def set_resumed_notice(self, notice: str) -> None:

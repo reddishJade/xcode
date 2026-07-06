@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast, runtime_checkable
 
 from xcode.ai.events import ToolCall
 
@@ -46,6 +46,12 @@ from ..skills import (
     ToolSpec,
     stringify_tool_input,
 )
+
+
+@runtime_checkable
+class _ClearableGrantStore(Protocol):
+    def clear(self) -> None: ...
+
 
 # 核心工具 capability 映射，提供给权限引擎
 _TOOL_ACTION_PROFILES: dict[str, tuple[str, str]] = {
@@ -190,6 +196,12 @@ class ToolGate:
     def set_permanent_grant_store(self, store: GrantStore | None) -> None:
         """设置或清除 permanent grant store。"""
         self._permanent_grant_store = store
+
+    def clear_session_grants(self) -> None:
+        """清空当前 session grant store。"""
+        store = self._resolve_session_store()
+        if isinstance(store, _ClearableGrantStore):
+            store.clear()
 
     @property
     def session_id(self) -> str:

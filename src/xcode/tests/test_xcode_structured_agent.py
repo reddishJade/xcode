@@ -26,12 +26,13 @@ from xcode.harness.agent_runtime import (
     StructuredAgent,
     StructuredAgentEvent,
 )
-from xcode.harness.agent_runtime.config import AgentRuntimeConfig
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 from xcode.harness.agent_runtime.events import FinalStructuredEvent
 from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.agent.messages import UserMessage
 from xcode.agent.results import TerminationReason
 from xcode.harness.memory import MemoryManager
+from xcode.harness.observability import GrantRecord, InMemoryGrantStore
 from xcode.harness.skills import ToolSpec
 from xcode.tests.fixtures import FakeProvider
 import pytest
@@ -248,6 +249,49 @@ class XcodeStructuredAgentTests:
             "assistant",
             "user",
         ]
+
+    def test_history_reset_clears_session_grants_only(self) -> None:
+        """验证新会话重置会清空 session grant，但保留永久授权。"""
+        session_store = InMemoryGrantStore()
+        permanent_store = InMemoryGrantStore()
+        grant = GrantRecord(
+            capability="read",
+            operation="read_file",
+            target_kind="path",
+            target_pattern="src/main.py",
+            access="read",
+            decision="allow",
+            scope="session",
+            grant_id="session-grant",
+        )
+        permanent_grant = grant.model_copy(
+            update={"grant_id": "permanent-grant", "scope": "permanent"}
+        )
+        session_store.add(grant)
+        permanent_store.add(permanent_grant)
+        agent = StructuredAgent(
+            provider=ResettableFakeProvider(),
+            registry=(),
+            gate=GateConfig(
+                session_grant_store=session_store,
+                permanent_grant_store=permanent_store,
+            ),
+        )
+
+        agent.clear_history()
+
+        assert session_store.records() == ()
+        assert permanent_store.records() == (permanent_grant,)
+
+        session_store.add(grant)
+        agent.load_history([UserMessage(content="old")])
+
+        assert session_store.records() == (grant,)
+
+        agent.load_history([])
+
+        assert session_store.records() == ()
+        assert permanent_store.records() == (permanent_grant,)
 
     def test_history_replacement_resets_provider_conversation_state(self) -> None:
         provider = ResettableFakeProvider()
