@@ -73,19 +73,22 @@ def deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+def _check_config_has_api_key(path: Path) -> bool:
+    """检查单个 JSON 配置文件中是否有 main profile 的 api_key。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        profiles = data.get("provider", {}).get("model_profiles", {})
+        return bool(profiles.get("main", {}).get("api_key"))
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
 def has_valid_config(project_root: Path) -> bool:
     """检查是否已有可用配置（config 文件或 .env）。"""
-    config_path = project_root / CONFIG_FILENAME
-    if config_path.exists():
-        try:
-            data = json.loads(config_path.read_text(encoding="utf-8"))
-            profiles = data.get("provider", {}).get("model_profiles", {})
-            for name in ("main",):
-                profile = profiles.get(name, {})
-                if profile.get("api_key"):
-                    return True
-        except (json.JSONDecodeError, OSError):
-            pass
+    if _check_config_has_api_key(project_root / CONFIG_FILENAME):
+        return True
+    if _check_config_has_api_key(Path.home() / ".xcode" / "settings.json"):
+        return True
 
     env_paths = [
         project_root / ".env",
