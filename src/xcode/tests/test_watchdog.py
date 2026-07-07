@@ -97,14 +97,22 @@ class TestWatchdogInterference:
     """
 
     def _make_call(
-        self, name: str = "write_file", path: str = "/test/file.txt"
+        self,
+        name: str = "write_file",
+        path: str = "/test/file.txt",
+        call_id: str = "call_1",
     ) -> ToolCallContent:
-        return ToolCallContent(id="call_1", name=name, arguments={"path": path})
+        return ToolCallContent(id=call_id, name=name, arguments={"path": path})
 
-    def _make_result(self, is_error: bool) -> ToolResultMessage:
+    def _make_result(
+        self,
+        is_error: bool,
+        tool_call_id: str = "call_1",
+        tool_name: str = "write_file",
+    ) -> ToolResultMessage:
         return ToolResultMessage(
-            tool_call_id="call_1",
-            tool_name="write_file",
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
             content="error" if is_error else "ok",
             is_error=is_error,
         )
@@ -221,6 +229,74 @@ class TestWatchdogInterference:
         reason = update_repeated_tool_watchdog(state, [call], config, results)
         assert reason is not None
         assert "repeated tool call" in reason
+
+    def test_skip_tools_do_not_count_when_batch_only_contains_skipped_tools(self):
+        """批次只包含豁免工具时，重复看门狗不计数。"""
+        state = _LoopRunState()
+        config = AgentLoopConfig(
+            watchdog_repeated_tool_limit=3,
+            watchdog_repeated_tool_skip=frozenset({"list_dir"}),
+        )
+        call = self._make_call(name="list_dir")
+        result = self._make_result(is_error=False)
+
+        for _ in range(5):
+            assert (
+                update_repeated_tool_watchdog(state, [call], config, [result]) is None
+            )
+            assert state.repeated_tool_count == 0
+            assert state.last_tool_signature is None
+
+    def test_skip_tools_do_not_hide_repeated_counted_calls(self):
+        """混合批次中，豁免工具不应掩盖非豁免工具重复。"""
+        state = _LoopRunState()
+        config = AgentLoopConfig(
+            watchdog_repeated_tool_limit=3,
+            watchdog_repeated_tool_skip=frozenset({"list_dir"}),
+        )
+        skipped = self._make_call(name="list_dir", path="/tmp", call_id="skip_1")
+        counted = self._make_call(
+            name="read_file", path="/target.txt", call_id="counted_1"
+        )
+        result = self._make_result(
+            is_error=False, tool_call_id="counted_1", tool_name="read_file"
+        )
+
+        batch = [skipped, counted]
+        assert update_repeated_tool_watchdog(state, batch, config, [result]) is None
+        assert state.repeated_tool_count == 0
+        assert update_repeated_tool_watchdog(state, batch, config, [result]) is None
+        assert state.repeated_tool_count == 1
+        assert update_repeated_tool_watchdog(state, batch, config, [result]) is None
+        assert state.repeated_tool_count == 2
+        reason = update_repeated_tool_watchdog(state, batch, config, [result])
+        assert reason == "watchdog stopped repeated tool call: read_file"
+
+    def test_skipped_success_does_not_make_counted_failure_repeated(self):
+        """豁免工具成功不应改变非豁免工具失败循环的归因。"""
+        state = _LoopRunState()
+        config = AgentLoopConfig(
+            watchdog_repeated_tool_limit=3,
+            watchdog_repeated_tool_skip=frozenset({"list_dir"}),
+        )
+        skipped = self._make_call(name="list_dir", path="/tmp", call_id="skip_1")
+        counted = self._make_call(
+            name="read_file", path="/target.txt", call_id="counted_1"
+        )
+        results = [
+            self._make_result(
+                is_error=False, tool_call_id="skip_1", tool_name="list_dir"
+            ),
+            self._make_result(
+                is_error=True, tool_call_id="counted_1", tool_name="read_file"
+            ),
+        ]
+
+        batch = [skipped, counted]
+        for _ in range(5):
+            assert update_repeated_tool_watchdog(state, batch, config, results) is None
+            assert state.repeated_tool_count == 0
+            assert state.last_tool_signature is None
 
 
 if __name__ == "__main__":

@@ -111,26 +111,38 @@ def update_repeated_tool_watchdog(
     - 签名完全相同（包括参数）才视为无效重复
 
     豁免规则：watchdog_repeated_tool_skip 中的工具名不参与重复计数，
-    用于允许低风险只读观察类工具重复调用而不触发看门狗。
+    用于允许低风险只读观察类工具重复调用而不触发看门狗。该规则只影响重复
+    检测，不影响权限门控；权限仍由工具执行前的门控层决定。
 
     与空闲看门狗的协作规则（避免互相干扰）：
     - 如果连续相同的调用每次都失败（所有结果是 error），重复看门狗不计入重复次数，
       留给空闲看门狗处理，避免 "repeated tool call" 掩盖工具持续失败的根因。
     - 如果至少一次调用成功，重复看门狗正常计数。
     """
-    if tool_calls and tool_calls[0].name in config.watchdog_repeated_tool_skip:
+    counted_calls = [
+        call
+        for call in tool_calls
+        if call.name not in config.watchdog_repeated_tool_skip
+    ]
+    if not counted_calls:
         state.repeated_tool_count = 0
         state.last_tool_signature = None
         return None
 
-    sig = tool_calls_signature(tool_calls)
+    counted_call_ids = {call.id for call in counted_calls}
+    counted_results = [
+        result for result in tool_results if result.tool_call_id in counted_call_ids
+    ]
+
+    # 如果非豁免工具结果都是错误，归空闲看门狗处理，不记录重复签名。
+    if all(r.is_error for r in counted_results):
+        state.repeated_tool_count = 0
+        state.last_tool_signature = None
+        return None
+
+    sig = tool_calls_signature(counted_calls)
     if sig == state.last_tool_signature:
-        # 如果所有工具结果都是错误，归空闲看门狗处理，不增加重复计数
-        if all(r.is_error for r in tool_results):
-            state.repeated_tool_count = 0
-            state.last_tool_signature = None
-        else:
-            state.repeated_tool_count += 1
+        state.repeated_tool_count += 1
     else:
         state.repeated_tool_count = 0
         state.last_tool_signature = sig
@@ -139,7 +151,7 @@ def update_repeated_tool_watchdog(
         config.watchdog_repeated_tool_limit > 0
         and state.repeated_tool_count >= config.watchdog_repeated_tool_limit
     ):
-        return f"watchdog stopped repeated tool call: {tool_calls[0].name}"
+        return f"watchdog stopped repeated tool call: {counted_calls[0].name}"
     return None
 
 
