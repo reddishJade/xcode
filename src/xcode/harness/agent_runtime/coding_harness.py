@@ -5,8 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Iterator
-from copy import deepcopy
+from collections.abc import AsyncIterator, Iterator
 from uuid import uuid4
 
 from ...agent.config import AgentContext, BeforeToolCallContext
@@ -17,7 +16,7 @@ from ...agent.messages import (
 )
 from ...agent.types import AgentTool, AgentToolResult
 from ...agent.types import TextContent, ToolCallContent
-from ...agent.types import ApprovalCallback, ToolSpec
+from ...agent.types import ToolSpec
 from ...agent.results import TerminationReason
 from xcode.ai.providers.base import ModelProvider
 from xcode.coding_agent.execution_modes import ExecutionMode

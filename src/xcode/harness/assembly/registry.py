@@ -126,7 +126,7 @@ def _extend_registry_with_features(
     runtime_config: XcodeRuntimeConfig,
     memory_manager: Any | None = None,
 ) -> tuple[ToolSpec, ...]:
-    from ..mcp import McpRuntimeRegistry, build_mcp_tools
+    from ..mcp import build_mcp_tools
 
     registry += build_mcp_tools(project_root, mcp_runtime_registry)
 

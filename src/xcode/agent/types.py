@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import json
-from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field

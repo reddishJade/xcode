@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
-from pathlib import Path
 
 from xcode.ai.providers.base import ModelProvider
 
@@ -153,7 +152,6 @@ class AgentHarness:
         子类可返回一个带有 current_mode 和 check_call() 的 mode state。
         基类返回一个提供 mode 名称为 "act" 的简单对象。
         """
-        from ._mode_protocol import ToolGateMode
         return _DefaultToolGateMode()
 
     def _build_active_registry(

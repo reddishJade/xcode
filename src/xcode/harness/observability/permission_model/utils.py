@@ -21,7 +21,6 @@ from .types import (
     PermissionAccess,
     Target,
     TargetFingerprint,
-    TargetKind,
 )
 
 _COMMAND_GRANT_ARITY: dict[tuple[str, ...], int] = {

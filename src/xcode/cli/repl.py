@@ -11,7 +11,6 @@ import time
 from typing import cast
 
 from rich.console import Console
-from rich.text import Text
 
 from .app_contract import ReplApp
 from .commands import PromptLike, PromptText, ReplState
@@ -21,7 +20,6 @@ from .repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_comman
 from .repl_hitl import ReplHITLHandler
 from .repl_rendering import (
     LiveMarkdownStream,
-    CLI_COLOR_INFO,
     clear_terminal_display,
     create_prompt_session,
     input_prompt,

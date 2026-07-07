@@ -13,7 +13,6 @@ from .types import (
     BoundaryContext,
     Constraint,
     CREDENTIAL_PATH_PARTS,
-    PermissionAccess,
     PermissionDecisionV2,
     StaticPermission,
     Target,
@@ -26,7 +25,6 @@ from .utils import (
     _is_inside_path,
     _is_sensitive_path,
     _looks_absolute,
-    _relative_path_parts,
     _validate_symlinks_can_resolve,
 )
 

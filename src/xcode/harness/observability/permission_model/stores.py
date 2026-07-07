@@ -13,7 +13,6 @@ from .types import (
     GrantRecord,
     GrantRecordData,
     Target,
-    TargetKind,
 )
 from .utils import _is_external_path, _is_inside_path
 

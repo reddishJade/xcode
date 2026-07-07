@@ -6,9 +6,8 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from ._process import POLL_INTERVAL, close_pipes, kill_process, start_process
-from .filesystem import FileSystem, LocalFileSystem
+from .filesystem import LocalFileSystem
 from .result import ExecutionResult
-from .shell import Shell
 
 
 class SubprocessShell:

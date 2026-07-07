@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass
 from difflib import unified_diff
 import json
@@ -17,7 +16,6 @@ from typing import Any
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.agent.types import ToolInput, ToolOutput
 from xcode.harness.execution_env import FileSystem, LocalFileSystem
-from xcode.agent.types import ToolOutput, ToolSpec
 from xcode.coding_agent.tools.path_utils import resolve_project_path
 from .text_edit import (
     apply_text_replacement,

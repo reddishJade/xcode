@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from xcode.ai.providers.base import ModelProvider
 from xcode.agent.types import ToolSpec
 from xcode.coding_agent.tools import ShellSpec
-from xcode.coding_agent.registry import build_project_scoped_registry
 
 from ..agent_runtime import CancellationToken, CodingAgentHarness, ContextualRetrievalState
 from ..agent_runtime.config import AgentRuntimeConfig, GateConfig
@@ -32,7 +31,6 @@ from .security import (
 
 if TYPE_CHECKING:
     from ..agent_skills import SkillRegistry
-    from ..memory import MemoryManager
 
 
 def build_hook_manager(

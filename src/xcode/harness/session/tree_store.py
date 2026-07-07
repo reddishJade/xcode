@@ -12,11 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import shutil
-from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime, UTC
 from pathlib import Path
 from uuid import uuid4
@@ -28,7 +25,6 @@ from ..skill_activation import is_skill_activation_content
 from .types import (
     JsonValue,
     SessionEntry,
-    SessionInfo,
     SessionInfoView,
     TreeNode,
 )

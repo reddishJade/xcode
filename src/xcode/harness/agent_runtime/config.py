@@ -8,7 +8,7 @@ from typing import Any
 
 from xcode.ai.providers.base import ModelProvider
 
-from xcode.ai.models import effective_compact_threshold, get_model_context_window
+from xcode.ai.models import effective_compact_threshold
 from ...agent._compaction import extract_prompt_tokens_from_usage
 from ...agent.config import AgentLoopConfig, AgentLoopTurnUpdate
 from ...agent.context import (
@@ -32,7 +32,6 @@ from ...agent.types import AgentTool
 from ..config import AgentConfig, RequestHygieneConfig
 from ..observability import (
     AuditLogger,
-    AuditRecord,
     ExternalHookRunner,
     HookManager,
     HookRecord,

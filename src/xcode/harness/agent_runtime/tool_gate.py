@@ -24,7 +24,6 @@ from .tool_audit import build_audit_record, emit_audit
 from .tool_hooks import emit_hook, emit_tool_hook, tool_result_text
 from ..observability import (
     AuditLogger,
-    AuditRecord,
     ExternalHookRunner,
     HookManager,
     HookRecord,
