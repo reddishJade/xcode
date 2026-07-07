@@ -785,7 +785,7 @@ def _build_hook_manager(
                     cwd=project_root,
                 )
 
-            manager.register(event, run_external)
+            manager.register_background(event, run_external)
     return manager
 
 

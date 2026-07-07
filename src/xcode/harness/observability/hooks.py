@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import queue
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import logging
+import threading
 from typing import Literal
 
 from blinker import Signal
@@ -133,12 +135,26 @@ class HookManager:
         self._subscribed: dict[HookEvent, Signal] = {
             event: Signal() for event in _HOOK_EVENTS
         }
+        self._background: dict[HookEvent, Signal] = {
+            event: Signal() for event in _HOOK_EVENTS
+        }
+        self._background_queue: queue.Queue[tuple[HookEvent, HookRecord]] = (
+            queue.Queue()
+        )
+        self._worker_started = False
+        self._worker_lock = threading.Lock()
 
     def register(self, event: HookEvent, callback: HookCallback) -> None:
         self._registered[event].connect(callback, weak=False)
 
     def remove(self, event: HookEvent, callback: HookCallback) -> None:
         self._registered[event].disconnect(callback)
+
+    def register_background(self, event: HookEvent, callback: HookCallback) -> None:
+        self._background[event].connect(callback, weak=False)
+
+    def remove_background(self, event: HookEvent, callback: HookCallback) -> None:
+        self._background[event].disconnect(callback)
 
     def subscribe(self, event: HookEvent, callback: HarnessCallback) -> None:
         self._subscribed[event].connect(callback, weak=False)
@@ -150,6 +166,40 @@ class HookManager:
         self._registered[record.event].send(record)
         converted = _harness_event_from_hook(record)
         self._subscribed[record.event].send(converted)
+        if self._background[record.event].receivers:
+            self._ensure_worker()
+            self._background_queue.put((record.event, record))
+
+    def drain_background(self) -> None:
+        """等待已入队后台 hook 完成，供测试和受控关闭使用。"""
+        self._background_queue.join()
+
+    def _ensure_worker(self) -> None:
+        with self._worker_lock:
+            if self._worker_started:
+                return
+            thread = threading.Thread(
+                target=self._run_background,
+                name="xcode-hook-manager",
+                daemon=True,
+            )
+            thread.start()
+            self._worker_started = True
+
+    def _run_background(self) -> None:
+        while True:
+            event, record = self._background_queue.get()
+            try:
+                self._send_background(event, record)
+            finally:
+                self._background_queue.task_done()
+
+    def _send_background(self, event: HookEvent, record: HookRecord) -> None:
+        for receiver in self._background[event].receivers_for(record):
+            try:
+                receiver(record)
+            except Exception:
+                logger.exception("background hook failed for event %s", event)
 
 
 def _harness_event_from_hook(record: HookRecord) -> HarnessEvent:

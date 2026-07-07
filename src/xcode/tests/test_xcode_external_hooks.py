@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -323,6 +324,7 @@ class ExternalHookRunnerTests:
 
             for event in events:
                 manager.emit(HookRecord(event))
+            manager.drain_background()
 
             recorded = [
                 json.loads(line)["event"]
@@ -330,6 +332,52 @@ class ExternalHookRunnerTests:
             ]
 
         assert recorded == list(events)
+
+    def test_non_pre_external_hooks_do_not_block_emit(self) -> None:
+        """非 pre_tool 外部命令在后台执行，不阻塞主路径。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _write_hook(
+                root,
+                ("import time\ntime.sleep(0.25)\nprint('{}')\n"),
+            )
+            runner = ExternalHookRunner(
+                (_entry(script, event="post_tool", timeout=1.0),),
+                root,
+            )
+            manager = _build_hook_manager(None, runner, root, subagent=False)
+            assert manager is not None
+
+            started = time.perf_counter()
+            manager.emit(HookRecord("post_tool", tool="bash"))
+            elapsed = time.perf_counter() - started
+
+            assert elapsed < 0.1
+            manager.drain_background()
+            assert runner.diagnostics()[0].run_count == 1
+
+    def test_non_pre_external_hook_failure_is_isolated(self) -> None:
+        """后台外部 hook 失败只记录日志，不回抛到 emit 调用者。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _write_hook(root, "print('not-json')\n")
+            runner = ExternalHookRunner(
+                (_entry(script, event="post_tool", failure_policy="fail"),),
+                root,
+            )
+            manager = _build_hook_manager(None, runner, root, subagent=False)
+            assert manager is not None
+
+            manager.emit(HookRecord("post_tool", tool="bash"))
+            with assert_logs(
+                "xcode.harness.observability.hooks",
+                level="ERROR",
+            ):
+                manager.drain_background()
+
+        diagnostic = runner.diagnostics()[0]
+        assert diagnostic.last_status == "failed"
+        assert "invalid JSON" in diagnostic.last_error
 
     def test_subagent_hook_manager_runs_only_inherited_entries(self) -> None:
         """subagent manager 默认跳过未显式继承的 command hook。"""
@@ -351,6 +399,7 @@ class ExternalHookRunnerTests:
             assert manager is not None
 
             manager.emit(HookRecord("before_agent_start"))
+            manager.drain_background()
 
         diagnostics = runner.diagnostics()
         assert diagnostics[0].run_count == 0

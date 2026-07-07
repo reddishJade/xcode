@@ -15,14 +15,3 @@
 | **P3** | 值得改进的设计细节 |
 
 ---
-
-## P3 — 值得改进的设计细节
-
-### blinker HookManager 同步阻塞
-
-`Signal.send()` 是同步阻塞的。如果 post_tool 订阅者做了 IO（如写入远程日志），它会阻塞工具执行流。
-
-- **位置**：`harness/observability/hooks.py` → `HookManager.emit()`
-- **建议**：引入可选的异步队列或线程池解耦，并提供 `flush()` / `close()`；hook 异常应隔离，除非显式配置为 fail-fast。
-
----
