@@ -46,7 +46,7 @@ def _safe_write(text: str) -> None:
 
 
 class ToolCallHandler:
-    """追踪工具调用、结果和更新，管理工具组聚合渲染和进度显示。"""
+    """追踪工具调用、结果和更新，管理批次聚合渲染和进度显示。"""
 
     def __init__(self, state: ReplState, live_console: Console) -> None:
         self.state = state

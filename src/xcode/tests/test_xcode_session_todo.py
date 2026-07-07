@@ -16,10 +16,10 @@ from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.harness.agent_runtime.result import RunState
 from xcode.harness.session import SessionStore
 from xcode.harness.session_todo import (
-    build_session_todo_tools,
     SessionTodoState,
     TodoItem,
 )
+from xcode.coding_agent.tools import build_todo_tools
 from xcode.tests.fixtures import FakeProvider
 import pytest
 
@@ -30,6 +30,7 @@ INVALID_TODO_PAYLOADS: tuple[list[dict[str, str]], ...] = (
     ],
     [{"id": "a", "content": " ", "status": "pending"}],
     [{"id": "a", "content": "one", "status": "unknown"}],
+    [{"id": "a", "content": "one", "status": "pending", "priority": "urgent"}],
     [
         {"id": "a", "content": "one", "status": "in_progress"},
         {"id": "b", "content": "two", "status": "in_progress"},
@@ -52,34 +53,38 @@ class SessionTodoTests:
         assert state.snapshot() == ()
 
     def test_update_tool_replaces_complete_list(self) -> None:
-        """update_todo 每次以完整列表替换旧状态。"""
+        """todowrite 每次以完整列表替换旧状态。"""
         state = SessionTodoState()
-        (tool,) = build_session_todo_tools(state)
+        (tool,) = build_todo_tools(state)
 
         tool.handler(
             {
-                "items": [
+                "todos": [
                     {
                         "id": "first",
                         "content": "First task",
                         "status": "in_progress",
+                        "priority": "high",
                     }
                 ]
             }
         )
         tool.handler(
             {
-                "items": [
+                "todos": [
                     {
                         "id": "second",
                         "content": "Second task",
-                        "status": "completed",
+                        "status": "cancelled",
+                        "priority": "low",
                     }
                 ]
             }
         )
 
-        assert state.snapshot() == (TodoItem("second", "Second task", "completed"),)
+        assert state.snapshot() == (
+            TodoItem("second", "Second task", "cancelled", "low"),
+        )
 
     def test_structured_agent_emits_todo_event_and_run_state(self) -> None:
         """成功工具调用发射结构化事件并进入 RunState。"""
@@ -91,13 +96,14 @@ class SessionTodoTests:
                         calls=[
                             ToolCall(
                                 id="todo-1",
-                                name="update_todo",
+                                name="todowrite",
                                 input={
-                                    "items": [
+                                    "todos": [
                                         {
                                             "id": "implement",
                                             "content": "Implement feature",
                                             "status": "in_progress",
+                                            "priority": "medium",
                                         }
                                     ]
                                 },
@@ -114,7 +120,7 @@ class SessionTodoTests:
         )
         agent = StructuredAgent(
             provider=provider,
-            registry=build_session_todo_tools(state),
+            registry=build_todo_tools(state),
             runtime=AgentRuntimeConfig(todo_state=state),
         )
 
@@ -124,6 +130,7 @@ class SessionTodoTests:
             event for event in events if isinstance(event, TodoUpdateStructuredEvent)
         )
         assert todo_event.data[0].id == "implement"
+        assert todo_event.data[0].priority == "medium"
         final = events[-1]
         run_state = cast(Any, final).data.run_state
         assert run_state.todos == state.snapshot()
@@ -202,6 +209,7 @@ class SessionTodoTests:
                             "id": "current",
                             "content": "Current",
                             "status": "in_progress",
+                            "priority": "high",
                         }
                     ],
                 },
@@ -216,6 +224,7 @@ class SessionTodoTests:
             sync_agent_history(cast(Any, app), store)
 
         assert restored[-1][0]["id"] == "current"
+        assert restored[-1][0]["priority"] == "high"
 
 
 if __name__ == "__main__":

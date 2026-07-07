@@ -54,7 +54,7 @@ uv run pytest src/xcode/tests/test_xcode_file_tools.py -q --tb=short # 单个测
 - **`ai/`** — 多 provider LLM API（OpenAI-compatible 基类 + DeepSeek/ChatGLM/MiMo 适配器）。Provider 注册、缓存统计、工具 schema 稳定化。
 - **`agent/`** — 通用 agent loop 合约。消息/事件类型、工具执行分区、context 收集与组装、watchdog 重复检测、request hygiene。
 - **`harness/`** — 应用装配、运行时配置、session 存储（JSONL）、权限引擎、审计日志、hook 管理、MCP 集成、Memory、tasks、progress、mailbox、daemon。
-- **`coding_agent/`** — coding 产品工具实现：file（read/write/edit）、code_search（glob/find/grep/ls）、bash、worktree。`edit_file` 依赖 read-before-edit 指纹校验。
+- **`coding_agent/`** — coding 产品工具实现：file（read/write/edit）、code_search（glob/find/grep/list_dir）、bash、worktree。`edit_file` 依赖 read-before-edit 指纹校验。
 
 ### 配置发现栈（优先级从低到高）
 
@@ -62,20 +62,9 @@ uv run pytest src/xcode/tests/test_xcode_file_tools.py -q --tb=short # 单个测
 
 没有配置文件时使用默认配置。配置结构详见 [CONFIG.md](CONFIG.md)。
 
-### 工具组
+### 工具注册
 
-| group | 工具 |
-|---|---|
-| `core` | `read_file`, `write_file`, `edit_file`, `glob_files`, `find_files`, `grep_search`, `ls`, `bash`, `search_tools` |
-| `skills` | `load_skill`（发现 project/user skill 时自动注册） |
-| `subagent` | `submit_subagent`, `check_subagent`, `cancel_subagent` |
-| `worktree` | `create_worktree_task`, `remove_worktree_task` |
-| `tasks` | `create_task`, `update_task`, `advance_task`, `list_tasks`, `get_task`, `resolve_blocked` |
-| `mailbox` | `send_mailbox_message`, `read_mailbox_messages`, `acknowledge_mailbox_message` |
-| `progress` | `save_task_progress`, `resume_task_progress`, `start_task_run`, `resume_task_run`, `retry_task_run`, `expire_task_runs` |
-| `memory` | `search_memory` + 主动召回 + 压缩摘要 consolidation |
-| `daemon` | `HeartbeatDaemon` 后台服务（由 `daemon.enabled` 控制） |
-| `mcp` | `mcp__{server}__{tool}`、`mcp_tool_search`（存在 `.local/mcp_config.json` 时自动注册） |
+稳定工具默认注册，包括文件工具、搜索工具、`websearch` / `webfetch`、`question`、`bash`、`subagent`、worktree、`todowrite` 和 `search_memory`。实验工具只通过 `experimental.tasks`、`experimental.mailbox`、`experimental.progress` 启用。MCP 工具由 `.local/mcp_config.json` 动态注册，skill 发现后才注册 `load_skill`。
 
 ### 权限模型
 

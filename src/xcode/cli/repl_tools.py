@@ -52,6 +52,9 @@ from xcode.agent.messages import AssistantMessage
 from xcode.agent.types import TextContent, ToolCallContent
 
 
+EXPERIMENTAL_TOOL_GROUPS = frozenset({"tasks", "mailbox", "progress"})
+
+
 def _registry(app: object) -> tuple[ToolSpec, ...]:
     raw = getattr(app, "registry", ())
     if isinstance(raw, ToolRegistryState):
@@ -62,7 +65,7 @@ def _registry(app: object) -> tuple[ToolSpec, ...]:
 def run_tool_command(command: str, app: object) -> str:
     parts = command.split(maxsplit=2)
     if len(parts) < 2:
-        return "usage: /tool NAME INPUT\n/tool list - show enabled tools by group"
+        return "usage: /tool NAME INPUT\n/tool list - show enabled tools"
     tool_name = parts[1]
     registry = _registry(app)
 
@@ -109,22 +112,20 @@ def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:
     for group_names in catalog.values():
         all_known.update(group_names)
     hidden = sorted(all_known - enabled_names)
-    if hidden:
+    experimental_hidden = {
+        group: catalog[group] & set(hidden)
+        for group in EXPERIMENTAL_TOOL_GROUPS
+        if group in catalog and catalog[group] & set(hidden)
+    }
+    if experimental_hidden:
+        hidden_count = sum(len(names) for names in experimental_hidden.values())
         lines.append("")
-        lines.append(f"## Hidden Tools ({len(hidden)})")
+        lines.append(f"## Disabled Experimental Tools ({hidden_count})")
         lines.append("")
-        for group in sorted(catalog):
-            group_hidden = sorted(catalog[group] & set(hidden))
-            if group_hidden:
-                lines.append(f"- **{group}** ({len(group_hidden)})")
-                lines.extend(f"  - `{name}`" for name in group_hidden)
-
-    available_groups = sorted(catalog.keys() - {tool.group for tool in registry})
-    if available_groups:
-        lines.append("")
-        lines.append("## Available Groups")
-        lines.append("")
-        lines.extend(f"- `{group}`" for group in available_groups)
+        for group in sorted(experimental_hidden):
+            group_hidden = sorted(experimental_hidden[group])
+            lines.append(f"- **{group}** ({len(group_hidden)})")
+            lines.extend(f"  - `{name}`" for name in group_hidden)
     return "\n".join(lines)
 
 

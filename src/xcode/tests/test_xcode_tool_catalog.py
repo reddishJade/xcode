@@ -33,7 +33,10 @@ class ToolCatalogConsistencyTests:
         """assembly 直接组合的 session、search、skill、subagent 工具可见。"""
         catalog = build_tool_catalog()
 
-        assert "update_todo" in catalog["session"]
+        assert "todowrite" in catalog["core"]
+        assert "webfetch" in catalog["core"]
+        assert "websearch" in catalog["core"]
+        assert "question" in catalog["core"]
         assert "search_tools" in catalog["core"]
         assert "apply_patch" in catalog["core"]
         assert "create_worktree_task" in catalog["worktree"]

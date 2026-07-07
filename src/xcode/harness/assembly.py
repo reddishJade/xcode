@@ -58,12 +58,9 @@ from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
 from xcode.harness.observability.permission_model import Rule
 from xcode.harness.skills import ToolInput, ToolRegistryState, ToolSpec
-from xcode.harness.session_todo import (
-    build_session_todo_tools,
-    SessionTodoState,
-)
+from xcode.harness.session_todo import SessionTodoState
 from xcode.coding_agent.registry import build_project_scoped_registry
-from xcode.coding_agent.tools import ShellSpec
+from xcode.coding_agent.tools import ShellSpec, build_todo_tools
 
 if TYPE_CHECKING:
     from xcode.experimental.mailbox import AgentMailbox
@@ -243,6 +240,24 @@ def build_shared_infra(
 
 # ── 工具注册 ──
 
+SUBAGENT_DEFAULT_TOOLS = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "apply_patch",
+        "glob_files",
+        "find_files",
+        "list_dir",
+        "grep_search",
+        "webfetch",
+        "websearch",
+        "bash",
+    }
+)
+
+SUBAGENT_WORKTREE_SHARED_TOOLS = frozenset({"todowrite"})
+
 
 def build_search_tools_tool(
     registry_provider: Callable[[], tuple[ToolSpec, ...]],
@@ -344,8 +359,10 @@ def build_tool_registry(
     )
 
     registry_state = ToolRegistryState(registry)
-    subagent_allowlist = set(runtime_config.tools.subagent_tool_allowlist)
-    child_registry = _build_child_registry(registry_state, subagent_allowlist)
+    child_registry = _build_child_registry(
+        registry_state,
+        set(runtime_config.tools.subagent_extra_tools),
+    )
     registry += (build_search_tools_tool(registry_state.snapshot),)
 
     subagent_closers, subagent_tools = _build_subagent_integration(
@@ -425,20 +442,18 @@ def _build_base_project_registry(
         skill_registry=skill_registry,
     )
     if todo_state is not None:
-        registry += build_session_todo_tools(todo_state)
+        registry += build_todo_tools(todo_state)
     return registry
 
 
 def _build_child_registry(
     registry_state: ToolRegistryState,
-    subagent_allowlist: set[str],
+    subagent_extra_tools: set[str],
 ) -> tuple[ToolSpec, ...]:
     """从主注册表过滤出子代理可用的工具集。"""
+    allowed_tools = SUBAGENT_DEFAULT_TOOLS | subagent_extra_tools
     return tuple(
-        tool
-        for tool in registry_state.snapshot()
-        if tool.group in ("core", "session")
-        and (tool.name != "update_todo" or tool.name in subagent_allowlist)
+        tool for tool in registry_state.snapshot() if tool.name in allowed_tools
     )
 
 
@@ -511,11 +526,8 @@ def _build_subagent_integration(
     if not child_llms:
         child_llms[PROFILE_MAIN] = llm
     child_llms.setdefault(PROFILE_SUBAGENT, child_llms[PROFILE_MAIN])
-    child_todo_state = (
-        todo_state
-        if "update_todo" in runtime_config.tools.subagent_tool_allowlist
-        else None
-    )
+    child_tool_names = frozenset(tool.name for tool in child_registry)
+    child_todo_state = todo_state if "todowrite" in child_tool_names else None
 
     async def run_child(
         prompt,
@@ -539,8 +551,7 @@ def _build_subagent_integration(
             effective_registry += tuple(
                 tool
                 for tool in child_registry
-                if tool.name in runtime_config.tools.subagent_tool_allowlist
-                and tool.group == "session"
+                if tool.name in SUBAGENT_WORKTREE_SHARED_TOOLS
             )
         sec = runtime_config.security
         child_hook_manager = _build_hook_manager(

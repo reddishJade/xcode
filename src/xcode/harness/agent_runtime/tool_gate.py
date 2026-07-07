@@ -69,7 +69,10 @@ _TOOL_ACTION_PROFILES: dict[str, tuple[str, str]] = {
     "bash": ("shell", "none"),
     "shell": ("shell", "none"),
     "load_skill": ("skill", "skill"),
-    "update_todo": ("write", "none"),
+    "todowrite": ("write", "none"),
+    "webfetch": ("read", "none"),
+    "websearch": ("read", "none"),
+    "question": ("read", "none"),
 }
 
 
@@ -100,6 +103,7 @@ class ToolGate:
             "resume_task_progress",
             "update_task",
             "create_task",
+            "todowrite",
         }
     )
 

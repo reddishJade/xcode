@@ -70,7 +70,10 @@ class XcodeAppRuntimeTests:
         assert "grep_search" in names
         assert "create_worktree_task" in names
         assert "subagent" in names
-        assert "update_todo" in names
+        assert "todowrite" in names
+        assert "webfetch" in names
+        assert "websearch" in names
+        assert "question" in names
 
     def test_default_tool_groups_do_not_construct_optional_groups(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
@@ -237,7 +240,7 @@ class XcodeAppRuntimeTests:
                 )
 
         assert "load_skill" not in {tool.name for tool in app.registry}
-        assert "update_todo" in {tool.name for tool in app.registry}
+        assert "todowrite" in {tool.name for tool in app.registry}
 
     def test_default_runtime_discovers_configured_mcp_tools(self) -> None:
         mcp_tool = ToolSpec(
@@ -363,8 +366,8 @@ class XcodeAppRuntimeTests:
         assert app.mailbox is None
         assert app.progress is None
 
-    def test_default_config_excludes_remaining_experimental_tool_groups(self) -> None:
-        """默认配置不注册实验工具组。"""
+    def test_default_config_excludes_experimental_tools(self) -> None:
+        """默认配置不注册实验工具。"""
         with tempfile.TemporaryDirectory() as tmp, _patched_provider_bundle([]):
             app = build_app(
                 project_root=Path(tmp),
@@ -603,7 +606,7 @@ class XcodeAppRuntimeTests:
         assert "- read_file:" in rendered
         assert "active_file: a.txt" in rendered
 
-    def test_subagent_inherits_only_enabled_core_tools(self) -> None:
+    def test_subagent_uses_explicit_default_tool_set(self) -> None:
         seen_child_tools: list[list[str]] = []
         runtime_config = XcodeRuntimeConfig()
         with (
@@ -624,16 +627,16 @@ class XcodeAppRuntimeTests:
 
         assert seen_child_tools
         assert "read_file" in seen_child_tools[0]
-        assert "update_todo" not in seen_child_tools[0]
+        assert "todowrite" not in seen_child_tools[0]
         assert "subagent" not in seen_child_tools[0]
         assert "create_worktree_task" not in seen_child_tools[0]
 
-    def test_subagent_can_explicitly_allow_session_todo_tool(self) -> None:
-        """subagent 仅在明确 allowlist 时继承 update_todo。"""
+    def test_subagent_can_explicitly_add_session_todo_tool(self) -> None:
+        """subagent 仅在明确配置时继承 todowrite。"""
         seen_child_tools: list[list[str]] = []
         runtime_config = XcodeRuntimeConfig(
             tools=ToolsRuntimeConfig(
-                subagent_tool_allowlist=("update_todo",),
+                subagent_extra_tools=("todowrite",),
             ),
         )
         with (
@@ -652,7 +655,7 @@ class XcodeAppRuntimeTests:
         )
 
         assert seen_child_tools
-        assert "update_todo" in seen_child_tools[0]
+        assert "todowrite" in seen_child_tools[0]
 
     def test_subagent_receives_runtime_prompt_context(self) -> None:
         seen_messages: list[list[Message]] = []

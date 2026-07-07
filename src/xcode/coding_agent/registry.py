@@ -18,7 +18,9 @@ from xcode.coding_agent.tools import (
     build_bash_tool,
     build_glob_tools,
     build_grep_tool,
+    build_question_tool,
     build_read_file_tool,
+    build_web_tools,
     build_write_file_tools,
 )
 
@@ -57,6 +59,8 @@ def build_project_scoped_registry(
     )
     registry += build_glob_tools(project_root, cancel_event=cancel_event)
     registry += (build_grep_tool(project_root, cancel_event=cancel_event),)
+    registry += build_web_tools()
+    registry += (build_question_tool(),)
     registry += (
         build_bash_tool(
             project_root,

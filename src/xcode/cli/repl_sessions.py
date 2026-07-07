@@ -124,6 +124,7 @@ def _restore_todo_state(app: object, records: list[SessionRecord]) -> None:
                 "id": item.get("id"),
                 "content": item.get("content"),
                 "status": item.get("status"),
+                "priority": item.get("priority"),
             }
             for item in raw_items
             if isinstance(item, dict)

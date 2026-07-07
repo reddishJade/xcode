@@ -210,7 +210,7 @@ InstructionSource = FileInstructionSource | InlineInstructionSource
 
 class ToolsRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    subagent_tool_allowlist: tuple[str, ...] = ()
+    subagent_extra_tools: tuple[str, ...] = ()
     shell: str = "auto"
 
 

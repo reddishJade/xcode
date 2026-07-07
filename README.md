@@ -154,27 +154,18 @@ xcode --config .local/settings.json
 - **权限与审计** — `PermissionEngine` 统一执行工具权限判定、HITL 审批和输出脱敏；`JsonlAuditLogger` 记录审计日志。
 - **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果，支持压缩后重建文件指纹。
 - **REPL 会话管理** — 丰富的 `/slash` 命令体系，支持 plan/build/act、会话分支、回退、模型切换、session transcript 落盘。
-- **Subagent 委托** — `delegate_task` 单入口委派子任务，实时流式展示子 agent 进度；支持正式的 worktree 隔离。
+- **Subagent 委托** — `subagent` 单入口委派子任务，实时流式展示子 agent 进度；支持正式的 worktree 隔离。
 - **MCP 协议** — 基于官方 Python SDK 连接本地 stdio server，自动发现
   `.local/mcp_config.json` 并注册 `mcp__{server}__{tool}` 动态工具。
 - **实验能力** — 可显式启用 tasks、mailbox 和 progress 断点续传；默认全部关闭。
 
 ---
 
-## 工具组
+## 工具能力
 
-| Group | Tools |
-|---|---|
-| `core` | `read_file`, `write_file`, `edit_file`, `glob_files`, `find_files`, `grep_search`, `ls`, `bash`, `search_tools` |
-| `skills` | `load_skill`（发现 skill 时自动注册） |
-| `subagent` | `delegate_task` |
-| `worktree` | `create_worktree_task`, `remove_worktree_task`, `list_worktrees`, `prune_stale_worktrees` |
-| `tasks` | 实验：`experimental.tasks=true` |
-| `mailbox` | 实验：`experimental.mailbox=true` |
-| `progress` | 实验：`experimental.progress=true`，且要求 `tasks=true` |
-| `memory` | `search_memory`；主动召回、压缩摘要 consolidation |
-| `daemon` | `HeartbeatDaemon`（由 `daemon.enabled` 配置项控制） |
-| `mcp` | `mcp__{server}__{tool}`, `mcp_tool_search`（存在 `.local/mcp_config.json` 时自动注册） |
+稳定工具默认注册：文件读写编辑、`glob_files` / `find_files` / `list_dir` / `grep_search`、`websearch` / `webfetch`、`question`、`bash`、`search_tools`、`subagent`、worktree、`todowrite`、`search_memory`。发现 skill 时注册 `load_skill`；存在 MCP 配置时注册 `mcp__{server}__{tool}` 动态工具。
+
+实验能力默认关闭，只通过 `experimental.tasks`、`experimental.mailbox`、`experimental.progress` 启用。
 
 每轮会按用户问题检索项目根 `MEMORY.md` 与用户级 `~/.xcode/memory/MEMORY.md`，将最多 3 条匹配记录注入 `<memory>` 上下文。`search_memory` 是只读、低风险工具。
 
@@ -251,7 +242,7 @@ uv run pyright src/
 |---|---|
 | [AGENTS.md](AGENTS.md) | Agent 开发入口和 Python 编码规范 |
 | [CONFIG.md](CONFIG.md) | 运行时配置参考 |
-| [docs/code-organization.md](docs/code-organization.md) | 模块职责与工具组映射 |
+| `src/xcode/harness/assembly.py` | 运行时装配与工具注册 |
 | [docs/source-review.md](docs/source-review.md) | 源码级架构审查 |
 
 

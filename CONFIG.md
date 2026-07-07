@@ -105,7 +105,7 @@ xcode config delete subagent                          # 删除 subagent profile
 | `compact_token_threshold` | int | `0` | token 阈值；0 关闭 |
 | `max_recent_messages` | int | `10` | 压缩时保留的近期消息数 |
 | `tool_workers` | int | `4` | 单个 parallel batch 的最大活跃工具数；小于 1 时按 1 执行 |
-| `subagent_workers` | int | `4` | 最大活跃 delegated subagent 运行数；超限时 `delegate_task` 返回 busy |
+| `subagent_workers` | int | `4` | 最大活跃 delegated subagent 运行数；超限时 `subagent` 返回 busy |
 | `watchdog_repeated_tool_limit` | int | `3` | 连续重复同一工具阈值 |
 
 ---
@@ -285,14 +285,19 @@ policy、静态策略、shell 可解析性与 mode ruleset 的结果取更严格
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `subagent_tool_allowlist` | string[] | `[]` | 额外允许 subagent 继承的主 agent 工具名；`update_todo` 默认不继承 |
+| `subagent_extra_tools` | string[] | `[]` | 额外允许 subagent 使用的主 agent 工具名；`todowrite` 默认不继承 |
 | `shell` | string | `"auto"` | `auto`、`pwsh`、`powershell`、`cmd`、`bash`、`zsh`、`sh`、`fish` |
 
-`update_todo` 是主 agent 默认可用的会话级工具，不属于持久化 `tasks` /
+`todowrite` 是主 agent 默认可用的会话级工具，不属于持久化 `tasks` /
 `progress` 组。它以完整列表替换当前清单，最多允许一个 `in_progress` 项。清单写入
 session transcript 和 `RunState`，并在每轮动态上下文中重新注入，因此不会因
-compaction 丢失。只有将 `"update_todo"` 加入 `subagent_tool_allowlist` 时，
+compaction 丢失。只有将 `"todowrite"` 加入 `subagent_extra_tools` 时，
 subagent 才会共享该会话清单。
+
+`todowrite` 输入使用 `todos` 数组。每个 todo 需要 `id`、`content`、`status`，
+可选 `priority`（`high` / `medium` / `low`）。`status` 支持 `pending`、
+`in_progress`、`completed`、`cancelled`。`id` 是 xcode 会话恢复和事件关联所需，
+因此不同于顶层 TypeScript 参考实现，不能省略。
 
 ## skills
 
@@ -312,22 +317,14 @@ Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
 `assets/` 相对路径元数据，但不会主动读取或执行资源。相同 session 内重复激活
 只返回简短状态；activation 状态可从会话历史恢复，并在上下文压缩时保留。
 
-### 工具组
+### 工具注册
 
-| group | 注册条件 | 工具 |
-|---|---|---|
-| `core` | 始终 | `read_file`、`write_file`、`edit_file`、`glob_files`、`find_files`、`grep_search`、`ls`、`bash`、`shell`、`search_tools` |
-| `skills` | 发现 skill 时 | `load_skill` |
-| `subagent` | 始终 | `delegate_task` |
-| `worktree` | 始终 | `create_worktree_task`、`remove_worktree_task`、`list_worktrees`、`prune_stale_worktrees` |
-| `tasks` | `experimental.tasks` | `create_task`、`update_task`、`advance_task`、`list_tasks`、`get_task`、`resolve_blocked` |
-| `mailbox` | `experimental.mailbox` | `send_mailbox_message`、`read_mailbox_messages`、`acknowledge_mailbox_message` |
-| `progress` | `experimental.progress` 且 `experimental.tasks` | `save_task_progress`、`resume_task_progress`、`start_task_run`、`resume_task_run`、`retry_task_run`、`expire_task_runs` |
-| `memory` | 始终 | `search_memory`；主动召回、压缩摘要 consolidation |
-| `daemon` | `daemon.enabled` | 构造 `HeartbeatDaemon` |
-| `mcp` | 存在 `.local/mcp_config.json` 时 | `mcp__{server}__{tool}`、`mcp_tool_search` |
+稳定工具默认注册：文件读写编辑、`glob_files`、`find_files`、`list_dir`、`grep_search`、`websearch`、`webfetch`、`question`、`bash`、`search_tools`、`subagent`、worktree、`todowrite`、`search_memory`。发现 skill 时注册 `load_skill`；存在 `.local/mcp_config.json` 时注册 `mcp__{server}__{tool}` 动态工具。
 
-`shell` 工具是 OpenAI Responses builtin 的本地执行桥，接收 `commands` 数组。`search_tools` 工具按关键字搜索已注册工具。
+`search_tools` 工具按关键字搜索当前已注册工具。
+`websearch` 是 xcode-native 搜索实现，支持 `query`、`numResults`、`timeout`，
+不启用 Exa / Parallel MCP provider。`webfetch` 支持 `markdown`、`text`、`html`
+输出格式，最多读取 5MB，并在截断时标记结果。
 运行时按每轮用户问题合并检索项目根 `MEMORY.md` 与
 `~/.xcode/memory/MEMORY.md`，并将匹配记录注入 `<memory>` 上下文。
 `search_memory` 的 schema 接受必填 `query`，以及可选 `limit`（1-10）、

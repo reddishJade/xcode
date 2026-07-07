@@ -198,7 +198,7 @@ class SubagentRunner:
         isolation_mode = _coerce_isolation(isolation)
         if isolation_mode == "worktree":
             if self.worktree_runner is None:
-                raise ValueError("worktree isolation requires the worktree tool group")
+                raise ValueError("worktree isolation is not available")
             task = self.worktree_runner.create(_task_name(prompt))
             return isolation_mode, Path(task.path).resolve(), task.id
         return isolation_mode, None, None

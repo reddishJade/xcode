@@ -169,13 +169,16 @@ def _init_mode_rulesets() -> None:
         Rule(action="find_files", effect="allow"),
         Rule(action="list_dir", effect="allow"),
         Rule(action="search_tools", effect="allow"),
+        Rule(action="webfetch", effect="allow"),
+        Rule(action="websearch", effect="allow"),
+        Rule(action="question", effect="allow"),
+        Rule(action="todowrite", effect="allow"),
         Rule(action="load_skill", effect="allow"),
     )
     write_rules = (
         Rule(action="write_file", effect="allow"),
         Rule(action="edit_file", effect="allow"),
         Rule(action="apply_patch", effect="allow"),
-        Rule(action="update_todo", effect="allow"),
     )
     shell_rules = (
         Rule(action="bash", effect="allow"),

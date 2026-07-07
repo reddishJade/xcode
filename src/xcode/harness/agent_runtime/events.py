@@ -404,14 +404,14 @@ def _translate_compaction(
 def _todo_items_from_result(
     event: ToolExecutionEndEvent,
 ) -> tuple[TodoItem, ...] | None:
-    """从成功的 update_todo 工具结果构建结构化事件。"""
-    if event.tool_name != "update_todo" or event.is_error or event.result is None:
+    """从成功的 todowrite 工具结果构建结构化事件。"""
+    if event.tool_name != "todowrite" or event.is_error or event.result is None:
         return None
     try:
         payload = json.loads(str(event.result.content))
     except json.JSONDecodeError:
         return None
-    raw_items = payload.get("items") if isinstance(payload, dict) else None
+    raw_items = payload.get("todos") if isinstance(payload, dict) else None
     if not isinstance(raw_items, list):
         return None
     items: list[TodoItem] = []
@@ -421,13 +421,15 @@ def _todo_items_from_result(
         item_id = raw_item.get("id")
         content = raw_item.get("content")
         status = raw_item.get("status")
+        priority = raw_item.get("priority")
         if (
             not isinstance(item_id, str)
             or not isinstance(content, str)
-            or status not in {"pending", "in_progress", "completed"}
+            or status not in {"pending", "in_progress", "completed", "cancelled"}
+            or (priority is not None and priority not in {"high", "medium", "low"})
         ):
             return None
-        items.append(TodoItem(item_id, content, status))
+        items.append(TodoItem(item_id, content, status, priority))
     return tuple(items)
 
 

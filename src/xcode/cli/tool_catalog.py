@@ -22,12 +22,15 @@ from xcode.coding_agent.tools import (
     build_bash_tool,
     build_glob_tools,
     build_grep_tool,
+    build_question_tool,
     build_read_file_tool,
+    build_todo_tools,
+    build_web_tools,
     build_write_file_tools,
 )
 from xcode.experimental.task_store import TaskStore, build_task_tools
 from xcode.harness.worktree import WorktreeTaskRunner, build_worktree_tools
-from xcode.harness.session_todo import build_session_todo_tools, SessionTodoState
+from xcode.harness.session_todo import SessionTodoState
 from xcode.harness.assembly import build_search_tools_tool
 from xcode.harness.memory import MemoryManager, build_memory_tools
 
@@ -46,9 +49,11 @@ CATALOG_COVERED_BUILDERS = frozenset(
         "build_progress_tools",
         "build_read_file_tool",
         "build_search_tools_tool",
-        "build_session_todo_tools",
+        "build_question_tool",
         "build_subagent_tools",
         "build_task_tools",
+        "build_todo_tools",
+        "build_web_tools",
         "build_worktree_tools",
         "build_write_file_tools",
     }
@@ -61,6 +66,8 @@ def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
         lambda: build_write_file_tools(base_tmp),
         lambda: (build_apply_patch_tool(base_tmp),),
         lambda: build_glob_tools(base_tmp) + (build_grep_tool(base_tmp),),
+        lambda: build_web_tools(),
+        lambda: (build_question_tool(),),
         lambda: (build_bash_tool(base_tmp),),
         lambda: build_worktree_tools(
             WorktreeTaskRunner(base_tmp),
@@ -72,7 +79,7 @@ def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
         lambda: _build_mailbox_catalog(base_tmp),
         lambda: _build_progress_catalog(base_tmp),
         lambda: build_memory_tools(MemoryManager(base_tmp)),
-        lambda: build_session_todo_tools(SessionTodoState()),
+        lambda: build_todo_tools(SessionTodoState()),
         lambda: (build_search_tools_tool(lambda: ()),),
     ]
 

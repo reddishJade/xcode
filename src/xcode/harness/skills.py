@@ -113,7 +113,7 @@ class ToolRegistryState:
         group: str,
         tools: tuple[ToolSpec, ...],
     ) -> tuple[ToolSpec, ...]:
-        """在原有位置替换指定工具组，并返回新快照。"""
+        """在原有位置替换指定内部 registry 标签，并返回新快照。"""
         with self._lock:
             existing = self._registry
             insertion_index = next(

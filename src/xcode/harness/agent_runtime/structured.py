@@ -300,7 +300,7 @@ class StructuredAgent:
             return ExplicitSkillActivationResult(
                 name=name,
                 status="disabled",
-                message="The skills tool group is disabled.",
+                message="Skill loading is disabled for this runtime.",
             )
         return None
 
