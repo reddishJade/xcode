@@ -49,12 +49,16 @@ class OpenAIChatProvider(OpenAICompatProvider):
         params: dict[str, Any],
         thinking_override: bool | None = None,
     ) -> None:
-        """OpenAI 使用 reasoning_effort 而非 extra_body.thinking。"""
+        """OpenAI 使用 reasoning_effort 而非 extra_body.thinking。
+
+        thinking=False 时发送 reasoning_effort=none，优先于配置的
+        reasoning_effort，确保 /thinking off 在请求层生效。
+        """
         effective = self.thinking if thinking_override is None else thinking_override
-        if self.reasoning_effort:
-            params["reasoning_effort"] = self.reasoning_effort
-        elif not effective:
+        if not effective:
             params["reasoning_effort"] = "none"
+        elif self.reasoning_effort:
+            params["reasoning_effort"] = self.reasoning_effort
 
     def _build_chat_params(
         self,

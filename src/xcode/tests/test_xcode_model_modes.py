@@ -70,6 +70,24 @@ class XcodeModelModeTests:
         assert info["transport"] == "deepseek_chat"
         assert info["reasoning_effort"] == "high"
 
+    def test_get_model_info_reports_thinking_off(self) -> None:
+        """thinking=False 时 get_model_info 返回 thinking=off。
+
+        /thinking 命令依赖此键值，确保关闭后显示 off 而非 unknown。
+        """
+        provider = _Provider("openai_chat")
+        provider.thinking = False
+        provider.reasoning_effort = None
+        agent = cast(
+            StructuredAgent,
+            _Agent(_ProviderWrapper(provider)),
+        )
+        app = XcodeApp(agent=agent)
+
+        info = app.get_model_info()
+
+        assert info["thinking"] == "off"
+
 
 class _ModelApp:
     def __init__(self) -> None:

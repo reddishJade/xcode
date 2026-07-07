@@ -126,6 +126,8 @@ class XcodeApp:
         }
         if active.thinking:
             info["thinking"] = str(active.thinking)
+        else:
+            info["thinking"] = "off"
         if active.reasoning_effort is not None:
             info["reasoning_effort"] = active.reasoning_effort
         return info
