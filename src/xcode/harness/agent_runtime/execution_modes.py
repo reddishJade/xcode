@@ -59,11 +59,16 @@ class ExecutionModeState:
 class PlanPolicy:
     """plan: 只读分析，可维护 .xcode/plans/*.md 计划文件。"""
 
+    _READ_ONLY_TOOLS = frozenset({
+        "read_file", "glob_files", "find_files", "list_dir", "grep_search",
+        "search_tools", "webfetch", "websearch", "question", "search_memory",
+    })
+
     def filter_tools(self, tools: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]:
         return tuple(
             tool
             for tool in tools
-            if tool.read_only or tool.name in {"write_file", "edit_file"}
+            if tool.name in self._READ_ONLY_TOOLS or tool.name in {"write_file", "edit_file"}
         )
 
     def check_call(self, call: ToolCall) -> PermissionDecision:

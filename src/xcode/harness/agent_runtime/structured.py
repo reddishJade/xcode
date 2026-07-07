@@ -36,7 +36,7 @@ from .events import (
     StructuredAgentEvent,
 )
 from .execution_modes import ExecutionModeState, policy_for_mode
-from ..skills import ToolRegistryState, ToolSpec
+from ..skills import ToolSpec
 from .fallback import _FallbackWithRetryPrimary
 from .message_codec import messages_from_run_state
 from .result import (
@@ -75,7 +75,7 @@ class StructuredAgent:
     def __init__(
         self,
         provider: ModelProvider,
-        registry: tuple[ToolSpec, ...] | ToolRegistryState,
+        registry: tuple[ToolSpec, ...],
         config: AgentConfig | None = None,
         gate: GateConfig | None = None,
         runtime: AgentRuntimeConfig | None = None,
@@ -91,11 +91,7 @@ class StructuredAgent:
             )
         self.project_root = runtime.project_root
         self._runtime = runtime
-        self._registry_state = (
-            registry
-            if isinstance(registry, ToolRegistryState)
-            else ToolRegistryState(registry)
-        )
+        self._registry = registry
         self.config = config
         self.compactor = runtime.compactor
         self._compact_controller = runtime.compact_controller
@@ -142,7 +138,7 @@ class StructuredAgent:
     @property
     def registry(self) -> tuple[ToolSpec, ...]:
         """返回当前工具注册表快照。"""
-        return self._registry_state.snapshot()
+        return self._registry
 
     @property
     def tool_map(self) -> dict[str, ToolSpec]:

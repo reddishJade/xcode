@@ -531,8 +531,6 @@ def build_fetch_tools_tool(
             "properties": {},
             "additionalProperties": False,
         },
-        read_only=True,
-        group="mcp",
     )
 
 
@@ -626,8 +624,6 @@ def build_mcp_tool_search(
             "required": ["query"],
             "additionalProperties": False,
         },
-        read_only=True,
-        group="mcp",
     )
 
 
@@ -1277,21 +1273,6 @@ def _build_registered_mcp_tool(
         input_hint=_mcp_tool_input_hint(tool.get("inputSchema", {})),
         handler=lambda args: mcp_handler(args),
         schema=tool_schema,
-        group="mcp",
-        read_only=read_only,
-        concurrency_safe=concurrency_safe,
-        builtin={
-            "mcp_metadata": {
-                "server": metadata.server_name,
-                "server_slug": metadata.server_slug,
-                "tool": metadata.tool_name,
-                "tool_slug": metadata.tool_slug,
-                "outputSchema": tool.get("outputSchema"),
-                "annotations": tool.get("annotations"),
-                "risk": tool_override.risk,
-            }
-        },
-        streaming_handler=mcp_handler,
     )
 
 

@@ -943,7 +943,7 @@ def _compute_context_summary(
 
     registry = getattr(agent, "registry", None)
     if registry is not None:
-        snap = registry.snapshot() if hasattr(registry, "snapshot") else registry
+        snap = registry
         from xcode.harness.skills import build_tool_prompt, build_tool_guidelines
 
         parts = ["Available tools:\n" + build_tool_prompt(snap)]

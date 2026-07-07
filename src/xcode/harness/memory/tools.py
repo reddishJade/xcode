@@ -125,8 +125,7 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
                 "required": ["query"],
                 "additionalProperties": False,
             },
-            read_only=True,
-            group="memory",
+
             prompt_snippet=(
                 "Search opt-in project and user memory when prior decisions or "
                 "solutions may affect the task."

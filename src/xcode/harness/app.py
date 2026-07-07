@@ -16,7 +16,7 @@ from xcode.harness.agent_runtime import (
     StructuredAgent,
     StructuredAgentEvent,
 )
-from xcode.harness.skills import ToolRegistryState, ToolSpec
+from xcode.harness.skills import ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from xcode.ai.providers.registry import ProviderSettings, build_provider_bundle
 from . import assembly as _assembly
@@ -35,7 +35,7 @@ class XcodeApp:
     """Xcode 应用句柄。"""
 
     agent: StructuredAgent
-    registry: tuple[ToolSpec, ...] | ToolRegistryState = ()
+    registry: tuple[ToolSpec, ...] = ()
     contextual_state: ContextualRetrievalState | None = None
     external_hook_runner: ExternalHookRunner | None = None
 

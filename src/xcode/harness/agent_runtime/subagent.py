@@ -222,10 +222,7 @@ def build_subagent_tools(runner: SubagentRunner) -> tuple[ToolSpec, ...]:
             ),
             'JSON: {"description":"short label","prompt":"...", "model_profile":"subagent", "isolation":"context"}',
             lambda data: _subagent_handler(data, None),
-            group="subagent",
-            counts_as_progress=True,
             schema=_subagent_schema(),
-            streaming_handler=_subagent_handler,
             prompt_snippet=(
                 "Delegate a task to a subagent (child agent). "
                 "Use this when the user says 'subagent', 'delegate', 'sub agent', "

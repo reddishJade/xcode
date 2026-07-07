@@ -58,9 +58,6 @@ def build_glob_tools(
             description="Find project files by glob pattern. Use **/*.py for recursive search.",
             input_hint='JSON: {"path": ".", "pattern": "**/*.py", "max_results": 100}',
             handler=glob_files,
-            read_only=True,
-            concurrency_safe=True,
-            group="core",
             prompt_guidelines=(
                 "Use **/*.py for recursive Python file search.",
                 "Combine path (directory) + pattern (glob) for narrower results.",
@@ -95,9 +92,6 @@ def build_glob_tools(
             ),
             input_hint='JSON: {"path": ".", "pattern": "*.py", "max_results": 100}',
             handler=find_files,
-            read_only=True,
-            concurrency_safe=True,
-            group="core",
             prompt_guidelines=(
                 "Use find_files to locate files by name when you don't know the directory.",
                 "Basename-only patterns (e.g. '*.py') search all subdirectories.",
@@ -130,9 +124,6 @@ def build_glob_tools(
             description="List directory contents. Entries sorted alphabetically, '/' suffix for directories. Includes dotfiles.",
             input_hint='JSON: {"path": "src/xcode", "limit": 100}',
             handler=list_dir,
-            read_only=True,
-            concurrency_safe=True,
-            group="core",
             prompt_guidelines=(
                 "Use list_dir to explore directory contents before reading files.",
                 "Limit defaults to 500 entries; raise it for large directories.",

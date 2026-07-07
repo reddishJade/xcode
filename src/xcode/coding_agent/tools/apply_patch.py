@@ -107,8 +107,6 @@ def build_apply_patch_tool(
         input_hint='JSON: {"patch_text": "*** Begin Patch\\n*** Update File: /abs/path/to/app.py\\n@@\\n-old\\n+new\\n*** End Patch"}',
         handler=apply_patch,
         schema=APPLY_PATCH_SCHEMA,
-        group="core",
-        counts_as_progress=True,
         prompt_snippet="Apply structured file patches with add, update, delete, and move hunks",
         prompt_guidelines=(
             "Use apply_patch for multi-file edits when exact old_text replacements are awkward.",

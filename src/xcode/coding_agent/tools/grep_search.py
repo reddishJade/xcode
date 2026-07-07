@@ -37,9 +37,6 @@ def build_grep_tool(
         ),
         input_hint='JSON: {"pattern": "ToolSpec", "path": "src/xcode", "glob": "*.py"}',
         handler=handler,
-        read_only=True,
-        concurrency_safe=True,
-        group="core",
         prompt_guidelines=(
             "Use grep_search to find strings in file contents (not filenames).",
             "Supports full regex: 'log.*Error', 'function\\s+\\w+'.",

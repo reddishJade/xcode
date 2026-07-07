@@ -22,7 +22,7 @@ from .repl_rendering import (
     VERBOSE_TOOL_RESULT_PREVIEW_LIMIT,
     single_line_preview,
 )
-from .tool_catalog import build_tool_catalog
+
 from xcode.harness.agent_runtime.events import (
     AssistantEventBlock,
     AssistantStructuredEvent,
@@ -43,7 +43,6 @@ from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
 from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.harness.skills import (
     ToolInput,
-    ToolRegistryState,
     ToolSpec,
 )
 from xcode.agent.config import AgentContext, BeforeToolCallContext
@@ -51,13 +50,8 @@ from xcode.agent.messages import AssistantMessage
 from xcode.agent.types import TextContent, ToolCallContent
 
 
-EXPERIMENTAL_TOOL_GROUPS = frozenset()
-
-
 def _registry(app: object) -> tuple[ToolSpec, ...]:
     raw = getattr(app, "registry", ())
-    if isinstance(raw, ToolRegistryState):
-        return raw.snapshot()
     return tuple(raw) if raw else ()
 
 
@@ -85,46 +79,9 @@ def run_tool_command(command: str, app: object) -> str:
 
 
 def _tool_list_legacy(registry: tuple[ToolSpec, ...]) -> str:
-    catalog = build_tool_catalog()
-    enabled_names = {t.name for t in registry}
-
-    lines = [f"## Visible Tools ({len(registry)})", ""]
-    core_names = sorted(t.name for t in registry if t.group == "core")
-    if core_names:
-        lines.append(f"- **core** ({len(core_names)})")
-        lines.extend(f"  - `{n}`" for n in core_names)
-
-    noncore_groups = sorted({t.group for t in registry if t.group != "core"})
-    for group in noncore_groups:
-        tools_in_group = sorted(
-            (t for t in registry if t.group == group), key=lambda item: item.name
-        )
-        lines.append(f"- **{group}** ({len(tools_in_group)})")
-        for tool in tools_in_group:
-            suffix = ""
-            if tool.group == "mcp" and "[mcp: " in tool.description:
-                server_name = tool.description.split("[mcp: ")[-1].split("]")[0]
-                suffix = f" - MCP server `{server_name}`"
-            lines.append(f"  - `{tool.name}`{suffix}")
-
-    all_known = set()
-    for group_names in catalog.values():
-        all_known.update(group_names)
-    hidden = sorted(all_known - enabled_names)
-    experimental_hidden = {
-        group: catalog[group] & set(hidden)
-        for group in EXPERIMENTAL_TOOL_GROUPS
-        if group in catalog and catalog[group] & set(hidden)
-    }
-    if experimental_hidden:
-        hidden_count = sum(len(names) for names in experimental_hidden.values())
-        lines.append("")
-        lines.append(f"## Disabled Experimental Tools ({hidden_count})")
-        lines.append("")
-        for group in sorted(experimental_hidden):
-            group_hidden = sorted(experimental_hidden[group])
-            lines.append(f"- **{group}** ({len(group_hidden)})")
-            lines.extend(f"  - `{name}`" for name in group_hidden)
+    lines = [f"## Available Tools ({len(registry)})", ""]
+    for t in sorted(registry, key=lambda x: x.name):
+        lines.append(f"  - `{t.name}`: {t.description[:80]}")
     return "\n".join(lines)
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,10 +17,9 @@ from ...agent.config import (
     BeforeToolCallResult,
     IsToolProductiveHook,
 )
-from ...agent.types import AgentTool, CancellationSignal
-from ...agent.types import ToolCallContent
+from ...agent.types import AgentTool, AgentToolResult, CancellationSignal
+from ...agent.types import TextContent, ToolCallContent
 from .execution_modes import ExecutionModeState, policy_for_mode
-from .tool_adapter import adapt_tool_specs
 from .tool_audit import build_audit_record, emit_audit
 from .tool_hooks import emit_hook, emit_tool_hook, tool_result_text
 from ..observability import (
@@ -48,6 +48,53 @@ from ..skills import (
     ToolSpec,
     stringify_tool_input,
 )
+from ..observability import redact_text
+
+
+class _ToolSpecAdapter:
+    """最小 ToolSpec → AgentTool 适配。"""
+
+    def __init__(self, spec: ToolSpec) -> None:
+        self._spec = spec
+
+    @property
+    def name(self) -> str:
+        return self._spec.name
+
+    @property
+    def label(self) -> str:
+        return self._spec.name
+
+    @property
+    def description(self) -> str:
+        return self._spec.description
+
+    @property
+    def parameters(self) -> dict[str, object]:
+        return self._spec.schema or {}
+
+    @property
+    def execution_mode(self) -> None:
+        return None
+
+    @property
+    def examples(self) -> list[dict[str, object]]:
+        return []
+
+    async def execute(
+        self,
+        tool_call_id: str,
+        params: dict[str, object],
+        signal: CancellationSignal | None = None,
+        on_update: Callable[[AgentToolResult], None] | None = None,
+    ) -> AgentToolResult:
+        content = await asyncio.to_thread(self._spec.handler, dict(params))
+        metadata = getattr(content, "metadata", None)
+        return AgentToolResult(
+            content=[TextContent(text=redact_text(str(content)))],
+            details=metadata if isinstance(metadata, dict) else None,
+            is_error=bool(getattr(content, "is_error", False)),
+        )
 
 
 @runtime_checkable
@@ -222,12 +269,11 @@ class ToolGate:
         )
 
     def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
-        """将 ToolSpec 注册表适配为 AgentTool。
-
-        权限门控由 build_before_tool_hook 中的 _precheck_permission 处理，
-        不在 ToolSpecAdapter 中执行。
-        """
-        return list(adapt_tool_specs(registry))
+        missing_schema = [spec.name for spec in registry if spec.schema is None]
+        if missing_schema:
+            names = ", ".join(sorted(missing_schema))
+            raise ValueError(f"tools must define JSON schemas: {names}")
+        return [_ToolSpecAdapter(spec) for spec in registry]
 
     @property
     def approval_callback(self) -> ApprovalCallback | None:
@@ -505,12 +551,7 @@ def _tool_results_count_as_progress(
         )
         if not is_ok:
             continue
-        spec = tool_map.get(tool_use.name)
-        if spec and spec.counts_as_progress is not None:
-            return spec.counts_as_progress
-        if spec and spec.read_only:
-            return True
-    return False
+    return True
 
 
 def _stricter_decision(

@@ -114,8 +114,6 @@ def build_load_skill_tool(
         ),
         input_hint='JSON: {"name": "code-review"}',
         handler=handler,
-        group="skills",
-        read_only=True,
         schema={
             "type": "object",
             "properties": {

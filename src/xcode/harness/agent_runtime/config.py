@@ -49,6 +49,13 @@ from ..skills import ApprovalCallback, ToolSpec
 from ..agent_skills import SkillRegistry
 from ..memory import MemoryManager
 from .cancellation import CancellationToken
+
+
+_READ_ONLY_TOOLS = frozenset({
+    "read_file", "glob_files", "find_files", "list_dir", "grep_search",
+    "search_tools", "webfetch", "websearch", "question", "search_memory",
+})
+
 from .compaction import CompactController, estimate_message_tokens
 from .execution_modes import ExecutionModeState, mode_notice
 from .message_codec import messages_from_compacted_dicts
@@ -336,9 +343,7 @@ def build_loop_config(
         max_consecutive_continuations=3,
         min_continuation_tokens=500,
         watchdog_repeated_tool_limit=snapshot.config.watchdog_repeated_tool_limit,
-        watchdog_repeated_tool_skip=frozenset(
-            spec.name for spec in registry if spec.read_only
-        ),
+        watchdog_repeated_tool_skip=_READ_ONLY_TOOLS,
         max_consecutive_idle_steps=4,
         should_compact=should_compact_fn,
         compact=compact_fn,

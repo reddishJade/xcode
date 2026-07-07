@@ -112,7 +112,6 @@ def build_bash_tool(
         prompt_snippet=_build_prompt_snippet(spec, shell_syntax),
         prompt_guidelines=_build_prompt_guidelines(spec, shell_syntax, root),
         schema=_build_schema(shell_syntax),
-        counts_as_progress=True,
     )
 
 

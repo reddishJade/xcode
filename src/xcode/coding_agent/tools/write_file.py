@@ -77,18 +77,10 @@ def build_write_file_tools(
                 lambda d: _write_file(root, ops, context_state, d), data
             ),
             schema=WRITE_FILE_SCHEMA,
-            group="core",
-            counts_as_progress=True,
             prompt_snippet="Create new files or deliberately replace entire files",
             prompt_guidelines=(
                 "Use write_file only for new files or deliberate full-file rewrites.",
             ),
-            examples=[
-                {
-                    "path": "notes.md",
-                    "content": "# Notes\n\nNew file content.\n",
-                }
-            ],
         ),
         ToolSpec(
             name="edit_file",
@@ -102,8 +94,6 @@ def build_write_file_tools(
                 lambda d: _edit_file(root, ops, context_state, d), data
             ),
             schema=EDIT_FILE_SCHEMA,
-            group="core",
-            counts_as_progress=True,
             prompt_snippet=(
                 "Make precise file edits with exact old_text/new_text replacements"
             ),
@@ -112,12 +102,5 @@ def build_write_file_tools(
                 "When editing, provide the full old_text that should be replaced.",
                 "Keep old_text as small as possible while still unique in the file.",
             ),
-            examples=[
-                {
-                    "path": "/abs/path/src/main.py",
-                    "old_text": "return old_value\n",
-                    "new_text": "return new_value\n",
-                }
-            ],
         ),
     )

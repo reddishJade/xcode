@@ -8,12 +8,12 @@ from xcode.harness.agent_runtime import CancellationToken, StructuredAgentEvent
 from xcode.harness.config import ExecutionMode
 from xcode.harness.observability import ExternalHookDiagnostic
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
-from xcode.harness.skills import ApprovalCallback, ToolRegistryState, ToolSpec
+from xcode.harness.skills import ApprovalCallback, ToolSpec
 
 
 class ToolRegistryApp(Protocol):
     @property
-    def registry(self) -> tuple[ToolSpec, ...] | ToolRegistryState: ...
+    def registry(self) -> tuple[ToolSpec, ...]: ...
 
 
 class ReplAgent(Protocol):
@@ -57,7 +57,7 @@ class ReplApp(ModelControlApp, ToolRegistryApp, Protocol):
     def agent(self) -> ReplAgent: ...
 
     @property
-    def registry(self) -> tuple[ToolSpec, ...] | ToolRegistryState: ...
+    def registry(self) -> tuple[ToolSpec, ...]: ...
 
     def ask_stream(
         self, question: str, mode: ExecutionMode | None = None

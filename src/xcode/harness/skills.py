@@ -5,14 +5,12 @@ ToolSpec 描述工具能力，dispatch map 根据工具名找到 handler。"""
 from __future__ import annotations
 
 
-from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 import json
 from pathlib import Path
-import threading
 from typing import Any, Literal
 
-from ..agent.types import ToolExecutionMode
 from ..agent.types import FileContent, ImageContent, ShellCallOutputContent
 from .observability import HITLResult
 from .session import JsonValue
@@ -22,7 +20,6 @@ type AgentResultContentBlock = ImageContent | FileContent | ShellCallOutputConte
 type ToolMetadataValue = JsonValue | list[AgentResultContentBlock]
 type ToolMetadata = dict[str, ToolMetadataValue]
 ActionHandler = Callable[[ToolInput], str]
-StreamingActionHandler = Callable[[ToolInput, Callable[[str], None] | None], str]
 ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
 AGENT_CONTENT_BLOCKS_METADATA_KEY = "agent_content_blocks"
 CITATION_SOURCES_METADATA_KEY = "citation_sources"
@@ -59,72 +56,15 @@ class ToolOutput(str):
 
 @dataclass(frozen=True)
 class ToolSpec:
-    """工具的可复用描述。
-
-    prompt_snippet/prompt_guidelines 进入 system prompt，description/input_hint
-    保留为工具协议说明，handler 负责执行，risk 决定是否需要人工确认。
-    """
+    """工具描述。"""
 
     name: str
     description: str
     input_hint: str
     handler: ActionHandler
     schema: dict[str, Any] | None = None
-    read_only: bool = False
-    concurrency_safe: bool = False
-    group: str = "core"
-    execution_mode: ToolExecutionMode | None = None
-    counts_as_progress: bool | None = None
-    examples: list[dict[str, Any]] = field(default_factory=list)
     prompt_snippet: str | None = None
     prompt_guidelines: tuple[str, ...] = ()
-    builtin: dict[str, Any] | None = None
-    streaming_handler: StreamingActionHandler | None = None
-
-
-class ToolRegistryState:
-    """保存可在运行期间原子替换的工具注册表快照。"""
-
-    def __init__(self, registry: tuple[ToolSpec, ...]) -> None:
-        """使用初始工具列表创建线程安全状态。"""
-        self._lock = threading.Lock()
-        self._registry: tuple[ToolSpec, ...] = registry
-
-    def snapshot(self) -> tuple[ToolSpec, ...]:
-        """返回当前不可变工具快照。"""
-        with self._lock:
-            return self._registry
-
-    def __iter__(self) -> Iterator[ToolSpec]:
-        """迭代调用开始时的稳定工具快照。"""
-        return iter(self.snapshot())
-
-    def __len__(self) -> int:
-        """返回当前工具数量。"""
-        return len(self.snapshot())
-
-    def replace(self, registry: tuple[ToolSpec, ...]) -> None:
-        """原子替换完整工具注册表。"""
-        with self._lock:
-            self._registry = registry
-
-    def replace_group(
-        self,
-        group: str,
-        tools: tuple[ToolSpec, ...],
-    ) -> tuple[ToolSpec, ...]:
-        """在原有位置替换指定内部 registry 标签，并返回新快照。"""
-        with self._lock:
-            existing = self._registry
-            insertion_index = next(
-                (index for index, rt in enumerate(existing) if rt.group == group),
-                len(existing),
-            )
-            retained = tuple(rt for rt in existing if rt.group != group)
-            self._registry = (
-                retained[:insertion_index] + tools + retained[insertion_index:]
-            )
-            return self._registry
 
 
 def resolve_project_path(project_root: Path, raw_path: str) -> Path:

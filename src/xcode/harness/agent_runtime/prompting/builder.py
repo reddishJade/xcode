@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING
 
 from xcode.harness.config import DEFAULT_PROMPT_MODULES
 from xcode.harness.skills import (
-    ToolRegistryState,
     ToolSpec,
     build_tool_guidelines,
     build_tool_prompt,
@@ -249,7 +248,7 @@ def _tool_prompt_section(registry: tuple[ToolSpec, ...]) -> str:
 
 def build_runtime_context_provider(
     project_root: Path,
-    registry: tuple[ToolSpec, ...] | ToolRegistryState,
+    registry: tuple[ToolSpec, ...],
     prompt_builder: SystemPromptBuilder | None = None,
     resumed_notice: Callable[[], str | None] | None = None,
     interrupted_notice: Callable[[], str | None] | None = None,
@@ -263,9 +262,7 @@ def build_runtime_context_provider(
     root = project_root.resolve()
 
     def provide(question: str) -> list[str]:
-        current_registry = (
-            registry.snapshot() if isinstance(registry, ToolRegistryState) else registry
-        )
+        current_registry = registry
         parts = [
             builder.build(
                 PromptContext(

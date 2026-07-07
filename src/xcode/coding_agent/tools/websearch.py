@@ -65,8 +65,6 @@ def build_websearch_tool() -> ToolSpec:
             "required": ["query"],
             "additionalProperties": False,
         },
-        read_only=True,
-        group="core",
         prompt_snippet="Search the web for current external information.",
     )
 
