@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Protocol
 
 from xcode.agent.messages import AgentMessage
-from xcode.harness.agent_runtime import CancellationToken, StructuredAgentEvent
+from xcode.harness.agent_runtime import CancellationToken, CodingAgentHarnessEvent
 from xcode.harness.config import ExecutionMode
 from xcode.harness.observability import ExternalHookDiagnostic
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
@@ -61,7 +61,7 @@ class ReplApp(ModelControlApp, ToolRegistryApp, Protocol):
 
     def ask_stream(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> Iterator[StructuredAgentEvent]: ...
+    ) -> Iterator[CodingAgentHarnessEvent]: ...
 
     def hook_diagnostics(self) -> tuple[ExternalHookDiagnostic, ...]: ...
 

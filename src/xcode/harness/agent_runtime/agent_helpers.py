@@ -1,4 +1,4 @@
-"""StructuredAgent 工具函数。
+"""CodingAgentHarness 工具函数。
 
 从 structured.py 提取的纯函数和辅助逻辑：消息转换、预算裁剪、sync/async 桥接。
 """
@@ -24,7 +24,7 @@ from .async_worker import IsolatedAsyncWorker
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .events import StructuredAgentEvent
+    from .events import CodingAgentHarnessEvent
 
 T = TypeVar("T")
 
@@ -137,14 +137,14 @@ def run_coro_sync(coro: Coroutine[Any, Any, T]) -> T:
         return asyncio.run(coro)
     coro.close()
     raise RuntimeError(
-        "StructuredAgent.run() cannot be called inside an active event loop; "
-        "use await StructuredAgent.run_async() instead."
+        "CodingAgentHarness.run() cannot be called inside an active event loop; "
+        "use await CodingAgentHarness.run_async() instead."
     )
 
 
 @dataclass(frozen=True)
 class _StreamItem:
-    event: StructuredAgentEvent
+    event: CodingAgentHarnessEvent
 
 
 @dataclass(frozen=True)
@@ -161,9 +161,9 @@ _StreamMessage = _StreamItem | _StreamError | _StreamDone
 
 
 def aiter_to_sync_iter(
-    async_iter: AsyncIterator[StructuredAgentEvent],
+    async_iter: AsyncIterator[CodingAgentHarnessEvent],
     cancellation_token: CancellationToken,
-) -> Iterator[StructuredAgentEvent]:
+) -> Iterator[CodingAgentHarnessEvent]:
     items: queue.Queue[_StreamMessage] = queue.Queue()
     worker = IsolatedAsyncWorker(name="xcode-sync-stream-worker")
 

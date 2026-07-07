@@ -19,7 +19,7 @@ from ...agent.config import (
 )
 from ...agent.types import AgentTool, AgentToolResult, CancellationSignal
 from ...agent.types import TextContent, ToolCallContent, ToolSpecAdapter
-from .execution_modes import ExecutionModeState, policy_for_mode
+from ._mode_protocol import ToolGateMode
 from .tool_audit import build_audit_record, emit_audit
 from .tool_hooks import emit_hook, emit_tool_hook, tool_result_text
 from ..observability import (
@@ -126,7 +126,7 @@ class ToolGate:
 
     def __init__(
         self,
-        mode_state: ExecutionModeState,
+        mode_state: ToolGateMode,
         approval_callback: ApprovalCallback | None,
         permission_policy: PermissionPolicy | None,
         hook_manager: HookManager | None,
@@ -301,8 +301,7 @@ class ToolGate:
             args = ctx.args
             original_args = args
 
-            effective_policy = policy_for_mode(self._mode.current_mode)
-            decision = effective_policy.check_call(
+            decision = self._mode.check_call(
                 ToolCall(id=tool_call.id, name=tool_call.name, input=args)
             )
             args, decision = self._apply_external_pre_hooks(

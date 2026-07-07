@@ -26,8 +26,8 @@ from xcode.harness.config import (
 )
 from xcode.harness.agent_runtime import (
     CancellationToken,
+    CodingAgentHarness,
     ContextualRetrievalState,
-    StructuredAgent,
 )
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
@@ -412,7 +412,7 @@ def build_agent(
     skill_registry: SkillRegistry | None = None,
     external_hook_runner: ExternalHookRunner | None = None,
     memory_manager: Any | None = None,
-) -> StructuredAgent:
+) -> CodingAgentHarness:
     from xcode.harness.memory import MemoryManager
 
     memory_manager = memory_manager or MemoryManager(project_root)
@@ -425,7 +425,7 @@ def build_agent(
     )
 
     sec = runtime_config.security
-    return StructuredAgent(
+    return CodingAgentHarness(
         provider=llm,
         registry=registry,
         config=config,

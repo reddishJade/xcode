@@ -51,13 +51,8 @@ from ..memory import MemoryManager
 from .cancellation import CancellationToken
 
 
-_READ_ONLY_TOOLS = frozenset({
-    "read_file", "glob_files", "find_files", "list_dir", "grep_search",
-    "search_tools", "webfetch", "websearch", "question", "search_memory",
-})
-
 from .compaction import CompactController, estimate_message_tokens
-from .execution_modes import ExecutionModeState, mode_notice
+from xcode.coding_agent.execution_modes import ExecutionModeState, mode_notice
 from .message_codec import messages_from_compacted_dicts
 from .tool_gate import ToolGate
 
@@ -97,7 +92,7 @@ class GateConfig:
 
 @dataclass
 class AgentRuntimeConfig:
-    """StructuredAgent 运行时基础设施配置。"""
+    """CodingAgentHarness 运行时基础设施配置。"""
 
     config: AgentConfig = field(default_factory=AgentConfig)
     compactor: StructuredCompactor | None = None
@@ -220,7 +215,7 @@ def _build_before_provider_request_closure(
 
 
 def build_loop_config(
-    mode: ExecutionMode,
+    *,
     snapshot: TurnSnapshot,
     gate: ToolGate,
     registry: tuple[ToolSpec, ...],
@@ -229,15 +224,18 @@ def build_loop_config(
     request_hygiene: RequestHygieneConfig,
     compact_controller: CompactController | None,
     last_prompt_tokens: int | None,
-    tools_for_mode: Callable[[tuple[ToolSpec, ...], ExecutionMode], list[AgentTool]],
     steer: Callable[[AgentMessage], None],
     emit_hook: Callable[[HookRecord], None],
-    mode_state: ExecutionModeState,
     get_prompt_version: Callable[[], str],
     project_root: Path | None = None,
-    skill_registry: SkillRegistry | None = None,
     prompt_instructions: tuple[dict, ...] = (),
     correlation: RuntimeCorrelation | None = None,
+    # 以下为编码扩展参数，由 CodingAgentHarness 通过 _build_loop_config_extras 传入
+    mode_state: ExecutionModeState | None = None,
+    skill_registry: SkillRegistry | None = None,
+    mode: ExecutionMode | None = None,
+    tools_for_mode: Callable[[tuple[ToolSpec, ...], ExecutionMode], list[AgentTool]] | None = None,
+    watchdog_repeated_tool_skip: frozenset[str] | None = None,
 ) -> AgentLoopConfig:
     active_correlation = correlation or RuntimeCorrelation("local")
     gate_snapshot = gate.snapshot_for(registry)
@@ -284,7 +282,7 @@ def build_loop_config(
                     )
                 )
             )
-        if mode_state.check_plan_timeout():
+        if mode_state is not None and mode_state.check_plan_timeout():
             steer(
                 SystemMessage(
                     content=(
@@ -343,7 +341,7 @@ def build_loop_config(
         max_consecutive_continuations=3,
         min_continuation_tokens=500,
         watchdog_repeated_tool_limit=snapshot.config.watchdog_repeated_tool_limit,
-        watchdog_repeated_tool_skip=_READ_ONLY_TOOLS,
+        watchdog_repeated_tool_skip=watchdog_repeated_tool_skip or frozenset(),
         max_consecutive_idle_steps=4,
         should_compact=should_compact_fn,
         compact=compact_fn,

@@ -12,9 +12,9 @@ from typing import Any, TYPE_CHECKING
 
 from xcode.harness.config import AgentConfig, ExecutionMode, XcodeRuntimeConfig
 from xcode.harness.agent_runtime import (
+    CodingAgentHarness,
     ContextualRetrievalState,
-    StructuredAgent,
-    StructuredAgentEvent,
+    CodingAgentHarnessEvent,
 )
 from xcode.agent.types import ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 class XcodeApp:
     """Xcode 应用句柄。"""
 
-    agent: StructuredAgent
+    agent: CodingAgentHarness
     registry: tuple[ToolSpec, ...] = ()
     contextual_state: ContextualRetrievalState | None = None
     external_hook_runner: ExternalHookRunner | None = None
@@ -134,12 +134,12 @@ class XcodeApp:
 
     def ask_stream(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> Iterator[StructuredAgentEvent]:
+    ) -> Iterator[CodingAgentHarnessEvent]:
         yield from self.agent.run_stream(question, mode=mode)
 
     async def aask_stream(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> AsyncIterator[StructuredAgentEvent]:
+    ) -> AsyncIterator[CodingAgentHarnessEvent]:
         async for event in self.agent.arun_stream(question, mode=mode):
             yield event
 

@@ -1,4 +1,4 @@
-"""StructuredAgent 结果类型与转换。"""
+"""CodingAgentHarness 结果类型与转换。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,17 @@ from ..config import ExecutionMode
 from .agent_helpers import text_from_blocks, to_dict
 from .events import FinalStructuredEvent
 from ..observability import EventCorrelation
-from .execution_modes import parse_execution_mode
+from ..config import ExecutionMode
+
+
+def _parse_execution_mode(value: object) -> ExecutionMode | None:
+    if not isinstance(value, str):
+        return None
+    match value:
+        case "plan" | "build" | "act":
+            return value
+        case _:
+            return None
 
 
 @dataclass(frozen=True)
@@ -43,14 +53,14 @@ class RunState:
         raw_messages = payload.get("messages", [])
         return cls(
             messages=_message_dicts(raw_messages),
-            current_mode=parse_execution_mode(payload.get("current_mode")) or "act",
+            current_mode=_parse_execution_mode(payload.get("current_mode")) or "act",
             last_agent=str(payload.get("last_agent", "main")),
             needs_follow_up=bool(payload.get("needs_follow_up", False)),
         )
 
 
 @dataclass(frozen=True)
-class StructuredAgentResult:
+class CodingAgentHarnessResult:
     answer: str
     messages: list[dict[str, Any]]
     steps: int
@@ -68,8 +78,8 @@ def _build_structured_result(
     result: AgentLoopResult,
     max_steps: int,
     current_mode: ExecutionMode = "act",
-) -> StructuredAgentResult:
-    """将 AgentLoopResult 转换为 StructuredAgentResult。"""
+) -> CodingAgentHarnessResult:
+    """将 AgentLoopResult 转换为 CodingAgentHarnessResult。"""
     answer_parts: list[str] = []
     tool_calls: list[ToolCall] = []
     messages: list[dict[str, Any]] = []
@@ -121,7 +131,7 @@ def _build_structured_result(
     elif result.termination_reason is TerminationReason.STEP_LIMIT and not answer:
         answer = "step limit reached"
 
-    return StructuredAgentResult(
+    return CodingAgentHarnessResult(
         answer=answer,
         messages=messages,
         steps=result.steps,
@@ -146,7 +156,7 @@ def _message_dicts(value: object) -> list[dict[str, Any]]:
 
 def _final_event(
     step: int,
-    result: StructuredAgentResult,
+    result: CodingAgentHarnessResult,
     correlation: EventCorrelation | None = None,
 ) -> FinalStructuredEvent:
     return FinalStructuredEvent(

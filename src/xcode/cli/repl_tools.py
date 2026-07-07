@@ -30,7 +30,7 @@ from xcode.harness.agent_runtime.events import (
     CompactionStructuredEvent,
     MessageStartStructuredEvent,
     ReasoningDeltaStructuredEvent,
-    StructuredAgentEvent,
+    CodingAgentHarnessEvent,
     TextDeltaStructuredEvent,
     ToolResultBlock,
     ToolResultStructuredEvent,
@@ -38,8 +38,8 @@ from xcode.harness.agent_runtime.events import (
     ToolUseStructuredEvent,
     TurnEndStructuredEvent,
 )
-from xcode.harness.agent_runtime.result import StructuredAgentResult
-from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
+from xcode.harness.agent_runtime.result import CodingAgentHarnessResult
+from xcode.coding_agent.execution_modes import ExecutionModeState
 from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.agent.types import ToolSpec
 from xcode.agent.config import AgentContext, BeforeToolCallContext
@@ -242,7 +242,7 @@ def summarize_intents(intents: list[str]) -> str:
     return single_line_preview(f"{first} and {len(intents) - 1} more")
 
 
-def event_to_dict(event: StructuredAgentEvent) -> dict[str, Any]:
+def event_to_dict(event: CodingAgentHarnessEvent) -> dict[str, Any]:
     return {
         "type": event.type,
         "step": event.step,
@@ -251,7 +251,7 @@ def event_to_dict(event: StructuredAgentEvent) -> dict[str, Any]:
     }
 
 
-def _event_payload(event: StructuredAgentEvent) -> object:
+def _event_payload(event: CodingAgentHarnessEvent) -> object:
     if isinstance(event, (TextDeltaStructuredEvent, ReasoningDeltaStructuredEvent)):
         return event.data
     if isinstance(event, MessageStartStructuredEvent):
@@ -347,7 +347,7 @@ def print_tool_result_rich(
     console.print(Text(f"  ← {mark} {summary}", style=border))
 
 
-def final_stop_reason(data: StructuredAgentResult) -> str | None:
+def final_stop_reason(data: CodingAgentHarnessResult) -> str | None:
     if data.termination_reason.value == "step_limit":
         return "[stopped] step limit reached"
     if data.termination_reason.value == "watchdog":

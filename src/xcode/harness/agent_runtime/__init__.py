@@ -3,16 +3,16 @@
 from .cancellation import CancellationToken
 from .compaction import estimate_message_tokens
 from .contextual import ContextualRetrievalState
-from .structured import StructuredAgent
-from .events import StructuredAgentEvent
-from .result import RunState, StructuredAgentResult
+from .coding_harness import CodingAgentHarness
+from .events import CodingAgentHarnessEvent
+from .result import CodingAgentHarnessResult, RunState
 
 __all__ = [
     "CancellationToken",
+    "CodingAgentHarness",
+    "CodingAgentHarnessEvent",
+    "CodingAgentHarnessResult",
     "ContextualRetrievalState",
     "RunState",
-    "StructuredAgent",
-    "StructuredAgentEvent",
-    "StructuredAgentResult",
     "estimate_message_tokens",
 ]
