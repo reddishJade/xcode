@@ -11,6 +11,7 @@ from xcode.ai.model_modes import parse_model_mode
 from xcode.harness.observability import (
     FileGrantStore,
     InMemoryGrantStore,
+    PermissionDecision,
     PermissionPolicy,
 )
 from xcode.harness.observability.permission_model import StaticPermission
@@ -36,6 +37,10 @@ class ModelControlApp(Protocol):
 
 def _is_model_control_app(app: object) -> TypeGuard[ModelControlApp]:
     return hasattr(app, "get_model_info") and hasattr(app, "set_model")
+
+
+def _is_permission_decision(value: object) -> TypeGuard[PermissionDecision]:
+    return value in {"allow", "deny", "ask"}
 
 
 def _model_info(app: object) -> dict[str, str]:
@@ -475,7 +480,7 @@ def _policy_from_config(config: dict[str, Any]) -> PermissionPolicy | None:
         except ValueError:
             continue
     global_default = security.get("global_default")
-    if not isinstance(global_default, str):
+    if not _is_permission_decision(global_default):
         global_default = None
     if not rules and global_default is None:
         return None

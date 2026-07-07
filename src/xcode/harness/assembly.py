@@ -68,6 +68,7 @@ from xcode.coding_agent.tools import ShellSpec
 if TYPE_CHECKING:
     from xcode.experimental.mailbox import AgentMailbox
     from xcode.harness.daemon import HeartbeatDaemon
+    from xcode.harness.memory import MemoryManager
     from xcode.harness.mcp import McpRuntimeRegistry
     from xcode.harness.agent_skills import SkillRegistry
 
@@ -147,7 +148,7 @@ class SharedInfra:
     cancellation_token: CancellationToken
     compact_controller: CompactController
     compactor: LayeredCompactor
-    memory_manager: Any | None = None
+    memory_manager: MemoryManager
 
 
 # ── 配置解析 ──
