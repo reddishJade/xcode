@@ -1,124 +1,129 @@
-"""Web 检索与抓取工具。"""
+"""URL 抓取工具。"""
 
 from __future__ import annotations
 
+import gzip
+import re
 from html import unescape
 from html.parser import HTMLParser
-import re
 from typing import Literal, cast
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from xcode.harness.skills import ToolInput, ToolSpec
 
 
-USER_AGENT = "xcode-agent/1.0"
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/143.0.0.0 Safari/537.36"
+)
 MAX_FETCH_BYTES = 5 * 1024 * 1024
-MAX_SEARCH_BYTES = 256 * 1024
+DEFAULT_TIMEOUT = 30.0
+MAX_TIMEOUT = 120.0
 
 
-def build_web_tools() -> tuple[ToolSpec, ...]:
-    """构建默认可用的 web 工具。"""
+def build_webfetch_tool() -> ToolSpec:
+    """构建 webfetch 工具。"""
 
-    def webfetch(data: ToolInput) -> str:
+    def handler(data: ToolInput) -> str:
         url = _valid_url(str(data.get("url", "")).strip())
         output_format = _format(str(data.get("format", "markdown")).strip())
         timeout = _timeout(data.get("timeout"))
-        raw, content_type, truncated = _fetch_url(url, timeout)
+        raw, content_type, truncated = _fetch_url(url, timeout, output_format)
         text = raw.decode(_charset(content_type), errors="replace")
+        if not _is_html_mime(_mime(content_type)):
+            return _with_truncation_notice(text, truncated)
         if output_format == "html":
             return _with_truncation_notice(text, truncated)
         if output_format == "text":
             return _with_truncation_notice(_plain_text(text), truncated)
         return _with_truncation_notice(_markdown_text(text, url), truncated)
 
-    def websearch(data: ToolInput) -> str:
-        query = str(data.get("query", "")).strip()
-        if not query:
-            raise ValueError("query is required")
-        limit = _limit(data.get("numResults"))
-        html = _fetch_url(
-            f"https://duckduckgo.com/html/?q={quote_plus(query)}",
-            _timeout(data.get("timeout")),
-            max_bytes=MAX_SEARCH_BYTES,
-        )[0].decode("utf-8", errors="replace")
-        results = _duckduckgo_results(html, limit)
-        return _render_search_results(query, results)
-
-    return (
-        ToolSpec(
-            name="webfetch",
-            description="Fetch a URL and return its content as markdown, text, or HTML.",
-            input_hint='JSON: {"url":"https://example.com", "format":"markdown"}',
-            handler=webfetch,
-            schema={
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "HTTP(S) URL to fetch."},
-                    "format": {
-                        "type": "string",
-                        "enum": ["markdown", "text", "html"],
-                    },
-                    "timeout": {"type": "number", "minimum": 1, "maximum": 120},
+    return ToolSpec(
+        name="webfetch",
+        description="Fetch content from an HTTP or HTTPS URL and return it as text, markdown, or HTML.",
+        input_hint='JSON: {"url":"https://example.com", "format":"markdown"}',
+        handler=handler,
+        schema={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "HTTP(S) URL to fetch."},
+                "format": {
+                    "type": "string",
+                    "enum": ["markdown", "text", "html"],
                 },
-                "required": ["url"],
-                "additionalProperties": False,
+                "timeout": {"type": "number", "minimum": 1, "maximum": 120},
             },
-            read_only=True,
-            group="core",
-            prompt_snippet="Fetch web page content from an HTTP(S) URL.",
-        ),
-        ToolSpec(
-            name="websearch",
-            description="Search the web and return a compact list of result titles, URLs, and snippets.",
-            input_hint='JSON: {"query":"python pathlib docs", "numResults":8}',
-            handler=websearch,
-            schema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "numResults": {"type": "integer", "minimum": 1, "maximum": 20},
-                    "timeout": {"type": "number", "minimum": 1, "maximum": 120},
-                },
-                "required": ["query"],
-                "additionalProperties": False,
-            },
-            read_only=True,
-            group="core",
-            prompt_snippet="Search the web for current external information.",
-        ),
+            "required": ["url"],
+            "additionalProperties": False,
+        },
+        read_only=True,
+        group="core",
+        prompt_snippet="Fetch web page content from an HTTP(S) URL.",
     )
 
 
 def _fetch_url(
     url: str,
     timeout: float,
+    output_format: Literal["markdown", "text", "html"] = "markdown",
     *,
     max_bytes: int = MAX_FETCH_BYTES,
 ) -> tuple[bytes, str, bool]:
     request = Request(
         url,
         headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "text/markdown, text/plain, text/html, application/json, application/xml, */*;q=0.1",
+            "User-Agent": BROWSER_UA,
+            "Accept": _accept_header(output_format),
             "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate",
         },
     )
     try:
         with urlopen(request, timeout=timeout) as response:
             content_type = response.headers.get("content-type", "")
+            content_encoding = response.headers.get("content-encoding")
             mime = _mime(content_type)
             if _is_image_mime(mime):
                 raise ValueError(f"unsupported fetched image content type: {mime}")
             if not _is_textual_mime(mime):
                 raise ValueError(f"unsupported fetched file content type: {mime}")
-            raw = response.read(max_bytes + 1)
+            raw = response.read()
+            raw = _decompress(raw, content_encoding)
             return raw[:max_bytes], content_type, len(raw) > max_bytes
     except HTTPError as exc:
         raise ValueError(f"HTTP {exc.code} fetching {url}") from exc
     except URLError as exc:
         raise ValueError(f"failed to fetch {url}: {exc.reason}") from exc
+
+
+def _decompress(raw: bytes, content_encoding: str | None) -> bytes:
+    if not content_encoding:
+        return raw
+    encoding = content_encoding.lower()
+    if "gzip" in encoding:
+        return gzip.decompress(raw)
+    if "deflate" in encoding:
+        import zlib
+
+        return zlib.decompress(raw)
+    return raw
+
+
+def _accept_header(output_format: Literal["markdown", "text", "html"]) -> str:
+    if output_format == "markdown":
+        return (
+            "text/markdown;q=1.0, text/x-markdown;q=0.9, "
+            "text/plain;q=0.8, text/html;q=0.7, */*;q=0.1"
+        )
+    if output_format == "text":
+        return "text/plain;q=1.0, text/markdown;q=0.9, text/html;q=0.8, */*;q=0.1"
+    return (
+        "text/html;q=1.0, application/xhtml+xml;q=0.9, "
+        "text/plain;q=0.8, text/markdown;q=0.7, */*;q=0.1"
+    )
 
 
 def _valid_url(url: str) -> str:
@@ -130,24 +135,13 @@ def _valid_url(url: str) -> str:
 
 def _timeout(value: object) -> float:
     if value is None:
-        return 30.0
+        return DEFAULT_TIMEOUT
     if not isinstance(value, str | int | float):
         raise ValueError("timeout must be a number")
     timeout = float(value)
-    if timeout <= 0 or timeout > 120:
+    if timeout <= 0 or timeout > MAX_TIMEOUT:
         raise ValueError("timeout must be between 0 and 120 seconds")
     return timeout
-
-
-def _limit(value: object) -> int:
-    if value is None:
-        return 8
-    if not isinstance(value, str | int):
-        raise ValueError("limit must be an integer")
-    limit = int(value)
-    if limit < 1 or limit > 20:
-        raise ValueError("numResults must be between 1 and 20")
-    return limit
 
 
 def _format(value: str) -> Literal["markdown", "text", "html"]:
@@ -177,6 +171,10 @@ def _is_textual_mime(mime: str) -> bool:
         or mime.endswith("+json")
         or mime.endswith("+xml")
     )
+
+
+def _is_html_mime(mime: str) -> bool:
+    return mime in {"text/html", "application/xhtml+xml"} or mime.endswith("+html")
 
 
 def _plain_text(html: str) -> str:
@@ -226,42 +224,6 @@ def _html_to_markdown(html: str) -> str:
     )
     cleaned = re.sub(r"<[^>]*>", "", cleaned)
     return unescape(re.sub(r"\n{4,}", "\n\n\n", cleaned).strip())
-
-
-def _duckduckgo_results(html: str, limit: int) -> list[dict[str, str]]:
-    pattern = re.compile(
-        r'<a rel="nofollow" class="result__a" href="(?P<url>[^"]+)">(?P<title>.*?)</a>.*?'
-        r'<a class="result__snippet".*?>(?P<snippet>.*?)</a>',
-        re.DOTALL,
-    )
-    results: list[dict[str, str]] = []
-    for match in pattern.finditer(html):
-        results.append(
-            {
-                "title": _plain_text(match.group("title")),
-                "url": match.group("url"),
-                "snippet": _plain_text(match.group("snippet")),
-            }
-        )
-        if len(results) >= limit:
-            break
-    return results
-
-
-def _render_search_results(query: str, results: list[dict[str, str]]) -> str:
-    if not results:
-        return "No search results found. Please try a different query."
-    lines = [f"Search results for: {query}"]
-    for index, result in enumerate(results, start=1):
-        lines.extend(
-            [
-                "",
-                f"{index}. {result['title']}",
-                f"   URL: {result['url']}",
-                f"   Snippet: {result['snippet']}",
-            ]
-        )
-    return "\n".join(lines)
 
 
 class _TextParser(HTMLParser):

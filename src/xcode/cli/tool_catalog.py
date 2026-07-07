@@ -25,7 +25,8 @@ from xcode.coding_agent.tools import (
     build_question_tool,
     build_read_file_tool,
     build_todo_tools,
-    build_web_tools,
+    build_webfetch_tool,
+    build_websearch_tool,
     build_write_file_tools,
 )
 from xcode.experimental.task_store import TaskStore, build_task_tools
@@ -53,7 +54,8 @@ CATALOG_COVERED_BUILDERS = frozenset(
         "build_subagent_tools",
         "build_task_tools",
         "build_todo_tools",
-        "build_web_tools",
+        "build_webfetch_tool",
+        "build_websearch_tool",
         "build_worktree_tools",
         "build_write_file_tools",
     }
@@ -66,7 +68,7 @@ def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
         lambda: build_write_file_tools(base_tmp),
         lambda: (build_apply_patch_tool(base_tmp),),
         lambda: build_glob_tools(base_tmp) + (build_grep_tool(base_tmp),),
-        lambda: build_web_tools(),
+        lambda: (build_webfetch_tool(), build_websearch_tool()),
         lambda: (build_question_tool(),),
         lambda: (build_bash_tool(base_tmp),),
         lambda: build_worktree_tools(
