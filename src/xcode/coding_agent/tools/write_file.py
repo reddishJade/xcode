@@ -8,7 +8,8 @@ from pathlib import Path
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.agent.types import ToolSpec
 
-from .file_handlers import FileOperations, LocalFileOperations, _edit_file, _write_file
+from xcode.harness.execution_env import FileSystem, LocalFileSystem
+from .file_handlers import _edit_file, _write_file
 
 WRITE_FILE_SCHEMA = {
     "type": "object",
@@ -54,11 +55,11 @@ EDIT_FILE_SCHEMA = {
 def build_write_file_tools(
     project_root: Path,
     context_state: ContextualRetrievalState | None = None,
-    operations: FileOperations | None = None,
+    operations: FileSystem | None = None,
     cancel_event: threading.Event | None = None,
 ) -> tuple[ToolSpec, ...]:
     root = project_root.resolve()
-    ops = operations or LocalFileOperations()
+    ops = operations or LocalFileSystem()
 
     def _handler(fn, data):
         if cancel_event is not None and cancel_event.is_set():

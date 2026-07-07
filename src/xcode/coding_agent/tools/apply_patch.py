@@ -22,13 +22,8 @@ from .text_edit import (
     restore_line_endings,
     strip_bom,
 )
-from .file_handlers import (
-    FileOperations,
-    LocalFileOperations,
-    _ensure_write_size,
-    _read_text,
-    _format_file,
-)
+from xcode.harness.execution_env import FileSystem, LocalFileSystem
+from .file_handlers import _ensure_write_size, _read_text, _format_file
 from .file_mutation_queue import with_file_mutation
 from .path_utils import (
     display_path,
@@ -87,11 +82,11 @@ class FileChange:
 def build_apply_patch_tool(
     project_root: Path,
     context_state: ContextualRetrievalState | None = None,
-    operations: FileOperations | None = None,
+    operations: FileSystem | None = None,
 ) -> ToolSpec:
     """构建 apply_patch 工具。"""
     root = project_root.resolve()
-    ops = operations or LocalFileOperations()
+    ops = operations or LocalFileSystem()
 
     def apply_patch(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         patch_text = _patch_text(data)
@@ -283,7 +278,7 @@ def _patch_text(data: ToolInput) -> str:
 
 def _plan_changes(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     hunks: tuple[PatchHunk, ...],
 ) -> tuple[FileChange, ...]:
     changes: list[FileChange] = []
@@ -301,7 +296,7 @@ def _plan_changes(
 
 def _plan_add(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     hunk: PatchHunk,
     path: Path,
     display: str,
@@ -321,7 +316,7 @@ def _plan_add(
 
 def _plan_delete(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     path: Path,
     display: str,
 ) -> FileChange:
@@ -337,7 +332,7 @@ def _plan_delete(
 
 def _plan_update(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     hunk: PatchHunk,
     path: Path,
     display: str,
@@ -440,7 +435,7 @@ def _find_anchor(lines: list[str], anchor: str, cursor: int) -> int:
 
 def _apply_changes(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     context_state: ContextualRetrievalState | None,
     changes: tuple[FileChange, ...],
 ) -> ToolOutput:
@@ -468,7 +463,7 @@ def _apply_changes(
     return with_file_mutation(root, mutate)
 
 
-def _write_change(operations: FileOperations, change: FileChange) -> None:
+def _write_change(operations: FileSystem, change: FileChange) -> None:
     target = change.move_path or change.path
     if change.kind == "delete":
         _remove_path(operations, change.path)
@@ -488,13 +483,13 @@ def _encode_like(before: str, after: str) -> bytes:
     return after.encode(encoding)
 
 
-def _remove_path(operations: FileOperations, path: Path) -> None:
+def _remove_path(operations: FileSystem, path: Path) -> None:
     operations.remove_file(path)
 
 
 def _existing_text(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     path: Path,
     display: str,
 ) -> tuple[str, str]:

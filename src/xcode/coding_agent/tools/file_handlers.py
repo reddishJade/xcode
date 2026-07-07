@@ -12,9 +12,11 @@ from difflib import unified_diff
 import json
 from pathlib import Path
 import subprocess
-from typing import Any, Protocol
+from typing import Any
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
+from xcode.agent.types import ToolInput, ToolOutput
+from xcode.harness.execution_env import FileSystem, LocalFileSystem
 from xcode.agent.types import ToolOutput, ToolSpec
 from xcode.coding_agent.tools.path_utils import resolve_project_path
 from .text_edit import (
@@ -65,63 +67,9 @@ class WriteFileRequest:
     content: str
 
 
-class FileOperations(Protocol):
-    def exists(self, path: Path) -> bool: ...
-    def is_file(self, path: Path) -> bool: ...
-    def is_dir(self, path: Path) -> bool: ...
-    def size(self, path: Path) -> int: ...
-    def read_bytes(self, path: Path) -> bytes: ...
-    def write_bytes(self, path: Path, data: bytes) -> None: ...
-    def mkdir(self, path: Path) -> None: ...
-    def remove_file(self, path: Path) -> None: ...
-    def iter_lines(self, path: Path) -> Iterator[str]: ...
-    def read_dir_entries(self, path: Path) -> list[tuple[str, bool]]: ...
-    def read_head(self, path: Path, n: int) -> bytes: ...
-
-
-class LocalFileOperations:
-    def exists(self, path: Path) -> bool:
-        return path.exists()
-
-    def is_file(self, path: Path) -> bool:
-        return path.is_file()
-
-    def is_dir(self, path: Path) -> bool:
-        return path.is_dir()
-
-    def size(self, path: Path) -> int:
-        return path.stat().st_size
-
-    def read_bytes(self, path: Path) -> bytes:
-        return path.read_bytes()
-
-    def write_bytes(self, path: Path, data: bytes) -> None:
-        path.write_bytes(data)
-
-    def mkdir(self, path: Path) -> None:
-        path.mkdir(parents=True, exist_ok=True)
-
-    def remove_file(self, path: Path) -> None:
-        path.unlink()
-
-    def iter_lines(self, path: Path) -> Iterator[str]:
-        with open(path, "r", encoding="utf-8-sig") as f:
-            for line in f:
-                yield line.rstrip("\r\n")
-
-    def read_dir_entries(self, path: Path) -> list[tuple[str, bool]]:
-        entries = [(entry.name, entry.is_dir()) for entry in path.iterdir()]
-        entries.sort(key=lambda x: x[0].casefold())
-        return entries
-
-    def read_head(self, path: Path, n: int) -> bytes:
-        with open(path, "rb") as f:
-            return f.read(n)
-
-
 def _read_file(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
@@ -185,7 +133,7 @@ def _parse_limit(data: ToolInput) -> int:
     return val if val > 0 else MAX_READ_LIMIT
 
 
-def _file_not_found(filepath: Path, root: Path, operations: FileOperations) -> str:
+def _file_not_found(filepath: Path, root: Path, operations: FileSystem) -> str:
     dir_path = filepath.parent
     base_name = filepath.stem if filepath.suffix else filepath.name
     suggestions: list[str] = []
@@ -224,7 +172,7 @@ def _read_text_file(
     display: str,
     offset: int,
     limit: int,
-    operations: FileOperations,
+    operations: FileSystem,
 ) -> ToolOutput:
     start = offset - 1
     lines: list[str] = []
@@ -300,7 +248,7 @@ def _read_text_file(
 def _read_directory(
     path: Path,
     display: str,
-    operations: FileOperations,
+    operations: FileSystem,
     data: ToolInput,
 ) -> ToolOutput:
     items = operations.read_dir_entries(path)
@@ -372,7 +320,7 @@ def _write_safe_path(root: Path, raw_path: str) -> Path:
 
 def _write_file(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
@@ -385,7 +333,7 @@ def _write_file(
 
 def _parse_write_file_request(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     data: ToolInput,
 ) -> WriteFileRequest:
     path_str = str(data.get("path", "")).strip()
@@ -404,7 +352,7 @@ def _parse_write_file_request(
 def _write_file_impl(
     root: Path,
     request: WriteFileRequest,
-    operations: FileOperations,
+    operations: FileSystem,
     context_state: ContextualRetrievalState | None,
 ) -> str:
     operations.mkdir(request.path.parent)
@@ -445,7 +393,7 @@ def _write_file_impl(
 
 def _edit_file(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     context_state: ContextualRetrievalState | None,
     data: ToolInput,
 ) -> str:
@@ -458,7 +406,7 @@ def _edit_file(
 
 def _parse_edit_file_request(
     root: Path,
-    operations: FileOperations,
+    operations: FileSystem,
     data: ToolInput,
 ) -> EditFileRequest:
     prepared = _prepare_edit_arguments(data)
@@ -485,7 +433,7 @@ def _parse_edit_file_request(
 def _edit_file_impl(
     root: Path,
     request: EditFileRequest,
-    operations: FileOperations,
+    operations: FileSystem,
     context_state: ContextualRetrievalState | None,
 ) -> str:
     path = request.path
@@ -572,7 +520,7 @@ def _prepare_edit_arguments(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def read_project_text_file(project_root: Path, raw_path: str) -> str:
-    operations = LocalFileOperations()
+    operations = LocalFileSystem()
     root = project_root.resolve()
     path = _safe_path(root, raw_path)
     if not operations.is_file(path):
@@ -595,7 +543,7 @@ def _truncate(text: str) -> str:
     return truncate_output(text)
 
 
-def _read_text(path: Path, operations: FileOperations) -> tuple[str, str]:
+def _read_text(path: Path, operations: FileSystem) -> tuple[str, str]:
     data = operations.read_bytes(path)
     encoding = "utf-8-sig" if data.startswith(b"\xef\xbb\xbf") else "utf-8"
     try:
@@ -609,7 +557,7 @@ def _write_text(
     path: Path,
     text: str,
     encoding: str,
-    operations: FileOperations,
+    operations: FileSystem,
 ) -> None:
     operations.write_bytes(path, text.encode(encoding))
 
