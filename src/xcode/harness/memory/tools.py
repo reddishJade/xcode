@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from xcode.agent.types import ToolSpec
+from xcode.agent.types import ToolInput, ToolSpec
 
 from .manager import MemoryLayerFilter, MemoryManager, MemoryRetrievalContext
 

@@ -15,7 +15,7 @@ import questionary
 
 from .repl_tools import brief_input
 from xcode.harness.observability import HITLResult
-from xcode.agent.types import ToolSpec
+from xcode.agent.types import ToolInput, ToolSpec
 
 
 _DEFAULT_HITL_TIMEOUT: float = 300.0

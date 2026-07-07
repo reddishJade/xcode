@@ -106,23 +106,6 @@ def _restore_contextual_state(app: object, records: list[SessionRecord]) -> None
 
 
 
-        if not isinstance(raw_items, list):
-            continue
-        latest = [
-            {
-                "id": item.get("id"),
-                "content": item.get("content"),
-                "status": item.get("status"),
-                "priority": item.get("priority"),
-            }
-            for item in raw_items
-            if isinstance(item, dict)
-        ]
-    try:
-        restore(latest)
-    except ValueError:
-        restore([])
-
 
 def records_to_agent_messages(records: list[SessionRecord]) -> list[AgentMessage]:
     messages: list[AgentMessage] = []

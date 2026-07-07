@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from xcode.agent.types import ToolSpec
+from xcode.agent.types import ToolInput, ToolSpec
 
 from . import client as _mcp_mod
 from .results import convert_mcp_tool_result
@@ -1248,15 +1248,15 @@ def _build_registered_mcp_tool(
         validated.name, tool, is_deferred
     )
     annotations = tool.get("annotations")
-    read_only_hint = isinstance(annotations, dict) and bool(
+    _read_only_hint = isinstance(annotations, dict) and bool(
         annotations.get("readOnlyHint")
     )
-    read_only = (
+    _read_only = (
         tool_override.read_only
         if tool_override.read_only is not None
-        else read_only_hint
+        else _read_only_hint
     )
-    concurrency_safe = bool(tool_override.concurrency_safe)
+    _concurrency_safe = bool(tool_override.concurrency_safe)
     description = tool_override.description or tool_description
     mcp_handler = _make_handler(
         lazy_ref,

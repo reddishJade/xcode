@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from rich.console import Console
 from rich.text import Text
 
+from xcode.agent.types import ToolInput
+
 from .file_refs import FileReference
 from .repl_rendering import (
     CLI_COLOR_ERROR,
