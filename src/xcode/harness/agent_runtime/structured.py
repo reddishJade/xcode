@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
 from uuid import uuid4
 
-from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.providers.base import ModelProvider
 
 from ...agent.agent import Agent
 from ...agent.config import AgentContext, BeforeToolCallContext

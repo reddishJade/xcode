@@ -21,7 +21,7 @@ from xcode.ai.events import (
 from xcode.ai.types import ToolArguments
 
 
-# ── OpenAI 对象 Protocol ──
+# ── OpenAI chunk 结构 Protocol ──
 
 
 class _Usage(Protocol):
@@ -70,7 +70,6 @@ class _ChatCompletionChunk(Protocol):
 
 
 def parse_tool_arguments(raw_arguments: str) -> ToolArguments:
-    """解析工具调用参数 JSON。"""
     try:
         result = orjson.loads((raw_arguments or "{}").encode())
         return _tool_arguments(result) or {
@@ -92,7 +91,7 @@ def _tool_arguments(value: object) -> ToolArguments | None:
 def chat_stream_to_events(
     stream: Iterable[_ChatCompletionChunk],
 ) -> Iterator[TextDelta | ReasoningDelta | ToolCallEvent | UsageUpdate]:
-    """Yields provider events: TextDelta, ReasoningDelta, ToolCallEvent, UsageUpdate."""
+    """将 Chat Completions 流式 chunk 转换为统一事件流。"""
     calls: dict[int, dict[str, str]] = defaultdict(
         lambda: {"id": "", "name": "", "arguments": ""}
     )
@@ -127,7 +126,11 @@ def chat_stream_to_events(
                     current["arguments"] += func.arguments
 
     ready = [
-        ToolCall(id=c["id"], name=c["name"], input=parse_tool_arguments(c["arguments"]))
+        ToolCall(
+            id=c["id"],
+            name=c["name"],
+            input=parse_tool_arguments(c["arguments"]),
+        )
         for _, c in sorted(calls.items())
     ]
     if ready:

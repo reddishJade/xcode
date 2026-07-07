@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from xcode.ai.events import Message, ProviderEvent
-from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.providers.base import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
 
 

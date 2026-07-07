@@ -1,3 +1,5 @@
+"""模拟 provider：可脚本化响应队列，用于测试。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,17 +17,14 @@ from xcode.ai.events import (
     ToolCallEvent,
     UsageUpdate,
 )
-from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.providers.base import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
 
-"""模拟 provider：可脚本化响应队列，用于测试。"""
 
-
-# --- Faux response builders ---
+# ── Faux response builders ──
 
 
 def faux_text(text: str) -> list[ProviderEvent]:
-    """构建纯文本响应的事件列表。"""
     return [
         TextDelta(chunk=text),
         FinalMessage(content=text, stop_reason="end_turn"),
@@ -33,7 +32,6 @@ def faux_text(text: str) -> list[ProviderEvent]:
 
 
 def faux_thinking(text: str) -> list[ProviderEvent]:
-    """构建 thinking 文本的事件列表。"""
     return [ReasoningDelta(chunk=text)]
 
 
@@ -42,7 +40,6 @@ def faux_tool_call(
     arguments: dict[str, Any] | None = None,
     tool_id: str | None = None,
 ) -> list[ProviderEvent]:
-    """构建单次工具调用的事件列表。"""
     tid = tool_id or f"faux_{name}"
     return [
         ToolCallEvent(calls=[ToolCall(id=tid, name=name, input=arguments or {})]),
@@ -58,7 +55,7 @@ def faux_final(stop_reason: StopReason = "end_turn") -> list[ProviderEvent]:
     return [FinalMessage(content="", stop_reason=stop_reason)]
 
 
-# --- Response queue provider ---
+# ── Response queue provider ──
 
 
 @dataclass
@@ -68,16 +65,7 @@ class FauxResponse:
 
 
 class FauxProvider(ModelProvider):
-    """可脚本化的模拟 provider。
-
-    支持预设多轮响应队列、tool call、thinking、usage 事件。
-    每次 ``stream()`` 消费队列中的一个响应。
-
-    接受：
-    - ProviderEvent 列表（单轮）
-    - ProviderEvent 列表的列表（多轮）
-    - ``(messages, tools) -> list[ProviderEvent]`` 工厂函数
-    """
+    """可脚本化的模拟 provider。"""
 
     def __init__(
         self,
@@ -87,6 +75,8 @@ class FauxProvider(ModelProvider):
         delay_seconds: float = 0.0,
     ) -> None:
         self._model = model
+        self._base_url = ""
+        self._transport = "faux"
         self._thinking = True
         self._reasoning_effort: str | None = None
         self._delay = delay_seconds
@@ -120,12 +110,12 @@ class FauxProvider(ModelProvider):
                 else:
                     self._queue.append(
                         FauxResponse(
-                            events=list(response_spec), delay_seconds=delay_seconds
+                            events=list(response_spec),
+                            delay_seconds=delay_seconds,
                         )
                     )
 
     def push(self, events: list[ProviderEvent], delay: float = 0.0) -> None:
-        """向队列尾部添加一个响应。"""
         self._queue.append(FauxResponse(events=events, delay_seconds=delay))
 
     def push_text(self, text: str) -> None:
@@ -146,11 +136,11 @@ class FauxProvider(ModelProvider):
 
     @property
     def base_url(self) -> str:
-        return ""
+        return self._base_url
 
     @property
     def transport(self) -> str:
-        return "faux"
+        return self._transport
 
     @property
     def thinking(self) -> bool:
@@ -208,7 +198,6 @@ def register_faux_provider(
     model_id: str = "faux",
     delay_seconds: float = 0.0,
 ) -> FauxProvider:
-    """快捷创建 FauxProvider。"""
     return FauxProvider(
         response_spec=responses,
         model=model,

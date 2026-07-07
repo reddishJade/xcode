@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import get_type_hints
 
 from xcode.ai import events
-from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.providers.base import ModelProvider
 import pytest
 
 

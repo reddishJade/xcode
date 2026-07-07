@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.functional_validators import SkipValidation
 from enum import StrEnum
 
-from xcode.ai.providers.protocol import StreamProvider
+from xcode.ai.providers.base import StreamProvider
 from .messages import AgentMessage
 
 

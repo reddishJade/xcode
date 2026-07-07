@@ -906,7 +906,7 @@ def _count_output_tokens(messages: list[object]) -> int:
 
 
 def _get_context_window(model_name: str) -> int:
-    from xcode.ai.registry import get_providers, get_models
+    from xcode.ai.models import get_providers, get_models
 
     for provider in get_providers():
         for model in get_models(provider):
@@ -916,7 +916,7 @@ def _get_context_window(model_name: str) -> int:
 
 
 def _get_model_cost(model_name: str) -> object | None:
-    from xcode.ai.registry import get_providers, get_models
+    from xcode.ai.models import get_providers, get_models
 
     for provider in get_providers():
         for model in get_models(provider):

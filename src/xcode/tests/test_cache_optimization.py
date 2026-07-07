@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from xcode.ai.cache import CacheUsage, extract_cache_usage
-from xcode.ai.providers.codec import (
+from xcode.ai.providers._codec import (
     canonical_tool_schema,
     canonical_tools,
     tool_catalog_fingerprint,

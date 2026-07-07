@@ -9,7 +9,7 @@ from typing import Any, get_args
 from xcode.ai.events import TextDelta, ToolCallEvent
 from xcode.ai.types import ToolDefinition
 from dotenv import dotenv_values
-from xcode.ai.providers.factory import (
+from xcode.ai.providers.registry import (
     ProviderRuntime,
     ProviderSettings,
     RateLimitPolicy,

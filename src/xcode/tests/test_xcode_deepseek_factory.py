@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from xcode.ai.providers.factory import _build_llm_profile
+from xcode.ai.providers.registry import _build_llm_profile
 from xcode.ai.providers.deepseek import DeepSeekProvider
-from xcode.ai.providers.runtime import ProviderRuntime
+from xcode.ai.providers._runtime import ProviderRuntime
 import pytest
 
 

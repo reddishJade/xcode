@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from xcode.ai.providers.openai import OpenAIChatProvider
-from xcode.ai.providers.runtime import ProviderRuntime
+from xcode.ai.providers._runtime import ProviderRuntime
 from xcode.tests.test_xcode_providers import FakeStreamChunk, _make_mock_client
 
 

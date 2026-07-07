@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.functional_validators import SkipValidation
 
-from xcode.ai.providers.protocol import StreamProvider
+from xcode.ai.providers.base import StreamProvider
 from xcode.ai.types import StreamOptions, ThinkingLevel
 from xcode.agent.types import ToolArguments, ToolCallContent
 

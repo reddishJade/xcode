@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from xcode.ai.providers.protocol import ModelProvider
+from xcode.ai.providers.base import ModelProvider
 
 from ...agent.compaction import (
     effective_compact_threshold,

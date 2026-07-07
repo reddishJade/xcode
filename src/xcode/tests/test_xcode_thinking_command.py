@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 
 from xcode.ai.providers import ProviderSettings
-from xcode.ai.providers.factory import ModelProfileConfig
+from xcode.ai.providers.registry import ModelProfileConfig
 from xcode.cli.repl_settings import handle_thinking_command
 from xcode.harness.app import XcodeApp
 

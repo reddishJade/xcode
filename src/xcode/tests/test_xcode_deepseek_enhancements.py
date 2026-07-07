@@ -4,7 +4,7 @@ import asyncio
 from typing import Any, cast
 from unittest.mock import MagicMock
 
-from xcode.ai.providers.codec import (
+from xcode.ai.providers._codec import (
     to_chat_messages,
     to_chat_tool,
 )

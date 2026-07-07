@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from xcode.ai.providers.factory import ModelProfileConfig
+from xcode.ai.providers.registry import ModelProfileConfig
 from xcode.harness.agent_runtime.fallback import _FallbackWithRetryPrimary
 from xcode.harness.app import XcodeApp
 

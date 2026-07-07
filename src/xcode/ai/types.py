@@ -1,4 +1,4 @@
-"""AI 层类型定义：Model、Transport、Thinking、Usage 等核心类型。"""
+"""AI 层类型定义：核心类型与 provider 配置。"""
 
 from __future__ import annotations
 
@@ -38,6 +38,23 @@ ServiceTier = Literal["auto", "default", "flex", "scale", "priority"]
 TextVerbosity = Literal["low", "medium", "high"]
 Truncation = Literal["auto", "disabled"]
 type ToolArguments = dict[str, object]
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    """标准化 provider 构造参数。
+
+    所有 provider 共享此构造契约，factory 无需感知 provider 专有字段。
+    专有配置通过 extra 传递，各 provider 在 __init__ 中自行提取。
+    """
+
+    api_key: str
+    model: str
+    base_url: str = ""
+    thinking: bool = True
+    reasoning_effort: str | None = None
+    response_format: dict[str, Any] | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -1,8 +1,7 @@
-"""OpenAI tool schema and message format codecs.
+"""消息与工具编码：将内部格式转换为 Chat Completions API 格式。
 
-Schema 转换、消息格式转换（Chat Completions）、
-工具列表规范化与指纹计算。
-流式事件解码见 stream_codec.py。
+包括：JSON Schema strict 模式转换、消息格式转换、工具 schema 构建。
+流式响应解码见 _stream.py。
 """
 
 from __future__ import annotations
@@ -10,12 +9,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from typing import Any
 
 import orjson
-from typing import Any, Protocol
 
 from xcode.ai.types import ToolDefinition
 
+# ── JSON Schema strict 模式 ──
 
 _UNSUPPORTED_STRICT_SCHEMA_KEYS = frozenset(
     {
@@ -38,31 +38,8 @@ _UNSUPPORTED_STRICT_SCHEMA_KEYS = frozenset(
 )
 
 
-class _ChatToolCallFunction(Protocol):
-    @property
-    def name(self) -> str: ...
-    @property
-    def arguments(self) -> str: ...
-
-
-class _ChatToolCall(Protocol):
-    @property
-    def id(self) -> str: ...
-    @property
-    def function(self) -> _ChatToolCallFunction: ...
-
-
 def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
-    """将 JSON Schema 转换为 OpenAI strict mode 兼容格式。
-
-    OpenAI strict mode 约束：
-    - object 类型必须声明所有字段为 required
-    - 原本可选字段用 null union 表达
-    - 不允许 additionalProperties（必须显式禁止）
-    - 不支持细粒度校验约束字段
-
-    这些限制确保模型生成的 JSON 严格匹配 schema，避免幻觉字段。
-    """
+    """将 JSON Schema 转换为 OpenAI strict mode 兼容格式。"""
     s = copy.deepcopy(schema)
 
     def process(node: Any) -> Any:
@@ -128,21 +105,19 @@ def _nullable_schema(schema: Any) -> Any:
     return result
 
 
+# ── 工具名称转换 ──
+
+
 def provider_function_name(canonical_id: str) -> str:
-    """Convert canonical internal id to a provider-valid function name.
-
-    Canonical format: kind://source/tool  (e.g., mcp://everything/echo)
-    Core tools keep their simple name (e.g., read_file, grep_search).
-
-    Provider rules (OpenAI Chat Completions):
-    - Must match ^[a-zA-Z0-9_-]{1,64}$
-    - No dots, colons, slashes, or special chars except underscore and dash
-    """
+    """将内部规范 ID 转换为 provider 合法的函数名。"""
     if "://" not in canonical_id:
         return canonical_id
     kind, _, remainder = canonical_id.partition("://")
     safe = remainder.replace("/", "__")
     return f"{kind}__{safe}"
+
+
+# ── Chat Completions 工具格式 ──
 
 
 def to_chat_tool(
@@ -168,7 +143,11 @@ def to_chat_tool(
         }
     return {
         "type": "function",
-        "function": {"name": name, "description": description, "parameters": resolved},
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": resolved,
+        },
     }
 
 
@@ -179,18 +158,20 @@ def to_chat_tools(
 ) -> list[dict[str, Any]]:
     """将 ToolDefinition 列表转换为 Chat Completions 工具参数。"""
     return [
-        to_chat_tool(
-            tool.name,
-            tool.description,
-            tool.parameters,
-            strict=strict,
-        )
+        to_chat_tool(tool.name, tool.description, tool.parameters, strict=strict)
         for tool in tools
     ]
 
 
-# Provider 之间无需转换的目标列表（共享 reasoning_content 协议）
-_REASONING_CONTENT_TRANSPORTS = {"deepseek_chat", "chatglm_chat", "mimo_chat"}
+# ── 跨 provider 消息归一化 ──
+
+_REASONING_CONTENT_TRANSPORTS = frozenset(
+    {
+        "deepseek_chat",
+        "chatglm_chat",
+        "mimo_chat",
+    }
+)
 
 
 def _has_reasoning_content(messages: list[dict[str, Any]]) -> bool:
@@ -206,8 +187,7 @@ def normalize_cross_provider_messages(
 ) -> list[dict[str, Any]]:
     """跨 provider 消息归一化。
 
-    当消息来自不同 provider 时（如 DeepSeek → MiMo），
-    将 provider 专有字段（如 reasoning_content）转为通用文本格式。
+    当消息来自不同 provider 时，将 provider 专有字段转为通用文本格式。
     """
     if not _has_reasoning_content(messages):
         return messages
@@ -231,8 +211,11 @@ def normalize_cross_provider_messages(
     return result
 
 
+# ── Chat Completions 消息格式 ──
+
+
 def to_chat_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """转换为 Chat Completions API 格式。tool result 使用 role:"tool"。"""
+    """转换为 Chat Completions API 格式。tool result 使用 role:'tool'。"""
     converted: list[dict[str, Any]] = []
     for message in messages:
         role = str(message.get("role", "user"))
@@ -255,7 +238,10 @@ def to_chat_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 )
             )
         else:
-            result: dict[str, Any] = {"role": role, "content": result_content}
+            result: dict[str, Any] = {
+                "role": role,
+                "content": result_content,
+            }
             if "tool_calls" in message:
                 result["tool_calls"] = _normalize_chat_tool_calls(message["tool_calls"])
             if (
@@ -296,7 +282,7 @@ def _content_blocks_to_chat_messages(
     reasoning_content: str | None = None,
     prefix: bool | None = None,
 ) -> list[dict[str, Any]]:
-    """将内容块转换为 Chat Completions 格式。"""
+    """将内容块列表转换为 Chat Completions 格式。"""
     converted: list[dict[str, Any]] = []
     assistant_tool_calls = []
     text_parts = []
@@ -319,9 +305,7 @@ def _content_blocks_to_chat_messages(
                     "type": "function",
                     "function": {
                         "name": str(part.get("name", "")),
-                        "arguments": orjson.dumps(
-                            part.get("input", {}),
-                        ).decode(),
+                        "arguments": orjson.dumps(part.get("input", {})).decode(),
                     },
                 }
             )
@@ -352,10 +336,7 @@ def _content_blocks_to_chat_messages(
 
 
 def canonical_tool_schema(tool: ToolDefinition) -> dict[str, Any]:
-    """规范化工具 schema（字典键排序）。
-
-    确保同一工具的 schema 在不同调用间字节稳定。
-    """
+    """规范化工具 schema（字典键排序）。"""
     result: dict[str, Any] = {
         "name": tool.name,
         "description": tool.description,
@@ -375,19 +356,13 @@ def _sort_dict_recursive(obj: Any) -> Any:
 
 
 def canonical_tools(tools: list[ToolDefinition]) -> list[dict[str, Any]]:
-    """按 name 排序并规范化工具列表。
-
-    确保工具列表在不同调用间顺序稳定。
-    """
+    """按 name 排序并规范化工具列表。"""
     sorted_tools = sorted(tools, key=lambda t: t.name)
     return [canonical_tool_schema(t) for t in sorted_tools]
 
 
 def tool_catalog_fingerprint(tools: list[ToolDefinition]) -> str:
-    """计算工具集合指纹（SHA256）。
-
-    用于检测工具 catalog 漂移。
-    """
+    """计算工具集合指纹（SHA256 前 16 字符）。"""
     canonical = canonical_tools(tools)
     serialized = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(serialized.encode()).hexdigest()[:16]

@@ -19,7 +19,7 @@ from xcode.harness.agent_runtime import (
 from xcode.harness.skills import ToolRegistryState, ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from xcode.harness.session_todo import SessionTodoState, TodoItem
-from xcode.ai.providers.factory import ProviderSettings, build_provider_bundle
+from xcode.ai.providers.registry import ProviderSettings, build_provider_bundle
 from . import assembly as _assembly
 from .assembly import (
     build_agent,
@@ -63,8 +63,7 @@ class XcodeApp:
         reasoning_effort: str | None = None,
     ) -> str:
         from xcode.ai.providers import build_provider_bundle, ProviderSettings
-        from xcode.ai.providers.factory import ModelProfileConfig
-        from xcode.ai.providers.factory import ModelProfileProto
+        from xcode.ai.providers.registry import ModelProfileConfig, ModelProfileProto
 
         if not self._model_profiles:
             return self.agent.provider.model

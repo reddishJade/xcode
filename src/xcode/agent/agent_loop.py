@@ -22,7 +22,7 @@ import json
 import time
 from collections.abc import Callable
 
-from xcode.ai.providers.protocol import StreamProvider
+from xcode.ai.providers.base import StreamProvider
 from xcode.agent.types import TextContent, ToolCallContent
 from .config import (
     AgentContext,

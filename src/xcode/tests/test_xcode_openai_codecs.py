@@ -12,8 +12,8 @@ from xcode.agent.messages import (
 )
 from xcode.agent.types import FileContent, ImageContent, TextContent, ToolCallContent
 from xcode.ai.events import ReasoningDelta, TextDelta, ToolCallEvent
-from xcode.ai.providers.codec import to_chat_messages, to_chat_tool
-from xcode.ai.providers.stream_codec import chat_stream_to_events
+from xcode.ai.providers._codec import to_chat_messages, to_chat_tool
+from xcode.ai.providers._stream import chat_stream_to_events
 from xcode.harness.skills import ToolSpec
 import pytest
 

@@ -7,7 +7,7 @@ from typing import Any, Protocol, TypeGuard
 import questionary
 
 from .setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
-from xcode.ai.model_modes import parse_model_mode
+from xcode.ai.models import parse_model_mode
 from xcode.harness.observability import (
     FileGrantStore,
     InMemoryGrantStore,

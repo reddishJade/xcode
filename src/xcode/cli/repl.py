@@ -29,7 +29,7 @@ from .repl_rendering import (
 )
 from .repl_turn_handler import ReasoningHandler, ToolCallHandler
 from .reasoning_effort import reasoning_effort_levels_for_transport
-from xcode.ai.registry import get_models, get_providers
+from xcode.ai.models import get_models, get_providers
 from .repl_sessions import (
     print_saved_conversation,
     resume_interactively,

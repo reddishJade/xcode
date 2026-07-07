@@ -18,7 +18,7 @@ from xcode.ai.events import (
     ToolCall,
     ToolCallEvent,
 )
-from xcode.ai.providers.protocol import StreamProvider
+from xcode.ai.providers.base import StreamProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.harness.agent_runtime import StructuredAgent
 from xcode.harness.config import (

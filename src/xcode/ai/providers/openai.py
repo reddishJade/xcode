@@ -5,60 +5,36 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from xcode.ai.types import ToolDefinition
+from xcode.ai.types import ProviderConfig, ToolDefinition
 
-from .openai_compat import OpenAICompatProvider
-from .runtime import ProviderRuntime
+from ._compat import OpenAICompatProvider
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class OpenAIChatProvider(OpenAICompatProvider):
-    """OpenAI Chat Completions provider（兼容所有 OpenAI API 兼容服务）。
-
-    只发送 OpenAI Chat Completions 标准参数。
-    DeepSeek/ChatGLM/MiMo 等专有扩展字段（如 extra_body.thinking）
-    由各自的 Provider 实现，不在此处处理。
-    """
+    """OpenAI Chat Completions provider（兼容所有 OpenAI API 兼容服务）。"""
 
     def __init__(
         self,
-        api_key: str,
-        base_url: str,
-        model: str,
-        thinking: bool = True,
-        reasoning_effort: str | None = None,
-        runtime: ProviderRuntime | None = None,
-        response_format: dict[str, Any] | None = None,
+        config: ProviderConfig,
+        *,
         client: Any | None = None,
     ) -> None:
-        super().__init__(
-            api_key,
-            base_url,
-            model,
-            thinking=thinking,
-            reasoning_effort=reasoning_effort,
-            runtime=runtime,
-            transport="openai_chat",
-            client=client,
-        )
-        self.response_format = response_format
+        super().__init__(config, transport="openai_chat", client=client)
 
     def _build_thinking_params(
         self,
         params: dict[str, Any],
         thinking_override: bool | None = None,
     ) -> None:
-        """OpenAI 使用 reasoning_effort 而非 extra_body.thinking。
-
-        thinking=False 时发送 reasoning_effort=none，优先于配置的
-        reasoning_effort，确保 /thinking off 在请求层生效。
-        """
-        effective = self.thinking if thinking_override is None else thinking_override
-        if not effective:
+        effective = (
+            self.config.thinking if thinking_override is None else thinking_override
+        )
+        if self.config.reasoning_effort:
+            params["reasoning_effort"] = self.config.reasoning_effort
+        elif not effective:
             params["reasoning_effort"] = "none"
-        elif self.reasoning_effort:
-            params["reasoning_effort"] = self.reasoning_effort
 
     def _build_chat_params(
         self,
@@ -66,8 +42,8 @@ class OpenAIChatProvider(OpenAICompatProvider):
         tools: tuple[ToolDefinition, ...],
     ) -> dict[str, Any]:
         params = super()._build_chat_params(api_messages, tools)
-        if self.response_format:
-            params["response_format"] = self.response_format
+        if self.config.response_format:
+            params["response_format"] = self.config.response_format
         return params
 
     def _warn_builtin_tools(self, tools: tuple[ToolDefinition, ...]) -> None:
@@ -75,7 +51,6 @@ class OpenAIChatProvider(OpenAICompatProvider):
 
 
 def _warn_chat_builtin_tools(tools: tuple[ToolDefinition, ...]) -> None:
-    """提示 Chat Completions 不支持 Responses 内建工具。"""
     for tool in tools:
         if tool.builtin is None:
             continue

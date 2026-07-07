@@ -1,8 +1,29 @@
+"""模型注册表与模型选择语法解析。
+
+合并原 registry.py 与 model_modes.py 的职责。
+"""
+
 from __future__ import annotations
 
-from .types import Cost, Model
+from dataclasses import dataclass
 
-"""内置模型注册表：预定义常见模型的元数据。"""
+from xcode.ai.types import Cost, Model
+
+THINKING_LEVELS = frozenset(
+    ("off", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+)
+
+
+@dataclass(frozen=True)
+class ModelMode:
+    """解析后的模型选择。"""
+
+    model: str
+    provider: str | None = None
+    thinking_level: str | None = None
+
+
+# ── 模型注册表 ──
 
 _MODELS: dict[str, dict[str, Model]] = {
     "openai": {
@@ -149,15 +170,7 @@ def get_model(provider_name: str, model_id: str) -> Model | None:
 
 
 def resolve_model(provider_name: str, model_id: str) -> Model:
-    """解析模型定义，支持三层回退策略。
-
-    回退逻辑：
-    1. 尝试从注册表查找 provider_name + model_id 的精确匹配
-    2. 若未找到，但 provider 存在，返回该 provider 的第一个注册模型（默认模型）
-    3. 若 provider 也不存在，构造最小化 Model 对象（使用 openai-completions 作为兜底 API）
-
-    设计原因：确保未知模型不会导致运行时错误，允许用户使用未预注册的模型。
-    """
+    """解析模型定义，支持三层回退策略。"""
     model = get_model(provider_name, model_id)
     if model is not None:
         return model
@@ -168,3 +181,35 @@ def resolve_model(provider_name: str, model_id: str) -> Model:
     return Model(
         id=model_id, name=model_id, api="openai-completions", provider=provider_name
     )
+
+
+# ── 模型选择语法解析 ──
+
+
+def parse_model_mode(value: str) -> ModelMode:
+    """解析 `provider/model:thinking_level` 模型选择语法。"""
+    text = value.strip()
+    if not text:
+        raise ValueError("model must not be empty")
+
+    provider: str | None = None
+    model_part = text
+    if "/" in text:
+        provider_text, model_part = text.split("/", 1)
+        provider = provider_text.strip() or None
+
+    model = model_part
+    thinking_level: str | None = None
+    if ":" in model_part:
+        model, level = model_part.rsplit(":", 1)
+        thinking_level = level.strip().lower()
+        if thinking_level not in THINKING_LEVELS:
+            allowed = "/".join(sorted(THINKING_LEVELS))
+            raise ValueError(
+                f"invalid thinking level: {thinking_level}. Use {allowed}."
+            )
+
+    model = model.strip()
+    if not model:
+        raise ValueError("model must not be empty")
+    return ModelMode(model=model, provider=provider, thinking_level=thinking_level)

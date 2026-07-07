@@ -1,21 +1,27 @@
 """Provider 适配器注册。"""
 
-from ._registry import (
-    ChatGLMProvider,
-    DeepSeekProvider,
-    MiMoProvider,
-    OpenAIChatProvider,
+from .chatglm import ChatGLMProvider
+from .deepseek import DeepSeekProvider
+from .mimo import MiMoProvider
+from .openai import OpenAIChatProvider
+from .registry import (
     PROVIDER_REGISTRY,
+    ModelProfileConfig,
+    ModelProfileProto,
+    ProviderBundle,
+    ProviderSettings,
+    build_provider_bundle,
 )
-from .factory import ProviderBundle, ProviderSettings, build_provider_bundle
 
 __all__ = [
     "ChatGLMProvider",
     "DeepSeekProvider",
     "MiMoProvider",
     "OpenAIChatProvider",
+    "PROVIDER_REGISTRY",
     "ProviderBundle",
     "ProviderSettings",
-    "PROVIDER_REGISTRY",
+    "ModelProfileConfig",
+    "ModelProfileProto",
     "build_provider_bundle",
 ]

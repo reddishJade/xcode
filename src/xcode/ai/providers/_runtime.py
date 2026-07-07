@@ -1,13 +1,16 @@
+"""Provider 运行时：重试、限速、API 错误分类。
+
+不依赖任何特定 provider 库，通过 Callable 注入客户端调用。
+"""
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from time import monotonic, sleep
-from collections.abc import Callable
 from typing import TypeVar
 
 import tenacity
-
-"""Provider 运行时：重试、限速、API 错误处理。"""
 
 T = TypeVar("T")
 
@@ -26,36 +29,38 @@ API_ERROR_MESSAGES: dict[int, str] = {
 
 
 def classify_api_error(exc: BaseException) -> str:
-    from openai import APIStatusError
-
-    if isinstance(exc, APIStatusError):
-        code = exc.status_code
-        msg = API_ERROR_MESSAGES.get(code)
+    """将异常分类为人类可读的错误消息。"""
+    status_code = _try_extract_status_code(exc)
+    if status_code is not None:
+        msg = API_ERROR_MESSAGES.get(status_code)
         if msg:
-            return f"{msg} (HTTP {code}): {exc.message}"
-        return f"API returned abnormal status (HTTP {code}): {exc.message}"
+            return f"{msg} (HTTP {status_code}): {exc}"
+        return f"API returned abnormal status (HTTP {status_code}): {exc}"
     return f"Request failed: {exc}"
 
 
-def is_transient_provider_error(exc: BaseException) -> bool:
-    from openai import APIStatusError, APITimeoutError, APIConnectionError
+def _try_extract_status_code(exc: BaseException) -> int | None:
+    """尝试从异常中提取 HTTP 状态码。"""
+    for attr in ("status_code", "status", "code"):
+        val = getattr(exc, attr, None)
+        if isinstance(val, int) and 100 <= val <= 599:
+            return val
+    return None
 
-    if isinstance(exc, (APITimeoutError, APIConnectionError)):
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """判断是否为可重试的临时性错误。
+
+    基于 HTTP 状态码和异常特征，不依赖任何特定库的类型。
+    """
+    status_code = _try_extract_status_code(exc)
+    if status_code is not None and status_code in (429, 500, 502, 503, 529):
         return True
-    if isinstance(exc, APIStatusError):
-        return exc.status_code in (429, 500, 502, 503, 529)
 
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return True
 
     msg = str(exc).lower()
-    # 临时性错误关键词（基于 HTTP 标准和经验值）
-    # - timeout: 网络超时或服务端处理超时
-    # - connection reset/refused: 网络连接问题
-    # - 429: Too Many Requests（速率限制）
-    # - 500/502/503: 服务端临时故障
-    # - 529: Cloudflare 限流（非标准状态码，部分 CDN 使用）
-    # - temporary: 服务端明确标识的临时错误
     transient_keywords = [
         "timeout",
         "connection reset",
@@ -66,6 +71,8 @@ def is_transient_provider_error(exc: BaseException) -> bool:
         "503",
         "529",
         "temporary",
+        "rate limit",
+        "too many requests",
     ]
     for kw in transient_keywords:
         if kw in msg:
@@ -87,7 +94,10 @@ class RateLimitPolicy:
 
 
 class ProviderRuntime:
-    """处理重试和本地限速的 provider 运行时。"""
+    """处理重试和本地限速的 provider 运行时。
+
+    通过 run() 方法接受任意可调用对象，不绑定任何特定客户端库。
+    """
 
     def __init__(
         self,
@@ -103,7 +113,7 @@ class ProviderRuntime:
         self._last_call_at: float | None = None
 
     def run(self, operation: Callable[[], T]) -> T:
-        retry_policy = tenacity.retry_if_exception(is_transient_provider_error)
+        retry_policy = tenacity.retry_if_exception(_is_transient_error)
 
         retrier = tenacity.Retrying(
             stop=tenacity.stop_after_attempt(self.retry.max_attempts),

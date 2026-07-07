@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import redirect_stdout
 from io import StringIO
 from typing import cast
-from xcode.ai.model_modes import parse_model_mode
+from xcode.ai.models import parse_model_mode
 from xcode.cli.repl_settings import handle_effort_command, handle_model_command
 from xcode.harness.app import XcodeApp
 from xcode.harness.agent_runtime import StructuredAgent
