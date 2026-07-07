@@ -37,7 +37,6 @@ class ReplState:
     context_cost: str = ""
     last_dir: str = ""
     model_name: str = ""
-    expand_reasoning: bool = False
 
 
 @dataclass

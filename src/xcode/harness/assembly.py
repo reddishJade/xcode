@@ -58,9 +58,8 @@ from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
 from xcode.harness.observability.permission_model import Rule
 from xcode.harness.skills import ToolInput, ToolRegistryState, ToolSpec
-from xcode.harness.session_todo import SessionTodoState
 from xcode.coding_agent.registry import build_project_scoped_registry
-from xcode.coding_agent.tools import ShellSpec, build_todo_tools
+from xcode.coding_agent.tools import ShellSpec
 
 if TYPE_CHECKING:
     from xcode.experimental.mailbox import AgentMailbox
@@ -319,7 +318,6 @@ def build_tool_registry(
     skills_dir: Path | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     external_hook_runner: ExternalHookRunner | None = None,
-    todo_state: SessionTodoState | None = None,
     memory_manager: Any | None = None,
 ) -> tuple[
     ToolRegistryState,
@@ -342,7 +340,6 @@ def build_tool_registry(
         cancel_event,
         env,
         skill_registry,
-        todo_state,
         contextual_state=contextual_state,
     )
     mcp_runtime_registry = McpRuntimeRegistry()
@@ -379,7 +376,6 @@ def build_tool_registry(
         env=env,
         hook_constraint_providers=hook_constraint_providers,
         external_hook_runner=external_hook_runner,
-        todo_state=todo_state,
     )
     closers.extend(subagent_closers)
     registry += subagent_tools
@@ -429,11 +425,10 @@ def _build_base_project_registry(
     cancel_event: threading.Event | None,
     env: ExecutionEnv | None,
     skill_registry: SkillRegistry | None,
-    todo_state: SessionTodoState | None,
     contextual_state: ContextualRetrievalState | None = None,
 ) -> tuple[ToolSpec, ...]:
     """构建项目级基础工具注册表。"""
-    registry = build_project_scoped_registry(
+    return build_project_scoped_registry(
         project_root=project_root,
         contextual_state=contextual_state,
         shell_spec=shell_spec,
@@ -441,9 +436,6 @@ def _build_base_project_registry(
         env=env,
         skill_registry=skill_registry,
     )
-    if todo_state is not None:
-        registry += build_todo_tools(todo_state)
-    return registry
 
 
 def _build_child_registry(
@@ -519,15 +511,12 @@ def _build_subagent_integration(
     env: ExecutionEnv | None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     external_hook_runner: ExternalHookRunner | None = None,
-    todo_state: SessionTodoState | None = None,
 ) -> tuple[list[Callable[[], None]], tuple[ToolSpec, ...]]:
     """构建子代理运行器和工具，返回 (closers, subagent_tools)。"""
     child_llms = dict(llm_profiles or {})
     if not child_llms:
         child_llms[PROFILE_MAIN] = llm
     child_llms.setdefault(PROFILE_SUBAGENT, child_llms[PROFILE_MAIN])
-    child_tool_names = frozenset(tool.name for tool in child_registry)
-    child_todo_state = todo_state if "todowrite" in child_tool_names else None
 
     async def run_child(
         prompt,
@@ -598,7 +587,6 @@ def _build_subagent_integration(
                     shell_spec=shell_spec,
                     contextual_state=child_contextual_state,
                     modules=runtime_config.prompt.modules,
-                    todo_state=child_todo_state,
                     memory_manager=memory_manager,
                 ),
                 project_root=child_root,
@@ -606,7 +594,6 @@ def _build_subagent_integration(
                     i.model_dump(exclude_none=True)
                     for i in runtime_config.prompt.instructions
                 ),
-                todo_state=child_todo_state,
             ),
         )
         result = None
@@ -700,7 +687,6 @@ def build_agent(
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     skill_registry: SkillRegistry | None = None,
     external_hook_runner: ExternalHookRunner | None = None,
-    todo_state: SessionTodoState | None = None,
     memory_manager: Any | None = None,
 ) -> StructuredAgent:
     from xcode.harness.memory import MemoryManager
@@ -740,7 +726,6 @@ def build_agent(
                 shell_spec=shell_spec,
                 contextual_state=contextual_state,
                 modules=runtime_config.prompt.modules,
-                todo_state=todo_state,
                 memory_manager=memory_manager,
             ),
             fallback_provider=fallback_provider,
@@ -751,7 +736,6 @@ def build_agent(
                 i.model_dump(exclude_none=True)
                 for i in runtime_config.prompt.instructions
             ),
-            todo_state=todo_state,
             memory_manager=memory_manager,
         ),
     )

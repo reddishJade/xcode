@@ -11,7 +11,6 @@ from ...agent.messages import AssistantMessage
 from xcode.ai.events import ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
 from ..config import ExecutionMode
-from ..session_todo import SessionTodoState, TodoItem
 from .agent_helpers import text_from_blocks, to_dict
 from .events import FinalStructuredEvent
 from ..observability import EventCorrelation
@@ -26,7 +25,6 @@ class RunState:
     current_mode: ExecutionMode = "act"
     last_agent: str = "main"
     needs_follow_up: bool = False
-    todos: tuple[TodoItem, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 可序列化字典。"""
@@ -35,7 +33,6 @@ class RunState:
             "current_mode": self.current_mode,
             "last_agent": self.last_agent,
             "needs_follow_up": self.needs_follow_up,
-            "todos": [asdict(item) for item in self.todos],
         }
 
     @classmethod
@@ -49,7 +46,6 @@ class RunState:
             current_mode=parse_execution_mode(payload.get("current_mode")) or "act",
             last_agent=str(payload.get("last_agent", "main")),
             needs_follow_up=bool(payload.get("needs_follow_up", False)),
-            todos=_todo_items(payload.get("todos")),
         )
 
 
@@ -72,7 +68,6 @@ def _build_structured_result(
     result: AgentLoopResult,
     max_steps: int,
     current_mode: ExecutionMode = "act",
-    todos: tuple[TodoItem, ...] = (),
 ) -> StructuredAgentResult:
     """将 AgentLoopResult 转换为 StructuredAgentResult。"""
     answer_parts: list[str] = []
@@ -139,7 +134,6 @@ def _build_structured_result(
         run_state=RunState(
             messages=messages,
             current_mode=current_mode,
-            todos=todos,
         ),
     )
 
@@ -148,15 +142,6 @@ def _message_dicts(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, Mapping)]
-
-
-def _todo_items(value: object) -> tuple[TodoItem, ...]:
-    """从持久化运行状态恢复有效待办项。"""
-    state = SessionTodoState()
-    try:
-        return state.replace(value)
-    except ValueError:
-        return ()
 
 
 def _final_event(

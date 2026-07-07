@@ -299,8 +299,6 @@ def make_bottom_toolbar(state: ReplState) -> Callable[[], str]:
             parts.append(f"context: {state.context_usage}")
         if state.context_cost:
             parts.append(f"cost: {state.context_cost}")
-        if state.expand_reasoning:
-            parts.append("think: expanded")
         return "  ".join(parts)
 
     return toolbar
@@ -348,16 +346,6 @@ def create_prompt_session(
             event.app.exit(exception=KeyboardInterrupt())
 
     bindings.add("c-c")(handle_ctrl_c)
-
-    if state is not None:
-
-        def handle_ctrl_t(event) -> None:
-            state.expand_reasoning = not state.expand_reasoning
-            status = "expanded" if state.expand_reasoning else "collapsed"
-            sys.stdout.write(f"\r  Thinking: {status}\n")  # noqa: T201
-            sys.stdout.flush()
-
-        bindings.add("c-t")(handle_ctrl_t)
 
     completer = ReplCompleter(
         project_root or Path.cwd(),

@@ -55,7 +55,7 @@ from xcode.harness.agent_runtime.events import (
     StructuredAgentEvent,
     TextDeltaStructuredEvent,
     ToolResultStructuredEvent,
-    TodoUpdateStructuredEvent,
+
     ToolUpdateStructuredEvent,
     ToolUseStructuredEvent,
 )
@@ -63,7 +63,6 @@ from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.observability import FileGrantStore
 from xcode.harness.observability.permission_model import SessionGrantStoreManager
 from xcode.harness.session import SessionMetadataView, SessionStore
-from xcode.harness.session_todo import TodoItem
 from xcode.harness.snapshot import (
     SnapshotStore,
     SnapshotUnsupportedError,
@@ -548,7 +547,7 @@ class _ReplTurnRenderer:
         self.streamed_text = False
         self.tool_handler = ToolCallHandler(state, self.live_console)
         self.reasoning_handler = ReasoningHandler(
-            self.live_console, self.state.verbosity, self.state.expand_reasoning
+            self.live_console, self.state.verbosity
         )
         self.tool_names_in_turn: list[str] = []
 
@@ -571,8 +570,6 @@ class _ReplTurnRenderer:
         elif isinstance(event, ToolResultStructuredEvent):
             self.tool_handler.record_tool_result(event.data)
             self.tool_handler.clear_progress()
-        elif isinstance(event, TodoUpdateStructuredEvent):
-            self._handle_todo_update(event.data)
         elif isinstance(event, FinalStructuredEvent):
             self._handle_final_event(event.data)
 
@@ -629,24 +626,6 @@ class _ReplTurnRenderer:
                 self.markdown_renderer.render(final_answer)
             self.streamed_text = False
         self.stopped_reason = final_stop_reason(event_data)
-
-    def _handle_todo_update(self, items: tuple[TodoItem, ...]) -> None:
-        """渲染当前会话待办清单。"""
-        self.tool_handler.flush_group()
-        self.live_console.print(
-            Text(f"  Todo ({len(items)} items)", style=CLI_COLOR_INFO)
-        )
-        markers = {
-            "pending": " ",
-            "in_progress": "/",
-            "completed": "x",
-        }
-        for item in items:
-            self.live_console.print(
-                Text(
-                    f"    [{markers[item.status]}] {item.content}", style=CLI_COLOR_INFO
-                )
-            )
 
 
 def _assistant_has_tool_calls(

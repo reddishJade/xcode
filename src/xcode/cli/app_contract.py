@@ -7,7 +7,6 @@ from xcode.agent.messages import AgentMessage
 from xcode.harness.agent_runtime import CancellationToken, StructuredAgentEvent
 from xcode.harness.config import ExecutionMode
 from xcode.harness.observability import ExternalHookDiagnostic
-from xcode.harness.session_todo import TodoItem
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
 from xcode.harness.skills import ApprovalCallback, ToolRegistryState, ToolSpec
 
@@ -66,4 +65,4 @@ class ReplApp(ModelControlApp, ToolRegistryApp, Protocol):
 
     def hook_diagnostics(self) -> tuple[ExternalHookDiagnostic, ...]: ...
 
-    def restore_todos(self, items: list[dict[str, object]]) -> tuple[TodoItem, ...]: ...
+

@@ -18,7 +18,6 @@ from xcode.harness.agent_runtime import (
 )
 from xcode.harness.skills import ToolRegistryState, ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
-from xcode.harness.session_todo import SessionTodoState, TodoItem
 from xcode.ai.providers.registry import ProviderSettings, build_provider_bundle
 from . import assembly as _assembly
 from .assembly import (
@@ -44,7 +43,7 @@ class XcodeApp:
     mailbox: AgentMailbox | None = None
     progress: bool | None = None
     external_hook_runner: ExternalHookRunner | None = None
-    todo_state: SessionTodoState | None = None
+
     memory_manager: MemoryManager | None = None
     mcp_runtime: McpRuntimeRegistry | None = None
     _model_profiles: dict[str, Any] | None = None
@@ -63,7 +62,8 @@ class XcodeApp:
         reasoning_effort: str | None = None,
     ) -> str:
         from xcode.ai.providers import build_provider_bundle, ProviderSettings
-        from xcode.ai.providers.registry import ModelProfileConfig, ModelProfileProto
+        from xcode.ai.providers.registry import ModelProfileConfig
+        from xcode.ai.providers.registry import ModelProfileProto
 
         if not self._model_profiles:
             return self.agent.provider.model
@@ -154,12 +154,6 @@ class XcodeApp:
             return ()
         return self.external_hook_runner.diagnostics()
 
-    def restore_todos(self, items: list[dict[str, object]]) -> tuple[TodoItem, ...]:
-        """从会话记录恢复轻量待办状态。"""
-        if self.todo_state is None:
-            return ()
-        return self.todo_state.replace(items)
-
     def mcp_status(self) -> tuple[dict[str, object], ...]:
         """返回 MCP server 运行时状态快照。"""
         if self.mcp_runtime is None:
@@ -209,8 +203,6 @@ def build_app(
         if cfg.runtime_config.hooks.entries
         else None
     )
-    todo_state = SessionTodoState()
-
     (
         registry_state,
         shell_spec,
@@ -229,7 +221,6 @@ def build_app(
         cancel_event=infra.cancellation_token,
         skills_dir=cfg.skills_dir,
         external_hook_runner=external_hook_runner,
-        todo_state=todo_state,
         memory_manager=memory_manager,
     )
 
@@ -271,7 +262,6 @@ def build_app(
         fallback_provider=fallback_provider,
         skill_registry=skill_registry,
         external_hook_runner=external_hook_runner,
-        todo_state=todo_state,
         memory_manager=memory_manager,
     )
 
@@ -287,7 +277,6 @@ def build_app(
         mailbox=opt_in_services.mailbox,
         progress=opt_in_services.progress,
         external_hook_runner=external_hook_runner,
-        todo_state=todo_state,
         memory_manager=memory_manager,
         mcp_runtime=mcp_runtime_registry,
         _env_files=cfg.env_files,

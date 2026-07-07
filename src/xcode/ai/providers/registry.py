@@ -175,7 +175,9 @@ def _build_llm_profile(
 ) -> object:
     """构造单个 provider 实例。"""
     transport = profile.transport
-    api_key = _resolve_api_key(profile.api_key, profile_name, env_files, transport)
+    api_key = _resolve_api_key(
+        profile.api_key, profile_name, env_files, transport
+    )
 
     provider_cls = PROVIDER_REGISTRY.get(transport)
     if provider_cls is None:

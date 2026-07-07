@@ -11,7 +11,6 @@ from rich.text import Text
 
 from .commands import ReplState, VerbosityLevel
 from .repl_rendering import (
-    CLI_COLOR_DIM,
     CLI_COLOR_ERROR,
     CLI_COLOR_SUCCESS,
     CLI_COLOR_THINKING,
@@ -154,14 +153,10 @@ class ReasoningHandler:
     """处理推理过程的 delta 流式事件，管理实时预览和摘要输出。"""
 
     def __init__(
-        self,
-        live_console: Console,
-        verbosity: VerbosityLevel = "normal",
-        expand_reasoning: bool = False,
+        self, live_console: Console, verbosity: VerbosityLevel = "normal"
     ) -> None:
         self.live_console = live_console
         self.verbosity = verbosity
-        self.expand_reasoning = expand_reasoning
         self.reasoning_started_at: float | None = None
         self.reasoning_text = ""
         self.reasoning_preview = LiveReasoningPreview(live_console)
@@ -189,10 +184,6 @@ class ReasoningHandler:
                 style=CLI_COLOR_THINKING,
             )
         )
-        if self.expand_reasoning and self.reasoning_text.strip():
-            self.live_console.print(
-                Text(self.reasoning_text.rstrip(), style=CLI_COLOR_DIM)
-            )
         self.reasoning_started_at = None
         self.reasoning_text = ""
 

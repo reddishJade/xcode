@@ -8,7 +8,7 @@ from typing import Any
 
 from xcode.ai.providers.base import ModelProvider
 
-from xcode.ai.models import effective_compact_threshold
+from xcode.ai.models import effective_compact_threshold, get_model_context_window
 from ...agent._compaction import extract_prompt_tokens_from_usage
 from ...agent.config import AgentLoopConfig, AgentLoopTurnUpdate
 from ...agent.context import (
@@ -49,7 +49,6 @@ from ..observability.permission_model import (
 from ..skills import ApprovalCallback, ToolSpec
 from ..agent_skills import SkillRegistry
 from ..memory import MemoryManager
-from ..session_todo import SessionTodoState
 from .cancellation import CancellationToken
 from .compaction import CompactController, estimate_message_tokens
 from .execution_modes import ExecutionModeState, mode_notice
@@ -103,7 +102,6 @@ class AgentRuntimeConfig:
     project_root: Path | None = None
     request_hygiene: RequestHygieneConfig | None = None
     skill_registry: SkillRegistry | None = None
-    todo_state: SessionTodoState | None = None
     memory_manager: MemoryManager | None = None
     prompt_instructions: tuple[dict, ...] = ()
 

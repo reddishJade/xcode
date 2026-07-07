@@ -29,7 +29,9 @@ class OpenAIChatProvider(OpenAICompatProvider):
         thinking_override: bool | None = None,
     ) -> None:
         effective = (
-            self.config.thinking if thinking_override is None else thinking_override
+            self.config.thinking
+            if thinking_override is None
+            else thinking_override
         )
         if self.config.reasoning_effort:
             params["reasoning_effort"] = self.config.reasoning_effort

@@ -182,11 +182,12 @@ class AgentLoopConfig(BaseModel):
     max_consecutive_continuations: int = 3
     min_continuation_tokens: int = 500
 
-    watchdog_repeated_tool_limit: int = 3
+    # 看门狗限制（经验阈值，可根据实际任务调整）
+    watchdog_repeated_tool_limit: int = 3  # 连续重复同一工具签名 3 次则终止
     watchdog_repeated_tool_skip: frozenset[str] = (
         frozenset()
-    )
-    max_consecutive_idle_steps: int = 4
+    )  # 豁免重复检测的工具名集合
+    max_consecutive_idle_steps: int = 4  # 连续 4 次工具调用无产出则终止
 
     should_compact: ShouldCompactHook | None = None
     compact: CompactHook | None = None
@@ -197,6 +198,18 @@ class AgentLoopConfig(BaseModel):
     before_provider_request: BeforeProviderRequestHook | None = None
 
     context_collectors: ContextCollectorRegistry | None = None
+    """上下文收集器注册表。配置后在 context_assembler 之前执行。
+
+    所有注册的 collector 按顺序运行，输出合并为 context_blocks
+    传递给 context_assembler。未配置时收集阶段返回空列表。
+    """
+
     context_assembler: Annotated[ContextAssembler | None, SkipValidation] = None
+    """结构化上下文组装器。配置后替代/增强 transform_context 的功能。
+
+    未配置时消息流完全不变。配置后每轮 provider 调用前执行，
+    按优先级注入 context_blocks，支持 budget 裁剪和过期过滤。
+    与 transform_context 兼容：先执行 context_assembler，再执行 transform_context。
+    """
 
     options: StreamOptions | None = None

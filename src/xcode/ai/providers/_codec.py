@@ -17,25 +17,23 @@ from xcode.ai.types import ToolDefinition
 
 # ── JSON Schema strict 模式 ──
 
-_UNSUPPORTED_STRICT_SCHEMA_KEYS = frozenset(
-    {
-        "default",
-        "format",
-        "maximum",
-        "maxItems",
-        "maxLength",
-        "maxProperties",
-        "minimum",
-        "minItems",
-        "minLength",
-        "minProperties",
-        "multipleOf",
-        "pattern",
-        "patternProperties",
-        "propertyNames",
-        "uniqueItems",
-    }
-)
+_UNSUPPORTED_STRICT_SCHEMA_KEYS = frozenset({
+    "default",
+    "format",
+    "maximum",
+    "maxItems",
+    "maxLength",
+    "maxProperties",
+    "minimum",
+    "minItems",
+    "minLength",
+    "minProperties",
+    "multipleOf",
+    "pattern",
+    "patternProperties",
+    "propertyNames",
+    "uniqueItems",
+})
 
 
 def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
@@ -51,7 +49,9 @@ def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
             properties = node.get("properties", {})
             existing_required = node.get("required", [])
             required = (
-                set(existing_required) if isinstance(existing_required, list) else set()
+                set(existing_required)
+                if isinstance(existing_required, list)
+                else set()
             )
             if isinstance(properties, dict) and properties:
                 node["properties"] = {
@@ -65,7 +65,9 @@ def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
             node.pop(key, None)
 
         if "properties" in node:
-            node["properties"] = {k: process(v) for k, v in node["properties"].items()}
+            node["properties"] = {
+                k: process(v) for k, v in node["properties"].items()
+            }
         if "items" in node:
             node["items"] = process(node["items"])
         if "anyOf" in node:
@@ -98,7 +100,8 @@ def _nullable_schema(schema: Any) -> Any:
         any_of = result.get("anyOf")
         if isinstance(any_of, list):
             has_null = any(
-                isinstance(item, dict) and item.get("type") == "null" for item in any_of
+                isinstance(item, dict) and item.get("type") == "null"
+                for item in any_of
             )
             if not has_null:
                 result["anyOf"] = [*any_of, {"type": "null"}]
@@ -165,13 +168,11 @@ def to_chat_tools(
 
 # ── 跨 provider 消息归一化 ──
 
-_REASONING_CONTENT_TRANSPORTS = frozenset(
-    {
-        "deepseek_chat",
-        "chatglm_chat",
-        "mimo_chat",
-    }
-)
+_REASONING_CONTENT_TRANSPORTS = frozenset({
+    "deepseek_chat",
+    "chatglm_chat",
+    "mimo_chat",
+})
 
 
 def _has_reasoning_content(messages: list[dict[str, Any]]) -> bool:
@@ -243,7 +244,9 @@ def to_chat_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "content": result_content,
             }
             if "tool_calls" in message:
-                result["tool_calls"] = _normalize_chat_tool_calls(message["tool_calls"])
+                result["tool_calls"] = _normalize_chat_tool_calls(
+                    message["tool_calls"]
+                )
             if (
                 "reasoning_content" in message
                 and message["reasoning_content"] is not None

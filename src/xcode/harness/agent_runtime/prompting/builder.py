@@ -35,7 +35,6 @@ from xcode.harness.skills import (
     build_tool_guidelines,
     build_tool_prompt,
 )
-from xcode.harness.session_todo import SessionTodoState
 from xcode.coding_agent.tools.shell_adapter import ShellSpec
 
 from ..contextual import ContextualRetrievalState
@@ -257,7 +256,6 @@ def build_runtime_context_provider(
     contextual_state: ContextualRetrievalState | None = None,
     modules: tuple[str, ...] | None = None,
     shell_spec: ShellSpec | None = None,
-    todo_state: SessionTodoState | None = None,
     memory_manager: MemoryManager | None = None,
 ) -> Callable[[str], list[str]]:
     """构建每轮运行时上下文，并按问题主动召回 opt-in 记忆。"""
@@ -287,10 +285,6 @@ def build_runtime_context_provider(
                 )
             )
         ]
-        if todo_state is not None:
-            rendered_todos = todo_state.render_context()
-            if rendered_todos:
-                parts.append(rendered_todos)
         if memory_manager is not None:
             rendered_memory = _render_memory_context(
                 memory_manager,

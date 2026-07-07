@@ -8,7 +8,6 @@ from .question import build_question_tool
 from .read_file import build_read_file_tool
 from .shell_adapter import ShellSpec, detect_shell, build_shell_argv
 from .tools_manager import ensure_tool
-from .todo import build_todo_tools
 from .webfetch import build_webfetch_tool
 from .websearch import build_websearch_tool
 from .write_file import build_write_file_tools
@@ -20,7 +19,6 @@ __all__ = [
     "build_grep_tool",
     "build_question_tool",
     "build_read_file_tool",
-    "build_todo_tools",
     "build_webfetch_tool",
     "build_websearch_tool",
     "build_write_file_tools",

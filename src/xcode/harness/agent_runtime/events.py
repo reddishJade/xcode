@@ -28,7 +28,6 @@ from xcode.agent.types import (
     ToolArguments,
     ToolCallContent,
 )
-from ..session_todo import TodoItem
 from ..observability import EventCorrelation, RuntimeCorrelation
 
 if TYPE_CHECKING:
@@ -141,16 +140,6 @@ class ToolResultStructuredEvent:
 
 
 @dataclass(frozen=True)
-class TodoUpdateStructuredEvent:
-    """会话待办完整替换事件。"""
-
-    type: Literal["todo_update"]
-    step: int
-    data: tuple[TodoItem, ...]
-    correlation: EventCorrelation = field(default_factory=EventCorrelation)
-
-
-@dataclass(frozen=True)
 class CompactionData:
     messages_removed: int
     messages_after: int
@@ -183,7 +172,6 @@ type StructuredAgentEvent = (
     | ToolUseStructuredEvent
     | ToolUpdateStructuredEvent
     | ToolResultStructuredEvent
-    | TodoUpdateStructuredEvent
     | CompactionStructuredEvent
     | FinalStructuredEvent
 )
@@ -370,18 +358,7 @@ def _translate_tool_execution_end(
         ),
         state.correlation.snapshot(event.tool_call_id),
     )
-    todo_items = _todo_items_from_result(event)
-    if todo_items is None:
-        return result_event
-    return [
-        result_event,
-        TodoUpdateStructuredEvent(
-            "todo_update",
-            state.step,
-            todo_items,
-            state.correlation.snapshot(event.tool_call_id),
-        ),
-    ]
+    return result_event
 
 
 def _translate_compaction(
@@ -399,38 +376,6 @@ def _translate_compaction(
         ),
         state.correlation.snapshot(),
     )
-
-
-def _todo_items_from_result(
-    event: ToolExecutionEndEvent,
-) -> tuple[TodoItem, ...] | None:
-    """从成功的 todowrite 工具结果构建结构化事件。"""
-    if event.tool_name != "todowrite" or event.is_error or event.result is None:
-        return None
-    try:
-        payload = json.loads(str(event.result.content))
-    except json.JSONDecodeError:
-        return None
-    raw_items = payload.get("todos") if isinstance(payload, dict) else None
-    if not isinstance(raw_items, list):
-        return None
-    items: list[TodoItem] = []
-    for raw_item in raw_items:
-        if not isinstance(raw_item, dict):
-            return None
-        item_id = raw_item.get("id")
-        content = raw_item.get("content")
-        status = raw_item.get("status")
-        priority = raw_item.get("priority")
-        if (
-            not isinstance(item_id, str)
-            or not isinstance(content, str)
-            or status not in {"pending", "in_progress", "completed", "cancelled"}
-            or (priority is not None and priority not in {"high", "medium", "low"})
-        ):
-            return None
-        items.append(TodoItem(item_id, content, status, priority))
-    return tuple(items)
 
 
 def _tool_update_text(partial_result: AgentToolResult | None) -> str:

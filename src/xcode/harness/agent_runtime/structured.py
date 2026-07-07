@@ -102,7 +102,6 @@ class StructuredAgent:
         self.runtime_context_provider = runtime.runtime_context_provider
         self.cancellation_token = runtime.cancellation_token or CancellationToken()
         self.request_hygiene = runtime.request_hygiene or RequestHygieneConfig()
-        self._todo_state = runtime.todo_state
         self._memory_manager = runtime.memory_manager
         self._correlation = gate.correlation or RuntimeCorrelation(gate.session_id)
         self._last_prompt_tokens: int | None = None
@@ -162,8 +161,6 @@ class StructuredAgent:
 
     def clear_history(self) -> None:
         self._history = []
-        if self._todo_state is not None:
-            self._todo_state.replace([])
         if self._runtime.skill_registry is not None:
             self._runtime.skill_registry.clear_activations()
         self._gate.clear_session_grants()
@@ -212,19 +209,6 @@ class StructuredAgent:
 
     def load_run_state(self, run_state: RunState) -> None:
         self._history = messages_from_run_state(run_state)
-        if self._todo_state is not None:
-            self._todo_state.replace(
-                [
-                    {
-                        "id": item.id,
-                        "content": item.content,
-                        "status": item.status,
-                    }
-                    for item in run_state.todos
-                ]
-            )
-        if self._runtime.skill_registry is not None:
-            self._runtime.skill_registry.restore_activations(run_state.messages)
         self._reset_provider_conversation_state()
         if run_state.current_mode in {"act", "plan", "build"}:
             self._mode.set_mode(run_state.current_mode)
@@ -536,7 +520,6 @@ class StructuredAgent:
             visible_result,
             snapshot.config.max_steps,
             self._mode.current_mode,
-            self._todo_state.snapshot() if self._todo_state is not None else (),
         )
         self._record_memory_feedback(final)
 

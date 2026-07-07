@@ -24,13 +24,11 @@ from xcode.coding_agent.tools import (
     build_grep_tool,
     build_question_tool,
     build_read_file_tool,
-    build_todo_tools,
     build_webfetch_tool,
     build_websearch_tool,
     build_write_file_tools,
 )
 from xcode.harness.worktree import WorktreeTaskRunner, build_worktree_tools
-from xcode.harness.session_todo import SessionTodoState
 from xcode.harness.assembly import build_search_tools_tool
 from xcode.harness.memory import MemoryManager, build_memory_tools
 
@@ -52,7 +50,6 @@ CATALOG_COVERED_BUILDERS = frozenset(
         "build_question_tool",
         "build_subagent_tools",
         "build_task_tools",
-        "build_todo_tools",
         "build_webfetch_tool",
         "build_websearch_tool",
         "build_worktree_tools",
@@ -78,7 +75,6 @@ def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
         lambda: _build_mailbox_catalog(base_tmp),
         lambda: _build_progress_catalog(base_tmp),
         lambda: build_memory_tools(MemoryManager(base_tmp)),
-        lambda: build_todo_tools(SessionTodoState()),
         lambda: (build_search_tools_tool(lambda: ()),),
     ]
 
