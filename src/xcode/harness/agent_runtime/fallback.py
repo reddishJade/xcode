@@ -31,6 +31,18 @@ class _FallbackSwitchingProvider:
         self._fallback_successes: int = 0
         self._using_fallback: bool = False
 
+    def replace_primary(self, primary: ModelProvider) -> None:
+        """热替换主 provider 并重置容灾计数。
+
+        /model、/thinking、/effort 等命令重建主 provider 后调用此方法，
+        原地换主以保留 fallback 容灾包装层。新主 provider 视为全新实例，
+        下一轮 stream 优先尝试新主而非沿用 fallback 状态。
+        """
+        self._primary = primary
+        self._consecutive_errors = 0
+        self._fallback_successes = 0
+        self._using_fallback = False
+
     @property
     def active_provider(self) -> ModelProvider:
         return self._fallback if self._using_fallback else self._primary
