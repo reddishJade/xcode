@@ -9,9 +9,10 @@ import os
 import time
 import uuid
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, Protocol
 
-from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.agent.types import ToolInput, ToolSpec
 import filelock
 
 
@@ -389,7 +390,7 @@ class AgentMailbox:
 
 
 def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
-    def send_mailbox_message(args: ToolInput) -> str:
+    def send_mailbox_message(args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         sender_id = str(args.get("sender_id", "")).strip()
         recipient_id = str(args.get("recipient_id", "")).strip()
         type_name = str(args.get("type", "")).strip()
@@ -416,7 +417,7 @@ def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
         )
         return f"sent message {message_id} to {recipient_id}"
 
-    def read_mailbox_messages(args: ToolInput) -> str:
+    def read_mailbox_messages(args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         recipient_id = str(args.get("recipient_id", "")).strip()
         if not recipient_id:
             raise ValueError("recipient_id is required")
@@ -439,7 +440,7 @@ def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
         )
         return json.dumps(messages, ensure_ascii=False, indent=2)
 
-    def acknowledge_mailbox_message(args: ToolInput) -> str:
+    def acknowledge_mailbox_message(args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         message_id = str(args.get("message_id", "")).strip()
         recipient_id = str(args.get("recipient_id", "")).strip()
         if not message_id:
@@ -475,7 +476,6 @@ def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
                 "required": ["sender_id", "recipient_id", "type"],
                 "additionalProperties": False,
             },
-            group="mailbox",
         ),
         ToolSpec(
             name="read_mailbox_messages",
@@ -503,8 +503,6 @@ def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
                 "required": ["recipient_id"],
                 "additionalProperties": False,
             },
-            read_only=True,
-            group="mailbox",
         ),
         ToolSpec(
             name="acknowledge_mailbox_message",
@@ -520,6 +518,5 @@ def build_mailbox_tools(mailbox: AgentMailbox) -> tuple[ToolSpec, ...]:
                 "required": ["recipient_id", "message_id"],
                 "additionalProperties": False,
             },
-            group="mailbox",
         ),
     )

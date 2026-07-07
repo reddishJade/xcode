@@ -110,7 +110,7 @@ def _execute_tool_via_gate(
     无 session/audit 上下文，且为用户显式输入而非 LLM 决策，不写入审计日志。
     """
     if agent is None:
-        return str(tool.handler(tool_input))
+        return str(tool.handler(tool_input, None))
 
     mode_state = ExecutionModeState()
     gate = ToolGate(

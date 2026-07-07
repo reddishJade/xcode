@@ -62,7 +62,7 @@ def _grant_matches_target(
     if record.access != target.access:
         return False
     if target.kind != "path":
-        from .rule_matcher import _wildcard_match
+        from ..rule_matcher import _wildcard_match
 
         return _wildcard_match(target.value, record.target_pattern, cross_path=True)
     return _path_pattern_matches(

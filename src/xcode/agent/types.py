@@ -120,7 +120,7 @@ type ToolUpdateCallback = Callable[[AgentToolResult], None]
 
 ToolInput = dict[str, Any]
 ActionHandler = Callable[[ToolInput, Callable[[str], None] | None], str]
-HITLResult = dict[str, object]
+HITLResult = Any
 ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
 
 

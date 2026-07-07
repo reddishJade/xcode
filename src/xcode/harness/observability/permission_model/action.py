@@ -199,7 +199,7 @@ class ActionExtractor:
         shell_type: str = "posix",
     ) -> Any:
         try:
-            from .shell_analyzer import analyze_shell_command
+            from ..shell_analyzer import analyze_shell_command
 
             return analyze_shell_command(command, shell_type)
         except ImportError:

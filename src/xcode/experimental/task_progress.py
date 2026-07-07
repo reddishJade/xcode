@@ -13,10 +13,11 @@ import logging
 import time
 from dataclasses import asdict
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from xcode.experimental.orchestration_store import OrchestrationStore, TaskRunState
-from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.agent.types import ToolInput, ToolSpec
 from xcode.experimental.task_store import CLAIMED, PENDING, TaskStore
 
 logger = logging.getLogger("xcode.experimental.task_progress")
@@ -260,7 +261,7 @@ def build_progress_tools(
 ) -> tuple[ToolSpec, ...]:
     resolved_summary_path = summary_path
 
-    def save_task_progress(args: ToolInput) -> str:
+    def save_task_progress(args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         task_id = args.get("task_id", args.get("id"))
         feature_list = args.get("feature_list", args.get("checklist"))
         if task_id is None:
@@ -277,14 +278,14 @@ def build_progress_tools(
         )
         return f"saved progress for task {task_id}"
 
-    def resume_task_progress(args: ToolInput) -> str:
+    def resume_task_progress(args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         task_id = args.get("task_id", args.get("id"))
         if task_id is None:
             raise ValueError("task_id is required")
         checklist = resume_task(task_store, task_id)
         return json.dumps(checklist, ensure_ascii=False, indent=2)
 
-    def start_task_run(args: ToolInput) -> str:
+    def start_task_run(args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         task_id = args.get("task_id", args.get("id"))
         if task_id is None:
             raise ValueError("task_id is required")
@@ -301,21 +302,21 @@ def build_progress_tools(
         )
         return json.dumps(_state_to_dict(state), ensure_ascii=False, indent=2)
 
-    def resume_task_run(args: ToolInput) -> str:
+    def resume_task_run(args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         task_id = args.get("task_id", args.get("id"))
         if task_id is None:
             raise ValueError("task_id is required")
         state = resume_run(task_store, orchestration_store, task_id)
         return json.dumps(_state_to_dict(state), ensure_ascii=False, indent=2)
 
-    def retry_task_run(args: ToolInput) -> str:
+    def retry_task_run(args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         task_id = args.get("task_id", args.get("id"))
         if task_id is None:
             raise ValueError("task_id is required")
         state = retry_run(task_store, orchestration_store, task_id)
         return json.dumps(_state_to_dict(state), ensure_ascii=False, indent=2)
 
-    def expire_task_runs(_args: ToolInput) -> str:
+    def expire_task_runs(_args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         expired = expire_stale_runs(task_store, orchestration_store)
         return json.dumps(
             [_state_to_dict(state) for state in expired],
@@ -341,7 +342,6 @@ def build_progress_tools(
                 "required": ["task_id", "feature_list"],
                 "additionalProperties": False,
             },
-            group="progress",
         ),
         ToolSpec(
             name="resume_task_progress",
@@ -354,8 +354,6 @@ def build_progress_tools(
                 "required": ["task_id"],
                 "additionalProperties": False,
             },
-            read_only=True,
-            group="progress",
         ),
         ToolSpec(
             name="start_task_run",
@@ -379,7 +377,6 @@ def build_progress_tools(
                 "required": ["task_id"],
                 "additionalProperties": False,
             },
-            group="progress",
         ),
         ToolSpec(
             name="resume_task_run",
@@ -392,8 +389,6 @@ def build_progress_tools(
                 "required": ["task_id"],
                 "additionalProperties": False,
             },
-            read_only=True,
-            group="progress",
         ),
         ToolSpec(
             name="retry_task_run",
@@ -408,7 +403,6 @@ def build_progress_tools(
                 "required": ["task_id"],
                 "additionalProperties": False,
             },
-            group="progress",
         ),
         ToolSpec(
             name="expire_task_runs",
@@ -420,7 +414,6 @@ def build_progress_tools(
                 "properties": {},
                 "additionalProperties": False,
             },
-            group="progress",
         ),
     )
 

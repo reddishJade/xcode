@@ -30,7 +30,7 @@ from .security import (
 )
 
 if TYPE_CHECKING:
-    from ..agent_skills import SkillRegistry
+    from ..skills import SkillRegistry
 
 
 def build_hook_manager(

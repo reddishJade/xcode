@@ -13,13 +13,12 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from functools import partial
 from pathlib import Path
 from typing import Any
 
 import filelock
 
-from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.agent.types import ToolInput, ToolSpec
 
 
 PENDING = "pending"
@@ -605,59 +604,49 @@ def build_task_tools(store: TaskStore) -> tuple[ToolSpec, ...]:
             name="create_task",
             description="Create a durable task graph node. Expose title and blocked_by dependencies.",
             input_hint='{"title": "Implement X", "blocked_by": [1]}',
-            handler=partial(_create_task, store),
+            handler=lambda args, on_update=None: _create_task(store, args),
             schema=CREATE_TASK_SCHEMA,
-            group="tasks",
         ),
         ToolSpec(
             name="update_task",
             description="Update task attributes, status (pending/claimed/completed), title, or blocked_by. Pass expected_version for optimistic locking.",
             input_hint='{"id": 1, "status": "completed", "expected_version": 2}',
-            handler=partial(_update_task, store),
+            handler=lambda args, on_update=None: _update_task(store, args),
             schema=UPDATE_TASK_SCHEMA,
-            group="tasks",
         ),
         ToolSpec(
             name="claim_task",
             description="Atomically claim a pending task for an agent. Returns failure message if task is already claimed or completed.",
             input_hint='{"task_id": 1, "claimant": "agent_a"}',
-            handler=partial(_claim_task, store),
+            handler=lambda args, on_update=None: _claim_task(store, args),
             schema=CLAIM_TASK_SCHEMA,
-            group="tasks",
         ),
         ToolSpec(
             name="advance_task",
             description="Mark a task as completed and auto-unblock its dependents. Use instead of update_task for completing tasks with blocked_by dependencies.",
             input_hint='{"id": 1}',
-            handler=partial(_advance_task, store),
+            handler=lambda args, on_update=None: _advance_task(store, args),
             schema=ADVANCE_TASK_SCHEMA,
-            group="tasks",
         ),
         ToolSpec(
             name="list_tasks",
             description="List task graph nodes. Supports 'kanban', 'topological', or 'raw' views.",
             input_hint='{"view": "kanban"}',
-            handler=partial(_list_tasks, store),
+            handler=lambda args, on_update=None: _list_tasks(store, args),
             schema=LIST_TASKS_SCHEMA,
-            read_only=True,
-            group="tasks",
         ),
         ToolSpec(
             name="get_task",
             description="Retrieve detailed fields and full payload of a single task by its integer ID.",
             input_hint='{"id": 1}',
-            handler=partial(_get_task, store),
+            handler=lambda args, on_update=None: _get_task(store, args),
             schema=GET_TASK_SCHEMA,
-            read_only=True,
-            group="tasks",
         ),
         ToolSpec(
             name="resolve_blocked",
             description="Show which tasks are blocked by unfinished dependencies.",
             input_hint="{}",
-            handler=partial(_resolve_blocked, store),
+            handler=lambda args, on_update=None: _resolve_blocked(store, args),
             schema=RESOLVE_BLOCKED_SCHEMA,
-            read_only=True,
-            group="tasks",
         ),
     )

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from xcode.agent.types import ToolInput, ToolSpec
@@ -26,7 +27,7 @@ def build_load_skill_tool(
     默认返回技能正文 + references 摘要元数据。
     """
 
-    def handler(input: ToolInput) -> str:
+    def handler(input: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         name = input.get("name", "")
         if not isinstance(name, str) or not name.strip():
             return "Error: 'name' is required and must be a non-empty string."

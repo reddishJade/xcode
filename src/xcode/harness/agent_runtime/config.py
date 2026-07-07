@@ -46,7 +46,7 @@ from ..observability.permission_model import (
     Rule,
 )
 from ...agent.types import ApprovalCallback, ToolSpec
-from ..agent_skills import SkillRegistry
+from ..skills import SkillRegistry
 from ..memory import MemoryManager
 from .cancellation import CancellationToken
 
@@ -299,7 +299,7 @@ def build_loop_config(
     registry_: ContextCollectorRegistry | None = None
     assembler: DefaultContextAssembler | None = None
     if project_root is not None:
-        from xcode.harness.agent_skills import (
+        from xcode.harness.skills import (
             SkillIndexCollector,
             SkillRegistry,
             build_skill_search_dirs,

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import cast
 
 from xcode.agent.types import ToolInput, ToolSpec
@@ -16,7 +17,7 @@ from .manager import MemoryLayerFilter, MemoryManager, MemoryRetrievalContext
 def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
     """构建 opt-in memory 工具。"""
 
-    def search_memory(data: ToolInput) -> str:
+    def search_memory(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         """跨项目级与用户级记忆检索并渲染来源。"""
         query = str(data.get("query", "")).strip()
         if not query:

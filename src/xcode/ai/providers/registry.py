@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 from dotenv import dotenv_values
 
+from xcode.ai.providers.base import ModelProvider
 from xcode.ai.types import ProviderConfig
 
 from ._runtime import ProviderRuntime, RetryPolicy, RateLimitPolicy
@@ -82,8 +83,8 @@ class ProviderSettings:
 
 @dataclass(frozen=True)
 class ProviderBundle:
-    llm: object  # ModelProvider
-    llms: dict[str, object]
+    llm: ModelProvider
+    llms: dict[str, ModelProvider]
 
 
 # ── 环境变量工具 ──
@@ -121,7 +122,7 @@ def build_provider_bundle(settings: ProviderSettings) -> ProviderBundle:
 def _build_llm_profiles(
     settings: ProviderSettings,
     runtime: ProviderRuntime,
-) -> dict[str, object]:
+) -> dict[str, ModelProvider]:
     """构造所有 model profile 的 provider 实例。"""
     profile_settings = dict(settings.model_profiles)
     profile_settings.setdefault("main", ModelProfileConfig())
@@ -172,7 +173,7 @@ def _build_llm_profile(
     profile: ModelProfileProto,
     profile_name: str,
     env_files: tuple[Path, ...],
-) -> object:
+) -> ModelProvider:
     """构造单个 provider 实例。"""
     transport = profile.transport
     api_key = _resolve_api_key(

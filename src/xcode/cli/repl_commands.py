@@ -80,11 +80,13 @@ def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
 def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
     """从当前会话创建独立分支。"""
     parent_session_id = ctx.store.session_id
-    meta = ctx.store.fork_into()
-    if ctx.snapshot_store is not None:
-        ctx.snapshot_store.fork_session(parent_session_id, meta.id)
+    ctx.store.fork_into()
+    fork_meta = ctx.store.current_metadata()
+    if ctx.snapshot_store is not None and fork_meta is not None:
+        ctx.snapshot_store.fork_session(parent_session_id, fork_meta.id)
     sync_agent_history(ctx.app, ctx.store)
-    print(f'Forked: "{meta.title}"')
+    if fork_meta is not None:
+        print(f'Forked: "{fork_meta.title}"')
     return False
 
 
@@ -1225,7 +1227,7 @@ def _revert_turn(
                     name=tool_name,
                     description="Restore a workspace file from a snapshot.",
                     input_hint='JSON: {"path": "relative/path"}',
-                    handler=lambda _input: "",
+                    handler=lambda _input, _on_update=None: "",
                     schema={
                         "type": "object",
                         "properties": {"path": {"type": "string"}},
