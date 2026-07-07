@@ -28,7 +28,7 @@ from xcode.cli.repl_rendering import input_prompt
 from xcode.cli.repl_rendering import reasoning_preview_lines
 from xcode.cli.repl_sessions import records_to_agent_messages
 from xcode.cli.repl_skills import parse_skill_invocation
-from xcode.cli.repl_tools import brief_input, run_tool_command
+from xcode.cli.repl_tools import brief_input, run_tool_command, tool_intent
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
 from xcode.harness.session import SessionRecord, SessionStore
 from xcode.harness.snapshot import SnapshotResult, SnapshotStore
@@ -969,6 +969,16 @@ class XcodeReplTests:
         assert (
             brief_input("grep_search", {"pattern": "**/*mcp*", "path": "src/xcode"})
             == 'grep_search: pattern="**/*mcp*", path="src/xcode"'
+        )
+
+    def test_tool_intent_shows_web_search_query_and_fetch_url(self) -> None:
+        assert (
+            tool_intent("websearch", {"query": "Python 3.13 features"})
+            == "Search web for Python 3.13 features"
+        )
+        assert (
+            tool_intent("webfetch", {"url": "https://www.python.org"})
+            == "Fetch https://www.python.org"
         )
 
     def test_run_repl_interrupt_is_final_standalone_line(self) -> None:

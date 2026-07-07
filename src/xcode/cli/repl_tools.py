@@ -269,6 +269,14 @@ def tool_intent(name: str, raw_input: ToolInput | str) -> str:
         command = raw_input.get("command") or raw_input.get("input")
         if command:
             return single_line_preview(f"Run {command}")
+    if name == "websearch":
+        query = raw_input.get("query") or raw_input.get("input")
+        if query:
+            return single_line_preview(f"Search web for {query}")
+    if name == "webfetch":
+        url = raw_input.get("url") or raw_input.get("input")
+        if url:
+            return single_line_preview(f"Fetch {url}")
     return single_line_preview(f"Run {name}")
 
 
