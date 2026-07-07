@@ -44,7 +44,7 @@ from xcode.agent.protocols import AgentToolResult, ToolExecutionMode
 from xcode.agent.types import TextContent
 from xcode.ai.events import Message, TextDelta, ToolCall, ToolCallEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
-from xcode.harness.agent_skills import (
+from xcode.harness.skills import (
     SkillIndexCollector,
     SkillRegistry,
     build_skill_search_dirs,

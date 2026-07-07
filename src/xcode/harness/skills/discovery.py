@@ -9,7 +9,7 @@ import logging
 import os as _os
 from pathlib import Path
 
-from xcode.harness.agent_skills.models import SkillReference, SkillResource
+from xcode.harness.skills.models import SkillReference, SkillResource
 
 logger = logging.getLogger(__name__)
 

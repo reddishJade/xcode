@@ -6,14 +6,14 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
-from xcode.harness.agent_skills.models import SkillDef, SkillDiagnostic, SkillSummary
-from xcode.harness.agent_skills.parsing import (
+from xcode.harness.skills.models import SkillDef, SkillDiagnostic, SkillSummary
+from xcode.harness.skills.parsing import (
     find_body_start,
     frontmatter_metadata,
     frontmatter_optional_string,
     parse_frontmatter,
 )
-from xcode.harness.agent_skills.discovery import (
+from xcode.harness.skills.discovery import (
     load_reference_text,
     scan_skill_references,
     scan_skill_resources,

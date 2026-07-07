@@ -33,7 +33,7 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from xcode.harness.agent_skills import (
+from xcode.harness.skills import (
     SkillIndexCollector,
     SkillRegistry,
     build_load_skill_tool,

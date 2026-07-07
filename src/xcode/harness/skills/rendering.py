@@ -14,10 +14,10 @@ from xcode.agent.context import (
     ContextBlockTarget,
     ContextPriority,
 )
-from xcode.harness.agent_skills.models import SkillSummary
+from xcode.harness.skills.models import SkillSummary
 
 if TYPE_CHECKING:
-    from xcode.harness.agent_skills.registry import SkillRegistry
+    from xcode.harness.skills.registry import SkillRegistry
 
 _CATALOG_DESCRIPTION_MAX_CHARS = 768
 

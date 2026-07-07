@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING
 
 from xcode.agent.types import ToolSpec
 from xcode.harness.skill_activation import SKILL_ACTIVATION_STATE_TAG
-from xcode.harness.agent_skills.models import SkillDef, SkillResource
-from xcode.harness.agent_skills.rendering import xml_escape_attr, xml_escape_content
+from xcode.harness.skills.models import SkillDef, SkillResource
+from xcode.harness.skills.rendering import xml_escape_attr, xml_escape_content
 
 if TYPE_CHECKING:
-    from xcode.harness.agent_skills.registry import SkillRegistry
+    from xcode.harness.skills.registry import SkillRegistry
 
 
 def build_load_skill_tool(

@@ -17,13 +17,13 @@ from unittest import mock
 
 import jsonschema
 
-from xcode.harness.agent_skills import (
+from xcode.harness.skills import (
     SkillIndexCollector,
     SkillRegistry,
     build_load_skill_tool,
     build_skill_search_dirs,
 )
-from xcode.harness.agent_skills.parsing import parse_frontmatter
+from xcode.harness.skills.parsing import parse_frontmatter
 from xcode.harness.observability import (
     PermissionEngine,
     PermissionEngineConfig,
@@ -131,7 +131,7 @@ class TestFrontmatterParser:
             "---\n"
         )
 
-        with assert_logs("xcode.harness.agent_skills", level="WARNING"):
+        with assert_logs("xcode.harness.skills", level="WARNING"):
             result = parse_frontmatter(text)
 
         assert result is not None
@@ -149,7 +149,7 @@ class TestFrontmatterParser:
         )
 
         with assert_logs(
-            "xcode.harness.agent_skills",
+            "xcode.harness.skills",
             level="WARNING",
         ) as logs:
             result = parse_frontmatter(text)
@@ -243,7 +243,7 @@ class TestSkillRegistry:
             registry = SkillRegistry()
 
             with assert_logs(
-                "xcode.harness.agent_skills",
+                "xcode.harness.skills",
                 level="WARNING",
             ) as logs:
                 registry.discover(build_skill_search_dirs(root))
@@ -271,7 +271,7 @@ class TestSkillRegistry:
             registry = SkillRegistry()
 
             with assert_logs(
-                "xcode.harness.agent_skills",
+                "xcode.harness.skills",
                 level="WARNING",
             ) as logs:
                 registry.discover(build_skill_search_dirs(root))
@@ -295,7 +295,7 @@ class TestSkillRegistry:
             registry = SkillRegistry()
 
             with assert_logs(
-                "xcode.harness.agent_skills",
+                "xcode.harness.skills",
                 level="WARNING",
             ) as logs:
                 registry.discover(build_skill_search_dirs(root))
@@ -535,7 +535,7 @@ class TestSkillRegistry:
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "missing"
             with assert_logs(
-                "xcode.harness.agent_skills",
+                "xcode.harness.skills",
                 level="WARNING",
             ) as logs:
                 search_dirs = build_skill_search_dirs(
