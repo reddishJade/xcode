@@ -708,18 +708,19 @@ def handle_thinking_command(command: str, app: object) -> None:
 
     info = app.get_model_info()
     current_model = info.get("model", "unknown") if info else "unknown"
-    current_effort = info.get("reasoning_effort", "high") if info else "high"
 
+    # thinking 与 reasoning_effort 是两个正交状态轴：/thinking 只翻转 thinking，
+    # 不传 reasoning_effort 让 set_model 沿用 profile 现值。
     try:
         if state == "off":
-            app.set_model(model=current_model, thinking=False, reasoning_effort=None)
+            app.set_model(model=current_model, thinking=False)
             print("Thinking disabled.")
         else:
-            app.set_model(
-                model=current_model,
-                thinking=True,
-                reasoning_effort=current_effort,
-            )
-            print(f"Thinking enabled (effort: {current_effort}).")
+            app.set_model(model=current_model, thinking=True)
+            effort = app.get_model_info().get("reasoning_effort")
+            if effort:
+                print(f"Thinking enabled (effort: {effort}).")
+            else:
+                print("Thinking enabled.")
     except Exception as exc:
         print(f"Failed to set thinking: {exc}")
