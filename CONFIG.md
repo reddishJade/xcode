@@ -322,9 +322,11 @@ Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
 稳定工具默认注册：文件读写编辑、`glob_files`、`find_files`、`list_dir`、`grep_search`、`websearch`、`webfetch`、`question`、`bash`、`search_tools`、`subagent`、worktree、`todowrite`、`search_memory`。发现 skill 时注册 `load_skill`；存在 `.local/mcp_config.json` 时注册 `mcp__{server}__{tool}` 动态工具。
 
 `search_tools` 工具按关键字搜索当前已注册工具。
-`websearch` 是 xcode-native 搜索实现，支持 `query`、`numResults`、`timeout`，
-不启用 Exa / Parallel MCP provider。`webfetch` 支持 `markdown`、`text`、`html`
-输出格式，最多读取 5MB，并在截断时标记结果。
+`websearch` 通过 Exa / Parallel MCP provider 搜索网络，默认 Exa；支持 `query`、
+`numResults`、`type`（`auto`/`fast`/`deep`）、`livecrawl`（`fallback`/`preferred`）
+和 `timeout`。可通过环境变量 `EXA_API_KEY` / `PARALLEL_API_KEY` 或
+`OPENCODE_EXPERIMENTAL_PARALLEL` 切换/鉴权。`webfetch` 支持 `markdown`、`text`、
+`html` 输出格式，自动解压 gzip/deflate，最多读取 5MB，并在截断时标记结果。
 运行时按每轮用户问题合并检索项目根 `MEMORY.md` 与
 `~/.xcode/memory/MEMORY.md`，并将匹配记录注入 `<memory>` 上下文。
 `search_memory` 的 schema 接受必填 `query`，以及可选 `limit`（1-10）、
