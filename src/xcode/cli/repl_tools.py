@@ -51,7 +51,7 @@ from xcode.agent.messages import AssistantMessage
 from xcode.agent.types import TextContent, ToolCallContent
 
 
-EXPERIMENTAL_TOOL_GROUPS = frozenset({"tasks", "mailbox", "progress"})
+EXPERIMENTAL_TOOL_GROUPS = frozenset()
 
 
 def _registry(app: object) -> tuple[ToolSpec, ...]:

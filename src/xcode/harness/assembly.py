@@ -62,8 +62,6 @@ from xcode.coding_agent.registry import build_project_scoped_registry
 from xcode.coding_agent.tools import ShellSpec
 
 if TYPE_CHECKING:
-    from xcode.experimental.mailbox import AgentMailbox
-    from xcode.harness.daemon import HeartbeatDaemon
     from xcode.harness.memory import MemoryManager
     from xcode.harness.mcp import McpRuntimeRegistry
     from xcode.harness.agent_skills import SkillRegistry
@@ -71,62 +69,15 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class SharedServices:
-    """进程级共享实验基础设施实例。"""
-
-    task_store: Any | None = None
-    mailbox: Any | None = None
-    worktree_runner: Any = None
-    orchestration_store: Any | None = None
+    pass
 
 
-def build_shared_services(
-    project_root: Path,
-    runtime_config: XcodeRuntimeConfig,
-) -> SharedServices:
-    """按实验开关创建共享服务。"""
-    experimental = runtime_config.experimental
-    if experimental.progress and not experimental.tasks:
-        raise ValueError("experimental.progress requires experimental.tasks")
-
-    return SharedServices(
-        task_store=_build_task_store(project_root) if experimental.tasks else None,
-        mailbox=_build_mailbox(project_root) if experimental.mailbox else None,
-        worktree_runner=_build_worktree_runner(project_root),
-        orchestration_store=(
-            _build_orchestration_store(project_root) if experimental.progress else None
-        ),
-    )
+def build_shared_services(project_root: Path) -> SharedServices:
+    return SharedServices()
 
 
-def _build_task_store(project_root: Path) -> Any:
-    from xcode.experimental.task_store import TaskStore
-
-    return TaskStore(project_root)
-
-
-def _build_mailbox(project_root: Path) -> Any:
-    from xcode.experimental.mailbox import AgentMailbox
-
-    return AgentMailbox(project_root)
-
-
-def _build_worktree_runner(project_root: Path) -> Any:
-    from xcode.harness.worktree import WorktreeTaskRunner
-
-    return WorktreeTaskRunner(project_root)
-
-
-def _build_orchestration_store(project_root: Path) -> Any:
-    from xcode.experimental.orchestration_store import OrchestrationStore
-
-    return OrchestrationStore(project_root)
-
-
-@dataclass(frozen=True)
 class OptInServices:
-    daemon: HeartbeatDaemon | None = None
-    mailbox: AgentMailbox | None = None
-    progress: bool | None = None
+    pass
 
 
 @dataclass(frozen=True)
@@ -255,7 +206,7 @@ SUBAGENT_DEFAULT_TOOLS = frozenset(
     }
 )
 
-SUBAGENT_WORKTREE_SHARED_TOOLS = frozenset({"todowrite"})
+SUBAGENT_WORKTREE_SHARED_TOOLS: frozenset[str] = frozenset()
 
 
 def build_search_tools_tool(
@@ -461,31 +412,6 @@ def _extend_registry_with_features(
     from xcode.harness.mcp import build_mcp_tools
 
     registry += build_mcp_tools(project_root, mcp_runtime_registry)
-    from xcode.harness.worktree import build_worktree_tools
-
-    registry += build_worktree_tools(shared_services.worktree_runner)
-    if shared_services.task_store is not None:
-        from xcode.experimental.task_store import build_task_tools
-
-        registry += build_task_tools(shared_services.task_store)
-    if shared_services.mailbox is not None:
-        from xcode.experimental.mailbox import build_mailbox_tools
-
-        registry += build_mailbox_tools(shared_services.mailbox)
-    if shared_services.orchestration_store is not None:
-        from xcode.experimental.task_progress import build_progress_tools
-
-        task_store = shared_services.task_store
-        if task_store is None:
-            raise RuntimeError("progress service requires task store")
-        progress_summary = resolve_config_path(
-            project_root, runtime_config.paths.progress_summary
-        )
-        registry += build_progress_tools(
-            task_store,
-            shared_services.orchestration_store,
-            summary_path=progress_summary,
-        )
     from xcode.harness.memory import build_memory_tools
 
     if memory_manager is not None:
@@ -611,7 +537,6 @@ def _build_subagent_integration(
         run_child,
         available_profiles=tuple(child_llms),
         default_profile=PROFILE_SUBAGENT,
-        worktree_runner=shared_services.worktree_runner,
         max_active_jobs=config.subagent_workers,
     )
     return [managed_runner.shutdown], build_subagent_tools(managed_runner)
@@ -648,24 +573,9 @@ def _single_line(text: str) -> str:
 def load_opt_in_services(
     project_root: Path,
     runtime_config: XcodeRuntimeConfig,
-    shared_services: SharedServices,
+    shared_services: object,
 ) -> OptInServices:
-    daemon = None
-    if runtime_config.daemon.enabled:
-        from xcode.harness.daemon import HeartbeatDaemon
-
-        daemon = HeartbeatDaemon(
-            project_root=project_root,
-            mailbox=shared_services.mailbox,
-            task_store=shared_services.task_store,
-            worktree_runner=shared_services.worktree_runner,
-            interval_seconds=runtime_config.daemon.interval_seconds,
-        )
-    return OptInServices(
-        daemon=daemon,
-        mailbox=shared_services.mailbox,
-        progress=(True if shared_services.orchestration_store is not None else None),
-    )
+    return OptInServices()
 
 
 # ── Agent 构建 ──

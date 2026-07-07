@@ -20,7 +20,7 @@ from .async_worker import IsolatedAsyncWorker
 并把子 Agent 的进度通过 tool update 流给终端；最终只把完成摘要返回给父模型。
 """
 
-SubagentIsolation = Literal["context", "worktree"]
+SubagentIsolation = Literal["context"]
 SubagentStatus = Literal["running", "done", "failed"]
 SubagentUpdate = Callable[[str], None]
 RunChild = Callable[[str, str, Path | None, SubagentUpdate | None], Awaitable[str]]
@@ -43,12 +43,11 @@ class SubagentResult:
     started_at: datetime
     finished_at: datetime
     cwd_override: Path | None = None
-    worktree_task_id: str | None = None
     error: str | None = None
 
 
 class SubagentRunner:
-    """执行一次子 Agent 委派，并负责并发额度与 worktree 隔离。"""
+    """执行一次子 Agent 委派，并负责并发额度。"""
 
     def __init__(
         self,
@@ -56,7 +55,6 @@ class SubagentRunner:
         timeout_seconds: float | None = 120,
         available_profiles: tuple[str, ...] = (PROFILE_SUBAGENT,),
         default_profile: str = PROFILE_SUBAGENT,
-        worktree_runner=None,
         worker: IsolatedAsyncWorker | None = None,
         max_active_jobs: int = 4,
     ) -> None:
@@ -64,7 +62,6 @@ class SubagentRunner:
         self.timeout_seconds = timeout_seconds
         self.available_profiles = available_profiles
         self.default_profile = default_profile
-        self.worktree_runner = worktree_runner
         self.max_active_jobs = max(1, max_active_jobs)
         self._worker = worker or IsolatedAsyncWorker(name="xcode-subagent-worker")
         self._active_run_ids: set[str] = set()
@@ -98,7 +95,7 @@ class SubagentRunner:
         run_id = self._reserve_run_id()
         started_at = datetime.now()
         try:
-            isolation_mode, cwd_override, worktree_task_id = self._resolve_isolation(
+            isolation_mode, cwd_override = self._resolve_isolation(
                 clean_prompt, isolation
             )
             self._emit(
@@ -149,7 +146,6 @@ class SubagentRunner:
             started_at=started_at,
             finished_at=finished_at,
             cwd_override=cwd_override,
-            worktree_task_id=worktree_task_id,
         )
 
     def shutdown(self) -> None:
@@ -194,14 +190,8 @@ class SubagentRunner:
 
     def _resolve_isolation(
         self, prompt: str, isolation: str | None
-    ) -> tuple[SubagentIsolation, Path | None, str | None]:
-        isolation_mode = _coerce_isolation(isolation)
-        if isolation_mode == "worktree":
-            if self.worktree_runner is None:
-                raise ValueError("worktree isolation is not available")
-            task = self.worktree_runner.create(_task_name(prompt))
-            return isolation_mode, Path(task.path).resolve(), task.id
-        return isolation_mode, None, None
+    ) -> tuple[SubagentIsolation, Path | None]:
+        return _coerce_isolation(isolation), None
 
     def _emit(self, on_update: SubagentUpdate | None, text: str) -> None:
         if on_update is not None:
@@ -230,7 +220,7 @@ def build_subagent_tools(runner: SubagentRunner) -> tuple[ToolSpec, ...]:
                 "result. Progress streams to the user; only the final result is "
                 "returned to the parent model. Do not poll for status."
             ),
-            'JSON: {"description":"short label","prompt":"...", "model_profile":"subagent", "isolation":"context|worktree"}',
+            'JSON: {"description":"short label","prompt":"...", "model_profile":"subagent", "isolation":"context"}',
             lambda data: _subagent_handler(data, None),
             group="subagent",
             counts_as_progress=True,
@@ -266,7 +256,7 @@ def _subagent_schema() -> dict[str, object]:
             "model_profile": {"type": "string"},
             "isolation": {
                 "type": "string",
-                "enum": ["context", "worktree"],
+                "enum": ["context"],
             },
         },
         "required": ["description", "prompt"],
@@ -288,8 +278,6 @@ def _render_subagent_result(result: SubagentResult) -> str:
         f'<task id="{result.run_id}" state="completed">',
         f"<summary>Delegated task completed: {result.prompt[:80]}</summary>",
     ]
-    if result.worktree_task_id:
-        lines.append(f"<worktree>{result.worktree_task_id}</worktree>")
     lines.extend(["<task_result>", answer, "</task_result>", "</task>"])
     return "\n".join(lines)
 
@@ -300,10 +288,7 @@ def _format_update(run_id: str, status: str, message: str) -> str:
 
 
 def _coerce_isolation(isolation: str | None) -> SubagentIsolation:
-    value = (isolation or "context").strip() or "context"
-    if value not in ("context", "worktree"):
-        raise ValueError(f"unknown subagent isolation: {value}")
-    return value
+    return "context"
 
 
 def _unknown_profile(model_profile: str, profiles: tuple[str, ...]) -> str:
@@ -311,5 +296,5 @@ def _unknown_profile(model_profile: str, profiles: tuple[str, ...]) -> str:
     return f"unknown model_profile: {model_profile}; available: {available}"
 
 
-def _task_name(prompt: str) -> str:
+def _task_name(_prompt: str) -> str:
     return prompt.strip().splitlines()[0][:40] or "subagent"

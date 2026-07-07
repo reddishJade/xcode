@@ -176,29 +176,22 @@ def _run(args, runtime_config) -> int:
         or resolve_config_path(args.project_root, runtime_config.paths.sessions_dir)
         or (args.project_root / ".local" / "sessions")
     )
-    daemon = getattr(app, "daemon", None)
-    if daemon is not None:
-        daemon.start()
-    try:
-        if args.session:
-            return run_repl(
-                app,
-                sessions_dir,
-                session_id=args.session,
-                project_root=args.project_root,
-            )
-        if args.continue_:
-            return run_repl(
-                app, sessions_dir, auto_continue=True, project_root=args.project_root
-            )
-        if args.resume:
-            return run_repl(
-                app, sessions_dir, resume_latest=True, project_root=args.project_root
-            )
-        return run_repl(app, sessions_dir, project_root=args.project_root)
-    finally:
-        if daemon is not None:
-            daemon.stop()
+    if args.session:
+        return run_repl(
+            app,
+            sessions_dir,
+            session_id=args.session,
+            project_root=args.project_root,
+        )
+    if args.continue_:
+        return run_repl(
+            app, sessions_dir, auto_continue=True, project_root=args.project_root
+        )
+    if args.resume:
+        return run_repl(
+            app, sessions_dir, resume_latest=True, project_root=args.project_root
+        )
+    return run_repl(app, sessions_dir, project_root=args.project_root)
 
 
 def _build_app_from_config(project_root: Path, runtime_config):

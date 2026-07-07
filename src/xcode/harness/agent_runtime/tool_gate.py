@@ -97,15 +97,7 @@ class ToolGateSnapshot:
 class ToolGate:
     """工具执行门控：HITL 审批、权限检查、准入决策。"""
 
-    PROGRESS_TOOL_NAMES = frozenset(
-        {
-            "save_task_progress",
-            "resume_task_progress",
-            "update_task",
-            "create_task",
-            "todowrite",
-        }
-    )
+    PROGRESS_TOOL_NAMES = frozenset()
 
     def __init__(
         self,

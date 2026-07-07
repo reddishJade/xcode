@@ -28,7 +28,6 @@ from xcode.coding_agent.tools import (
     build_websearch_tool,
     build_write_file_tools,
 )
-from xcode.harness.worktree import WorktreeTaskRunner, build_worktree_tools
 from xcode.harness.assembly import build_search_tools_tool
 from xcode.harness.memory import MemoryManager, build_memory_tools
 
@@ -41,18 +40,14 @@ CATALOG_COVERED_BUILDERS = frozenset(
         "build_glob_tools",
         "build_grep_tool",
         "build_load_skill_tool",
-        "build_mailbox_tools",
         "build_mcp_tools",
         "build_memory_tools",
-        "build_progress_tools",
         "build_read_file_tool",
         "build_search_tools_tool",
         "build_question_tool",
         "build_subagent_tools",
-        "build_task_tools",
         "build_webfetch_tool",
         "build_websearch_tool",
-        "build_worktree_tools",
         "build_write_file_tools",
     }
 )
@@ -67,13 +62,7 @@ def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
         lambda: (build_webfetch_tool(), build_websearch_tool()),
         lambda: (build_question_tool(),),
         lambda: (build_bash_tool(base_tmp),),
-        lambda: build_worktree_tools(
-            WorktreeTaskRunner(base_tmp),
-        ),
-        lambda: _build_task_catalog(base_tmp),
         lambda: _build_mcp_catalog(base_tmp),
-        lambda: _build_mailbox_catalog(base_tmp),
-        lambda: _build_progress_catalog(base_tmp),
         lambda: build_memory_tools(MemoryManager(base_tmp)),
         lambda: (build_search_tools_tool(lambda: ()),),
     ]
@@ -87,32 +76,6 @@ def _build_mcp_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
         mcp_config.parent.mkdir(parents=True, exist_ok=True)
         mcp_config.write_text("{}", encoding="utf-8")
     return build_mcp_tools(base_tmp)
-
-
-def _build_task_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    try:
-        from xcode.experimental.task_store import TaskStore, build_task_tools
-        return build_task_tools(TaskStore(base_tmp))
-    except ModuleNotFoundError:
-        return ()
-
-
-def _build_mailbox_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    try:
-        from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
-        return build_mailbox_tools(AgentMailbox(base_tmp))
-    except ModuleNotFoundError:
-        return ()
-
-
-def _build_progress_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    try:
-        from xcode.experimental.orchestration_store import OrchestrationStore
-        from xcode.experimental.task_progress import build_progress_tools
-        from xcode.experimental.task_store import TaskStore
-        return build_progress_tools(TaskStore(base_tmp), OrchestrationStore(base_tmp))
-    except ModuleNotFoundError:
-        return ()
 
 
 def build_tool_catalog() -> dict[str, set[str]]:

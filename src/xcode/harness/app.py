@@ -26,8 +26,6 @@ from .assembly import (
 )
 
 if TYPE_CHECKING:
-    from xcode.experimental.mailbox import AgentMailbox
-    from xcode.harness.daemon import HeartbeatDaemon
     from xcode.harness.memory import MemoryManager
     from xcode.harness.mcp import McpRuntimeRegistry
 
@@ -39,9 +37,6 @@ class XcodeApp:
     agent: StructuredAgent
     registry: tuple[ToolSpec, ...] | ToolRegistryState = ()
     contextual_state: ContextualRetrievalState | None = None
-    daemon: HeartbeatDaemon | None = None
-    mailbox: AgentMailbox | None = None
-    progress: bool | None = None
     external_hook_runner: ExternalHookRunner | None = None
 
     memory_manager: MemoryManager | None = None
@@ -187,7 +182,7 @@ def build_app(
         project_root, env_files, agent_config, skills_dir, audit_path, runtime_config
     )
     infra = build_shared_infra(project_root, cfg.runtime_config)
-    shared_services = _assembly.build_shared_services(project_root, cfg.runtime_config)
+    shared_services = _assembly.build_shared_services(project_root)
 
     # 使用共享的 MemoryManager 实例，确保 compactor 和 agent 使用同一实例
     memory_manager = infra.memory_manager
@@ -273,9 +268,6 @@ def build_app(
         agent=agent,
         registry=registry_state,
         contextual_state=infra.contextual_state,
-        daemon=opt_in_services.daemon,
-        mailbox=opt_in_services.mailbox,
-        progress=opt_in_services.progress,
         external_hook_runner=external_hook_runner,
         memory_manager=memory_manager,
         mcp_runtime=mcp_runtime_registry,

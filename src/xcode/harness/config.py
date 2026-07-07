@@ -229,7 +229,7 @@ class PathsRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sessions_dir: Path | None = None
     skills_dir: Path | None = None
-    progress_summary: Path = Path(".local/progress_summary.md")
+
 
 
 class ObservabilityRuntimeConfig(BaseModel):
@@ -279,21 +279,6 @@ class HooksRuntimeConfig(BaseModel):
     entries: tuple[ExternalHookRuntimeConfig, ...] = ()
 
 
-class DaemonRuntimeConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    enabled: StrictBool = False
-    interval_seconds: StrictInt = 30
-
-
-class ExperimentalRuntimeConfig(BaseModel):
-    """默认关闭的实验性能力开关。"""
-
-    model_config = ConfigDict(extra="forbid")
-    tasks: StrictBool = False
-    mailbox: StrictBool = False
-    progress: StrictBool = False
-
-
 class XcodeRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provider: ProviderRuntimeConfig = Field(default_factory=ProviderRuntimeConfig)
@@ -306,10 +291,6 @@ class XcodeRuntimeConfig(BaseModel):
         default_factory=ObservabilityRuntimeConfig
     )
     hooks: HooksRuntimeConfig = Field(default_factory=HooksRuntimeConfig)
-    daemon: DaemonRuntimeConfig = Field(default_factory=DaemonRuntimeConfig)
-    experimental: ExperimentalRuntimeConfig = Field(
-        default_factory=ExperimentalRuntimeConfig
-    )
     request_hygiene: RequestHygieneConfig = Field(default_factory=RequestHygieneConfig)
     security: SecurityRuntimeConfig = Field(default_factory=SecurityRuntimeConfig)
     execution_modes: ExecutionModesRuntimeConfig = Field(
