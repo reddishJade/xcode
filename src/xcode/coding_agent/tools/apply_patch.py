@@ -97,15 +97,18 @@ def build_apply_patch_tool(
     return ToolSpec(
         name="apply_patch",
         description=(
-            "Apply a structured patch inside the project sandbox. Supports "
-            "Add File, Update File, Delete File, and Move to hunks."
+            "Edit, add, delete, or move multiple files in a single tool call "
+            "using a structured patch. Bundles related changes for atomic "
+            "multi-file edits. Prefer edit_file for single-file targeted "
+            "replacements."
         ),
         input_hint='JSON: {"patch_text": "*** Begin Patch\\n*** Update File: /abs/path/to/app.py\\n@@\\n-old\\n+new\\n*** End Patch"}',
         handler=apply_patch,
         schema=APPLY_PATCH_SCHEMA,
-        prompt_snippet="Apply structured file patches with add, update, delete, and move hunks",
+        prompt_snippet="Edit, add, delete, or move multiple files in a single patch",
         prompt_guidelines=(
-            "Use apply_patch for multi-file edits when exact old_text replacements are awkward.",
+            "Use apply_patch for multi-file edits that touch 3+ files or need atomic application.",
+            "Use apply_patch to move or delete files (edit_file cannot do this).",
             "Each apply_patch hunk must start with *** Begin Patch and end with *** End Patch.",
             "Patch paths must be project-relative and may not escape the project sandbox.",
         ),
