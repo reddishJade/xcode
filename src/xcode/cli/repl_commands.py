@@ -181,7 +181,7 @@ def cmd_continue(cmd: str, ctx: CommandContext) -> bool:
 
 def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
     """交互式选择并恢复历史会话。"""
-    sessions = ctx.store.list_session_infos()
+    sessions = ctx.store.list_infos()
     if not sessions:
         print("No conversations found.")
         return False

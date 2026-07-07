@@ -18,7 +18,8 @@ from xcode.agent.messages import (
     UserMessage,
 )
 from xcode.agent.types import TextContent, ToolArguments, ToolCallContent
-from xcode.harness.session import SessionMetadataView, SessionRecord, SessionStore
+from xcode.harness.session import SessionEntry as SessionRecord, SessionInfoView as SessionMetadataView
+from xcode.harness.session import SessionStore
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,7 @@ _TranscriptEvent = (
 
 
 def resume_interactively(store: SessionStore, prompt_session: PromptLike) -> None:
-    sessions = store.list_session_infos()
+    sessions = store.list_infos()
     if not sessions:
         print("No conversations found.")
         return
@@ -57,7 +58,7 @@ def resume_interactively(store: SessionStore, prompt_session: PromptLike) -> Non
 
 
 def resume_latest(store: SessionStore) -> SessionMetadataView | None:
-    sessions = store.list_session_infos(limit=1)
+    sessions = store.list_infos(limit=1)
     if not sessions:
         return None
     store.resume(sessions[0].id)
@@ -70,7 +71,7 @@ def sync_agent_history(app: object, store: SessionStore) -> None:
     load_history = getattr(agent, "load_history", None)
     if not callable(load_history):
         return
-    records = store.load_records()
+    records = store.read_entries()
     load_history(records_to_agent_messages(records))
     _restore_contextual_state(app, records)
     set_notice = getattr(agent, "set_resumed_notice", None)
@@ -388,7 +389,7 @@ def print_loaded_history(store: SessionStore) -> None:
     console = Console(file=sys.stdout)
     records = [
         record
-        for record in store.load_records()
+        for record in store.read_entries()
         if record.type in {"user", "assistant"} and str(record.content).strip()
     ]
     if not records:
