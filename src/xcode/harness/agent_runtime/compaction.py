@@ -117,7 +117,6 @@ class LayeredCompactor:
         compact_instructions: CompactInstructions | None = None,
         summarize_fn: SummarizeFn | None = None,
         active_branch_id: str | None = None,
-        reserve_tokens: int = 16384,
     ) -> None:
         self.transcript_dir = transcript_dir
         self.checkpoint_dir = checkpoint_dir

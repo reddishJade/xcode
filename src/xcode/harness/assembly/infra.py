@@ -52,7 +52,6 @@ def build_shared_infra(
         checkpoint_dir=checkpoint_dir,
         max_recent_messages=runtime_config.agent.max_recent_messages,
         keep_recent_tokens=runtime_config.agent.keep_recent_tokens,
-        reserve_tokens=runtime_config.agent.reserve_tokens,
         on_compact=_combined_on_compact,
     )
     return SharedInfra(

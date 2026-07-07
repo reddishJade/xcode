@@ -63,7 +63,6 @@ class AgentConfig(BaseModel):
     reserve_tokens: StrictInt = 16384
     tool_workers: StrictInt = 4
     tool_timeout_seconds: StrictFloat | StrictInt = 120.0
-    subagent_workers: StrictInt = 4
     watchdog_repeated_tool_limit: StrictInt = 3
 
 
