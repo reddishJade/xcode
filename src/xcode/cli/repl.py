@@ -548,7 +548,7 @@ class _ReplTurnRenderer:
         self.streamed_text = False
         self.tool_handler = ToolCallHandler(state, self.live_console)
         self.reasoning_handler = ReasoningHandler(
-            self.live_console, self.state.verbosity
+            self.live_console, self.state.verbosity, self.state.expand_reasoning
         )
         self.tool_names_in_turn: list[str] = []
 
