@@ -32,7 +32,6 @@ from xcode.harness.agent_runtime import (
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
-from xcode.harness.agent_runtime.tool_gate import _ToolSpecAdapter
 from xcode.ai.providers.base import ModelProvider
 from xcode.harness.observability import (
     ExternalHookRunner,
@@ -46,7 +45,7 @@ from xcode.harness.observability.permission_model import ExternalDirectory
 from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
 from xcode.harness.observability.permission_model import Rule
-from xcode.agent.types import AgentToolResult, TextContent, ToolSpec
+from xcode.agent.types import ToolSpec
 from xcode.coding_agent.tools.subagent import build_subagent_tool
 from xcode.coding_agent.registry import build_project_scoped_registry
 from xcode.coding_agent.tools import ShellSpec
@@ -284,12 +283,12 @@ def build_tool_registry(
     )
     registry += (build_search_tools_tool(lambda: registry),)
 
-    _, subagent_tools = _build_subagent_integration(
-        llm=llm,
-        child_registry=child_registry,
+    registry += (build_subagent_tool(
+        model=llm,
+        coding_tools=list(child_registry),
+        research_tools=list(child_registry),
         cancellation_token=cancel_event,
-    )
-    registry += subagent_tools
+    ),)
 
     closers.append(mcp_runtime_registry.close)
 
@@ -380,22 +379,6 @@ def _extend_registry_with_features(
 
         registry += build_memory_tools(MemoryManager(project_root))
     return registry
-
-
-def _build_subagent_integration(
-    llm: ModelProvider,
-    child_registry: tuple[ToolSpec, ...],
-    cancellation_token: CancellationToken | None = None,
-) -> tuple[list[Callable[[], None]], tuple[ToolSpec, ...]]:
-    """构建子代理工具，返回 (closers, subagent_tools)。"""
-    adapted = [_ToolSpecAdapter(s) for s in child_registry]
-    tool = build_subagent_tool(
-        model=llm,
-        coding_tools=adapted,
-        research_tools=adapted,
-        cancellation_token=cancellation_token,
-    )
-    return ([], (tool,))
 
 
 # ── 可选服务 ──

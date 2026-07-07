@@ -20,6 +20,7 @@ from xcode.coding_agent.tools import (
     build_grep_tool,
     build_question_tool,
     build_read_file_tool,
+    build_todowrite_tool,
     build_webfetch_tool,
     build_websearch_tool,
     build_write_file_tools,
@@ -70,6 +71,7 @@ def build_project_scoped_registry(
             env=env,
         ),
     )
+    registry += (build_todowrite_tool(),)
     if skill_registry is not None and skill_registry.available_names():
         from xcode.harness.agent_skills import build_load_skill_tool
 

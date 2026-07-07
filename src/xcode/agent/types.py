@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import json
@@ -207,3 +208,53 @@ class AgentTool(Protocol):
         signal: CancellationSignal | None = None,
         on_update: ToolUpdateCallback | None = None,
     ) -> AgentToolResult: ...
+
+
+class ToolSpecAdapter:
+    """ToolSpec → AgentTool 适配器（无 redaction，可用于子代理等场景）。"""
+
+    def __init__(self, spec: ToolSpec) -> None:
+        self._spec = spec
+
+    @property
+    def name(self) -> str:
+        return self._spec.name
+
+    @property
+    def label(self) -> str:
+        return self._spec.name
+
+    @property
+    def description(self) -> str:
+        return self._spec.description
+
+    @property
+    def parameters(self) -> Mapping[str, object]:
+        return self._spec.schema or {}
+
+    @property
+    def execution_mode(self) -> None:
+        return None
+
+    @property
+    def examples(self) -> list[dict[str, object]]:
+        return []
+
+    async def execute(
+        self,
+        tool_call_id: str,
+        params: ToolArguments,
+        signal: CancellationSignal | None = None,
+        on_update: ToolUpdateCallback | None = None,
+    ) -> AgentToolResult:
+        def _text_update(text: str) -> None:
+            if on_update is not None:
+                on_update(AgentToolResult(content=[TextContent(text=text)]))
+
+        content = await asyncio.to_thread(self._spec.handler, dict(params), _text_update)
+        metadata = getattr(content, "metadata", None)
+        return AgentToolResult(
+            content=[TextContent(text=str(content))],
+            details=metadata if isinstance(metadata, dict) else None,
+            is_error=bool(getattr(content, "is_error", False)),
+        )

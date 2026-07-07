@@ -6,7 +6,7 @@ from typing import Any
 
 from xcode.agent.agent import Agent
 from xcode.ai.providers.base import ModelProvider
-from xcode.agent.types import CancellationSignal, ToolSpec as CoreToolSpec
+from xcode.agent.types import AgentTool, CancellationSignal, ToolSpec, ToolSpecAdapter
 
 
 BUILD_SUBAGENT_PROMPTS: dict[str, str] = {
@@ -35,10 +35,10 @@ BUILD_SUBAGENT_PROMPTS: dict[str, str] = {
 
 def build_subagent_tool(
     model: ModelProvider,
-    coding_tools: list[Any],
-    research_tools: list[Any],
+    coding_tools: list[ToolSpec],
+    research_tools: list[ToolSpec],
     cancellation_token: CancellationSignal | None = None,
-) -> CoreToolSpec:
+) -> ToolSpec:
     def handler(
         data: dict[str, Any],
         on_update: Callable[[str], None] | None = None,
@@ -48,10 +48,11 @@ def build_subagent_tool(
             return "Error: prompt is required"
         subagent_type = str(data.get("subagent_type", "coding")).strip()
         system_prompt = BUILD_SUBAGENT_PROMPTS.get(subagent_type, BUILD_SUBAGENT_PROMPTS["default"])
-        tools = coding_tools if subagent_type == "coding" else research_tools
+        raw_tools = coding_tools if subagent_type == "coding" else research_tools
 
         async def _run() -> str:
-            agent = Agent(tools=tools, model=model, system_prompt=system_prompt)
+            adapted: list[AgentTool] = [ToolSpecAdapter(s) for s in raw_tools]  # type: ignore[assignment]
+            agent = Agent(tools=adapted, model=model, system_prompt=system_prompt)
             return await agent.prompt(
                 prompt,
                 signal=cancellation_token,
@@ -60,7 +61,7 @@ def build_subagent_tool(
 
         return async_run(_run())
 
-    return CoreToolSpec(
+    return ToolSpec(
         name="subagent",
         description=(
             "Launch a subagent to perform a self-contained task. "
