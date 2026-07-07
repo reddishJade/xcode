@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
-from xcode.harness.config import ExecutionMode
+from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.session import SessionStore
 
 _SKILL_INVOCATION_PATTERN = re.compile(

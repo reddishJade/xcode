@@ -5,7 +5,7 @@ from typing import Protocol
 
 from xcode.agent.messages import AgentMessage
 from xcode.harness.agent_runtime import CancellationToken, CodingAgentHarnessEvent
-from xcode.harness.config import ExecutionMode
+from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.observability import ExternalHookDiagnostic
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
 from xcode.agent.types import ApprovalCallback, ToolSpec

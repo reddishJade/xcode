@@ -7,7 +7,7 @@ from typing import Literal, Protocol
 
 from .app_contract import ReplApp
 from .markdown import MarkdownRenderer
-from xcode.harness.config import ExecutionMode
+from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.session import SessionStore
 from xcode.harness.observability import (
     FileGrantStore,

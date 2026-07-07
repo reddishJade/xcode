@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from xcode.harness.config import AgentConfig, ExecutionMode, XcodeRuntimeConfig
+from xcode.coding_agent.execution_modes import ExecutionMode
+from xcode.harness.config import AgentConfig, XcodeRuntimeConfig
 from xcode.harness.agent_runtime import (
     CodingAgentHarness,
     ContextualRetrievalState,

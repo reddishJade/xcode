@@ -1,6 +1,6 @@
 from .agent_runtime import CodingAgentHarness, CodingAgentHarnessEvent
 from .agent_runtime.cancellation import CancellationToken
-from .config import AgentConfig, ExecutionMode
+from .config import AgentConfig
 from .execution_env import (
     ExecutionEnv,
     ExecutionResult,
@@ -20,7 +20,6 @@ __all__ = [
     "CodingAgentHarnessEvent",
     "ExecutionEnv",
     "ExecutionResult",
-    "ExecutionMode",
     "FileSystem",
     "HookManager",
     "LocalFileSystem",

@@ -29,7 +29,7 @@ from ...agent.messages import (
     UserMessage,
 )
 from ...agent.types import AgentTool
-from ..config import AgentConfig, ExecutionMode, RequestHygieneConfig
+from ..config import AgentConfig, RequestHygieneConfig
 from ..observability import (
     AuditRecord,
     ExternalHookRunner,
@@ -52,7 +52,7 @@ from .cancellation import CancellationToken
 
 
 from .compaction import CompactController, estimate_message_tokens
-from xcode.coding_agent.execution_modes import ExecutionModeState, mode_notice
+from xcode.coding_agent.execution_modes import ExecutionMode, ExecutionModeState, mode_notice
 from .message_codec import messages_from_compacted_dicts
 from .tool_gate import ToolGate
 

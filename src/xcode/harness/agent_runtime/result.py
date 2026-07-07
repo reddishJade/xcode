@@ -10,11 +10,10 @@ from ...agent.results import AgentLoopResult, TerminationReason
 from ...agent.messages import AssistantMessage
 from xcode.ai.events import ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
-from ..config import ExecutionMode
+from xcode.coding_agent.execution_modes import ExecutionMode
 from .agent_helpers import text_from_blocks, to_dict
 from .events import FinalStructuredEvent
 from ..observability import EventCorrelation
-from ..config import ExecutionMode
 
 
 def _parse_execution_mode(value: object) -> ExecutionMode | None:

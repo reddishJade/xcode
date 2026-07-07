@@ -24,7 +24,6 @@ ProviderTransport = Literal[
     "deepseek_chat",
     "mimo_chat",
 ]
-ExecutionMode = Literal["plan", "build", "act"]
 PermissionMode = Literal["strict", "normal", "permissive"]
 ApprovalPolicy = Literal["always", "never"]
 HookEventName = Literal[
@@ -57,7 +56,6 @@ DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     max_steps: StrictInt = 20
-    execution_mode: ExecutionMode = "act"
     compact_threshold: StrictInt = 0
     compact_token_threshold: StrictInt = 0
     max_recent_messages: StrictInt = 10

@@ -20,7 +20,8 @@ from ...agent.types import TextContent, ToolCallContent
 from ...agent.types import ApprovalCallback, ToolSpec
 from ...agent.results import TerminationReason
 from xcode.ai.providers.base import ModelProvider
-from ..config import AgentConfig, ExecutionMode
+from xcode.coding_agent.execution_modes import ExecutionMode
+from ..config import AgentConfig
 from ..skill_activation import (
     ExplicitSkillActivationResult,
     is_skill_activation_content,

@@ -6,14 +6,16 @@ PlanPolicy.filter_tools() 暴露 _PLAN_TOOLS，外加 write_file/edit_file（限
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Literal, Protocol
 
 from xcode.ai.events import ToolCall
-from xcode.harness.config import ExecutionMode
 from xcode.harness.observability.permission_model import MODE_DEFAULT_RULES, Rule
 from xcode.harness.observability.permissions import PermissionDecision
 from xcode.agent.types import ToolSpec
 from xcode.harness.agent_runtime._mode_protocol import ToolGateMode
+
+
+ExecutionMode = Literal["plan", "build", "act"]
 
 
 class ExecutionPolicy(Protocol):
