@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from xcode.harness.skills import ToolInput, ToolOutput, ToolSpec
+from xcode.agent.types import ToolOutput, ToolSpec
 from . import _search_utils
 from .path_utils import resolve_absolute_path, matches_blocked_pattern, display_path
 

@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.agent.types import ToolSpec
 
 from . import client as _mcp_mod
 from .results import convert_mcp_tool_result

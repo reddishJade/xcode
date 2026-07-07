@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.agent.types import ToolSpec
 
 
 BROWSER_UA = (

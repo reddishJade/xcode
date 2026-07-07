@@ -43,7 +43,7 @@ from ..observability.permission_model import (
     PolicyEvaluator,
     Rule,
 )
-from ..skills import (
+from ...agent.types import (
     ApprovalCallback,
     ToolSpec,
     stringify_tool_input,

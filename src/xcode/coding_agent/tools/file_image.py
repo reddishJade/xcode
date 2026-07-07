@@ -10,7 +10,7 @@ from typing import Protocol
 import filetype
 from PIL import Image
 
-from xcode.harness.skills import ToolOutput
+from xcode.agent.types import ToolOutput
 
 
 class _ImageFileOperations(Protocol):

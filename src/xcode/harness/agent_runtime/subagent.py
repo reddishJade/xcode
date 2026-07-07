@@ -11,7 +11,7 @@ import threading
 from typing import Literal
 
 from ..config import PROFILE_SUBAGENT
-from ..skills import ToolInput, ToolOutput, ToolSpec
+from ...agent.types import ToolOutput, ToolSpec
 from .async_worker import IsolatedAsyncWorker
 
 """子 Agent 委派工具。

@@ -7,7 +7,7 @@ from typing import Any
 
 import questionary
 
-from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.agent.types import ToolSpec
 
 
 def build_question_tool() -> ToolSpec:

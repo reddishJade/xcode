@@ -6,7 +6,7 @@ from pathlib import Path
 import time
 from typing import TYPE_CHECKING, Callable
 
-from xcode.harness.skills import ToolSpec
+from xcode.agent.types import ToolSpec
 from xcode.coding_agent.tools.file_index import build_project_file_index
 
 from .commands import COMMAND_GROUP_ORDER, CommandEntry

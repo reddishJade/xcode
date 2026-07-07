@@ -3,7 +3,7 @@ from .agent_runtime.cancellation import CancellationToken
 from .config import AgentConfig, ExecutionMode
 from .execution_env import ExecutionEnv, ExecutionResult, SubprocessExecutionEnv
 from .observability import HookManager, PermissionPolicy
-from .skills import ToolOutput, ToolSpec
+from xcode.agent.types import ToolOutput, ToolSpec
 
 __all__ = [
     "AgentConfig",

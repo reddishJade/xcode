@@ -8,7 +8,7 @@ from xcode.harness.agent_runtime import CancellationToken, StructuredAgentEvent
 from xcode.harness.config import ExecutionMode
 from xcode.harness.observability import ExternalHookDiagnostic
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
-from xcode.harness.skills import ApprovalCallback, ToolSpec
+from xcode.agent.types import ApprovalCallback, ToolSpec
 
 
 class ToolRegistryApp(Protocol):

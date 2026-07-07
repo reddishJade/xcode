@@ -57,7 +57,7 @@ from xcode.harness.observability import (
     PermissionPolicy,
 )
 from xcode.harness.memory import MemoryLayer, MemoryLayerFilter, MemoryManager
-from xcode.harness.skills import ToolSpec
+from xcode.agent.types import ToolSpec
 from xcode.harness.session import SessionStore
 from xcode.harness.snapshot import SnapshotStore, TurnSnapshotRecord
 
@@ -944,7 +944,7 @@ def _compute_context_summary(
     registry = getattr(agent, "registry", None)
     if registry is not None:
         snap = registry
-        from xcode.harness.skills import build_tool_prompt, build_tool_guidelines
+        from xcode.coding_agent.tools.prompt import build_tool_prompt, build_tool_guidelines
 
         parts = ["Available tools:\n" + build_tool_prompt(snap)]
         guidelines = build_tool_guidelines(snap)

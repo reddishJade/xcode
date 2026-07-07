@@ -16,7 +16,7 @@ from xcode.harness.agent_runtime import (
     StructuredAgent,
     StructuredAgentEvent,
 )
-from xcode.harness.skills import ToolSpec
+from xcode.agent.types import ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from xcode.ai.providers.registry import ProviderSettings, build_provider_bundle
 from . import assembly as _assembly

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.agent.types import ToolSpec
 from xcode.harness.skill_activation import SKILL_ACTIVATION_STATE_TAG
 from xcode.harness.agent_skills.models import SkillDef, SkillResource
 from xcode.harness.agent_skills.rendering import xml_escape_attr, xml_escape_content

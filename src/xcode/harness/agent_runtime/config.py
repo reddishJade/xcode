@@ -45,7 +45,7 @@ from ..observability.permission_model import (
     PolicyEvaluator,
     Rule,
 )
-from ..skills import ApprovalCallback, ToolSpec
+from ...agent.types import ApprovalCallback, ToolSpec
 from ..agent_skills import SkillRegistry
 from ..memory import MemoryManager
 from .cancellation import CancellationToken

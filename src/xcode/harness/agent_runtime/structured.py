@@ -36,7 +36,7 @@ from .events import (
     StructuredAgentEvent,
 )
 from .execution_modes import ExecutionModeState, policy_for_mode
-from ..skills import ToolSpec
+from ...agent.types import ToolSpec
 from .fallback import _FallbackWithRetryPrimary
 from .message_codec import messages_from_run_state
 from .result import (
@@ -54,7 +54,7 @@ from ..skill_activation import (
     is_skill_activation_content,
 )
 from ..memory.manager import MemoryOutcome
-from ..skills import ApprovalCallback
+from ...agent.types import ApprovalCallback
 
 _PROMPT_VERSION_CACHE: str | None = None
 

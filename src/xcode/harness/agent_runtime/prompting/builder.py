@@ -29,11 +29,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from xcode.harness.config import DEFAULT_PROMPT_MODULES
-from xcode.harness.skills import (
-    ToolSpec,
-    build_tool_guidelines,
-    build_tool_prompt,
-)
+from xcode.agent.types import ToolSpec
+from xcode.coding_agent.tools.prompt import build_tool_guidelines, build_tool_prompt
 from xcode.coding_agent.tools.shell_adapter import ShellSpec
 
 from ..contextual import ContextualRetrievalState

@@ -41,10 +41,7 @@ from xcode.harness.agent_runtime.events import (
 from xcode.harness.agent_runtime.result import StructuredAgentResult
 from xcode.harness.agent_runtime.execution_modes import ExecutionModeState
 from xcode.harness.agent_runtime.tool_gate import ToolGate
-from xcode.harness.skills import (
-    ToolInput,
-    ToolSpec,
-)
+from xcode.agent.types import ToolSpec
 from xcode.agent.config import AgentContext, BeforeToolCallContext
 from xcode.agent.messages import AssistantMessage
 from xcode.agent.types import TextContent, ToolCallContent

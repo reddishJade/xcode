@@ -1,9 +1,12 @@
-"""Agent 层类型定义：内容块、协议、回调签名。"""
+"""Agent 层类型定义：内容块、协议、工具描述、回调签名。"""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Literal, Protocol
+from dataclasses import dataclass
+import json
+from pathlib import Path
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -113,6 +116,62 @@ class AgentToolResult:
 
 
 type ToolUpdateCallback = Callable[[AgentToolResult], None]
+
+
+ToolInput = dict[str, Any]
+ActionHandler = Callable[[ToolInput], str]
+HITLResult = dict[str, object]
+ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
+
+
+@dataclass(frozen=True)
+class CitationSource:
+    """模型可引用的本地证据来源。"""
+
+    kind: Literal["file", "search"]
+    path: str
+    start_line: int
+    end_line: int
+    text: str
+
+
+class ToolOutput(str):
+    """带结构化元数据的工具输出文本。"""
+
+    metadata: dict[str, object]
+    is_error: bool
+
+    def __new__(
+        cls,
+        content: str,
+        metadata: Mapping[str, object] | None = None,
+        is_error: bool = False,
+    ) -> "ToolOutput":
+        output = str.__new__(cls, content)
+        output.metadata = dict(metadata) if metadata else {}
+        output.is_error = is_error
+        return output
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """工具描述。"""
+
+    name: str
+    description: str
+    input_hint: str
+    handler: ActionHandler
+    schema: dict[str, Any] | None = None
+    prompt_snippet: str | None = None
+    prompt_guidelines: tuple[str, ...] = ()
+
+
+AGENT_CONTENT_BLOCKS_METADATA_KEY = "agent_content_blocks"
+CITATION_SOURCES_METADATA_KEY = "citation_sources"
+
+
+def stringify_tool_input(action_input: ToolInput) -> str:
+    return json.dumps(action_input, ensure_ascii=False, sort_keys=True)
 
 
 class CancellationSignal(Protocol):

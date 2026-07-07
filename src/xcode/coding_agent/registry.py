@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from xcode.harness.execution_env import ExecutionEnv
-from xcode.harness.skills import ToolSpec
+from xcode.agent.types import ToolSpec
 from xcode.coding_agent.tools import (
     build_apply_patch_tool,
     build_bash_tool,

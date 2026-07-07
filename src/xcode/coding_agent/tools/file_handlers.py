@@ -15,11 +15,8 @@ import subprocess
 from typing import Any, Protocol
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
-from xcode.harness.skills import (
-    ToolInput,
-    ToolOutput,
-    resolve_project_path,
-)
+from xcode.agent.types import ToolOutput, ToolSpec
+from xcode.coding_agent.tools.path_utils import resolve_project_path
 from .text_edit import (
     apply_text_replacement,
     detect_line_ending,

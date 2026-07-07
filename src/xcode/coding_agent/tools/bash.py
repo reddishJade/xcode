@@ -15,7 +15,7 @@ from xcode.harness.execution_env import (
     ExecutionResult,
     SubprocessExecutionEnv,
 )
-from xcode.harness.skills import ToolInput, ToolSpec
+from xcode.agent.types import ToolSpec
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 from ._constants import (
@@ -318,7 +318,7 @@ def _resolve_workdir(root: Path, workdir: str | None) -> Path:
     if workdir is None:
         return root
     # 安全解析（禁止绝对路径、.. 逃逸）
-    from xcode.harness.skills import resolve_project_path
+    from xcode.coding_agent.tools.path_utils import resolve_project_path
 
     try:
         return resolve_project_path(root, workdir)

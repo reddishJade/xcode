@@ -13,7 +13,7 @@ from xcode.ai.events import ToolCall
 from ..config import ExecutionMode
 from ..observability.permission_model import MODE_DEFAULT_RULES, Rule
 from ..observability.permissions import PermissionDecision
-from ..skills import ToolSpec
+from ...agent.types import ToolSpec
 
 
 class ExecutionPolicy(Protocol):

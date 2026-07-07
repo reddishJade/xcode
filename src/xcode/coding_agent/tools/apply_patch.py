@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
-from xcode.harness.skills import ToolInput, ToolOutput, ToolSpec
+from xcode.agent.types import ToolOutput, ToolSpec
 
 from .text_edit import (
     detect_line_ending,

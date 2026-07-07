@@ -3,13 +3,26 @@ from __future__ import annotations
 import unicodedata
 from pathlib import Path
 
-from xcode.harness.skills import resolve_project_path
 from .truncate import truncate_tail
 
 import pathspec
 
 DEFAULT_MAX_LINES = 2000
 DEFAULT_MAX_BYTES = 50 * 1024
+
+
+def resolve_project_path(project_root: Path, raw_path: str) -> Path:
+    relative_path = Path(raw_path.strip().strip("\"'") or ".")
+    if relative_path.is_absolute():
+        raise ValueError("absolute paths are not allowed")
+    if ".." in relative_path.parts:
+        raise ValueError("parent-directory paths are not allowed")
+    root = project_root.resolve()
+    candidate = (root / relative_path).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise ValueError("path escapes project root")
+    return candidate
+
 
 _BLOCKED_SPEC = pathspec.PathSpec.from_lines(
     "gitwildmatch",

@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
-from xcode.harness.skills import ToolSpec
+from xcode.agent.types import ToolSpec
 
 from .file_handlers import FileOperations, LocalFileOperations, _read_file
 

@@ -18,7 +18,7 @@ from rich.text import Text
 
 from .commands import CommandEntry, PromptLike, PromptText, ReplState
 from .completion import CommandArgsSuggester, ReplCompleter
-from xcode.harness.skills import ToolSpec
+from xcode.agent.types import ToolSpec
 
 CITE_START = "\ue200"
 CITE_SEP = "\ue202"
