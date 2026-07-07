@@ -15,7 +15,7 @@ from xcode.harness.execution_env import (
     ExecutionResult,
     SubprocessExecutionEnv,
 )
-from xcode.agent.types import ToolSpec
+from xcode.agent.types import ToolInput, ToolSpec
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 from ._constants import (
@@ -66,7 +66,7 @@ def build_bash_tool(
     env = env or SubprocessExecutionEnv()
     shell_syntax = spec.syntax
 
-    def bash(data: ToolInput) -> str:
+    def bash(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         request = _parse_bash_request(data)
         plan = _build_bash_execution_plan(
             request,

@@ -7,6 +7,8 @@ from .grep_search import build_grep_tool
 from .question import build_question_tool
 from .read_file import build_read_file_tool
 from .shell_adapter import ShellSpec, detect_shell, build_shell_argv
+from .subagent import build_subagent_tool
+from .todowrite import build_todowrite_tool
 from .tools_manager import ensure_tool
 from .webfetch import build_webfetch_tool
 from .websearch import build_websearch_tool
@@ -22,6 +24,8 @@ __all__ = [
     "build_webfetch_tool",
     "build_websearch_tool",
     "build_write_file_tools",
+    "build_subagent_tool",
+    "build_todowrite_tool",
     "ensure_tool",
     "ShellSpec",
     "detect_shell",

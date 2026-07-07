@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from typing import Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from xcode.agent.types import ToolSpec
+from xcode.agent.types import ToolInput, ToolSpec
 
 
 BROWSER_UA = (
@@ -27,7 +28,7 @@ MCP_PARALLEL_URL = "https://search.parallel.ai/mcp"
 def build_websearch_tool() -> ToolSpec:
     """构建 websearch 工具。"""
 
-    def handler(data: ToolInput) -> str:
+    def handler(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         query = str(data.get("query", "")).strip()
         if not query:
             raise ValueError("query is required")

@@ -9,12 +9,19 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 
+from xcode.ai.providers.base import ModelProvider
+
 from .agent_loop import run_agent_loop
 from .config import AgentContext, AgentLoopConfig
+from ._codec import convert_to_llm
 from .results import AgentLoopResult
-from .events import AgentEvent
-from .messages import AgentMessage
-from .types import AgentTool, CancellationSignal
+from .events import (
+    AgentEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+)
+from .messages import AgentMessage, AssistantMessage, SystemMessage, UserMessage
+from .types import AgentTool, CancellationSignal, TextContent
 
 
 class Agent:
@@ -23,16 +30,24 @@ class Agent:
     持有工具列表、steer/followup 队列。
     不感知 ToolSpec、权限、审计、hook — 这些由调用方通过
     AgentLoopConfig 的钩子注入。
+
+    当提供了 model + system_prompt，可通过 prompt() 快速执行（subagent 场景）。
     """
 
     def __init__(
         self,
         tools: list[AgentTool],
+        *,
+        model: ModelProvider | None = None,
+        system_prompt: str = "",
     ) -> None:
         self._tools = tools
+        self._model = model
+        self._system_prompt = system_prompt
         self._steer_queue: list[AgentMessage] = []
         self._followup_queue: list[AgentMessage] = []
         self._last_result: AgentLoopResult | None = None
+        self._last_messages: list[AgentMessage] = []
 
     # ── 队列 API ──
 
@@ -64,6 +79,58 @@ class Agent:
     @property
     def last_result(self) -> AgentLoopResult | None:
         return self._last_result
+
+    @property
+    def messages(self) -> list[AgentMessage]:
+        return list(self._last_messages)
+
+    async def prompt(
+        self,
+        text: str,
+        *,
+        model: ModelProvider | None = None,
+        system_prompt: str | None = None,
+        signal: CancellationSignal | None = None,
+        on_update: Callable[[str], None] | None = None,
+    ) -> str:
+        """轻量 prompt API：创建简化 AgentLoopConfig 并执行。
+
+        用于 subagent 等自包含场景。不依赖 hooks / permissions / compaction。
+        """
+        model = model or self._model
+        if model is None:
+            raise ValueError("model is required for prompt()")
+        sp = system_prompt if system_prompt is not None else self._system_prompt
+        history: list[AgentMessage] = [SystemMessage(content=sp)] if sp else []
+        config = AgentLoopConfig(
+            provider=model,
+            max_steps=25,
+            convert_to_llm=convert_to_llm,
+        )
+
+        def _emit(event: AgentEvent) -> None:
+            if isinstance(event, ToolExecutionStartEvent):
+                on_update and on_update(f"→ {event.tool_name}")
+            elif isinstance(event, ToolExecutionEndEvent):
+                status = "✓" if not event.is_error else "✗"
+                on_update and on_update(f"{status} {event.tool_name}")
+
+        result = await self.run(
+            [UserMessage(content=text)],
+            config,
+            signal=signal,
+            history=history,
+            emit=_emit if on_update else None,
+        )
+        self._last_messages = result.messages
+        parts: list[str] = []
+        for msg in result.messages:
+            if not isinstance(msg, AssistantMessage):
+                continue
+            for block in msg.content:
+                if isinstance(block, TextContent) and block.text:
+                    parts.append(block.text)
+        return " ".join(parts).strip() or "(no output)"
 
     # ── 执行 ──
 

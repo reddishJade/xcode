@@ -40,7 +40,7 @@ def build_read_file_tool(
     root = project_root.resolve()
     ops = operations or LocalFileOperations()
 
-    def handler(data):
+    def handler(data, _on_update=None):
         if cancel_event is not None and cancel_event.is_set():
             raise ValueError("Tool cancelled")
         return _read_file(root, ops, context_state, data)

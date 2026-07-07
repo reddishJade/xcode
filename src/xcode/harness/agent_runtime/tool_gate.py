@@ -88,7 +88,11 @@ class _ToolSpecAdapter:
         signal: CancellationSignal | None = None,
         on_update: Callable[[AgentToolResult], None] | None = None,
     ) -> AgentToolResult:
-        content = await asyncio.to_thread(self._spec.handler, dict(params))
+        def _text_update(text: str) -> None:
+            if on_update is not None:
+                on_update(AgentToolResult(content=[TextContent(text=redact_text(text))]))
+
+        content = await asyncio.to_thread(self._spec.handler, dict(params), _text_update)
         metadata = getattr(content, "metadata", None)
         return AgentToolResult(
             content=[TextContent(text=redact_text(str(content)))],

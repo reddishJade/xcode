@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from xcode.agent.types import ToolOutput, ToolSpec
+from xcode.agent.types import ToolInput, ToolOutput, ToolSpec
 from . import _search_utils
 from .path_utils import resolve_absolute_path, matches_blocked_pattern, display_path
 
@@ -25,7 +26,7 @@ def build_glob_tools(
         if cancel_event is not None and cancel_event.is_set():
             raise ValueError("Tool cancelled")
 
-    def glob_files(data: ToolInput) -> str:
+    def glob_files(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         _cancel_check()
         pattern = str(data.get("pattern", "*")).strip() or "*"
         base = _safe_path(root, str(data.get("path", ".")))
@@ -34,7 +35,7 @@ def build_glob_tools(
             root, base, pattern, max_results, _search_utils.get_rg_path()
         )
 
-    def find_files(data: ToolInput) -> str:
+    def find_files(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         _cancel_check()
         pattern = str(data.get("pattern", "")).strip()
         if not pattern:
@@ -45,7 +46,7 @@ def build_glob_tools(
             root, base, pattern, max_results, _search_utils.get_rg_path()
         )
 
-    def list_dir(data: ToolInput) -> str:
+    def list_dir(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         _cancel_check()
         raw_path = str(data.get("path", ".")).strip()
         base = _safe_path(root, raw_path)

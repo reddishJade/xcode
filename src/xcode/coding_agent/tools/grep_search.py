@@ -5,10 +5,11 @@ from __future__ import annotations
 import re
 import subprocess
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from xcode.agent.types import ToolOutput, ToolSpec
+from xcode.agent.types import ToolInput, ToolOutput, ToolSpec
 from . import _search_utils
 from .path_utils import resolve_absolute_path, matches_blocked_pattern
 from .truncate import GREP_MAX_LINE_LENGTH, truncate_line, truncate_tail
@@ -22,7 +23,7 @@ def build_grep_tool(
 ) -> ToolSpec:
     root = project_root.resolve()
 
-    def handler(data: ToolInput) -> str:
+    def handler(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         if cancel_event is not None and cancel_event.is_set():
             raise ValueError("Tool cancelled")
         return _grep(root, _search_utils.get_rg_path(), data)

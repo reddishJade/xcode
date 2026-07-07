@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import re
+from collections.abc import Callable
 from html import unescape
 from html.parser import HTMLParser
 from typing import Literal, cast
@@ -11,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from xcode.agent.types import ToolSpec
+from xcode.agent.types import ToolInput, ToolSpec
 
 
 BROWSER_UA = (
@@ -27,7 +28,7 @@ MAX_TIMEOUT = 120.0
 def build_webfetch_tool() -> ToolSpec:
     """构建 webfetch 工具。"""
 
-    def handler(data: ToolInput) -> str:
+    def handler(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
         url = _valid_url(str(data.get("url", "")).strip())
         output_format = _format(str(data.get("format", "markdown")).strip())
         timeout = _timeout(data.get("timeout"))

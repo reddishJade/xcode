@@ -73,7 +73,7 @@ def build_write_file_tools(
                 "Prefer edit_file for targeted changes to an existing file."
             ),
             input_hint='JSON: {"path": "/absolute/path/to/file", "content": "..."}',
-            handler=lambda data: _handler(
+            handler=lambda data, _on_update=None: _handler(
                 lambda d: _write_file(root, ops, context_state, d), data
             ),
             schema=WRITE_FILE_SCHEMA,
@@ -90,7 +90,7 @@ def build_write_file_tools(
                 "Use write_file for new files or full replacements."
             ),
             input_hint='JSON: {"path": "/absolute/path/to/file", "old_text": "...", "new_text": "..."}',
-            handler=lambda data: _handler(
+            handler=lambda data, _on_update=None: _handler(
                 lambda d: _edit_file(root, ops, context_state, d), data
             ),
             schema=EDIT_FILE_SCHEMA,
