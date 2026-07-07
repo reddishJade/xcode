@@ -182,7 +182,6 @@ def build_app(
         project_root, env_files, agent_config, skills_dir, audit_path, runtime_config
     )
     infra = build_shared_infra(project_root, cfg.runtime_config)
-    shared_services = _assembly.build_shared_services(project_root)
 
     # 使用共享的 MemoryManager 实例，确保 compactor 和 agent 使用同一实例
     memory_manager = infra.memory_manager
@@ -210,7 +209,6 @@ def build_app(
         llm_profiles=providers.llms,
         config=cfg.agent_config,
         runtime_config=cfg.runtime_config,
-        shared_services=shared_services,
         contextual_state=infra.contextual_state,
         compact_controller=infra.compact_controller,
         cancel_event=infra.cancellation_token,
@@ -258,10 +256,6 @@ def build_app(
         skill_registry=skill_registry,
         external_hook_runner=external_hook_runner,
         memory_manager=memory_manager,
-    )
-
-    opt_in_services = _assembly.load_opt_in_services(
-        project_root, cfg.runtime_config, shared_services
     )
 
     return XcodeApp(
