@@ -442,7 +442,7 @@ def _cache_metadata(client: _mcp_mod.McpClient) -> dict[str, Any]:
     }
 
 
-def _compatible_cached_tools(
+def _validated_cached_tools(
     cached_entry: object,
     config_hash: str,
 ) -> list[dict[str, Any]] | None:
@@ -1157,7 +1157,7 @@ def _tools_for_server(
 ) -> list[dict[str, Any]]:
     config_hash = compute_config_hash(raw_config)
     cached_entry = cache_data.get("servers", {}).get(server_name, {})
-    cached_tools = _compatible_cached_tools(cached_entry, config_hash)
+    cached_tools = _validated_cached_tools(cached_entry, config_hash)
     if cached_tools is not None:
         cache_metadata_by_server[server_name] = {
             "protocol_version": cached_entry.get("protocol_version"),
@@ -1222,7 +1222,7 @@ def _query_server_tools(
         redacted = _redact_and_truncate(str(e), max_len=200)
         server_errors[server_name] = redacted
         _warn(f"error querying tools from MCP server {server_name!r}: {redacted}")
-        cached_tools = _compatible_cached_tools(cached_entry, config_hash)
+        cached_tools = _validated_cached_tools(cached_entry, config_hash)
         if cached_tools is not None:
             cache_metadata_by_server[server_name] = {
                 "protocol_version": cached_entry.get("protocol_version"),

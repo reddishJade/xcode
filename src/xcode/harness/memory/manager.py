@@ -1201,37 +1201,6 @@ class MemoryManager:
             updated.append(new_block.strip() + "\n")
         self._memory_file(layer).write_text("".join(updated), encoding="utf-8")
 
-    def migrate_legacy_records(
-        self,
-        layer: MemoryLayerFilter = "all",
-    ) -> int:
-        """一次性补齐缺失的 memory_id / type / status / validity 元数据。"""
-        updated_count = 0
-        for current_layer in self._selected_layers(layer):
-            blocks = self.read_memory_blocks(layer=current_layer)
-            rewritten: list[str] = []
-            changed = False
-            for block in blocks:
-                normalized = (
-                    with_metadata(
-                        block,
-                        layer=current_layer,
-                        source=None,
-                        scope=None,
-                        confidence=None,
-                        status="active",
-                        validity="unknown",
-                    ).strip()
-                    + "\n"
-                )
-                rewritten.append(normalized)
-                if normalized != block:
-                    changed = True
-                    updated_count += 1
-            if changed:
-                self._write_blocks(rewritten, current_layer)
-        return updated_count
-
     def _merge_with_existing(
         self,
         new_block: str,

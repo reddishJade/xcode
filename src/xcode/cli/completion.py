@@ -4,7 +4,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 import time
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
+
+from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
+from prompt_toolkit.completion import Completer
 
 from xcode.agent.types import ToolSpec
 from xcode.coding_agent.tools.file_index import build_project_file_index
@@ -13,30 +16,6 @@ from .commands import COMMAND_GROUP_ORDER, CommandEntry
 from .reasoning_effort import normalize_reasoning_effort_options
 
 """REPL 命令、工具名和 @file 引用补全。"""
-
-if TYPE_CHECKING:
-    from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
-    from prompt_toolkit.completion import Completer
-else:
-    try:
-        from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
-    except ImportError:
-
-        class AutoSuggest:
-            def get_suggestion(self, buffer: object, document: object) -> object:
-                return None
-
-        class Suggestion:
-            def __init__(self, text: str) -> None:
-                self.text = text
-
-    try:
-        from prompt_toolkit.completion import Completer
-    except ImportError:
-
-        class Completer:
-            pass
-
 
 MAX_FILE_COMPLETIONS = 100
 MAX_NAME_COMPLETIONS = 25
