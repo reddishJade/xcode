@@ -10,7 +10,7 @@ from rich.text import Text
 
 from .commands import PromptLike
 from .repl_rendering import CLI_COLOR_ASSISTANT, CLI_COLOR_INFO, CLI_COLOR_USER
-from xcode.agent.protocols import ContentBlock
+from xcode.agent.types import ContentBlock
 from xcode.agent.messages import (
     AgentMessage,
     AssistantMessage,

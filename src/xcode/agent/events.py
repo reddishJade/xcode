@@ -1,3 +1,5 @@
+"""Agent 事件类型。"""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -5,10 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .messages import AgentMessage, ToolResultMessage
-from .protocols import AgentToolResult
-from .types import ToolArguments
-
-"""Agent 事件类型。"""
+from .types import AgentToolResult, ToolArguments
 
 
 class AgentStartEvent(BaseModel):

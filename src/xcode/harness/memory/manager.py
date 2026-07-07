@@ -242,7 +242,7 @@ class MemoryManager:
         """按 token 预算读取记忆块，重要性高的优先。"""
         if max_tokens <= 0:
             return []
-        from xcode.agent.compaction import estimate_tokens
+        from xcode.agent._compaction import estimate_tokens
 
         records = self.read_memory_records(layer=layer)
         if not records:
@@ -268,7 +268,7 @@ class MemoryManager:
         """按 token 预算读取记忆记录，重要性高的优先。"""
         if max_tokens <= 0:
             return []
-        from xcode.agent.compaction import estimate_tokens
+        from xcode.agent._compaction import estimate_tokens
 
         records = self.read_memory_records(layer=layer)
         if not records:
@@ -2097,7 +2097,7 @@ class MemoryManager:
         return "-".join(parts)
 
     def _estimate_block_tokens(self, block: str) -> int:
-        from xcode.agent.compaction import estimate_tokens
+        from xcode.agent._compaction import estimate_tokens
 
         return estimate_tokens(block)
 

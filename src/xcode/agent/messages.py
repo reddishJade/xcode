@@ -1,19 +1,18 @@
+"""Agent 消息类型。"""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from xcode.ai.events import StopReason
 from xcode.agent.types import (
+    ContentBlock,
     FileContent,
     ImageContent,
     ShellCallOutputContent,
     TextContent,
     ToolResultContent,
 )
-
-from .protocols import ContentBlock
-
-"""Agent 消息类型。"""
 
 type UserContent = str | list[TextContent | ImageContent | FileContent]
 type ToolResultMessageContent = (

@@ -546,7 +546,7 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
 
 def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     """手动触发上下文压缩，立即执行完整压缩管线并显示结构化摘要。"""
-    from xcode.agent.compaction import estimate_message_tokens
+    from xcode.agent._compaction import estimate_message_tokens
     from xcode.harness.agent_runtime.agent_helpers import to_dict
     from xcode.harness.agent_runtime.message_codec import (
         messages_from_compacted_dicts,
@@ -929,7 +929,7 @@ def _compute_context_summary(
     agent: object, project_root: Path, state: ReplState
 ) -> _ContextSummary:
     """计算分类 token 用量，并更新 state 供底栏使用。"""
-    from xcode.agent.compaction import estimate_tokens, estimate_message_tokens
+    from xcode.agent._compaction import estimate_tokens, estimate_message_tokens
     from xcode.harness.agent_runtime.prompting.identity import (
         CORE_IDENTITY,
         TOOL_DISCIPLINE,

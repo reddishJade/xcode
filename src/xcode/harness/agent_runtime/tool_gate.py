@@ -16,7 +16,7 @@ from ...agent.config import (
     BeforeToolCallResult,
     IsToolProductiveHook,
 )
-from ...agent.protocols import AgentTool, CancellationSignal
+from ...agent.types import AgentTool, CancellationSignal
 from ...agent.types import ToolCallContent
 from .execution_modes import ExecutionModeState, policy_for_mode
 from .tool_adapter import adapt_tool_specs

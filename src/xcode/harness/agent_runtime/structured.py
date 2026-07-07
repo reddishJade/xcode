@@ -16,7 +16,7 @@ from ...agent.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from ...agent.protocols import AgentTool, AgentToolResult
+from ...agent.types import AgentTool, AgentToolResult
 from ...agent.types import TextContent, ToolCallContent
 from ...agent.results import TerminationReason
 from .agent_helpers import aiter_to_sync_iter, run_coro_sync

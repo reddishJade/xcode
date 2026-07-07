@@ -14,7 +14,7 @@ from .config import AgentContext, AgentLoopConfig
 from .results import AgentLoopResult
 from .events import AgentEvent
 from .messages import AgentMessage
-from .protocols import AgentTool, CancellationSignal
+from .types import AgentTool, CancellationSignal
 
 
 class Agent:

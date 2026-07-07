@@ -11,8 +11,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import uuid4
 
-from xcode.agent.compaction import estimate_tokens
-from xcode.agent.message_converter import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
+from xcode.agent._compaction import estimate_tokens
+from xcode.agent._codec import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
 from xcode.agent.config import CompactInstructions
 from ..skill_activation import is_skill_activation_content
 from ..skills import ToolSpec

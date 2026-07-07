@@ -12,7 +12,7 @@ from pathlib import Path
 import threading
 from typing import Any, Literal
 
-from ..agent.protocols import ToolExecutionMode
+from ..agent.types import ToolExecutionMode
 from ..agent.types import FileContent, ImageContent, ShellCallOutputContent
 from .observability import HITLResult
 from .session import JsonValue

@@ -23,7 +23,7 @@ import time
 from collections.abc import Callable
 
 from xcode.ai.providers.base import StreamProvider
-from xcode.agent.types import TextContent, ToolCallContent
+from xcode.agent.types import CancellationSignal, TextContent, ToolCallContent
 from .config import (
     AgentContext,
     AgentLoopConfig,
@@ -43,15 +43,12 @@ from .events import (
     TurnStartEvent,
 )
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
-from .protocols import CancellationSignal
-from .compaction import estimate_tokens
-from .tool_execution import (
+from ._compaction import estimate_tokens
+from ._execution import (
     ExecutedToolBatch,
     execute_tool_calls,
     is_cancelled,
     cancel_reason,
-)
-from .watchdog import (
     update_repeated_tool_watchdog,
     update_idle_tool_watchdog,
 )

@@ -1,46 +1,37 @@
-"""Agent 工具执行。
-
-从 agent_loop.py 提取的工具调用执行逻辑：串行/并行调度、
-单工具执行、before/after 钩子。
-
-**提取的设计原因**：
-- 关注点分离：agent_loop.py 专注于轮次管理，tool_execution.py 专注于工具调度
-- 测试隔离：工具执行逻辑可以独立测试，不依赖完整 agent 循环
-- 复用性：其他执行模式（如 plan mode）可以复用工具执行逻辑
-"""
+"""工具执行调度、参数校验、看门狗检测。"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import jsonschema
 
-from xcode.agent.types import (
-    TextContent,
-    ToolArguments,
-    ToolCallContent,
-)
-from .config import (
+from xcode.agent.config import (
     AfterToolCallContext,
     AgentContext,
     AgentLoopConfig,
     BeforeToolCallContext,
     BeforeToolCallResult,
+    _LoopRunState,
 )
-from .events import (
+from xcode.agent.events import (
     AgentEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
 )
-from .messages import AssistantMessage, ToolResultMessage, ToolResultMessageContent
-from .protocols import (
+from xcode.agent.messages import AssistantMessage, ToolResultMessage, ToolResultMessageContent
+from xcode.agent.types import (
     AgentTool,
     AgentToolResult,
     CancellationSignal,
+    TextContent,
+    ToolArguments,
+    ToolCallContent,
     ToolResultContentBlock,
 )
 
@@ -53,11 +44,26 @@ class ExecutedToolBatch:
     terminate: bool
 
 
+# ── 取消检查（共享工具） ──
+
+
+def is_cancelled(signal: CancellationSignal | None) -> bool:
+    return bool(signal and signal.is_cancelled())
+
+
+def cancel_reason(signal: CancellationSignal | None) -> str:
+    if signal is None:
+        return "interrupted by user"
+    return signal.reason
+
+
+# ── 工具执行调度 ──
+
+
 def partition_tool_calls_for_execution(
     current_context: AgentContext,
     tool_calls: list[ToolCallContent],
 ) -> list[list[ToolCallContent]]:
-    """按工具执行模式将连续并发调用分批。"""
     batches: list[list[ToolCallContent]] = []
     parallel_batch: list[ToolCallContent] = []
     for tool_call in tool_calls:
@@ -77,7 +83,6 @@ def _tool_execution_mode(
     current_context: AgentContext,
     tool_call: ToolCallContent,
 ) -> str:
-    """返回工具声明的执行模式，未找到时保守地串行执行。"""
     for tool in current_context.tools or []:
         if tool.name == tool_call.name:
             return tool.execution_mode or "sequential"
@@ -89,7 +94,6 @@ def validate_tool_arguments(
     tool_call: ToolCallContent,
     args: ToolArguments,
 ) -> str | None:
-    """按工具 JSON schema 校验模型生成的参数。"""
     try:
         schema = dict(tool.parameters)
     except Exception as exc:
@@ -114,17 +118,6 @@ async def execute_tool_calls(
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
 ) -> ExecutedToolBatch:
-    """根据 execution_mode 调度串行或并行工具执行。
-
-    串行/并行调度设计原因：
-    - 默认并行：充分利用并发提升效率（如多文件读取、并行搜索）
-    - 强制串行：某些工具有副作用依赖（如先写文件再读取）或需要顺序保证
-    - 批次隔离：同一批次内的工具可以并行，不同批次按顺序执行
-
-    分批策略（partition_tool_calls_for_execution）：
-    按工具的 execution_mode 元数据分组，sequential 工具单独成批，
-    其余工具尽可能合并到同一批次并行执行。
-    """
     if config.tool_execution == "sequential":
         return await _execute_sequential(
             current_context, assistant_message, tool_calls, config, signal, emit
@@ -195,7 +188,6 @@ async def _execute_parallel(
     async def execute_limited(
         tool_call: ToolCallContent,
     ) -> tuple[ToolResultMessage, bool]:
-        """在共享并发额度内执行单个 parallel 工具。"""
         async with semaphore:
             return await _execute_one(
                 current_context,
@@ -240,7 +232,6 @@ async def _execute_one(
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
 ) -> tuple[ToolResultMessage, bool]:
-    """执行单个工具调用，返回结果消息和终止标记。"""
     result_msg: ToolResultMessage | None = None
     try:
         result_msg, terminate = await _execute_one_impl(
@@ -266,7 +257,6 @@ async def _execute_one_impl(
     signal: CancellationSignal | None,
     emit: Callable[[AgentEvent], None],
 ) -> tuple[ToolResultMessage, bool]:
-    """执行单个工具调用，返回结果消息和终止标记。"""
     tool = _find_tool(current_context, tool_call)
 
     if tool is None:
@@ -484,11 +474,132 @@ def _emit_tool_end(
     )
 
 
-def is_cancelled(signal: CancellationSignal | None) -> bool:
-    return bool(signal and signal.is_cancelled())
+# ── 工具看门狗 ──
 
 
-def cancel_reason(signal: CancellationSignal | None) -> str:
-    if signal is None:
-        return "interrupted by user"
-    return signal.reason
+DEFAULT_MUTATION_TOOLS: frozenset[str] = frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "bash",
+        "create_file",
+        "delete_file",
+        "move_file",
+        "rename_file",
+    }
+)
+
+DEFAULT_READ_TOOLS: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "grep_search",
+        "glob_files",
+        "list_dir",
+        "find_files",
+    }
+)
+
+
+def tool_call_signature(call: ToolCallContent) -> str:
+    args_str = json.dumps(call.arguments or {}, sort_keys=True, default=str)
+    return f"{call.name}:{args_str}"
+
+
+def tool_calls_signature(calls: list[ToolCallContent]) -> str:
+    parts = [tool_call_signature(c) for c in calls]
+    return "|".join(sorted(parts))
+
+
+def is_file_mutation_tool(
+    tool_name: str,
+    mutation_tools: frozenset[str] | None = None,
+) -> bool:
+    return tool_name in (
+        mutation_tools if mutation_tools is not None else DEFAULT_MUTATION_TOOLS
+    )
+
+
+def is_file_read_tool(
+    tool_name: str,
+    read_tools: frozenset[str] | None = None,
+) -> bool:
+    return tool_name in (read_tools if read_tools is not None else DEFAULT_READ_TOOLS)
+
+
+def should_clear_read_history(
+    new_calls: list[ToolCallContent],
+    read_history: list[str],
+    mutation_tools: frozenset[str] | None = None,
+) -> bool:
+    return any(is_file_mutation_tool(c.name, mutation_tools) for c in new_calls)
+
+
+def is_tool_productive_default(
+    tool_calls: list[ToolCallContent],
+    tool_results: list[ToolResultMessage],
+) -> bool:
+    return any(not r.is_error for r in tool_results)
+
+
+def update_repeated_tool_watchdog(
+    state: _LoopRunState,
+    tool_calls: list[ToolCallContent],
+    config: AgentLoopConfig,
+    tool_results: list[ToolResultMessage],
+) -> str | None:
+    counted_calls = [
+        call
+        for call in tool_calls
+        if call.name not in config.watchdog_repeated_tool_skip
+    ]
+    if not counted_calls:
+        state.repeated_tool_count = 0
+        state.last_tool_signature = None
+        return None
+
+    counted_call_ids = {call.id for call in counted_calls}
+    counted_results = [
+        result for result in tool_results if result.tool_call_id in counted_call_ids
+    ]
+
+    if all(r.is_error for r in counted_results):
+        state.repeated_tool_count = 0
+        state.last_tool_signature = None
+        return None
+
+    sig = tool_calls_signature(counted_calls)
+    if sig == state.last_tool_signature:
+        state.repeated_tool_count += 1
+    else:
+        state.repeated_tool_count = 0
+        state.last_tool_signature = sig
+
+    if (
+        config.watchdog_repeated_tool_limit > 0
+        and state.repeated_tool_count >= config.watchdog_repeated_tool_limit
+    ):
+        return f"watchdog stopped repeated tool call: {counted_calls[0].name}"
+    return None
+
+
+def update_idle_tool_watchdog(
+    state: _LoopRunState,
+    tool_calls: list[ToolCallContent],
+    tool_results: list[ToolResultMessage],
+    config: AgentLoopConfig,
+) -> str | None:
+    is_productive = config.is_tool_productive or is_tool_productive_default
+    if is_productive(tool_calls, tool_results):
+        state.consecutive_idle_steps = 0
+    else:
+        state.consecutive_idle_steps += 1
+
+    if (
+        config.max_consecutive_idle_steps > 0
+        and state.consecutive_idle_steps >= config.max_consecutive_idle_steps
+    ):
+        return (
+            f"Watchdog triggered: {state.consecutive_idle_steps} consecutive steps "
+            f"without productive tool calls."
+        )
+    return None

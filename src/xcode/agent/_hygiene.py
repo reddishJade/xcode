@@ -1,7 +1,4 @@
-"""消息历史修复和清理工具。
-
-提供工具调用配对修复、请求 hygiene 和历史压缩辅助功能。
-"""
+"""消息历史修复和请求卫生。"""
 
 from __future__ import annotations
 
@@ -12,19 +9,9 @@ from xcode.agent.types import ToolArguments, ToolCallContent
 
 
 def repair_tool_pairing(messages: list[AgentMessage]) -> list[AgentMessage]:
-    """修复工具调用和结果的配对关系。
-
-    规则：
-    1. 移除孤儿 tool_result（没有对应 tool_call）
-    2. 移除未完成的 tool_call（没有对应 result）
-    3. 保持消息顺序和其他内容不变
-
-    设计原因：避免畸形工具历史污染模型上下文和缓存前缀。
-    """
     if not messages:
         return messages
 
-    # 收集所有 tool_call id
     tool_call_ids: set[str] = set()
     for msg in messages:
         if isinstance(msg, AssistantMessage):
@@ -32,17 +19,14 @@ def repair_tool_pairing(messages: list[AgentMessage]) -> list[AgentMessage]:
                 if isinstance(block, ToolCallContent):
                     tool_call_ids.add(block.id)
 
-    # 收集所有 tool_result 的 tool_call_id
     tool_result_ids: set[str] = set()
     for msg in messages:
         if isinstance(msg, ToolResultMessage) and msg.tool_call_id:
             tool_result_ids.add(msg.tool_call_id)
 
-    # 过滤消息
     repaired: list[AgentMessage] = []
     for msg in messages:
         if isinstance(msg, AssistantMessage):
-            # 过滤掉没有 result 的 tool_call
             filtered_content = []
             for block in msg.content:
                 if isinstance(block, ToolCallContent):
@@ -60,7 +44,6 @@ def repair_tool_pairing(messages: list[AgentMessage]) -> list[AgentMessage]:
                     )
                 )
         elif isinstance(msg, ToolResultMessage):
-            # 过滤掉孤儿 tool_result
             if msg.tool_call_id in tool_call_ids:
                 repaired.append(msg)
         else:
@@ -77,20 +60,8 @@ def apply_request_hygiene(
     keep_head_lines: int = 50,
     keep_tail_lines: int = 50,
 ) -> list[AgentMessage]:
-    """对请求消息历史应用 hygiene 规则。
-
-    规则：
-    1. 超大 tool_result 按字节/行数上限保留 head + tail + signal lines
-    2. base64 payload 替换为占位符
-    3. 已完成工具调用的超长字符串参数替换为占位符
-
-    重要：只在发给模型的请求边界压缩，磁盘/session 保留完整历史。
-
-    设计原因：避免超长工具输出和参数污染缓存热前缀占比，同时保留错误信息。
-    """
     cleaned: list[AgentMessage] = []
 
-    # 收集已完成的 tool_call ids
     completed_tool_ids: set[str] = set()
     for msg in messages:
         if isinstance(msg, ToolResultMessage) and msg.tool_call_id:
@@ -98,14 +69,12 @@ def apply_request_hygiene(
 
     for msg in messages:
         if isinstance(msg, AssistantMessage):
-            # 清理已完成工具调用的超长参数
             cleaned_content = []
             for block in msg.content:
                 if (
                     isinstance(block, ToolCallContent)
                     and block.id in completed_tool_ids
                 ):
-                    # 压缩超长参数
                     cleaned_args = _truncate_tool_args(
                         block.arguments or {}, max_tool_arg_length
                     )
@@ -127,7 +96,6 @@ def apply_request_hygiene(
                 )
             )
         elif isinstance(msg, ToolResultMessage):
-            # 清理超大 tool_result
             if isinstance(msg.content, str):
                 truncated = _truncate_tool_result(
                     msg.content, max_tool_result_bytes, keep_head_lines, keep_tail_lines
@@ -173,7 +141,6 @@ def apply_request_hygiene(
 
 
 def _truncate_tool_args(args: ToolArguments, max_length: int) -> ToolArguments:
-    """压缩工具参数中的超长字符串。"""
     cleaned: ToolArguments = {}
     for key, value in args.items():
         if isinstance(value, str) and len(value) > max_length:
@@ -198,39 +165,29 @@ def _truncate_tool_result(
     keep_head_lines: int,
     keep_tail_lines: int,
 ) -> str:
-    """压缩超大工具结果，保留 head + tail + signal lines。"""
-    # 检查是否包含 base64 payload
     if _is_base64_payload(content):
         return f"<base64 data, {len(content)} bytes>"
 
-    # 按行处理
     lines = content.splitlines()
 
-    # 检查行数是否超过阈值
     if len(lines) <= keep_head_lines + keep_tail_lines:
-        # 行数未超标，检查字节大小
         content_bytes = content.encode("utf-8", errors="ignore")
         if len(content_bytes) <= max_bytes:
             return content
 
-    # 需要压缩
     if len(lines) <= keep_head_lines + keep_tail_lines:
-        # 行数少但字节多，直接截断
         return (
             content[:max_bytes] + f"\n... (truncated, {len(content)} bytes total) ..."
         )
 
-    # 提取 signal lines（错误/警告）
     signal_lines = []
     for i, line in enumerate(lines):
         if _is_signal_line(line):
             signal_lines.append((i, line))
 
-    # 构建压缩结果
     head = lines[:keep_head_lines]
     tail = lines[-keep_tail_lines:]
 
-    # 添加 signal lines（避免重复）
     middle_signals = [
         line
         for i, line in signal_lines
@@ -253,16 +210,13 @@ def _truncate_tool_result(
 
 
 def _is_base64_payload(content: str) -> bool:
-    """检测是否为 base64 payload。"""
     if len(content) < 100:
         return False
-    # 简单检测：连续 base64 字符比例 > 90%
     base64_chars = re.findall(r"[A-Za-z0-9+/=]", content)
     return len(base64_chars) / len(content) > 0.9
 
 
 def _is_signal_line(line: str) -> bool:
-    """检测是否为重要信号行（错误/警告）。"""
     line_lower = line.lower()
     keywords = ["error", "exception", "warning", "failed", "traceback", "assert"]
     return any(keyword in line_lower for keyword in keywords)

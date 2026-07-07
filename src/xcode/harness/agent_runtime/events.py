@@ -21,7 +21,7 @@ from ...agent.events import (
     TurnStartEvent,
 )
 from ...agent.messages import AgentMessage, AssistantMessage
-from ...agent.protocols import AgentToolResult
+from ...agent.types import AgentToolResult
 from xcode.ai.events import ToolCall
 from xcode.agent.types import (
     TextContent,

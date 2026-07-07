@@ -29,7 +29,6 @@ from xcode.coding_agent.tools import (
     build_websearch_tool,
     build_write_file_tools,
 )
-from xcode.experimental.task_store import TaskStore, build_task_tools
 from xcode.harness.worktree import WorktreeTaskRunner, build_worktree_tools
 from xcode.harness.session_todo import SessionTodoState
 from xcode.harness.assembly import build_search_tools_tool
@@ -74,9 +73,7 @@ def _builders(base_tmp: Path) -> list[ToolCatalogBuilder]:
         lambda: build_worktree_tools(
             WorktreeTaskRunner(base_tmp),
         ),
-        lambda: build_task_tools(
-            TaskStore(base_tmp),
-        ),
+        lambda: _build_task_catalog(base_tmp),
         lambda: _build_mcp_catalog(base_tmp),
         lambda: _build_mailbox_catalog(base_tmp),
         lambda: _build_progress_catalog(base_tmp),
@@ -96,18 +93,30 @@ def _build_mcp_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
     return build_mcp_tools(base_tmp)
 
 
-def _build_mailbox_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
+def _build_task_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
+    try:
+        from xcode.experimental.task_store import TaskStore, build_task_tools
+        return build_task_tools(TaskStore(base_tmp))
+    except ModuleNotFoundError:
+        return ()
 
-    return build_mailbox_tools(AgentMailbox(base_tmp))
+
+def _build_mailbox_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
+    try:
+        from xcode.experimental.mailbox import AgentMailbox, build_mailbox_tools
+        return build_mailbox_tools(AgentMailbox(base_tmp))
+    except ModuleNotFoundError:
+        return ()
 
 
 def _build_progress_catalog(base_tmp: Path) -> tuple[ToolSpec, ...]:
-    from xcode.experimental.orchestration_store import OrchestrationStore
-    from xcode.experimental.task_progress import build_progress_tools
-    from xcode.experimental.task_store import TaskStore
-
-    return build_progress_tools(TaskStore(base_tmp), OrchestrationStore(base_tmp))
+    try:
+        from xcode.experimental.orchestration_store import OrchestrationStore
+        from xcode.experimental.task_progress import build_progress_tools
+        from xcode.experimental.task_store import TaskStore
+        return build_progress_tools(TaskStore(base_tmp), OrchestrationStore(base_tmp))
+    except ModuleNotFoundError:
+        return ()
 
 
 def build_tool_catalog() -> dict[str, set[str]]:

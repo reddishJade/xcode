@@ -186,6 +186,28 @@ def resolve_model(provider_name: str, model_id: str) -> Model:
 # ── 模型选择语法解析 ──
 
 
+def get_model_context_window(model: str | None) -> int | None:
+    if not model:
+        return None
+    model_lower = model.lower()
+    for provider_models in _MODELS.values():
+        for mid, m in provider_models.items():
+            if mid in model_lower:
+                return m.context_window
+    return None
+
+
+def effective_compact_threshold(
+    model: str | None,
+    reserve_tokens: int = 0,
+    fallback_threshold: int = 32000,
+) -> int:
+    context_window = get_model_context_window(model)
+    if context_window is not None and reserve_tokens > 0:
+        return context_window - reserve_tokens
+    return fallback_threshold
+
+
 def parse_model_mode(value: str) -> ModelMode:
     """解析 `provider/model:thinking_level` 模型选择语法。"""
     text = value.strip()

@@ -9,30 +9,20 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.functional_validators import SkipValidation
 
 from xcode.ai.providers.base import StreamProvider
-from xcode.ai.types import StreamOptions, ThinkingLevel
-from xcode.agent.types import ToolArguments, ToolCallContent
-
-from .messages import AgentMessage, AssistantMessage, ToolResultMessage
-from .protocols import (
+from xcode.ai.types import StreamOptions, ThinkingLevel, ToolDefinition
+from xcode.agent.types import (
     AgentTool,
     AgentToolResult,
     CancellationSignal,
+    ToolArguments,
+    ToolCallContent,
     ToolExecutionMode,
     ToolResultContentBlock,
     ToolResultDetails,
 )
-from xcode.agent.context_assembly import ContextAssembler
-from xcode.agent.context_collector import ContextCollectorRegistry
 
-from .hooks import (
-    ArchiveWriter,
-    BeforeProviderRequestHook,
-    CompactHook,
-    ContextTransformer,
-    IsToolProductiveHook,
-    MessageConverter,
-    ShouldCompactHook,
-)
+from .messages import AgentMessage, AssistantMessage, ToolResultMessage
+from .context import ContextAssembler, ContextCollectorRegistry
 
 
 class _LoopRunState(BaseModel):
@@ -148,6 +138,22 @@ type AfterToolCallHook = Callable[
 type PrepareNextTurnHook = Callable[[], AgentLoopTurnUpdate | None]
 type ShouldStopAfterTurnHook = Callable[[ShouldStopAfterTurnContext], bool]
 
+# ── Callable type aliases（原 hooks.py）──
+
+type MessageConverter = Callable[[list[AgentMessage]], list[dict[str, object]]]
+type ContextTransformer = Callable[
+    [list[AgentMessage], CancellationSignal | None], list[AgentMessage]
+]
+type ArchiveWriter = Callable[[list[AgentMessage]], str | None]
+type ShouldCompactHook = Callable[[list[AgentMessage]], bool]
+type CompactHook = Callable[[list[AgentMessage]], list[AgentMessage]]
+type IsToolProductiveHook = Callable[
+    [list[ToolCallContent], list[ToolResultMessage]], bool
+]
+type BeforeProviderRequestHook = Callable[
+    [list[dict[str, object]], list[ToolDefinition]], None
+]
+
 
 # ── 循环配置 ──
 
@@ -176,12 +182,11 @@ class AgentLoopConfig(BaseModel):
     max_consecutive_continuations: int = 3
     min_continuation_tokens: int = 500
 
-    # 看门狗限制（经验阈值，可根据实际任务调整）
-    watchdog_repeated_tool_limit: int = 3  # 连续重复同一工具签名 3 次则终止
+    watchdog_repeated_tool_limit: int = 3
     watchdog_repeated_tool_skip: frozenset[str] = (
         frozenset()
-    )  # 豁免重复检测的工具名集合
-    max_consecutive_idle_steps: int = 4  # 连续 4 次工具调用无产出则终止
+    )
+    max_consecutive_idle_steps: int = 4
 
     should_compact: ShouldCompactHook | None = None
     compact: CompactHook | None = None
@@ -192,18 +197,6 @@ class AgentLoopConfig(BaseModel):
     before_provider_request: BeforeProviderRequestHook | None = None
 
     context_collectors: ContextCollectorRegistry | None = None
-    """上下文收集器注册表。配置后在 context_assembler 之前执行。
-
-    所有注册的 collector 按顺序运行，输出合并为 context_blocks
-    传递给 context_assembler。未配置时收集阶段返回空列表。
-    """
-
     context_assembler: Annotated[ContextAssembler | None, SkipValidation] = None
-    """结构化上下文组装器。配置后替代/增强 transform_context 的功能。
-
-    未配置时消息流完全不变。配置后每轮 provider 调用前执行，
-    按优先级注入 context_blocks，支持 budget 裁剪和过期过滤。
-    与 transform_context 兼容：先执行 context_assembler，再执行 transform_context。
-    """
 
     options: StreamOptions | None = None

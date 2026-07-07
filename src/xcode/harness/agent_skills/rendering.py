@@ -8,7 +8,7 @@ from __future__ import annotations
 import xml.sax.saxutils as _xml
 from typing import TYPE_CHECKING
 
-from xcode.agent.context_assembly import (
+from xcode.agent.context import (
     ContextBlock,
     ContextBlockSource,
     ContextBlockTarget,
