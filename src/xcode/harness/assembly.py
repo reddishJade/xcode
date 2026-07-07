@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from uuid import uuid4
 from typing import TYPE_CHECKING, Any, cast
 
 from xcode.harness.execution_env import ExecutionEnv
@@ -19,8 +19,6 @@ from xcode.harness.execution_env import ExecutionEnv
 from xcode.harness.config import (
     AgentConfig,
     ModeRuleRuntimeConfig,
-    PROFILE_MAIN,
-    PROFILE_SUBAGENT,
     SecurityRuntimeConfig,
     XcodeRuntimeConfig,
     discover_runtime_config,
@@ -30,26 +28,17 @@ from xcode.harness.agent_runtime import (
     CancellationToken,
     ContextualRetrievalState,
     StructuredAgent,
-    build_subagent_tools,
-    SubagentRunner,
-)
-from xcode.harness.agent_runtime.events import (
-    FinalStructuredEvent,
-    TextDeltaStructuredEvent,
-    ToolResultStructuredEvent,
-    ToolUpdateStructuredEvent,
-    ToolUseStructuredEvent,
 )
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
-from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
+from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
+from xcode.harness.agent_runtime.tool_gate import _ToolSpecAdapter
 from xcode.ai.providers.base import ModelProvider
 from xcode.harness.observability import (
     ExternalHookRunner,
     HookRecord,
-    JsonlAuditLogger,
     HookManager,
-    InMemoryGrantStore,
+    JsonlAuditLogger,
     PermissionDecision,
     PermissionPolicy,
 )
@@ -57,7 +46,8 @@ from xcode.harness.observability.permission_model import ExternalDirectory
 from xcode.harness.observability.permission_model import StaticPermission
 from xcode.harness.observability.permission_model import PolicyEvaluator
 from xcode.harness.observability.permission_model import Rule
-from xcode.agent.types import ToolSpec
+from xcode.agent.types import AgentToolResult, TextContent, ToolSpec
+from xcode.coding_agent.tools.subagent import build_subagent_tool
 from xcode.coding_agent.registry import build_project_scoped_registry
 from xcode.coding_agent.tools import ShellSpec
 
@@ -198,7 +188,7 @@ def build_search_tools_tool(
 ) -> ToolSpec:
     """按关键字搜索所有已注册工具。"""
 
-    def search_tools(data: ToolInput) -> str:
+    def search_tools(data: dict[str, Any], _on_update: Callable[[str], None] | None = None) -> str:
         registry = registry_provider()
         query = str(data.get("query", "")).strip().lower()
         if not query:
@@ -246,7 +236,7 @@ def build_tool_registry(
     shared_services: SharedServices,
     contextual_state: ContextualRetrievalState | None = None,
     compact_controller: CompactController | None = None,
-    cancel_event: threading.Event | None = None,
+    cancel_event: CancellationToken | None = None,
     env: ExecutionEnv | None = None,
     skills_dir: Path | None = None,
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
@@ -294,22 +284,11 @@ def build_tool_registry(
     )
     registry += (build_search_tools_tool(lambda: registry),)
 
-    subagent_closers, subagent_tools = _build_subagent_integration(
-        project_root=project_root,
+    _, subagent_tools = _build_subagent_integration(
         llm=llm,
-        llm_profiles=llm_profiles,
-        config=config,
-        runtime_config=runtime_config,
-        shared_services=shared_services,
         child_registry=child_registry,
-        contextual_state=contextual_state,
-        shell_spec=shell_spec,
-        cancel_event=cancel_event,
-        env=env,
-        hook_constraint_providers=hook_constraint_providers,
-        external_hook_runner=external_hook_runner,
+        cancellation_token=cancel_event,
     )
-    closers.extend(subagent_closers)
     registry += subagent_tools
 
     closers.append(mcp_runtime_registry.close)
@@ -404,143 +383,19 @@ def _extend_registry_with_features(
 
 
 def _build_subagent_integration(
-    project_root: Path,
     llm: ModelProvider,
-    llm_profiles: Mapping[str, ModelProvider] | None,
-    config: AgentConfig,
-    runtime_config: XcodeRuntimeConfig,
-    shared_services: SharedServices,
     child_registry: tuple[ToolSpec, ...],
-    contextual_state: ContextualRetrievalState | None,
-    shell_spec: ShellSpec,
-    cancel_event: threading.Event | None,
-    env: ExecutionEnv | None,
-    hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
-    external_hook_runner: ExternalHookRunner | None = None,
+    cancellation_token: CancellationToken | None = None,
 ) -> tuple[list[Callable[[], None]], tuple[ToolSpec, ...]]:
-    """构建子代理运行器和工具，返回 (closers, subagent_tools)。"""
-    child_llms = dict(llm_profiles or {})
-    if not child_llms:
-        child_llms[PROFILE_MAIN] = llm
-    child_llms.setdefault(PROFILE_SUBAGENT, child_llms[PROFILE_MAIN])
-
-    async def run_child(
-        prompt,
-        model_profile=PROFILE_SUBAGENT,
-        cwd_override=None,
-        on_update=None,
-    ):
-        child_root = project_root.resolve()
-        child_contextual_state = contextual_state
-        effective_registry = child_registry
-        if cwd_override is not None:
-            child_root = Path(cwd_override).resolve()
-            child_contextual_state = ContextualRetrievalState(child_root)
-            effective_registry = build_project_scoped_registry(
-                project_root=child_root,
-                contextual_state=child_contextual_state,
-                shell_spec=shell_spec,
-                cancel_event=cancel_event,
-                env=env,
-            )
-
-        sec = runtime_config.security
-        child_hook_manager = _build_hook_manager(
-            child_contextual_state,
-            external_hook_runner,
-            child_root,
-            subagent=True,
-        )
-
-        child_audit_path = resolve_config_path(
-            project_root, runtime_config.observability.audit_path
-        )
-        from xcode.harness.memory import MemoryManager
-
-        memory_manager = MemoryManager(child_root)
-
-        subagent_session_id = f"subagent-{uuid4().hex[:8]}"
-        child_agent = StructuredAgent(
-            provider=child_llms[model_profile],
-            registry=effective_registry,
-            config=config,
-            gate=GateConfig(
-                session_id=subagent_session_id,
-                permission_policy=_permission_policy_from_security(sec),
-                restricted_dirs=sec.restricted_dirs,
-                hook_constraint_providers=hook_constraint_providers,
-                hook_manager=child_hook_manager,
-                external_hook_runner=external_hook_runner,
-                external_hooks_subagent=True,
-                external_hooks_cwd=child_root,
-                audit_logger=(
-                    JsonlAuditLogger(child_audit_path).write
-                    if child_audit_path
-                    else None
-                ),
-                external_directories=_external_directories_from_security(sec),
-                session_grant_store=InMemoryGrantStore(session_id=subagent_session_id),
-                user_rulesets=_mode_rulesets_from_runtime_config(runtime_config),
-            ),
-            runtime=AgentRuntimeConfig(
-                runtime_context_provider=build_runtime_context_provider(
-                    child_root,
-                    effective_registry,
-                    shell_spec=shell_spec,
-                    contextual_state=child_contextual_state,
-                    modules=runtime_config.prompt.modules,
-                    memory_manager=memory_manager,
-                ),
-                project_root=child_root,
-                prompt_instructions=tuple(
-                    i.model_dump(exclude_none=True)
-                    for i in runtime_config.prompt.instructions
-                ),
-            ),
-        )
-        result = None
-        async for event in child_agent.arun_stream(prompt):
-            update = _format_child_event_update(event)
-            if update and on_update is not None:
-                on_update(update)
-            if isinstance(event, FinalStructuredEvent):
-                result = event.data
-        if result is None:
-            raise RuntimeError("subagent finished without final result")
-        return result.answer
-
-    managed_runner = SubagentRunner(
-        run_child,
-        available_profiles=tuple(child_llms),
-        default_profile=PROFILE_SUBAGENT,
-        max_active_jobs=config.subagent_workers,
+    """构建子代理工具，返回 (closers, subagent_tools)。"""
+    adapted = [_ToolSpecAdapter(s) for s in child_registry]
+    tool = build_subagent_tool(
+        model=llm,
+        coding_tools=adapted,
+        research_tools=adapted,
+        cancellation_token=cancellation_token,
     )
-    return [managed_runner.shutdown], build_subagent_tools(managed_runner)
-
-
-def _format_child_event_update(event: object) -> str | None:
-    """将子 Agent 结构化事件压缩为用户可见的委派进度。"""
-    if isinstance(event, TextDeltaStructuredEvent):
-        text = _single_line(event.data)
-        return f"text: {text}" if text else None
-    if isinstance(event, ToolUseStructuredEvent):
-        args = json.dumps(event.data.input, ensure_ascii=False, sort_keys=True)
-        return f"tool: {event.data.name} {args[:240]}"
-    if isinstance(event, ToolUpdateStructuredEvent):
-        text = _single_line(event.data.partial_result)
-        return f"{event.data.tool_name}: {text}" if text else None
-    if isinstance(event, ToolResultStructuredEvent):
-        text = _single_line(event.data.content)
-        status = "ok" if event.data.status == "ok" else "error"
-        return f"tool_result: {status} {text[:240]}"
-    if isinstance(event, FinalStructuredEvent):
-        reason = event.data.termination_reason.value
-        return f"final: {reason}"
-    return None
-
-
-def _single_line(text: str) -> str:
-    return " ".join(text.strip().split())[:240]
+    return ([], (tool,))
 
 
 # ── 可选服务 ──

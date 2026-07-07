@@ -1,6 +1,6 @@
 """Plan / Build / Act 的工具可见性策略与三态 ruleset 初始化。
 
-PlanPolicy.filter_tools() 暴露只读工具，并允许文件工具维护计划文件。
+PlanPolicy.filter_tools() 暴露 _PLAN_TOOLS，外加 write_file/edit_file（限 .xcode/plans/*.md）。
 初始化 MODE_DEFAULT_RULES，build 默认规则为透明的工具级 profile。
 """
 
@@ -59,16 +59,16 @@ class ExecutionModeState:
 class PlanPolicy:
     """plan: 只读分析，可维护 .xcode/plans/*.md 计划文件。"""
 
-    _READ_ONLY_TOOLS = frozenset({
+    _PLAN_TOOLS = frozenset({
         "read_file", "glob_files", "find_files", "list_dir", "grep_search",
-        "search_tools", "webfetch", "websearch", "question", "search_memory",
+        "search_tools", "webfetch", "websearch", "question",
     })
 
     def filter_tools(self, tools: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]:
         return tuple(
             tool
             for tool in tools
-            if tool.name in self._READ_ONLY_TOOLS or tool.name in {"write_file", "edit_file"}
+            if tool.name in self._PLAN_TOOLS or tool.name in {"write_file", "edit_file"}
         )
 
     def check_call(self, call: ToolCall) -> PermissionDecision:
@@ -179,6 +179,10 @@ def _init_mode_rulesets() -> None:
         Rule(action="question", effect="allow"),
         Rule(action="todowrite", effect="allow"),
         Rule(action="load_skill", effect="allow"),
+        Rule(action="subagent", effect="allow"),
+        Rule(action="search_memory", effect="allow"),
+        Rule(action="mcp__*", effect="allow"),
+        Rule(action="mcp_tool_search", effect="allow"),
     )
     write_rules = (
         Rule(action="write_file", effect="allow"),
