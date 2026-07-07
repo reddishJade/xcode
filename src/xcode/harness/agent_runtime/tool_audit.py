@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING
 
 from ...agent.config import AfterToolCallContext
 from ...agent.types import ToolCallContent
-from ..observability import AuditRecord, HookCorrelationFields, redact_text
+from ..observability import AuditLogger, AuditRecord, HookCorrelationFields, redact_text
 
 if TYPE_CHECKING:
     from ..observability import PermissionEngineResult
 
 
 def emit_audit(
-    audit_logger: Callable[[AuditRecord], None] | None,
+    audit_logger: AuditLogger | None,
     session_id: str,
     ctx: AfterToolCallContext,
     action_input: str,

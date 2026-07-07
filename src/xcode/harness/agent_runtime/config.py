@@ -31,6 +31,7 @@ from ...agent.messages import (
 from ...agent.types import AgentTool
 from ..config import AgentConfig, RequestHygieneConfig
 from ..observability import (
+    AuditLogger,
     AuditRecord,
     ExternalHookRunner,
     HookManager,
@@ -46,7 +47,7 @@ from ..observability.permission_model import (
     Rule,
 )
 from ...agent.types import ApprovalCallback, ToolSpec
-from ..skills import SkillRegistry
+from ..agent_skills import SkillRegistry
 from ..memory import MemoryManager
 from .cancellation import CancellationToken
 
@@ -80,7 +81,7 @@ class GateConfig:
     external_hook_runner: ExternalHookRunner | None = None
     external_hooks_subagent: bool = False
     external_hooks_cwd: Path | None = None
-    audit_logger: Callable[[AuditRecord], None] | None = None
+    audit_logger: AuditLogger | None = None
     session_id: str = "local"
     external_directories: tuple[ExternalDirectory, ...] = ()
     session_grant_store: GrantStore | None = None
@@ -299,7 +300,7 @@ def build_loop_config(
     registry_: ContextCollectorRegistry | None = None
     assembler: DefaultContextAssembler | None = None
     if project_root is not None:
-        from xcode.harness.skills import (
+        from xcode.harness.agent_skills import (
             SkillIndexCollector,
             SkillRegistry,
             build_skill_search_dirs,

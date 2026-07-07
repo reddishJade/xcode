@@ -20,7 +20,7 @@ from ..agent_runtime import CancellationToken, ContextualRetrievalState
 from ..observability import ExternalHookRunner, PolicyEvaluator
 
 if TYPE_CHECKING:
-    from ..skills import SkillRegistry
+    from ..agent_skills import SkillRegistry
     from ..mcp import McpRuntimeRegistry
 
 
@@ -73,7 +73,7 @@ def _discover_skills(
     runtime_config: XcodeRuntimeConfig,
     skills_dir: Path | None,
 ) -> SkillRegistry | None:
-    from ..skills import SkillRegistry, build_skill_search_dirs
+    from ..agent_skills import SkillRegistry, build_skill_search_dirs
 
     skill_registry: SkillRegistry | None = SkillRegistry()
     skill_registry.discover(

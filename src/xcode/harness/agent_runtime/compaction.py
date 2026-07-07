@@ -132,7 +132,6 @@ class LayeredCompactor:
         self.large_tool_output_tail_chars = large_tool_output_tail_chars
         self.compact_token_threshold = compact_token_threshold
         self.budget_trigger_token_ratio = budget_trigger_token_ratio
-        self.reserve_tokens = reserve_tokens
         self.on_compact = on_compact
         self.last_transcript_path: Path | None = None
         # 累积文件跟踪（跨压缩轮次）

@@ -20,6 +20,7 @@ from ..observability import (
     HookManager,
     HookRecord,
     JsonlAuditLogger,
+    SignalHookManager,
 )
 from ..observability.permission_model import PolicyEvaluator
 
@@ -30,7 +31,7 @@ from .security import (
 )
 
 if TYPE_CHECKING:
-    from ..skills import SkillRegistry
+    from ..agent_skills import SkillRegistry
     from ..memory import MemoryManager
 
 
@@ -43,7 +44,7 @@ def build_hook_manager(
 ) -> HookManager | None:
     if contextual_state is None and external_hook_runner is None:
         return None
-    manager = HookManager()
+    manager = SignalHookManager()
     if contextual_state is not None:
 
         def record_post_tool(record: object) -> None:

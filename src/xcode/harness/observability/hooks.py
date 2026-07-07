@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import logging
 import threading
-from typing import Literal
+from typing import Literal, Protocol
 
 from blinker import Signal
 
@@ -127,7 +127,18 @@ type HarnessEvent = (
 )
 
 
-class HookManager:
+class HookManager(Protocol):
+    def register(self, event: HookEvent, callback: HookCallback) -> None: ...
+    def remove(self, event: HookEvent, callback: HookCallback) -> None: ...
+    def register_background(self, event: HookEvent, callback: HookCallback) -> None: ...
+    def remove_background(self, event: HookEvent, callback: HookCallback) -> None: ...
+    def subscribe(self, event: HookEvent, callback: HarnessCallback) -> None: ...
+    def unsubscribe(self, event: HookEvent, callback: HarnessCallback) -> None: ...
+    def emit(self, record: HookRecord) -> None: ...
+    def drain_background(self) -> None: ...
+
+
+class SignalHookManager:
     def __init__(self) -> None:
         self._registered: dict[HookEvent, Signal] = {
             event: Signal() for event in _HOOK_EVENTS

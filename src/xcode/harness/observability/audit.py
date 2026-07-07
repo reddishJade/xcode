@@ -5,6 +5,7 @@ from datetime import datetime, UTC
 import json
 from pathlib import Path
 import re
+from typing import Protocol
 
 """工具执行审计与敏感信息脱敏。"""
 
@@ -64,6 +65,10 @@ class AuditRecord:
             "approval_source": self.approval_source,
             "approval_grant_id": self.approval_grant_id,
         }
+
+
+class AuditLogger(Protocol):
+    def __call__(self, record: AuditRecord) -> None: ...
 
 
 class JsonlAuditLogger:

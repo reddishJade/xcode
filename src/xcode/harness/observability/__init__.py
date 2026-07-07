@@ -4,7 +4,7 @@ trace 依赖 RAG 类型，使用时从 `observability.tracing` 直接导入，�
 入口和 RAG pipeline 形成循环依赖。
 """
 
-from .audit import AuditRecord, JsonlAuditLogger, redact_text
+from .audit import AuditLogger, AuditRecord, JsonlAuditLogger, redact_text
 from .external_hooks import (
     ExternalHookDiagnostic,
     ExternalHookExecution,
@@ -27,6 +27,7 @@ from .hooks import (
     HookRecord,
     PostToolEvent,
     PreToolEvent,
+    SignalHookManager,
 )
 
 from .permission_model import (
@@ -76,6 +77,7 @@ from .permissions import (
 )
 
 __all__ = [
+    "AuditLogger",
     "AuditRecord",
     "Action",
     "ActionExtractor",
@@ -122,6 +124,7 @@ __all__ = [
 
     "ShellAnalysis",
     "ShellAnalysisPolicyEvaluator",
+    "SignalHookManager",
     "UnresolvedEffect",
     "StaticPermission",
     "PostToolEvent",
