@@ -86,8 +86,13 @@ def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
 
     choices = [
         questionary.Choice(
-            title=" ".join(str(e.content if e.type == "user"
-                else e.content.get("data", {}).get("content", "")).split())[:100],
+            title=" ".join(
+                str(
+                    e.content
+                    if e.type == "user"
+                    else e.content.get("data", {}).get("content", "")
+                ).split()
+            )[:100],
             value=e,
         )
         for e in msgs
@@ -905,6 +910,8 @@ class _ContextSummary:
     free: int
     memory_text: str
     skill_count: int
+    instruction_files: list[str]
+    skill_source_dirs: list[tuple[str, str]]
 
 
 def _format_token(n: int) -> str:
@@ -927,6 +934,54 @@ def _count_output_tokens(messages: list[object]) -> int:
             ct = getattr(usage, "output", 0)
             total += ct if isinstance(ct, int) else 0
     return total
+
+
+def _count_tokens_by_message_role(messages: list[object]) -> dict[str, int]:
+    """按角色拆解消息 token 用量（user / agent / tool_calls）。"""
+    from xcode.agent._compaction import estimate_tokens
+    from xcode.agent.messages import (
+        AssistantMessage,
+        ToolResultMessage,
+        UserMessage,
+    )
+    from xcode.agent.types import TextContent, ThinkingContent, ToolCallContent
+
+    result: dict[str, int] = {"user": 0, "agent": 0, "tool_calls": 0}
+
+    for msg in messages:
+        if isinstance(msg, UserMessage):
+            content = msg.content
+            if isinstance(content, str):
+                result["user"] += estimate_tokens(content)
+            else:
+                for block in content:
+                    if isinstance(block, TextContent):
+                        result["user"] += estimate_tokens(block.text)
+        elif isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, (TextContent, ThinkingContent)):
+                    text = (
+                        block.text if isinstance(block, TextContent) else block.thinking
+                    )
+                    result["agent"] += estimate_tokens(text)
+                elif isinstance(block, ToolCallContent):
+                    import json
+
+                    result["tool_calls"] += estimate_tokens(
+                        json.dumps(block.arguments or {}, default=str)
+                    )
+            if msg.reasoning_content:
+                result["agent"] += estimate_tokens(msg.reasoning_content)
+        elif isinstance(msg, ToolResultMessage):
+            content = msg.content
+            if isinstance(content, str):
+                result["tool_calls"] += estimate_tokens(content)
+            else:
+                for block in content:
+                    if isinstance(block, TextContent):
+                        result["tool_calls"] += estimate_tokens(block.text)
+
+    return result
 
 
 def _get_context_window(model_name: str) -> int:
@@ -953,7 +1008,7 @@ def _compute_context_summary(
     agent: object, project_root: Path, state: ReplState
 ) -> _ContextSummary:
     """计算分类 token 用量，并更新 state 供底栏使用。"""
-    from xcode.agent._compaction import estimate_tokens, estimate_message_tokens
+    from xcode.agent._compaction import estimate_tokens
     from xcode.harness.agent_runtime.prompting.identity import (
         CORE_IDENTITY,
         TOOL_DISCIPLINE,
@@ -968,7 +1023,10 @@ def _compute_context_summary(
     registry = getattr(agent, "registry", None)
     if registry is not None:
         snap = registry
-        from xcode.coding_agent.tools.prompt import build_tool_prompt, build_tool_guidelines
+        from xcode.coding_agent.tools.prompt import (
+            build_tool_prompt,
+            build_tool_guidelines,
+        )
 
         parts = ["Available tools:\n" + build_tool_prompt(snap)]
         guidelines = build_tool_guidelines(snap)
@@ -978,7 +1036,14 @@ def _compute_context_summary(
 
     history_messages = getattr(agent, "history_messages", None)
     messages = history_messages() if history_messages is not None else []
-    categories.append(("Messages", estimate_message_tokens(messages)))
+    role_counts = _count_tokens_by_message_role(messages)
+    for key, label in [
+        ("user", "User messages"),
+        ("agent", "Agent responses"),
+        ("tool_calls", "Tool calls"),
+    ]:
+        if tokens := role_counts.get(key, 0):
+            categories.append((label, tokens))
 
     memory_manager = MemoryManager(project_root)
     memory_text = "\n".join(memory_manager.read_memory_blocks())
@@ -1007,6 +1072,37 @@ def _compute_context_summary(
                 lines.append(f"  <skill name={s.name}>{desc}</skill>")
             lines.append("</available-skills>")
             categories.append(("Skills", estimate_tokens("\n".join(lines))))
+
+    instruction_files: list[str] = []
+    agents_md = project_root / "AGENTS.md"
+    if agents_md.is_file():
+        instruction_files.append(str(agents_md))
+
+    skill_source_dirs: list[tuple[str, str]] = []
+    if skill_registry is not None and hasattr(skill_registry, "list_summaries"):
+        seen_dirs: set[str] = set()
+        for skill in skill_registry.list_summaries():
+            src = skill.source or "user"
+            label = {"explicit": "explicit", "project": "project", "user": "user"}.get(
+                src, src
+            )
+            key = (label, src)
+            if key not in seen_dirs and src not in seen_dirs:
+                seen_dirs.add(src)
+        standard_dirs = []
+        from xcode.harness.skills.discovery import build_skill_search_dirs
+
+        for path, priority in build_skill_search_dirs(project_root):
+            src_label = {
+                0: "explicit",
+                1: "project",
+                2: "project",
+                3: "user",
+                4: "user",
+            }.get(priority, "user")
+            if path.is_dir() and src_label in seen_dirs:
+                standard_dirs.append((src_label, str(path)))
+        skill_source_dirs = standard_dirs
 
     provider = getattr(agent, "provider", None)
     inner = getattr(provider, "active_provider", provider)
@@ -1049,6 +1145,8 @@ def _compute_context_summary(
         free=free,
         memory_text=memory_text,
         skill_count=skill_count,
+        instruction_files=instruction_files,
+        skill_source_dirs=skill_source_dirs,
     )
 
 
@@ -1061,25 +1159,33 @@ def cmd_context(cmd: str, ctx: CommandContext) -> bool:
 
     summary = _compute_context_summary(agent, ctx.project_root, ctx.state)
 
-    cost_str = f"${summary.spent:.2f}" if summary.spent > 0 else ""
-    parts = [f"cwd: {ctx.project_root}"]
-    parts.append(f"model: {summary.model_name}")
-    parts.append(f"mode: {ctx.state.mode}")
-    parts.append(f"context: {ctx.state.context_usage}")
-    if cost_str:
-        parts.append(f"cost: {cost_str}")
-    print("  ".join(parts))
+    cost_str = f" · ${summary.spent:.2f}" if summary.spent > 0 else ""
+    print(
+        f" Context Usage · {summary.model_name} · {ctx.state.context_usage}{cost_str}"
+    )
+    print()
 
-    print(" Estimated usage by category")
+    ICONS = {
+        "System prompt": "\u26c1",
+        "System tools": "\u26c1",
+        "User messages": "\u25c9",
+        "Agent responses": "\u25c9",
+        "Tool calls": "\u25c9",
+        "Skills": "\u26c1",
+        "Memory files": "\u26c1",
+    }
     for name, tokens in summary.categories:
+        icon = ICONS.get(name, " ")
         pct = (
             (tokens / summary.context_window * 100) if summary.context_window > 0 else 0
         )
-        print(f"   \u26c1 {name}: {_format_token(tokens)} tokens ({pct:.1f}%)")
+        print(f"   {icon} {name:<18} {_format_token(tokens):>7} tokens ({pct:.1f}%)")
 
     if summary.context_window > 0:
         free_pct = summary.free / summary.context_window * 100
-        print(f"   \u26f6 Free space: {_format_token(summary.free)} ({free_pct:.1f}%)")
+        print(
+            f"   \u25a1 Free space:       {_format_token(summary.free):>7} ({free_pct:.1f}%)"
+        )
 
     if summary.memory_text:
         block_count = max(1, summary.memory_text.count("## "))
@@ -1089,6 +1195,11 @@ def cmd_context(cmd: str, ctx: CommandContext) -> bool:
             f" \u00b7 {_format_token(len(summary.memory_text))} chars"
         )
 
+    if summary.instruction_files:
+        print("\n Instructions \u00b7 auto-loaded")
+        for f in summary.instruction_files:
+            print(f" \u2514 {f}")
+
     if summary.skill_count > 0:
         skill_token = next((t for n, t in summary.categories if n == "Skills"), 0)
         print("\n Skills \u00b7 /skills")
@@ -1096,6 +1207,12 @@ def cmd_context(cmd: str, ctx: CommandContext) -> bool:
             f" \u2514 {summary.skill_count} skills"
             f" \u00b7 {_format_token(skill_token)} tokens"
         )
+        if summary.skill_source_dirs:
+            seen_labels: set[str] = set()
+            for label, path in summary.skill_source_dirs:
+                if label not in seen_labels:
+                    seen_labels.add(label)
+                    print(f"    {label}: {path}")
 
     return False
 
@@ -1368,7 +1485,6 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         desc="Show session fork tree.",
         group=COMMAND_GROUP_SESSION_BRANCH,
     ),
-
     "/model": CommandEntry(
         handler=cmd_model,
         desc="Show current model info.",
