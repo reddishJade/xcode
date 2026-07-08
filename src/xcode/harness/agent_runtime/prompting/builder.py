@@ -253,6 +253,7 @@ def build_runtime_context_provider(
     modules: tuple[str, ...] | None = None,
     shell_spec: ShellSpec | None = None,
     memory_manager: MemoryManager | None = None,
+    todo_context_provider: Callable[[], str] | None = None,
 ) -> Callable[[str], list[str]]:
     """构建每轮运行时上下文，并按问题主动召回 opt-in 记忆。"""
     builder = prompt_builder or SystemPromptBuilder()
@@ -279,6 +280,10 @@ def build_runtime_context_provider(
                 )
             )
         ]
+        if todo_context_provider is not None:
+            rendered_todo = todo_context_provider()
+            if rendered_todo:
+                parts.append(rendered_todo)
         if memory_manager is not None:
             rendered_memory = _render_memory_context(
                 memory_manager,

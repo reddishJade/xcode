@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from asyncio import run as async_run
 from collections.abc import Callable
 from typing import Any
@@ -33,6 +34,10 @@ BUILD_SUBAGENT_PROMPTS: dict[str, str] = {
 }
 
 
+MAX_BATCH_TASKS = 16
+DEFAULT_MAX_CONCURRENT = 4
+
+
 def build_subagent_tool(
     model: ModelProvider,
     coding_tools: list[ToolSpec],
@@ -43,20 +48,31 @@ def build_subagent_tool(
         data: dict[str, Any],
         on_update: Callable[[str], None] | None = None,
     ) -> str:
-        prompt = str(data.get("prompt", "")).strip()
-        if not prompt:
-            return "Error: prompt is required"
-        subagent_type = str(data.get("subagent_type", "coding")).strip()
-        system_prompt = BUILD_SUBAGENT_PROMPTS.get(subagent_type, BUILD_SUBAGENT_PROMPTS["default"])
-        raw_tools = coding_tools if subagent_type == "coding" else research_tools
+        tasks_or_error = _parse_tasks(data)
+        if isinstance(tasks_or_error, str):
+            return tasks_or_error
+        tasks = tasks_or_error
+        max_concurrent = _max_concurrent(data.get("max_concurrent"))
 
         async def _run() -> str:
-            adapted: list[AgentTool] = [ToolSpecAdapter(s) for s in raw_tools]
-            agent = Agent(tools=adapted, model=model, system_prompt=system_prompt)
-            return await agent.prompt(
-                prompt,
-                signal=cancellation_token,
-                on_update=on_update,
+            if len(tasks) == 1:
+                task = tasks[0]
+                return await _run_one(
+                    task,
+                    model,
+                    coding_tools,
+                    research_tools,
+                    cancellation_token,
+                    on_update,
+                )
+            return await _run_batch(
+                tasks,
+                max_concurrent,
+                model,
+                coding_tools,
+                research_tools,
+                cancellation_token,
+                on_update,
             )
 
         return async_run(_run())
@@ -64,39 +80,201 @@ def build_subagent_tool(
     return ToolSpec(
         name="subagent",
         description=(
-            "Launch a subagent to perform a self-contained task. "
-            "The subagent runs independently with file system and web access.\n\n"
+            "Launch one or more subagents for self-contained tasks. "
+            "Each subagent runs independently with file system and web access. "
+            "Use tasks for parallel fan-out when the work items do not depend on each other.\n\n"
             "Available subagent types:\n"
             "- coding: Expert software engineer (default)\n"
             "- research: Research assistant with web access\n"
             "- default: General-purpose assistant"
         ),
-        input_hint='JSON: {"description":"short label","prompt":"...", "subagent_type":"coding"}',
+        input_hint=(
+            'JSON: {"description":"short label","prompt":"...", "subagent_type":"coding"} '
+            'or {"tasks":[{"description":"label","prompt":"..."}],"max_concurrent":4}'
+        ),
         handler=handler,
         schema={
             "type": "object",
             "properties": {
                 "description": {
                     "type": "string",
-                    "description": "Short 3-7 word label for the delegated task",
+                    "description": "Short 3-7 word label for a single delegated task",
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Complete task prompt for the subagent",
+                    "description": "Complete task prompt for a single subagent",
                 },
                 "subagent_type": {
                     "type": "string",
                     "enum": ["coding", "research", "default"],
                     "description": "Type of subagent (default: coding)",
                 },
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "description": {"type": "string"},
+                            "prompt": {"type": "string"},
+                            "subagent_type": {
+                                "type": "string",
+                                "enum": ["coding", "research", "default"],
+                            },
+                        },
+                        "required": ["description", "prompt"],
+                        "additionalProperties": False,
+                    },
+                    "description": "Independent tasks to run in parallel",
+                },
+                "max_concurrent": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_BATCH_TASKS,
+                    "description": "Maximum parallel subagents for tasks (default: 4)",
+                },
             },
-            "required": ["description", "prompt"],
             "additionalProperties": False,
         },
-        prompt_snippet="Delegate tasks to a subagent with full tool access",
+        prompt_snippet="Delegate independent work to one or more subagents",
         prompt_guidelines=(
             "Use subagent for substantial independent investigation or implementation tasks.",
-            "Include all necessary context in the prompt; subagent does not inherit conversation history.",
+            "Use tasks only when the work items can run independently; the main agent synthesizes results.",
+            "Include all necessary context in each prompt; subagents do not inherit conversation history.",
             "Do not poll delegated tasks; subagent returns the final result when done.",
         ),
+    )
+
+
+def _parse_tasks(data: dict[str, Any]) -> list[dict[str, str]] | str:
+    raw_tasks = data.get("tasks")
+    if raw_tasks is None:
+        prompt = str(data.get("prompt", "")).strip()
+        if not prompt:
+            return "Error: prompt is required"
+        return [
+            {
+                "description": str(data.get("description", "subagent")).strip()
+                or "subagent",
+                "prompt": prompt,
+                "subagent_type": str(data.get("subagent_type", "coding")).strip()
+                or "coding",
+            }
+        ]
+    if not isinstance(raw_tasks, list):
+        return "Error: tasks must be an array"
+    if not raw_tasks:
+        return "Error: tasks must not be empty"
+    if len(raw_tasks) > MAX_BATCH_TASKS:
+        return f"Error: tasks may contain at most {MAX_BATCH_TASKS} items"
+    tasks: list[dict[str, str]] = []
+    for index, raw_task in enumerate(raw_tasks, start=1):
+        if not isinstance(raw_task, dict):
+            return "Error: each task must be an object"
+        prompt = str(raw_task.get("prompt", "")).strip()
+        if not prompt:
+            return f"Error: task {index} prompt is required"
+        tasks.append(
+            {
+                "description": str(raw_task.get("description", f"task-{index}")).strip()
+                or f"task-{index}",
+                "prompt": prompt,
+                "subagent_type": str(
+                    raw_task.get("subagent_type", data.get("subagent_type", "coding"))
+                ).strip()
+                or "coding",
+            }
+        )
+    return tasks
+
+
+def _max_concurrent(raw: object) -> int:
+    if isinstance(raw, int):
+        return max(1, min(MAX_BATCH_TASKS, raw))
+    return DEFAULT_MAX_CONCURRENT
+
+
+async def _run_batch(
+    tasks: list[dict[str, str]],
+    max_concurrent: int,
+    model: ModelProvider,
+    coding_tools: list[ToolSpec],
+    research_tools: list[ToolSpec],
+    cancellation_token: CancellationSignal | None,
+    on_update: Callable[[str], None] | None,
+) -> str:
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def limited(index: int, task: dict[str, str]) -> tuple[int, str, str]:
+        async with semaphore:
+            label = task["description"]
+            task_update = _task_update(index, on_update)
+            if on_update is not None:
+                on_update(f"[{index}] → {label}")
+            try:
+                result = await _run_one(
+                    task,
+                    model,
+                    coding_tools,
+                    research_tools,
+                    cancellation_token,
+                    task_update,
+                )
+            except Exception as exc:
+                if on_update is not None:
+                    on_update(f"[{index}] ✗ {label}: {exc}")
+                return index, label, f"Error: {exc}"
+            if on_update is not None:
+                on_update(f"[{index}] ✓ {label}")
+            return index, label, result
+
+    results = await asyncio.gather(
+        *(limited(index, task) for index, task in enumerate(tasks, start=1))
+    )
+    lines = [f"Subagent batch completed: {len(results)} task(s)"]
+    for index, label, result in sorted(results):
+        lines.append(f"\n## {index}. {label}\n{result.strip()}")
+    return "\n".join(lines)
+
+
+def _task_update(
+    index: int,
+    on_update: Callable[[str], None] | None,
+) -> Callable[[str], None] | None:
+    if on_update is None:
+        return None
+
+    def update(line: str) -> None:
+        on_update(f"[{index}]   {line}")
+
+    return update
+
+
+async def _run_one(
+    task: dict[str, str],
+    model: ModelProvider,
+    coding_tools: list[ToolSpec],
+    research_tools: list[ToolSpec],
+    cancellation_token: CancellationSignal | None,
+    on_update: Callable[[str], None] | None,
+) -> str:
+    subagent_type = task["subagent_type"]
+    system_prompt = BUILD_SUBAGENT_PROMPTS.get(
+        subagent_type, BUILD_SUBAGENT_PROMPTS["default"]
+    )
+    raw_tools = coding_tools if subagent_type == "coding" else research_tools
+    adapted: list[AgentTool] = [ToolSpecAdapter(spec) for spec in raw_tools]
+    agent = Agent(tools=adapted, model=model, system_prompt=system_prompt)
+    return await agent.prompt(
+        _bounded_prompt(task["prompt"]),
+        signal=cancellation_token,
+        on_update=on_update,
+    )
+
+
+def _bounded_prompt(prompt: str) -> str:
+    return (
+        prompt
+        + "\n\nKeep this subagent task bounded: inspect only what is needed, "
+        + "avoid broad test suites or exhaustive scans unless explicitly requested, "
+        + "and return a concise summary."
     )

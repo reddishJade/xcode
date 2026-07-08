@@ -17,6 +17,7 @@ from xcode.coding_agent.registry import build_project_scoped_registry
 from ..config import XcodeRuntimeConfig, AgentConfig
 from ..execution_env import ExecutionEnv
 from ..agent_runtime import CancellationToken, ContextualRetrievalState
+from ..session_todo import SessionTodoState
 from ..observability import ExternalHookRunner, PolicyEvaluator
 
 if TYPE_CHECKING:
@@ -29,7 +30,9 @@ def build_search_tools_tool(
 ) -> ToolSpec:
     """按关键字搜索所有已注册工具。"""
 
-    def search_tools(data: dict[str, Any], _on_update: Callable[[str], None] | None = None) -> str:
+    def search_tools(
+        data: dict[str, Any], _on_update: Callable[[str], None] | None = None
+    ) -> str:
         registry = registry_provider()
         query = str(data.get("query", "")).strip().lower()
         if not query:
@@ -93,6 +96,7 @@ def _build_base_project_registry(
     env: ExecutionEnv | None,
     skill_registry: SkillRegistry | None,
     contextual_state: ContextualRetrievalState | None = None,
+    todo_state: SessionTodoState | None = None,
 ) -> tuple[ToolSpec, ...]:
     return build_project_scoped_registry(
         project_root=project_root,
@@ -101,6 +105,7 @@ def _build_base_project_registry(
         cancel_event=cancel_event,
         env=env,
         skill_registry=skill_registry,
+        todo_state=todo_state,
     )
 
 
@@ -110,9 +115,17 @@ def _build_child_registry(
 ) -> tuple[ToolSpec, ...]:
     CORE_TOOLS = frozenset(
         {
-            "read_file", "write_file", "edit_file", "apply_patch",
-            "glob_files", "find_files", "list_dir", "grep_search",
-            "webfetch", "websearch", "bash",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "apply_patch",
+            "glob_files",
+            "find_files",
+            "list_dir",
+            "grep_search",
+            "webfetch",
+            "websearch",
+            "bash",
         }
     )
     allowed_tools = CORE_TOOLS | subagent_extra_tools
@@ -153,6 +166,7 @@ def build_tool_registry(
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     external_hook_runner: ExternalHookRunner | None = None,
     memory_manager: Any | None = None,
+    todo_state: SessionTodoState | None = None,
 ) -> tuple[
     tuple[ToolSpec, ...],
     ShellSpec,
@@ -174,6 +188,7 @@ def build_tool_registry(
         env,
         skill_registry,
         contextual_state=contextual_state,
+        todo_state=todo_state,
     )
     mcp_runtime_registry = McpRuntimeRegistry()
     mcp_runtime_registry.configure_runtime(
@@ -194,12 +209,14 @@ def build_tool_registry(
     )
     registry += (build_search_tools_tool(lambda: registry),)
 
-    registry += (build_subagent_tool(
-        model=llm,
-        coding_tools=list(child_registry),
-        research_tools=list(child_registry),
-        cancellation_token=cancel_event,
-    ),)
+    registry += (
+        build_subagent_tool(
+            model=llm,
+            coding_tools=list(child_registry),
+            research_tools=list(child_registry),
+            cancellation_token=cancel_event,
+        ),
+    )
 
     closers.append(mcp_runtime_registry.close)
 

@@ -9,11 +9,16 @@ from xcode.ai.providers.base import ModelProvider
 from xcode.agent.types import ToolSpec
 from xcode.coding_agent.tools import ShellSpec
 
-from ..agent_runtime import CancellationToken, CodingAgentHarness, ContextualRetrievalState
+from ..agent_runtime import (
+    CancellationToken,
+    CodingAgentHarness,
+    ContextualRetrievalState,
+)
 from ..agent_runtime.config import AgentRuntimeConfig, GateConfig
 from ..agent_runtime.compaction import CompactController, LayeredCompactor
 from ..agent_runtime.prompting import build_runtime_context_provider
 from ..config import AgentConfig, XcodeRuntimeConfig
+from ..session_todo import SessionTodoState
 from ..observability import (
     ExternalHookRunner,
     HookManager,
@@ -93,6 +98,7 @@ def build_agent(
     skill_registry: SkillRegistry | None = None,
     external_hook_runner: ExternalHookRunner | None = None,
     memory_manager: Any | None = None,
+    todo_state: SessionTodoState | None = None,
 ) -> CodingAgentHarness:
     from ..memory import MemoryManager
 
@@ -132,6 +138,9 @@ def build_agent(
                 contextual_state=contextual_state,
                 modules=runtime_config.prompt.modules,
                 memory_manager=memory_manager,
+                todo_context_provider=(
+                    todo_state.render_context if todo_state is not None else None
+                ),
             ),
             fallback_provider=fallback_provider,
             project_root=project_root,
@@ -142,5 +151,6 @@ def build_agent(
                 for i in runtime_config.prompt.instructions
             ),
             memory_manager=memory_manager,
+            todo_state=todo_state,
         ),
     )

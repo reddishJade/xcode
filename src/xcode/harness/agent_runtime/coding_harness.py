@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
+from typing import cast
 from uuid import uuid4
 
 from ...agent.config import AgentContext, BeforeToolCallContext
@@ -17,7 +18,7 @@ from ...agent.messages import (
 from ...agent.types import AgentTool, AgentToolResult
 from ...agent.types import TextContent, ToolCallContent
 from ...agent.types import ToolSpec
-from ...agent.results import TerminationReason
+from ...agent.results import AgentLoopResult, TerminationReason
 from xcode.ai.providers.base import ModelProvider
 from xcode.coding_agent.execution_modes import ExecutionMode
 from ..config import AgentConfig
@@ -60,6 +61,7 @@ class CodingAgentHarness(AgentHarness):
         runtime = runtime or AgentRuntimeConfig()
         self._mode = ExecutionModeState()
         self._memory_manager = runtime.memory_manager
+        self._todo_state = runtime.todo_state
         super().__init__(provider, registry, config, gate, runtime)
 
     # ── AgentHarness 扩展点覆盖 ──
@@ -110,7 +112,10 @@ class CodingAgentHarness(AgentHarness):
         from .result import _build_structured_result
 
         return _build_structured_result(
-            visible_result, max_steps, self._mode.current_mode  # type: ignore[arg-type]
+            cast(AgentLoopResult, visible_result),
+            max_steps,
+            self._mode.current_mode,
+            todos=self._todo_state.to_dicts() if self._todo_state is not None else None,
         )
 
     def _post_load_history(self, messages: list[AgentMessage]) -> None:
@@ -124,11 +129,15 @@ class CodingAgentHarness(AgentHarness):
         super().load_run_state(run_state)
         if run_state.current_mode in {"act", "plan", "build"}:
             self._mode.set_mode(run_state.current_mode)
+        if self._todo_state is not None:
+            self._todo_state.replace(run_state.todos or [])
 
     def clear_history(self) -> None:
         super().clear_history()
         if self._runtime.skill_registry is not None:
             self._runtime.skill_registry.clear_activations()
+        if self._todo_state is not None:
+            self._todo_state.replace([])
 
     # ── 编码特定公共 API ──
 

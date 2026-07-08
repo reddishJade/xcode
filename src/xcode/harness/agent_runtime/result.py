@@ -34,6 +34,7 @@ class RunState:
     current_mode: ExecutionMode = "act"
     last_agent: str = "main"
     needs_follow_up: bool = False
+    todos: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 可序列化字典。"""
@@ -42,6 +43,7 @@ class RunState:
             "current_mode": self.current_mode,
             "last_agent": self.last_agent,
             "needs_follow_up": self.needs_follow_up,
+            "todos": self.todos or [],
         }
 
     @classmethod
@@ -55,6 +57,7 @@ class RunState:
             current_mode=_parse_execution_mode(payload.get("current_mode")) or "act",
             last_agent=str(payload.get("last_agent", "main")),
             needs_follow_up=bool(payload.get("needs_follow_up", False)),
+            todos=_todo_dicts(payload.get("todos", [])),
         )
 
 
@@ -77,6 +80,7 @@ def _build_structured_result(
     result: AgentLoopResult,
     max_steps: int,
     current_mode: ExecutionMode = "act",
+    todos: list[dict[str, Any]] | None = None,
 ) -> CodingAgentHarnessResult:
     """将 AgentLoopResult 转换为 CodingAgentHarnessResult。"""
     answer_parts: list[str] = []
@@ -143,11 +147,18 @@ def _build_structured_result(
         run_state=RunState(
             messages=messages,
             current_mode=current_mode,
+            todos=todos or [],
         ),
     )
 
 
 def _message_dicts(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _todo_dicts(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, Mapping)]

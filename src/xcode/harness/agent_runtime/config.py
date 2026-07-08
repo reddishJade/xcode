@@ -49,10 +49,15 @@ from ...agent.types import ApprovalCallback, ToolSpec
 from ..skills import SkillRegistry
 from ..memory import MemoryManager
 from .cancellation import CancellationToken
+from ..session_todo import SessionTodoState
 
 
 from .compaction import CompactController, estimate_message_tokens
-from xcode.coding_agent.execution_modes import ExecutionMode, ExecutionModeState, mode_notice
+from xcode.coding_agent.execution_modes import (
+    ExecutionMode,
+    ExecutionModeState,
+    mode_notice,
+)
 from .message_codec import messages_from_compacted_dicts
 from .tool_gate import ToolGate
 
@@ -104,6 +109,7 @@ class AgentRuntimeConfig:
     request_hygiene: RequestHygieneConfig | None = None
     skill_registry: SkillRegistry | None = None
     memory_manager: MemoryManager | None = None
+    todo_state: SessionTodoState | None = None
     prompt_instructions: tuple[dict, ...] = ()
 
 
@@ -234,7 +240,8 @@ def build_loop_config(
     mode_state: ExecutionModeState | None = None,
     skill_registry: SkillRegistry | None = None,
     mode: ExecutionMode | None = None,
-    tools_for_mode: Callable[[tuple[ToolSpec, ...], ExecutionMode], list[AgentTool]] | None = None,
+    tools_for_mode: Callable[[tuple[ToolSpec, ...], ExecutionMode], list[AgentTool]]
+    | None = None,
     watchdog_repeated_tool_skip: frozenset[str] | None = None,
 ) -> AgentLoopConfig:
     active_correlation = correlation or RuntimeCorrelation("local")

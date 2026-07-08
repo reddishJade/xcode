@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from xcode.harness.execution_env import ExecutionEnv
+from xcode.harness.session_todo import SessionTodoState
 from xcode.agent.types import ToolSpec
 from xcode.coding_agent.tools import (
     build_apply_patch_tool,
@@ -39,6 +40,7 @@ def build_project_scoped_registry(
     cancel_event: threading.Event | None = None,
     env: ExecutionEnv | None = None,
     skill_registry: SkillRegistry | None = None,
+    todo_state: SessionTodoState | None = None,
 ) -> tuple[ToolSpec, ...]:
     registry: tuple[ToolSpec, ...] = ()
     registry += (
@@ -71,7 +73,7 @@ def build_project_scoped_registry(
             env=env,
         ),
     )
-    registry += (build_todowrite_tool(),)
+    registry += (build_todowrite_tool(todo_state),)
     if skill_registry is not None and skill_registry.available_names():
         from xcode.harness.skills import build_load_skill_tool
 

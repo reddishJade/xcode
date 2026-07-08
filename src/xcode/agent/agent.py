@@ -24,6 +24,28 @@ from .messages import AgentMessage, AssistantMessage, SystemMessage, UserMessage
 from .types import AgentTool, CancellationSignal, TextContent
 
 
+def _tool_update_label(tool_name: str, args: dict[str, object]) -> str:
+    if tool_name == "read_file":
+        path = str(args.get("path") or args.get("file_path") or args.get("input") or "")
+        return f"read {path}" if path else tool_name
+    if tool_name == "bash":
+        command = str(args.get("command") or args.get("input") or "")
+        return f"$ {command}" if command else tool_name
+    if tool_name == "grep_search":
+        pattern = str(
+            args.get("pattern") or args.get("query") or args.get("input") or ""
+        )
+        path = str(args.get("path") or args.get("include") or "workspace")
+        return f"grep /{pattern}/ in {path}" if pattern else tool_name
+    if tool_name in {"glob_files", "find_files"}:
+        pattern = str(
+            args.get("pattern") or args.get("path") or args.get("input") or ""
+        )
+        path = str(args.get("path") or "workspace")
+        return f"find {pattern} in {path}" if pattern else tool_name
+    return tool_name
+
+
 class Agent:
     """纯 agent 运行时薄封装。
 
@@ -109,11 +131,13 @@ class Agent:
         )
 
         def _emit(event: AgentEvent) -> None:
+            if on_update is None:
+                return
             if isinstance(event, ToolExecutionStartEvent):
-                on_update and on_update(f"→ {event.tool_name}")
+                on_update(f"→ {_tool_update_label(event.tool_name, event.args)}")
             elif isinstance(event, ToolExecutionEndEvent):
                 status = "✓" if not event.is_error else "✗"
-                on_update and on_update(f"{status} {event.tool_name}")
+                on_update(f"{status} {event.tool_name}")
 
         result = await self.run(
             [UserMessage(content=text)],

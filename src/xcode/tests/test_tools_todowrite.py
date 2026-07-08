@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import json
+
 from xcode.coding_agent.tools.todowrite import build_todowrite_tool
+from xcode.harness.session_todo import SessionTodoState
+
 
 tool = build_todowrite_tool()
 
 
 class TestTodoWriteValidation:
     def test_valid_todo(self) -> None:
-        result = tool.handler({"todos": [{"content": "Fix bug", "status": "pending"}]}, None)
+        result = tool.handler(
+            {"todos": [{"content": "Fix bug", "status": "pending"}]}, None
+        )
         assert "Fix bug" in result
         assert "pending" in result
 
@@ -22,8 +28,10 @@ class TestTodoWriteValidation:
         assert "must not be empty" in result
 
     def test_invalid_status_raises(self) -> None:
-        result = tool.handler({"todos": [{"content": "task", "status": "invalid"}]}, None)
-        assert "invalid status" in result
+        result = tool.handler(
+            {"todos": [{"content": "task", "status": "invalid"}]}, None
+        )
+        assert "invalid todo status" in result
 
     def test_valid_statuses(self) -> None:
         for s in ("pending", "in_progress", "completed", "cancelled"):
@@ -35,7 +43,7 @@ class TestTodoWriteValidation:
             {"todos": [{"content": "task", "status": "pending", "priority": "urgent"}]},
             None,
         )
-        assert "invalid priority" in result
+        assert "invalid todo priority" in result
 
     def test_valid_priorities(self) -> None:
         for p in ("high", "medium", "low"):
@@ -44,3 +52,60 @@ class TestTodoWriteValidation:
                 None,
             )
             assert "error" not in result.lower()
+
+    def test_updates_shared_session_state(self) -> None:
+        state = SessionTodoState()
+        stateful_tool = build_todowrite_tool(state)
+        result = stateful_tool.handler(
+            {
+                "todos": [
+                    {
+                        "id": "fix-bug",
+                        "content": "Fix bug",
+                        "status": "in_progress",
+                        "priority": "high",
+                    }
+                ]
+            },
+            None,
+        )
+        payload = json.loads(result)
+        assert payload["todos"][0]["id"] == "fix-bug"
+        assert (
+            'id="fix-bug" status="in_progress" priority="high": Fix bug'
+            in state.render_context()
+        )
+
+    def test_rejects_multiple_in_progress_items(self) -> None:
+        result = tool.handler(
+            {
+                "todos": [
+                    {"id": "one", "content": "One", "status": "in_progress"},
+                    {"id": "two", "content": "Two", "status": "in_progress"},
+                ]
+            },
+            None,
+        )
+        assert "at most one" in result
+
+
+def test_todowrite_renders_multiline_tool_call_text() -> None:
+    from xcode.cli.repl_tools import brief_input, tool_call_text
+
+    raw = {
+        "todos": [
+            {"content": "Review diff", "status": "completed"},
+            {"content": "Run tests", "status": "in_progress", "priority": "high"},
+            {"content": "Write notes", "status": "pending"},
+        ]
+    }
+
+    assert brief_input("todowrite", raw) == "todo list (3)"
+    rendered = tool_call_text("todowrite", "todo list (3)", raw)
+    assert rendered.plain.splitlines() == [
+        "  → Todo list (3)",
+        "    ✓ Review diff",
+        "    ◌ Run tests [high]",
+        "    · Write notes",
+    ]
+    assert rendered.spans

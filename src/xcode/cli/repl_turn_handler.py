@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 from typing import Any
 
 from rich.console import Console
+from rich.live import Live
 from rich.text import Text
 
 from .commands import ReplState
 from .repl_rendering import (
+    CLI_COLOR_DIM,
     CLI_COLOR_ERROR,
     CLI_COLOR_SUCCESS,
     CLI_COLOR_THINKING,
@@ -26,6 +29,7 @@ from .repl_tools import (
     print_tool_call_rich,
     print_tool_result_rich,
     summarize_intents,
+    tool_call_text,
     tool_intent,
 )
 from xcode.ai.events import ToolCall
@@ -54,7 +58,8 @@ class ToolCallHandler:
         self.tool_group: dict[str, Any] | None = None
         self.tool_call_labels: dict[str, str] = {}
         self._progress_tool_id: str | None = None
-        self._subagent_lines: list[str] = []
+        self._subagent_slots: dict[int, dict[str, str]] = {}
+        self._subagent_live: Live | None = None
 
     def record_tool_call(self, event_data: ToolCall) -> None:
         label = brief_input(event_data.name, event_data.input)
@@ -73,7 +78,9 @@ class ToolCallHandler:
             }
         self.tool_group["calls"] += 1
         # ponytail: 记录工具名称+参数摘要，方便 flush 时显示
-        self.tool_group["details"].append((event_data.name, label))
+        self.tool_group["details"].append(
+            tool_call_text(event_data.name, label, event_data.input)
+        )
         if intent not in self.tool_group["intents"]:
             self.tool_group["intents"].append(intent)
 
@@ -101,24 +108,12 @@ class ToolCallHandler:
             return
         if event_data.tool_name == "subagent":
             self.flush_group()
-            self.clear_progress()
-            self._subagent_lines.extend(partial.splitlines())
-            visible = [ln.strip() for ln in self._subagent_lines if ln.strip()]
-            if not visible:
-                return
-            # ponytail: 紧凑单行进度，\r 覆盖，不刷屏
-            starts = sum(1 for ln in visible if ln.startswith("→"))
-            ends = sum(1 for ln in visible if "✓" in ln or "✗" in ln)
-            running = max(0, starts - ends)
-            done = ends
-            total = max(starts, ends)
-            preview = visible[-3:]
-            status = ", ".join(preview)
-            _safe_write(
-                f"\r\033[K\x1b[90m  Subagent: {done}/{total} tool calls"
-                + (f", {running} running" if running else "")
-                + f" · {status}\x1b[0m"
-            )
+            self._clear_progress()
+            changed = False
+            for line in partial.splitlines():
+                changed = self._record_subagent_update(line.strip()) or changed
+            if changed:
+                self._render_subagent_live()
             return
         if self._progress_tool_id != tool_id:
             self._clear_progress()
@@ -149,8 +144,8 @@ class ToolCallHandler:
             )
         else:
             # ponytail: 主 agent 工具每次调用一行，清晰可见
-            for _name, summary in details:
-                self.live_console.print(Text(f"  → {summary}", style=CLI_COLOR_TOOL))
+            for detail in details:
+                self.live_console.print(detail)
             status = "failed" if errors else "done"
             style = CLI_COLOR_ERROR if errors else CLI_COLOR_SUCCESS
             self.live_console.print(Text(f"    {status}: {calls} tools", style=style))
@@ -164,7 +159,56 @@ class ToolCallHandler:
     def discard_group(self) -> None:
         self.clear_progress()
         self.tool_group = None
-        self._subagent_lines.clear()
+        self._stop_subagent_live()
+        self._subagent_slots.clear()
+
+    def _record_subagent_update(self, clean: str) -> bool:
+        if not clean:
+            return False
+        match = re.match(r"\[(\d+)]( +)(.*)", clean)
+        if match is None:
+            return False
+        index = int(match.group(1))
+        gap = match.group(2)
+        body = match.group(3)
+        slot = self._subagent_slots.setdefault(index, {"task": "", "tool": ""})
+        if len(gap) > 1:
+            slot["tool"] = body.strip()
+        else:
+            slot["task"] = body
+            if body.startswith(("✓", "✗")):
+                slot["tool"] = ""
+        return True
+
+    def _render_subagent_live(self) -> None:
+        text = Text("  Subagents", style=CLI_COLOR_TOOL)
+        for index in sorted(self._subagent_slots):
+            slot = self._subagent_slots[index]
+            task = slot.get("task") or "waiting"
+            tool = slot.get("tool", "")
+            text.append("\n")
+            text.append(f"    [{index}] ", style=CLI_COLOR_DIM)
+            text.append(task, style=CLI_COLOR_TOOL)
+            if tool:
+                text.append("\n")
+                text.append("        ", style=CLI_COLOR_DIM)
+                text.append(tool, style=CLI_COLOR_DIM)
+        if self._subagent_live is None:
+            self._subagent_live = Live(
+                text,
+                console=self.live_console,
+                refresh_per_second=12,
+                transient=False,
+            )
+            self._subagent_live.start(refresh=True)
+            return
+        self._subagent_live.update(text, refresh=True)
+
+    def _stop_subagent_live(self) -> None:
+        if self._subagent_live is None:
+            return
+        self._subagent_live.stop()
+        self._subagent_live = None
 
     def clear_line(self) -> None:
         _safe_write("\r\033[K")

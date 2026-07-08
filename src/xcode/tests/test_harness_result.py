@@ -18,12 +18,14 @@ class TestRunState:
             current_mode="build",
             last_agent="sub",
             needs_follow_up=True,
+            todos=[{"id": "one", "content": "One", "status": "pending"}],
         )
         d = original.to_dict()
         restored = RunState.from_dict(d)
         assert restored.current_mode == "build"
         assert restored.last_agent == "sub"
         assert restored.needs_follow_up
+        assert restored.todos == [{"id": "one", "content": "One", "status": "pending"}]
 
     def test_from_dict_non_dict(self) -> None:
         state = RunState.from_dict("not a dict")

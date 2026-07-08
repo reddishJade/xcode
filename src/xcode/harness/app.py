@@ -19,6 +19,7 @@ from xcode.harness.agent_runtime import (
 )
 from xcode.agent.types import ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
+from xcode.harness.session_todo import SessionTodoState
 from xcode.ai.providers.registry import ProviderSettings, build_provider_bundle
 from . import assembly as _assembly
 from .assembly import (
@@ -193,6 +194,7 @@ def build_app(
             model_profiles=cfg.runtime_config.provider.model_profiles,
         )
     )
+    todo_state = SessionTodoState()
     external_hook_runner = (
         ExternalHookRunner(cfg.runtime_config.hooks.entries, project_root)
         if cfg.runtime_config.hooks.entries
@@ -216,6 +218,7 @@ def build_app(
         skills_dir=cfg.skills_dir,
         external_hook_runner=external_hook_runner,
         memory_manager=memory_manager,
+        todo_state=todo_state,
     )
 
     fallback_provider = providers.llms.get("fallback")
@@ -257,6 +260,7 @@ def build_app(
         skill_registry=skill_registry,
         external_hook_runner=external_hook_runner,
         memory_manager=memory_manager,
+        todo_state=todo_state,
     )
 
     return XcodeApp(

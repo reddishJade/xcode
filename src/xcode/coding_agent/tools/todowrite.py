@@ -1,43 +1,28 @@
 from __future__ import annotations
 
 import json
-import threading
 from collections.abc import Callable
-from typing import Any
+from dataclasses import asdict
 
 from xcode.agent.types import ToolSpec as CoreToolSpec
+from xcode.harness.session_todo import SessionTodoState
 
 
-_todos: list[dict[str, Any]] = []
-_lock = threading.Lock()
+def build_todowrite_tool(state: SessionTodoState | None = None) -> CoreToolSpec:
+    todo_state = state or SessionTodoState()
 
-
-def build_todowrite_tool() -> CoreToolSpec:
-    def handler(data: dict[str, Any], _on_update: Callable[[str], None] | None = None) -> str:
-        raw = data.get("todos")
-        if not isinstance(raw, list):
-            return 'Error: "todos" must be an array'
-        validated: list[dict[str, Any]] = []
-        for item in raw:
-            if not isinstance(item, dict):
-                return "Error: each todo must be an object"
-            content = str(item.get("content", "")).strip()
-            status = str(item.get("status", "pending")).strip()
-            if not content:
-                return "Error: todo content must not be empty"
-            if status not in {"pending", "in_progress", "completed", "cancelled"}:
-                return f"Error: invalid status: {status}"
-            entry: dict[str, Any] = {"content": content, "status": status}
-            priority = item.get("priority")
-            if priority is not None:
-                if priority not in {"high", "medium", "low"}:
-                    return f"Error: invalid priority: {priority}"
-                entry["priority"] = priority
-            validated.append(entry)
-        with _lock:
-            _todos.clear()
-            _todos.extend(validated)
-        return json.dumps({"todos": validated}, ensure_ascii=False, indent=2)
+    def handler(
+        data: dict[str, object], _on_update: Callable[[str], None] | None = None
+    ) -> str:
+        try:
+            items = todo_state.replace(data.get("todos"))
+        except ValueError as exc:
+            return f"Error: {exc}"
+        return json.dumps(
+            {"todos": [asdict(item) for item in items]},
+            ensure_ascii=False,
+            indent=2,
+        )
 
     return CoreToolSpec(
         name="todowrite",
@@ -46,7 +31,7 @@ def build_todowrite_tool() -> CoreToolSpec:
             "Use it to track progress during multi-step work. "
             "Provide the full list each time to replace the previous state."
         ),
-        input_hint='JSON: {"todos": [{"content": "Implement X", "status": "in_progress", "priority": "high"}]}',
+        input_hint='JSON: {"todos": [{"id":"implement-x", "content": "Implement X", "status": "in_progress", "priority": "high"}]}',
         handler=handler,
         schema={
             "type": "object",
@@ -56,10 +41,22 @@ def build_todowrite_tool() -> CoreToolSpec:
                     "items": {
                         "type": "object",
                         "properties": {
-                            "content": {"type": "string", "description": "Description of the task"},
+                            "id": {
+                                "type": "string",
+                                "description": "Stable id for updating an existing todo",
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "Description of the task",
+                            },
                             "status": {
                                 "type": "string",
-                                "enum": ["pending", "in_progress", "completed", "cancelled"],
+                                "enum": [
+                                    "pending",
+                                    "in_progress",
+                                    "completed",
+                                    "cancelled",
+                                ],
                                 "description": "Current status",
                             },
                             "priority": {
@@ -68,6 +65,7 @@ def build_todowrite_tool() -> CoreToolSpec:
                             },
                         },
                         "required": ["content", "status"],
+                        "additionalProperties": False,
                     },
                     "description": "Full todo list (replaces previous state)",
                 }
@@ -79,6 +77,8 @@ def build_todowrite_tool() -> CoreToolSpec:
         prompt_guidelines=(
             "Use todowrite to maintain a persistent todo list during multi-step tasks.",
             "Provide the full list each time; the system replaces the previous state.",
+            "Use stable ids when updating existing items.",
+            "Keep at most one item in_progress.",
             "Mark items completed when done, update priorities as needed.",
         ),
     )
