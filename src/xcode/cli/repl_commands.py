@@ -78,7 +78,37 @@ def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
-    """从当前会话创建独立分支。"""
+    """从某条 user 消息截断，新建会话。"""
+    msgs = ctx.store.get_user_messages()
+    if not msgs:
+        print("No user messages to fork from.")
+        return False
+
+    choices = [
+        questionary.Choice(
+            title=" ".join(str(e.content if e.type == "user"
+                else e.content.get("data", {}).get("content", "")).split())[:100],
+            value=e,
+        )
+        for e in msgs
+    ]
+    selected = questionary.select("Select message to fork from:", choices=choices).ask()
+    if selected is None:
+        return False
+
+    parent_session_id = ctx.store.session_id
+    forked = ctx.store.fork_from_entry(selected.id)
+    ctx.store.current_path = forked.current_path
+    meta = ctx.store.current_metadata()
+    if ctx.snapshot_store is not None and meta is not None:
+        ctx.snapshot_store.fork_session(parent_session_id, meta.id)
+    sync_agent_history(ctx.app, ctx.store)
+    print(f'Forked at: "{meta.title if meta else selected.id[:8]}"')
+    return False
+
+
+def cmd_clone(cmd: str, ctx: CommandContext) -> bool:
+    """完整复制当前会话到新文件。"""
     parent_session_id = ctx.store.session_id
     ctx.store.fork_into()
     fork_meta = ctx.store.current_metadata()
@@ -86,7 +116,7 @@ def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
         ctx.snapshot_store.fork_session(parent_session_id, fork_meta.id)
     sync_agent_history(ctx.app, ctx.store)
     if fork_meta is not None:
-        print(f'Forked: "{fork_meta.title}"')
+        print(f'Cloned: "{fork_meta.title}"')
     return False
 
 
@@ -131,37 +161,29 @@ def cmd_resume(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_tree(cmd: str, ctx: CommandContext) -> bool:
-    """显示会话分支树。"""
+    """显示会话分支树，选中的 entry 设为当前位置。"""
     nodes = ctx.store.get_tree()
     if not nodes:
         print("No session tree available (no metadata).")
         return False
 
-    for node in nodes:
-        indent = "  " * node.depth
-        prefix = "└─ " if node.depth > 0 else ""
-        branch = ""
-        marker = " ← current" if node.is_current else ""
-        label = f"{branch}{node.title}"
-        print(f"{indent}{prefix}{label}{marker}")
-    return False
-
-
-def cmd_branch(cmd: str, ctx: CommandContext) -> bool:
-    """列出或切换到指定分支。"""
-    parts = cmd.split(maxsplit=1)
-    if len(parts) == 1 or parts[1].strip() in {"list", "tree"}:
-        return cmd_tree("/tree", ctx)
-
-    target = parts[1].strip()
-    try:
-        view = ctx.store.switch_branch(target)
-    except ValueError as exc:
-        print(str(exc))
+    choices = [
+        questionary.Choice(
+            title=f"{'  ' * n.depth}{'└─ ' if n.depth > 0 else ''}{n.title}{' ← current' if n.is_current else ''}",
+            value=n,
+        )
+        for n in nodes
+    ]
+    selected = questionary.select("Jump to entry:", choices=choices).ask()
+    if selected is None:
         return False
+
+    if not ctx.store.jump_to_entry(selected.id):
+        print("Failed to set entry.")
+        return False
+
     sync_agent_history(ctx.app, ctx.store)
-    print(resumed_message(view))
-    print_loaded_history(ctx.store)
+    print(f"Moved to: {selected.title}")
     return False
 
 
@@ -1315,7 +1337,12 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     ),
     "/fork": CommandEntry(
         handler=cmd_fork,
-        desc="Fork current session into an independent branch.",
+        desc="Fork from a user message into a new session.",
+        group=COMMAND_GROUP_SESSION_BRANCH,
+    ),
+    "/clone": CommandEntry(
+        handler=cmd_clone,
+        desc="Clone current session into a new file.",
         group=COMMAND_GROUP_SESSION_BRANCH,
     ),
     "/rewind": CommandEntry(
@@ -1341,13 +1368,7 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         desc="Show session fork tree.",
         group=COMMAND_GROUP_SESSION_BRANCH,
     ),
-    "/branch": CommandEntry(
-        handler=cmd_branch,
-        desc="List or switch session branches.",
-        args_desc="list|tree|<id|title>",
-        accepts_args=True,
-        group=COMMAND_GROUP_SESSION_BRANCH,
-    ),
+
     "/model": CommandEntry(
         handler=cmd_model,
         desc="Show current model info.",

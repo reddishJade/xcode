@@ -435,7 +435,12 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
             Callable[..., Iterator[CodingAgentHarnessEvent]], ask_stream
         )
         for event in typed_ask_stream(text, mode=ctx.state.mode):
-            ctx.store.append("event", event_to_dict(event))
+            # ponytail: 只记录有意义的事件，不存流式碎片
+            if event.type not in {
+                "message_start", "message_stop",
+                "reasoning_delta", "text_delta",
+            }:
+                ctx.store.append("event", event_to_dict(event))
             turn.handle_event(event)
     except KeyboardInterrupt:
         turn.interrupted = True

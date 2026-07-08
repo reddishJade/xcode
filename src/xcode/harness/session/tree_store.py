@@ -169,6 +169,7 @@ class TreeSessionRepo:
             created_at=now,
             updated_at=now,
             parent_id=parent.id,
+            head_id=self._load_head_id(),
         )
         self._upsert_metadata(meta)
         fork = TreeSessionRepo.__new__(TreeSessionRepo)
@@ -356,11 +357,92 @@ class TreeSessionRepo:
             "recovery_boundary": "head_id_and_entry_tree",
         }
 
-    def get_tree(self) -> list[TreeNode]:
+    def get_user_messages(self) -> list[SessionEntry]:
+        """当前会话所有 user 消息，去重。"""
+        raw = self.read_entries()
+        seen: set[str] = set()
+        out: list[SessionEntry] = []
+        for e in raw:
+            if e.type == "user":
+                text = str(e.content)
+            elif (e.type == "event" and isinstance(e.content, dict)
+                  and e.content.get("type") == "message_start"
+                  and isinstance(e.content.get("data"), dict)
+                  and e.content.get("data", {}).get("role") == "user"):
+                text = str(e.content.get("data", {}).get("content", ""))
+            else:
+                continue
+            if text not in seen:
+                seen.add(text)
+                out.append(e)
+        return out
+
+    def jump_to_entry(self, entry_id: str) -> bool:
+        """将 head_id 指向指定 entry，实现树内导航。"""
         entries = self.read_entries()
-        if not entries:
-            return []
+        if not any(e.id == entry_id for e in entries):
+            return False
+        self._save_head_id(entry_id)
+        return True
+
+    def fork_from_entry(self, entry_id: str, title: str = "", summary: str = "") -> TreeSessionRepo:
+        """从指定 entry 分叉：新建会话，只保留从该 entry 到 head 的路径。"""
+        entries = self.read_entries()
         by_id = {e.id: e for e in entries}
+        if entry_id not in by_id:
+            raise ValueError(f"entry {entry_id} not found")
+
+        # 从 head 回溯到 entry_id，收集路径
+        branch_ids: set[str] = set()
+        current: str | None = self._load_head_id() or entry_id
+        while current and current in by_id:
+            branch_ids.add(current)
+            if current == entry_id:
+                break
+            current = by_id[current].parent_id
+
+        if entry_id not in branch_ids:
+            raise ValueError(f"entry {entry_id} not on current branch")
+
+        parent = self.ensure_metadata()
+        fork_path = self._new_path()
+        entry_parent = by_id[entry_id].parent_id
+        with fork_path.open("w", encoding="utf-8") as f:
+            for e in entries:
+                if e.id in branch_ids:
+                    pid = None if e.id == entry_id else e.parent_id
+                    f.write(TreeEntryModel(
+                        id=e.id, parent_id=pid, type=e.type,
+                        content=e.content, created_at=e.created_at,
+                    ).model_dump_json() + "\n")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        meta = TreeMetadata(
+            id=self._session_id(fork_path),
+            title=title or f"Fork of {parent.title}",
+            summary=summary or parent.summary,
+            project_path=parent.project_path,
+            transcript_path=str(fork_path),
+            created_at=now,
+            updated_at=now,
+            parent_id=parent.id,
+            head_id=self._load_head_id(),
+        )
+        self._upsert_metadata(meta)
+        fork = TreeSessionRepo.__new__(TreeSessionRepo)
+        fork.sessions_dir = self.sessions_dir
+        fork.project_root = self.project_root
+        fork.index_path = self.index_path
+        fork._lock = self._lock
+        fork.current_path = fork_path
+        fork.artifacts_dir = self.artifacts_dir
+        return fork
+
+    def get_tree(self) -> list[TreeNode]:
+        # ponytail: 跳过流式碎片，重连孤儿子节点
+        raw = self.read_entries()
+        if not raw:
+            return []
+        entries, by_id = _filter_tree_entries(raw)
         children: dict[str, list[SessionEntry]] = {}
         for e in entries:
             pid = e.parent_id
@@ -376,33 +458,41 @@ class TreeSessionRepo:
         result: list[TreeNode] = []
         seen: set[str] = set()
 
-        def walk(e: SessionEntry, depth: int) -> None:
-            if e.id in seen:
-                return
-            seen.add(e.id)
-            is_current = e.id == head_id
-            type_label = e.type[:20]
-            result.append(
-                TreeNode(
-                    id=e.id,
-                    title=type_label,
-                    depth=depth,
-                    is_current=is_current,
-                    is_leaf=e.id not in children,
-                )
-            )
-            for child in sorted(
-                children.get(e.id, []), key=lambda x: x.created_at
-            ):
-                walk(child, depth + 1)
-
+        # ponytail: iterative stack avoids RecursionError on deep chains
+        stack: list[tuple[SessionEntry, int]] = []
         if heads:
-            for h in heads:
-                walk(h, 0)
+            stack.append((heads[0], 0))  # 只推根节点，子节点靠 children walk 展开
         else:
             for e in entries:
                 if e.parent_id is None:
-                    walk(e, 0)
+                    stack.append((e, 0))
+
+        while stack:
+            e, depth = stack.pop()
+            if e.id in seen:
+                continue
+            seen.add(e.id)
+            is_current = e.id == head_id
+            child_count = len(children.get(e.id, []))
+            is_branch = child_count > 1
+            title = _node_label(e, child_count)
+            if is_branch:
+                title = f"⊕ {title}"
+            result.append(
+                TreeNode(
+                    id=e.id,
+                    title=title,
+                    depth=depth,
+                    is_current=is_current,
+                    is_leaf=child_count == 0,
+                )
+            )
+            # push children in reverse so they process in created_at order
+            for child in reversed(
+                sorted(children.get(e.id, []), key=lambda x: x.created_at)
+            ):
+                stack.append((child, depth + 1))
+
         return result
 
     @staticmethod
@@ -635,3 +725,94 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+_NOISY_EVENT_TYPES = frozenset({
+    "message_start", "message_stop",
+    "reasoning_delta", "text_delta",
+    "assistant",  # AssistantStructuredEvent — block list，无用
+    "turn_end",    # 内部 bookkeeping
+    "final",       # 同上
+    "tool_update", # 进度更新，无意义
+    "tool_use",    # 树只看 user/assistant 消息
+    "tool_result",
+})
+
+
+def _is_noisy_event(e: SessionEntry) -> bool:
+    return (
+        e.type == "event"
+        and isinstance(e.content, dict)
+        and e.content.get("type") in _NOISY_EVENT_TYPES
+    )
+
+
+def _filter_tree_entries(
+    raw: list[SessionEntry],
+) -> tuple[list[SessionEntry], dict[str, SessionEntry]]:
+    """移除流式碎片，重连孤儿子节点。"""
+    by_id = {e.id: e for e in raw}
+    filtered: list[SessionEntry] = []
+    removed: set[str] = set()
+
+    for e in raw:
+        if _is_noisy_event(e):
+            removed.add(e.id)
+        else:
+            filtered.append(e)
+
+    if not removed:
+        return filtered, {e.id: e for e in filtered}
+
+    # 重连：被移除节点的子节点指向最近的可见祖先
+    reparented: list[SessionEntry] = []
+    for e in filtered:
+        pid = e.parent_id
+        while pid and pid in removed:
+            pid = by_id[pid].parent_id if pid in by_id else None
+        if pid != e.parent_id:
+            e = SessionEntry(
+                id=e.id, parent_id=pid, type=e.type,
+                content=e.content, created_at=e.created_at,
+            )
+        reparented.append(e)
+
+    by_id = {e.id: e for e in reparented}
+    return reparented, by_id
+
+
+def _node_label(e: SessionEntry, child_count: int) -> str:
+    """生成树节点展示文本。"""
+    if e.type == "user":
+        text = _collapse_text(str(e.content))
+        return f"user: {_truncate(text, 60)}"
+    if e.type == "assistant":
+        text = _collapse_text(str(e.content))
+        return f"assistant: {_truncate(text, 60)}"
+    if e.type == "event" and isinstance(e.content, dict):
+        sub = str(e.content.get("type", ""))
+        data = e.content.get("data", "")
+
+        if isinstance(data, dict):
+            if sub == "tool_use" and "name" in data and "input" in data:
+                name = data["name"]
+                inp = data["input"]
+                if isinstance(inp, dict):
+                    # 提取工具关键入参：bash → command，文件工具 → path，搜索 → pattern
+                    for key in ("command", "path", "pattern", "paths", "file_path"):
+                        if key in inp:
+                            preview = _collapse_text(str(inp[key]))
+                            return f"{name}: {_truncate(preview, 60)}"
+                return name
+            if sub == "tool_result" and "content" in data:
+                content = _collapse_text(str(data["content"]))
+                return f"{sub}: {_truncate(content, 50)}"
+            if "name" in data:
+                return f"{sub}: {data['name']}"
+            data_str = _collapse_text(str({k: v for k, v in data.items() if k != "input"}))
+        else:
+            data_str = _collapse_text(str(data)) if data else ""
+        if data_str:
+            return f"{sub}: {_truncate(data_str, 50)}"
+        return sub or "event"
+    return e.type[:20]
