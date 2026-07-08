@@ -71,7 +71,7 @@ def sync_agent_history(app: object, store: SessionStore) -> None:
     load_history = getattr(agent, "load_history", None)
     if not callable(load_history):
         return
-    records = store.read_entries()
+    records = store.build_branch()
     load_history(records_to_agent_messages(records))
     _restore_contextual_state(app, records)
     set_notice = getattr(agent, "set_resumed_notice", None)
@@ -372,7 +372,7 @@ def print_loaded_history(store: SessionStore) -> None:
     console = Console(file=sys.stdout)
     records = [
         record
-        for record in store.read_entries()
+        for record in store.build_branch()
         if record.type in {"user", "assistant"} and str(record.content).strip()
     ]
     if not records:
