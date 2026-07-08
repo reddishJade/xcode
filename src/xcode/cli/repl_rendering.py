@@ -347,6 +347,22 @@ def create_prompt_session(
 
     bindings.add("c-c")(handle_ctrl_c)
 
+    if state is not None:
+
+        def _toggle_thinking(event) -> None:
+            state.thinking_collapsed = not state.thinking_collapsed
+            status = "collapsed" if state.thinking_collapsed else "expanded"
+            event.app.print(f"\r\033[K\x1b[90mthinking: {status}\x1b[0m")
+
+        bindings.add("c-t")(_toggle_thinking)
+
+        def _toggle_tool(event) -> None:
+            state.tool_collapsed = not state.tool_collapsed
+            status = "collapsed" if state.tool_collapsed else "expanded"
+            event.app.print(f"\r\033[K\x1b[90mtool: {status}\x1b[0m")
+
+        bindings.add("c-o")(_toggle_tool)
+
     completer = ReplCompleter(
         project_root or Path.cwd(),
         registry,

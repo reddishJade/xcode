@@ -37,6 +37,8 @@ class ReplState:
     context_cost: str = ""
     last_dir: str = ""
     model_name: str = ""
+    thinking_collapsed: bool = False
+    tool_collapsed: bool = False
 
 
 @dataclass

@@ -9,7 +9,7 @@ from typing import Any
 from rich.console import Console
 from rich.text import Text
 
-from .commands import ReplState, VerbosityLevel
+from .commands import ReplState
 from .repl_rendering import (
     CLI_COLOR_ERROR,
     CLI_COLOR_SUCCESS,
@@ -92,6 +92,8 @@ class ToolCallHandler:
         partial = event_data.partial_result
         if not tool_id or not partial:
             return
+        if self.state.tool_collapsed:
+            return
         if event_data.tool_name == "subagent":
             self.flush_group()
             self.clear_progress()
@@ -125,15 +127,21 @@ class ToolCallHandler:
         errors = list(self.tool_group["errors"])
         intents = list(self.tool_group["intents"])
         title = summarize_intents(intents)
-        status = "failed" if errors else "done"
-        style = CLI_COLOR_ERROR if errors else CLI_COLOR_SUCCESS
-        self.live_console.print(Text(f"  • Explore: {title}", style=CLI_COLOR_TOOL))
-        self.live_console.print(Text(f"    {status}: {calls} tools", style=style))
-        for label, result in errors:
-            summary = single_line_preview(str(result.content), width=120)
+        if self.state.tool_collapsed:
+            # ponytail: 折叠时只显示一行摘要
             self.live_console.print(
-                Text(f"    error: {label}: {summary}", style=CLI_COLOR_ERROR)
+                Text(f"  • {calls} tools — {title}", style=CLI_COLOR_TOOL)
             )
+        else:
+            status = "failed" if errors else "done"
+            style = CLI_COLOR_ERROR if errors else CLI_COLOR_SUCCESS
+            self.live_console.print(Text(f"  • Explore: {title}", style=CLI_COLOR_TOOL))
+            self.live_console.print(Text(f"    {status}: {calls} tools", style=style))
+            for label, result in errors:
+                summary = single_line_preview(str(result.content), width=120)
+                self.live_console.print(
+                    Text(f"    error: {label}: {summary}", style=CLI_COLOR_ERROR)
+                )
         self.tool_group = None
 
     def discard_group(self) -> None:
@@ -152,11 +160,9 @@ class ToolCallHandler:
 class ReasoningHandler:
     """处理推理过程的 delta 流式事件，管理实时预览和摘要输出。"""
 
-    def __init__(
-        self, live_console: Console, verbosity: VerbosityLevel = "normal"
-    ) -> None:
+    def __init__(self, live_console: Console, state: ReplState) -> None:
         self.live_console = live_console
-        self.verbosity = verbosity
+        self.state = state
         self.reasoning_started_at: float | None = None
         self.reasoning_text = ""
         self.reasoning_preview = LiveReasoningPreview(live_console)
@@ -165,15 +171,21 @@ class ReasoningHandler:
         if self.reasoning_started_at is None:
             self.reasoning_started_at = time.perf_counter()
         self.reasoning_text += event_data
-        preview = reasoning_preview_lines(self.reasoning_text)
-        display = ["  Thinking..."] + (preview or [])
-        self.reasoning_preview.update(display)
+        if not self.state.thinking_collapsed:
+            preview = reasoning_preview_lines(self.reasoning_text)
+            display = ["  Thinking..."] + (preview or [])
+            self.reasoning_preview.update(display)
 
     def finish(self) -> None:
         if self.reasoning_started_at is None:
             return
         elapsed = time.perf_counter() - self.reasoning_started_at
         self.reasoning_preview.stop()
+        if self.state.thinking_collapsed:
+            # collapsed: 只记录时间，不输出摘要
+            self.reasoning_started_at = None
+            self.reasoning_text = ""
+            return
         if not should_print_reasoning_summary(self.reasoning_text, elapsed):
             self.reasoning_started_at = None
             self.reasoning_text = ""

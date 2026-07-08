@@ -53,7 +53,6 @@ from xcode.harness.agent_runtime.events import (
     CodingAgentHarnessEvent,
     TextDeltaStructuredEvent,
     ToolResultStructuredEvent,
-
     ToolUpdateStructuredEvent,
     ToolUseStructuredEvent,
 )
@@ -437,8 +436,10 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
         for event in typed_ask_stream(text, mode=ctx.state.mode):
             # ponytail: 只记录有意义的事件，不存流式碎片
             if event.type not in {
-                "message_start", "message_stop",
-                "reasoning_delta", "text_delta",
+                "message_start",
+                "message_stop",
+                "reasoning_delta",
+                "text_delta",
             }:
                 ctx.store.append("event", event_to_dict(event))
             turn.handle_event(event)
@@ -549,9 +550,7 @@ class _ReplTurnRenderer:
         self.answer_stream = LiveMarkdownStream(self.live_console)
         self.streamed_text = False
         self.tool_handler = ToolCallHandler(state, self.live_console)
-        self.reasoning_handler = ReasoningHandler(
-            self.live_console, self.state.verbosity
-        )
+        self.reasoning_handler = ReasoningHandler(self.live_console, self.state)
         self.tool_names_in_turn: list[str] = []
 
     def handle_event(self, event: CodingAgentHarnessEvent) -> None:
