@@ -72,9 +72,10 @@ class _ChatCompletionChunk(Protocol):
 def parse_tool_arguments(raw_arguments: str) -> ToolArguments:
     try:
         result = orjson.loads((raw_arguments or "{}").encode())
-        return _tool_arguments(result) or {
-            "__invalid_tool_arguments__": str(result),
-        }
+        parsed = _tool_arguments(result)
+        if parsed is not None:
+            return parsed
+        return {"__invalid_tool_arguments__": str(result)}
     except orjson.JSONDecodeError:
         return {"__invalid_tool_arguments__": raw_arguments}
 
