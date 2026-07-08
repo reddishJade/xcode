@@ -11,6 +11,8 @@ from xcode.agent.messages import AgentMessage
 import questionary
 
 from .app_contract import ReplApp
+from xcode.harness.session.types import SessionEntry
+
 from .commands import (
     COMMAND_GROUP_EXIT,
     COMMAND_GROUP_INFO,
@@ -84,15 +86,18 @@ def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
         print("No user messages to fork from.")
         return False
 
+    def _fork_title(e: SessionEntry) -> str:
+        if e.type == "user":
+            return str(e.content)
+        if isinstance(e.content, dict):
+            data = e.content.get("data")
+            if isinstance(data, dict):
+                return str(data.get("content", ""))
+        return ""
+
     choices = [
         questionary.Choice(
-            title=" ".join(
-                str(
-                    e.content
-                    if e.type == "user"
-                    else e.content.get("data", {}).get("content", "")
-                ).split()
-            )[:100],
+            title=" ".join(_fork_title(e).split())[:100],
             value=e,
         )
         for e in msgs
