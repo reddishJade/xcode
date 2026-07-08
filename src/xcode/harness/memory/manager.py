@@ -2333,12 +2333,12 @@ def build_memory_embedding_fn() -> MemoryEmbeddingFn:
     回退到零依赖的字符 n-gram 哈希向量。
     """
     try:
-        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+        from sentence_transformers import SentenceTransformer  # type: ignore[import]  # not available in CI
 
         model = SentenceTransformer("all-MiniLM-L6-v2")
 
         def embed(text: str) -> list[float]:
-            return model.encode(text).tolist()  # type: ignore[no-any-return]
+            return model.encode(text).tolist()
 
         return embed
     except ImportError:

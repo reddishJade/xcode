@@ -12,11 +12,6 @@ _todos: list[dict[str, Any]] = []
 _lock = threading.Lock()
 
 
-def _reset() -> None:
-    with _lock:
-        _todos.clear()
-
-
 def build_todowrite_tool() -> CoreToolSpec:
     def handler(data: dict[str, Any], _on_update: Callable[[str], None] | None = None) -> str:
         raw = data.get("todos")

@@ -522,7 +522,7 @@ def _tool_results_count_as_progress(
     tool_results: list[Any],
     tool_map: dict[str, ToolSpec],
 ) -> bool:
-    for tool_use, tool_result in zip(tool_uses, tool_results, strict=True):
+    for _, tool_result in zip(tool_uses, tool_results, strict=True):
         is_ok = (hasattr(tool_result, "is_error") and not tool_result.is_error) or (
             hasattr(tool_result, "status") and tool_result.status == "ok"
         )

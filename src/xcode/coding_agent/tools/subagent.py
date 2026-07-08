@@ -51,7 +51,7 @@ def build_subagent_tool(
         raw_tools = coding_tools if subagent_type == "coding" else research_tools
 
         async def _run() -> str:
-            adapted: list[AgentTool] = [ToolSpecAdapter(s) for s in raw_tools]  # type: ignore[assignment]
+            adapted: list[AgentTool] = [ToolSpecAdapter(s) for s in raw_tools]
             agent = Agent(tools=adapted, model=model, system_prompt=system_prompt)
             return await agent.prompt(
                 prompt,

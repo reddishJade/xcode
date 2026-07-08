@@ -618,11 +618,4 @@ def _prepare_edits(data: ToolInput) -> list[FileEdit]:
     return edits
 
 
-def _edit_payloads(edits: list[FileEdit]) -> list[dict[str, str]]:
-    return [
-        {
-            "old_text": edit.old_text,
-            "new_text": edit.new_text,
-        }
-        for edit in edits
-    ]
+
