@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import queue
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 import sys
-import threading
 import time
 from typing import cast
 
@@ -64,7 +62,6 @@ from xcode.harness.snapshot import (
     SnapshotStore,
     SnapshotUnsupportedError,
 )
-from xcode.agent.messages import UserMessage
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +392,6 @@ class _AgentTurnContext:
 
 def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
     turn = _ReplTurnRenderer(ctx.renderer, ctx.state)
-    queued_input = _start_queue_input_reader(ctx.state, ctx.session)
 
     text = ctx.text
     if ctx.state.pending_partial is not None:
@@ -473,14 +469,6 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
             print("[interrupted] current run cancelled; session is still active.")
         return turn.tool_names_in_turn
     finally:
-        queued_lines = queued_input.drain() if queued_input is not None else []
-        if queued_lines:
-            agent = getattr(ctx.app, "agent", None)
-            for queued_line in queued_lines:
-                ctx.store.append("user", queued_line)
-                if agent is not None and hasattr(agent, "follow_up"):
-                    agent.follow_up(UserMessage(content=queued_line))
-            print(f"[queued] {len(queued_lines)} follow-up message(s)")
         turn.close()
 
     if turn.stopped_reason:
@@ -490,50 +478,6 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
         ctx.store.append("assistant", answer)
         ctx.store.update_summary()
     return turn.tool_names_in_turn
-
-
-class _QueuedInput:
-    def __init__(
-        self,
-        thread: threading.Thread,
-        lines: queue.SimpleQueue[str],
-    ) -> None:
-        self.thread = thread
-        self.lines = lines
-
-    def drain(self) -> list[str]:
-        self.thread.join()
-        drained: list[str] = []
-        while True:
-            try:
-                drained.append(self.lines.get_nowait())
-            except queue.Empty:
-                return drained
-
-
-def _start_queue_input_reader(
-    state: ReplState,
-    session: PromptLike,
-) -> _QueuedInput | None:
-    if not state.queue_mode:
-        return None
-    lines: queue.SimpleQueue[str] = queue.SimpleQueue()
-
-    def read_lines() -> None:
-        while True:
-            try:
-                text = session.prompt(
-                    [("class:prompt-marker", "queue> "), ("", "")]
-                ).strip()
-            except (EOFError, KeyboardInterrupt):
-                return
-            if not text:
-                return
-            lines.put(text)
-
-    thread = threading.Thread(target=read_lines, daemon=True)
-    thread.start()
-    return _QueuedInput(thread, lines)
 
 
 class _ReplTurnRenderer:

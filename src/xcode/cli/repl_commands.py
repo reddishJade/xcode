@@ -562,19 +562,39 @@ def cmd_debug(cmd: str, ctx: CommandContext) -> bool:
     return False
 
 
-def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
-    """启用或禁用 agent 回合期间的输入队列。"""
+def cmd_steer(cmd: str, ctx: CommandContext) -> bool:
+    """向当前运行的 agent 注入实时指导，下次推理前生效。"""
     parts = cmd.split(maxsplit=1)
-    if len(parts) == 1:
-        ctx.state.queue_mode = not ctx.state.queue_mode
-        print(f"Queue mode {'enabled' if ctx.state.queue_mode else 'disabled'}.")
+    if len(parts) < 2 or not parts[1].strip():
+        print("Usage: /steer <message>")
         return False
-    value = parts[1].strip().lower()
-    if value not in {"on", "off"}:
-        print("Usage: /queue on|off")
+    msg = parts[1].strip()
+    agent = getattr(ctx.app, "agent", None)
+    if agent is None or not hasattr(agent, "steer"):
+        print("No active agent to steer.")
         return False
-    ctx.state.queue_mode = value == "on"
-    print(f"Queue mode {'enabled' if ctx.state.queue_mode else 'disabled'}.")
+    from xcode.agent.messages import UserMessage
+    agent.steer(UserMessage(content=msg))
+    ctx.store.append("user", f"[steer] {msg}")
+    print("[steer] injected")
+    return False
+
+
+def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
+    """将消息加入队列，在 agent 当前回合结束后自动发送。"""
+    parts = cmd.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        print("Usage: /queue <message>")
+        return False
+    msg = parts[1].strip()
+    agent = getattr(ctx.app, "agent", None)
+    if agent is None or not hasattr(agent, "follow_up"):
+        print("No active agent to queue message.")
+        return False
+    from xcode.agent.messages import UserMessage
+    agent.follow_up(UserMessage(content=msg))
+    ctx.store.append("user", f"[queued] {msg}")
+    print("[queued] will be delivered after current turn")
     return False
 
 
@@ -1550,10 +1570,17 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         accepts_args=True,
         group=COMMAND_GROUP_MODE,
     ),
+    "/steer": CommandEntry(
+        handler=cmd_steer,
+        desc="Inject real-time guidance into the active run (next inference).",
+        args_desc="<message>",
+        accepts_args=True,
+        group=COMMAND_GROUP_MODE,
+    ),
     "/queue": CommandEntry(
         handler=cmd_queue,
-        desc="Enable queued input while an agent turn is streaming.",
-        args_desc="on|off",
+        desc="Queue a message for delivery after the current turn ends.",
+        args_desc="<message>",
         accepts_args=True,
         group=COMMAND_GROUP_MODE,
     ),
