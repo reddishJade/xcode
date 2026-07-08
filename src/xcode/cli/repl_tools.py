@@ -240,6 +240,27 @@ def brief_input(name: str, raw_input: ToolInput | str) -> str:
             f"grep /{pattern}/" + (f" in {path}" if path != "." else "")
         )
 
+    if name == "todowrite":
+        todos = raw_input.get("todos", [])
+        if isinstance(todos, list) and todos:
+            icons = {
+                "completed": "✓",
+                "in_progress": "◌",
+                "pending": "·",
+                "cancelled": "✕",
+            }
+            parts = []
+            for t in todos:
+                if not isinstance(t, dict):
+                    continue
+                icon = icons.get(str(t.get("status", "")), "?")
+                content = str(t.get("content", ""))
+                if content:
+                    parts.append(f"{icon} {content}")
+            if parts:
+                return single_line_preview(" | ".join(parts))
+        return name
+
     if name == "subagent":
         desc = raw_input.get("description", "")
         return single_line_preview(f"subagent: {desc}") if desc else name
