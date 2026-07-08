@@ -173,25 +173,96 @@ def cli_shorthand_key(tool: ToolSpec) -> str:
     return "input"
 
 
+def _shorten_path(p: str) -> str:
+    """缩短路径，保留尾部和关键部分。"""
+    if not p or p == ".":
+        return "."
+    p = p.replace("\\", "/")
+    parts = p.split("/")
+    if len(parts) <= 3:
+        return p
+    # src/xcode/cli/repl.py → src/xcode/.../repl.py
+    return f"{parts[0]}/{parts[1]}/.../{parts[-1]}"
+
+
 def brief_input(name: str, raw_input: ToolInput | str) -> str:
     """从工具输入中提取简短的人类可读摘要。"""
-    if isinstance(raw_input, dict):
-        if name == "bash":
-            command = raw_input.get("command") or raw_input.get("input")
-            return single_line_preview(f"bash: {command}") if command else name
-        parts = []
-        for key, value in raw_input.items():
-            if value in (None, "", [], {}):
-                continue
-            parts.append(f"{key}={json.dumps(value, ensure_ascii=False)}")
-        if parts:
-            return single_line_preview(f"{name}: {', '.join(parts)}")
-        if raw_input:
-            key, val = next(iter(raw_input.items()))
-            return single_line_preview(f"{name}: {key}={val}")
-        return name
+    if not isinstance(raw_input, dict):
+        return single_line_preview(f"{name}: {raw_input}") if raw_input else name
+
+    # ── 各工具类型特化格式化 ──
+    if name in ("bash", "hypa_shell"):
+        cmd = raw_input.get("command") or raw_input.get("input") or ""
+        return single_line_preview(f"$ {cmd}") if cmd else name
+
+    if name in ("read_file", "read", "hypa_read"):
+        path = _shorten_path(
+            str(
+                raw_input.get(
+                    "file_path", raw_input.get("path", raw_input.get("input", ""))
+                )
+            )
+        )
+        off = raw_input.get("offset")
+        lim = raw_input.get("limit")
+        suffix = f":{off}" if off else ""
+        if lim:
+            suffix += f"-{off + lim - 1}" if off else f" ({lim} lines)"
+        return single_line_preview(f"read {path}{suffix}")
+
+    if name in ("write_file", "write"):
+        path = _shorten_path(str(raw_input.get("file_path", raw_input.get("path", ""))))
+        content = str(raw_input.get("content", ""))
+        lines = content.count("\n") + 1 if content else 0
+        return single_line_preview(
+            f"write {path}" + (f" ({lines} lines)" if lines else "")
+        )
+
+    if name in ("edit_file", "edit"):
+        path = _shorten_path(str(raw_input.get("file_path", raw_input.get("path", ""))))
+        return single_line_preview(f"edit {path}")
+
+    if name in ("list_dir", "ls", "hypa_ls"):
+        path = _shorten_path(str(raw_input.get("path", ".")))
+        return single_line_preview(f"ls {path}")
+
+    if name in ("glob_files", "find", "hypa_find"):
+        pattern = str(raw_input.get("pattern", raw_input.get("path", "*")))
+        path = _shorten_path(str(raw_input.get("path", ".")))
+        return single_line_preview(
+            f"glob {pattern}" + (f" in {path}" if path != "." else "")
+        )
+
+    if name in ("grep_search", "grep", "hypa_grep"):
+        pattern = str(raw_input.get("pattern", ""))
+        path = _shorten_path(str(raw_input.get("path", raw_input.get("include", "."))))
+        return single_line_preview(
+            f"grep /{pattern}/" + (f" in {path}" if path != "." else "")
+        )
+
+    if name == "subagent":
+        desc = raw_input.get("description", "")
+        return single_line_preview(f"subagent: {desc}") if desc else name
+
+    if name == "websearch":
+        query = raw_input.get("query", raw_input.get("input", ""))
+        return single_line_preview(f"web: {query}") if query else name
+
+    if name == "webfetch":
+        url = raw_input.get("url", raw_input.get("input", ""))
+        return single_line_preview(f"fetch: {url}") if url else name
+
+    # ── 兜底：key=value 列表 ──
+    parts = [
+        f"{k}={json.dumps(v, ensure_ascii=False)}"
+        for k, v in raw_input.items()
+        if v not in (None, "", [], {})
+    ]
+    if parts:
+        return single_line_preview(f"{name}: {', '.join(parts)}")
     if raw_input:
-        return single_line_preview(f"{name}: {raw_input}")
+        k, v = next(iter(raw_input.items()))
+        return single_line_preview(f"{name}: {k}={v}")
     return name
 
 
