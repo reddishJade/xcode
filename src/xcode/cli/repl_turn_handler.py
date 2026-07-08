@@ -54,6 +54,7 @@ class ToolCallHandler:
         self.tool_group: dict[str, Any] | None = None
         self.tool_call_labels: dict[str, str] = {}
         self._progress_tool_id: str | None = None
+        self._subagent_lines: list[str] = []
 
     def record_tool_call(self, event_data: ToolCall) -> None:
         label = brief_input(event_data.name, event_data.input)
@@ -68,12 +69,16 @@ class ToolCallHandler:
                 "calls": 0,
                 "ok": 0,
                 "errors": [],
+                "details": [],
             }
         self.tool_group["calls"] += 1
+        # ponytail: 记录工具名称+参数摘要，方便 flush 时显示
+        self.tool_group["details"].append((event_data.name, label))
         if intent not in self.tool_group["intents"]:
             self.tool_group["intents"].append(intent)
 
     def record_tool_result(self, event_data: ToolResultBlock) -> None:
+        self.clear_progress()
         if self.state.verbosity != "normal":
             print_tool_result_rich(event_data, self.state.verbosity, self.live_console)
             return
@@ -97,12 +102,23 @@ class ToolCallHandler:
         if event_data.tool_name == "subagent":
             self.flush_group()
             self.clear_progress()
-            for line in partial.splitlines():
-                clean = line.strip()
-                if clean:
-                    self.live_console.print(
-                        Text(f"  Subagent: {clean}", style=CLI_COLOR_TOOL)
-                    )
+            self._subagent_lines.extend(partial.splitlines())
+            visible = [ln.strip() for ln in self._subagent_lines if ln.strip()]
+            if not visible:
+                return
+            # ponytail: 紧凑单行进度，\r 覆盖，不刷屏
+            starts = sum(1 for ln in visible if ln.startswith("→"))
+            ends = sum(1 for ln in visible if "✓" in ln or "✗" in ln)
+            running = max(0, starts - ends)
+            done = ends
+            total = max(starts, ends)
+            preview = visible[-3:]
+            status = ", ".join(preview)
+            _safe_write(
+                f"\r\033[K\x1b[90m  Subagent: {done}/{total} tool calls"
+                + (f", {running} running" if running else "")
+                + f" · {status}\x1b[0m"
+            )
             return
         if self._progress_tool_id != tool_id:
             self._clear_progress()
@@ -115,9 +131,8 @@ class ToolCallHandler:
             _safe_write(f"\r\033[K\x1b[90m  {last_line}\x1b[0m")
 
     def clear_progress(self) -> None:
-        if self._progress_tool_id is not None:
-            self.clear_line()
-            self._progress_tool_id = None
+        self.clear_line()
+        self._progress_tool_id = None
 
     def flush_group(self) -> None:
         if self.tool_group is None:
@@ -126,16 +141,18 @@ class ToolCallHandler:
         calls = int(self.tool_group["calls"])
         errors = list(self.tool_group["errors"])
         intents = list(self.tool_group["intents"])
+        details = list(self.tool_group.get("details", []))
         title = summarize_intents(intents)
         if self.state.tool_collapsed:
-            # ponytail: 折叠时只显示一行摘要
             self.live_console.print(
                 Text(f"  • {calls} tools — {title}", style=CLI_COLOR_TOOL)
             )
         else:
+            # ponytail: 主 agent 工具每次调用一行，清晰可见
+            for _name, summary in details:
+                self.live_console.print(Text(f"  → {summary}", style=CLI_COLOR_TOOL))
             status = "failed" if errors else "done"
             style = CLI_COLOR_ERROR if errors else CLI_COLOR_SUCCESS
-            self.live_console.print(Text(f"  • Explore: {title}", style=CLI_COLOR_TOOL))
             self.live_console.print(Text(f"    {status}: {calls} tools", style=style))
             for label, result in errors:
                 summary = single_line_preview(str(result.content), width=120)
@@ -147,6 +164,7 @@ class ToolCallHandler:
     def discard_group(self) -> None:
         self.clear_progress()
         self.tool_group = None
+        self._subagent_lines.clear()
 
     def clear_line(self) -> None:
         _safe_write("\r\033[K")
