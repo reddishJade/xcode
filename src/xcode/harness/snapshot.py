@@ -39,6 +39,9 @@ SNAPSHOT_EXCLUDES: list[str] = [
     "*.zip",
     "*.tar*",
     "*.gz",
+    "nul",
+    "NUL",
+    "NUL.*",
 ]
 
 
@@ -188,16 +191,17 @@ class SnapshotService:
             self._git(["read-tree", "--empty"])
             paths = self._enumerate_files()
             if paths:
-                pathspec = "\0".join(paths) + "\0"
-                self._git(
-                    [
-                        "--literal-pathspecs",
-                        "add",
-                        "--pathspec-from-file=-",
-                        "--pathspec-file-nul",
-                    ],
-                    input_text=pathspec,
-                )
+                # ponytail: 逐条添加，跳过无法索引的文件（如 Windows 保留设备名）
+                failed_paths: list[str] = []
+                for p in paths:
+                    r = self._git(
+                        ["--literal-pathspecs", "add", p],
+                        check=False,
+                    )
+                    if r.returncode != 0:
+                        failed_paths.append(p)
+                for p in failed_paths:
+                    self._record_skipped(p, "skipped: git add failed (reserved name?)")
             result = self._git(["write-tree"])
             snapshot_id = result.stdout.strip()
             skipped = self._pop_skipped()
