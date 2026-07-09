@@ -257,13 +257,16 @@ class _TuiState:
             elif entry.role == "thinking":
                 entry_lines = entry.text.splitlines() or [""]
                 has_timing = any("Thought for" in ln for ln in entry_lines)
-                bar = "│ thinking Thinking…"
+                dur_text = entry_lines[-1].strip() if has_timing else ""
                 if has_timing:
-                    bar += f" ({entry_lines[-1].strip()})"
                     entry_lines = entry_lines[:-1]
+                bar = "│ thinking Thinking…"
+                if dur_text:
+                    bar += f" (Thought for {dur_text.split()[-1]})"
                 lines.append(bar)
-                for tl in entry_lines:
-                    lines.append(f"│   {tl}")
+                if not self.thinking_collapsed:
+                    for tl in entry_lines:
+                        lines.append(f"│   {tl}")
             elif entry.markdown:
                 lines.append(f"│ {entry.role}")
                 for line in _rendered_markdown_lines(entry.text):
@@ -292,16 +295,18 @@ class _TuiState:
             if not entry.role:
                 lines.extend(entry.text.splitlines())
             elif entry.role == "thinking":
-                # Persisted thinking preserves the Thinking… bar
                 entry_lines = entry.text.splitlines() or [""]
                 has_timing = any("Thought for" in ln for ln in entry_lines)
-                bar = "│ thinking Thinking…"
+                dur_text = entry_lines[-1].strip() if has_timing else ""
                 if has_timing:
-                    bar += f" ({entry_lines[-1].strip()})"
                     entry_lines = entry_lines[:-1]
+                bar = "│ thinking Thinking…"
+                if dur_text:
+                    bar += f" (Thought for {dur_text.split()[-1]})"
                 lines.append(bar)
-                for tl in entry_lines:
-                    lines.append(f"│   {tl.lstrip()}")
+                if not self.thinking_collapsed:
+                    for tl in entry_lines:
+                        lines.append(f"│   {tl.lstrip()}")
             elif entry.markdown:
                 lines.append(f"│ {entry.role}")
                 for line in _markdown_ansi_lines(entry.text):
@@ -422,7 +427,7 @@ class _TuiState:
                 self.thinking_duration_ms = int((time.time() - self.thinking_start) * 1000)
             text = self.thinking.strip()
             if self.thinking_duration_ms:
-                text += f"\n(Thought for {self.thinking_duration_ms}ms)"
+                text += f"\nThought for {self.thinking_duration_ms}ms"
             self.log.append(_LogEntry("thinking", text))
 
         # Persist tool activity before clearing
@@ -493,7 +498,7 @@ class _XcodeTui:
         )
         self._input = TextArea(
             height=3,
-            prompt="输入消息 > ",
+            prompt=self._input_prompt,
             multiline=False,
             completer=self._make_completer(),
             lexer=_TuiInputLexer(),
@@ -514,7 +519,7 @@ class _XcodeTui:
             ),
             key_bindings=self._bindings(),
             full_screen=False,
-            mouse_support=False,
+            mouse_support=True,
             style=Style.from_dict(
                 {
                     "": "",
@@ -555,6 +560,9 @@ class _XcodeTui:
 
     def _make_completer(self) -> _TuiCompleter:
         return _TuiCompleter()
+
+    def _input_prompt(self) -> str:
+        return "授权 > " if self._state.pending_hitl is not None else "输入消息 > "
 
     def _bindings(self) -> KeyBindings:
         bindings = KeyBindings()
@@ -883,12 +891,6 @@ def _visible_lines(lines: list[str], limit: int | None, scrollback: int) -> list
     start = max(0, end - limit)
     return lines[start:end]
 
-
-def _message_block(role: str, text: str, markdown: bool = False) -> str:
-    lines = [f"│ {role}"]
-    body = _rendered_markdown_lines(text) if markdown else _wrap_lines(text)
-    lines.extend(f"│   {line}" for line in body)
-    return "\n".join(lines)
 
 
 def _tool_block(name: str, status: str, text: str) -> str:
