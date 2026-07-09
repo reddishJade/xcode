@@ -489,6 +489,7 @@ class _XcodeTui:
             completer=self._make_completer(),
             lexer=_TuiInputLexer(),
             complete_while_typing=True,
+            accept_handler=lambda buf: self._submit_key(None) or True,
         )
         self._status = Label(text="", style="class:status")
         self._application = Application(
@@ -527,6 +528,9 @@ class _XcodeTui:
                     "error": "ansired",
                     "status": "ansigreen",
                     "border": "ansibrightblack",
+                    "completion-menu": "bg:default",
+                    "completion-menu.completion": "bg:default fg:default",
+                    "completion-menu.completion.current": "bg:default fg:default bold underline",
                 }
             ),
             input=input,
@@ -782,6 +786,7 @@ class _XcodeTui:
                     tool_names.append(event.data.name)
                 self._state.handle_event(event)
                 self._refresh()
+                time.sleep(0.005)  # yield to main thread for redraw
         except Exception as exc:
             self._state.log.append(_LogEntry("error", f"[error] {exc}"))
             self._state.running = False
