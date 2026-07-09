@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 from contextlib import redirect_stdout
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from io import StringIO
 import re
 import textwrap
 import threading
 from threading import Event
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from prompt_toolkit.application import Application
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.input.base import Input
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.output.base import Output
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Label, TextArea
@@ -53,6 +56,7 @@ from .commands import PromptText, ReplState
 from .file_refs import expand_file_references
 from .markdown import TerminalMarkdownRenderer
 from .repl_commands import handle_command
+from .repl_commands import COMMAND_NAMES
 from .repl_hitl import parse_hitl_choice
 from .repl_skills import activate_skill, parse_skill_invocation
 from .repl_tools import (
@@ -66,6 +70,67 @@ from .repl_tools import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+_file_ref_pattern = re.compile(r"(?<!\S)@([^\s]+)")
+
+
+class _TuiInputLexer(Lexer):
+    """高亮 TUI 输入栏中的 ! 前缀和 @file 引用。"""
+
+    def lex_document(self, document: object) -> Callable[[int], StyleAndTextTuples]:
+        lines: list[str] = (
+            getattr(document, "lines", None)
+            or str(getattr(document, "text", "")).splitlines()
+        )
+        if not lines:
+            lines = [""]
+
+        def get_line(line_number: int) -> StyleAndTextTuples:
+            if line_number < 0 or line_number >= len(lines):
+                return []
+            return self._highlight(lines[line_number], line_number == 0)
+
+        return get_line
+
+    @staticmethod
+    def _highlight(line: str, first_line: bool) -> StyleAndTextTuples:
+        frags: list[tuple[str, str]] = []
+        cursor = 0
+        if first_line and line.startswith("!"):
+            frags.append(("fg:ansiyellow bold", "!"))
+            cursor = 1
+        for m in _file_ref_pattern.finditer(line, cursor):
+            if m.start() > cursor:
+                frags.append(("", line[cursor : m.start()]))
+            frags.append(("fg:ansicyan bold", m.group(0)))
+            cursor = m.end()
+        if cursor < len(line):
+            frags.append(("", line[cursor:]))
+        if not frags:
+            frags.append(("", line))
+        return cast(StyleAndTextTuples, frags)
+
+
+class _TuiCompleter(Completer):
+    """为 TUI 输入栏提供 / 命令补全。"""
+
+    def __init__(self) -> None:
+        self._commands = COMMAND_NAMES
+
+    def get_completions(
+        self, document: object, complete_event: object
+    ) -> list[Completion]:
+        text = str(getattr(document, "text", ""))
+        if not text:
+            return []
+        if text.startswith("/"):
+            partial = text.lower()
+            return [
+                Completion(cmd, start_position=-len(text))
+                for cmd in self._commands
+                if cmd.lower().startswith(partial)
+            ]
+        return []
 
 
 class _TuiPromptSession:
@@ -166,7 +231,7 @@ class _TuiState:
 
     def lines(self) -> list[str]:
         lines: list[str] = []
-        for entry in self.log[-80:]:
+        for entry in self.log:
             if lines:
                 lines.append("")
             lines.extend(entry.splitlines())
@@ -326,7 +391,14 @@ class _XcodeTui:
             wrap_lines=True,
             always_hide_cursor=True,
         )
-        self._input = TextArea(height=3, prompt="输入消息 > ", multiline=False)
+        self._input = TextArea(
+            height=3,
+            prompt="输入消息 > ",
+            multiline=False,
+            completer=self._make_completer(),
+            lexer=_TuiInputLexer(),
+            complete_while_typing=True,
+        )
         self._status = Label(text="", style="class:status")
         self._application = Application(
             layout=Layout(
@@ -379,6 +451,9 @@ class _XcodeTui:
     def run(self) -> int:
         self._application.run()
         return 0
+
+    def _make_completer(self) -> _TuiCompleter:
+        return _TuiCompleter()
 
     def _bindings(self) -> KeyBindings:
         bindings = KeyBindings()
@@ -438,7 +513,14 @@ class _XcodeTui:
 
     def _cancel_key(self, _event: object) -> None:
         if self._state.running:
-            self._agent_app.agent.cancellation_token.cancel("interrupted by user")
+            agent = getattr(self._agent_app, "agent", None)
+            if agent is not None:
+                token = getattr(agent, "cancellation_token", None)
+                if token is not None:
+                    token.cancel("interrupted by user")
+            self._store.append(
+                "event", {"type": "interrupted", "data": "interrupted by user"}
+            )
             self._state.log.append(_message_block("stop", "[interrupted]"))
             self._state.running = False
             self._refresh()
@@ -511,7 +593,11 @@ class _XcodeTui:
             self._application.exit()
 
     def _run_shell_shortcut(self, text: str) -> None:
-        self._agent_app.agent.cancellation_token.reset()
+        agent = getattr(self._agent_app, "agent", None)
+        if agent is not None:
+            token = getattr(agent, "cancellation_token", None)
+            if token is not None:
+                token.reset()
         output = run_shell_shortcut(text, self._agent_app)
         self._store.append("event", {"type": "shell_shortcut", "data": text})
         self._store.append("event", {"type": "tool_result", "data": output})
@@ -525,6 +611,9 @@ class _XcodeTui:
         )
         self._state.pending_hitl = request
         self._refresh()
+        self._application.invalidate()
+        import time
+        time.sleep(0.05)  # yield to event loop so HITL prompt renders before block
         request.event.wait()
         result = request.result or HITLResult("deny", "once")
         if self._state.pending_hitl is request:
