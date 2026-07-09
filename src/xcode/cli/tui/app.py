@@ -32,7 +32,6 @@ from ..repl_skills import activate_skill, parse_skill_invocation
 from ..repl_tools import (
     event_to_dict,
     file_reference_event,
-    run_shell_shortcut,
 )
 from .rendering import (
     hitl_preview_lines,
@@ -58,6 +57,30 @@ if TYPE_CHECKING:
         SessionGrantStoreManager,
     )
     from xcode.harness.session import SessionStore
+
+
+def _tui_shell_shortcut(text: str, app: ReplApp) -> str:
+    """TUI 版 shell 快捷：直接调 bash tool handler，绕过 gate/adapter 异步包装。
+
+    run_shell_shortcut/repl_tools._execute_tool_via_gate 用 asyncio.run()
+    包装异步 adapter，在 prompt_toolkit 已有 running event loop 的线程里必炸。
+    bash handler 本身是同步函数，直接调即可。
+    ponytail: 跳过 gate 鉴权——! 命令是用户自发输入，非 LLM 决策。
+    """
+    shell_command = text[1:].strip()
+    if not shell_command:
+        return "usage: !COMMAND"
+    registry = getattr(app, "registry", ()) or ()
+    bash_tool = next(
+        (t for t in registry if t.name == "bash"),
+        None,
+    )
+    if bash_tool is None:
+        return "bash tool not available"
+    try:
+        return str(bash_tool.handler({"command": shell_command}, None))
+    except Exception as exc:
+        return f"error: {exc}"
 
 
 def run_tui(app: ReplApp, project_root: Path, sessions_dir: Path) -> int:
@@ -357,7 +380,7 @@ class _XcodeTui:
             token = getattr(agent, "cancellation_token", None)
             if token is not None:
                 token.reset()
-        output = run_shell_shortcut(text, self._agent_app)
+        output = _tui_shell_shortcut(text, self._agent_app)
         self._store.append("event", {"type": "shell_shortcut", "data": text})
         self._store.append("event", {"type": "tool_result", "data": output})
         self._state.log.append(_LogEntry("shell", output, markdown=False))
