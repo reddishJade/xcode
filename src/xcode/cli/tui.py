@@ -20,7 +20,9 @@ from prompt_toolkit.input.base import Input
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import HSplit, Layout, Window
+from prompt_toolkit.layout import Float, FloatContainer
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.output.base import Output
 from prompt_toolkit.styles import Style
@@ -300,6 +302,10 @@ class _TuiState:
                     lines.append(f"│   {line}")
         if self.thinking.strip():
             self._thinking_lines(lines)
+        elif self.running and not self.current_answer.strip():
+            if lines:
+                lines.append("")
+            lines.append("│ thinking")
         self._append_activity_lines(lines)
         self._append_hitl_lines(lines)
         if self.current_answer.strip():
@@ -487,15 +493,24 @@ class _XcodeTui:
         self._status = Label(text="", style="class:status")
         self._application = Application(
             layout=Layout(
-                HSplit(
-                    [
-                        self._top,
-                        self._output,
-                        self._status,
-                        Label(text="─" * 120, style="class:border"),
-                        self._input,
-                    ]
-                )
+                FloatContainer(
+                    HSplit(
+                        [
+                            self._top,
+                            self._output,
+                            self._status,
+                            Label(text="─" * 120, style="class:border"),
+                            self._input,
+                        ]
+                    ),
+                    floats=[
+                        Float(
+                            content=CompletionsMenu(max_height=8, scroll_offset=2),
+                            xcursor=True,
+                            ycursor=True,
+                        ),
+                    ],
+                ),
             ),
             key_bindings=self._bindings(),
             full_screen=False,
