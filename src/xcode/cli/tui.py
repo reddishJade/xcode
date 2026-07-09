@@ -254,6 +254,16 @@ class _TuiState:
                 lines.append("")
             if not entry.role:
                 lines.extend(entry.text.splitlines())
+            elif entry.role == "thinking":
+                entry_lines = entry.text.splitlines() or [""]
+                has_timing = any("Thought for" in ln for ln in entry_lines)
+                bar = "│ thinking Thinking…"
+                if has_timing:
+                    bar += f" ({entry_lines[-1].strip()})"
+                    entry_lines = entry_lines[:-1]
+                lines.append(bar)
+                for tl in entry_lines:
+                    lines.append(f"│   {tl}")
             elif entry.markdown:
                 lines.append(f"│ {entry.role}")
                 for line in _rendered_markdown_lines(entry.text):
@@ -281,6 +291,17 @@ class _TuiState:
                 lines.append("")
             if not entry.role:
                 lines.extend(entry.text.splitlines())
+            elif entry.role == "thinking":
+                # Persisted thinking preserves the Thinking… bar
+                entry_lines = entry.text.splitlines() or [""]
+                has_timing = any("Thought for" in ln for ln in entry_lines)
+                bar = "│ thinking Thinking…"
+                if has_timing:
+                    bar += f" ({entry_lines[-1].strip()})"
+                    entry_lines = entry_lines[:-1]
+                lines.append(bar)
+                for tl in entry_lines:
+                    lines.append(f"│   {tl.lstrip()}")
             elif entry.markdown:
                 lines.append(f"│ {entry.role}")
                 for line in _markdown_ansi_lines(entry.text):
@@ -394,6 +415,16 @@ class _TuiState:
 
     def _finish_answer(self, event: FinalStructuredEvent) -> None:
         answer = self.current_answer.strip() or event.data.answer.strip()
+
+        # Persist thinking text before clearing
+        if self.thinking.strip():
+            if self.thinking_start:
+                self.thinking_duration_ms = int((time.time() - self.thinking_start) * 1000)
+            text = self.thinking.strip()
+            if self.thinking_duration_ms:
+                text += f"\n(Thought for {self.thinking_duration_ms}ms)"
+            self.log.append(_LogEntry("thinking", text))
+
         # Persist tool activity before clearing
         activity_lines: list[str] = []
         for ev in self.tool_events[-40:]:
@@ -409,8 +440,6 @@ class _TuiState:
         reason = final_stop_reason(event.data)
         if reason:
             self.log.append(_LogEntry("stop", reason))
-        if self.thinking_start:
-            self.thinking_duration_ms = int((time.time() - self.thinking_start) * 1000)
         self.current_answer = ""
         self.thinking = ""
         self.running = False
@@ -753,6 +782,10 @@ class _XcodeTui:
             self._store.append("assistant", answer)
             self._store.update_summary()
 
+        # Scroll to bottom now that turn completed
+        self._scrollback = 0
+        self._refresh()
+
         if _snapshot_ctx is not None:
             turn_id, service, pre_result = _snapshot_ctx
             assert snapshot is not None  # guaranteed by _snapshot_ctx being set
@@ -941,5 +974,5 @@ def _line_style(line: str) -> str:
     if stripped.startswith("│ error") or "✗" in stripped or "工具失败" in stripped:
         return "class:error"
     if stripped.startswith("│"):
-        return "class:tool"
+        return ""  # default style (white) — most content lines
     return ""
