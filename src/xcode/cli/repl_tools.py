@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import asdict
 from typing import Any
@@ -47,7 +46,7 @@ from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.agent.types import ToolSpec
 from xcode.agent.config import AgentContext, BeforeToolCallContext
 from xcode.agent.messages import AssistantMessage
-from xcode.agent.types import TextContent, ToolCallContent
+from xcode.agent.types import ToolCallContent
 
 
 def _registry(app: object) -> tuple[ToolSpec, ...]:
@@ -140,11 +139,8 @@ def _execute_tool_via_gate(
     if before_result is not None:
         return before_result.reason or f"tool {tool.name} was blocked"
 
-    adapted = gate.adapt_tools((tool,))
-    result = asyncio.run(adapted[0].execute("repl", tool_input))
-    return "".join(
-        item.text for item in result.content if isinstance(item, TextContent)
-    )
+    content = tool.handler(dict(tool_input), None)
+    return str(content)
 
 
 def parse_tool_input(tool: ToolSpec, raw_input: str) -> ToolInput:
