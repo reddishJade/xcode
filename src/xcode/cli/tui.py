@@ -237,7 +237,7 @@ class _TuiState:
     def top_bar(self, project_name: str) -> str:
         state = "busy" if self.running else "idle"
         return (
-            f" Xcode  ·  {state} · ready  ·  mode {self.mode}  ·  cwd {project_name} "
+            f" Xcode  ·  {state}  ·  mode {self.mode}  ·  cwd {project_name} "
         )
 
     def status(self, scrollback: int = 0) -> str:
@@ -245,7 +245,7 @@ class _TuiState:
         thinking = "thinking:collapsed" if self.thinking_collapsed else "thinking:open"
         tools = "tools:collapsed" if self.tool_collapsed else "tools:open"
         scroll = f" · scroll {scrollback}" if scrollback else ""
-        return f" {state} · ready · Ctrl-T {thinking} · Ctrl-O {tools}{scroll} "
+        return f" {state} · Ctrl-T {thinking} · Ctrl-O {tools}{scroll} "
 
     def lines(self) -> list[str]:
         lines: list[str] = []
@@ -517,6 +517,7 @@ class _XcodeTui:
             mouse_support=False,
             style=Style.from_dict(
                 {
+                    "": "",
                     "top": "ansigreen bold",
                     "user": "ansicyan bold",
                     "assistant": "ansigreen bold",
