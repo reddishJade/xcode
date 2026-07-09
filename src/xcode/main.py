@@ -7,6 +7,7 @@ import sys
 
 from .cli.config_cmd import handle_config_command
 from .cli.repl import run_repl
+from .cli.tui import run_tui
 from .cli.setup_wizard import has_valid_config, run_setup_wizard
 from .harness.config import discover_runtime_config, resolve_config_path
 from .harness.app import build_app
@@ -88,6 +89,10 @@ def _build_setup_parser(subparsers) -> None:
     subparsers.add_parser("setup", help="Run the provider setup wizard")
 
 
+def _build_tui_parser(subparsers) -> None:
+    subparsers.add_parser("tui", help="Run the full-screen terminal UI")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Xcode coding agent.")
     parser.add_argument(
@@ -119,6 +124,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command")
     _build_config_parser(subparsers)
     _build_setup_parser(subparsers)
+    _build_tui_parser(subparsers)
     return parser.parse_args(argv)
 
 
@@ -176,6 +182,8 @@ def _run(args, runtime_config) -> int:
         or resolve_config_path(args.project_root, runtime_config.paths.sessions_dir)
         or (args.project_root / ".local" / "sessions")
     )
+    if args.command == "tui":
+        return run_tui(app, args.project_root, sessions_dir)
     if args.session:
         return run_repl(
             app,
