@@ -467,13 +467,8 @@ class _XcodeTui:
         self._top.text = self._state.top_bar(self._project_root.name)
         self._status.text = self._state.status(self._scrollback)
         self._output_control.text = self._fragments()
-        # 直接调度重绘，绕过 _invalidated 防抖——每个事件都刷一次屏
-        try:
-            loop = self._application.loop
-            if loop is not None and not loop.is_closed():
-                loop.call_soon_threadsafe(self._application._redraw)
-        except Exception:
-            pass
+        self._application._invalidated = False
+        self._application.invalidate()
 
 
 # ── 模块级工具函数 ──
