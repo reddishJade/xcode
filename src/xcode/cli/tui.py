@@ -19,9 +19,8 @@ from prompt_toolkit.formatted_text.ansi import ANSI
 from prompt_toolkit.input.base import Input
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import HSplit, Layout, Window
+from prompt_toolkit.layout import HSplit, Layout
 from prompt_toolkit.layout import Float, FloatContainer
-from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.output.base import Output
@@ -473,14 +472,9 @@ class _XcodeTui:
         self._markdown_renderer = TerminalMarkdownRenderer()
         self._prompt_session = _TuiPromptSession()
         self._top = Label(text="", style="class:top")
-        self._output_control = FormattedTextControl(
-            self._fragments,
-            focusable=False,
-        )
-        self._output = Window(
-            self._output_control,
-            wrap_lines=True,
-            always_hide_cursor=True,
+        self._output = Label(
+            text="",
+            style="class:output",
         )
         self._input = TextArea(
             height=3,
@@ -505,11 +499,7 @@ class _XcodeTui:
                         ]
                     ),
                     floats=[
-                        Float(
-                            content=CompletionsMenu(max_height=8, scroll_offset=2),
-                            xcursor=True,
-                            ycursor=True,
-                        ),
+                        Float(content=CompletionsMenu(max_height=8, scroll_offset=2), xcursor=True, ycursor=True),
                     ],
                 ),
             ),
@@ -844,6 +834,7 @@ class _XcodeTui:
         self._scrollback = min(self._scrollback, self._max_scrollback())
         self._top.text = self._state.top_bar(self._project_root.name)
         self._status.text = self._state.status(self._scrollback)
+        self._output.text = self._fragments()
         self._application.invalidate()
 
 
