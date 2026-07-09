@@ -282,10 +282,11 @@ class _TuiState:
                 dur_text = entry_lines[-1].strip() if has_timing else ""
                 if has_timing:
                     entry_lines = entry_lines[:-1]
-                bar = "│ thinking Thinking…"
                 if dur_text:
-                    bar += f" (Thought for {dur_text.split()[-1]})"
-                lines.append(bar)
+                    dur_ms = dur_text.split()[-1].rstrip("ms")
+                    lines.append(f"│ thought for {dur_ms}ms")
+                else:
+                    lines.append("│ thinking")
                 if not self.thinking_collapsed:
                     for tl in entry_lines:
                         lines.append(f"│   {tl.lstrip()}")
