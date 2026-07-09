@@ -7,6 +7,7 @@ from io import StringIO
 import threading
 import time
 from threading import Event
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from prompt_toolkit.application import Application
@@ -19,7 +20,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.output.base import Output
 from prompt_toolkit.styles import Style
-from prompt_toolkit.widgets import Label, TextArea
+from prompt_toolkit.widgets import Button, Dialog, Label, TextArea
 
 from ..app_contract import ReplApp
 from ..commands import ReplState
@@ -373,6 +374,7 @@ class _XcodeTui:
             event=Event(),
         )
         self._state.pending_hitl = request
+        self._show_hitl_dialog(request, tool, action_input)
         self._refresh()
         self._application.invalidate()
         time.sleep(0.05)
@@ -380,8 +382,47 @@ class _XcodeTui:
         result = request.result or HITLResult("deny", "once")
         if self._state.pending_hitl is request:
             self._state.pending_hitl = None
+            self._dismiss_hitl_dialog()
             self._refresh()
         return result
+
+    def _show_hitl_dialog(
+        self, request: _HitlRequest, tool: ToolSpec, action_input: ToolInput
+    ) -> None:
+        from xcode.harness.observability.permissions import HITLDecision, HITLScope
+
+        def _make_handler(decision: HITLDecision, scope: HITLScope) -> Callable[[], None]:
+            def _on_click() -> None:
+                from xcode.harness.observability import HITLResult
+
+                request.result = HITLResult(decision, scope)
+                request.event.set()
+
+            return _on_click
+
+        buttons = [
+            Button("Allow (once)", handler=_make_handler("allow", "once")),
+            Button("Allow this session", handler=_make_handler("allow", "session")),
+            Button("Always allow", handler=_make_handler("allow", "permanent")),
+            Button(" Deny ", handler=_make_handler("deny", "once")),
+        ]
+        lines = hitl_preview_lines(tool.name, action_input)
+        preview_text = "\n".join(lines)
+        dialog = Dialog(
+            title=f"Authorization: {tool.name}",
+            body=Label(text=preview_text),
+            buttons=buttons,
+        )
+        container = self._application.layout.container
+        if isinstance(container, FloatContainer):
+            container.floats.append(Float(content=dialog))
+
+    def _dismiss_hitl_dialog(self) -> None:
+        container = self._application.layout.container
+        if not isinstance(container, FloatContainer):
+            return
+        new_floats = [f for f in container.floats if not isinstance(f.content, Dialog)]
+        container.floats[:] = new_floats
 
     def _answer_hitl_text(self, text: str) -> None:
         # 支持数字选择：1→Allow(once) 2→Allow this session 3→Always allow 4→Deny
