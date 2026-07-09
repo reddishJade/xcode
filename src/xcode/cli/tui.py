@@ -9,12 +9,14 @@ from io import StringIO
 import re
 import textwrap
 import threading
+import time
 from threading import Event
 from typing import TYPE_CHECKING, cast
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.formatted_text import StyleAndTextTuples
+from prompt_toolkit.formatted_text import StyleAndTextTuples, to_formatted_text
+from prompt_toolkit.formatted_text.ansi import ANSI
 from prompt_toolkit.input.base import Input
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
@@ -161,10 +163,19 @@ class _HitlRequest:
 
 
 @dataclass
+class _LogEntry:
+    role: str = "system"
+    text: str = ""
+    markdown: bool = False
+
+
+@dataclass
 class _TuiState:
-    log: list[str] = field(default_factory=list)
+    log: list[_LogEntry] = field(default_factory=list)
     current_answer: str = ""
     thinking: str = ""
+    thinking_start: float = 0.0
+    thinking_duration_ms: int = 0
     tool_events: list[str] = field(default_factory=list)
     tool_labels: dict[str, _ToolSlot] = field(default_factory=dict)
     subagents: dict[int, _SubagentSlot] = field(default_factory=dict)
@@ -175,9 +186,11 @@ class _TuiState:
     mode: ExecutionMode = "act"
 
     def add_user(self, text: str) -> None:
-        self.log.append(_message_block("you", f"> {text}"))
+        self.log.append(_LogEntry("you", f"> {text}"))
         self.current_answer = ""
         self.thinking = ""
+        self.thinking_start = 0.0
+        self.thinking_duration_ms = 0
         self._clear_activity()
 
     def toggle_thinking(self) -> None:
@@ -188,6 +201,8 @@ class _TuiState:
 
     def handle_event(self, event: CodingAgentHarnessEvent) -> None:
         if isinstance(event, ReasoningDeltaStructuredEvent):
+            if not self.thinking_start:
+                self.thinking_start = time.time()
             self.thinking += event.data
         elif isinstance(event, TextDeltaStructuredEvent):
             self.current_answer += event.data
@@ -210,11 +225,13 @@ class _TuiState:
     def fragments(
         self, limit: int | None = None, scrollback: int = 0
     ) -> StyleAndTextTuples:
-        fragments: StyleAndTextTuples = []
-        for line in _visible_lines(self.lines(), limit, scrollback):
-            fragments.append((_line_style(line), line))
-            fragments.append(("", "\n"))
-        return fragments
+        all_text = self.lines()
+        visible = _visible_lines(all_text, limit, scrollback)
+        result: StyleAndTextTuples = []
+        for line in visible:
+            result.extend(_render_line_fragments(line))
+            result.append(("", "\n"))
+        return result
 
     def top_bar(self, project_name: str) -> str:
         state = "busy" if self.running else "idle"
@@ -234,23 +251,42 @@ class _TuiState:
         for entry in self.log:
             if lines:
                 lines.append("")
-            lines.extend(entry.splitlines())
+            if not entry.role:
+                # Raw lines (activity summary) already have │ prefix
+                lines.extend(entry.text.splitlines())
+            elif entry.markdown:
+                lines.append(f"│ {entry.role}")
+                for line in _rendered_markdown_lines(entry.text):
+                    lines.append(f"│   {line}")
+            else:
+                lines.append(f"│ {entry.role}")
+                for line in entry.text.splitlines() or [""]:
+                    lines.append(f"│   {line}")
         if self.thinking.strip():
-            if lines:
-                lines.append("")
-            text = "collapsed" if self.thinking_collapsed else _tail_line(self.thinking)
-            lines.extend(_message_block("thinking", text).splitlines())
+            self._thinking_lines(lines)
         self._append_activity_lines(lines)
         self._append_hitl_lines(lines)
         if self.current_answer.strip():
             if lines:
                 lines.append("")
-            lines.extend(
-                _message_block(
-                    "xcode", self.current_answer.strip(), markdown=True
-                ).splitlines()
-            )
+            lines.append("│ xcode")
+            lines.extend(_rendered_markdown_lines(self.current_answer.strip()))
         return lines
+
+    def _thinking_lines(self, lines: list[str]) -> None:
+        if lines:
+            lines.append("")
+        dur = self.thinking_duration_ms
+        if dur:
+            bar = f"│ thinking Thinking… (Thought for {dur}ms)"
+        else:
+            bar = "│ thinking Thinking…"
+        lines.append(bar)
+        if not self.thinking_collapsed:
+            for tl in self.thinking.splitlines():
+                lines.append(f"│   {tl.lstrip()}")
+            if dur:
+                lines.append(f"│   (Thought for {dur}ms)")
 
     def _append_activity_lines(self, lines: list[str]) -> None:
         if self.tool_collapsed and (self.tool_events or self.subagents):
@@ -296,10 +332,10 @@ class _TuiState:
         label = slot.label if slot else tool_id
         if status == "ok":
             summary = _tail_line(content)
-            detail = f"工具完成: {label}" + (f" -> {summary}" if summary else "")
+            detail = f"✓ {label}" + (f" -> {summary}" if summary else "")
             self.tool_events.append(_tool_block(name, "success", detail))
             return
-        self.tool_events.append(_tool_block(name, "error", f"工具失败: {content}"))
+        self.tool_events.append(_tool_block(name, "error", f"✗ {label}: {content}"))
 
     def _handle_tool_update(self, tool_name: str, partial: str) -> None:
         if tool_name != "subagent":
@@ -330,18 +366,25 @@ class _TuiState:
 
     def _finish_answer(self, event: FinalStructuredEvent) -> None:
         answer = self.current_answer.strip() or event.data.answer.strip()
-        activity: list[str] = []
-        self._append_activity_lines(activity)
+        # Persist tool activity before clearing
+        activity_lines: list[str] = []
+        for ev in self.tool_events[-40:]:
+            if activity_lines:
+                activity_lines.append("")
+            activity_lines.extend(ev.splitlines())
+        activity = "\n".join(activity_lines).strip()
+        self._clear_activity()
         if activity:
-            self.log.append("\n".join(activity).strip())
+            self.log.append(_LogEntry(role="", text=activity))
         if answer:
-            self.log.append(_message_block("xcode", answer, markdown=True))
+            self.log.append(_LogEntry("xcode", answer, markdown=True))
         reason = final_stop_reason(event.data)
         if reason:
-            self.log.append(_message_block("stop", reason))
+            self.log.append(_LogEntry("stop", reason))
+        if self.thinking_start:
+            self.thinking_duration_ms = int((time.time() - self.thinking_start) * 1000)
         self.current_answer = ""
         self.thinking = ""
-        self._clear_activity()
         self.running = False
 
     def _clear_activity(self) -> None:
@@ -521,7 +564,7 @@ class _XcodeTui:
             self._store.append(
                 "event", {"type": "interrupted", "data": "interrupted by user"}
             )
-            self._state.log.append(_message_block("stop", "[interrupted]"))
+            self._state.log.append(_LogEntry("stop", "[interrupted]"))
             self._state.running = False
             self._refresh()
             return
@@ -537,7 +580,7 @@ class _XcodeTui:
                 skill_name,
                 mode=self._repl_state.mode,
             )
-            self._state.log.append(_message_block("system", activation.message))
+            self._state.log.append(_LogEntry("system", activation.message))
             if activation.status not in {"activated", "already_active"}:
                 self._refresh()
                 return
@@ -588,7 +631,7 @@ class _XcodeTui:
         self._state.mode = self._repl_state.mode
         output = output_buffer.getvalue().strip()
         if output:
-            self._state.log.append(_message_block("system", output, markdown=True))
+            self._state.log.append(_LogEntry("system", output, markdown=True))
         if should_exit:
             self._application.exit()
 
@@ -601,7 +644,7 @@ class _XcodeTui:
         output = run_shell_shortcut(text, self._agent_app)
         self._store.append("event", {"type": "shell_shortcut", "data": text})
         self._store.append("event", {"type": "tool_result", "data": output})
-        self._state.log.append(_message_block("shell", output, markdown=True))
+        self._state.log.append(_LogEntry("shell", output, markdown=False))
 
     def _approval_callback(self, tool: ToolSpec, action_input: ToolInput) -> HITLResult:
         request = _HitlRequest(
@@ -625,7 +668,7 @@ class _XcodeTui:
         result = parse_hitl_choice(text)
         if result is None:
             self._state.log.append(
-                _message_block(
+                _LogEntry(
                     "system",
                     "permission choice must be: Deny, Allow (once), "
                     "Allow this session, or Always allow",
@@ -673,7 +716,7 @@ class _XcodeTui:
                 self._state.handle_event(event)
                 self._refresh()
         except Exception as exc:
-            self._state.log.append(_message_block("error", f"[error] {exc}"))
+            self._state.log.append(_LogEntry("error", f"[error] {exc}"))
             self._state.running = False
             self._refresh()
             return
@@ -781,7 +824,7 @@ def _visible_lines(lines: list[str], limit: int | None, scrollback: int) -> list
 
 def _message_block(role: str, text: str, markdown: bool = False) -> str:
     lines = [f"│ {role}"]
-    body = _markdown_lines(text) if markdown else _wrap_lines(text)
+    body = _rendered_markdown_lines(text) if markdown else _wrap_lines(text)
     lines.extend(f"│   {line}" for line in body)
     return "\n".join(lines)
 
@@ -792,17 +835,33 @@ def _tool_block(name: str, status: str, text: str) -> str:
     return "\n".join(lines)
 
 
-def _markdown_lines(text: str) -> list[str]:
+def _rendered_markdown_lines(text: str) -> list[str]:
+    """Render markdown to plain text lines for scroll counting."""
     buffer = StringIO()
-    console = Console(
+    Console(
         file=buffer,
         width=112,
         force_terminal=False,
         color_system=None,
-    )
-    console.print(Markdown(text))
+    ).print(Markdown(text))
     rendered = buffer.getvalue().replace("\r\n", "\n").rstrip("\n")
     return rendered.splitlines() or [""]
+
+
+def _render_line_fragments(line: str) -> StyleAndTextTuples:
+    """Convert a single text line to styled fragments.
+
+    If the line contains ANSI escape codes, parse them into
+    prompt_toolkit style fragments.  Otherwise use the simple
+    prefix-based style.
+    """
+    if "\x1b[" in line:
+        try:
+            return cast(StyleAndTextTuples, to_formatted_text(ANSI(line)))
+        except Exception:
+            pass
+    style = _line_style(line)
+    return [(style, line)]
 
 
 def _wrap_lines(text: str) -> list[str]:
@@ -819,19 +878,21 @@ def _tail_line(text: str) -> str:
 
 def _line_style(line: str) -> str:
     stripped = line.strip()
-    if stripped in {"│ you", "you"}:
+    if stripped in {"│ you", "you"} or stripped.startswith("│ you"):
         return "class:user"
-    if stripped in {"│ xcode", "xcode"} or stripped == "│ xcode:":
+    if stripped in {"│ xcode", "xcode"} or stripped.startswith("│ xcode"):
         return "class:assistant"
     if stripped.startswith("│ thinking"):
         return "class:thinking"
-    if stripped.startswith(("│ tool", "│ subagents", "│ tools collapsed")):
+    if stripped.startswith((
+        "│ tool", "│ subagents", "│ tools collapsed", "│ authorization"
+    )):
         return "class:tool-title"
     if stripped.startswith("│ permission requested"):
         return "class:error"
     if stripped.startswith("│   [") or stripped.startswith("│       "):
         return "class:tool"
-    if stripped.startswith("│ error") or "工具失败" in stripped:
+    if stripped.startswith("│ error") or "✗" in stripped or "工具失败" in stripped:
         return "class:error"
     if stripped.startswith("│"):
         return "class:tool"

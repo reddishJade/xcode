@@ -17,7 +17,7 @@ from xcode.cli.tui import (
     _HitlRequest,
     _TuiState,
     _XcodeTui,
-    _markdown_lines,
+    _rendered_markdown_lines,
     _visible_lines,
 )
 from xcode.harness.agent_runtime.events import (
@@ -80,7 +80,7 @@ def test_visible_lines_follow_tail_and_scrollback() -> None:
 
 
 def test_markdown_lines_render_markdown_structure() -> None:
-    rendered = "\n".join(_markdown_lines("# Title\n\n- item"))
+    rendered = "\n".join(_rendered_markdown_lines("# Title\n\n- item"))
 
     assert "Title" in rendered
     assert "item" in rendered
@@ -95,7 +95,7 @@ def test_tui_state_collapses_thinking_and_tools() -> None:
     state.toggle_tools()
     rendered = state.render()
 
-    assert "│   collapsed" in rendered
+    assert "│ thinking Thinking" in rendered
     assert "│ tools collapsed" in rendered
     assert "private reasoning" not in rendered
     assert "read file" not in rendered
