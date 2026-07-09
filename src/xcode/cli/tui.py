@@ -41,12 +41,19 @@ from xcode.harness.observability.permission_model import (
     SessionGrantStoreManager,
 )
 from xcode.harness.session import SessionStore
+from xcode.harness.snapshot import (
+    SnapshotResult,
+    SnapshotService,
+    SnapshotStore,
+    SnapshotUnsupportedError,
+)
 
 from .app_contract import ReplApp
 from .commands import PromptText, ReplState
 from .file_refs import expand_file_references
 from .markdown import TerminalMarkdownRenderer
 from .repl_commands import handle_command
+from .repl_hitl import parse_hitl_choice
 from .repl_skills import activate_skill, parse_skill_invocation
 from .repl_tools import (
     brief_input,
@@ -299,6 +306,11 @@ class _XcodeTui:
             project_root=project_root,
         )
         self._repl_state = ReplState()
+        self._snapshot_store: SnapshotStore | None = None
+        try:
+            self._snapshot_store = SnapshotStore(project_root)
+        except SnapshotUnsupportedError:
+            pass
         self._state = _TuiState(mode=self._repl_state.mode)
         self._scrollback = 0
         self._grant_store_manager = SessionGrantStoreManager()
@@ -489,6 +501,7 @@ class _XcodeTui:
                 FileGrantStore.for_project_root(self._project_root),
                 static_policy=getattr(self._agent_app.agent, "permission_policy", None),
                 restricted_dirs=getattr(self._agent_app.agent, "restricted_dirs", ()),
+                snapshot_store=self._snapshot_store,
             )
         self._state.mode = self._repl_state.mode
         output = output_buffer.getvalue().strip()
@@ -520,15 +533,7 @@ class _XcodeTui:
         return result
 
     def _answer_hitl_text(self, text: str) -> None:
-        normalized = text.strip().lower()
-        choices = {
-            "deny": HITLResult("deny", "once"),
-            "allow once": HITLResult("allow", "once"),
-            "allow (once)": HITLResult("allow", "once"),
-            "allow this session": HITLResult("allow", "session"),
-            "always allow": HITLResult("allow", "permanent"),
-        }
-        result = choices.get(normalized)
+        result = parse_hitl_choice(text)
         if result is None:
             self._state.log.append(
                 _message_block(
@@ -551,7 +556,18 @@ class _XcodeTui:
         self._refresh()
 
     def _run_turn(self, text: str) -> None:
+        snapshot = self._snapshot_store
+        _snapshot_ctx: (
+            tuple[str, SnapshotService, SnapshotResult] | None
+        ) = None
+        if snapshot is not None:
+            _turn_id = snapshot.next_turn_id(self._store.session_id)
+            _service = snapshot.service(self._store.session_id)
+            _pre_result = _service.track()
+            _snapshot_ctx = (_turn_id, _service, _pre_result)
+
         answer = ""
+        tool_names: list[str] = []
         try:
             for event in self._agent_app.ask_stream(text, mode=self._repl_state.mode):
                 if event.type not in {
@@ -563,6 +579,8 @@ class _XcodeTui:
                     self._store.append("event", event_to_dict(event))
                 if isinstance(event, FinalStructuredEvent):
                     answer = event.data.answer
+                if isinstance(event, ToolUseStructuredEvent):
+                    tool_names.append(event.data.name)
                 self._state.handle_event(event)
                 self._refresh()
         except Exception as exc:
@@ -570,9 +588,34 @@ class _XcodeTui:
             self._state.running = False
             self._refresh()
             return
+
         if answer:
             self._store.append("assistant", answer)
             self._store.update_summary()
+
+        if _snapshot_ctx is not None:
+            turn_id, service, pre_result = _snapshot_ctx
+            assert snapshot is not None  # guaranteed by _snapshot_ctx being set
+            try:
+                post_result = service.track()
+                changes = service.diff(
+                    pre_result.snapshot_id, post_result.snapshot_id
+                )
+                skipped_files = [
+                    *pre_result.skipped_files,
+                    *post_result.skipped_files,
+                ]
+                snapshot.record_turn(
+                    session_id=self._store.session_id,
+                    turn_id=turn_id,
+                    pre_snapshot_id=pre_result.snapshot_id,
+                    post_snapshot_id=post_result.snapshot_id,
+                    changed_files=changes,
+                    skipped_files=skipped_files,
+                    tool_names=tool_names,
+                )
+            except Exception:
+                pass
 
     def _fragments(self) -> StyleAndTextTuples:
         return self._state.fragments(self._output_height(), self._scrollback)

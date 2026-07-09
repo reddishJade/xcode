@@ -15,11 +15,28 @@ import questionary
 
 from .repl_tools import brief_input
 from xcode.harness.observability import HITLResult
+from xcode.harness.observability.permissions import HITLDecision, HITLScope
 from xcode.agent.types import ToolInput, ToolSpec
 
 
 _DEFAULT_HITL_TIMEOUT: float = 300.0
 _console = Console()
+
+
+def parse_hitl_choice(text: str) -> HITLResult | None:
+    """将用户输入的权限选择文本解析为 HITLResult。"""
+    normalized = text.strip().lower()
+    mapping: dict[str, tuple[HITLDecision, HITLScope]] = {
+        "deny": ("deny", "once"),
+        "allow (once)": ("allow", "once"),
+        "allow once": ("allow", "once"),
+        "allow this session": ("allow", "session"),
+        "always allow": ("allow", "permanent"),
+    }
+    pair = mapping.get(normalized)
+    if pair is None:
+        return None
+    return HITLResult(*pair)
 
 
 class ReplHITLHandler:
