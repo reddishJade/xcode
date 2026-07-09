@@ -14,7 +14,6 @@ from threading import Event
 from typing import TYPE_CHECKING, cast
 
 from prompt_toolkit.application import Application
-from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import StyleAndTextTuples, to_formatted_text
 from prompt_toolkit.formatted_text.ansi import ANSI
 from prompt_toolkit.input.base import Input
@@ -58,7 +57,8 @@ from .commands import PromptText, ReplState
 from .file_refs import expand_file_references
 from .markdown import TerminalMarkdownRenderer
 from .repl_commands import handle_command
-from .repl_commands import COMMAND_NAMES
+from .completion import ReplCompleter
+from .repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT
 from .repl_hitl import parse_hitl_choice
 from .repl_skills import activate_skill, parse_skill_invocation
 from .repl_tools import (
@@ -113,26 +113,7 @@ class _TuiInputLexer(Lexer):
         return cast(StyleAndTextTuples, frags)
 
 
-class _TuiCompleter(Completer):
-    """为 TUI 输入栏提供 / 命令补全。"""
 
-    def __init__(self) -> None:
-        self._commands = COMMAND_NAMES
-
-    def get_completions(
-        self, document: object, complete_event: object
-    ) -> list[Completion]:
-        text = str(getattr(document, "text", ""))
-        if not text:
-            return []
-        if text.startswith("/"):
-            partial = text.lower()
-            return [
-                Completion(cmd, start_position=-len(text))
-                for cmd in self._commands
-                if cmd.lower().startswith(partial)
-            ]
-        return []
 
 
 class _TuiPromptSession:
@@ -333,15 +314,12 @@ class _TuiState:
             lines.append("")
         dur = self.thinking_duration_ms
         if dur:
-            bar = f"│ thinking Thinking… (Thought for {dur}ms)"
+            lines.append(f"│ thought for {dur}ms")
         else:
-            bar = "│ thinking Thinking…"
-        lines.append(bar)
+            lines.append("│ thinking")
         if not self.thinking_collapsed:
             for tl in self.thinking.splitlines():
                 lines.append(f"│   {tl.lstrip()}")
-            if dur:
-                lines.append(f"│   (Thought for {dur}ms)")
 
     def _append_activity_lines(self, lines: list[str]) -> None:
         if self.tool_collapsed and (self.tool_events or self.subagents):
@@ -559,8 +537,14 @@ class _XcodeTui:
         self._application.run()
         return 0
 
-    def _make_completer(self) -> _TuiCompleter:
-        return _TuiCompleter()
+    def _make_completer(self) -> ReplCompleter:
+        registry = tuple(getattr(self._agent_app, "registry", ()) or ())
+        return ReplCompleter(
+            project_root=self._project_root,
+            registry=registry,
+            command_names=COMMAND_NAMES,
+            command_registry=COMMAND_REGISTRY_EXPORT,
+        )
 
     def _input_prompt(self) -> str:
         return "授权 > " if self._state.pending_hitl is not None else "输入消息 > "

@@ -95,7 +95,7 @@ def test_tui_state_collapses_thinking_and_tools() -> None:
     state.toggle_tools()
     rendered = state.render()
 
-    assert "│ thinking Thinking" in rendered
+    assert "│ thinking" in rendered
     assert "│ tools collapsed" in rendered
     assert "private reasoning" not in rendered
     assert "read file" not in rendered
