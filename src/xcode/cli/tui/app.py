@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import redirect_stdout
 from io import StringIO
-import threading
 import time
 from threading import Event
 from typing import TYPE_CHECKING
@@ -46,6 +46,8 @@ from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
     ToolUseStructuredEvent,
 )
+
+_SENTINEL = object()
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -315,12 +317,7 @@ class _XcodeTui:
             if token is not None:
                 token.reset()
         self._refresh()
-        thread = threading.Thread(
-            target=self._run_turn,
-            args=(expanded_text,),
-            daemon=True,
-        )
-        thread.start()
+        self._application.create_background_task(self._run_turn_async(expanded_text))
 
     def _run_command(self, text: str) -> None:
         output_buffer = StringIO()
@@ -405,14 +402,37 @@ class _XcodeTui:
 
     # ── Turn 执行 ──
 
-    def _run_turn(self, text: str) -> None:
+    async def _run_turn_async(self, text: str) -> None:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[object] = asyncio.Queue()
         snapshot = self._snapshot_store
         _snapshot_ctx = _enter_snapshot_ctx(snapshot, self._store.session_id)
 
         answer = ""
         tool_names: list[str] = []
+
+        def _produce() -> None:
+            try:
+                for event in self._agent_app.ask_stream(text, mode=self._repl_state.mode):
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+                    time.sleep(0.002)
+            except Exception as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, exc)
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+
+        loop.run_in_executor(None, _produce)
+
         try:
-            for event in self._agent_app.ask_stream(text, mode=self._repl_state.mode):
+            while True:
+                item = await queue.get()
+                await asyncio.sleep(0)  # yield to event loop
+                if item is _SENTINEL:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                from xcode.harness.agent_runtime.events import CodingAgentHarnessEvent
+                event: CodingAgentHarnessEvent = item  # type: ignore[assignment]
                 if event.type not in {
                     "message_start",
                     "message_stop",
@@ -426,7 +446,6 @@ class _XcodeTui:
                     tool_names.append(event.data.name)
                 self._state.handle_event(event)
                 self._refresh()
-                time.sleep(0.005)
         except Exception as exc:
             self._state.log.append(_LogEntry("error", f"[error] {exc}"))
             self._state.running = False
