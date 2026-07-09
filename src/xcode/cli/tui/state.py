@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Event
 from typing import TYPE_CHECKING
@@ -34,13 +35,6 @@ class _SubagentSlot:
 
 
 @dataclass
-class _ToolSlot:
-    name: str
-    label: str
-    text: str
-
-
-@dataclass
 class _HitlRequest:
     tool_name: str
     preview: list[str]
@@ -57,16 +51,14 @@ class _LogEntry:
 
 @dataclass
 class _TuiState:
-    """TUI 核心状态，包含完整的对话渲染逻辑。
+    """TUI 核心状态。
 
-    不绑定 prompt_toolkit 或 Rich，输出由上层 app.py 分派到 Label/Window。
+    tool use/text_delta 事件按到达顺序直接追加到 self.log，
+    和 CLI 的 Live.update() 逐事件流式输出一致。
     """
 
     log: list[_LogEntry] = field(default_factory=list)
-    current_answer: str = ""
     thinking_core: ReasoningCore = field(default_factory=ReasoningCore)
-    tool_events: list[str] = field(default_factory=list)
-    tool_labels: dict[str, _ToolSlot] = field(default_factory=dict)
     subagents: dict[int, _SubagentSlot] = field(default_factory=dict)
     pending_hitl: _HitlRequest | None = None
     thinking_collapsed: bool = False
@@ -92,9 +84,8 @@ class _TuiState:
 
     def add_user(self, text: str) -> None:
         self.log.append(_LogEntry("you", f"> {text}"))
-        self.current_answer = ""
         self.thinking_core.reset()
-        self._clear_activity()
+        self.subagents.clear()
 
     def toggle_thinking(self) -> None:
         self.thinking_collapsed = not self.thinking_collapsed
@@ -106,7 +97,7 @@ class _TuiState:
         if event.type == "reasoning_delta":
             self.thinking_core.handle_delta(event.data)
         elif event.type == "text_delta":
-            self.current_answer += event.data
+            self._handle_text_delta(event.data)
         elif event.type == "tool_use":
             self._record_tool_use(event.data.id, event.data.name, event.data.input)
         elif event.type == "tool_update":
@@ -152,29 +143,11 @@ class _TuiState:
     def lines(self) -> list[str]:
         lines: list[str] = []
         for entry in self.log:
-            if lines:
-                lines.append("")
-            if not entry.role:
-                lines.extend(entry.text.splitlines())
-            elif entry.role == "thinking":
-                self._append_thinking_entry(entry, lines, plain_text=True)
-            elif entry.markdown:
-                lines.append(f"│ {entry.role}")
-                for line in rendered_markdown_lines(entry.text):
-                    lines.append(f"│   {line}")
-            else:
-                lines.append(f"│ {entry.role}")
-                for line in entry.text.splitlines() or [""]:
-                    lines.append(f"│   {line}")
+            self._append_entry_lines(entry, lines, rendered_markdown_lines)
         if self.thinking.strip():
             self._thinking_lines(lines)
-        self._append_activity_lines(lines)
+        self._append_subagent_lines(lines)
         self._append_hitl_lines(lines)
-        if self.current_answer.strip():
-            if lines:
-                lines.append("")
-            lines.append("│ xcode")
-            lines.extend(rendered_markdown_lines(self.current_answer.strip()))
         return lines
 
     # ── ANSI 渲染（彩色：用于片段生成） ──
@@ -182,37 +155,39 @@ class _TuiState:
     def ansi_lines(self) -> list[str]:
         lines: list[str] = []
         for entry in self.log:
-            if lines:
-                lines.append("")
-            if not entry.role:
-                lines.extend(entry.text.splitlines())
-            elif entry.role == "thinking":
-                self._append_thinking_entry(entry, lines, plain_text=False)
-            elif entry.markdown:
-                lines.append(f"│ {entry.role}")
-                for line in markdown_ansi_lines(entry.text):
-                    lines.append(f"│   {line}")
-            else:
-                lines.append(f"│ {entry.role}")
-                for line in entry.text.splitlines() or [""]:
-                    lines.append(f"│   {line}")
+            self._append_entry_lines(entry, lines, markdown_ansi_lines)
         if self.thinking.strip():
             self._thinking_lines(lines)
-        elif self.running and not self.current_answer.strip():
+        elif self.running:
             if lines:
                 lines.append("")
             lines.append("│ thinking")
-        self._append_activity_lines(lines)
+        self._append_subagent_lines(lines)
         self._append_hitl_lines(lines)
-        if self.current_answer.strip():
-            if lines:
-                lines.append("")
-            lines.append("│ xcode")
-            for line in markdown_ansi_lines(self.current_answer.strip()):
-                lines.append(f"│   {line}")
         return lines
 
     # ── 内部渲染方法 ──
+
+    def _append_entry_lines(
+        self,
+        entry: _LogEntry,
+        lines: list[str],
+        md_fn: Callable[[str], list[str]],
+    ) -> None:
+        if lines:
+            lines.append("")
+        if not entry.role:
+            lines.extend(entry.text.splitlines())
+        elif entry.role == "thinking":
+            self._append_thinking_entry(entry, lines, plain_text=(md_fn is rendered_markdown_lines))
+        elif entry.markdown:
+            lines.append(f"│ {entry.role}")
+            for line in md_fn(entry.text):
+                lines.append(f"│   {line}")
+        else:
+            lines.append(f"│ {entry.role}")
+            for line in entry.text.splitlines() or [""]:
+                lines.append(f"│   {line}")
 
     def _thinking_lines(self, lines: list[str]) -> None:
         if lines:
@@ -246,25 +221,17 @@ class _TuiState:
                 else:
                     lines.append(f"│   {tl.lstrip()}")
 
-    def _append_activity_lines(self, lines: list[str]) -> None:
-        if self.tool_collapsed and (self.tool_events or self.subagents):
-            if lines:
-                lines.append("")
-            lines.append("│ tools collapsed")
+    def _append_subagent_lines(self, lines: list[str]) -> None:
+        if not self.subagents:
             return
-        for event in self.tool_events[-40:]:
-            if lines:
-                lines.append("")
-            lines.extend(event.splitlines())
-        if self.subagents:
-            if lines:
-                lines.append("")
-            lines.append("│ subagents")
-            for index in sorted(self.subagents):
-                slot = self.subagents[index]
-                lines.append(f"│   [{index}] {slot.task}")
-                if slot.tool:
-                    lines.append(f"│       {slot.tool}")
+        if lines:
+            lines.append("")
+        lines.append("│ subagents")
+        for index in sorted(self.subagents):
+            slot = self.subagents[index]
+            lines.append(f"│   [{index}] {slot.task}")
+            if slot.tool:
+                lines.append(f"│       {slot.tool}")
 
     def _append_hitl_lines(self, lines: list[str]) -> None:
         if self.pending_hitl is None:
@@ -275,43 +242,56 @@ class _TuiState:
         for line in self.pending_hitl.preview:
             lines.append(f"│   {line}")
         lines.append("│   Deny | Allow (once) | Allow this session | Always allow")
+        lines.append("│   Type your choice above and press Enter")
 
-    # ── 工具事件记录 ──
+    # ── 工具事件记录（直接追加到 log） ──
+
+    def _handle_text_delta(self, delta: str) -> None:
+        """追加 text_delta 到 log 的最后一个 xcode 条目（或在流式期间追加新行）。"""
+        # 追加增量文本到当前答句末尾
+        self._append_or_update_answer(delta)
+
+    def _append_or_update_answer(self, delta: str) -> None:
+        if self.log and self.log[-1].role == "xcode" and self.log[-1].markdown:
+            self.log[-1] = _LogEntry("xcode", self.log[-1].text + delta, markdown=True)
+        else:
+            self.log.append(_LogEntry("xcode", delta, markdown=True))
 
     def _record_tool_use(self, tool_id: str, name: str, raw_input: ToolInput) -> None:
         label = brief_input(name, raw_input)
-        text = tool_call_text(name, label, raw_input).plain
-        self.tool_labels[tool_id] = _ToolSlot(name=name, label=label, text=text)
-        self.tool_events.append(f"│ tool {label}")
+        self.log.append(_LogEntry("", f"│ tool {label}"))
         if name in {"todowrite", "subagent"}:
-            self.tool_events.append(f"│   {text.strip()}")
+            text = tool_call_text(name, label, raw_input).plain
+            self.log.append(_LogEntry("", f"│   {text.strip()}"))
 
     def _record_tool_result(
         self, tool_id: str, status: str, content: str
     ) -> None:
         from .rendering import tail_line
 
-        slot = self.tool_labels.get(tool_id)
-        label = slot.label if slot else tool_id
         if status == "ok":
             summary = tail_line(content)
             detail = f"✓ {summary}" if summary else "✓"
-            self.tool_events.append(f"│   {detail}")
+            self.log.append(_LogEntry("", f"│   {detail}"))
             return
-        self.tool_events.append(f"│ ✗ {label}: {content}")
+        self.log.append(_LogEntry("", f"│ ✗ {content}"))
 
     def _handle_tool_update(self, tool_name: str, partial: str) -> None:
         from .rendering import tail_line
 
         if tool_name == "subagent":
             for line in partial.splitlines():
-                self.record_subagent_update(line.strip())
+                self._record_subagent_update(line.strip())
             return
         clean = tail_line(partial)
         if clean:
-            self.tool_events.append(f"│   {clean}")
+            self.log.append(_LogEntry("", f"│   {clean}"))
 
     def record_subagent_update(self, clean: str) -> bool:
+        """公开的 subagent 更新入口，测试和 _handle_tool_update 共用。"""
+        return self._record_subagent_update(clean)
+
+    def _record_subagent_update(self, clean: str) -> bool:
         if not clean:
             return False
         match = re.match(r"\[(\d+)]( +)(.*)", clean)
@@ -332,9 +312,7 @@ class _TuiState:
     # ── 回合结束 ──
 
     def _finish_answer(self, event: FinalStructuredEvent) -> None:
-        answer = self.current_answer.strip() or event.data.answer.strip()
-
-        # Persist thinking before clearing
+        # 持久化思考（自动包含耗时信息）
         if self.thinking.strip():
             self.thinking_core.finish()
             text = self.thinking.strip()
@@ -342,26 +320,17 @@ class _TuiState:
                 text += f"\nThought for {self.thinking_duration_ms}ms"
             self.log.append(_LogEntry("thinking", text))
 
-        # Persist tool activity before clearing
-        activity_lines: list[str] = []
-        for ev in self.tool_events[-40:]:
-            if activity_lines:
-                activity_lines.append("")
-            activity_lines.extend(ev.splitlines())
-        activity = "\n".join(activity_lines).strip()
-        self._clear_activity()
-        if activity:
-            self.log.append(_LogEntry(role="", text=activity))
-        if answer:
-            self.log.append(_LogEntry("xcode", answer, markdown=True))
+        # 追加 final 事件的答案（如果 log 中最后的 xcode 条目不完整）
+        final_answer = event.data.answer.strip()
+        if final_answer and (
+            not self.log
+            or self.log[-1].role != "xcode"
+            or not self.log[-1].text.strip().endswith(final_answer)
+        ):
+            self.log.append(_LogEntry("xcode", final_answer, markdown=True))
+
         reason = final_stop_reason(event.data)
         if reason:
             self.log.append(_LogEntry("stop", reason))
-        self.current_answer = ""
         self.thinking_core.reset()
         self.running = False
-
-    def _clear_activity(self) -> None:
-        self.tool_events.clear()
-        self.tool_labels.clear()
-        self.subagents.clear()

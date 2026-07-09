@@ -15,7 +15,7 @@ from xcode.agent.types import ToolSpec
 from xcode.ai.events import ToolCall
 from xcode.cli.tui.app import _XcodeTui
 from xcode.cli.tui.rendering import rendered_markdown_lines, visible_lines
-from xcode.cli.tui.state import _HitlRequest, _TuiState
+from xcode.cli.tui.state import _HitlRequest, _LogEntry, _TuiState
 from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
     TextDeltaStructuredEvent,
@@ -60,7 +60,7 @@ def test_tui_state_uses_firstcoder_like_message_blocks() -> None:
 def test_tui_state_emits_styled_fragments() -> None:
     state = _TuiState()
     state.add_user("hello")
-    state.current_answer = "hi"
+    state.log.append(_LogEntry("xcode", "hi", markdown=True))
 
     fragments = state.fragments()
     assert ("class:user", "│ you") in fragments
@@ -82,19 +82,15 @@ def test_markdown_lines_render_markdown_structure() -> None:
     assert "item" in rendered
 
 
-def test_tui_state_collapses_thinking_and_tools() -> None:
+def test_tui_state_collapses_thinking() -> None:
     state = _TuiState()
     state.thinking = "private reasoning"
-    state.tool_events.append("│ tool read_file: path")
 
     state.toggle_thinking()
-    state.toggle_tools()
     rendered = state.render()
 
     assert "│ thinking" in rendered
-    assert "│ tools collapsed" in rendered
     assert "private reasoning" not in rendered
-    assert "read_file" not in rendered
 
 
 def test_tui_state_keeps_tool_summary_after_final() -> None:
