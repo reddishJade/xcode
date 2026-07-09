@@ -7,8 +7,8 @@ import threading
 from typing import Any
 
 from prompt_toolkit.input.defaults import create_pipe_input
-from prompt_toolkit.widgets import Label
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.output import DummyOutput
 
 from xcode.agent.types import ToolSpec
@@ -160,7 +160,7 @@ def test_tui_constructs_with_input_focus(tmp_path) -> None:
         tui = _XcodeTui(_App(), tmp_path, input=pipe_input, output=DummyOutput())
 
     assert tui._application.layout.current_control == tui._input.control
-    assert isinstance(tui._output, Label)
+    assert isinstance(tui._output_control, FormattedTextControl)
     bound_keys = {binding.keys[0] for binding in tui._bindings().bindings}
     assert Keys.ScrollUp in bound_keys
     assert Keys.ScrollDown in bound_keys
