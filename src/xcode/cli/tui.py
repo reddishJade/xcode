@@ -225,8 +225,9 @@ class _TuiState:
     def fragments(
         self, limit: int | None = None, scrollback: int = 0
     ) -> StyleAndTextTuples:
-        all_text = self.lines()
-        visible = _visible_lines(all_text, limit, scrollback)
+        # ansi_lines for scroll = same total lines as lines() but ANSI-colored
+        all_ansi = self.ansi_lines()
+        visible = _visible_lines(all_ansi, limit, scrollback)
         result: StyleAndTextTuples = []
         for line in visible:
             result.extend(_render_line_fragments(line))
@@ -252,7 +253,6 @@ class _TuiState:
             if lines:
                 lines.append("")
             if not entry.role:
-                # Raw lines (activity summary) already have │ prefix
                 lines.extend(entry.text.splitlines())
             elif entry.markdown:
                 lines.append(f"│ {entry.role}")
@@ -271,6 +271,34 @@ class _TuiState:
                 lines.append("")
             lines.append("│ xcode")
             lines.extend(_rendered_markdown_lines(self.current_answer.strip()))
+        return lines
+
+    def ansi_lines(self) -> list[str]:
+        """Like lines() but markdown content uses ANSI codes for coloring."""
+        lines: list[str] = []
+        for entry in self.log:
+            if lines:
+                lines.append("")
+            if not entry.role:
+                lines.extend(entry.text.splitlines())
+            elif entry.markdown:
+                lines.append(f"│ {entry.role}")
+                for line in _markdown_ansi_lines(entry.text):
+                    lines.append(f"│   {line}")
+            else:
+                lines.append(f"│ {entry.role}")
+                for line in entry.text.splitlines() or [""]:
+                    lines.append(f"│   {line}")
+        if self.thinking.strip():
+            self._thinking_lines(lines)
+        self._append_activity_lines(lines)
+        self._append_hitl_lines(lines)
+        if self.current_answer.strip():
+            if lines:
+                lines.append("")
+            lines.append("│ xcode")
+            for line in _markdown_ansi_lines(self.current_answer.strip()):
+                lines.append(f"│   {line}")
         return lines
 
     def _thinking_lines(self, lines: list[str]) -> None:
@@ -836,7 +864,7 @@ def _tool_block(name: str, status: str, text: str) -> str:
 
 
 def _rendered_markdown_lines(text: str) -> list[str]:
-    """Render markdown to plain text lines for scroll counting."""
+    """Render markdown to plain text lines (for scroll counting)."""
     buffer = StringIO()
     Console(
         file=buffer,
@@ -846,6 +874,24 @@ def _rendered_markdown_lines(text: str) -> list[str]:
     ).print(Markdown(text))
     rendered = buffer.getvalue().replace("\r\n", "\n").rstrip("\n")
     return rendered.splitlines() or [""]
+
+
+def _markdown_ansi_lines(text: str) -> list[str]:
+    """Render markdown to ANSI-colored lines for fragment rendering."""
+    buffer = StringIO()
+    Console(
+        file=buffer,
+        width=112,
+        force_terminal=True,
+        color_system="truecolor",
+    ).print(Markdown(text))
+    raw = buffer.getvalue()
+    # Strip trailing whitespace from each Rich-padded line
+    lines = [line.rstrip() for line in raw.splitlines()]
+    # Drop trailing empty lines
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines
 
 
 def _render_line_fragments(line: str) -> StyleAndTextTuples:
