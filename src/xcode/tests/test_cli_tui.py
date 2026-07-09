@@ -250,8 +250,6 @@ def test_tui_hitl_callback_returns_selected_result(tmp_path) -> None:
     assert "Authorization" not in rendered
     assert "authorization request" in rendered
     assert "Command: echo hi" in rendered
-    assert "Allow this session" in rendered
-    assert "Always allow" in rendered
     tui._answer_hitl_text("Allow (once)")
     thread.join(timeout=1)
 

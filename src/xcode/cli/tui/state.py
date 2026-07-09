@@ -241,11 +241,6 @@ class _TuiState:
         lines.append("│ authorization request")
         for line in self.pending_hitl.preview:
             lines.append(f"│   {line}")
-        lines.append("│")
-        lines.append("│   [1] Allow (once)")
-        lines.append("│   [2] Allow this session")
-        lines.append("│   [3] Always allow")
-        lines.append("│   [4] Deny")
 
     # ── 工具事件记录（直接追加到 log） ──
 
