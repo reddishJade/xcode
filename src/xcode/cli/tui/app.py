@@ -42,16 +42,17 @@ from xcode.harness.session import SessionStore
 from xcode.harness.snapshot import SnapshotStore, SnapshotUnsupportedError
 from .widgets import TuiInputLexer, TuiPromptSession
 
+from xcode.harness.agent_runtime.events import (
+    FinalStructuredEvent,
+    ToolUseStructuredEvent,
+)
+
 if TYPE_CHECKING:
     from pathlib import Path
 
     from xcode.harness.snapshot import SnapshotService, SnapshotResult
 
     from xcode.agent.types import ToolInput, ToolSpec
-    from xcode.harness.agent_runtime.events import (
-        FinalStructuredEvent,
-        ToolUseStructuredEvent,
-    )
     from xcode.harness.observability import HITLResult
     from xcode.harness.observability.permission_model import (
         SessionGrantStoreManager,
