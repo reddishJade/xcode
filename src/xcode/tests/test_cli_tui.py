@@ -85,7 +85,7 @@ def test_markdown_lines_render_markdown_structure() -> None:
 def test_tui_state_collapses_thinking_and_tools() -> None:
     state = _TuiState()
     state.thinking = "private reasoning"
-    state.tool_events.append("│ tool read_file running\n│   read file")
+    state.tool_events.append("│ tool read_file: path")
 
     state.toggle_thinking()
     state.toggle_tools()
@@ -94,7 +94,7 @@ def test_tui_state_collapses_thinking_and_tools() -> None:
     assert "│ thinking" in rendered
     assert "│ tools collapsed" in rendered
     assert "private reasoning" not in rendered
-    assert "read file" not in rendered
+    assert "read_file" not in rendered
 
 
 def test_tui_state_keeps_tool_summary_after_final() -> None:
@@ -129,9 +129,8 @@ def test_tui_state_keeps_tool_summary_after_final() -> None:
     )
 
     rendered = state.render()
-    assert "│ tool read_file running" in rendered
-    assert "read src/xcode/.../tui.py" in rendered
-    assert "│ tool read_file success" in rendered
+    assert "│ tool read src/xcode/.../tui.py" in rendered
+    assert "│   ✓" in rendered
     assert "│ xcode\n│   done" in rendered
 
 

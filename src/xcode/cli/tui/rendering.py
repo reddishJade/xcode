@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import textwrap
 from io import StringIO
 from typing import cast
 
@@ -71,31 +70,18 @@ def line_style(line: str) -> str:
         return "class:tool-title"
     if stripped.startswith("│ permission requested"):
         return "class:error"
-    if stripped.startswith("│   [") or stripped.startswith("│       "):
+    if stripped.startswith(("│   [", "│       ", "│   ✓", "│   <-")):
         return "class:tool"
-    if stripped.startswith("│ error") or "✗" in stripped or "工具失败" in stripped:
+    if stripped.startswith("│ error") or "✗" in stripped:
         return "class:error"
     if stripped.startswith("│"):
         return ""
     return ""
 
 
-def wrap_lines(text: str) -> list[str]:
-    wrapped: list[str] = []
-    for paragraph in text.splitlines() or [text]:
-        wrapped.extend(textwrap.wrap(paragraph, width=112) or [""])
-    return wrapped
-
-
 def tail_line(text: str) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return lines[-1] if lines else ""
-
-
-def tool_block(name: str, status: str, text: str) -> str:
-    lines = [f"│ tool {name} {status}"]
-    lines.extend(f"│   {line}" for line in wrap_lines(text))
-    return "\n".join(lines)
 
 
 def visible_lines(

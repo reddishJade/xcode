@@ -15,7 +15,6 @@ from .rendering import (
     markdown_ansi_lines,
     rendered_markdown_lines,
     render_line_fragments,
-    tool_block,
     visible_lines,
 )
 
@@ -283,35 +282,34 @@ class _TuiState:
         label = brief_input(name, raw_input)
         text = tool_call_text(name, label, raw_input).plain
         self.tool_labels[tool_id] = _ToolSlot(name=name, label=label, text=text)
-        self.tool_events.append(tool_block(name, "running", f"正在调用工具: {label}"))
+        self.tool_events.append(f"│ tool {label}")
         if name in {"todowrite", "subagent"}:
-            self.tool_events.append(tool_block(name, "input", text.strip()))
+            self.tool_events.append(f"│   {text.strip()}")
 
     def _record_tool_result(
         self, tool_id: str, status: str, content: str
     ) -> None:
+        from .rendering import tail_line
+
         slot = self.tool_labels.get(tool_id)
-        name = slot.name if slot else tool_id
         label = slot.label if slot else tool_id
         if status == "ok":
-            from .rendering import tail_line
-
             summary = tail_line(content)
-            detail = f"✓ {label}" + (f" -> {summary}" if summary else "")
-            self.tool_events.append(tool_block(name, "success", detail))
+            detail = f"✓ {summary}" if summary else "✓"
+            self.tool_events.append(f"│   {detail}")
             return
-        self.tool_events.append(tool_block(name, "error", f"✗ {label}: {content}"))
+        self.tool_events.append(f"│ ✗ {label}: {content}")
 
     def _handle_tool_update(self, tool_name: str, partial: str) -> None:
         from .rendering import tail_line
 
-        if tool_name != "subagent":
-            clean = tail_line(partial)
-            if clean:
-                self.tool_events.append(tool_block(tool_name, "update", clean))
+        if tool_name == "subagent":
+            for line in partial.splitlines():
+                self.record_subagent_update(line.strip())
             return
-        for line in partial.splitlines():
-            self.record_subagent_update(line.strip())
+        clean = tail_line(partial)
+        if clean:
+            self.tool_events.append(f"│   {clean}")
 
     def record_subagent_update(self, clean: str) -> bool:
         if not clean:
