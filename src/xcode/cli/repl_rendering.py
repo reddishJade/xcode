@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
-import shutil
 import sys
-import textwrap
 from collections.abc import Callable, Iterable
 from typing import Any, cast
 
@@ -18,15 +16,18 @@ from rich.text import Text
 
 from .commands import CommandEntry, PromptLike, PromptText, ReplState
 from .completion import CommandArgsSuggester, ReplCompleter
+from .shared.thinking import (  # noqa: F401 — re-exported for back-compat
+    format_elapsed,
+    reasoning_preview_lines,
+    should_print_reasoning_summary,
+    single_line_preview,
+)
 from xcode.agent.types import ToolSpec
 
 CITE_START = "\ue200"
 CITE_SEP = "\ue202"
 CITE_END = "\ue201"
 
-
-_MIN_REASONING_SUMMARY_SECONDS = 0.5
-_MIN_REASONING_SUMMARY_CHARS = 24
 
 DEBUG_TOOL_RESULT_PREVIEW_LIMIT = 20_000
 VERBOSE_TOOL_RESULT_PREVIEW_LIMIT = 600
@@ -76,42 +77,6 @@ class PromptSessionAdapter:
 
     def prompt(self, prompt_text: PromptText) -> str:
         return str(self.session.prompt(prompt_text))
-
-
-def reasoning_preview_lines(text: str, width: int | None = None) -> list[str]:
-    width = width or max(20, shutil.get_terminal_size((100, 20)).columns - 4)
-    lines: list[str] = []
-    for line in text.splitlines() or [text]:
-        wrapped = textwrap.wrap(
-            line,
-            width=width,
-            replace_whitespace=False,
-            drop_whitespace=False,
-        )
-        lines.extend(wrapped or [""])
-    return lines[-3:]
-
-
-def format_elapsed(seconds: float) -> str:
-    if seconds < 1:
-        return f"{seconds * 1000:.0f}ms"
-    return f"{seconds:.1f}s"
-
-
-def single_line_preview(text: str, width: int | None = None) -> str:
-    width = width or max(20, shutil.get_terminal_size((100, 20)).columns - 6)
-    preview = " ".join(text.split())
-    if len(preview) <= width:
-        return preview
-    return f"{preview[: max(0, width - 1)]}…"
-
-
-def should_print_reasoning_summary(text: str, elapsed: float) -> bool:
-    preview = " ".join(text.split())
-    return bool(preview) and (
-        elapsed >= _MIN_REASONING_SUMMARY_SECONDS
-        or len(preview) >= _MIN_REASONING_SUMMARY_CHARS
-    )
 
 
 def _render_citations(text: str) -> str:

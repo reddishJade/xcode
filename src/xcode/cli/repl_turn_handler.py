@@ -19,10 +19,12 @@ from .repl_rendering import (
     CLI_COLOR_THINKING,
     CLI_COLOR_TOOL,
     LiveReasoningPreview,
+)
+from .shared.thinking import single_line_preview
+from .shared.thinking import (
+    ReasoningCore,
     format_elapsed,
-    reasoning_preview_lines,
     should_print_reasoning_summary,
-    single_line_preview,
 )
 from .repl_tools import (
     brief_input,
@@ -220,37 +222,34 @@ class ToolCallHandler:
 
 
 class ReasoningHandler:
-    """处理推理过程的 delta 流式事件，管理实时预览和摘要输出。"""
+    """处理推理过程的 delta 流式事件，管理实时预览和摘要输出。
+
+    基于输出无关的 ReasoningCore，叠加 Rich Live 实时显示。
+    """
 
     def __init__(self, live_console: Console, state: ReplState) -> None:
         self.live_console = live_console
         self.state = state
-        self.reasoning_started_at: float | None = None
-        self.reasoning_text = ""
+        self.core = ReasoningCore()
         self.reasoning_preview = LiveReasoningPreview(live_console)
 
     def handle_delta(self, event_data: str) -> None:
-        if self.reasoning_started_at is None:
-            self.reasoning_started_at = time.perf_counter()
-        self.reasoning_text += event_data
+        self.core.handle_delta(event_data)
         if not self.state.thinking_collapsed:
-            preview = reasoning_preview_lines(self.reasoning_text)
-            display = ["  Thinking..."] + (preview or [])
+            display = ["  Thinking..."] + (self.core.preview_lines or [])
             self.reasoning_preview.update(display)
 
     def finish(self) -> None:
-        if self.reasoning_started_at is None:
+        if self.core.started_at is None:
             return
-        elapsed = time.perf_counter() - self.reasoning_started_at
+        self.core.finish()
         self.reasoning_preview.stop()
         if self.state.thinking_collapsed:
-            # collapsed: 只记录时间，不输出摘要
-            self.reasoning_started_at = None
-            self.reasoning_text = ""
+            self.core.reset()
             return
-        if not should_print_reasoning_summary(self.reasoning_text, elapsed):
-            self.reasoning_started_at = None
-            self.reasoning_text = ""
+        elapsed = time.perf_counter() - self.core.started_at
+        if not should_print_reasoning_summary(self.core.text, elapsed):
+            self.core.reset()
             return
         self.live_console.print(
             Text(
@@ -258,9 +257,8 @@ class ReasoningHandler:
                 style=CLI_COLOR_THINKING,
             )
         )
-        self.reasoning_started_at = None
-        self.reasoning_text = ""
+        self.core.reset()
 
     @property
     def text(self) -> str:
-        return self.reasoning_text
+        return self.core.text

@@ -13,13 +13,9 @@ from prompt_toolkit.output import DummyOutput
 
 from xcode.agent.types import ToolSpec
 from xcode.ai.events import ToolCall
-from xcode.cli.tui import (
-    _HitlRequest,
-    _TuiState,
-    _XcodeTui,
-    _rendered_markdown_lines,
-    _visible_lines,
-)
+from xcode.cli.tui.app import _XcodeTui
+from xcode.cli.tui.rendering import rendered_markdown_lines, visible_lines
+from xcode.cli.tui.state import _HitlRequest, _TuiState
 from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
     TextDeltaStructuredEvent,
@@ -74,13 +70,13 @@ def test_tui_state_emits_styled_fragments() -> None:
 def test_visible_lines_follow_tail_and_scrollback() -> None:
     lines = [f"line {i}" for i in range(8)]
 
-    assert _visible_lines(lines, 3, 0) == ["line 5", "line 6", "line 7"]
-    assert _visible_lines(lines, 3, 2) == ["line 3", "line 4", "line 5"]
-    assert _visible_lines(lines, 20, 0) == lines
+    assert visible_lines(lines, 3, 0) == ["line 5", "line 6", "line 7"]
+    assert visible_lines(lines, 3, 2) == ["line 3", "line 4", "line 5"]
+    assert visible_lines(lines, 20, 0) == lines
 
 
 def test_markdown_lines_render_markdown_structure() -> None:
-    rendered = "\n".join(_rendered_markdown_lines("# Title\n\n- item"))
+    rendered = "\n".join(rendered_markdown_lines("# Title\n\n- item"))
 
     assert "Title" in rendered
     assert "item" in rendered

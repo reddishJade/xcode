@@ -23,8 +23,8 @@ from .repl_rendering import (
     DEBUG_TOOL_RESULT_PREVIEW_LIMIT,
     NORMAL_TOOL_RESULT_PREVIEW_LIMIT,
     VERBOSE_TOOL_RESULT_PREVIEW_LIMIT,
-    single_line_preview,
 )
+from .shared.thinking import single_line_preview
 
 from xcode.harness.agent_runtime.events import (
     AssistantEventBlock,
