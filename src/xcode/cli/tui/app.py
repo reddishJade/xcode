@@ -384,14 +384,16 @@ class _XcodeTui:
         return result
 
     def _answer_hitl_text(self, text: str) -> None:
-
-        result = parse_hitl_choice(text)
+        # 支持数字选择：1→Allow(once) 2→Allow this session 3→Always allow 4→Deny
+        numeric = {"1": "allow (once)", "2": "allow this session", "3": "always allow", "4": "deny"}
+        translated = numeric.get(text.strip(), text)
+        result = parse_hitl_choice(translated)
         if result is None:
             self._state.log.append(
                 _LogEntry(
                     "system",
-                    "permission choice must be: Deny, Allow (once), "
-                    "Allow this session, or Always allow",
+                    "选择: [1] Allow (once)  [2] Allow this session  "
+                    "[3] Always allow  [4] Deny",
                 )
             )
             self._refresh()
