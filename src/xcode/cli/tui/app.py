@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import redirect_stdout
 from io import StringIO
+import threading
 import time
 from threading import Event
 from typing import TYPE_CHECKING
@@ -46,8 +46,6 @@ from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
     ToolUseStructuredEvent,
 )
-
-_SENTINEL = object()
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -156,6 +154,10 @@ class _XcodeTui:
                 "completion-menu": "bg:default",
                 "completion-menu.completion": "bg:default fg:default",
                 "completion-menu.completion.current": (
+                    "bg:default fg:default bold underline"
+                ),
+                "completion-menu.meta.completion": "bg:default fg:default",
+                "completion-menu.meta.completion.current": (
                     "bg:default fg:default bold underline"
                 ),
             }),
@@ -317,7 +319,12 @@ class _XcodeTui:
             if token is not None:
                 token.reset()
         self._refresh()
-        self._application.create_background_task(self._run_turn_async(expanded_text))
+        thread = threading.Thread(
+            target=self._run_turn,
+            args=(expanded_text,),
+            daemon=True,
+        )
+        thread.start()
 
     def _run_command(self, text: str) -> None:
         output_buffer = StringIO()
@@ -402,37 +409,14 @@ class _XcodeTui:
 
     # ── Turn 执行 ──
 
-    async def _run_turn_async(self, text: str) -> None:
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[object] = asyncio.Queue()
+    def _run_turn(self, text: str) -> None:
         snapshot = self._snapshot_store
         _snapshot_ctx = _enter_snapshot_ctx(snapshot, self._store.session_id)
 
         answer = ""
         tool_names: list[str] = []
-
-        def _produce() -> None:
-            try:
-                for event in self._agent_app.ask_stream(text, mode=self._repl_state.mode):
-                    loop.call_soon_threadsafe(queue.put_nowait, event)
-                    time.sleep(0.002)
-            except Exception as exc:
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
-
-        loop.run_in_executor(None, _produce)
-
         try:
-            while True:
-                item = await queue.get()
-                await asyncio.sleep(0)  # yield to event loop
-                if item is _SENTINEL:
-                    break
-                if isinstance(item, Exception):
-                    raise item
-                from xcode.harness.agent_runtime.events import CodingAgentHarnessEvent
-                event: CodingAgentHarnessEvent = item  # type: ignore[assignment]
+            for event in self._agent_app.ask_stream(text, mode=self._repl_state.mode):
                 if event.type not in {
                     "message_start",
                     "message_stop",
@@ -483,7 +467,13 @@ class _XcodeTui:
         self._top.text = self._state.top_bar(self._project_root.name)
         self._status.text = self._state.status(self._scrollback)
         self._output_control.text = self._fragments()
-        self._application.invalidate()
+        # 直接调度重绘，绕过 _invalidated 防抖——每个事件都刷一次屏
+        try:
+            loop = self._application.loop
+            if loop is not None and not loop.is_closed():
+                loop.call_soon_threadsafe(self._application._redraw)
+        except Exception:
+            pass
 
 
 # ── 模块级工具函数 ──
