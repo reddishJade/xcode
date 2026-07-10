@@ -5,12 +5,13 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 
-from ..shared.thinking import ReasoningCore
+from ..shared.thinking import ReasoningCore, format_elapsed, single_line_preview
 from ..repl_tools import brief_input, final_stop_reason, tool_call_text
 from .rendering import (
     markdown_ansi_lines,
@@ -58,6 +59,8 @@ class _TuiState:
     """
 
     log: list[_LogEntry] = field(default_factory=list)
+    tool_names: dict[str, str] = field(default_factory=dict)
+    project_root: Path | None = None
     thinking_core: ReasoningCore = field(default_factory=ReasoningCore)
     subagents: dict[int, _SubagentSlot] = field(default_factory=dict)
     pending_hitl: _HitlRequest | None = None
@@ -83,7 +86,7 @@ class _TuiState:
     # ── 生命周期 ──
 
     def add_user(self, text: str) -> None:
-        self.log.append(_LogEntry("you", f"> {text}"))
+        self.log.append(_LogEntry("you", text))
         self.thinking_core.reset()
         self.subagents.clear()
 
@@ -99,6 +102,7 @@ class _TuiState:
         elif event.type == "text_delta":
             self._handle_text_delta(event.data)
         elif event.type == "tool_use":
+            self._finish_thinking()
             self._record_tool_use(event.data.id, event.data.name, event.data.input)
         elif event.type == "tool_update":
             self._handle_tool_update(event.data.tool_name, event.data.partial_result)
@@ -127,17 +131,6 @@ class _TuiState:
             result.append(("", "\n"))
         return result
 
-    def top_bar(self, project_name: str) -> str:
-        state = "busy" if self.running else "idle"
-        return f" Xcode  ·  {state}  ·  mode {self.mode}  ·  cwd {project_name} "
-
-    def status(self, scrollback: int = 0) -> str:
-        state = "busy" if self.running else "idle"
-        thinking = "thinking:collapsed" if self.thinking_collapsed else "thinking:open"
-        tools = "tools:collapsed" if self.tool_collapsed else "tools:open"
-        scroll = f" · scroll {scrollback}" if scrollback else ""
-        return f" {state} · Ctrl-T {thinking} · Ctrl-O {tools}{scroll} "
-
     # ── 文本渲染（纯文本：用于滚动高度计算） ──
 
     def lines(self) -> list[str]:
@@ -158,10 +151,6 @@ class _TuiState:
             self._append_entry_lines(entry, lines, markdown_ansi_lines)
         if self.thinking.strip():
             self._thinking_lines(lines)
-        elif self.running:
-            if lines:
-                lines.append("")
-            lines.append("│ thinking")
         self._append_subagent_lines(lines)
         self._append_hitl_lines(lines)
         return lines
@@ -174,79 +163,83 @@ class _TuiState:
         lines: list[str],
         md_fn: Callable[[str], list[str]],
     ) -> None:
-        if lines:
+        if entry.role == "tool-detail" and self.tool_collapsed:
+            return
+        if lines and entry.role not in {"tool", "tool-detail"}:
             lines.append("")
-        if not entry.role:
+        if entry.role == "you":
+            user_lines = entry.text.splitlines() or [""]
+            lines.append("─" * 72)
+            lines.append(f"> {user_lines[0]}")
+            lines.extend(f"  {line}" for line in user_lines[1:])
+        elif entry.role == "tool":
+            suffix = " (ctrl+o to expand)" if self.tool_collapsed else ""
+            lines.append(f"{entry.text}{suffix}")
+        elif entry.role in {"", "tool-detail"}:
             lines.extend(entry.text.splitlines())
         elif entry.role == "thinking":
-            self._append_thinking_entry(entry, lines, plain_text=(md_fn is rendered_markdown_lines))
+            self._append_thinking_entry(
+                entry, lines, plain_text=(md_fn is rendered_markdown_lines)
+            )
         elif entry.markdown:
-            lines.append(f"│ {entry.role}")
-            for line in md_fn(entry.text):
-                lines.append(f"│   {line}")
+            lines.extend(md_fn(entry.text))
         else:
-            lines.append(f"│ {entry.role}")
-            for line in entry.text.splitlines() or [""]:
-                lines.append(f"│   {line}")
+            lines.extend(entry.text.splitlines() or [""])
 
     def _thinking_lines(self, lines: list[str]) -> None:
         if lines:
             lines.append("")
         dur = self.thinking_core.duration_ms
         if dur:
-            lines.append(f"│ thought for {dur}ms")
+            lines.append(f"Thought for {format_elapsed(dur / 1000)}")
         else:
-            lines.append("│ thinking")
+            lines.append("Thinking")
         if not self.thinking_collapsed:
             for tl in self.thinking.splitlines():
-                lines.append(f"│   {tl.lstrip()}")
+                lines.append(f"  {tl.lstrip()}")
 
     def _append_thinking_entry(
         self, entry: _LogEntry, lines: list[str], plain_text: bool
     ) -> None:
         entry_lines = entry.text.splitlines() or [""]
-        has_timing = any("Thought for" in ln for ln in entry_lines)
-        dur_text = entry_lines[-1].strip() if has_timing else ""
+        has_timing = entry_lines[-1].startswith("Thought for ")
+        dur_text = entry_lines[-1].removeprefix("Thought for ") if has_timing else ""
         if has_timing:
             entry_lines = entry_lines[:-1]
         if dur_text:
-            dur_ms = dur_text.split()[-1].rstrip("ms")
-            lines.append(f"│ thought for {dur_ms}ms")
+            lines.append(f"Thought for {dur_text}")
         else:
-            lines.append("│ thinking")
+            lines.append("Thinking")
         if not self.thinking_collapsed:
             for tl in entry_lines:
-                if plain_text:
-                    lines.append(f"│   {tl}")
-                else:
-                    lines.append(f"│   {tl.lstrip()}")
+                lines.append(f"  {tl if plain_text else tl.lstrip()}")
 
     def _append_subagent_lines(self, lines: list[str]) -> None:
-        if not self.subagents:
+        if not self.subagents or self.tool_collapsed:
             return
         if lines:
             lines.append("")
-        lines.append("│ subagents")
+        lines.append("● Subagents")
         for index in sorted(self.subagents):
             slot = self.subagents[index]
-            lines.append(f"│   [{index}] {slot.task}")
+            lines.append(f"  └ [{index}] {slot.task}")
             if slot.tool:
-                lines.append(f"│       {slot.tool}")
+                lines.append(f"      {slot.tool}")
 
     def _append_hitl_lines(self, lines: list[str]) -> None:
         if self.pending_hitl is None:
             return
         if lines:
             lines.append("")
-        lines.append("│ authorization request")
+        lines.append("? Authorization request")
         for line in self.pending_hitl.preview:
-            lines.append(f"│   {line}")
+            lines.append(f"  {line}")
 
     # ── 工具事件记录（直接追加到 log） ──
 
     def _handle_text_delta(self, delta: str) -> None:
         """追加 text_delta 到 log 的最后一个 xcode 条目（或在流式期间追加新行）。"""
-        # 追加增量文本到当前答句末尾
+        self._finish_thinking()
         self._append_or_update_answer(delta)
 
     def _append_or_update_answer(self, delta: str) -> None:
@@ -256,34 +249,59 @@ class _TuiState:
             self.log.append(_LogEntry("xcode", delta, markdown=True))
 
     def _record_tool_use(self, tool_id: str, name: str, raw_input: ToolInput) -> None:
+        self.tool_names[tool_id] = name
         label = brief_input(name, raw_input)
-        self.log.append(_LogEntry("", f"│ tool {label}"))
+        if name == "list_dir":
+            path = Path(str(raw_input.get("path", ".")))
+            if self.project_root is not None and not path.is_absolute():
+                path = self.project_root / path
+            label = f"ListDir({path.as_posix()})"
+        elif name == "read_file":
+            path = Path(str(raw_input.get("path", "")))
+            if self.project_root is not None and not path.is_absolute():
+                path = self.project_root / path
+            limit = raw_input.get("limit")
+            label = f"Read({path.as_posix()})" + (f" ({limit} lines)" if limit else "")
+        else:
+            label = label[:1].upper() + label[1:]
+        self.log.append(_LogEntry("tool", f"● {label}"))
         if name in {"todowrite", "subagent"}:
             text = tool_call_text(name, label, raw_input).plain
-            self.log.append(_LogEntry("", f"│   {text.strip()}"))
+            self.log.append(_LogEntry("tool-detail", f"  └ {text.strip()}"))
 
-    def _record_tool_result(
-        self, tool_id: str, status: str, content: str
-    ) -> None:
-        from .rendering import tail_line
-
+    def _record_tool_result(self, tool_id: str, status: str, content: str) -> None:
+        name = self.tool_names.pop(tool_id, "")
         if status == "ok":
-            summary = tail_line(content)
-            detail = f"✓ {summary}" if summary else "✓"
-            self.log.append(_LogEntry("", f"│   {detail}"))
+            detail = "done"
+            if name == "list_dir":
+                entries = [
+                    line.strip()
+                    for line in content.splitlines()
+                    if line.strip() and not line.lstrip().startswith("...")
+                ]
+                if entries == ["(empty directory)"]:
+                    entries = []
+                directories = sum(line.endswith("/") for line in entries)
+                detail = (
+                    f"{len(entries) - directories} files, {directories} directories"
+                )
+            elif name == "read_file":
+                count = sum(
+                    bool(re.match(r"^\d+: ", line)) for line in content.splitlines()
+                )
+                detail = f"Read {count} lines"
+            self.log.append(
+                _LogEntry("tool-detail", f"  └ {detail} (ctrl+o to collapse)")
+            )
             return
-        self.log.append(_LogEntry("", f"│ ✗ {content}"))
+        self.log.append(
+            _LogEntry("tool-detail", f"  └ ✗ {single_line_preview(content)}")
+        )
 
     def _handle_tool_update(self, tool_name: str, partial: str) -> None:
-        from .rendering import tail_line
-
         if tool_name == "subagent":
             for line in partial.splitlines():
                 self._record_subagent_update(line.strip())
-            return
-        clean = tail_line(partial)
-        if clean:
-            self.log.append(_LogEntry("", f"│   {clean}"))
 
     def record_subagent_update(self, clean: str) -> bool:
         """公开的 subagent 更新入口，测试和 _handle_tool_update 共用。"""
@@ -310,21 +328,14 @@ class _TuiState:
     # ── 回合结束 ──
 
     def _finish_answer(self, event: FinalStructuredEvent) -> None:
-        # 持久化思考（自动包含耗时信息）
-        if self.thinking.strip():
-            self.thinking_core.finish()
-            text = self.thinking.strip()
-            if self.thinking_duration_ms:
-                text += f"\nThought for {self.thinking_duration_ms}ms"
-            self.log.append(_LogEntry("thinking", text))
+        self._finish_thinking()
 
-        # 追加 final 事件的答案（如果 log 中最后的 xcode 条目不完整）
         final_answer = event.data.answer.strip()
-        if final_answer and (
-            not self.log
-            or self.log[-1].role != "xcode"
-            or not self.log[-1].text.strip().endswith(final_answer)
-        ):
+        already_streamed = any(
+            entry.role == "xcode" and entry.text.strip() == final_answer
+            for entry in self.log
+        )
+        if final_answer and not already_streamed:
             self.log.append(_LogEntry("xcode", final_answer, markdown=True))
 
         reason = final_stop_reason(event.data)
@@ -332,3 +343,14 @@ class _TuiState:
             self.log.append(_LogEntry("stop", reason))
         self.thinking_core.reset()
         self.running = False
+
+    def _finish_thinking(self) -> None:
+        if self.thinking.strip():
+            self.thinking_core.finish()
+            text = self.thinking.strip()
+            if self.thinking_duration_ms:
+                text += (
+                    f"\nThought for {format_elapsed(self.thinking_duration_ms / 1000)}"
+                )
+            self.log.append(_LogEntry("thinking", text))
+        self.thinking_core.reset()

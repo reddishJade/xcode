@@ -20,6 +20,12 @@ from xcode.agent.types import ToolInput, ToolSpec
 
 
 _DEFAULT_HITL_TIMEOUT: float = 300.0
+HITL_CHOICES = (
+    "Allow (once)",
+    "Allow this session",
+    "Always allow",
+    "Deny",
+)
 _console = Console()
 
 
@@ -302,12 +308,7 @@ def _show_select_prompt(tool: ToolSpec, action_input: ToolInput) -> str | None:
     brief = brief_input(tool.name, action_input)
     return questionary.select(
         f"Authorization required: {tool.name}\nInput: {brief}",
-        choices=[
-            "Allow (once)",
-            "Allow this session",
-            "Always allow",
-            "Deny",
-        ],
+        choices=HITL_CHOICES,
     ).ask()
 
 
