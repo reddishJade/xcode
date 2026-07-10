@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -95,10 +96,11 @@ async def call_provider(
         llm_messages,
         tool_definitions,
         config,
+        emit,
     )
     elapsed = round((perf_counter() - started) * 1000, 3)
     metrics.model_latencies_ms.append(elapsed)
-    return _provider_events_to_response(events, metrics, emit)
+    return _provider_events_to_response(events, metrics, lambda _event: None)
 
 
 async def _collect_provider_events(
@@ -106,17 +108,26 @@ async def _collect_provider_events(
     llm_messages: list[Message],
     tool_definitions: list[ToolDefinition],
     config: AgentLoopConfig,
+    emit: Callable[[AgentEvent], None],
 ) -> list[ProviderEvent]:
+    events: list[ProviderEvent] = []
+    text_parts: list[str] = []
     try:
-        events: list[ProviderEvent] = []
         kwargs = {}
         if config.options is not None:
             kwargs["options"] = config.options
         async for event in provider.stream(llm_messages, tool_definitions, **kwargs):
             events.append(event)
+            if isinstance(event, TextDelta):
+                _append_text_delta(text_parts, event, emit)
+                await asyncio.sleep(0)
+            elif isinstance(event, ReasoningDelta):
+                emit(ThinkingUpdateEvent(reasoning_content=event.chunk))
+                await asyncio.sleep(0)
         return events
     except Exception as e:
-        return [FinalMessage(content=f"Provider error: {e}", stop_reason="error")]
+        events.append(FinalMessage(content=f"Provider error: {e}", stop_reason="error"))
+        return events
 
 
 def _provider_events_to_response(

@@ -15,7 +15,11 @@ def format_elapsed(seconds: float) -> str:
     """推理耗时格式化。"""
     if seconds < 1:
         return f"{seconds * 1000:.0f}ms"
-    return f"{seconds:.1f}s"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    if seconds < 3600:
+        return f"{seconds / 60:.1f}m"
+    return f"{seconds / 3600:.1f}h"
 
 
 def should_print_reasoning_summary(text: str, elapsed: float) -> bool:
