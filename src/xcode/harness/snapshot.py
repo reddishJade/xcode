@@ -191,17 +191,24 @@ class SnapshotService:
             self._git(["read-tree", "--empty"])
             paths = self._enumerate_files()
             if paths:
-                # ponytail: 逐条添加，跳过无法索引的文件（如 Windows 保留设备名）
-                failed_paths: list[str] = []
-                for p in paths:
-                    r = self._git(
-                        ["--literal-pathspecs", "add", p],
-                        check=False,
-                    )
-                    if r.returncode != 0:
-                        failed_paths.append(p)
-                for p in failed_paths:
-                    self._record_skipped(p, "skipped: git add failed (reserved name?)")
+                # 一次添加所有路径（快），失败再逐条回退
+                r = self._git(
+                    ["--literal-pathspecs", "add", "--", *paths],
+                    check=False,
+                )
+                if r.returncode != 0:
+                    failed_paths: list[str] = []
+                    for p in paths:
+                        r2 = self._git(
+                            ["--literal-pathspecs", "add", p],
+                            check=False,
+                        )
+                        if r2.returncode != 0:
+                            failed_paths.append(p)
+                    for p in failed_paths:
+                        self._record_skipped(
+                            p, "skipped: git add failed (reserved name?)"
+                        )
             result = self._git(["write-tree"])
             snapshot_id = result.stdout.strip()
             skipped = self._pop_skipped()
