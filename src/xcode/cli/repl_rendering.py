@@ -7,9 +7,6 @@ from collections.abc import Callable, Iterable
 from typing import Any, cast
 
 
-from prompt_toolkit.application import run_in_terminal
-
-
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -314,32 +311,6 @@ def create_prompt_session(
             event.app.exit(exception=KeyboardInterrupt())
 
     bindings.add("c-c")(handle_ctrl_c)
-
-    if state is not None:
-
-        def _toggle_thinking(event) -> None:
-            state.thinking_collapsed = not state.thinking_collapsed
-            status = "collapsed" if state.thinking_collapsed else "expanded"
-            run_in_terminal(
-                lambda: (
-                    sys.__stdout__.write(f"\r\033[K\x1b[90mthinking: {status}\x1b[0m\n"),
-                    sys.__stdout__.flush(),
-                )
-            )
-
-        bindings.add("c-t")(_toggle_thinking)
-
-        def _toggle_tool(event) -> None:
-            state.tool_collapsed = not state.tool_collapsed
-            status = "collapsed" if state.tool_collapsed else "expanded"
-            run_in_terminal(
-                lambda: (
-                    sys.__stdout__.write(f"\r\033[K\x1b[90mtool: {status}\x1b[0m\n"),
-                    sys.__stdout__.flush(),
-                )
-            )
-
-        bindings.add("c-o")(_toggle_tool)
 
     completer = ReplCompleter(
         project_root or Path.cwd(),
