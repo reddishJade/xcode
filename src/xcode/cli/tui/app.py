@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -84,14 +85,18 @@ def run_tui(
     auto_continue: bool = False,
     session_id: str | None = None,
 ) -> int:
-    return _XcodeTui(
-        app,
-        project_root,
-        sessions_dir,
-        resume_latest=resume_latest,
-        auto_continue=auto_continue,
-        session_id=session_id,
-    ).run()
+    try:
+        return _XcodeTui(
+            app,
+            project_root,
+            sessions_dir,
+            resume_latest=resume_latest,
+            auto_continue=auto_continue,
+            session_id=session_id,
+        ).run()
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
 
 
 class _XcodeTui:
