@@ -1,60 +1,58 @@
-# Xcode Agent Guide
+# Repository Guidelines
 
-Entry point for coding agents working in this repository.
+## Project Structure & Architecture
 
-## 项目概述
+Xcode is a Python 3.12+ coding-agent harness. All package code lives in
+`src/xcode/`; the command-line entry point is `src/xcode/main.py`. The layered
+design is `ai/` (provider adapters), `agent/` (loop and context), `harness/`
+(runtime, sessions, policy, MCP), `coding_agent/` (tools), and `cli/` (REPL and
+TUI). Keep new code in the layer that owns the behavior. Tests reside in
+`src/xcode/tests/`; documentation and examples are in `docs/` and `examples/`.
 
-Xcode 是轻量级 Python Agent 运行骨架。四层架构：
-`ai/` (Provider) → `agent/` (Loop Core) → `harness/` (Runtime Infra) → `coding_agent/` (Coding Product) → `cli/` (UI)
+## Build, Test, and Development Commands
 
-运行路径：`main.py` → `build_app()` → `StructuredAgent` → `Agent` loop → provider stream → tool execution。
+Install runtime or development dependencies with:
 
-## 常用命令
-
-```powershell
-# 安装
-uv pip install -e .                          # 运行时
-uv pip install -e ".[dev]"                   # 开发依赖
-
-# 静态检查（lint → typecheck）
-uv run ruff check src/ --fix
-uv run ruff format src/
-uv run pyright src/
-
-# 测试
-uv run pytest src/xcode/tests/ -q --tb=short            # 全部
-uv run pytest src/xcode/tests/test_xcode_file_tools.py -q --tb=short  # 单个
-
-# 编译检查
-uv run python -m compileall src
+```sh
+uv pip install -e .
+uv pip install -e ".[dev]"
 ```
 
-## 执行模式与权限
+Run the application with `uv run xcode`. Before submitting changes, run:
 
-`plan` 仅允许只读和维护 `.xcode/plans/*.md`，`build` 默认允许全部工具，
-`act` 默认询问写入和 shell；用户规则按 findLast 覆盖 mode 默认规则。
+```sh
+uv run ruff check src/ --fix  # lint and apply safe fixes
+uv run ruff format src/       # format source files
+uv run pyright src/           # type-check the package
+uv run pytest src/xcode/tests -q --tb=short
+```
 
-## 代码规范
+## Coding Style & Naming
 
-- Python 3.12+，完整类型注解，ruff 格式化（行宽 88），零 `# noqa` / `# type: ignore`
-- 注释和 docstring 使用简体中文
-- 函数职责单一，纯函数优先，异常捕获具体类型
-- `*args`/`**kwargs` 只在不避免的边界使用
-- 禁止动态 `importlib`/`getattr`/`setattr`
-- 依赖变更视为代码变更，需要 review
-- 不维护向后兼容，除非用户要求
+Use complete type annotations and standard four-space Python indentation.
+Ruff enforces formatting with an 88-character line length; do not add `# noqa`
+or blanket exception handlers. Prefer small, single-purpose functions and
+separate I/O, computation, and presentation. Use `snake_case` for modules,
+functions, and variables; `PascalCase` for classes; and `test_<feature>.py` for
+test modules. Write comments and docstrings in Simplified Chinese.
 
-## Git 规则
+## Testing Guidelines
 
-- 只允许 `git add <exact-path>`，不允许 `git add -A` / `git add .`
-- 禁止历史重写操作（reset --hard、checkout .、clean -fd、stash）
-- 每个 commit 只含一个逻辑变更
-- 提交前检查：`git status --short && git diff --cached --stat`
-- commit message 格式：`type: one-line title` + body（英文）
+Pytest is configured to discover `test_*.py` under `src/xcode/tests`, with
+async tests handled automatically by `pytest-asyncio`. Add automated tests for
+pure logic; manually verify provider- or terminal-dependent behavior rather
+than mocking external I/O. Run a focused test during development, for example:
 
-## 测试
+```sh
+uv run pytest src/xcode/tests/test_tools_file_handlers.py -q --tb=short
+```
 
-- `pytest-asyncio`，`asyncio_mode = "auto"`，位于 `src/xcode/tests/`
-- 回归套件（`--suite all`）：`pipeline` + `tool-policy` + `context` + `multi`
-- 仅修改文档时：`git diff --check -- <modified-docs>`
-- 不运行需要外部环境变量的端到端套件（除非明确要求）
+The `mcp_external` tests require network tooling and are excluded by default.
+
+## Commits & Pull Requests
+
+Use focused commits with imperative Conventional Commit-style subjects, such as
+`fix: refine tui input presentation` or `feat: add session export`. Stage only
+explicit paths (`git add src/xcode/...`), never `git add .`. In pull requests,
+describe the behavioral change, list validation commands, link relevant issues,
+and include terminal screenshots when a REPL or TUI change is visible.
