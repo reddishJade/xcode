@@ -32,7 +32,8 @@ from ..file_refs import expand_file_references
 from ..markdown import TerminalMarkdownRenderer
 from ..repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
 from ..repl_hitl import HITL_CHOICES, parse_hitl_choice
-from ..repl_skills import activate_skill, parse_skill_invocation
+from ..repl import current_effort_options, current_model_options
+from ..repl_skills import activate_skill, available_skill_names, parse_skill_invocation
 from ..repl_tools import (
     brief_input,
     event_to_dict,
@@ -115,6 +116,9 @@ class _XcodeTui:
             lexer=TuiInputLexer(),
             complete_while_typing=True,
             accept_handler=lambda buf: self._submit_key(None) or True,
+        )
+        self._input.buffer.on_text_insert += lambda _buf: setattr(
+            self._input.buffer, "complete_state", None
         )
         self._approval_choices = RadioList(
             [(choice, choice) for choice in HITL_CHOICES],
@@ -239,6 +243,9 @@ class _XcodeTui:
             registry=registry,
             command_names=COMMAND_NAMES,
             command_registry=COMMAND_REGISTRY_EXPORT,
+            effort_options=lambda: current_effort_options(self._agent_app),
+            model_options=lambda: current_model_options(self._agent_app),
+            skill_options=lambda: available_skill_names(self._agent_app),
         )
 
     def _input_prompt(self) -> str:
