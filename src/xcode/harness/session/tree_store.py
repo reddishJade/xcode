@@ -623,7 +623,7 @@ class TreeSessionRepo:
         items = []
         for raw in raw_items:
             try:
-                metadata = TreeMetadata.model_validate(raw)
+                metadata = TreeMetadata.model_validate(_migrate_metadata(raw))
             except ValidationError:
                 logging.warning("skipping malformed session metadata: %s", raw)
                 continue
@@ -719,6 +719,13 @@ def _make_conversation_summary(user: str, assistant: str | None) -> str:
 
 def _collapse_text(text: str) -> str:
     return " ".join(str(text).split())
+
+
+def _migrate_metadata(raw: object) -> object:
+    """移除旧版索引中已废弃的 fork_type 字段。"""
+    if not isinstance(raw, dict) or "fork_type" not in raw:
+        return raw
+    return {key: value for key, value in raw.items() if key != "fork_type"}
 
 
 def _truncate(text: str, limit: int) -> str:
