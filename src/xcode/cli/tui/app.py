@@ -16,7 +16,13 @@ from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.input.base import Input
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, Window
+from prompt_toolkit.layout import (
+    ConditionalContainer,
+    Dimension,
+    HSplit,
+    Layout,
+    Window,
+)
 from prompt_toolkit.layout import Float, FloatContainer
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.menus import CompletionsMenu
@@ -27,7 +33,7 @@ from prompt_toolkit.widgets import RadioList, TextArea
 
 from ..app_contract import ReplApp
 from ..commands import ReplState
-from ..completion import ReplCompleter
+from ..completion import CommandArgsSuggester, ReplCompleter
 from ..file_refs import expand_file_references
 from ..markdown import TerminalMarkdownRenderer
 from ..repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
@@ -123,6 +129,7 @@ class _XcodeTui:
         self._markdown_renderer = TerminalMarkdownRenderer()
         self._prompt_session = TuiPromptSession()
         self._awaiting_denial_suggestion = False
+        self._exit_pending = 0.0
 
         # ── UI 组件 ──
         self._output_control = FormattedTextControl(text="", focusable=False)
@@ -132,14 +139,16 @@ class _XcodeTui:
             always_hide_cursor=True,
             dont_extend_height=True,
         )
+        completer = self._make_completer()
         self._input = TextArea(
-            height=1,
+            height=Dimension(min=1, max=5),
             prompt=self._input_prompt,
-            multiline=False,
-            completer=self._make_completer(),
+            multiline=True,
+            completer=completer,
             lexer=TuiInputLexer(),
             complete_while_typing=True,
-            accept_handler=lambda buf: self._submit_key(None) or True,
+            auto_suggest=CommandArgsSuggester(completer.command_args),
+            history=_tui_history(project_root),
         )
         self._input.buffer.on_text_insert += lambda _buf: setattr(
             self._input.buffer, "complete_state", None
@@ -176,6 +185,11 @@ class _XcodeTui:
                 )
             ),
         )
+        self._status = Window(
+            FormattedTextControl(text=self._status_text),
+            height=1,
+            style="class:status",
+        )
         # ── Application ──
         self._application = Application(
             layout=Layout(
@@ -185,6 +199,7 @@ class _XcodeTui:
                             self._output,
                             self._approval_container,
                             self._input_container,
+                            self._status,
                         ]
                     ),
                     floats=[
@@ -218,6 +233,7 @@ class _XcodeTui:
                         "bg:default fg:default bold underline"
                     ),
                     "radio-selected": "ansicyan bold",
+                    "status": "ansibrightblack",
                 }
             ),
             input=input,
@@ -241,6 +257,9 @@ class _XcodeTui:
                 )
             if hasattr(agent, "set_permanent_grant_store"):
                 agent.set_permanent_grant_store(self._permanent_grant_store)
+            from ..repl_commands import _compute_context_summary
+
+            _compute_context_summary(agent, self._project_root, self._repl_state)
 
         self._application.layout.focus(self._input)
         self._refresh()
@@ -278,6 +297,8 @@ class _XcodeTui:
     def _bindings(self) -> KeyBindings:
         bindings = KeyBindings()
         bindings.add("enter")(self._submit_key)
+        bindings.add("s-enter")(self._insert_newline)
+        bindings.add("escape", "enter")(self._insert_newline)
         bindings.add("pageup")(self._page_up_key)
         bindings.add("pagedown")(self._page_down_key)
         bindings.add("end")(self._end_key)
@@ -304,6 +325,11 @@ class _XcodeTui:
         if self._state.running or self._committing:
             return
         self._submit(text)
+
+    def _insert_newline(self, event: object) -> None:
+        buffer = getattr(event, "current_buffer", None)
+        if buffer is not None:
+            buffer.insert_text("\n")
 
     def _page_up_key(self, _event: object) -> None:
         self._scroll_by(10)
@@ -352,7 +378,13 @@ class _XcodeTui:
             self._state.running = False
             self._refresh()
             return
-        self._application.exit()
+        now = perf_counter()
+        if self._exit_pending and now - self._exit_pending < 1.5:
+            self._application.exit()
+            return
+        self._exit_pending = now
+        self._state.log.append(_LogEntry("system", "(press Ctrl+C again to exit)"))
+        self._refresh()
 
     # ── 提交 ──
 
@@ -659,7 +691,14 @@ class _XcodeTui:
             and not self._awaiting_denial_suggestion
             else 0
         )
-        return max(1, self._application.output.get_size().rows - 1 - approval_height)
+        input_height = min(5, max(1, self._input.text.count("\n") + 1))
+        return max(
+            1,
+            self._application.output.get_size().rows
+            - input_height
+            - 1
+            - approval_height,
+        )
 
     def _max_scrollback(self) -> int:
         return max(0, len(self._state.lines()) - self._output_height())
@@ -687,8 +726,31 @@ class _XcodeTui:
         self._output_control.text = self._fragments()
         self._application.invalidate()
 
+    def _status_text(self) -> str:
+        parts = [f"cwd: {self._project_root}"]
+        if self._repl_state.model_name:
+            parts.append(f"model: {self._repl_state.model_name}")
+        parts.append(f"mode: {self._repl_state.mode}")
+        if self._repl_state.context_usage:
+            parts.append(f"context: {self._repl_state.context_usage}")
+        if self._repl_state.context_cost:
+            parts.append(f"cost: {self._repl_state.context_cost}")
+        return "  ".join(parts)
+
 
 # ── 模块级工具函数 ──
+
+
+def _tui_history(project_root: Path) -> object | None:
+    """为 TUI 输入栏创建与 REPL 相同的持久化历史记录。"""
+    try:
+        from prompt_toolkit.history import FileHistory
+
+        history_dir = project_root / ".local"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        return FileHistory(str(history_dir / "repl_history"))
+    except OSError:
+        return None
 
 
 def _is_session_history_command(command: str) -> bool:

@@ -13,6 +13,7 @@ from prompt_toolkit.formatted_text import StyleAndTextTuples
 
 from ..shared.thinking import ReasoningCore, format_elapsed, single_line_preview
 from ..repl_tools import brief_input, final_stop_reason, tool_call_text
+from ..repl_rendering import _render_citations
 from xcode.agent.types import ToolInput
 from .rendering import (
     markdown_ansi_lines,
@@ -266,7 +267,7 @@ class _TuiState:
                 entry, lines, plain_text=(md_fn is rendered_markdown_lines)
             )
         elif entry.markdown:
-            lines.extend(md_fn(entry.text))
+            lines.extend(md_fn(_render_citations(entry.text)))
         else:
             lines.extend(entry.text.splitlines() or [""])
 
