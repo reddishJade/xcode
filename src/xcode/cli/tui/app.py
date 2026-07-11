@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 from collections.abc import Callable
 from threading import Event
@@ -37,12 +38,15 @@ from ..completion import CommandArgsSuggester, ReplCompleter
 from ..file_refs import expand_file_references
 from ..markdown import TerminalMarkdownRenderer
 from ..repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
-from ..repl_hitl import HITL_CHOICES, parse_hitl_choice
+from ..repl_hitl import HITL_CHOICES, parse_hitl_choice, tool_preview_lines
 from ..repl import current_effort_options, current_model_options
-from ..repl_sessions import select_session_interactively, sync_agent_history
+from ..repl_sessions import (
+    print_saved_conversation,
+    select_session_interactively,
+    sync_agent_history,
+)
 from ..repl_skills import activate_skill, available_skill_names, parse_skill_invocation
 from ..repl_tools import (
-    brief_input,
     event_to_dict,
     file_reference_event,
     run_shell_shortcut,
@@ -266,10 +270,16 @@ class _XcodeTui:
 
     def run(self) -> int:
         info = self._agent_app.get_model_info()
-        print("Xcode")
-        print(f"model: {info.get('model', 'unknown')}")
-        print(f"mode:  {self._repl_state.mode}")
-        print(f"cwd:   {self._project_root}")
+        self._state.log.insert(
+            0,
+            _LogEntry(
+                "system",
+                "Xcode  •  "
+                f"model: {info.get('model', 'unknown')}  •  "
+                "Ctrl+T thinking  •  Ctrl+O tools  •  /help commands",
+            ),
+        )
+        self._refresh()
         self._application.run()
         return 0
 
@@ -360,6 +370,7 @@ class _XcodeTui:
     def _quit_key(self, _event: object) -> None:
         if self._state.pending_hitl is not None:
             self._finish_denial("")
+        print_saved_conversation(self._store)
         self._application.exit()
 
     def _cancel_key(self, _event: object) -> None:
@@ -380,6 +391,7 @@ class _XcodeTui:
             return
         now = perf_counter()
         if self._exit_pending and now - self._exit_pending < 1.5:
+            print_saved_conversation(self._store)
             self._application.exit()
             return
         self._exit_pending = now
@@ -463,7 +475,9 @@ class _XcodeTui:
             self._state.running = False
             self._refresh()
             if should_exit:
+                print_saved_conversation(self._store)
                 self._application.exit()
+            self._submit_pending_inject()
 
         if self._application.loop is None:
             asyncio.run(run())
@@ -528,8 +542,8 @@ class _XcodeTui:
         request = _HitlRequest(
             tool_name=tool.name,
             preview=[
-                f"Authorization required: {tool.name}",
-                f"Input: {brief_input(tool.name, action_input)}",
+                _strip_rich_markup(line)
+                for line in tool_preview_lines(tool, action_input)
             ],
             event=Event(),
         )
@@ -551,6 +565,13 @@ class _XcodeTui:
         if self._state.pending_hitl is request:
             self._state.pending_hitl = None
         return result
+
+    def _submit_pending_inject(self) -> None:
+        """在命令设置注入内容后，以普通用户回合继续执行。"""
+        text = self._repl_state.pending_inject
+        self._repl_state.pending_inject = None
+        if text:
+            self._submit(text)
 
     def _accept_approval_choice(self) -> None:
         choice = self._approval_choices.current_value
@@ -635,6 +656,7 @@ class _XcodeTui:
                 self._refresh()
         except Exception as exc:
             flush_thinking()
+            self._save_partial_answer()
             self._state.log.append(_LogEntry("error", f"[error] {exc}"))
             self._state.running = False
             self._refresh()
@@ -646,6 +668,8 @@ class _XcodeTui:
         if answer:
             self._store.append("assistant", answer)
             self._store.update_summary()
+        else:
+            self._save_partial_answer()
 
         self._scrollback = 0
         self._refresh()
@@ -661,6 +685,15 @@ class _XcodeTui:
         loop.call_soon_threadsafe(
             lambda: self._application.create_background_task(self._commit_turn())
         )
+
+    def _save_partial_answer(self) -> None:
+        """将中断前已经流式显示的回答写入会话，供恢复和后续注入使用。"""
+        partial = "".join(
+            entry.text for entry in self._state.log if entry.role == "xcode"
+        ).strip()
+        if partial:
+            self._store.append("assistant", partial)
+            self._store.update_summary()
 
     async def _commit_turn(self) -> None:
         transcript = FormattedText(self._state.fragments())
@@ -751,6 +784,11 @@ def _tui_history(project_root: Path) -> object | None:
         return FileHistory(str(history_dir / "repl_history"))
     except OSError:
         return None
+
+
+def _strip_rich_markup(text: str) -> str:
+    """Rich 标记不能由 prompt_toolkit 解析，转换为保留内容的纯文本。"""
+    return re.sub(r"\[/?[^\]]+]", "", text)
 
 
 def _is_session_history_command(command: str) -> bool:

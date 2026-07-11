@@ -85,6 +85,20 @@ class ReplHITLHandler:
 
 def _print_tool_preview(tool: ToolSpec, action_input: ToolInput) -> None:
     """在 HITL 提示之前打印丰富的工具预览信息。"""
+    lines = tool_preview_lines(tool, action_input)
+
+    if lines:
+        _console.print()
+        _console.print(
+            Panel.fit(
+                "\n".join(lines), title="Authorization Request", border_style="yellow"
+            )
+        )
+        _console.print()
+
+
+def tool_preview_lines(tool: ToolSpec, action_input: ToolInput) -> list[str]:
+    """生成供 REPL 和 TUI 共用的授权预览内容。"""
     lines: list[str] = []
 
     # Tool name
@@ -106,14 +120,7 @@ def _print_tool_preview(tool: ToolSpec, action_input: ToolInput) -> None:
         brief = brief_input(tool.name, action_input)
         lines.append(f"[bold]Input:[/bold] {brief}")
 
-    if lines:
-        _console.print()
-        _console.print(
-            Panel.fit(
-                "\n".join(lines), title="Authorization Request", border_style="yellow"
-            )
-        )
-        _console.print()
+    return lines
 
 
 def _preview_edit_file(action_input: dict, lines: list[str]) -> None:
