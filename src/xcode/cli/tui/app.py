@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Callable
 from threading import Event
 from typing import TYPE_CHECKING, cast
 
@@ -252,8 +253,10 @@ class _XcodeTui:
         bindings.add("pageup")(self._page_up_key)
         bindings.add("pagedown")(self._page_down_key)
         bindings.add("end")(self._end_key)
-        bindings.add("c-t")(self._toggle_thinking_key)
-        bindings.add("c-o")(self._toggle_tools_key)
+        # 输入框带有 Emacs 风格的默认按键。这里必须抢占 Ctrl+T/Ctrl+O，
+        # 否则快捷键会被输入控件消费，折叠状态不会及时重绘。
+        bindings.add("c-t", eager=True)(self._toggle_thinking_key)
+        bindings.add("c-o", eager=True)(self._toggle_tools_key)
         bindings.add(Keys.ScrollUp)(self._scroll_up_key)
         bindings.add(Keys.ScrollDown)(self._scroll_down_key)
         bindings.add("c-q")(self._quit_key)
@@ -291,12 +294,12 @@ class _XcodeTui:
         self._refresh()
 
     def _toggle_thinking_key(self, _event: object) -> None:
-        self._state.toggle_thinking()
+        self._update_preserving_viewport(self._state.toggle_thinking)
         self._repl_state.thinking_collapsed = self._state.thinking_collapsed
         self._refresh()
 
     def _toggle_tools_key(self, _event: object) -> None:
-        self._state.toggle_tools()
+        self._update_preserving_viewport(self._state.toggle_tools)
         self._repl_state.tool_collapsed = self._state.tool_collapsed
         self._refresh()
 
@@ -562,6 +565,18 @@ class _XcodeTui:
             0, min(self._max_scrollback(), self._scrollback + amount)
         )
         self._refresh()
+
+    def _update_preserving_viewport(self, update: Callable[[], None]) -> None:
+        """更新会改变行数的显示状态，并保持当前视口的顶部位置。"""
+        top_line = max(
+            0,
+            len(self._state.lines()) - self._output_height() - self._scrollback,
+        )
+        update()
+        self._scrollback = max(
+            0,
+            len(self._state.lines()) - self._output_height() - top_line,
+        )
 
     def _refresh(self) -> None:
         self._scrollback = min(self._scrollback, self._max_scrollback())

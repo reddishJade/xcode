@@ -81,6 +81,30 @@ def test_tui_state_collapses_thinking() -> None:
     assert "private reasoning" not in rendered
 
 
+def test_tui_state_collapses_tool_details_as_one_group() -> None:
+    state = _TuiState(
+        log=[
+            _LogEntry("tool", "● ListDir(project)"),
+            _LogEntry("tool-detail", "  ⎿  12 files, 14 directories"),
+            _LogEntry("tool", "● Read(AGENTS.md)"),
+            _LogEntry("tool-detail", "  ⎿  Read 61 lines"),
+        ]
+    )
+
+    expanded = state.render()
+
+    assert "● ListDir(project)\n  ⎿  12 files, 14 directories" in expanded
+    assert "● Read(AGENTS.md)\n  ⎿  Read 61 lines (ctrl+o to collapse)" in expanded
+
+    state.toggle_tools()
+    collapsed = state.render()
+
+    assert "12 files, 14 directories" not in collapsed
+    assert "Read 61 lines" not in collapsed
+    assert "● ListDir(project) (ctrl+o to expand)" not in collapsed
+    assert "● Read(AGENTS.md) (ctrl+o to expand)" in collapsed
+
+
 def test_tui_constructs_with_input_focus(tmp_path) -> None:
     class _Token:
         def reset(self) -> None:
@@ -112,6 +136,58 @@ def test_tui_constructs_with_input_focus(tmp_path) -> None:
     assert "2" not in bound_keys
     assert "3" not in bound_keys
     assert "4" not in bound_keys
+
+
+def test_tui_toggle_shortcuts_take_priority_and_preserve_viewport(tmp_path) -> None:
+    class _Token:
+        def reset(self) -> None:
+            pass
+
+        def cancel(self, _reason: str) -> None:
+            pass
+
+    class _Agent:
+        cancellation_token = _Token()
+
+    class _App:
+        agent = _Agent()
+
+        def ask_stream(self, _text: str, mode: object = None) -> list[Any]:
+            return []
+
+    with create_pipe_input() as pipe_input:
+        tui = _XcodeTui(_App(), tmp_path, input=pipe_input, output=DummyOutput())
+
+    tui._state.log.append(
+        _LogEntry("system", "\n".join(f"line {i}" for i in range(200)))
+    )
+    tui._state.thinking = "\n".join(f"thought {i}" for i in range(80))
+    tui._scrollback = 100
+    top_before = len(tui._state.lines()) - tui._output_height() - tui._scrollback
+
+    tui._toggle_thinking_key(None)
+
+    top_after = len(tui._state.lines()) - tui._output_height() - tui._scrollback
+    assert tui._state.thinking_collapsed
+    assert top_after == top_before
+
+    tui._state.log.extend(
+        [
+            _LogEntry("tool", "● Read(example.py)"),
+            *[_LogEntry("tool-detail", f"  └ detail {i}") for i in range(80)],
+        ]
+    )
+    tui._scrollback = 100
+    top_before = len(tui._state.lines()) - tui._output_height() - tui._scrollback
+
+    tui._toggle_tools_key(None)
+
+    top_after = len(tui._state.lines()) - tui._output_height() - tui._scrollback
+    assert tui._state.tool_collapsed
+    assert top_after == top_before
+    bindings = {binding.keys[0]: binding for binding in tui._bindings().bindings}
+    assert bindings["c-t"].eager()
+    assert bindings["c-o"].eager()
 
 
 def test_tui_reuses_cli_command_registry(tmp_path) -> None:
