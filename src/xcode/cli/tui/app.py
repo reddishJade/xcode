@@ -6,6 +6,7 @@ import asyncio
 import re
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from threading import Event
 from time import perf_counter
 from typing import TYPE_CHECKING, cast
@@ -62,7 +63,7 @@ from xcode.harness.agent_runtime.events import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from prompt_toolkit.history import History
 
     from xcode.harness.snapshot import SnapshotService, SnapshotResult
 
@@ -774,7 +775,7 @@ class _XcodeTui:
 # ── 模块级工具函数 ──
 
 
-def _tui_history(project_root: Path) -> object | None:
+def _tui_history(project_root: Path) -> History | None:
     """为 TUI 输入栏创建与 REPL 相同的持久化历史记录。"""
     try:
         from prompt_toolkit.history import FileHistory
