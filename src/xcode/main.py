@@ -183,7 +183,14 @@ def _run(args, runtime_config) -> int:
         or (args.project_root / ".local" / "sessions")
     )
     if args.command == "tui":
-        return run_tui(app, args.project_root, sessions_dir)
+        return run_tui(
+            app,
+            args.project_root,
+            sessions_dir,
+            session_id=args.session,
+            auto_continue=args.continue_,
+            resume_latest=args.resume,
+        )
     if args.session:
         return run_repl(
             app,

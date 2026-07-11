@@ -33,6 +33,7 @@ from ..markdown import TerminalMarkdownRenderer
 from ..repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
 from ..repl_hitl import HITL_CHOICES, parse_hitl_choice
 from ..repl import current_effort_options, current_model_options
+from ..repl_sessions import select_session_interactively, sync_agent_history
 from ..repl_skills import activate_skill, available_skill_names, parse_skill_invocation
 from ..repl_tools import (
     brief_input,
@@ -63,8 +64,23 @@ if TYPE_CHECKING:
     from xcode.harness.session import SessionStore
 
 
-def run_tui(app: ReplApp, project_root: Path, sessions_dir: Path) -> int:
-    return _XcodeTui(app, project_root, sessions_dir).run()
+def run_tui(
+    app: ReplApp,
+    project_root: Path,
+    sessions_dir: Path,
+    *,
+    resume_latest: bool = False,
+    auto_continue: bool = False,
+    session_id: str | None = None,
+) -> int:
+    return _XcodeTui(
+        app,
+        project_root,
+        sessions_dir,
+        resume_latest=resume_latest,
+        auto_continue=auto_continue,
+        session_id=session_id,
+    ).run()
 
 
 class _XcodeTui:
@@ -75,6 +91,10 @@ class _XcodeTui:
         sessions_dir: Path | None = None,
         input: Input | None = None,
         output: Output | None = None,
+        *,
+        resume_latest: bool = False,
+        auto_continue: bool = False,
+        session_id: str | None = None,
     ) -> None:
         self._agent_app = app
         self._project_root = project_root
@@ -85,6 +105,10 @@ class _XcodeTui:
         self._repl_state = ReplState()
         self._snapshot_store = _init_snapshot_store(project_root)
         self._state = _TuiState(mode=self._repl_state.mode, project_root=project_root)
+        from xcode.harness.observability.permission_model import FileGrantStore
+
+        self._permanent_grant_store = FileGrantStore.for_project_root(project_root)
+        self._restore_startup_session(resume_latest, auto_continue, session_id)
         self._scrollback = 0
         self._committing = False
         self._grant_store_manager: SessionGrantStoreManager | None = None
@@ -153,8 +177,6 @@ class _XcodeTui:
             ),
         )
         # ── Application ──
-        from xcode.harness.observability.permission_model import FileGrantStore
-
         self._application = Application(
             layout=Layout(
                 FloatContainer(
@@ -218,9 +240,7 @@ class _XcodeTui:
                     )
                 )
             if hasattr(agent, "set_permanent_grant_store"):
-                agent.set_permanent_grant_store(
-                    FileGrantStore.for_project_root(self._project_root)
-                )
+                agent.set_permanent_grant_store(self._permanent_grant_store)
 
         self._application.layout.focus(self._input)
         self._refresh()
@@ -396,11 +416,11 @@ class _XcodeTui:
                 self._grant_store_manager.get_for_session(self._store.session_id)
                 if self._grant_store_manager is not None
                 else None,
-                None,
+                self._permanent_grant_store,
                 static_policy=getattr(self._agent_app.agent, "permission_policy", None),
                 restricted_dirs=getattr(self._agent_app.agent, "restricted_dirs", ()),
                 snapshot_store=cast(SnapshotStore | None, self._snapshot_store),
-                show_session_history=False,
+                show_session_history=True,
             )
 
         async def run() -> None:
@@ -436,6 +456,37 @@ class _XcodeTui:
         agent = getattr(self._agent_app, "agent", None)
         if agent is not None:
             agent.session_id = self._store.session_id
+
+    def _restore_startup_session(
+        self,
+        resume_latest: bool,
+        auto_continue: bool,
+        session_id: str | None,
+    ) -> None:
+        """在 TUI 创建前选择并恢复会话，避免以空白会话覆盖历史。"""
+        selected = None
+        if session_id is not None:
+            selected = self._store.find_by_id(session_id)
+            if selected is None:
+                raise ValueError(f"Session not found: {session_id}")
+            stored = (
+                Path(selected.project_path).resolve() if selected.project_path else None
+            )
+            if stored is None or stored != self._project_root.resolve():
+                raise ValueError(
+                    f"Session belongs to another project: {selected.project_path}"
+                )
+        elif auto_continue:
+            selected = self._store.find_latest_for_project(self._project_root)
+        elif resume_latest:
+            selected = select_session_interactively(
+                self._store.list_infos(), "Select session to resume:"
+            )
+        if selected is None:
+            return
+        self._store.resume(selected.id)
+        sync_agent_history(self._agent_app, self._store)
+        self._state.restore_history(self._store.build_branch())
 
     # ── HITL ──
 
