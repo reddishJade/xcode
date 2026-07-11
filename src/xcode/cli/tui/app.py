@@ -163,6 +163,9 @@ class _XcodeTui:
         self._input.buffer.on_text_insert += lambda _buf: setattr(
             self._input.buffer, "complete_state", None
         )
+        input_bindings = cast(KeyBindings, self._input.control.key_bindings)
+        input_bindings.add("c-t", eager=True)(self._toggle_thinking_key)
+        input_bindings.add("c-o", eager=True)(self._toggle_tools_key)
         self._approval_choices = RadioList(
             [(choice, choice) for choice in HITL_CHOICES],
             default=HITL_CHOICES[0],
@@ -321,10 +324,6 @@ class _XcodeTui:
         bindings.add("pageup")(self._page_up_key)
         bindings.add("pagedown")(self._page_down_key)
         bindings.add("end")(self._end_key)
-        # 输入框带有 Emacs 风格的默认按键。这里必须抢占 Ctrl+T/Ctrl+O，
-        # 否则快捷键会被输入控件消费，折叠状态不会及时重绘。
-        bindings.add("c-t", eager=True)(self._toggle_thinking_key)
-        bindings.add("c-o", eager=True)(self._toggle_tools_key)
         bindings.add(Keys.ScrollUp)(self._scroll_up_key)
         bindings.add(Keys.ScrollDown)(self._scroll_down_key)
         bindings.add("c-q")(self._quit_key)
