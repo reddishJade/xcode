@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from prompt_toolkit.input.defaults import create_pipe_input
@@ -188,6 +189,30 @@ def test_tui_toggle_shortcuts_take_priority_and_preserve_viewport(tmp_path) -> N
     bindings = {binding.keys[0]: binding for binding in tui._bindings().bindings}
     assert bindings["c-t"].eager()
     assert bindings["c-o"].eager()
+
+
+async def test_tui_toggle_shortcuts_handle_input_events(tmp_path) -> None:
+    class _App:
+        agent = None
+
+        def ask_stream(self, _text: str, mode: object = None) -> list[Any]:
+            return []
+
+    with create_pipe_input() as pipe_input:
+        tui = _XcodeTui(_App(), tmp_path, input=pipe_input, output=DummyOutput())
+        task = asyncio.create_task(tui._application.run_async())
+        await asyncio.sleep(0.05)
+
+        pipe_input.send_bytes(b"\x14")
+        await asyncio.sleep(0.05)
+        assert tui._state.thinking_collapsed
+
+        pipe_input.send_bytes(b"\x0f")
+        await asyncio.sleep(0.05)
+        assert tui._state.tool_collapsed
+
+        tui._application.exit()
+        await task
 
 
 def test_tui_reuses_cli_command_registry(tmp_path) -> None:
