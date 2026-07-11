@@ -150,6 +150,9 @@ class _XcodeTui:
             dont_extend_height=True,
         )
         completer = self._make_completer()
+        input_bindings = KeyBindings()
+        input_bindings.add("c-t", eager=True)(self._toggle_thinking_key)
+        input_bindings.add("c-o", eager=True)(self._toggle_tools_key)
         self._input = TextArea(
             height=Dimension(min=1, max=5),
             prompt=self._input_prompt,
@@ -160,12 +163,10 @@ class _XcodeTui:
             auto_suggest=CommandArgsSuggester(completer.command_args),
             history=_tui_history(project_root),
         )
+        self._input.control.key_bindings = input_bindings
         self._input.buffer.on_text_insert += lambda _buf: setattr(
             self._input.buffer, "complete_state", None
         )
-        input_bindings = cast(KeyBindings, self._input.control.key_bindings)
-        input_bindings.add("c-t", eager=True)(self._toggle_thinking_key)
-        input_bindings.add("c-o", eager=True)(self._toggle_tools_key)
         self._approval_choices = RadioList(
             [(choice, choice) for choice in HITL_CHOICES],
             default=HITL_CHOICES[0],
