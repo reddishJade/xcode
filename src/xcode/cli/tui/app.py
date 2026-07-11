@@ -313,7 +313,10 @@ class _XcodeTui:
     def _bindings(self) -> KeyBindings:
         bindings = KeyBindings()
         bindings.add("enter")(self._submit_key)
-        bindings.add("s-enter")(self._insert_newline)
+        try:
+            bindings.add("s-enter")(self._insert_newline)
+        except ValueError:
+            pass
         bindings.add("escape", "enter")(self._insert_newline)
         bindings.add("pageup")(self._page_up_key)
         bindings.add("pagedown")(self._page_down_key)
