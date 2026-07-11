@@ -11,7 +11,7 @@ from xcode.agent.messages import AgentMessage
 import questionary
 
 from .app_contract import ReplApp
-from xcode.harness.session.types import SessionEntry
+from xcode.harness.session.types import SessionEntry, SessionInfoView
 
 from .commands import (
     COMMAND_GROUP_EXIT,
@@ -154,18 +154,18 @@ def cmd_resume(cmd: str, ctx: CommandContext) -> bool:
         if target == "last":
             view = resume_latest(ctx.store)
             if view:
-                print(resumed_message(view))
-                print_loaded_history(ctx.store)
+                _print_resumed_session(view, ctx)
                 sync_agent_history(ctx.app, ctx.store)
             else:
                 print("No conversations found.")
             return False
         ctx.store.resume(target)
-        print(resumed_message(current_view(ctx.store)))
-        print_loaded_history(ctx.store)
+        _print_resumed_session(current_view(ctx.store), ctx)
         sync_agent_history(ctx.app, ctx.store)
         return False
-    resume_interactively(ctx.store, ctx.prompt_session)
+    resume_interactively(
+        ctx.store, ctx.prompt_session, show_history=ctx.show_session_history
+    )
     sync_agent_history(ctx.app, ctx.store)
     return False
 
@@ -207,8 +207,7 @@ def cmd_continue(cmd: str, ctx: CommandContext) -> bool:
         print(f"Already on the latest session: {view.title}")
         return False
     ctx.store.resume(view.id)
-    print(resumed_message(view))
-    print_loaded_history(ctx.store)
+    _print_resumed_session(view, ctx)
     sync_agent_history(ctx.app, ctx.store)
     return False
 
@@ -226,9 +225,16 @@ def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
 
     ctx.store.resume(selected.id)
     sync_agent_history(ctx.app, ctx.store)
-    print(resumed_message(selected))
-    print_loaded_history(ctx.store)
+    _print_resumed_session(selected, ctx)
     return False
+
+
+def _print_resumed_session(view: SessionInfoView, ctx: CommandContext) -> None:
+    """在文本 REPL 中输出恢复提示；TUI 自行重建历史画面。"""
+    if not ctx.show_session_history:
+        return
+    print(resumed_message(view))
+    print_loaded_history(ctx.store)
 
 
 def cmd_rename(cmd: str, ctx: CommandContext) -> bool:
@@ -574,6 +580,7 @@ def cmd_steer(cmd: str, ctx: CommandContext) -> bool:
         print("No active agent to steer.")
         return False
     from xcode.agent.messages import UserMessage
+
     agent.steer(UserMessage(content=msg))
     ctx.store.append("user", f"[steer] {msg}")
     print("[steer] injected")
@@ -592,6 +599,7 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
         print("No active agent to queue message.")
         return False
     from xcode.agent.messages import UserMessage
+
     agent.follow_up(UserMessage(content=msg))
     ctx.store.append("user", f"[queued] {msg}")
     print("[queued] will be delivered after current turn")
@@ -1692,6 +1700,7 @@ def handle_command(
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
     snapshot_store: SnapshotStore | None = None,
+    show_session_history: bool = True,
 ) -> bool:
     ctx = CommandContext(
         store=store,
@@ -1705,6 +1714,7 @@ def handle_command(
         static_policy=static_policy,
         restricted_dirs=restricted_dirs,
         snapshot_store=snapshot_store,
+        show_session_history=show_session_history,
     )
     for prefix in sorted(COMMAND_REGISTRY, key=len, reverse=True):
         entry = COMMAND_REGISTRY[prefix]

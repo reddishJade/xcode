@@ -6,6 +6,7 @@ import asyncio
 import threading
 from collections.abc import Callable
 from threading import Event
+from time import perf_counter
 from typing import TYPE_CHECKING, cast
 
 from prompt_toolkit.application import Application
@@ -392,11 +393,14 @@ class _XcodeTui:
                 static_policy=getattr(self._agent_app.agent, "permission_policy", None),
                 restricted_dirs=getattr(self._agent_app.agent, "restricted_dirs", ()),
                 snapshot_store=cast(SnapshotStore | None, self._snapshot_store),
+                show_session_history=False,
             )
 
         async def run() -> None:
             should_exit = await run_in_terminal(invoke, in_executor=True)
             self._state.mode = self._repl_state.mode
+            if _is_session_history_command(text):
+                self._restore_session_history()
             self._state.running = False
             self._refresh()
             if should_exit:
@@ -417,6 +421,14 @@ class _XcodeTui:
         self._store.append("event", {"type": "shell_shortcut", "data": text})
         self._store.append("event", {"type": "tool_result", "data": output})
         self._state.log.append(_LogEntry("shell", output, markdown=False))
+
+    def _restore_session_history(self) -> None:
+        """恢复会话命令完成后，以 TUI 形式重新渲染当前分支。"""
+        self._state.restore_history(self._store.build_branch())
+        self._scrollback = 0
+        agent = getattr(self._agent_app, "agent", None)
+        if agent is not None:
+            agent.session_id = self._store.session_id
 
     # ── HITL ──
 
@@ -485,8 +497,39 @@ class _XcodeTui:
 
         answer = ""
         tool_names: list[str] = []
+        thinking_parts: list[str] = []
+        thinking_started_at: float | None = None
+
+        def flush_thinking() -> None:
+            nonlocal thinking_started_at
+            if not thinking_parts:
+                return
+            duration_ms = int(
+                (perf_counter() - thinking_started_at) * 1000
+                if thinking_started_at is not None
+                else 0
+            )
+            self._store.append(
+                "event",
+                {
+                    "type": "thinking",
+                    "data": {
+                        "content": "".join(thinking_parts),
+                        "duration_ms": duration_ms,
+                    },
+                },
+            )
+            thinking_parts.clear()
+            thinking_started_at = None
+
         try:
             for event in self._agent_app.ask_stream(text, mode=self._repl_state.mode):
+                if event.type == "reasoning_delta":
+                    thinking_parts.append(event.data)
+                    if thinking_started_at is None:
+                        thinking_started_at = perf_counter()
+                else:
+                    flush_thinking()
                 if event.type not in {
                     "message_start",
                     "message_stop",
@@ -501,11 +544,14 @@ class _XcodeTui:
                 self._state.handle_event(event)
                 self._refresh()
         except Exception as exc:
+            flush_thinking()
             self._state.log.append(_LogEntry("error", f"[error] {exc}"))
             self._state.running = False
             self._refresh()
             self._schedule_turn_commit()
             return
+
+        flush_thinking()
 
         if answer:
             self._store.append("assistant", answer)
@@ -585,6 +631,12 @@ class _XcodeTui:
 
 
 # ── 模块级工具函数 ──
+
+
+def _is_session_history_command(command: str) -> bool:
+    """判断命令是否会切换或重写当前会话分支。"""
+    name = command.split(maxsplit=1)[0]
+    return name in {"/resume", "/continue", "/sessions", "/tree", "/rewind"}
 
 
 def _init_snapshot_store(project_root: Path) -> object | None:

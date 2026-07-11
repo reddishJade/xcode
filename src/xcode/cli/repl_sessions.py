@@ -18,7 +18,10 @@ from xcode.agent.messages import (
     UserMessage,
 )
 from xcode.agent.types import TextContent, ToolArguments, ToolCallContent
-from xcode.harness.session import SessionEntry as SessionRecord, SessionInfoView as SessionMetadataView
+from xcode.harness.session import (
+    SessionEntry as SessionRecord,
+    SessionInfoView as SessionMetadataView,
+)
 from xcode.harness.session import SessionStore
 
 
@@ -43,7 +46,9 @@ _TranscriptEvent = (
 )
 
 
-def resume_interactively(store: SessionStore, prompt_session: PromptLike) -> None:
+def resume_interactively(
+    store: SessionStore, prompt_session: PromptLike, show_history: bool = True
+) -> None:
     sessions = store.list_infos()
     if not sessions:
         print("No conversations found.")
@@ -53,8 +58,9 @@ def resume_interactively(store: SessionStore, prompt_session: PromptLike) -> Non
         print("Resume cancelled.")
         return
     store.resume(selected.id)
-    print(resumed_message(selected))
-    print_loaded_history(store)
+    if show_history:
+        print(resumed_message(selected))
+        print_loaded_history(store)
 
 
 def resume_latest(store: SessionStore) -> SessionMetadataView | None:
@@ -103,8 +109,6 @@ def _restore_contextual_state(app: object, records: list[SessionRecord]) -> None
             content = str(event_data.get("content", "") or "")
             if tool_name:
                 contextual_state.record_tool_result(tool_name, content)
-
-
 
 
 def records_to_agent_messages(records: list[SessionRecord]) -> list[AgentMessage]:

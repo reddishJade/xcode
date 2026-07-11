@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 
 from ..shared.thinking import ReasoningCore, format_elapsed, single_line_preview
 from ..repl_tools import brief_input, final_stop_reason, tool_call_text
+from xcode.agent.types import ToolInput
 from .rendering import (
     markdown_ansi_lines,
     rendered_markdown_lines,
@@ -21,12 +22,12 @@ from .rendering import (
 )
 
 if TYPE_CHECKING:
-    from xcode.agent.types import ToolInput
     from xcode.harness.agent_runtime.events import (
         CodingAgentHarnessEvent,
         FinalStructuredEvent,
     )
     from xcode.harness.observability import HITLResult
+    from xcode.harness.session import SessionEntry
 
 
 @dataclass
@@ -95,6 +96,59 @@ class _TuiState:
 
     def toggle_tools(self) -> None:
         self.tool_collapsed = not self.tool_collapsed
+
+    def restore_history(self, records: list[SessionEntry]) -> None:
+        """将会话分支重建为与实时输出一致的 TUI 日志。"""
+        self.log.clear()
+        self.tool_names.clear()
+        self.thinking_core.reset()
+        self.subagents.clear()
+        self.pending_hitl = None
+        self.running = False
+        for record in records:
+            if record.type == "user":
+                self.add_user(str(record.content))
+            elif record.type == "assistant":
+                text = str(record.content).strip()
+                if text:
+                    self.log.append(_LogEntry("xcode", text, markdown=True))
+            elif record.type == "event" and isinstance(record.content, Mapping):
+                self._restore_event(record.content)
+
+    def _restore_event(self, content: Mapping[str, object]) -> None:
+        event_type = content.get("type")
+        data = content.get("data")
+        if event_type == "thinking":
+            self._restore_thinking(data)
+        elif event_type == "tool_use" and isinstance(data, dict):
+            self._record_tool_use(
+                str(data.get("id", "")),
+                str(data.get("name", "tool")),
+                cast(
+                    ToolInput,
+                    data.get("input") if isinstance(data.get("input"), dict) else {},
+                ),
+            )
+        elif event_type == "tool_result" and isinstance(data, dict):
+            self._record_tool_result(
+                str(data.get("tool_use_id", "")),
+                str(data.get("status", "ok")),
+                str(data.get("content", "")),
+            )
+
+    def _restore_thinking(self, data: object) -> None:
+        if not isinstance(data, dict):
+            return
+        text = str(data.get("content", "")).strip()
+        if not text:
+            return
+        duration = data.get("duration_ms")
+        suffix = (
+            f"\nThought for {format_elapsed(duration / 1000)}"
+            if isinstance(duration, int) and duration > 0
+            else ""
+        )
+        self.log.append(_LogEntry("thinking", text + suffix))
 
     def handle_event(self, event: CodingAgentHarnessEvent) -> None:
         if event.type == "reasoning_delta":
