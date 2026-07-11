@@ -35,7 +35,9 @@ class TestUpdateContinuationCount:
             content=[TextContent(text="short")],
             stop_reason="max_tokens",
         )
-        result = _update_continuation_count(msg, 0, AgentLoopConfig(min_continuation_tokens=500))
+        result = _update_continuation_count(
+            msg, 0, AgentLoopConfig(min_continuation_tokens=500)
+        )
         assert result == 1
 
     def test_long_output_resets(self) -> None:
@@ -43,7 +45,9 @@ class TestUpdateContinuationCount:
             content=[TextContent(text="x" * 5000)],
             stop_reason="max_tokens",
         )
-        result = _update_continuation_count(msg, 0, AgentLoopConfig(min_continuation_tokens=500))
+        result = _update_continuation_count(
+            msg, 0, AgentLoopConfig(min_continuation_tokens=500)
+        )
         assert result == 0
 
     def test_exceeds_limit_returns_none(self) -> None:
@@ -52,7 +56,11 @@ class TestUpdateContinuationCount:
             stop_reason="max_tokens",
         )
         result = _update_continuation_count(
-            msg, 2, AgentLoopConfig(min_continuation_tokens=500, max_consecutive_continuations=3)
+            msg,
+            2,
+            AgentLoopConfig(
+                min_continuation_tokens=500, max_consecutive_continuations=3
+            ),
         )
         assert result is None
 
@@ -102,6 +110,7 @@ class TestCancelledMessage:
     def test_with_signal(self) -> None:
         class MockSignal:
             reason = "user cancelled"
+
             def is_cancelled(self) -> bool:
                 return True
 

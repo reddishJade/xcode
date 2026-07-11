@@ -67,7 +67,7 @@ def line_style(line: str) -> str:
         return "class:tool-title"
     if stripped.startswith("?"):
         return "class:error"
-    if stripped.startswith("└ "):
+    if stripped.startswith(("└ ", "⎿")):
         return "class:tool"
     if stripped.startswith("─"):
         return "class:border"

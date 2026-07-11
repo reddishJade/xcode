@@ -12,7 +12,12 @@ from typing import Any
 
 from xcode.ai.cache import extract_cache_usage
 from xcode.ai.events import ProviderEvent
-from xcode.ai.types import ProviderConfig, StreamOptions, ThinkingBudgets, ToolDefinition
+from xcode.ai.types import (
+    ProviderConfig,
+    StreamOptions,
+    ThinkingBudgets,
+    ToolDefinition,
+)
 
 from ._codec import normalize_cross_provider_messages, to_chat_messages, to_chat_tools
 from ._runtime import ProviderRuntime
@@ -56,9 +61,7 @@ class OpenAICompatProvider:
         if client is None:
             from openai import OpenAI as _OpenAIClient
 
-            client = _OpenAIClient(
-                api_key=config.api_key, base_url=config.base_url
-            )
+            client = _OpenAIClient(api_key=config.api_key, base_url=config.base_url)
         self.client = client
         self.config = config
         self.runtime = ProviderRuntime()
@@ -158,9 +161,7 @@ class OpenAICompatProvider:
             if extra_headers:
                 params["extra_headers"] = extra_headers
 
-        stream = self.runtime.run(
-            lambda: self.client.chat.completions.create(**params)
-        )
+        stream = self.runtime.run(lambda: self.client.chat.completions.create(**params))
         intercepted = self._intercept_usage(stream, message_count)
         return chat_stream_to_events(intercepted)
 
@@ -204,9 +205,7 @@ class OpenAICompatProvider:
     ) -> dict[str, Any]:
         """构建 provider-agnostic thinking extra_body。"""
         effective = (
-            self.config.thinking
-            if thinking_override is None
-            else thinking_override
+            self.config.thinking if thinking_override is None else thinking_override
         )
         if effective:
             return {"thinking": {"type": "enabled"}}
@@ -219,9 +218,7 @@ class OpenAICompatProvider:
     ) -> None:
         """将 thinking 配置写入 params（extra_body 和 reasoning_effort）。"""
         effective = (
-            self.config.thinking
-            if thinking_override is None
-            else thinking_override
+            self.config.thinking if thinking_override is None else thinking_override
         )
         extra = self._build_thinking_extra_body(thinking_override)
 
@@ -229,9 +226,7 @@ class OpenAICompatProvider:
         if opts and opts.thinking_budgets and effective:
             level_name = opts.thinking_level
             if level_name and level_name != "off":
-                budget = _lookup_thinking_budget(
-                    opts.thinking_budgets, level_name
-                )
+                budget = _lookup_thinking_budget(opts.thinking_budgets, level_name)
                 if budget and budget > 0:
                     extra.setdefault("thinking", {})["budget_tokens"] = budget
 

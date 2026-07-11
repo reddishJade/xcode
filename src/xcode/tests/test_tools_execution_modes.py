@@ -50,9 +50,14 @@ class TestModeNotice:
 class TestPlanPolicy:
     def test_filter_keeps_read_tools(self) -> None:
         from xcode.agent.types import ToolSpec
+
         tools = (
-            ToolSpec(name="read_file", description="", input_hint="", handler=lambda d, _: ""),
-            ToolSpec(name="bash", description="", input_hint="", handler=lambda d, _: ""),
+            ToolSpec(
+                name="read_file", description="", input_hint="", handler=lambda d, _: ""
+            ),
+            ToolSpec(
+                name="bash", description="", input_hint="", handler=lambda d, _: ""
+            ),
         )
         filtered = PlanPolicy().filter_tools(tools)
         names = {t.name for t in filtered}
@@ -63,9 +68,14 @@ class TestPlanPolicy:
 class TestBuildPolicy:
     def test_filter_keeps_all(self) -> None:
         from xcode.agent.types import ToolSpec
+
         tools = (
-            ToolSpec(name="read_file", description="", input_hint="", handler=lambda d, _: ""),
-            ToolSpec(name="bash", description="", input_hint="", handler=lambda d, _: ""),
+            ToolSpec(
+                name="read_file", description="", input_hint="", handler=lambda d, _: ""
+            ),
+            ToolSpec(
+                name="bash", description="", input_hint="", handler=lambda d, _: ""
+            ),
         )
         assert len(BuildPolicy().filter_tools(tools)) == 2
 
@@ -73,9 +83,14 @@ class TestBuildPolicy:
 class TestActPolicy:
     def test_filter_keeps_all(self) -> None:
         from xcode.agent.types import ToolSpec
+
         tools = (
-            ToolSpec(name="read_file", description="", input_hint="", handler=lambda d, _: ""),
-            ToolSpec(name="bash", description="", input_hint="", handler=lambda d, _: ""),
+            ToolSpec(
+                name="read_file", description="", input_hint="", handler=lambda d, _: ""
+            ),
+            ToolSpec(
+                name="bash", description="", input_hint="", handler=lambda d, _: ""
+            ),
         )
         assert len(ActPolicy().filter_tools(tools)) == 2
 

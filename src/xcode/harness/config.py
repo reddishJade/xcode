@@ -228,7 +228,6 @@ class PathsRuntimeConfig(BaseModel):
     skills_dir: Path | None = None
 
 
-
 class ObservabilityRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     audit_path: Path | None = None

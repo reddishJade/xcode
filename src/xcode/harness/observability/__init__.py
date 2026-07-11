@@ -121,7 +121,6 @@ __all__ = [
     "PathBoundaryPolicyEvaluator",
     "PosixAnalyzer",
     "PowerShellAnalyzer",
-
     "ShellAnalysis",
     "ShellAnalysisPolicyEvaluator",
     "SignalHookManager",

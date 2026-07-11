@@ -70,7 +70,10 @@ class TestParsePatch:
 
 class TestHeaderPath:
     def test_extracts_path(self) -> None:
-        assert _header_path("*** Update File: src/main.py", "*** Update File: ") == "src/main.py"
+        assert (
+            _header_path("*** Update File: src/main.py", "*** Update File: ")
+            == "src/main.py"
+        )
 
     def test_empty_raises(self) -> None:
         with pytest.raises(ValueError, match="empty"):

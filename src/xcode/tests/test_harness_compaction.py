@@ -24,7 +24,9 @@ class TestContextCollapseClean:
         assert "<summary>" not in result
 
     def test_removes_analysis_think_tags(self) -> None:
-        content = "prefix <analysis>hidden</analysis> middle <think>hidden</think> suffix"
+        content = (
+            "prefix <analysis>hidden</analysis> middle <think>hidden</think> suffix"
+        )
         result = context_collapse_clean(content)
         assert "hidden" not in result
         assert "prefix" in result
@@ -80,7 +82,13 @@ class TestIsToolResultMessage:
 
 class TestInactiveBranchId:
     def test_active_branch_returns_none(self) -> None:
-        msg = {"metadata": {"type": "conversation", "branch_id": "b1", "active_branch": True}}
+        msg = {
+            "metadata": {
+                "type": "conversation",
+                "branch_id": "b1",
+                "active_branch": True,
+            }
+        }
         assert _inactive_branch_id(msg, "b1") is None
 
     def test_branch_summary_returns_none(self) -> None:
@@ -124,23 +132,35 @@ class TestContentPreview:
 
 class TestExtractFileOpsFromMessages:
     def test_read_files(self) -> None:
-        msgs = [{
-            "role": "assistant",
-            "content": [
-                {"type": "tool_use", "name": "read_file", "input": {"path": "src/main.py"}},
-            ],
-        }]
+        msgs = [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "read_file",
+                        "input": {"path": "src/main.py"},
+                    },
+                ],
+            }
+        ]
         reads, modifies = _extract_file_ops_from_messages(msgs)
         assert "src/main.py" in reads
         assert not modifies
 
     def test_modified_files(self) -> None:
-        msgs = [{
-            "role": "assistant",
-            "content": [
-                {"type": "tool_use", "name": "write_file", "input": {"path": "src/new.py"}},
-            ],
-        }]
+        msgs = [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "write_file",
+                        "input": {"path": "src/new.py"},
+                    },
+                ],
+            }
+        ]
         reads, modifies = _extract_file_ops_from_messages(msgs)
         assert "src/new.py" in modifies
 

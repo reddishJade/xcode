@@ -46,7 +46,9 @@ class TestMakeSchemaStrict:
     def test_removes_unsupported_keys(self) -> None:
         schema = {
             "type": "object",
-            "properties": {"x": {"type": "string", "default": "hello", "format": "email"}},
+            "properties": {
+                "x": {"type": "string", "default": "hello", "format": "email"}
+            },
             "required": ["x"],
         }
         result = make_schema_strict(schema)
@@ -90,7 +92,9 @@ class TestNormalizeCrossProviderMessages:
         assert "reasoning_content" in result[0]
 
     def test_converts_reasoning_for_unsupported(self) -> None:
-        msgs = [{"role": "assistant", "content": "hi", "reasoning_content": "think step"}]
+        msgs = [
+            {"role": "assistant", "content": "hi", "reasoning_content": "think step"}
+        ]
         result = normalize_cross_provider_messages(msgs, "openai_chat")
         assert "reasoning_content" not in result[0]
         assert "<thinking>think step</thinking>" in result[0]["content"]
@@ -107,7 +111,9 @@ class TestToChatMessages:
         assert result == [{"role": "user", "content": "hello"}]
 
     def test_tool_result_null_content(self) -> None:
-        result = to_chat_messages([{"role": "tool", "tool_call_id": "call1", "content": None}])
+        result = to_chat_messages(
+            [{"role": "tool", "tool_call_id": "call1", "content": None}]
+        )
         assert result == [{"role": "tool", "tool_call_id": "call1", "content": ""}]
 
     def test_tool_calls_normalized(self) -> None:
@@ -137,7 +143,12 @@ class TestToChatMessages:
                 "role": "assistant",
                 "content": [
                     {"type": "text", "text": "Let me check"},
-                    {"type": "tool_use", "id": "tu1", "name": "search", "input": {"q": "x"}},
+                    {
+                        "type": "tool_use",
+                        "id": "tu1",
+                        "name": "search",
+                        "input": {"q": "x"},
+                    },
                 ],
             }
         ]
@@ -152,7 +163,11 @@ class TestToChatMessages:
             {
                 "role": "user",
                 "content": [
-                    {"type": "tool_result", "tool_use_id": "tu1", "content": "result data"},
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tu1",
+                        "content": "result data",
+                    },
                 ],
             }
         ]
@@ -173,7 +188,9 @@ class TestToChatTool:
 
     def test_strict_mode(self) -> None:
         result = to_chat_tool(
-            "test", "A test", {"type": "object", "properties": {"x": {"type": "string"}}},
+            "test",
+            "A test",
+            {"type": "object", "properties": {"x": {"type": "string"}}},
             strict=True,
         )
         assert result["function"]["strict"] is True
@@ -182,15 +199,21 @@ class TestToChatTool:
 class TestToChatTools:
     def test_multiple_tools(self) -> None:
         tools = [
-            ToolDefinition(name="a", description="first", parameters={"type": "object"}),
-            ToolDefinition(name="b", description="second", parameters={"type": "object"}),
+            ToolDefinition(
+                name="a", description="first", parameters={"type": "object"}
+            ),
+            ToolDefinition(
+                name="b", description="second", parameters={"type": "object"}
+            ),
         ]
         result = to_chat_tools(tuple(tools))
         assert len(result) == 2
 
     def test_strict_multiple_tools(self) -> None:
         tools = [
-            ToolDefinition(name="a", description="first", parameters={"type": "object"}),
+            ToolDefinition(
+                name="a", description="first", parameters={"type": "object"}
+            ),
         ]
         result = to_chat_tools(tuple(tools), strict=True)
         assert result[0]["function"]["strict"] is True

@@ -56,6 +56,7 @@ class _MockTool(AgentTool):
 
     async def execute(self, *args, **kwargs) -> object:
         from xcode.agent.types import AgentToolResult, TextContent
+
         return AgentToolResult(content=[TextContent(text="ok")])
 
 
@@ -154,13 +155,17 @@ class TestShouldClearReadHistory:
 class TestIsToolProductiveDefault:
     def test_all_ok(self) -> None:
         results = [
-            ToolResultMessage(tool_call_id="c1", tool_name="t", content="ok", is_error=False),
+            ToolResultMessage(
+                tool_call_id="c1", tool_name="t", content="ok", is_error=False
+            ),
         ]
         assert is_tool_productive_default([], results)
 
     def test_all_error(self) -> None:
         results = [
-            ToolResultMessage(tool_call_id="c1", tool_name="t", content="err", is_error=True),
+            ToolResultMessage(
+                tool_call_id="c1", tool_name="t", content="err", is_error=True
+            ),
         ]
         assert not is_tool_productive_default([], results)
 
@@ -197,7 +202,9 @@ class TestUpdateRepeatedToolWatchdog:
             watchdog_repeated_tool_skip=frozenset({"skip_tool"}),
         )
         skip_call = [_make_call("skip_tool", id="c1")]
-        results = [ToolResultMessage(tool_call_id="c1", tool_name="skip_tool", content="ok")]
+        results = [
+            ToolResultMessage(tool_call_id="c1", tool_name="skip_tool", content="ok")
+        ]
 
         reason = update_repeated_tool_watchdog(state, skip_call, config, results)
         assert reason is None
@@ -206,7 +213,11 @@ class TestUpdateRepeatedToolWatchdog:
         state = _LoopRunState()
         config = AgentLoopConfig()
         calls = [_make_call("read", id="c1")]
-        results = [ToolResultMessage(tool_call_id="c1", tool_name="read", content="err", is_error=True)]
+        results = [
+            ToolResultMessage(
+                tool_call_id="c1", tool_name="read", content="err", is_error=True
+            )
+        ]
         update_repeated_tool_watchdog(state, calls, config, results)
         assert state.repeated_tool_count == 0
 
@@ -225,7 +236,11 @@ class TestUpdateIdleToolWatchdog:
         state = _LoopRunState()
         config = AgentLoopConfig(max_consecutive_idle_steps=3)
         calls = [_make_call("read")]
-        results = [ToolResultMessage(tool_call_id="c1", tool_name="read", content="err", is_error=True)]
+        results = [
+            ToolResultMessage(
+                tool_call_id="c1", tool_name="read", content="err", is_error=True
+            )
+        ]
 
         for _ in range(3):
             reason = update_idle_tool_watchdog(state, calls, results, config)

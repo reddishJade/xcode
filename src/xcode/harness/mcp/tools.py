@@ -478,7 +478,9 @@ def build_fetch_tools_tool(
 ) -> ToolSpec:
     """创建用于冷启动延迟加载服务器并拉取工具列表的引导工具。"""
 
-    def handler(_args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
+    def handler(
+        _args: ToolInput, _on_update: Callable[[str], None] | None = None
+    ) -> str:
         config_hash = compute_config_hash(
             {
                 "command": validated.command[0],
@@ -563,7 +565,9 @@ def build_mcp_tool_search(
 ) -> ToolSpec:
     """创建用于搜索和获取延迟加载工具完整参数 Schema 的工具。"""
 
-    def handler(args: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
+    def handler(
+        args: ToolInput, _on_update: Callable[[str], None] | None = None
+    ) -> str:
         query = str(args.get("query", "")).strip().lower()
         if not query:
             return "Please provide a query to search."

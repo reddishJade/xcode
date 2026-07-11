@@ -23,7 +23,9 @@ def build_grep_tool(
 ) -> ToolSpec:
     root = project_root.resolve()
 
-    def handler(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
+    def handler(
+        data: ToolInput, _on_update: Callable[[str], None] | None = None
+    ) -> str:
         if cancel_event is not None and cancel_event.is_set():
             raise ValueError("Tool cancelled")
         return _grep(root, _search_utils.get_rg_path(), data)

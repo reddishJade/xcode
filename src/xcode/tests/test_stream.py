@@ -84,7 +84,13 @@ class TestChatStreamToEvents:
                 self.arguments = arguments
 
         class Call:
-            def __init__(self, index: int, id: str | None = None, name: str | None = None, arguments: str | None = None):
+            def __init__(
+                self,
+                index: int,
+                id: str | None = None,
+                name: str | None = None,
+                arguments: str | None = None,
+            ):
                 self.index = index
                 self.id = id
                 self.function = Func(name, arguments) if name or arguments else None

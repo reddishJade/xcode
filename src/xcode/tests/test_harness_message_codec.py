@@ -12,7 +12,9 @@ from xcode.agent.messages import SystemMessage, UserMessage
 
 class TestMessagesFromCompactedDicts:
     def test_system_message(self) -> None:
-        result = messages_from_compacted_dicts([{"role": "system", "content": "Be helpful"}])
+        result = messages_from_compacted_dicts(
+            [{"role": "system", "content": "Be helpful"}]
+        )
         assert len(result) == 1
         assert isinstance(result[0], SystemMessage)
 
@@ -22,18 +24,20 @@ class TestMessagesFromCompactedDicts:
         assert isinstance(result[0], UserMessage)
 
     def test_assistant_with_tool_calls(self) -> None:
-        result = messages_from_compacted_dicts([
-            {
-                "role": "assistant",
-                "content": "I'll search",
-                "tool_calls": [
-                    {
-                        "id": "c1",
-                        "function": {"name": "search", "arguments": '{"q": "x"}'},
-                    }
-                ],
-            }
-        ])
+        result = messages_from_compacted_dicts(
+            [
+                {
+                    "role": "assistant",
+                    "content": "I'll search",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "function": {"name": "search", "arguments": '{"q": "x"}'},
+                        }
+                    ],
+                }
+            ]
+        )
         assert len(result) == 1
         msg = result[0]
         assert len(msg.content) == 2  # text + tool call

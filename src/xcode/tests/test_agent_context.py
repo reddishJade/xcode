@@ -231,7 +231,7 @@ class TestDefaultContextAssembler:
                 token_budget=50,
             )
         )
-        assert len(result.blocks_dropped) >= 0  # may be budget-dropped
+        assert len(result.blocks_dropped) == 1
 
 
 # ── _apply_size_budget ──
@@ -281,20 +281,14 @@ class TestCondenseManifest:
             "## Priority\n"
             "- item 1\n\n"
             "## Checklist\n"
-            "- check A\n\n"
-            + "x" * 50000
+            "- check A\n\n" + "x" * 50000
         )
         result = _condense_manifest(text)
         assert "Priority" in result
         assert "Checklist" in result
 
     def test_non_key_section_not_in_key_sections(self) -> None:
-        text = (
-            "Opening\n"
-            "## Random Section\n"
-            "- stuff\n\n"
-            + "y" * 50000
-        )
+        text = "Opening\n## Random Section\n- stuff\n\n" + "y" * 50000
         sections = _extract_key_sections(text)
         assert not any("random section" in s.lower() for s in sections)
 
@@ -354,12 +348,28 @@ class TestContextCollectorRegistry:
 
     def test_collect_aggregates(self) -> None:
         registry = ContextCollectorRegistry()
-        registry.register(_DummyCollector([
-            ContextBlock(source=ContextBlockSource.NOTES, priority=ContextPriority.LOW, content="a"),
-        ]))
-        registry.register(_DummyCollector([
-            ContextBlock(source=ContextBlockSource.INSTRUCTION, priority=ContextPriority.CRITICAL, content="b"),
-        ]))
+        registry.register(
+            _DummyCollector(
+                [
+                    ContextBlock(
+                        source=ContextBlockSource.NOTES,
+                        priority=ContextPriority.LOW,
+                        content="a",
+                    ),
+                ]
+            )
+        )
+        registry.register(
+            _DummyCollector(
+                [
+                    ContextBlock(
+                        source=ContextBlockSource.INSTRUCTION,
+                        priority=ContextPriority.CRITICAL,
+                        content="b",
+                    ),
+                ]
+            )
+        )
         blocks = registry.collect(ContextCollectionInput())
         assert len(blocks) == 2
 
@@ -370,8 +380,16 @@ class TestContextCollectorRegistry:
 
         registry = ContextCollectorRegistry()
         registry.register(BrokenCollector())
-        registry.register(_DummyCollector([
-            ContextBlock(source=ContextBlockSource.NOTES, priority=ContextPriority.LOW, content="ok"),
-        ]))
+        registry.register(
+            _DummyCollector(
+                [
+                    ContextBlock(
+                        source=ContextBlockSource.NOTES,
+                        priority=ContextPriority.LOW,
+                        content="ok",
+                    ),
+                ]
+            )
+        )
         blocks = registry.collect(ContextCollectionInput())
         assert len(blocks) == 1

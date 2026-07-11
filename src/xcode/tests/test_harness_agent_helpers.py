@@ -13,16 +13,23 @@ from xcode.agent.types import TextContent
 
 class TestToolResultStatus:
     def test_ok(self) -> None:
-        msg = ToolResultMessage(tool_call_id="c1", tool_name="t", content="ok", is_error=False)
+        msg = ToolResultMessage(
+            tool_call_id="c1", tool_name="t", content="ok", is_error=False
+        )
         assert _tool_result_status(msg) == "ok"
 
     def test_error(self) -> None:
-        msg = ToolResultMessage(tool_call_id="c1", tool_name="t", content="failed", is_error=True)
+        msg = ToolResultMessage(
+            tool_call_id="c1", tool_name="t", content="failed", is_error=True
+        )
         assert _tool_result_status(msg) == "error"
 
     def test_interrupted(self) -> None:
         msg = ToolResultMessage(
-            tool_call_id="c1", tool_name="t", content="Interrupted by user", is_error=True
+            tool_call_id="c1",
+            tool_name="t",
+            content="Interrupted by user",
+            is_error=True,
         )
         assert _tool_result_status(msg) == "interrupted"
 
@@ -56,7 +63,10 @@ class TestTextFromBlocks:
         assert "Hello" in result
 
     def test_non_text_blocks_skipped(self) -> None:
-        blocks = [{"type": "tool_use", "name": "search"}, {"type": "text", "text": "result"}]
+        blocks = [
+            {"type": "tool_use", "name": "search"},
+            {"type": "text", "text": "result"},
+        ]
         assert text_from_blocks(blocks) == "result"
 
     def test_empty(self) -> None:

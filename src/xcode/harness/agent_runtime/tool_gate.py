@@ -51,7 +51,6 @@ from ...agent.types import (
 from ..observability import redact_text
 
 
-
 @runtime_checkable
 class _ClearableGrantStore(Protocol):
     def clear(self) -> None: ...
@@ -90,9 +89,13 @@ class _RedactingAdapter(ToolSpecAdapter):
     ) -> AgentToolResult:
         def _redacted_update(text: str) -> None:
             if on_update is not None:
-                on_update(AgentToolResult(content=[TextContent(text=redact_text(text))]))
+                on_update(
+                    AgentToolResult(content=[TextContent(text=redact_text(text))])
+                )
 
-        content = await asyncio.to_thread(self._spec.handler, dict(params), _redacted_update)
+        content = await asyncio.to_thread(
+            self._spec.handler, dict(params), _redacted_update
+        )
         metadata = getattr(content, "metadata", None)
         return AgentToolResult(
             content=[TextContent(text=redact_text(str(content)))],

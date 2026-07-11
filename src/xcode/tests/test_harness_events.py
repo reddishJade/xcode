@@ -57,7 +57,9 @@ def test_thinking_update() -> None:
 def test_tool_execution_start() -> None:
     state = _StreamTranslationState()
     result = _translate_tool_execution_start(
-        ToolExecutionStartEvent(tool_call_id="c1", tool_name="read_file", args={"path": "/x"}),
+        ToolExecutionStartEvent(
+            tool_call_id="c1", tool_name="read_file", args={"path": "/x"}
+        ),
         state,
     )
     assert isinstance(result, ToolUseStructuredEvent)
@@ -66,12 +68,15 @@ def test_tool_execution_start() -> None:
 
 def test_tool_execution_end() -> None:
     from xcode.agent.messages import ToolResultMessage
+
     state = _StreamTranslationState()
     result = _translate_tool_execution_end(
         ToolExecutionEndEvent(
             tool_call_id="c1",
             tool_name="read_file",
-            result=ToolResultMessage(tool_call_id="c1", tool_name="read_file", content="result text"),
+            result=ToolResultMessage(
+                tool_call_id="c1", tool_name="read_file", content="result text"
+            ),
             is_error=False,
         ),
         state,
@@ -95,7 +100,12 @@ def test_tool_execution_end_error() -> None:
 def test_compaction_event() -> None:
     state = _StreamTranslationState()
     result = _translate_compaction(
-        CompactionEvent(messages_removed=5, messages_after=3, summary_token_estimate=200, trigger="token_limit"),
+        CompactionEvent(
+            messages_removed=5,
+            messages_after=3,
+            summary_token_estimate=200,
+            trigger="token_limit",
+        ),
         state,
     )
     assert isinstance(result, CompactionStructuredEvent)
@@ -121,9 +131,7 @@ class TestTranslateMessageUpdate:
 
     def test_non_assistant_returns_none(self) -> None:
         state = _StreamTranslationState()
-        result = _translate_message_update(
-            MessageUpdateEvent(message=None), state
-        )
+        result = _translate_message_update(MessageUpdateEvent(message=None), state)
         assert result is None
 
 
@@ -131,10 +139,13 @@ class TestTranslateTurnEnd:
     def test_tool_results_included(self) -> None:
         state = _StreamTranslationState()
         from xcode.agent.messages import ToolResultMessage
+
         event = TurnEndEvent(
             message=AssistantMessage(content=[TextContent(text="done")]),
             tool_results=[
-                ToolResultMessage(tool_call_id="c1", tool_name="read", content="output"),
+                ToolResultMessage(
+                    tool_call_id="c1", tool_name="read", content="output"
+                ),
             ],
         )
         result = _translate_turn_end(event, state)

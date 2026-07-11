@@ -28,7 +28,9 @@ MCP_PARALLEL_URL = "https://search.parallel.ai/mcp"
 def build_websearch_tool() -> ToolSpec:
     """构建 websearch 工具。"""
 
-    def handler(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
+    def handler(
+        data: ToolInput, _on_update: Callable[[str], None] | None = None
+    ) -> str:
         query = str(data.get("query", "")).strip()
         if not query:
             raise ValueError("query is required")

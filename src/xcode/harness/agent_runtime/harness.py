@@ -269,19 +269,13 @@ class AgentHarness:
     def history_messages(self) -> list[AgentMessage]:
         return list(self._history)
 
-    def run(
-        self, question: str
-    ) -> CodingAgentHarnessResult:
+    def run(self, question: str) -> CodingAgentHarnessResult:
         return run_coro_sync(self.arun(question))
 
-    async def run_async(
-        self, question: str
-    ) -> CodingAgentHarnessResult:
+    async def run_async(self, question: str) -> CodingAgentHarnessResult:
         return await self.arun(question)
 
-    async def arun(
-        self, question: str
-    ) -> CodingAgentHarnessResult:
+    async def arun(self, question: str) -> CodingAgentHarnessResult:
         result: CodingAgentHarnessResult | None = None
         async for event in self.arun_stream(question):
             if event.type == "final":
@@ -289,9 +283,7 @@ class AgentHarness:
         assert result is not None
         return result
 
-    def run_stream(
-        self, question: str
-    ) -> Iterator[CodingAgentHarnessEvent]:
+    def run_stream(self, question: str) -> Iterator[CodingAgentHarnessEvent]:
         yield from aiter_to_sync_iter(
             self.arun_stream(question), self.cancellation_token
         )

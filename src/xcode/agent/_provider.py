@@ -28,8 +28,18 @@ from xcode.ai.events import (
 from xcode.ai.providers.base import StreamProvider
 from xcode.ai.providers._codec import provider_function_name
 from xcode.ai.types import ToolDefinition
-from xcode.agent.context import ContextAssemblyInput, ContextBlock, ContextCollectionInput
-from xcode.agent.types import AgentTool, CancellationSignal, ContentBlock, TextContent, ToolCallContent
+from xcode.agent.context import (
+    ContextAssemblyInput,
+    ContextBlock,
+    ContextCollectionInput,
+)
+from xcode.agent.types import (
+    AgentTool,
+    CancellationSignal,
+    ContentBlock,
+    TextContent,
+    ToolCallContent,
+)
 from xcode.agent.config import AgentContext, AgentLoopConfig
 from xcode.agent.results import AgentLoopMetrics
 from xcode.agent.events import (

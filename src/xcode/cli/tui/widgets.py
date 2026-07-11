@@ -15,7 +15,7 @@ _file_ref_pattern = re.compile(r"(?<!\S)@([^\s]+)")
 
 
 class TuiInputLexer(Lexer):
-    """高亮 TUI 输入栏中的 ! 前缀和 @file 引用。"""
+    """高亮 TUI 输入栏中的 @file 引用。"""
 
     def lex_document(self, document: object) -> Callable[[int], StyleAndTextTuples]:
         lines: list[str] = (
@@ -28,17 +28,14 @@ class TuiInputLexer(Lexer):
         def get_line(line_number: int) -> StyleAndTextTuples:
             if line_number < 0 or line_number >= len(lines):
                 return []
-            return self._highlight(lines[line_number], line_number == 0)
+            return self._highlight(lines[line_number])
 
         return get_line
 
     @staticmethod
-    def _highlight(line: str, first_line: bool) -> StyleAndTextTuples:
+    def _highlight(line: str) -> StyleAndTextTuples:
         frags: list[tuple[str, str]] = []
         cursor = 0
-        if first_line and line.startswith("!"):
-            frags.append(("fg:ansiyellow bold", "!"))
-            cursor = 1
         for m in _file_ref_pattern.finditer(line, cursor):
             if m.start() > cursor:
                 frags.append(("", line[cursor : m.start()]))
@@ -49,6 +46,16 @@ class TuiInputLexer(Lexer):
         if not frags:
             frags.append(("", line))
         return cast(StyleAndTextTuples, frags)
+
+
+def tui_input_prompt(
+    awaiting_denial_suggestion: bool, is_shell_command: bool
+) -> StyleAndTextTuples:
+    """返回输入提示符；shell 命令模式时强调输入标记。"""
+    marker_style = "class:prompt-marker" if is_shell_command else ""
+    if awaiting_denial_suggestion:
+        return [("", "Tell model what to do "), (marker_style, "> ")]
+    return [(marker_style, "> ")]
 
 
 class TuiPromptSession:

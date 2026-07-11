@@ -61,7 +61,10 @@ class TestConvertAssistantMessage:
 class TestConvertToolResultMessage:
     def test_str_content(self) -> None:
         msg = ToolResultMessage(
-            tool_call_id="c1", tool_name="search", content='{"result": "ok"}', is_error=False
+            tool_call_id="c1",
+            tool_name="search",
+            content='{"result": "ok"}',
+            is_error=False,
         )
         result = convert_to_llm([msg])
         assert result[0]["role"] == "tool"
@@ -88,7 +91,9 @@ class TestConvertToolResultMessage:
 
 class TestConvertCompactionSummary:
     def test_compaction_summary_wraps_in_tags(self) -> None:
-        msg = CompactionSummaryMessage(summary="Previous context was...", tokens_before=500)
+        msg = CompactionSummaryMessage(
+            summary="Previous context was...", tokens_before=500
+        )
         result = convert_to_llm([msg])
         assert result[0]["role"] == "user"
         text = str(result[0]["content"])

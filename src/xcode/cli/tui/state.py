@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 
 from ..shared.thinking import ReasoningCore, format_elapsed, single_line_preview
 from ..repl_tools import brief_input, final_stop_reason, tool_call_text
+from ..repl_rendering import _render_citations
+from xcode.agent.types import ToolInput
 from .rendering import (
     markdown_ansi_lines,
     rendered_markdown_lines,
@@ -21,12 +23,12 @@ from .rendering import (
 )
 
 if TYPE_CHECKING:
-    from xcode.agent.types import ToolInput
     from xcode.harness.agent_runtime.events import (
         CodingAgentHarnessEvent,
         FinalStructuredEvent,
     )
     from xcode.harness.observability import HITLResult
+    from xcode.harness.session import SessionEntry
 
 
 @dataclass
@@ -96,6 +98,59 @@ class _TuiState:
     def toggle_tools(self) -> None:
         self.tool_collapsed = not self.tool_collapsed
 
+    def restore_history(self, records: list[SessionEntry]) -> None:
+        """将会话分支重建为与实时输出一致的 TUI 日志。"""
+        self.log.clear()
+        self.tool_names.clear()
+        self.thinking_core.reset()
+        self.subagents.clear()
+        self.pending_hitl = None
+        self.running = False
+        for record in records:
+            if record.type == "user":
+                self.add_user(str(record.content))
+            elif record.type == "assistant":
+                text = str(record.content).strip()
+                if text:
+                    self.log.append(_LogEntry("xcode", text, markdown=True))
+            elif record.type == "event" and isinstance(record.content, Mapping):
+                self._restore_event(record.content)
+
+    def _restore_event(self, content: Mapping[str, object]) -> None:
+        event_type = content.get("type")
+        data = content.get("data")
+        if event_type == "thinking":
+            self._restore_thinking(data)
+        elif event_type == "tool_use" and isinstance(data, dict):
+            self._record_tool_use(
+                str(data.get("id", "")),
+                str(data.get("name", "tool")),
+                cast(
+                    ToolInput,
+                    data.get("input") if isinstance(data.get("input"), dict) else {},
+                ),
+            )
+        elif event_type == "tool_result" and isinstance(data, dict):
+            self._record_tool_result(
+                str(data.get("tool_use_id", "")),
+                str(data.get("status", "ok")),
+                str(data.get("content", "")),
+            )
+
+    def _restore_thinking(self, data: object) -> None:
+        if not isinstance(data, dict):
+            return
+        text = str(data.get("content", "")).strip()
+        if not text:
+            return
+        duration = data.get("duration_ms")
+        suffix = (
+            f"\nThought for {format_elapsed(duration / 1000)}"
+            if isinstance(duration, int) and duration > 0
+            else ""
+        )
+        self.log.append(_LogEntry("thinking", text + suffix))
+
     def handle_event(self, event: CodingAgentHarnessEvent) -> None:
         if event.type == "reasoning_delta":
             self.thinking_core.handle_delta(event.data)
@@ -135,8 +190,7 @@ class _TuiState:
 
     def lines(self) -> list[str]:
         lines: list[str] = []
-        for entry in self.log:
-            self._append_entry_lines(entry, lines, rendered_markdown_lines)
+        self._append_log_entries(lines, rendered_markdown_lines)
         if self.thinking.strip():
             self._thinking_lines(lines)
         self._append_subagent_lines(lines)
@@ -147,8 +201,7 @@ class _TuiState:
 
     def ansi_lines(self) -> list[str]:
         lines: list[str] = []
-        for entry in self.log:
-            self._append_entry_lines(entry, lines, markdown_ansi_lines)
+        self._append_log_entries(lines, markdown_ansi_lines)
         if self.thinking.strip():
             self._thinking_lines(lines)
         self._append_subagent_lines(lines)
@@ -157,11 +210,40 @@ class _TuiState:
 
     # ── 内部渲染方法 ──
 
+    def _append_log_entries(
+        self, lines: list[str], md_fn: Callable[[str], list[str]]
+    ) -> None:
+        """按工具组渲染日志，并只在当前工具组显示折叠提示。"""
+        latest_tool_index = max(
+            (index for index, entry in enumerate(self.log) if entry.role == "tool"),
+            default=-1,
+        )
+        latest_detail_index = max(
+            (
+                index
+                for index, entry in enumerate(self.log)
+                if index > latest_tool_index and entry.role == "tool-detail"
+            ),
+            default=-1,
+        )
+        for index, entry in enumerate(self.log):
+            self._append_entry_lines(
+                entry,
+                lines,
+                md_fn,
+                show_tool_expand=(self.tool_collapsed and index == latest_tool_index),
+                show_tool_collapse=(
+                    not self.tool_collapsed and index == latest_detail_index
+                ),
+            )
+
     def _append_entry_lines(
         self,
         entry: _LogEntry,
         lines: list[str],
         md_fn: Callable[[str], list[str]],
+        show_tool_expand: bool,
+        show_tool_collapse: bool,
     ) -> None:
         if entry.role == "tool-detail" and self.tool_collapsed:
             return
@@ -173,16 +255,19 @@ class _TuiState:
             lines.append(f"> {user_lines[0]}")
             lines.extend(f"  {line}" for line in user_lines[1:])
         elif entry.role == "tool":
-            suffix = " (ctrl+o to expand)" if self.tool_collapsed else ""
+            suffix = " (ctrl+o to expand)" if show_tool_expand else ""
             lines.append(f"{entry.text}{suffix}")
         elif entry.role in {"", "tool-detail"}:
-            lines.extend(entry.text.splitlines())
+            detail_lines = entry.text.splitlines() or [""]
+            if show_tool_collapse:
+                detail_lines[-1] += " (ctrl+o to collapse)"
+            lines.extend(detail_lines)
         elif entry.role == "thinking":
             self._append_thinking_entry(
                 entry, lines, plain_text=(md_fn is rendered_markdown_lines)
             )
         elif entry.markdown:
-            lines.extend(md_fn(entry.text))
+            lines.extend(md_fn(_render_citations(entry.text)))
         else:
             lines.extend(entry.text.splitlines() or [""])
 
@@ -267,7 +352,7 @@ class _TuiState:
         self.log.append(_LogEntry("tool", f"● {label}"))
         if name in {"todowrite", "subagent"}:
             text = tool_call_text(name, label, raw_input).plain
-            self.log.append(_LogEntry("tool-detail", f"  └ {text.strip()}"))
+            self.log.append(_LogEntry("tool-detail", f"  ⎿  {text.strip()}"))
 
     def _record_tool_result(self, tool_id: str, status: str, content: str) -> None:
         name = self.tool_names.pop(tool_id, "")
@@ -290,12 +375,10 @@ class _TuiState:
                     bool(re.match(r"^\d+: ", line)) for line in content.splitlines()
                 )
                 detail = f"Read {count} lines"
-            self.log.append(
-                _LogEntry("tool-detail", f"  └ {detail} (ctrl+o to collapse)")
-            )
+            self.log.append(_LogEntry("tool-detail", f"  ⎿  {detail}"))
             return
         self.log.append(
-            _LogEntry("tool-detail", f"  └ ✗ {single_line_preview(content)}")
+            _LogEntry("tool-detail", f"  ⎿  ✗ {single_line_preview(content)}")
         )
 
     def _handle_tool_update(self, tool_name: str, partial: str) -> None:

@@ -62,9 +62,7 @@ class ChatGLMProvider(OpenAICompatProvider):
     ) -> dict[str, object]:
         cleaned_messages = self._clean_reasoning_content(messages)
         openai_messages = to_chat_messages(cleaned_messages)
-        effective_thinking = (
-            self.config.thinking if thinking is None else thinking
-        )
+        effective_thinking = self.config.thinking if thinking is None else thinking
 
         kwargs: dict[str, object] = {
             "model": self.config.model,
@@ -78,14 +76,10 @@ class ChatGLMProvider(OpenAICompatProvider):
         self._build_thinking_params(kwargs, effective_thinking)
 
         if stream and self._tool_stream and _supports_tool_stream(self.config.model):
-            extra_body = cast(
-                dict[str, Any], kwargs.setdefault("extra_body", {})
-            )
+            extra_body = cast(dict[str, Any], kwargs.setdefault("extra_body", {}))
             extra_body["tool_stream"] = True
         extra_body = cast(dict[str, Any], kwargs.setdefault("extra_body", {}))
-        thinking_body = cast(
-            dict[str, Any], extra_body.setdefault("thinking", {})
-        )
+        thinking_body = cast(dict[str, Any], extra_body.setdefault("thinking", {}))
         thinking_body["clear_thinking"] = self._clear_thinking
         return kwargs
 
@@ -108,8 +102,7 @@ class ChatGLMProvider(OpenAICompatProvider):
             self._metrics["prompt_tokens"] = prompt_tokens
             self._metrics["completion_tokens"] = completion_tokens
             self._metrics["total_tokens"] = (
-                getattr(usage, "total_tokens", 0)
-                or prompt_tokens + completion_tokens
+                getattr(usage, "total_tokens", 0) or prompt_tokens + completion_tokens
             )
             cached = self._metrics.get("cached_tokens", 0)
             if isinstance(cached, int) and cached > 0:

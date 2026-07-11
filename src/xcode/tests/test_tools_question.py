@@ -22,12 +22,14 @@ class TestQuestions:
         assert result[0]["multiple"] is False
 
     def test_with_options(self) -> None:
-        result = _questions([
-            {
-                "question": "Pick?",
-                "options": [{"label": "Yes"}, {"label": "No"}],
-            }
-        ])
+        result = _questions(
+            [
+                {
+                    "question": "Pick?",
+                    "options": [{"label": "Yes"}, {"label": "No"}],
+                }
+            ]
+        )
         assert len(result[0]["options"]) == 2
 
     def test_long_header_raises(self) -> None:
@@ -39,12 +41,14 @@ class TestQuestions:
             _questions([{"question": ""}])
 
     def test_options_with_descriptions(self) -> None:
-        result = _questions([
-            {
-                "question": "Q?",
-                "options": [{"label": "A", "description": "Option A"}],
-            }
-        ])
+        result = _questions(
+            [
+                {
+                    "question": "Q?",
+                    "options": [{"label": "A", "description": "Option A"}],
+                }
+            ]
+        )
         assert result[0]["options"][0]["description"] == "Option A"
 
 

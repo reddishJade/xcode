@@ -17,7 +17,9 @@ from .manager import MemoryLayerFilter, MemoryManager, MemoryRetrievalContext
 def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
     """构建 opt-in memory 工具。"""
 
-    def search_memory(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
+    def search_memory(
+        data: ToolInput, _on_update: Callable[[str], None] | None = None
+    ) -> str:
         """跨项目级与用户级记忆检索并渲染来源。"""
         query = str(data.get("query", "")).strip()
         if not query:
@@ -126,7 +128,6 @@ def build_memory_tools(manager: MemoryManager) -> tuple[ToolSpec, ...]:
                 "required": ["query"],
                 "additionalProperties": False,
             },
-
             prompt_snippet=(
                 "Search opt-in project and user memory when prior decisions or "
                 "solutions may affect the task."
