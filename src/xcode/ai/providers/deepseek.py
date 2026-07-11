@@ -84,9 +84,7 @@ class DeepSeekProvider(OpenAICompatProvider):
 
         return cleaned
 
-    def _ensure_json_word(
-        self, messages: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    def _ensure_json_word(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """确保消息中包含 'json' 关键字（DeepSeek API 约束）。"""
         has_json_word = False
         for msg in messages:

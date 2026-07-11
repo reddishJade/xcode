@@ -250,7 +250,9 @@ class ToolSpecAdapter:
             if on_update is not None:
                 on_update(AgentToolResult(content=[TextContent(text=text)]))
 
-        content = await asyncio.to_thread(self._spec.handler, dict(params), _text_update)
+        content = await asyncio.to_thread(
+            self._spec.handler, dict(params), _text_update
+        )
         metadata = getattr(content, "metadata", None)
         return AgentToolResult(
             content=[TextContent(text=str(content))],

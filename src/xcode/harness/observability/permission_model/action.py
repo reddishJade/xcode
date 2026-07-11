@@ -128,9 +128,7 @@ class ActionExtractor:
             input=tool_input,
         )
 
-    def _bash_action(
-        self, tool_name: str, tool_input: Mapping[str, object]
-    ) -> Action:
+    def _bash_action(self, tool_name: str, tool_input: Mapping[str, object]) -> Action:
         command = tool_input.get("command")
         targets: tuple[Target, ...] = ()
         unresolved_effects: tuple[UnresolvedEffect, ...] = ()
@@ -165,9 +163,7 @@ class ActionExtractor:
             unresolved_effects=unresolved_effects,
         )
 
-    def _shell_action(
-        self, tool_name: str, tool_input: Mapping[str, object]
-    ) -> Action:
+    def _shell_action(self, tool_name: str, tool_input: Mapping[str, object]) -> Action:
         targets: list[Target] = []
         all_unresolved: list[UnresolvedEffect] = []
         for command in self._shell_commands(tool_input):
@@ -175,9 +171,7 @@ class ActionExtractor:
             if not normalized_command:
                 continue
             targets.append(
-                Target(
-                    kind="command", value=normalized_command, access="execute"
-                )
+                Target(kind="command", value=normalized_command, access="execute")
             )
             analysis = self._analyze_command(normalized_command, "posix")
             targets.extend(analysis.resolved_paths)

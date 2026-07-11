@@ -28,7 +28,9 @@ MAX_TIMEOUT = 120.0
 def build_webfetch_tool() -> ToolSpec:
     """构建 webfetch 工具。"""
 
-    def handler(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
+    def handler(
+        data: ToolInput, _on_update: Callable[[str], None] | None = None
+    ) -> str:
         url = _valid_url(str(data.get("url", "")).strip())
         output_format = _format(str(data.get("format", "markdown")).strip())
         timeout = _timeout(data.get("timeout"))

@@ -70,7 +70,9 @@ class TestParseMcpResponse:
         assert _parse_mcp_response(body) == "Results here"
 
     def test_sse_format(self) -> None:
-        body = 'data: {"result": {"content": [{"type": "text", "text": "SSE result"}]}}\n'
+        body = (
+            'data: {"result": {"content": [{"type": "text", "text": "SSE result"}]}}\n'
+        )
         assert _parse_mcp_response(body) == "SSE result"
 
     def test_empty_body(self) -> None:

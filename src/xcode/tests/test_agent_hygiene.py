@@ -66,7 +66,10 @@ class TestApplyRequestHygiene:
                 stop_reason="tool_use",
             ),
             ToolResultMessage(
-                tool_call_id="c1", tool_name="bash", content=long_content, is_error=False
+                tool_call_id="c1",
+                tool_name="bash",
+                content=long_content,
+                is_error=False,
             ),
         ]
         result = apply_request_hygiene(msgs, keep_head_lines=2, keep_tail_lines=2)
@@ -78,10 +81,14 @@ class TestApplyRequestHygiene:
         long_arg = "x" * 2000
         msgs = [
             AssistantMessage(
-                content=[ToolCallContent(id="c1", name="write", arguments={"data": long_arg})],
+                content=[
+                    ToolCallContent(id="c1", name="write", arguments={"data": long_arg})
+                ],
                 stop_reason="tool_use",
             ),
-            ToolResultMessage(tool_call_id="c1", tool_name="write", content="done", is_error=False),
+            ToolResultMessage(
+                tool_call_id="c1", tool_name="write", content="done", is_error=False
+            ),
         ]
         result = apply_request_hygiene(msgs, max_tool_arg_length=200)
         block = result[0].content[0]

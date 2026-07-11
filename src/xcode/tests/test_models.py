@@ -46,7 +46,16 @@ class TestParseModelMode:
             parse_model_mode("gpt-4:ultra")
 
     def test_all_valid_thinking_levels(self) -> None:
-        for level in ("off", "none", "minimal", "low", "medium", "high", "xhigh", "max"):
+        for level in (
+            "off",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        ):
             result = parse_model_mode(f"gpt-4:{level}")
             assert result.thinking_level == level
 

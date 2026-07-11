@@ -616,6 +616,3 @@ def _prepare_edits(data: ToolInput) -> list[FileEdit]:
         )
 
     return edits
-
-
-

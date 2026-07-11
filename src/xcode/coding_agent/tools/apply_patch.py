@@ -88,7 +88,9 @@ def build_apply_patch_tool(
     root = project_root.resolve()
     ops = operations or LocalFileSystem()
 
-    def apply_patch(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
+    def apply_patch(
+        data: ToolInput, _on_update: Callable[[str], None] | None = None
+    ) -> str:
         patch_text = _patch_text(data)
         hunks = parse_patch(patch_text)
         changes = _plan_changes(root, ops, hunks)

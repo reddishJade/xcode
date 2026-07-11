@@ -209,9 +209,7 @@ class TreeSessionRepo:
         """回退指定轮次：将 head_id 往回移动。"""
         with self._lock:
             branch = self.build_branch()
-            user_indices = [
-                i for i, e in enumerate(branch) if e.type == "user"
-            ]
+            user_indices = [i for i, e in enumerate(branch) if e.type == "user"]
             if not user_indices:
                 return 0
             target_idx = max(0, len(user_indices) - turns)
@@ -281,11 +279,15 @@ class TreeSessionRepo:
         if existing is not None:
             return existing
         now = datetime.now(UTC).isoformat(timespec="seconds")
-        title = _make_title(first_user_text) if first_user_text else "Untitled conversation"
+        title = (
+            _make_title(first_user_text) if first_user_text else "Untitled conversation"
+        )
         meta = TreeMetadata(
             id=self._session_id(self.current_path),
             title=title,
-            summary=_make_initial_summary(first_user_text) if first_user_text else "Conversation started.",
+            summary=_make_initial_summary(first_user_text)
+            if first_user_text
+            else "Conversation started.",
             project_path=str(self.project_root),
             transcript_path=str(self.current_path),
             created_at=now,
@@ -365,10 +367,13 @@ class TreeSessionRepo:
         for e in raw:
             if e.type == "user":
                 text = str(e.content)
-            elif (e.type == "event" and isinstance(e.content, dict)
-                  and e.content.get("type") == "message_start"
-                  and isinstance(e.content.get("data"), dict)
-                  and e.content.get("data", {}).get("role") == "user"):
+            elif (
+                e.type == "event"
+                and isinstance(e.content, dict)
+                and e.content.get("type") == "message_start"
+                and isinstance(e.content.get("data"), dict)
+                and e.content.get("data", {}).get("role") == "user"
+            ):
                 text = str(e.content.get("data", {}).get("content", ""))
             else:
                 continue
@@ -385,7 +390,9 @@ class TreeSessionRepo:
         self._save_head_id(entry_id)
         return True
 
-    def fork_from_entry(self, entry_id: str, title: str = "", summary: str = "") -> TreeSessionRepo:
+    def fork_from_entry(
+        self, entry_id: str, title: str = "", summary: str = ""
+    ) -> TreeSessionRepo:
         """从指定 entry 分叉：新建会话，只保留从该 entry 到 head 的路径。"""
         entries = self.read_entries()
         by_id = {e.id: e for e in entries}
@@ -406,15 +413,20 @@ class TreeSessionRepo:
 
         parent = self.ensure_metadata()
         fork_path = self._new_path()
-        entry_parent = by_id[entry_id].parent_id
         with fork_path.open("w", encoding="utf-8") as f:
             for e in entries:
                 if e.id in branch_ids:
                     pid = None if e.id == entry_id else e.parent_id
-                    f.write(TreeEntryModel(
-                        id=e.id, parent_id=pid, type=e.type,
-                        content=e.content, created_at=e.created_at,
-                    ).model_dump_json() + "\n")
+                    f.write(
+                        TreeEntryModel(
+                            id=e.id,
+                            parent_id=pid,
+                            type=e.type,
+                            content=e.content,
+                            created_at=e.created_at,
+                        ).model_dump_json()
+                        + "\n"
+                    )
         now = datetime.now(UTC).isoformat(timespec="seconds")
         meta = TreeMetadata(
             id=self._session_id(fork_path),
@@ -734,16 +746,20 @@ def _truncate(text: str, limit: int) -> str:
     return text[: max(0, limit - 1)].rstrip() + "…"
 
 
-_NOISY_EVENT_TYPES = frozenset({
-    "message_start", "message_stop",
-    "reasoning_delta", "text_delta",
-    "assistant",  # AssistantStructuredEvent — block list，无用
-    "turn_end",    # 内部 bookkeeping
-    "final",       # 同上
-    "tool_update", # 进度更新，无意义
-    "tool_use",    # 树只看 user/assistant 消息
-    "tool_result",
-})
+_NOISY_EVENT_TYPES = frozenset(
+    {
+        "message_start",
+        "message_stop",
+        "reasoning_delta",
+        "text_delta",
+        "assistant",  # AssistantStructuredEvent — block list，无用
+        "turn_end",  # 内部 bookkeeping
+        "final",  # 同上
+        "tool_update",  # 进度更新，无意义
+        "tool_use",  # 树只看 user/assistant 消息
+        "tool_result",
+    }
+)
 
 
 def _is_noisy_event(e: SessionEntry) -> bool:
@@ -779,8 +795,11 @@ def _filter_tree_entries(
             pid = by_id[pid].parent_id if pid in by_id else None
         if pid != e.parent_id:
             e = SessionEntry(
-                id=e.id, parent_id=pid, type=e.type,
-                content=e.content, created_at=e.created_at,
+                id=e.id,
+                parent_id=pid,
+                type=e.type,
+                content=e.content,
+                created_at=e.created_at,
             )
         reparented.append(e)
 
@@ -816,7 +835,9 @@ def _node_label(e: SessionEntry, child_count: int) -> str:
                 return f"{sub}: {_truncate(content, 50)}"
             if "name" in data:
                 return f"{sub}: {data['name']}"
-            data_str = _collapse_text(str({k: v for k, v in data.items() if k != "input"}))
+            data_str = _collapse_text(
+                str({k: v for k, v in data.items() if k != "input"})
+            )
         else:
             data_str = _collapse_text(str(data)) if data else ""
         if data_str:

@@ -14,7 +14,9 @@ from xcode.agent.types import ToolInput, ToolSpec
 def build_question_tool() -> ToolSpec:
     """构建向用户收集选择的工具。"""
 
-    def question(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
+    def question(
+        data: ToolInput, _on_update: Callable[[str], None] | None = None
+    ) -> str:
         if not sys.stdin.isatty():
             return (
                 "Cannot ask questions in non-interactive mode. Please rephrase "

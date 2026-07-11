@@ -63,10 +63,19 @@ class ExecutionModeState:
 class PlanPolicy:
     """plan: 只读分析，可维护 .xcode/plans/*.md 计划文件。"""
 
-    _PLAN_TOOLS = frozenset({
-        "read_file", "glob_files", "find_files", "list_dir", "grep_search",
-        "search_tools", "webfetch", "websearch", "question",
-    })
+    _PLAN_TOOLS = frozenset(
+        {
+            "read_file",
+            "glob_files",
+            "find_files",
+            "list_dir",
+            "grep_search",
+            "search_tools",
+            "webfetch",
+            "websearch",
+            "question",
+        }
+    )
 
     def filter_tools(self, tools: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]:
         return tuple(

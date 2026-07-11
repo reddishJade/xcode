@@ -8,7 +8,12 @@ from xcode.agent._compaction import (
     should_compact_token_aware,
     extract_prompt_tokens_from_usage,
 )
-from xcode.agent.messages import AssistantMessage, SystemMessage, ToolResultMessage, UserMessage
+from xcode.agent.messages import (
+    AssistantMessage,
+    SystemMessage,
+    ToolResultMessage,
+    UserMessage,
+)
 from xcode.agent.types import TextContent, ThinkingContent, ToolCallContent
 
 
@@ -40,7 +45,9 @@ class TestEstimateMessageTokens:
     def test_assistant_tool_call(self) -> None:
         msgs = [
             AssistantMessage(
-                content=[ToolCallContent(id="c1", name="get", arguments={"key": "val"})],
+                content=[
+                    ToolCallContent(id="c1", name="get", arguments={"key": "val"})
+                ],
                 stop_reason="tool_use",
             )
         ]
@@ -49,7 +56,9 @@ class TestEstimateMessageTokens:
     def test_mixed_messages(self) -> None:
         msgs = [
             UserMessage(content="hello"),
-            AssistantMessage(content=[TextContent(text="world")], stop_reason="end_turn"),
+            AssistantMessage(
+                content=[TextContent(text="world")], stop_reason="end_turn"
+            ),
             ToolResultMessage(tool_call_id="c1", tool_name="t", content="result"),
         ]
         assert estimate_message_tokens(msgs) > 0

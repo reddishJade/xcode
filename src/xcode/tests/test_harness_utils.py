@@ -118,7 +118,13 @@ class TestAccessSatisfies:
 
 class TestCreateGrantRecord:
     def test_basic(self) -> None:
-        action = Action(tool="read_file", capability="read", operation="read_file", targets=(), input={})
+        action = Action(
+            tool="read_file",
+            capability="read",
+            operation="read_file",
+            targets=(),
+            input={},
+        )
         target = Target(kind="path", value="src/main.py", access="read")
         record = create_grant_record(action, target, decision="allow", scope="session")
         assert isinstance(record, GrantRecord)

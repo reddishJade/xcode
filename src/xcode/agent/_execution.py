@@ -24,7 +24,11 @@ from xcode.agent.events import (
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
 )
-from xcode.agent.messages import AssistantMessage, ToolResultMessage, ToolResultMessageContent
+from xcode.agent.messages import (
+    AssistantMessage,
+    ToolResultMessage,
+    ToolResultMessageContent,
+)
 from xcode.agent.types import (
     AgentTool,
     AgentToolResult,

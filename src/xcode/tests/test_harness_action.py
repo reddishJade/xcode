@@ -79,5 +79,7 @@ class TestFilesystemCommandPathArguments:
         assert "file.txt" in paths
 
     def test_chain_operator_stops(self) -> None:
-        paths = _filesystem_command_path_arguments("cat", ["a.txt", "&&", "rm", "b.txt"])
+        paths = _filesystem_command_path_arguments(
+            "cat", ["a.txt", "&&", "rm", "b.txt"]
+        )
         assert "b.txt" not in paths
