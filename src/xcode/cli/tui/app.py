@@ -56,7 +56,7 @@ from ..repl_tools import (
 from .state import _HitlRequest, _LogEntry, _TuiState
 from xcode.harness.session import SessionStore
 from xcode.harness.snapshot import SnapshotStore, SnapshotUnsupportedError
-from .widgets import TuiInputLexer, TuiPromptSession
+from .widgets import TuiInputLexer, TuiPromptSession, tui_input_prompt
 
 from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
@@ -191,13 +191,18 @@ class _XcodeTui:
                 )
             ),
         )
+        input_visible = Condition(
+            lambda: self._state.pending_hitl is None or self._awaiting_denial_suggestion
+        )
         self._input_container = ConditionalContainer(
-            self._input,
-            filter=Condition(
-                lambda: (
-                    self._state.pending_hitl is None or self._awaiting_denial_suggestion
-                )
+            HSplit(
+                [
+                    Window(height=1, char="─", style="class:input-border"),
+                    self._input,
+                    Window(height=1, char="─", style="class:input-border"),
+                ]
             ),
+            filter=input_visible,
         )
         self._status = Window(
             FormattedTextControl(text=self._status_text),
@@ -248,6 +253,8 @@ class _XcodeTui:
                     ),
                     "radio-selected": "ansicyan bold",
                     "status": "ansibrightblack",
+                    "input-border": "ansibrightblack",
+                    "prompt-marker": "ansiyellow bold",
                 }
             ),
             input=input,
@@ -279,17 +286,6 @@ class _XcodeTui:
         self._refresh()
 
     def run(self) -> int:
-        info = self._agent_app.get_model_info()
-        self._state.log.insert(
-            0,
-            _LogEntry(
-                "system",
-                "Xcode  •  "
-                f"model: {info.get('model', 'unknown')}  •  "
-                "Ctrl+T thinking  •  Ctrl+O tools  •  /help commands",
-            ),
-        )
-        self._refresh()
         self._application.run()
         return 0
 
@@ -307,10 +303,13 @@ class _XcodeTui:
             skill_options=lambda: available_skill_names(self._agent_app),
         )
 
-    def _input_prompt(self) -> str:
-        if self._awaiting_denial_suggestion:
-            return "Tell model what to do > "
-        return "> "
+    def _input_prompt(self) -> FormattedText:
+        return FormattedText(
+            tui_input_prompt(
+                self._awaiting_denial_suggestion,
+                self._input.text.startswith("!"),
+            )
+        )
 
     # ── 键绑定 ──
 
@@ -734,10 +733,14 @@ class _XcodeTui:
             else 0
         )
         input_height = min(5, max(1, self._input.text.count("\n") + 1))
+        input_visible = (
+            self._state.pending_hitl is None or self._awaiting_denial_suggestion
+        )
         return max(
             1,
             self._application.output.get_size().rows
             - input_height
+            - (2 if input_visible else 0)
             - 1
             - approval_height,
         )
