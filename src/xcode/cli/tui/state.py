@@ -21,6 +21,7 @@ from .rendering import (
     render_line_fragments,
     visible_lines,
 )
+from xcode.harness.observability.shell_analyzer import analyze_shell_command
 
 if TYPE_CHECKING:
     from xcode.harness.agent_runtime.events import (
@@ -46,10 +47,19 @@ class _HitlRequest:
 
 
 @dataclass
+class _ExplorationCall:
+    tool_id: str
+    label: str
+    complete: bool = False
+    failed: bool = False
+
+
+@dataclass
 class _LogEntry:
     role: str = "system"
     text: str = ""
     markdown: bool = False
+    exploration_calls: list[_ExplorationCall] = field(default_factory=list)
 
 
 @dataclass
@@ -215,14 +225,19 @@ class _TuiState:
     ) -> None:
         """按工具组渲染日志，并只在当前工具组显示折叠提示。"""
         latest_tool_index = max(
-            (index for index, entry in enumerate(self.log) if entry.role == "tool"),
+            (
+                index
+                for index, entry in enumerate(self.log)
+                if entry.role in {"tool", "exploration"}
+            ),
             default=-1,
         )
         latest_detail_index = max(
             (
                 index
                 for index, entry in enumerate(self.log)
-                if index > latest_tool_index and entry.role == "tool-detail"
+                if index > latest_tool_index
+                and entry.role in {"tool-detail", "exploration"}
             ),
             default=-1,
         )
@@ -233,7 +248,11 @@ class _TuiState:
                 md_fn,
                 show_tool_expand=(self.tool_collapsed and index == latest_tool_index),
                 show_tool_collapse=(
-                    not self.tool_collapsed and index == latest_detail_index
+                    not self.tool_collapsed
+                    and (
+                        index == latest_detail_index
+                        or (entry.role == "exploration" and index == latest_tool_index)
+                    )
                 ),
             )
 
@@ -247,7 +266,7 @@ class _TuiState:
     ) -> None:
         if entry.role == "tool-detail" and self.tool_collapsed:
             return
-        if lines and entry.role not in {"tool", "tool-detail"}:
+        if lines and entry.role not in {"tool", "tool-detail", "exploration"}:
             lines.append("")
         if entry.role == "you":
             user_lines = entry.text.splitlines() or [""]
@@ -257,6 +276,19 @@ class _TuiState:
         elif entry.role == "tool":
             suffix = " (ctrl+o to expand)" if show_tool_expand else ""
             lines.append(f"{entry.text}{suffix}")
+        elif entry.role == "exploration":
+            active = any(not call.complete for call in entry.exploration_calls)
+            title = "• Exploring" if active else "• Explored"
+            if self.tool_collapsed:
+                suffix = " (ctrl+o to expand)" if show_tool_expand else ""
+                lines.append(f"{title}{suffix}")
+                return
+            lines.append(title)
+            for call in entry.exploration_calls:
+                suffix = " — failed" if call.failed else ""
+                lines.append(f"  └ {call.label}{suffix}")
+            if show_tool_collapse and entry.exploration_calls:
+                lines[-1] += " (ctrl+o to collapse)"
         elif entry.role in {"", "tool-detail"}:
             detail_lines = entry.text.splitlines() or [""]
             if show_tool_collapse:
@@ -334,6 +366,11 @@ class _TuiState:
             self.log.append(_LogEntry("xcode", delta, markdown=True))
 
     def _record_tool_use(self, tool_id: str, name: str, raw_input: ToolInput) -> None:
+        if _is_exploration_call(name, raw_input):
+            self._record_exploration_call(
+                _ExplorationCall(tool_id, _exploration_label(name, raw_input))
+            )
+            return
         self.tool_names[tool_id] = name
         label = brief_input(name, raw_input)
         if name == "list_dir":
@@ -355,14 +392,34 @@ class _TuiState:
             self.log.append(_LogEntry("tool-detail", f"  ⎿  {text.strip()}"))
 
     def _record_tool_result(self, tool_id: str, status: str, content: str) -> None:
-        self.tool_names.pop(tool_id, None)
+        exploration = self._find_exploration_call(tool_id)
+        if exploration is not None:
+            exploration.complete = True
+            exploration.failed = status != "ok"
+            return
+        name = self.tool_names.pop(tool_id, "")
         if status == "ok":
-            detail = content.rstrip() or "done"
+            detail = _successful_tool_detail(name, content)
             self.log.append(_LogEntry("tool-detail", f"  ⎿  {detail}"))
             return
         self.log.append(
             _LogEntry("tool-detail", f"  ⎿  ✗ {single_line_preview(content)}")
         )
+
+    def _record_exploration_call(self, call: _ExplorationCall) -> None:
+        if self.log and self.log[-1].role == "exploration":
+            self.log[-1].exploration_calls.append(call)
+            return
+        self.log.append(_LogEntry("exploration", exploration_calls=[call]))
+
+    def _find_exploration_call(self, tool_id: str) -> _ExplorationCall | None:
+        for entry in reversed(self.log):
+            if entry.role != "exploration":
+                continue
+            for call in reversed(entry.exploration_calls):
+                if call.tool_id == tool_id:
+                    return call
+        return None
 
     def _handle_tool_update(self, tool_name: str, partial: str) -> None:
         if tool_name == "subagent":
@@ -420,3 +477,103 @@ class _TuiState:
                 )
             self.log.append(_LogEntry("thinking", text))
         self.thinking_core.reset()
+
+
+def _successful_tool_detail(name: str, content: str) -> str:
+    """为成功工具调用生成紧凑详情，shell 保留可见输出。"""
+    text = content.rstrip()
+    if name in {"bash", "hypa_shell", "shell"}:
+        return _tool_output_preview(text) if text else "done"
+    if name == "read_file":
+        count = sum(bool(re.match(r"^\d+: ", line)) for line in content.splitlines())
+        return f"Read {count} lines"
+    if name == "list_dir":
+        entries = [
+            line.strip()
+            for line in content.splitlines()
+            if line.strip() and not line.lstrip().startswith("...")
+        ]
+        if entries == ["(empty directory)"]:
+            entries = []
+        directories = sum(line.endswith("/") for line in entries)
+        return f"{len(entries) - directories} files, {directories} directories"
+    if name in {"glob_files", "find_files"}:
+        return f"{len([line for line in content.splitlines() if line.strip()])} matches"
+    if name == "grep_search":
+        if "no matches" in content.lower():
+            return "No matches found"
+        matches = sum(bool(re.search(r":\d+:", line)) for line in content.splitlines())
+        return f"{matches} matches"
+    return "done"
+
+
+def _is_exploration_call(name: str, raw_input: ToolInput) -> bool:
+    """判断 agent 工具调用是否可安全归入只读探索组。"""
+    if name in {"read_file", "list_dir", "grep_search", "glob_files", "find_files"}:
+        return True
+    if name != "bash":
+        return False
+    command = raw_input.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return False
+    analysis = analyze_shell_command(command)
+    return (
+        analysis.ast_available
+        and not analysis.parse_error
+        and analysis.primary_command
+        in {
+            "cat",
+            "head",
+            "tail",
+            "less",
+            "more",
+            "ls",
+            "dir",
+            "rg",
+            "grep",
+            "ack",
+            "find",
+        }
+        and not analysis.unresolved_effects
+        and all(path.access == "read" for path in analysis.resolved_paths)
+    )
+
+
+def _exploration_label(name: str, raw_input: ToolInput) -> str:
+    """生成探索组中简洁且稳定的调用标题。"""
+    if name == "bash":
+        command = str(raw_input.get("command", ""))
+        primary = analyze_shell_command(command).primary_command
+        prefix = {
+            "rg": "Search",
+            "grep": "Search",
+            "ack": "Search",
+            "ls": "List",
+            "dir": "List",
+            "find": "List",
+        }.get(primary, "Read")
+        return f"{prefix} {single_line_preview(command)}"
+    label = brief_input(name, raw_input)
+    if name in {"grep_search", "grep", "rg", "ack"}:
+        return f"Search {label.removeprefix('grep ')}"
+    if name in {"glob_files", "find_files", "find", "list_dir", "ls", "dir"}:
+        return f"List {label.removeprefix('glob ').removeprefix('ls ')}"
+    if name in {"read_file", "read", "cat", "head", "tail", "less", "more"}:
+        return f"Read {label.removeprefix('read ')}"
+    return label[:1].upper() + label[1:]
+
+
+def _tool_output_preview(content: str) -> str:
+    """限制 shell 输出，避免单次命令占满 TUI。"""
+    max_lines = 6
+    max_chars = 800
+    lines = content.splitlines()
+    preview_lines = lines[:max_lines]
+    preview = "\n".join(preview_lines)
+    if len(preview) > max_chars:
+        preview = preview[:max_chars].rstrip()
+    if len(lines) > max_lines:
+        return f"{preview}\n  … {len(lines) - max_lines} lines omitted"
+    if len(content) > len(preview):
+        return f"{preview}\n  … output truncated"
+    return preview

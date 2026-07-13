@@ -30,7 +30,6 @@ from prompt_toolkit.layout import Float, FloatContainer
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.output.base import Output
-from prompt_toolkit.shortcuts import print_formatted_text
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import RadioList, TextArea
 
@@ -710,13 +709,9 @@ class _XcodeTui:
         self._schedule_turn_commit()
 
     def _schedule_turn_commit(self) -> None:
-        loop = self._application.loop
-        if loop is None:
-            return
-        self._committing = True
-        loop.call_soon_threadsafe(
-            lambda: self._application.create_background_task(self._commit_turn())
-        )
+        """保留回合内容，允许完成后继续折叠和滚动查看。"""
+        self._committing = False
+        self._refresh()
 
     def _save_partial_answer(self) -> None:
         """将中断前已经流式显示的回答写入会话，供恢复和后续注入使用。"""
@@ -726,23 +721,6 @@ class _XcodeTui:
         if partial:
             self._store.append("assistant", partial)
             self._store.update_summary()
-
-    async def _commit_turn(self) -> None:
-        transcript = FormattedText(self._state.fragments())
-        await run_in_terminal(
-            lambda: print_formatted_text(
-                transcript,
-                end="",
-                style=self._application.style,
-                output=self._application.output,
-            )
-        )
-        self._state.log.clear()
-        self._state.tool_names.clear()
-        self._state.subagents.clear()
-        self._scrollback = 0
-        self._committing = False
-        self._refresh()
 
     # ── 刷新 ──
 
