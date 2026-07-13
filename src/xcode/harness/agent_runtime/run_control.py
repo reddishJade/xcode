@@ -78,7 +78,7 @@ class ActiveRunHandle:
         self._lock = Lock()
         self._finished = Event()
 
-    def steer(self, message: UserMessage) -> SubmitOutcome:
+    def steer(self, message: AgentMessage) -> SubmitOutcome:
         """尝试把消息加入当前 run 的下一安全边界。"""
         with self._lock:
             if self._state is not ActiveRunState.RUNNING:

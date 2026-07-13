@@ -575,11 +575,9 @@ def cmd_steer(cmd: str, ctx: CommandContext) -> bool:
         print("Usage: /steer <message>")
         return False
     msg = parts[1].strip()
-    agent = getattr(ctx.app, "agent", None)
     from xcode.agent.messages import UserMessage
 
-    try_steer = getattr(agent, "try_steer", None)
-    if callable(try_steer) and try_steer(UserMessage(content=msg)):
+    if ctx.app.agent.try_steer(UserMessage(content=msg)):
         ctx.store.append("user", msg)
         print("[steer] injected into the active run")
     else:
@@ -603,13 +601,9 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
         print(f"Busy-message mode set to {msg}.")
         return False
 
-    agent = getattr(ctx.app, "agent", None)
-    if agent is None or not hasattr(agent, "follow_up"):
-        print("No active agent to queue message.")
-        return False
     from xcode.agent.messages import UserMessage
 
-    queued = agent.follow_up(UserMessage(content=msg))
+    queued = ctx.app.agent.follow_up(UserMessage(content=msg))
     if queued is False:
         ctx.state.pending_inject = msg
         print("[queued] no active run; sending as a normal message")

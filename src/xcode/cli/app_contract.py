@@ -29,7 +29,9 @@ class ReplAgent(Protocol):
 
     cancellation_token: CancellationToken
 
-    def follow_up(self, msg: AgentMessage) -> bool: ...
+    def try_steer(self, msg: UserMessage) -> bool: ...
+
+    def follow_up(self, msg: UserMessage) -> bool: ...
 
     def submit_busy_message(
         self,

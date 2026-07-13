@@ -444,14 +444,7 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
             turn.handle_event(event)
     except KeyboardInterrupt:
         turn.interrupted = True
-        agent = getattr(ctx.app, "agent", None)
-        interrupt = getattr(agent, "interrupt", None)
-        if callable(interrupt):
-            interrupt("interrupted by user")
-        else:
-            token = getattr(agent, "cancellation_token", None)
-            if token is not None:
-                token.cancel("interrupted by user")
+        ctx.app.agent.interrupt("interrupted by user")
         turn.clear_line()
         ctx.store.append(
             "event", {"type": "interrupted", "data": "interrupted by user"}

@@ -3,7 +3,7 @@
 Xcode 的类型化 Agent 循环。模块本身不持有运行状态。
 
 **循环设计原因**：
-- 外层循环（步骤限制 + follow-up 队列）：防止无限递归，支持多轮对话延续
+- 外层循环（步骤限制）：防止单次 run 无限执行
 - 内层循环（compact → 模型调用 → 错误重试 → max_tokens 续写）：应对上下文溢出和部分生成
 - 可注入设计：所有外部依赖（provider、工具、hooks）通过参数注入，便于测试和替换
 
@@ -100,7 +100,6 @@ async def run_agent_loop(
     steer_queue: Callable[[], list[AgentMessage]] | None = None,
     finish_steering: Callable[[], list[AgentMessage]] | None = None,
     reopen_steering: Callable[[], None] | None = None,
-    follow_up_queue: list[AgentMessage] | None = None,
 ) -> AgentLoopResult:
     """运行 agent 核心循环。
 
@@ -127,7 +126,6 @@ async def run_agent_loop(
         steer_queue=steer_queue,
         finish_steering=finish_steering,
         reopen_steering=reopen_steering,
-        follow_up_queue=follow_up_queue,
     )
 
 
@@ -143,11 +141,10 @@ async def _run_loop(
     steer_queue: Callable[[], list[AgentMessage]] | None = None,
     finish_steering: Callable[[], list[AgentMessage]] | None = None,
     reopen_steering: Callable[[], None] | None = None,
-    follow_up_queue: list[AgentMessage] | None = None,
 ) -> AgentLoopResult:
     """核心 agent 循环。
 
-    外层：步骤限制 + follow-up 队列驱动
+    外层：步骤限制
     内层：compact → 模型调用 → 重试 → max_tokens → 工具执行 → watchdog
     """
     metrics = AgentLoopMetrics()
@@ -177,9 +174,6 @@ async def _run_loop(
             emit(_turn_start_event())
         else:
             state.first_turn = False
-
-        # ── 处理 pending messages ──
-        _drain_pending_messages(current_context, new_messages, state, emit)
 
         # ── 压缩检查 ──
         if config.should_compact and config.compact:
@@ -269,11 +263,6 @@ async def _run_loop(
                         reopen_steering()
                     continue
 
-            # 检查 follow-up 队列
-            if _queue_follow_up(state, follow_up_queue):
-                if reopen_steering is not None:
-                    reopen_steering()
-                continue
             return _finish_loop(
                 new_messages,
                 step,
@@ -346,11 +335,7 @@ async def _run_loop(
                     emit,
                 )
 
-        # ── 处理 follow-up 队列 ──
-        if _queue_follow_up(state, follow_up_queue):
-            continue
-
-        # 工具已执行但没有 follow-up，继续内层循环（下一轮工具调用）
+        # 工具已执行，继续内层循环（下一轮工具调用）
         if not executed.terminate:
             continue
 
@@ -412,36 +397,6 @@ def _append_messages(
     for msg in messages:
         current_context.messages.append(msg)
         new_messages.append(msg)
-
-
-def _drain_pending_messages(
-    current_context: AgentContext,
-    new_messages: list[AgentMessage],
-    state: _LoopRunState,
-    emit: Callable[[AgentEvent], None],
-) -> None:
-    if not state.pending_messages:
-        return
-    for msg in state.pending_messages:
-        emit(_message_start_event(msg))
-        emit(_message_end_event(msg))
-        current_context.messages.append(msg)
-        new_messages.append(msg)
-    state.pending_messages = []
-
-
-def _queue_follow_up(
-    state: _LoopRunState,
-    follow_up_queue: list[AgentMessage] | None,
-) -> bool:
-    if not follow_up_queue:
-        return False
-    msgs = list(follow_up_queue)
-    if not msgs:
-        return False
-    follow_up_queue.clear()
-    state.pending_messages = msgs
-    return True
 
 
 def _append_tool_results(

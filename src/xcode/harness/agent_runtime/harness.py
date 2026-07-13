@@ -149,7 +149,6 @@ class AgentHarness:
         self.audit_logger = gate.audit_logger
         self._history: list[AgentMessage] = []
         self._resumed_notice: str | None = None
-        self._active_agent: Agent | None = None
         self._run_controller = SessionRunController(gate.session_id)
 
     # ── 可被子类覆盖的扩展点 ──
@@ -212,19 +211,21 @@ class AgentHarness:
         return {tool.name: tool for tool in self.registry}
 
     def steer(self, msg: AgentMessage) -> None:
-        self.try_steer(msg)
+        self._try_runtime_steer(msg)
 
-    def try_steer(self, msg: AgentMessage) -> bool:
-        """尝试向当前活跃 run 注入消息。"""
-        if not isinstance(msg, UserMessage):
-            return False
+    def _try_runtime_steer(self, msg: AgentMessage) -> bool:
+        """注入运行时内部消息，包括 reminder 和 SystemMessage。"""
         handle = self.active_run()
         return bool(handle and handle.steer(msg).accepted)
 
-    def follow_up(self, msg: AgentMessage) -> bool:
-        """把用户消息排入当前 run 结束后的新 run。"""
+    def try_steer(self, msg: AgentMessage) -> bool:
+        """尝试向当前活跃 run 注入外部用户消息。"""
         if not isinstance(msg, UserMessage):
             return False
+        return self._try_runtime_steer(msg)
+
+    def follow_up(self, msg: UserMessage) -> bool:
+        """把用户消息排入当前 run 结束后的新 run。"""
         return self._run_controller.submit(msg, BusyMessageMode.FOLLOW_UP).accepted
 
     def submit_busy_message(
@@ -369,8 +370,6 @@ class AgentHarness:
 
         run_handle = self._run_controller.begin_run(turn_agent, self.cancellation_token)
         try:
-            self._agent = turn_agent
-            self._active_agent = turn_agent
             self.cancellation_token.reset()
             self._correlation.reset(self.session_id)
 
@@ -425,8 +424,6 @@ class AgentHarness:
             run_handle.begin_finishing()
             unconsumed_steers = turn_agent.close_steering()
             self._run_controller.complete_run(run_handle, unconsumed_steers)
-            if self._active_agent is turn_agent:
-                self._active_agent = None
 
     # ── 内部 ──
 

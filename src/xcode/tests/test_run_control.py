@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from xcode.agent.agent import Agent
-from xcode.agent.messages import UserMessage
+from xcode.agent.messages import SystemMessage, UserMessage
 from xcode.harness.agent_runtime.cancellation import CancellationToken
 from xcode.harness.agent_runtime.run_control import (
     ActiveRunState,
@@ -47,6 +47,17 @@ def test_steer_is_bound_to_active_run() -> None:
 
     assert outcome.status is SubmitStatus.STEER_ACCEPTED
     assert agent._drain_steer_queue() == [UserMessage(content="change direction")]
+
+
+def test_internal_system_steer_is_preserved() -> None:
+    controller, agent, _ = _begin()
+    handle = controller.active_run()
+    assert handle is not None
+
+    outcome = handle.steer(SystemMessage(content="runtime reminder"))
+
+    assert outcome.status is SubmitStatus.STEER_ACCEPTED
+    assert agent._drain_steer_queue() == [SystemMessage(content="runtime reminder")]
 
 
 def test_late_steer_falls_back_to_next_run() -> None:
