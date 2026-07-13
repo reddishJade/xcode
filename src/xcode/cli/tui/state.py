@@ -355,26 +355,9 @@ class _TuiState:
             self.log.append(_LogEntry("tool-detail", f"  ⎿  {text.strip()}"))
 
     def _record_tool_result(self, tool_id: str, status: str, content: str) -> None:
-        name = self.tool_names.pop(tool_id, "")
+        self.tool_names.pop(tool_id, None)
         if status == "ok":
-            detail = "done"
-            if name == "list_dir":
-                entries = [
-                    line.strip()
-                    for line in content.splitlines()
-                    if line.strip() and not line.lstrip().startswith("...")
-                ]
-                if entries == ["(empty directory)"]:
-                    entries = []
-                directories = sum(line.endswith("/") for line in entries)
-                detail = (
-                    f"{len(entries) - directories} files, {directories} directories"
-                )
-            elif name == "read_file":
-                count = sum(
-                    bool(re.match(r"^\d+: ", line)) for line in content.splitlines()
-                )
-                detail = f"Read {count} lines"
+            detail = content.rstrip() or "done"
             self.log.append(_LogEntry("tool-detail", f"  ⎿  {detail}"))
             return
         self.log.append(

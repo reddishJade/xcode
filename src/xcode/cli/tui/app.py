@@ -163,9 +163,6 @@ class _XcodeTui:
             dont_extend_height=True,
         )
         completer = self._make_completer()
-        input_bindings = KeyBindings()
-        input_bindings.add("c-t", eager=True)(self._toggle_thinking_key)
-        input_bindings.add("c-o", eager=True)(self._toggle_tools_key)
         self._input = TextArea(
             height=lambda: Dimension.exact(self._input_height()),
             prompt=self._input_prompt,
@@ -176,7 +173,6 @@ class _XcodeTui:
             auto_suggest=CommandArgsSuggester(completer.command_args),
             history=_tui_history(project_root),
         )
-        self._input.control.key_bindings = input_bindings
         self._input.buffer.on_text_insert += lambda _buf: setattr(
             self._input.buffer, "complete_state", None
         )
@@ -347,6 +343,9 @@ class _XcodeTui:
         bindings.add(Keys.ScrollUp)(self._scroll_up_key)
         bindings.add(Keys.ScrollDown)(self._scroll_down_key)
         bindings.add("?")(self._show_shortcuts_key)
+        # 折叠快捷键必须是应用级绑定：焦点可能在授权列表等非输入控件。
+        bindings.add("c-t", eager=True)(self._toggle_thinking_key)
+        bindings.add("c-o", eager=True)(self._toggle_tools_key)
         bindings.add("c-q")(self._quit_key)
         bindings.add("c-c")(self._cancel_key)
         return bindings
