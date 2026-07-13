@@ -702,7 +702,6 @@ class _XcodeTui:
         else:
             self._save_partial_answer()
 
-        self._scrollback = 0
         self._refresh()
 
         _exit_snapshot_ctx(snapshot, _snapshot_ctx, self._store.session_id, tool_names)
