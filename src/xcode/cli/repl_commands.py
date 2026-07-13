@@ -576,14 +576,15 @@ def cmd_steer(cmd: str, ctx: CommandContext) -> bool:
         return False
     msg = parts[1].strip()
     agent = getattr(ctx.app, "agent", None)
-    if agent is None or not hasattr(agent, "steer"):
-        print("No active agent to steer.")
-        return False
     from xcode.agent.messages import UserMessage
 
-    agent.steer(UserMessage(content=msg))
-    ctx.store.append("user", f"[steer] {msg}")
-    print("[steer] injected")
+    try_steer = getattr(agent, "try_steer", None)
+    if callable(try_steer) and try_steer(UserMessage(content=msg)):
+        ctx.store.append("user", f"[steer] {msg}")
+        print("[steer] injected into the active run")
+    else:
+        ctx.state.pending_inject = msg
+        print("[steer] no active run; sending as a normal message")
     return False
 
 

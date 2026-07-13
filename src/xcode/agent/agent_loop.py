@@ -97,7 +97,7 @@ async def run_agent_loop(
     config: AgentLoopConfig,
     emit: Callable[[AgentEvent], None],
     signal: CancellationSignal | None = None,
-    steer_queue: list[AgentMessage] | None = None,
+    steer_queue: Callable[[], list[AgentMessage]] | None = None,
     follow_up_queue: list[AgentMessage] | None = None,
 ) -> AgentLoopResult:
     """运行 agent 核心循环。
@@ -136,7 +136,7 @@ async def _run_loop(
     config: AgentLoopConfig,
     emit: Callable[[AgentEvent], None],
     signal: CancellationSignal | None = None,
-    steer_queue: list[AgentMessage] | None = None,
+    steer_queue: Callable[[], list[AgentMessage]] | None = None,
     follow_up_queue: list[AgentMessage] | None = None,
 ) -> AgentLoopResult:
     """核心 agent 循环。
@@ -375,12 +375,11 @@ def _finish_loop(
 def _append_steering_messages(
     current_context: AgentContext,
     new_messages: list[AgentMessage],
-    steer_queue: list[AgentMessage] | None,
+    steer_queue: Callable[[], list[AgentMessage]] | None,
 ) -> None:
-    if not steer_queue:
+    if steer_queue is None:
         return
-    msgs = list(steer_queue)
-    steer_queue.clear()
+    msgs = steer_queue()
     if not msgs:
         return
     for msg in msgs:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+from threading import Lock
 
 from xcode.ai.providers.base import ModelProvider
 
@@ -67,6 +68,7 @@ class Agent:
         self._model = model
         self._system_prompt = system_prompt
         self._steer_queue: list[AgentMessage] = []
+        self._steer_lock = Lock()
         self._followup_queue: list[AgentMessage] = []
         self._last_result: AgentLoopResult | None = None
         self._last_messages: list[AgentMessage] = []
@@ -80,7 +82,15 @@ class Agent:
         steer 用于循环内中断和调整方向，消息在下一步开始前插入。
         这允许外部代码在工具执行后、模型调用前干预（如注入上下文）。
         """
-        self._steer_queue.append(msg)
+        with self._steer_lock:
+            self._steer_queue.append(msg)
+
+    def _drain_steer_queue(self) -> list[AgentMessage]:
+        """原子地取出等待在下一个循环边界消费的 steer 消息。"""
+        with self._steer_lock:
+            messages = self._steer_queue
+            self._steer_queue = []
+        return messages
 
     def follow_up(self, msg: AgentMessage) -> None:
         """向 followup 队列注入消息（当前循环结束后追加）。
@@ -182,7 +192,7 @@ class Agent:
             config,
             sink,
             signal,
-            steer_queue=self._steer_queue,
+            steer_queue=self._drain_steer_queue,
             follow_up_queue=self._followup_queue,
         )
         self._last_result = result
@@ -220,7 +230,7 @@ class Agent:
                     config,
                     _emit,
                     signal,
-                    steer_queue=self._steer_queue,
+                    steer_queue=self._drain_steer_queue,
                     follow_up_queue=self._followup_queue,
                 )
                 self._last_result = result

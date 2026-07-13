@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
+from threading import Lock
 
 from xcode.ai.providers.base import ModelProvider
 
@@ -143,6 +144,8 @@ class AgentHarness:
         self.audit_logger = gate.audit_logger
         self._history: list[AgentMessage] = []
         self._resumed_notice: str | None = None
+        self._active_agent: Agent | None = None
+        self._active_agent_lock = Lock()
 
     # ── 可被子类覆盖的扩展点 ──
 
@@ -204,7 +207,15 @@ class AgentHarness:
         return {tool.name: tool for tool in self.registry}
 
     def steer(self, msg: AgentMessage) -> None:
-        self._agent.steer(msg)
+        self.try_steer(msg)
+
+    def try_steer(self, msg: AgentMessage) -> bool:
+        """尝试向当前活跃 run 注入消息。"""
+        with self._active_agent_lock:
+            if self._active_agent is None:
+                return False
+            self._active_agent.steer(msg)
+            return True
 
     def follow_up(self, msg: AgentMessage) -> None:
         self._agent.follow_up(msg)
@@ -309,7 +320,10 @@ class AgentHarness:
         history_messages = context_messages + self.history_messages()
         turn_messages: list[AgentMessage] = [UserMessage(content=question)]
 
-        self._agent = Agent(self._gate.adapt_tools(active_registry))
+        turn_agent = Agent(self._gate.adapt_tools(active_registry))
+        self._agent = turn_agent
+        with self._active_agent_lock:
+            self._active_agent = turn_agent
 
         loop_config = build_loop_config(
             snapshot=snapshot,
@@ -345,31 +359,39 @@ class AgentHarness:
         )
 
         translation_state = _StreamTranslationState(correlation=self._correlation)
+        try:
+            async for event in turn_agent.run_stream(
+                turn_messages,
+                loop_config,
+                signal=self.cancellation_token,
+                history=history_messages,
+            ):
+                translated = _translate_event(event, translation_state)
+                if translated is not None:
+                    for te in (
+                        translated if isinstance(translated, list) else [translated]
+                    ):
+                        yield te
 
-        async for event in self._agent.run_stream(
-            turn_messages,
-            loop_config,
-            signal=self.cancellation_token,
-            history=history_messages,
-        ):
-            translated = _translate_event(event, translation_state)
-            if translated is not None:
-                for te in translated if isinstance(translated, list) else [translated]:
-                    yield te
+            result = turn_agent.last_result
+            assert result is not None
 
-        result = self._agent.last_result
-        assert result is not None
+            self._history.extend(result.messages)
+            self._last_prompt_tokens = record_last_prompt_tokens(result.messages)
 
-        self._history.extend(result.messages)
-        self._last_prompt_tokens = record_last_prompt_tokens(result.messages)
-
-        visible_result = (
-            result.model_copy(update={"messages": context_messages + result.messages})
-            if context_messages
-            else result
-        )
-        final = self._build_result(visible_result, snapshot.config.max_steps)
-        self._post_run(final)
+            visible_result = (
+                result.model_copy(
+                    update={"messages": context_messages + result.messages}
+                )
+                if context_messages
+                else result
+            )
+            final = self._build_result(visible_result, snapshot.config.max_steps)
+            self._post_run(final)
+        finally:
+            with self._active_agent_lock:
+                if self._active_agent is turn_agent:
+                    self._active_agent = None
 
         yield _final_event(
             result.steps,

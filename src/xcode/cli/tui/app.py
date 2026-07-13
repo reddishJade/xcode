@@ -390,6 +390,8 @@ class _XcodeTui:
         self._input.text = ""
         self._scrollback = 0
         if self._state.running or self._committing:
+            if self._state.running and _is_live_command(text):
+                self._run_command(text, preserve_running=True)
             return
         self._submit(text)
 
@@ -522,14 +524,16 @@ class _XcodeTui:
         )
         thread.start()
 
-    def _run_command(self, text: str) -> None:
+    def _run_command(self, text: str, *, preserve_running: bool = False) -> None:
+        """执行斜杠命令；实时命令不得结束正在运行的 agent 回合。"""
         if text in {"/clear", "/new"}:
             self._clear_session()
             return
         if self._show_native_command_choice(text):
             return
 
-        self._state.running = True
+        if not preserve_running:
+            self._state.running = True
 
         def invoke(capture_output: bool) -> tuple[bool, str]:
             def handle() -> bool:
@@ -567,7 +571,15 @@ class _XcodeTui:
             )
             if output.strip():
                 self._state.log.append(_LogEntry("system", output.rstrip()))
-            self._finish_command(text, should_exit)
+            if preserve_running:
+                self._refresh()
+                if (
+                    self._repl_state.pending_inject is not None
+                    and not self._state.running
+                ):
+                    self._submit_pending_inject()
+            else:
+                self._finish_command(text, should_exit)
 
         if self._application.loop is None:
             asyncio.run(run_inline())
@@ -1030,6 +1042,7 @@ class _XcodeTui:
         """保留回合内容，允许完成后继续折叠和滚动查看。"""
         self._committing = False
         self._refresh()
+        self._submit_pending_inject()
 
     def _save_partial_answer(self) -> None:
         """将中断前已经流式显示的回答写入会话，供恢复和后续注入使用。"""
@@ -1125,6 +1138,11 @@ class _XcodeTui:
 
 
 # ── 模块级工具函数 ──
+
+
+def _is_live_command(text: str) -> bool:
+    """判断命令是否可以在 agent 回合执行期间提交。"""
+    return text.split(maxsplit=1)[0] == "/steer"
 
 
 def _tui_history(project_root: Path) -> History | None:
