@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import redirect_stdout
+from io import StringIO
 import re
 import sys
 import threading
@@ -13,7 +15,6 @@ from time import perf_counter
 from typing import TYPE_CHECKING, cast
 
 from prompt_toolkit.application import Application
-from prompt_toolkit.application.run_in_terminal import run_in_terminal
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.input.base import Input
@@ -52,7 +53,13 @@ from ..repl_tools import (
     file_reference_event,
     run_shell_shortcut,
 )
-from .state import _HitlRequest, _LogEntry, _TuiState
+from .state import (
+    _CommandChoiceRequest,
+    _CommandTextRequest,
+    _HitlRequest,
+    _LogEntry,
+    _TuiState,
+)
 from xcode.harness.session import SessionStore
 from xcode.harness.snapshot import SnapshotStore, SnapshotUnsupportedError
 from .widgets import TuiInputLexer, TuiPromptSession, tui_input_prompt
@@ -190,6 +197,18 @@ class _XcodeTui:
             KeyBindings, self._approval_choices.control.key_bindings
         )
         approval_bindings.add("enter")(lambda _event: self._accept_approval_choice())
+        self._command_choices: RadioList[object] = RadioList(
+            [(None, "")],
+            show_numbers=True,
+            select_on_focus=True,
+            open_character="",
+            select_character="❯",
+            close_character="",
+            show_cursor=False,
+            show_scrollbar=False,
+        )
+        command_bindings = cast(KeyBindings, self._command_choices.control.key_bindings)
+        command_bindings.add("enter")(lambda _event: self._accept_command_choice())
         self._approval_container = ConditionalContainer(
             self._approval_choices,
             filter=Condition(
@@ -199,8 +218,17 @@ class _XcodeTui:
                 )
             ),
         )
+        self._command_container = ConditionalContainer(
+            self._command_choices,
+            filter=Condition(lambda: self._state.pending_command_choice is not None),
+        )
         input_visible = Condition(
-            lambda: self._state.pending_hitl is None or self._awaiting_denial_suggestion
+            lambda: (
+                self._state.pending_command_choice is None
+                and (
+                    self._state.pending_hitl is None or self._awaiting_denial_suggestion
+                )
+            )
         )
         self._input_container = ConditionalContainer(
             HSplit(
@@ -225,6 +253,7 @@ class _XcodeTui:
                         [
                             self._output,
                             self._approval_container,
+                            self._command_container,
                             self._input_container,
                             self._status,
                         ]
@@ -313,6 +342,9 @@ class _XcodeTui:
         )
 
     def _input_prompt(self) -> FormattedText:
+        request = self._state.pending_command_text
+        if request is not None:
+            return FormattedText([("", f"{request.prompt} > ")])
         return FormattedText(
             tui_input_prompt(
                 self._awaiting_denial_suggestion,
@@ -345,6 +377,10 @@ class _XcodeTui:
 
     def _submit_key(self, _event: object) -> None:
         text = self._input.text.strip()
+        if self._state.pending_command_text is not None:
+            self._input.text = ""
+            self._submit_command_text(text)
+            return
         if self._awaiting_denial_suggestion:
             self._input.text = ""
             self._finish_denial(text)
@@ -405,6 +441,15 @@ class _XcodeTui:
         self._application.exit()
 
     def _cancel_key(self, _event: object) -> None:
+        if self._state.pending_command_choice is not None:
+            self._state.pending_command_choice = None
+            self._application.layout.focus(self._input)
+            self._refresh()
+            return
+        if self._state.pending_command_text is not None:
+            self._state.pending_command_text = None
+            self._refresh()
+            return
         if self._state.pending_hitl is not None:
             self._finish_denial("")
         if self._state.running:
@@ -481,43 +526,275 @@ class _XcodeTui:
         if text in {"/clear", "/new"}:
             self._clear_session()
             return
+        if self._show_native_command_choice(text):
+            return
 
         self._state.running = True
 
-        def invoke() -> bool:
-            return handle_command(
-                text,
-                self._store,
-                self._agent_app,
-                self._markdown_renderer,
-                self._repl_state,
-                self._prompt_session,
-                self._grant_store_manager.get_for_session(self._store.session_id)
-                if self._grant_store_manager is not None
-                else None,
-                self._permanent_grant_store,
-                static_policy=getattr(self._agent_app.agent, "permission_policy", None),
-                restricted_dirs=getattr(self._agent_app.agent, "restricted_dirs", ()),
-                snapshot_store=cast(SnapshotStore | None, self._snapshot_store),
-                show_session_history=True,
-            )
+        def invoke(capture_output: bool) -> tuple[bool, str]:
+            def handle() -> bool:
+                return handle_command(
+                    text,
+                    self._store,
+                    self._agent_app,
+                    self._markdown_renderer,
+                    self._repl_state,
+                    self._prompt_session,
+                    self._grant_store_manager.get_for_session(self._store.session_id)
+                    if self._grant_store_manager is not None
+                    else None,
+                    self._permanent_grant_store,
+                    static_policy=getattr(
+                        self._agent_app.agent, "permission_policy", None
+                    ),
+                    restricted_dirs=getattr(
+                        self._agent_app.agent, "restricted_dirs", ()
+                    ),
+                    snapshot_store=cast(SnapshotStore | None, self._snapshot_store),
+                    show_session_history=True,
+                )
 
-        async def run() -> None:
-            should_exit = await run_in_terminal(invoke, in_executor=True)
-            self._state.mode = self._repl_state.mode
-            if _is_session_history_command(text):
-                self._restore_session_history()
-            self._state.running = False
-            self._refresh()
-            if should_exit:
-                print_saved_conversation(self._store)
-                self._application.exit()
-            self._submit_pending_inject()
+            if not capture_output:
+                return handle(), ""
+            output = StringIO()
+            with redirect_stdout(output):
+                should_exit = handle()
+            return should_exit, output.getvalue()
+
+        async def run_inline() -> None:
+            should_exit, output = await asyncio.get_running_loop().run_in_executor(
+                None, invoke, True
+            )
+            if output.strip():
+                self._state.log.append(_LogEntry("system", output.rstrip()))
+            self._finish_command(text, should_exit)
 
         if self._application.loop is None:
-            asyncio.run(run())
+            asyncio.run(run_inline())
         else:
-            self._application.create_background_task(run())
+            self._application.create_background_task(run_inline())
+
+    def _show_native_command_choice(self, text: str) -> bool:
+        """为需要选择的会话命令打开 TUI 原生菜单。"""
+        command = text.split(maxsplit=1)[0]
+        if command == "/permissions":
+            self._open_command_choices(
+                [
+                    ("Show permission status", "/permissions list"),
+                    ("Clear session permissions", "/permissions clear"),
+                ],
+                lambda selected: self._run_command(str(selected)),
+            )
+            return True
+        if command == "/config":
+            parts = text.split(maxsplit=2)
+            action = parts[1] if len(parts) > 1 else ""
+            if action == "add":
+                self._state.log.append(
+                    _LogEntry(
+                        "system",
+                        "Adding a provider profile requires a multi-step TUI form; "
+                        "that form is not available yet.",
+                    )
+                )
+                self._refresh()
+                return True
+            if action in {"edit", "set"} and len(parts) < 3:
+                self._open_config_profile_editor()
+                return True
+            if action == "delete":
+                self._open_config_profile_delete()
+                return True
+        if command == "/fork":
+            entries = self._store.get_user_messages()
+            if not entries:
+                self._state.log.append(
+                    _LogEntry("system", "No user messages to fork from.")
+                )
+                self._refresh()
+                return True
+
+            def fork(entry: object) -> None:
+                parent_session_id = self._store.session_id
+                entry_id = getattr(entry, "id", "")
+                forked = self._store.fork_from_entry(entry_id)
+                self._store.current_path = forked.current_path
+                meta = self._store.current_metadata()
+                if self._snapshot_store is not None and meta is not None:
+                    cast(SnapshotStore, self._snapshot_store).fork_session(
+                        parent_session_id, meta.id
+                    )
+                sync_agent_history(self._agent_app, self._store)
+                self._state.restore_history(self._store.build_branch())
+                self._state.log.append(
+                    _LogEntry("system", f'Forked at: "{meta.title if meta else ""}"')
+                )
+
+            self._open_command_choices(
+                [(" ".join(str(e.content).split())[:100], e) for e in entries], fork
+            )
+            return True
+        if command in {"/sessions", "/resume"} and len(text.split()) == 1:
+            sessions = self._store.list_infos()
+            if not sessions:
+                self._state.log.append(_LogEntry("system", "No conversations found."))
+                self._refresh()
+                return True
+
+            def resume(session: object) -> None:
+                self._store.resume(getattr(session, "id", ""))
+                sync_agent_history(self._agent_app, self._store)
+                self._restore_session_history()
+
+            self._open_command_choices(
+                [(f"{s.title} ({s.id[:8]})", s) for s in sessions], resume
+            )
+            return True
+        if command == "/tree":
+            nodes = self._store.get_tree()
+            if not nodes:
+                self._state.log.append(
+                    _LogEntry("system", "No session tree available (no metadata).")
+                )
+                self._refresh()
+                return True
+
+            def jump(node: object) -> None:
+                node_id = getattr(node, "id", "")
+                if not self._store.jump_to_entry(node_id):
+                    self._state.log.append(_LogEntry("error", "Failed to set entry."))
+                    return
+                sync_agent_history(self._agent_app, self._store)
+                self._state.restore_history(self._store.build_branch())
+
+            self._open_command_choices(
+                [
+                    (
+                        f"{'  ' * n.depth}{'└─ ' if n.depth else ''}{n.title}"
+                        f"{' ← current' if n.is_current else ''}",
+                        n,
+                    )
+                    for n in nodes
+                ],
+                jump,
+            )
+            return True
+        return False
+
+    def _open_command_choices(
+        self,
+        choices: list[tuple[str, object]],
+        on_select: Callable[[object], None],
+    ) -> None:
+        """打开可复用的 TUI 命令选择菜单。"""
+        self._state.pending_command_choice = _CommandChoiceRequest(choices, on_select)
+        self._command_choices.values = [(value, label) for label, value in choices]
+        self._command_choices._selected_index = 0
+        self._command_choices.current_value = choices[0][1]
+        self._application.layout.focus(self._command_choices)
+        self._refresh()
+
+    def _open_command_text(self, prompt: str, on_submit: Callable[[str], None]) -> None:
+        """打开单行文本表单。"""
+        self._state.pending_command_text = _CommandTextRequest(prompt, on_submit)
+        self._application.layout.focus(self._input)
+        self._refresh()
+
+    def _submit_command_text(self, text: str) -> None:
+        request = self._state.pending_command_text
+        if request is None:
+            return
+        self._state.pending_command_text = None
+        request.on_submit(text)
+        self._refresh()
+
+    def _open_config_profile_editor(self) -> None:
+        """在 TUI 内选择配置项并提交字段值。"""
+        from ..setup_wizard import CONFIG_FILENAME, _load_existing_config
+
+        config = _load_existing_config(self._project_root / CONFIG_FILENAME)
+        profiles = config.get("provider", {}).get("model_profiles", {})
+        if not isinstance(profiles, dict) or not profiles:
+            self._state.log.append(_LogEntry("system", "No profiles found."))
+            self._refresh()
+            return
+
+        def choose_profile(profile: object) -> None:
+            fields = [
+                "transport",
+                "chat_model",
+                "base_url",
+                "api_key",
+                "thinking",
+                "reasoning_effort",
+                "clear_thinking",
+                "tool_stream",
+            ]
+
+            def choose_field(field: object) -> None:
+                profile_name = str(profile)
+                field_name = str(field)
+                self._open_command_text(
+                    f"{profile_name}.{field_name}",
+                    lambda value: (
+                        self._run_command(
+                            f"/config set {profile_name} {field_name} {value}"
+                        )
+                        if value
+                        else None
+                    ),
+                )
+
+            self._open_command_choices(
+                [(field, field) for field in fields], choose_field
+            )
+
+        self._open_command_choices(
+            [(str(name), name) for name in profiles], choose_profile
+        )
+
+    def _open_config_profile_delete(self) -> None:
+        """在 TUI 内选择并删除配置 profile。"""
+        from ..setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
+
+        config_path = self._project_root / CONFIG_FILENAME
+        config = _load_existing_config(config_path)
+        profiles = config.get("provider", {}).get("model_profiles", {})
+        if not isinstance(profiles, dict) or not profiles:
+            self._state.log.append(_LogEntry("system", "No profiles found."))
+            self._refresh()
+            return
+
+        def delete(profile: object) -> None:
+            name = str(profile)
+            profiles.pop(name, None)
+            _save_config(config, config_path)
+            self._state.log.append(_LogEntry("system", f"Deleted profile: {name}"))
+
+        self._open_command_choices([(str(name), name) for name in profiles], delete)
+
+    def _accept_command_choice(self) -> None:
+        request = self._state.pending_command_choice
+        if request is None:
+            return
+        selected = self._command_choices.current_value
+        self._state.pending_command_choice = None
+        request.on_select(selected)
+        self._application.layout.focus(self._input)
+        self._scrollback = 0
+        self._refresh()
+
+    def _finish_command(self, text: str, should_exit: bool) -> None:
+        """同步命令执行后的 TUI 状态。"""
+        self._state.mode = self._repl_state.mode
+        if _is_session_history_command(text):
+            self._restore_session_history()
+        self._state.running = False
+        self._refresh()
+        if should_exit:
+            print_saved_conversation(self._store)
+            self._application.exit()
+        self._submit_pending_inject()
 
     def _clear_session(self) -> None:
         """在 inline TUI 内创建空会话，不切换到终端清屏输出。"""
@@ -707,7 +984,10 @@ class _XcodeTui:
         except Exception as exc:
             flush_thinking()
             self._save_partial_answer()
-            self._state.log.append(_LogEntry("error", f"[error] {exc}"))
+            detail = str(exc) or repr(exc)
+            self._state.log.append(
+                _LogEntry("error", f"[error] {type(exc).__name__}: {detail}")
+            )
             self._state.running = False
             self._refresh()
             self._schedule_turn_commit()
@@ -753,8 +1033,13 @@ class _XcodeTui:
             else 0
         )
         input_height = self._input_height()
-        input_visible = (
+        input_visible = self._state.pending_command_choice is None and (
             self._state.pending_hitl is None or self._awaiting_denial_suggestion
+        )
+        command_height = (
+            len(self._state.pending_command_choice.choices)
+            if self._state.pending_command_choice is not None
+            else 0
         )
         return max(
             1,
@@ -763,6 +1048,7 @@ class _XcodeTui:
             - (2 if input_visible else 0)
             - 1
             - approval_height,
+            -command_height,
         )
 
     def _input_height(self) -> int:

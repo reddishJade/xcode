@@ -51,6 +51,22 @@ class _HitlRequest:
 
 
 @dataclass
+class _CommandChoiceRequest:
+    """TUI 内命令选择菜单的状态。"""
+
+    choices: list[tuple[str, object]]
+    on_select: Callable[[object], None]
+
+
+@dataclass
+class _CommandTextRequest:
+    """TUI 内命令文本表单的状态。"""
+
+    prompt: str
+    on_submit: Callable[[str], None]
+
+
+@dataclass
 class _ExplorationCall:
     tool_id: str
     name: str
@@ -83,6 +99,8 @@ class _TuiState:
     thinking_core: ReasoningCore = field(default_factory=ReasoningCore)
     subagents: dict[int, _SubagentSlot] = field(default_factory=dict)
     pending_hitl: _HitlRequest | None = None
+    pending_command_choice: _CommandChoiceRequest | None = None
+    pending_command_text: _CommandTextRequest | None = None
     thinking_collapsed: bool = False
     tool_collapsed: bool = False
     running: bool = False
@@ -290,7 +308,10 @@ class _TuiState:
         elif entry.role == "exploration":
             if len(entry.exploration_calls) == 1:
                 self._append_single_exploration(
-                    entry.exploration_calls[0], lines, show_tool_expand, show_tool_collapse
+                    entry.exploration_calls[0],
+                    lines,
+                    show_tool_expand,
+                    show_tool_collapse,
                 )
                 return
             active = any(not call.complete for call in entry.exploration_calls)
@@ -330,7 +351,9 @@ class _TuiState:
         show_tool_collapse: bool,
     ) -> None:
         """单个探索调用沿用普通工具的标题和结果布局。"""
-        suffix = " (ctrl+o to expand)" if self.tool_collapsed and show_tool_expand else ""
+        suffix = (
+            " (ctrl+o to expand)" if self.tool_collapsed and show_tool_expand else ""
+        )
         lines.append(f"● {call.solo_label}{suffix}")
         if self.tool_collapsed or not call.complete:
             return
