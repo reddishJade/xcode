@@ -676,7 +676,7 @@ class TreeSessionRepo:
     ) -> SessionInfoView:
         if metadata is None:
             stat = path.stat()
-            updated = datetime.fromtimestamp(stat.st_mtime).isoformat(
+            updated = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(
                 timespec="seconds"
             )
             sid = self._session_id(path)
