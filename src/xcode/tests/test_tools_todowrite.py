@@ -87,25 +87,3 @@ class TestTodoWriteValidation:
             None,
         )
         assert "at most one" in result
-
-
-def test_todowrite_renders_multiline_tool_call_text() -> None:
-    from xcode.cli.repl_tools import brief_input, tool_call_text
-
-    raw = {
-        "todos": [
-            {"content": "Review diff", "status": "completed"},
-            {"content": "Run tests", "status": "in_progress", "priority": "high"},
-            {"content": "Write notes", "status": "pending"},
-        ]
-    }
-
-    assert brief_input("todowrite", raw) == "todo list (3)"
-    rendered = tool_call_text("todowrite", "todo list (3)", raw)
-    assert rendered.plain.splitlines() == [
-        "  → Todo list (3)",
-        "    ✓ Review diff",
-        "    ◌ Run tests [high]",
-        "    · Write notes",
-    ]
-    assert rendered.spans

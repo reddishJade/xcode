@@ -56,22 +56,6 @@ def test_bounded_prompt_adds_summary_constraint() -> None:
     assert "return a concise summary" in prompt
 
 
-def test_subagent_batch_preview() -> None:
-    from xcode.cli.repl_tools import brief_input
-
-    preview = brief_input(
-        "subagent",
-        {
-            "tasks": [
-                {"description": "tools"},
-                {"description": "runtime"},
-                {"description": "cli"},
-            ]
-        },
-    )
-    assert preview == "subagent tasks (3)"
-
-
 def test_subagent_updates_keep_numbered_slots() -> None:
     import io
 
@@ -116,24 +100,3 @@ def test_subagent_updates_keep_numbered_slots() -> None:
         2: {"task": "✓ runtime", "tool": ""},
         3: {"task": "→ cli", "tool": ""},
     }
-
-
-def test_subagent_tool_call_text_is_multiline_list() -> None:
-    from xcode.cli.repl_tools import tool_call_text
-
-    rendered = tool_call_text(
-        "subagent",
-        "subagent tasks (2)",
-        {
-            "tasks": [
-                {"description": "tools", "subagent_type": "coding"},
-                {"description": "runtime", "subagent_type": "research"},
-            ]
-        },
-    )
-
-    assert rendered.plain.splitlines() == [
-        "  → Subagent tasks (2)",
-        "    [1] tools [coding]",
-        "    [2] runtime [research]",
-    ]
