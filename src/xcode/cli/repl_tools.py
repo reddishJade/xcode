@@ -250,7 +250,7 @@ def brief_input(name: str, raw_input: ToolInput | str) -> str:
 
     if name == "websearch":
         query = raw_input.get("query", raw_input.get("input", ""))
-        return single_line_preview(f"web: {query}") if query else name
+        return single_line_preview(f"search: {query}") if query else name
 
     if name == "webfetch":
         url = raw_input.get("url", raw_input.get("input", ""))
