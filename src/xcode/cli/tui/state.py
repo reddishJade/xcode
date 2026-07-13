@@ -127,6 +127,10 @@ class _TuiState:
         self.thinking_core.reset()
         self.subagents.clear()
 
+    def add_command(self, text: str) -> None:
+        """将已执行的 TUI 命令显示为用户消息，但不打断当前回合。"""
+        self.log.append(_LogEntry("you", text))
+
     def toggle_thinking(self) -> None:
         self.thinking_collapsed = not self.thinking_collapsed
 

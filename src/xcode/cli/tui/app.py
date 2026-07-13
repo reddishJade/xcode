@@ -64,7 +64,12 @@ from .state import (
 )
 from xcode.harness.session import SessionStore
 from xcode.harness.snapshot import SnapshotStore, SnapshotUnsupportedError
-from .widgets import TuiInputLexer, TuiPromptSession, tui_input_prompt
+from .widgets import (
+    TuiInputLexer,
+    TuiOutputControl,
+    TuiPromptSession,
+    tui_input_prompt,
+)
 
 from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
@@ -163,7 +168,7 @@ class _XcodeTui:
         self._exit_pending = 0.0
 
         # ── UI 组件 ──
-        self._output_control = FormattedTextControl(text="", focusable=False)
+        self._output_control = TuiOutputControl(self._scroll_by)
         self._output = Window(
             self._output_control,
             wrap_lines=True,
@@ -271,7 +276,8 @@ class _XcodeTui:
             ),
             key_bindings=self._bindings(),
             full_screen=False,
-            mouse_support=False,
+            mouse_support=Condition(self._should_capture_mouse),
+            enable_page_navigation_bindings=False,
             style=Style.from_dict(
                 {
                     "": "",
@@ -364,9 +370,9 @@ class _XcodeTui:
         except ValueError:
             pass
         bindings.add("escape", "enter")(self._insert_newline)
-        bindings.add("pageup")(self._page_up_key)
-        bindings.add("pagedown")(self._page_down_key)
-        bindings.add("end")(self._end_key)
+        bindings.add(Keys.PageUp, eager=True)(self._page_up_key)
+        bindings.add(Keys.PageDown, eager=True)(self._page_down_key)
+        bindings.add(Keys.End, eager=True)(self._end_key)
         bindings.add(Keys.ScrollUp)(self._scroll_up_key)
         bindings.add(Keys.ScrollDown)(self._scroll_down_key)
         bindings.add("?")(self._show_shortcuts_key)
@@ -393,6 +399,7 @@ class _XcodeTui:
         self._scrollback = 0
         if self._state.running or self._committing:
             if self._state.running and _is_live_command(text):
+                self._record_command(text)
                 self._run_command(text, preserve_running=True)
             elif self._state.running and not text.startswith(("/", "!", "$")):
                 self._submit_busy_message(text)
@@ -492,15 +499,7 @@ class _XcodeTui:
         if self._state.pending_hitl is not None:
             self._finish_denial("")
         if self._state.running:
-            agent = getattr(self._agent_app, "agent", None)
-            if agent is not None:
-                interrupt = getattr(agent, "interrupt", None)
-                if callable(interrupt):
-                    interrupt("interrupted by user")
-                else:
-                    token = getattr(agent, "cancellation_token", None)
-                    if token is not None:
-                        token.cancel("interrupted by user")
+            self._agent_app.agent.interrupt("interrupted by user")
             self._store.append(
                 "event", {"type": "interrupted", "data": "interrupted by user"}
             )
@@ -537,10 +536,12 @@ class _XcodeTui:
                 return
             text = remaining_text
         if text.startswith("/"):
+            self._record_command(text)
             self._run_command(text)
             self._refresh()
             return
         if text.startswith("!"):
+            self._record_command(text)
             self._run_shell_shortcut(text)
             self._refresh()
             return
@@ -625,6 +626,11 @@ class _XcodeTui:
             asyncio.run(run_inline())
         else:
             self._application.create_background_task(run_inline())
+
+    def _record_command(self, text: str) -> None:
+        """记录用户输入的命令，命令本身不进入 agent 回合。"""
+        self._store.append("user", text)
+        self._state.add_command(text)
 
     def _show_native_command_choice(self, text: str) -> bool:
         """为需要选择的会话命令打开 TUI 原生菜单。"""
@@ -1082,9 +1088,7 @@ class _XcodeTui:
         """保留回合内容，允许完成后继续折叠和滚动查看。"""
         self._committing = False
         self._refresh()
-        agent = getattr(self._agent_app, "agent", None)
-        take_follow_up = getattr(agent, "take_follow_up", None)
-        follow_up = take_follow_up() if callable(take_follow_up) else None
+        follow_up = self._agent_app.agent.take_follow_up()
         if isinstance(follow_up, UserMessage):
             self._submit(str(follow_up.content))
             return
@@ -1135,6 +1139,10 @@ class _XcodeTui:
 
     def _max_scrollback(self) -> int:
         return max(0, len(self._state.lines()) - self._output_height())
+
+    def _should_capture_mouse(self) -> bool:
+        """仅在 TUI 仍有可滚动历史时捕获滚轮。"""
+        return self._scrollback < self._max_scrollback()
 
     def _scroll_by(self, amount: int) -> None:
         self._scrollback = max(
