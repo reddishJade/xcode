@@ -63,7 +63,7 @@ def line_style(line: str) -> str:
         return "class:user"
     if stripped.startswith(("Thinking", "Thought for")):
         return "class:thinking"
-    if stripped.startswith("● "):
+    if stripped.startswith(("● ", "• Exploring", "• Explored")):
         return "class:tool-title"
     if stripped.startswith("?"):
         return "class:error"

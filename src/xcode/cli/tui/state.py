@@ -53,9 +53,12 @@ class _HitlRequest:
 @dataclass
 class _ExplorationCall:
     tool_id: str
+    name: str
     label: str
+    solo_label: str
     complete: bool = False
     failed: bool = False
+    detail: str = ""
 
 
 @dataclass
@@ -285,6 +288,11 @@ class _TuiState:
             suffix = " (ctrl+o to expand)" if show_tool_expand else ""
             lines.append(f"{entry.text}{suffix}")
         elif entry.role == "exploration":
+            if len(entry.exploration_calls) == 1:
+                self._append_single_exploration(
+                    entry.exploration_calls[0], lines, show_tool_expand, show_tool_collapse
+                )
+                return
             active = any(not call.complete for call in entry.exploration_calls)
             title = "• Exploring" if active else "• Explored"
             if self.tool_collapsed:
@@ -313,6 +321,24 @@ class _TuiState:
             lines.extend(md_fn(_render_citations(entry.text)))
         else:
             lines.extend(entry.text.splitlines() or [""])
+
+    def _append_single_exploration(
+        self,
+        call: _ExplorationCall,
+        lines: list[str],
+        show_tool_expand: bool,
+        show_tool_collapse: bool,
+    ) -> None:
+        """单个探索调用沿用普通工具的标题和结果布局。"""
+        suffix = " (ctrl+o to expand)" if self.tool_collapsed and show_tool_expand else ""
+        lines.append(f"● {call.solo_label}{suffix}")
+        if self.tool_collapsed or not call.complete:
+            return
+        detail = call.detail or ("failed" if call.failed else "done")
+        detail_lines = detail.splitlines() or [""]
+        lines.extend(f"  ⎿  {line}" for line in detail_lines)
+        if show_tool_collapse:
+            lines[-1] += " (ctrl+o to collapse)"
 
     def _thinking_lines(self, lines: list[str], color: bool) -> None:
         if lines:
@@ -390,10 +416,24 @@ class _TuiState:
     def _record_tool_use(self, tool_id: str, name: str, raw_input: ToolInput) -> None:
         if _is_exploration_call(name, raw_input):
             self._record_exploration_call(
-                _ExplorationCall(tool_id, _exploration_label(name, raw_input))
+                _ExplorationCall(
+                    tool_id,
+                    name,
+                    _exploration_label(name, raw_input),
+                    self._tool_label(name, raw_input),
+                )
             )
             return
         self.tool_names[tool_id] = name
+        label = self._tool_label(name, raw_input)
+
+        self.log.append(_LogEntry("tool", f"● {label}"))
+        if name in {"todowrite", "subagent"}:
+            text = tool_call_text(name, label, raw_input).plain
+            self.log.append(_LogEntry("tool-detail", f"  ⎿  {text.strip()}"))
+
+    def _tool_label(self, name: str, raw_input: ToolInput) -> str:
+        """生成普通工具卡片使用的标题。"""
         label = brief_input(name, raw_input)
         if name == "list_dir":
             path = Path(str(raw_input.get("path", ".")))
@@ -408,16 +448,18 @@ class _TuiState:
             label = f"Read({path.as_posix()})" + (f" ({limit} lines)" if limit else "")
         else:
             label = label[:1].upper() + label[1:]
-        self.log.append(_LogEntry("tool", f"● {label}"))
-        if name in {"todowrite", "subagent"}:
-            text = tool_call_text(name, label, raw_input).plain
-            self.log.append(_LogEntry("tool-detail", f"  ⎿  {text.strip()}"))
+        return label
 
     def _record_tool_result(self, tool_id: str, status: str, content: str) -> None:
         exploration = self._find_exploration_call(tool_id)
         if exploration is not None:
             exploration.complete = True
             exploration.failed = status != "ok"
+            exploration.detail = (
+                _successful_tool_detail(exploration.name, content)
+                if status == "ok"
+                else f"✗ {single_line_preview(content)}"
+            )
             return
         name = self.tool_names.pop(tool_id, "")
         if status == "ok":
