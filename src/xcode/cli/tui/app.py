@@ -218,18 +218,12 @@ class _XcodeTui:
             height=1,
             style="class:status",
         )
-        self._header = Window(
-            FormattedTextControl(text=self._header_text),
-            height=3,
-            style="class:title",
-        )
         # ── Application ──
         self._application = Application(
             layout=Layout(
                 FloatContainer(
                     HSplit(
                         [
-                            self._header,
                             self._output,
                             self._approval_container,
                             self._input_container,
@@ -269,7 +263,6 @@ class _XcodeTui:
                     "radio-selected": "ansicyan bold",
                     "status": "ansibrightblack",
                     "input-border": "ansibrightblack",
-                    "title": "bold",
                     "prompt-marker": "ansiyellow bold",
                 }
             ),
@@ -298,6 +291,7 @@ class _XcodeTui:
 
             _compute_context_summary(agent, self._project_root, self._repl_state)
 
+        self._state.log.append(_LogEntry("system", self._header_text()))
         self._application.layout.focus(self._input)
         self._refresh()
 
@@ -805,12 +799,18 @@ class _XcodeTui:
         self._application.invalidate()
 
     def _status_text(self) -> str:
-        parts = [f"mode: {self._repl_state.mode}"]
+        left = f"mode: {self._repl_state.mode}"
+        parts: list[str] = []
         if self._repl_state.context_usage:
             parts.append(f"context: {self._repl_state.context_usage}")
         if self._repl_state.context_cost:
             parts.append(f"cost: {self._repl_state.context_cost}")
-        return "  ".join(parts)
+        if not parts:
+            return left
+        right = "  ".join(parts)
+        width = self._application.output.get_size().columns
+        padding = max(2, width - len(left) - len(right))
+        return f"{left}{' ' * padding}{right}"
 
     def _header_text(self) -> str:
         get_model_info = getattr(self._agent_app, "get_model_info", None)
