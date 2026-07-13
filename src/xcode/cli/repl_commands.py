@@ -1223,7 +1223,7 @@ def cmd_context(cmd: str, ctx: CommandContext) -> bool:
     if summary.context_window > 0:
         free_pct = summary.free / summary.context_window * 100
         print(
-            f"   \u25a1 Free space:       {_format_token(summary.free):>7} ({free_pct:.1f}%)"
+            f"   □ {'Free space':<18} {_format_token(summary.free):>7} ({free_pct:.1f}%)"
         )
 
     if summary.memory_text:
