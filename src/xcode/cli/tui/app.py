@@ -606,7 +606,9 @@ class _XcodeTui:
                 self._open_config_profile_delete()
                 return True
         if command == "/fork":
-            entries = self._store.get_user_messages()
+            entries = [
+                entry for entry in self._store.build_branch() if entry.type == "user"
+            ]
             if not entries:
                 self._state.log.append(
                     _LogEntry("system", "No user messages to fork from.")
@@ -617,7 +619,11 @@ class _XcodeTui:
             def fork(entry: object) -> None:
                 parent_session_id = self._store.session_id
                 entry_id = getattr(entry, "id", "")
-                forked = self._store.fork_from_entry(entry_id)
+                try:
+                    forked = self._store.fork_from_entry(entry_id)
+                except ValueError as exc:
+                    self._state.log.append(_LogEntry("error", f"[error] {exc}"))
+                    return
                 self._store.current_path = forked.current_path
                 meta = self._store.current_metadata()
                 if self._snapshot_store is not None and meta is not None:
@@ -812,15 +818,31 @@ class _XcodeTui:
         self._refresh()
 
     def _run_shell_shortcut(self, text: str) -> None:
+        """在后台执行 shell 快捷命令，保持 TUI 事件循环可响应。"""
         agent = getattr(self._agent_app, "agent", None)
         if agent is not None:
             token = getattr(agent, "cancellation_token", None)
             if token is not None:
                 token.reset()
-        output = run_shell_shortcut(text, self._agent_app)
-        self._store.append("event", {"type": "shell_shortcut", "data": text})
-        self._store.append("event", {"type": "tool_result", "data": output})
-        self._state.log.append(_LogEntry("shell", output, markdown=False))
+        self._state.running = True
+        self._refresh()
+
+        def run() -> None:
+            try:
+                output = run_shell_shortcut(text, self._agent_app)
+                self._store.append("event", {"type": "shell_shortcut", "data": text})
+                self._store.append("event", {"type": "tool_result", "data": output})
+                self._state.log.append(_LogEntry("shell", output, markdown=False))
+            except Exception as exc:
+                detail = str(exc) or repr(exc)
+                self._state.log.append(
+                    _LogEntry("error", f"[error] {type(exc).__name__}: {detail}")
+                )
+            finally:
+                self._state.running = False
+                self._refresh()
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _restore_session_history(self) -> None:
         """恢复会话命令完成后，以 TUI 形式重新渲染当前分支。"""
