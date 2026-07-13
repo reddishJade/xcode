@@ -154,7 +154,7 @@ class _XcodeTui:
         input_bindings.add("c-t", eager=True)(self._toggle_thinking_key)
         input_bindings.add("c-o", eager=True)(self._toggle_tools_key)
         self._input = TextArea(
-            height=Dimension(min=1, max=5),
+            height=lambda: Dimension.exact(self._input_height()),
             prompt=self._input_prompt,
             multiline=True,
             completer=completer,
@@ -732,7 +732,7 @@ class _XcodeTui:
             and not self._awaiting_denial_suggestion
             else 0
         )
-        input_height = min(5, max(1, self._input.text.count("\n") + 1))
+        input_height = self._input_height()
         input_visible = (
             self._state.pending_hitl is None or self._awaiting_denial_suggestion
         )
@@ -744,6 +744,9 @@ class _XcodeTui:
             - 1
             - approval_height,
         )
+
+    def _input_height(self) -> int:
+        return min(5, max(1, self._input.text.count("\n") + 1))
 
     def _max_scrollback(self) -> int:
         return max(0, len(self._state.lines()) - self._output_height())
