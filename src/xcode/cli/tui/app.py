@@ -329,6 +329,7 @@ class _XcodeTui:
                 {
                     "": "",
                     "user": "ansicyan bold",
+                    "command": "ansiyellow bold",
                     "thinking": "#808080",
                     "tool": "ansibrightblack",
                     "tool-title": "ansigreen bold",

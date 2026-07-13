@@ -141,8 +141,8 @@ class _TuiState:
         self.subagents.clear()
 
     def add_command(self, text: str) -> None:
-        """将已执行的 TUI 命令显示为用户消息，但不打断当前回合。"""
-        self.log.append(_LogEntry("you", text))
+        """将已执行的 TUI 命令显示为命令消息，但不打断当前回合。"""
+        self.log.append(_LogEntry("command", text))
 
     def toggle_thinking(self) -> None:
         self.thinking_collapsed = not self.thinking_collapsed
@@ -315,7 +315,11 @@ class _TuiState:
             return
         if lines and entry.role not in {"tool", "tool-detail", "exploration"}:
             lines.append("")
-        if entry.role == "you":
+        if entry.role == "command":
+            cmd_lines = entry.text.splitlines() or [""]
+            lines.append(f"> {cmd_lines[0]}")
+            lines.extend(f"  {line}" for line in cmd_lines[1:])
+        elif entry.role == "you":
             user_lines = entry.text.splitlines() or [""]
             lines.append(f"> {user_lines[0]}")
             lines.extend(f"  {line}" for line in user_lines[1:])

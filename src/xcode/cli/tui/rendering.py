@@ -59,6 +59,8 @@ def render_line_fragments(line: str) -> StyleAndTextTuples:
 def line_style(line: str) -> str:
     """Determine the prompt_toolkit style class for a rendered content line."""
     stripped = line.strip()
+    if stripped.startswith("> /"):
+        return "class:command"
     if stripped.startswith("> "):
         return "class:user"
     if stripped.startswith(("Thinking", "Thought for")):
