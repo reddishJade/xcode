@@ -478,6 +478,10 @@ class _XcodeTui:
         thread.start()
 
     def _run_command(self, text: str) -> None:
+        if text in {"/clear", "/new"}:
+            self._clear_session()
+            return
+
         self._state.running = True
 
         def invoke() -> bool:
@@ -514,6 +518,21 @@ class _XcodeTui:
             asyncio.run(run())
         else:
             self._application.create_background_task(run())
+
+    def _clear_session(self) -> None:
+        """在 inline TUI 内创建空会话，不切换到终端清屏输出。"""
+        self._store.clear()
+        sync_agent_history(self._agent_app, self._store)
+        self._state.restore_history([])
+        self._state.log.append(_LogEntry("system", self._header_text()))
+        self._scrollback = 0
+        agent = getattr(self._agent_app, "agent", None)
+        if agent is not None:
+            agent.session_id = self._store.session_id
+            from ..repl_commands import _compute_context_summary
+
+            _compute_context_summary(agent, self._project_root, self._repl_state)
+        self._refresh()
 
     def _run_shell_shortcut(self, text: str) -> None:
         agent = getattr(self._agent_app, "agent", None)
