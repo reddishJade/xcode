@@ -106,9 +106,9 @@ class TreeSessionRepo:
             )
             with self.current_path.open("a", encoding="utf-8") as f:
                 f.write(entry.model_dump_json() + "\n")
-            self._save_head_id(entry_id)
             if record_type == "user":
                 self.ensure_metadata(str(content))
+            self._save_head_id(entry_id)
             return entry_id
 
     def read_entries(self) -> list[SessionEntry]:
@@ -381,6 +381,10 @@ class TreeSessionRepo:
                 seen.add(text)
                 out.append(e)
         return out
+
+    def get_forkable_user_messages(self) -> list[SessionEntry]:
+        """返回当前分支中可被 fork_from_entry 接受的用户消息。"""
+        return [entry for entry in self.build_branch() if entry.type == "user"]
 
     def jump_to_entry(self, entry_id: str) -> bool:
         """将 head_id 指向指定 entry，实现树内导航。"""

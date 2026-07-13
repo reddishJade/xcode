@@ -606,9 +606,7 @@ class _XcodeTui:
                 self._open_config_profile_delete()
                 return True
         if command == "/fork":
-            entries = [
-                entry for entry in self._store.build_branch() if entry.type == "user"
-            ]
+            entries = self._store.get_forkable_user_messages()
             if not entries:
                 self._state.log.append(
                     _LogEntry("system", "No user messages to fork from.")

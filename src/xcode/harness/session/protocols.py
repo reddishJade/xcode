@@ -30,6 +30,10 @@ class SessionStore(Protocol):
         """返回从根到当前叶节点的路径（用于构建 LLM context）。"""
         ...
 
+    def get_forkable_user_messages(self) -> list[SessionEntry]:
+        """返回当前分支中可作为 fork 起点的用户消息。"""
+        ...
+
     def fork(self, title: str = "", summary: str = "") -> SessionStore:
         """从当前叶节点分叉，返回新会话的存储。"""
         ...

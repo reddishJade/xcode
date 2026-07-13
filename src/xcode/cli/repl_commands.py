@@ -81,7 +81,7 @@ def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
 
 def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
     """从某条 user 消息截断，新建会话。"""
-    msgs = ctx.store.get_user_messages()
+    msgs = ctx.store.get_forkable_user_messages()
     if not msgs:
         print("No user messages to fork from.")
         return False
