@@ -64,6 +64,18 @@ class _CommandTextRequest:
 
     prompt: str
     on_submit: Callable[[str], None]
+    on_cancel: Callable[[], None] | None = None
+
+
+@dataclass
+class _QuestionChoiceRequest:
+    """TUI 内 question 工具的选择状态。"""
+
+    prompt: str
+    choices: list[tuple[str, str]]
+    multiple: bool
+    event: Event
+    result: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -101,6 +113,7 @@ class _TuiState:
     pending_hitl: _HitlRequest | None = None
     pending_command_choice: _CommandChoiceRequest | None = None
     pending_command_text: _CommandTextRequest | None = None
+    pending_question_choice: _QuestionChoiceRequest | None = None
     thinking_collapsed: bool = False
     tool_collapsed: bool = False
     running: bool = False

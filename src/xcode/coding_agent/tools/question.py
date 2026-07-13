@@ -10,49 +10,32 @@ import questionary
 
 from xcode.agent.types import ToolInput, ToolSpec
 
+QuestionPromptHandler = Callable[[list[dict[str, Any]]], list[list[str]]]
 
-def build_question_tool() -> ToolSpec:
-    """构建向用户收集选择的工具。"""
 
-    def question(
-        data: ToolInput, _on_update: Callable[[str], None] | None = None
+class _QuestionToolHandler:
+    """在不同前端之间路由问题交互。"""
+
+    def __init__(self) -> None:
+        self.prompt_handler: QuestionPromptHandler | None = None
+
+    def __call__(
+        self, data: ToolInput, _on_update: Callable[[str], None] | None = None
     ) -> str:
-        if not sys.stdin.isatty():
+        prompt_handler = self.prompt_handler
+        if prompt_handler is None and not sys.stdin.isatty():
             return (
                 "Cannot ask questions in non-interactive mode. Please rephrase "
                 "the request or use the interactive REPL."
             )
         questions = _questions(data.get("questions"))
-        answers: list[list[str]] = []
-        for item in questions:
-            header = item.get("header")
-            message = item["question"]
-            options = item.get("options")
-            if options:
-                display_to_label = {
-                    _choice_label(option["label"], option.get("description")): option[
-                        "label"
-                    ]
-                    for option in options
-                }
-                choices = list(display_to_label)
-                if item.get("multiple"):
-                    selected = questionary.checkbox(message, choices=choices).ask()
-                    answers.append(
-                        [display_to_label[str(value)] for value in (selected or [])]
-                    )
-                else:
-                    selected = questionary.select(message, choices=choices).ask()
-                    answers.append(
-                        [display_to_label[str(selected)]]
-                        if selected is not None
-                        else []
-                    )
-            else:
-                selected = questionary.text(message, qmark=header or "?").ask()
-                answers.append([str(selected)] if selected else [])
-        return _format_answers(questions, answers)
+        if prompt_handler is not None:
+            return _format_answers(questions, prompt_handler(questions))
+        return _format_answers(questions, _ask_with_questionary(questions))
 
+
+def build_question_tool() -> ToolSpec:
+    """构建向用户收集选择的工具。"""
     return ToolSpec(
         name="question",
         description=(
@@ -60,7 +43,7 @@ def build_question_tool() -> ToolSpec:
             "optional; without options the user can enter free text."
         ),
         input_hint='JSON: {"questions":[{"question":"Proceed?","options":[{"label":"Yes"}]}]}',
-        handler=question,
+        handler=_QuestionToolHandler(),
         schema={
             "type": "object",
             "properties": {
@@ -101,6 +84,49 @@ def build_question_tool() -> ToolSpec:
             "When recommending an option, make it the first option and add '(Recommended)' to its label.",
         ),
     )
+
+
+def set_question_prompt_handler(
+    tool: ToolSpec, handler: QuestionPromptHandler | None
+) -> bool:
+    """为 question 工具设置前端专用交互处理器。"""
+    if not isinstance(tool.handler, _QuestionToolHandler):
+        return False
+    tool.handler.prompt_handler = handler
+    return True
+
+
+def _ask_with_questionary(
+    questions: list[dict[str, Any]],
+) -> list[list[str]]:
+    """使用独立 CLI prompt 收集回答。"""
+    answers: list[list[str]] = []
+    for item in questions:
+        header = item.get("header")
+        message = item["question"]
+        options = item.get("options")
+        if options:
+            display_to_label = {
+                _choice_label(option["label"], option.get("description")): option[
+                    "label"
+                ]
+                for option in options
+            }
+            choices = list(display_to_label)
+            if item.get("multiple"):
+                selected = questionary.checkbox(message, choices=choices).ask()
+                answers.append(
+                    [display_to_label[str(value)] for value in (selected or [])]
+                )
+            else:
+                selected = questionary.select(message, choices=choices).ask()
+                answers.append(
+                    [display_to_label[str(selected)]] if selected is not None else []
+                )
+        else:
+            selected = questionary.text(message, qmark=header or "?").ask()
+            answers.append([str(selected)] if selected else [])
+    return answers
 
 
 def _questions(value: object) -> list[dict[str, Any]]:

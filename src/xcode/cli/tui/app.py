@@ -32,7 +32,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.output.base import Output
 from prompt_toolkit.styles import Style
-from prompt_toolkit.widgets import RadioList, TextArea
+from prompt_toolkit.widgets import CheckboxList, RadioList, TextArea
 
 from ..app_contract import ReplApp
 from ..commands import ReplState
@@ -60,6 +60,7 @@ from .state import (
     _CommandTextRequest,
     _HitlRequest,
     _LogEntry,
+    _QuestionChoiceRequest,
     _TuiState,
 )
 from xcode.harness.session import SessionStore
@@ -216,6 +217,30 @@ class _XcodeTui:
         )
         command_bindings = cast(KeyBindings, self._command_choices.control.key_bindings)
         command_bindings.add("enter")(lambda _event: self._accept_command_choice())
+        self._question_choices: RadioList[str] = RadioList(
+            [("", "")],
+            show_numbers=True,
+            select_on_focus=True,
+            open_character="",
+            select_character="❯",
+            close_character="",
+            show_cursor=False,
+            show_scrollbar=False,
+        )
+        question_bindings = cast(
+            KeyBindings, self._question_choices.control.key_bindings
+        )
+        question_bindings.add("enter")(lambda _event: self._accept_question_choice())
+        self._question_checkboxes: CheckboxList[str] = CheckboxList(
+            [("", "")],
+            open_character="",
+            select_character="✓",
+            close_character="",
+        )
+        checkbox_bindings = cast(
+            KeyBindings, self._question_checkboxes.control.key_bindings
+        )
+        checkbox_bindings.add("enter")(lambda _event: self._accept_question_choice())
         self._approval_container = ConditionalContainer(
             self._approval_choices,
             filter=Condition(
@@ -229,9 +254,30 @@ class _XcodeTui:
             self._command_choices,
             filter=Condition(lambda: self._state.pending_command_choice is not None),
         )
+        self._question_container = ConditionalContainer(
+            HSplit(
+                [
+                    Window(
+                        FormattedTextControl(text=self._question_prompt_text),
+                        height=1,
+                    ),
+                    ConditionalContainer(
+                        self._question_choices,
+                        filter=Condition(self._single_question_visible),
+                    ),
+                    ConditionalContainer(
+                        self._question_checkboxes,
+                        filter=Condition(self._multiple_question_visible),
+                    ),
+                ],
+                height=lambda: Dimension.exact(self._question_panel_height()),
+            ),
+            filter=Condition(lambda: self._state.pending_question_choice is not None),
+        )
         input_visible = Condition(
             lambda: (
                 self._state.pending_command_choice is None
+                and self._state.pending_question_choice is None
                 and (
                     self._state.pending_hitl is None or self._awaiting_denial_suggestion
                 )
@@ -261,6 +307,7 @@ class _XcodeTui:
                             self._output,
                             self._approval_container,
                             self._command_container,
+                            self._question_container,
                             self._input_container,
                             self._status,
                         ]
@@ -327,6 +374,13 @@ class _XcodeTui:
 
             _compute_context_summary(agent, self._project_root, self._repl_state)
 
+        from xcode.coding_agent.tools.question import set_question_prompt_handler
+
+        for tool in self._agent_app.registry:
+            if tool.name == "question":
+                set_question_prompt_handler(tool, self._question_prompt_callback)
+                break
+
         self._state.log.append(_LogEntry("system", self._header_text()))
         self._application.layout.focus(self._input)
         self._refresh()
@@ -359,6 +413,32 @@ class _XcodeTui:
                 self._input.text.startswith("!"),
             )
         )
+
+    def _question_prompt_text(self) -> str:
+        request = self._state.pending_question_choice
+        if request is None:
+            return ""
+        hint = (
+            " (Space to toggle, Enter to submit)"
+            if request.multiple
+            else " (Use arrow keys)"
+        )
+        return f"? {request.prompt}{hint}"
+
+    def _single_question_visible(self) -> bool:
+        request = self._state.pending_question_choice
+        return request is not None and not request.multiple
+
+    def _multiple_question_visible(self) -> bool:
+        request = self._state.pending_question_choice
+        return request is not None and request.multiple
+
+    def _question_panel_height(self) -> int:
+        request = self._state.pending_question_choice
+        if request is None:
+            return 0
+        available = max(2, self._application.output.get_size().rows - 2)
+        return min(len(request.choices) + 1, available)
 
     # ── 键绑定 ──
 
@@ -481,19 +561,32 @@ class _XcodeTui:
         self._refresh()
 
     def _quit_key(self, _event: object) -> None:
+        if self._state.pending_question_choice is not None:
+            self._complete_question_choice([])
+        if self._state.pending_command_text is not None:
+            request = self._state.pending_command_text
+            self._state.pending_command_text = None
+            if request.on_cancel is not None:
+                request.on_cancel()
         if self._state.pending_hitl is not None:
             self._finish_denial("")
         print_saved_conversation(self._store)
         self._application.exit()
 
     def _cancel_key(self, _event: object) -> None:
+        if self._state.pending_question_choice is not None:
+            self._complete_question_choice([])
+            return
         if self._state.pending_command_choice is not None:
             self._state.pending_command_choice = None
             self._application.layout.focus(self._input)
             self._refresh()
             return
         if self._state.pending_command_text is not None:
+            request = self._state.pending_command_text
             self._state.pending_command_text = None
+            if request.on_cancel is not None:
+                request.on_cancel()
             self._refresh()
             return
         if self._state.pending_hitl is not None:
@@ -756,9 +849,16 @@ class _XcodeTui:
         self._application.layout.focus(self._command_choices)
         self._refresh()
 
-    def _open_command_text(self, prompt: str, on_submit: Callable[[str], None]) -> None:
+    def _open_command_text(
+        self,
+        prompt: str,
+        on_submit: Callable[[str], None],
+        on_cancel: Callable[[], None] | None = None,
+    ) -> None:
         """打开单行文本表单。"""
-        self._state.pending_command_text = _CommandTextRequest(prompt, on_submit)
+        self._state.pending_command_text = _CommandTextRequest(
+            prompt, on_submit, on_cancel
+        )
         self._application.layout.focus(self._input)
         self._refresh()
 
@@ -941,6 +1041,104 @@ class _XcodeTui:
 
     # ── HITL ──
 
+    def _question_prompt_callback(
+        self, questions: list[dict[str, object]]
+    ) -> list[list[str]]:
+        """在现有 TUI application 内依次收集 question 工具回答。"""
+        answers: list[list[str]] = []
+        for question in questions:
+            options = question.get("options")
+            if isinstance(options, list) and options:
+                choices = [
+                    (
+                        _question_choice_text(option),
+                        str(option.get("label", "")),
+                    )
+                    for option in options
+                    if isinstance(option, dict)
+                ]
+                answers.append(
+                    self._wait_for_question_choice(
+                        str(question.get("question", "")),
+                        choices,
+                        bool(question.get("multiple", False)),
+                    )
+                )
+                continue
+
+            event = Event()
+            answer: list[str] = []
+
+            def submit(value: str) -> None:
+                if value:
+                    answer.append(value)
+                event.set()
+
+            def show_text() -> None:
+                self._open_command_text(
+                    str(question.get("question", "")), submit, event.set
+                )
+
+            self._call_in_ui_thread(show_text)
+            event.wait()
+            answers.append(answer)
+        return answers
+
+    def _wait_for_question_choice(
+        self,
+        prompt: str,
+        choices: list[tuple[str, str]],
+        multiple: bool,
+    ) -> list[str]:
+        request = _QuestionChoiceRequest(prompt, choices, multiple, Event())
+
+        def show_choices() -> None:
+            self._state.pending_question_choice = request
+            values = [(value, label) for label, value in choices]
+            if multiple:
+                self._question_checkboxes.values = values
+                self._question_checkboxes._selected_index = 0
+                self._question_checkboxes.current_values = []
+                self._application.layout.focus(self._question_checkboxes)
+            else:
+                self._question_choices.values = values
+                self._question_choices._selected_index = 0
+                self._question_choices.current_value = choices[0][1]
+                self._application.layout.focus(self._question_choices)
+            self._refresh()
+
+        self._call_in_ui_thread(show_choices)
+        request.event.wait()
+        return request.result
+
+    def _call_in_ui_thread(self, callback: Callable[[], None]) -> None:
+        loop = self._application.loop
+        if loop is None:
+            callback()
+        else:
+            loop.call_soon_threadsafe(callback)
+
+    def _accept_question_choice(self) -> None:
+        request = self._state.pending_question_choice
+        if request is None:
+            return
+        if request.multiple:
+            result = list(self._question_checkboxes.current_values)
+        else:
+            result = [self._question_choices.current_value]
+        self._complete_question_choice(result)
+
+    def _complete_question_choice(self, result: list[str]) -> None:
+        request = self._state.pending_question_choice
+        if request is None:
+            return
+        request.result = result
+        self._state.pending_question_choice = None
+        request.event.set()
+        self._application.layout.focus(self._input)
+        self._scrollback = 0
+        self._refresh()
+
     def _approval_callback(self, tool: ToolSpec, action_input: ToolInput) -> HITLResult:
         from xcode.harness.observability import HITLResult
 
@@ -1115,23 +1313,26 @@ class _XcodeTui:
             and not self._awaiting_denial_suggestion
             else 0
         )
-        input_height = self._input_height()
-        input_visible = self._state.pending_command_choice is None and (
-            self._state.pending_hitl is None or self._awaiting_denial_suggestion
+        input_visible = (
+            self._state.pending_command_choice is None
+            and (self._state.pending_question_choice is None)
+            and (self._state.pending_hitl is None or self._awaiting_denial_suggestion)
         )
+        input_area_height = self._input_height() + 2 if input_visible else 0
         command_height = (
             len(self._state.pending_command_choice.choices)
             if self._state.pending_command_choice is not None
             else 0
         )
+        question_height = self._question_panel_height()
         return max(
             1,
             self._application.output.get_size().rows
-            - input_height
-            - (2 if input_visible else 0)
+            - input_area_height
             - 1
-            - approval_height,
-            -command_height,
+            - approval_height
+            - command_height
+            - question_height,
         )
 
     def _input_height(self) -> int:
@@ -1214,6 +1415,15 @@ def _tui_history(project_root: Path) -> History | None:
 def _strip_rich_markup(text: str) -> str:
     """Rich 标记不能由 prompt_toolkit 解析，转换为保留内容的纯文本。"""
     return re.sub(r"\[/?[^\]]+]", "", text)
+
+
+def _question_choice_text(option: dict[str, object]) -> str:
+    """组合 question 选项标签和说明。"""
+    label = str(option.get("label", ""))
+    description = option.get("description")
+    if isinstance(description, str) and description.strip():
+        return f"{label} - {description.strip()}"
+    return label
 
 
 def _is_session_history_command(command: str) -> bool:
