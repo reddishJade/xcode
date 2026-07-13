@@ -279,7 +279,6 @@ class _TuiState:
             lines.append("")
         if entry.role == "you":
             user_lines = entry.text.splitlines() or [""]
-            lines.append("─" * 72)
             lines.append(f"> {user_lines[0]}")
             lines.extend(f"  {line}" for line in user_lines[1:])
         elif entry.role == "tool":
