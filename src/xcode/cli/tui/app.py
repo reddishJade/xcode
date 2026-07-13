@@ -63,6 +63,19 @@ from xcode.harness.agent_runtime.events import (
     ToolUseStructuredEvent,
 )
 
+_SHORTCUT_HELP = """Shortcuts
+  ?              show this help
+  Ctrl+C         interrupt; press twice to exit when idle
+  Ctrl+Q         exit
+  Ctrl+T         expand or collapse thinking
+  Ctrl+O         expand or collapse tool details
+  ! command      run a bash command
+  $skill [task]  invoke a skill
+  /command       run a slash command
+  Tab            complete commands, skills, and @file references
+  Shift+Enter    insert a newline (Esc Enter also works)
+  PageUp/Down    scroll history; End returns to the latest output"""
+
 if TYPE_CHECKING:
     from prompt_toolkit.history import History
 
@@ -209,12 +222,18 @@ class _XcodeTui:
             height=1,
             style="class:status",
         )
+        self._header = Window(
+            FormattedTextControl(text=self._header_text),
+            height=3,
+            style="class:title",
+        )
         # ── Application ──
         self._application = Application(
             layout=Layout(
                 FloatContainer(
                     HSplit(
                         [
+                            self._header,
                             self._output,
                             self._approval_container,
                             self._input_container,
@@ -254,6 +273,7 @@ class _XcodeTui:
                     "radio-selected": "ansicyan bold",
                     "status": "ansibrightblack",
                     "input-border": "ansibrightblack",
+                    "title": "bold",
                     "prompt-marker": "ansiyellow bold",
                 }
             ),
@@ -326,6 +346,7 @@ class _XcodeTui:
         bindings.add("end")(self._end_key)
         bindings.add(Keys.ScrollUp)(self._scroll_up_key)
         bindings.add(Keys.ScrollDown)(self._scroll_down_key)
+        bindings.add("?")(self._show_shortcuts_key)
         bindings.add("c-q")(self._quit_key)
         bindings.add("c-c")(self._cancel_key)
         return bindings
@@ -362,6 +383,16 @@ class _XcodeTui:
         self._scroll_by(-3)
 
     def _end_key(self, _event: object) -> None:
+        self._scrollback = 0
+        self._refresh()
+
+    def _show_shortcuts_key(self, event: object) -> None:
+        if self._input.text:
+            buffer = getattr(event, "current_buffer", None)
+            if buffer is not None:
+                buffer.insert_text("?")
+            return
+        self._state.log.append(_LogEntry("system", _SHORTCUT_HELP))
         self._scrollback = 0
         self._refresh()
 
@@ -775,15 +806,21 @@ class _XcodeTui:
         self._application.invalidate()
 
     def _status_text(self) -> str:
-        parts = [f"cwd: {self._project_root}"]
-        if self._repl_state.model_name:
-            parts.append(f"model: {self._repl_state.model_name}")
-        parts.append(f"mode: {self._repl_state.mode}")
+        parts = [f"mode: {self._repl_state.mode}"]
         if self._repl_state.context_usage:
             parts.append(f"context: {self._repl_state.context_usage}")
         if self._repl_state.context_cost:
             parts.append(f"cost: {self._repl_state.context_cost}")
         return "  ".join(parts)
+
+    def _header_text(self) -> str:
+        get_model_info = getattr(self._agent_app, "get_model_info", None)
+        raw_info = get_model_info() if callable(get_model_info) else None
+        info: dict[str, object] = raw_info if isinstance(raw_info, dict) else {}
+        model = str(info.get("model") or self._repl_state.model_name or "unknown")
+        effort = str(info.get("reasoning_effort") or "")
+        model_display = f"{model} ({effort})" if effort else model
+        return f"✦ Xcode\n· {model_display}\n: {self._project_root}"
 
 
 # ── 模块级工具函数 ──
