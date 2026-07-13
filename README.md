@@ -58,35 +58,6 @@ uv pip install -e ".[dev]"
 
 ---
 
-## 打包为独立二进制
-
-使用 PyInstaller 将 xcode 打包为免 Python 环境的可执行文件：
-
-```powershell
-# 安装打包依赖
-uv pip install -e ".[pack]"
-
-# 打包（onedir 模式，启动快、更新方便）
-uv run pyinstaller --onedir --name xcode --paths src src/xcode/__main__.py
-
-# 产出在 dist/xcode/
-# 直接运行（Windows）：
-.\dist\xcode\xcode.exe --help
-# 或（Linux/macOS）：
-./dist/xcode/xcode --help
-```
-
-| 模式 | 产出 | 启动速度 | 适用场景 |
-|---|---|---|---|
-| `--onedir`（默认） | `dist\xcode\` 目录（exe + 依赖） | 无延迟 | 开发/调试、频繁更新 |
-| `--onefile` | 单个 `dist\xcode.exe` | 慢 1-3 秒（需解压） | 分发给终端用户 |
-
-`onedir` 模式下，依赖层不变时只需重新打包主 exe，`_internal\` 目录可复用。
-
-已提供 `xcode.spec` 配置文件，也可直接运行 `uv run pyinstaller xcode.spec`。
-
----
-
 ## 快速开始
 
 ### 编程式调用
