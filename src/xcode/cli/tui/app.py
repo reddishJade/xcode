@@ -245,7 +245,7 @@ class _XcodeTui:
                 {
                     "": "",
                     "user": "ansicyan bold",
-                    "thinking": "ansibrightblack",
+                    "thinking": "#808080",
                     "tool": "ansibrightblack",
                     "tool-title": "ansigreen bold",
                     "error": "ansired",

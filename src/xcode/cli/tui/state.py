@@ -23,6 +23,10 @@ from .rendering import (
 )
 from xcode.harness.observability.shell_analyzer import analyze_shell_command
 
+
+_THINKING_ANSI = "\x1b[38;2;128;128;128m"
+_ANSI_RESET = "\x1b[0m"
+
 if TYPE_CHECKING:
     from xcode.harness.agent_runtime.events import (
         CodingAgentHarnessEvent,
@@ -200,9 +204,9 @@ class _TuiState:
 
     def lines(self) -> list[str]:
         lines: list[str] = []
-        self._append_log_entries(lines, rendered_markdown_lines)
+        self._append_log_entries(lines, rendered_markdown_lines, color_thinking=False)
         if self.thinking.strip():
-            self._thinking_lines(lines)
+            self._thinking_lines(lines, color=False)
         self._append_subagent_lines(lines)
         self._append_hitl_lines(lines)
         return lines
@@ -211,9 +215,9 @@ class _TuiState:
 
     def ansi_lines(self) -> list[str]:
         lines: list[str] = []
-        self._append_log_entries(lines, markdown_ansi_lines)
+        self._append_log_entries(lines, markdown_ansi_lines, color_thinking=True)
         if self.thinking.strip():
-            self._thinking_lines(lines)
+            self._thinking_lines(lines, color=True)
         self._append_subagent_lines(lines)
         self._append_hitl_lines(lines)
         return lines
@@ -221,7 +225,10 @@ class _TuiState:
     # ── 内部渲染方法 ──
 
     def _append_log_entries(
-        self, lines: list[str], md_fn: Callable[[str], list[str]]
+        self,
+        lines: list[str],
+        md_fn: Callable[[str], list[str]],
+        color_thinking: bool,
     ) -> None:
         """按工具组渲染日志，并只在当前工具组显示折叠提示。"""
         latest_tool_index = max(
@@ -246,6 +253,7 @@ class _TuiState:
                 entry,
                 lines,
                 md_fn,
+                color_thinking=color_thinking,
                 show_tool_expand=(self.tool_collapsed and index == latest_tool_index),
                 show_tool_collapse=(
                     not self.tool_collapsed
@@ -261,6 +269,7 @@ class _TuiState:
         entry: _LogEntry,
         lines: list[str],
         md_fn: Callable[[str], list[str]],
+        color_thinking: bool,
         show_tool_expand: bool,
         show_tool_collapse: bool,
     ) -> None:
@@ -296,27 +305,32 @@ class _TuiState:
             lines.extend(detail_lines)
         elif entry.role == "thinking":
             self._append_thinking_entry(
-                entry, lines, plain_text=(md_fn is rendered_markdown_lines)
+                entry,
+                lines,
+                plain_text=(md_fn is rendered_markdown_lines),
+                color=color_thinking,
             )
         elif entry.markdown:
             lines.extend(md_fn(_render_citations(entry.text)))
         else:
             lines.extend(entry.text.splitlines() or [""])
 
-    def _thinking_lines(self, lines: list[str]) -> None:
+    def _thinking_lines(self, lines: list[str], color: bool) -> None:
         if lines:
             lines.append("")
         dur = self.thinking_core.duration_ms
         if dur:
-            lines.append(f"Thought for {format_elapsed(dur / 1000)}")
+            self._append_thinking_line(
+                lines, f"Thought for {format_elapsed(dur / 1000)}", color
+            )
         else:
-            lines.append("Thinking")
+            self._append_thinking_line(lines, "Thinking", color)
         if not self.thinking_collapsed:
             for tl in self.thinking.splitlines():
-                lines.append(f"  {tl.lstrip()}")
+                self._append_thinking_line(lines, f"  {tl.lstrip()}", color)
 
     def _append_thinking_entry(
-        self, entry: _LogEntry, lines: list[str], plain_text: bool
+        self, entry: _LogEntry, lines: list[str], plain_text: bool, color: bool
     ) -> None:
         entry_lines = entry.text.splitlines() or [""]
         has_timing = entry_lines[-1].startswith("Thought for ")
@@ -324,12 +338,21 @@ class _TuiState:
         if has_timing:
             entry_lines = entry_lines[:-1]
         if dur_text:
-            lines.append(f"Thought for {dur_text}")
+            self._append_thinking_line(lines, f"Thought for {dur_text}", color)
         else:
-            lines.append("Thinking")
+            self._append_thinking_line(lines, "Thinking", color)
         if not self.thinking_collapsed:
             for tl in entry_lines:
-                lines.append(f"  {tl if plain_text else tl.lstrip()}")
+                self._append_thinking_line(
+                    lines, f"  {tl if plain_text else tl.lstrip()}", color
+                )
+
+    @staticmethod
+    def _append_thinking_line(lines: list[str], text: str, color: bool) -> None:
+        if color:
+            lines.append(f"{_THINKING_ANSI}{text}{_ANSI_RESET}")
+        else:
+            lines.append(text)
 
     def _append_subagent_lines(self, lines: list[str]) -> None:
         if not self.subagents or self.tool_collapsed:
