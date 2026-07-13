@@ -15,6 +15,7 @@ from xcode.harness.observability import (
     PermissionPolicy,
 )
 from xcode.harness.snapshot import SnapshotStore
+from xcode.harness.agent_runtime import BusyMessageMode
 
 
 VerbosityLevel = Literal["normal", "verbose", "debug"]
@@ -38,6 +39,7 @@ class ReplState:
     model_name: str = ""
     thinking_collapsed: bool = False
     tool_collapsed: bool = False
+    busy_mode: BusyMessageMode = BusyMessageMode.STEER
 
 
 @dataclass

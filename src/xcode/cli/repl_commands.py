@@ -580,7 +580,7 @@ def cmd_steer(cmd: str, ctx: CommandContext) -> bool:
 
     try_steer = getattr(agent, "try_steer", None)
     if callable(try_steer) and try_steer(UserMessage(content=msg)):
-        ctx.store.append("user", f"[steer] {msg}")
+        ctx.store.append("user", msg)
         print("[steer] injected into the active run")
     else:
         ctx.state.pending_inject = msg
@@ -589,21 +589,32 @@ def cmd_steer(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
-    """将消息加入队列，在 agent 当前回合结束后自动发送。"""
+    """设置忙时策略，或把消息加入 next-run follow-up 队列。"""
     parts = cmd.split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
-        print("Usage: /queue <message>")
+        print(f"Current busy-message mode: {ctx.state.busy_mode.value}")
+        print("Usage: /queue steer|followup|collect|interrupt|<message>")
         return False
     msg = parts[1].strip()
+    from xcode.harness.agent_runtime import BusyMessageMode
+
+    if msg in {mode.value for mode in BusyMessageMode}:
+        ctx.state.busy_mode = BusyMessageMode(msg)
+        print(f"Busy-message mode set to {msg}.")
+        return False
+
     agent = getattr(ctx.app, "agent", None)
     if agent is None or not hasattr(agent, "follow_up"):
         print("No active agent to queue message.")
         return False
     from xcode.agent.messages import UserMessage
 
-    agent.follow_up(UserMessage(content=msg))
-    ctx.store.append("user", f"[queued] {msg}")
-    print("[queued] will be delivered after current turn")
+    queued = agent.follow_up(UserMessage(content=msg))
+    if queued is False:
+        ctx.state.pending_inject = msg
+        print("[queued] no active run; sending as a normal message")
+    else:
+        print("[queued] will start a new run after the current run finishes")
     return False
 
 
@@ -1588,8 +1599,8 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     ),
     "/queue": CommandEntry(
         handler=cmd_queue,
-        desc="Queue a message for delivery after the current turn ends.",
-        args_desc="<message>",
+        desc="Set the busy-message mode or enqueue a next-run message.",
+        args_desc="steer|followup|collect|interrupt|<message>",
         accepts_args=True,
         group=COMMAND_GROUP_MODE,
     ),

@@ -69,21 +69,29 @@ class Agent:
         self._system_prompt = system_prompt
         self._steer_queue: list[AgentMessage] = []
         self._steer_lock = Lock()
+        self._accepting_steer = True
         self._followup_queue: list[AgentMessage] = []
         self._last_result: AgentLoopResult | None = None
         self._last_messages: list[AgentMessage] = []
 
     # ── 队列 API ──
 
-    def steer(self, msg: AgentMessage) -> None:
+    def steer(self, msg: AgentMessage) -> bool:
         """向 steer 队列注入消息（下一轮循环开始前消费）。
 
         设计原因：
         steer 用于循环内中断和调整方向，消息在下一步开始前插入。
         这允许外部代码在工具执行后、模型调用前干预（如注入上下文）。
         """
+        return self.try_steer(msg)
+
+    def try_steer(self, msg: AgentMessage) -> bool:
+        """仅在当前 run 仍有消费边界时接受 steer 消息。"""
         with self._steer_lock:
+            if not self._accepting_steer:
+                return False
             self._steer_queue.append(msg)
+            return True
 
     def _drain_steer_queue(self) -> list[AgentMessage]:
         """原子地取出等待在下一个循环边界消费的 steer 消息。"""
@@ -92,14 +100,35 @@ class Agent:
             self._steer_queue = []
         return messages
 
-    def follow_up(self, msg: AgentMessage) -> None:
-        """向 followup 队列注入消息（当前循环结束后追加）。
+    def _finish_steering(self) -> list[AgentMessage]:
+        """关闭 steer 入口并原子取出末轮消息。"""
+        with self._steer_lock:
+            self._accepting_steer = False
+            messages = self._steer_queue
+            self._steer_queue = []
+        return messages
+
+    def _reopen_steering(self) -> None:
+        """末轮收到 steer 后重新开放下一模型边界。"""
+        with self._steer_lock:
+            self._accepting_steer = True
+
+    def close_steering(self) -> list[AgentMessage]:
+        """结束 run 时关闭入口并返回尚未消费的消息。"""
+        return self._finish_steering()
+
+    def _continue_with(self, msg: AgentMessage) -> None:
+        """向 same-run continuation 队列注入消息。
 
         设计原因：
         followup 用于循环后续任务，消息在当前循环自然结束后追加。
         这允许外部代码安排下一轮工作（如多阶段任务编排）。
         """
         self._followup_queue.append(msg)
+
+    def follow_up(self, msg: AgentMessage) -> None:
+        """兼容旧接口；该方法不是 next-run follow-up。"""
+        self._continue_with(msg)
 
     def update_tools(self, tools: list[AgentTool]) -> None:
         """替换当前工具列表。
@@ -193,6 +222,8 @@ class Agent:
             sink,
             signal,
             steer_queue=self._drain_steer_queue,
+            finish_steering=self._finish_steering,
+            reopen_steering=self._reopen_steering,
             follow_up_queue=self._followup_queue,
         )
         self._last_result = result
@@ -231,6 +262,8 @@ class Agent:
                     _emit,
                     signal,
                     steer_queue=self._drain_steer_queue,
+                    finish_steering=self._finish_steering,
+                    reopen_steering=self._reopen_steering,
                     follow_up_queue=self._followup_queue,
                 )
                 self._last_result = result

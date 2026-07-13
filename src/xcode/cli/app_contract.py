@@ -3,8 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Protocol
 
-from xcode.agent.messages import AgentMessage
-from xcode.harness.agent_runtime import CancellationToken, CodingAgentHarnessEvent
+from xcode.agent.messages import AgentMessage, UserMessage
+from xcode.harness.agent_runtime import (
+    BusyMessageMode,
+    CancellationToken,
+    CodingAgentHarnessEvent,
+    SubmitOutcome,
+)
 from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.observability import ExternalHookDiagnostic
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
@@ -24,7 +29,17 @@ class ReplAgent(Protocol):
 
     cancellation_token: CancellationToken
 
-    def follow_up(self, msg: AgentMessage) -> None: ...
+    def follow_up(self, msg: AgentMessage) -> bool: ...
+
+    def submit_busy_message(
+        self,
+        msg: UserMessage,
+        mode: BusyMessageMode = BusyMessageMode.STEER,
+    ) -> SubmitOutcome: ...
+
+    def interrupt(self, reason: str = "interrupted by user") -> bool: ...
+
+    def take_follow_up(self) -> UserMessage | None: ...
 
     def load_history(self, messages: list[AgentMessage]) -> None: ...
 

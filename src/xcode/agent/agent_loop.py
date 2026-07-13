@@ -98,6 +98,8 @@ async def run_agent_loop(
     emit: Callable[[AgentEvent], None],
     signal: CancellationSignal | None = None,
     steer_queue: Callable[[], list[AgentMessage]] | None = None,
+    finish_steering: Callable[[], list[AgentMessage]] | None = None,
+    reopen_steering: Callable[[], None] | None = None,
     follow_up_queue: list[AgentMessage] | None = None,
 ) -> AgentLoopResult:
     """运行 agent 核心循环。
@@ -123,6 +125,8 @@ async def run_agent_loop(
         emit,
         signal,
         steer_queue=steer_queue,
+        finish_steering=finish_steering,
+        reopen_steering=reopen_steering,
         follow_up_queue=follow_up_queue,
     )
 
@@ -137,6 +141,8 @@ async def _run_loop(
     emit: Callable[[AgentEvent], None],
     signal: CancellationSignal | None = None,
     steer_queue: Callable[[], list[AgentMessage]] | None = None,
+    finish_steering: Callable[[], list[AgentMessage]] | None = None,
+    reopen_steering: Callable[[], None] | None = None,
     follow_up_queue: list[AgentMessage] | None = None,
 ) -> AgentLoopResult:
     """核心 agent 循环。
@@ -253,8 +259,20 @@ async def _run_loop(
             # 模型没有请求工具 → 本轮结束
             emit(_turn_end_event(message, []))
 
+            # 原子关闭入口并检查生成期间到达的末轮 steer。若存在，
+            # 重新开放入口并让下一次模型调用消费这些消息。
+            if finish_steering is not None and step < config.max_steps:
+                final_steers = finish_steering()
+                if final_steers:
+                    _append_messages(current_context, new_messages, final_steers)
+                    if reopen_steering is not None:
+                        reopen_steering()
+                    continue
+
             # 检查 follow-up 队列
             if _queue_follow_up(state, follow_up_queue):
+                if reopen_steering is not None:
+                    reopen_steering()
                 continue
             return _finish_loop(
                 new_messages,
@@ -382,7 +400,16 @@ def _append_steering_messages(
     msgs = steer_queue()
     if not msgs:
         return
-    for msg in msgs:
+    _append_messages(current_context, new_messages, msgs)
+
+
+def _append_messages(
+    current_context: AgentContext,
+    new_messages: list[AgentMessage],
+    messages: list[AgentMessage],
+) -> None:
+    """按顺序把运行时消息同时写入上下文和本轮 transcript。"""
+    for msg in messages:
         current_context.messages.append(msg)
         new_messages.append(msg)
 

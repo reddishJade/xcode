@@ -53,6 +53,8 @@ from ..repl_tools import (
     file_reference_event,
     run_shell_shortcut,
 )
+from xcode.agent.messages import UserMessage
+from xcode.harness.agent_runtime import SubmitStatus
 from .state import (
     _CommandChoiceRequest,
     _CommandTextRequest,
@@ -392,8 +394,43 @@ class _XcodeTui:
         if self._state.running or self._committing:
             if self._state.running and _is_live_command(text):
                 self._run_command(text, preserve_running=True)
+            elif self._state.running and not text.startswith(("/", "!", "$")):
+                self._submit_busy_message(text)
             return
         self._submit(text)
+
+    def _submit_busy_message(self, text: str) -> None:
+        """将忙时普通输入按默认 steer policy 交给 session controller。"""
+        expanded_text, references = expand_file_references(text, self._project_root)
+        outcome = self._agent_app.agent.submit_busy_message(
+            UserMessage(content=expanded_text),
+            self._repl_state.busy_mode,
+        )
+        self._state.add_user(text)
+        if references:
+            self._store.append("event", file_reference_event(references))
+        if outcome.status is SubmitStatus.STEER_ACCEPTED:
+            self._store.append("user", text)
+            self._state.log.append(
+                _LogEntry("system", f"[steer] accepted by {outcome.run_id}")
+            )
+        elif outcome.status is SubmitStatus.FOLLOW_UP_QUEUED:
+            self._state.log.append(
+                _LogEntry(
+                    "system",
+                    f"[{self._repl_state.busy_mode.value}] queued for the next run",
+                )
+            )
+        elif outcome.status is SubmitStatus.INTERRUPT_REQUESTED:
+            self._state.log.append(
+                _LogEntry("system", "[interrupt] cancelling before replacement run")
+            )
+        else:
+            self._repl_state.pending_inject = expanded_text
+            self._state.log.append(
+                _LogEntry("system", "[followup] active run already finished")
+            )
+        self._refresh()
 
     def _insert_newline(self, event: object) -> None:
         buffer = getattr(event, "current_buffer", None)
@@ -457,14 +494,17 @@ class _XcodeTui:
         if self._state.running:
             agent = getattr(self._agent_app, "agent", None)
             if agent is not None:
-                token = getattr(agent, "cancellation_token", None)
-                if token is not None:
-                    token.cancel("interrupted by user")
+                interrupt = getattr(agent, "interrupt", None)
+                if callable(interrupt):
+                    interrupt("interrupted by user")
+                else:
+                    token = getattr(agent, "cancellation_token", None)
+                    if token is not None:
+                        token.cancel("interrupted by user")
             self._store.append(
                 "event", {"type": "interrupted", "data": "interrupted by user"}
             )
-            self._state.log.append(_LogEntry("stop", "[interrupted]"))
-            self._state.running = False
+            self._state.log.append(_LogEntry("stop", "[interrupt requested]"))
             self._refresh()
             return
         now = perf_counter()
@@ -1042,6 +1082,12 @@ class _XcodeTui:
         """保留回合内容，允许完成后继续折叠和滚动查看。"""
         self._committing = False
         self._refresh()
+        agent = getattr(self._agent_app, "agent", None)
+        take_follow_up = getattr(agent, "take_follow_up", None)
+        follow_up = take_follow_up() if callable(take_follow_up) else None
+        if isinstance(follow_up, UserMessage):
+            self._submit(str(follow_up.content))
+            return
         self._submit_pending_inject()
 
     def _save_partial_answer(self) -> None:
@@ -1142,7 +1188,7 @@ class _XcodeTui:
 
 def _is_live_command(text: str) -> bool:
     """判断命令是否可以在 agent 回合执行期间提交。"""
-    return text.split(maxsplit=1)[0] == "/steer"
+    return text.split(maxsplit=1)[0] in {"/steer", "/queue"}
 
 
 def _tui_history(project_root: Path) -> History | None:

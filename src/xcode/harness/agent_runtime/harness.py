@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
-from threading import Lock
 
 from xcode.ai.providers.base import ModelProvider
 
@@ -43,6 +42,12 @@ from .result import (
     _final_event,
     RunState,
     CodingAgentHarnessResult,
+)
+from .run_control import (
+    ActiveRunHandle,
+    BusyMessageMode,
+    SessionRunController,
+    SubmitOutcome,
 )
 from .tool_gate import ToolGate
 from ._mode_protocol import ToolGateMode
@@ -145,7 +150,7 @@ class AgentHarness:
         self._history: list[AgentMessage] = []
         self._resumed_notice: str | None = None
         self._active_agent: Agent | None = None
-        self._active_agent_lock = Lock()
+        self._run_controller = SessionRunController(gate.session_id)
 
     # ── 可被子类覆盖的扩展点 ──
 
@@ -211,14 +216,37 @@ class AgentHarness:
 
     def try_steer(self, msg: AgentMessage) -> bool:
         """尝试向当前活跃 run 注入消息。"""
-        with self._active_agent_lock:
-            if self._active_agent is None:
-                return False
-            self._active_agent.steer(msg)
-            return True
+        if not isinstance(msg, UserMessage):
+            return False
+        handle = self.active_run()
+        return bool(handle and handle.steer(msg).accepted)
 
-    def follow_up(self, msg: AgentMessage) -> None:
-        self._agent.follow_up(msg)
+    def follow_up(self, msg: AgentMessage) -> bool:
+        """把用户消息排入当前 run 结束后的新 run。"""
+        if not isinstance(msg, UserMessage):
+            return False
+        return self._run_controller.submit(msg, BusyMessageMode.FOLLOW_UP).accepted
+
+    def submit_busy_message(
+        self,
+        msg: UserMessage,
+        mode: BusyMessageMode = BusyMessageMode.STEER,
+    ) -> SubmitOutcome:
+        """按照指定 busy policy 提交运行时用户消息。"""
+        return self._run_controller.submit(msg, mode)
+
+    def active_run(self) -> ActiveRunHandle | None:
+        """返回当前 session 的 active run handle。"""
+        return self._run_controller.active_run()
+
+    def interrupt(self, reason: str = "interrupted by user") -> bool:
+        """请求取消当前 run，但在其完整退出前保留 active identity。"""
+        handle = self.active_run()
+        return bool(handle and handle.interrupt(reason).accepted)
+
+    def take_follow_up(self) -> UserMessage | None:
+        """当前 run 完成后取出下一条 session-level follow-up。"""
+        return self._run_controller.take_follow_up()
 
     def request_compaction(self) -> None:
         if self._compact_controller is not None:
@@ -258,6 +286,7 @@ class AgentHarness:
     def session_id(self, value: str) -> None:
         self._gate.session_id = value
         self._correlation.session_id = value
+        self._run_controller.session_id = value
 
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history = deepcopy(messages)
@@ -312,19 +341,12 @@ class AgentHarness:
         )
         registry_snapshot = snapshot.registry
         active_registry = self._build_active_registry(registry_snapshot)
-        self.cancellation_token.reset()
-        self._correlation.reset(self.session_id)
-
         context_messages = self._build_context_messages(question, snapshot)
         self._resumed_notice = None
         history_messages = context_messages + self.history_messages()
         turn_messages: list[AgentMessage] = [UserMessage(content=question)]
 
         turn_agent = Agent(self._gate.adapt_tools(active_registry))
-        self._agent = turn_agent
-        with self._active_agent_lock:
-            self._active_agent = turn_agent
-
         loop_config = build_loop_config(
             snapshot=snapshot,
             gate=self._gate,
@@ -345,21 +367,27 @@ class AgentHarness:
             **self._build_loop_config_extras(),
         )
 
-        current = self._correlation.snapshot()
-        _emit_hook(
-            self._hook_manager,
-            HookRecord(
-                "before_agent_start",
-                metadata={"question": question},
-                timestamp=current.timestamp,
-                session_id=current.session_id,
-                turn_id=current.turn_id,
-                request_id=current.request_id,
-            ),
-        )
-
-        translation_state = _StreamTranslationState(correlation=self._correlation)
+        run_handle = self._run_controller.begin_run(turn_agent, self.cancellation_token)
         try:
+            self._agent = turn_agent
+            self._active_agent = turn_agent
+            self.cancellation_token.reset()
+            self._correlation.reset(self.session_id)
+
+            current = self._correlation.snapshot()
+            _emit_hook(
+                self._hook_manager,
+                HookRecord(
+                    "before_agent_start",
+                    metadata={"question": question},
+                    timestamp=current.timestamp,
+                    session_id=current.session_id,
+                    turn_id=current.turn_id,
+                    request_id=current.request_id,
+                ),
+            )
+
+            translation_state = _StreamTranslationState(correlation=self._correlation)
             async for event in turn_agent.run_stream(
                 turn_messages,
                 loop_config,
@@ -388,16 +416,17 @@ class AgentHarness:
             )
             final = self._build_result(visible_result, snapshot.config.max_steps)
             self._post_run(final)
+            yield _final_event(
+                result.steps,
+                final,
+                self._correlation.snapshot(),
+            )
         finally:
-            with self._active_agent_lock:
-                if self._active_agent is turn_agent:
-                    self._active_agent = None
-
-        yield _final_event(
-            result.steps,
-            final,
-            self._correlation.snapshot(),
-        )
+            run_handle.begin_finishing()
+            unconsumed_steers = turn_agent.close_steering()
+            self._run_controller.complete_run(run_handle, unconsumed_steers)
+            if self._active_agent is turn_agent:
+                self._active_agent = None
 
     # ── 内部 ──
 

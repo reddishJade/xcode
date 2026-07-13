@@ -303,6 +303,9 @@ def run_repl(
             text=expanded_text,
         )
         _run_snapshotted_turn(ctx, snapshot_store)
+        follow_up = app.agent.take_follow_up()
+        if follow_up is not None:
+            state.pending_inject = str(follow_up.content)
 
 
 def _read_repl_text(
@@ -441,9 +444,14 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
             turn.handle_event(event)
     except KeyboardInterrupt:
         turn.interrupted = True
-        token = getattr(getattr(ctx.app, "agent", None), "cancellation_token", None)
-        if token is not None:
-            token.cancel("interrupted by user")
+        agent = getattr(ctx.app, "agent", None)
+        interrupt = getattr(agent, "interrupt", None)
+        if callable(interrupt):
+            interrupt("interrupted by user")
+        else:
+            token = getattr(agent, "cancellation_token", None)
+            if token is not None:
+                token.cancel("interrupted by user")
         turn.clear_line()
         ctx.store.append(
             "event", {"type": "interrupted", "data": "interrupted by user"}
