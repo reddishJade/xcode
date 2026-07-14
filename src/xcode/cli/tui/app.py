@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, cast
 from prompt_toolkit.application import Application
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.formatted_text.utils import fragment_list_width
 from prompt_toolkit.input.base import Input
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
@@ -32,6 +33,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.output.base import Output
 from prompt_toolkit.styles import Style
+from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import CheckboxList, RadioList, TextArea
 
 from ..app_contract import ReplApp
@@ -186,6 +188,7 @@ class _XcodeTui:
             complete_while_typing=True,
             auto_suggest=CommandArgsSuggester(completer.command_args),
             history=_tui_history(project_root),
+            scrollbar=True,
         )
         self._input.buffer.on_text_insert += lambda _buf: setattr(
             self._input.buffer, "complete_state", None
@@ -1342,7 +1345,18 @@ class _XcodeTui:
         )
 
     def _input_height(self) -> int:
-        return min(5, max(1, self._input.text.count("\n") + 1))
+        # 输入内容可能没有换行符，但会因终端宽度产生视觉折行。
+        # 按显示宽度计算高度，避免视口只露出光标所在的最后一段。
+        columns = max(1, self._application.output.get_size().columns - 1)
+        prompt_width = fragment_list_width(self._input_prompt())
+        visual_lines = 0
+        for index, line in enumerate(self._input.text.split("\n")):
+            line_width = get_cwidth(line)
+            if index == 0:
+                line_width += prompt_width
+            quotient, remainder = divmod(line_width, columns)
+            visual_lines += max(1, quotient + bool(remainder))
+        return min(5, visual_lines)
 
     def _max_scrollback(self) -> int:
         return max(0, len(self._state.lines()) - self._output_height())
