@@ -81,7 +81,7 @@ from xcode.harness.agent_runtime.events import (
 
 _SHORTCUT_HELP = """Shortcuts
   ?              show this help
-  Ctrl+C         interrupt; press twice to exit when idle
+  Ctrl+C         clear input; interrupt; press twice to exit when idle
   Ctrl+Q         exit
   Ctrl+T         expand or collapse thinking
   Ctrl+O         expand or collapse tool details
@@ -595,6 +595,11 @@ class _XcodeTui:
             return
         if self._state.pending_hitl is not None:
             self._finish_denial("")
+        if self._input.text:
+            self._input.text = ""
+            self._exit_pending = 0.0
+            self._refresh()
+            return
         if self._state.running:
             self._agent_app.agent.interrupt("interrupted by user")
             self._store.append(
