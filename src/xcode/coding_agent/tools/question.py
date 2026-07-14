@@ -12,6 +12,9 @@ from xcode.agent.types import ToolInput, ToolSpec
 
 QuestionPromptHandler = Callable[[list[dict[str, Any]]], list[list[str]]]
 
+CUSTOM_OPTION_LABEL = "Type your own answer"
+"""当 LLM 提供了选项列表时，额外追加的「自定义输入」选项的显示文本。"""
+
 
 class _QuestionToolHandler:
     """在不同前端之间路由问题交互。"""
@@ -114,15 +117,27 @@ def _ask_with_questionary(
             }
             choices = list(display_to_label)
             if item.get("multiple"):
+                choices.append(CUSTOM_OPTION_LABEL)
                 selected = questionary.checkbox(message, choices=choices).ask()
-                answers.append(
-                    [display_to_label[str(value)] for value in (selected or [])]
-                )
+                if selected and CUSTOM_OPTION_LABEL in selected:
+                    custom = questionary.text("Your answer:", qmark=header or "?").ask()
+                    answers.append([str(custom)] if custom else [])
+                else:
+                    answers.append(
+                        [display_to_label[str(value)] for value in (selected or [])]
+                    )
             else:
+                choices.append(CUSTOM_OPTION_LABEL)
                 selected = questionary.select(message, choices=choices).ask()
-                answers.append(
-                    [display_to_label[str(selected)]] if selected is not None else []
-                )
+                if selected == CUSTOM_OPTION_LABEL:
+                    custom = questionary.text("Your answer:", qmark=header or "?").ask()
+                    answers.append([str(custom)] if custom else [])
+                else:
+                    answers.append(
+                        [display_to_label[str(selected)]]
+                        if selected is not None
+                        else []
+                    )
         else:
             selected = questionary.text(message, qmark=header or "?").ask()
             answers.append([str(selected)] if selected else [])

@@ -43,6 +43,7 @@ from ..file_refs import expand_file_references
 from ..markdown import TerminalMarkdownRenderer
 from ..repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
 from ..repl_hitl import HITL_CHOICES, parse_hitl_choice, tool_preview_lines
+from xcode.coding_agent.tools.question import CUSTOM_OPTION_LABEL
 from ..repl import current_effort_options, current_model_options
 from ..repl_sessions import (
     print_saved_conversation,
@@ -1066,32 +1067,55 @@ class _XcodeTui:
                     for option in options
                     if isinstance(option, dict)
                 ]
-                answers.append(
-                    self._wait_for_question_choice(
-                        str(question.get("question", "")),
-                        choices,
-                        bool(question.get("multiple", False)),
-                    )
+                # 追加「自定义输入」选项
+                choices.append((CUSTOM_OPTION_LABEL, CUSTOM_OPTION_LABEL))
+
+                result = self._wait_for_question_choice(
+                    str(question.get("question", "")),
+                    choices,
+                    bool(question.get("multiple", False)),
                 )
+
+                multiple = bool(question.get("multiple", False))
+                if multiple:
+                    if CUSTOM_OPTION_LABEL in result:
+                        custom = self._wait_for_question_text(
+                            str(question.get("question", ""))
+                        )
+                        answers.append(custom if custom else [])
+                    else:
+                        answers.append(result)
+                else:
+                    if result and result[0] == CUSTOM_OPTION_LABEL:
+                        custom = self._wait_for_question_text(
+                            str(question.get("question", ""))
+                        )
+                        answers.append(custom if custom else [])
+                    else:
+                        answers.append(result)
                 continue
 
-            event = Event()
-            answer: list[str] = []
-
-            def submit(value: str) -> None:
-                if value:
-                    answer.append(value)
-                event.set()
-
-            def show_text() -> None:
-                self._open_command_text(
-                    str(question.get("question", "")), submit, event.set
-                )
-
-            self._call_in_ui_thread(show_text)
-            event.wait()
-            answers.append(answer)
+            answers.append(
+                self._wait_for_question_text(str(question.get("question", "")))
+            )
         return answers
+
+    def _wait_for_question_text(self, prompt: str) -> list[str]:
+        """打开文本输入并等待用户提交回答。"""
+        event = Event()
+        answer: list[str] = []
+
+        def submit(value: str) -> None:
+            if value:
+                answer.append(value)
+            event.set()
+
+        def show_text() -> None:
+            self._open_command_text(prompt, submit, event.set)
+
+        self._call_in_ui_thread(show_text)
+        event.wait()
+        return answer
 
     def _wait_for_question_choice(
         self,
