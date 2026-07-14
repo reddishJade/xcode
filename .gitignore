@@ -8,6 +8,7 @@
 .pytest_cache/
 .ruff_cache/
 .uv-cache/
+.vscode/
 .xcode/
 
 # --- Python 缓存与构建 ——
