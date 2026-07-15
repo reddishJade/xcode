@@ -127,6 +127,35 @@ class Trial(EvalModel):
     command: tuple[str, ...]
 
 
+class Experiment(EvalModel):
+    """一组保持任务、模型、预算和重复策略可比较的 Trial 声明。"""
+
+    schema_version: int = SCHEMA_VERSION
+    experiment_id: Identifier
+    dataset_version: Identifier
+    task_ids: tuple[Identifier, ...]
+    variants: tuple[Variant, ...]
+    model: ModelConfig
+    repetitions: PositiveInt
+    command: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def validate_comparison_axes(self) -> Self:
+        """拒绝空任务、空命令和会破坏配对关系的重复标识。"""
+        if not self.task_ids:
+            raise ValueError("experiment must select at least one task")
+        if not self.variants:
+            raise ValueError("experiment must declare at least one variant")
+        if not self.command:
+            raise ValueError("experiment command must not be empty")
+        if len(set(self.task_ids)) != len(self.task_ids):
+            raise ValueError("experiment task_ids must be unique")
+        variant_ids = [variant.variant_id for variant in self.variants]
+        if len(set(variant_ids)) != len(variant_ids):
+            raise ValueError("experiment variant ids must be unique")
+        return self
+
+
 class VerifierSpec(EvalModel):
     """仅 Eval 控制面可读取的隐藏 verifier 定义。"""
 
@@ -241,3 +270,70 @@ class TrialResult(EvalModel):
         elif self.error_category is None:
             raise ValueError("invalid trial requires an error category")
         return self
+
+
+class TrialMetric(EvalModel):
+    """报告中的单 Trial 结果与投入联合点。"""
+
+    trial_id: Identifier
+    task_id: Identifier
+    variant_id: Identifier
+    repetition: Annotated[int, Field(ge=0)]
+    valid_trial: bool
+    success: bool
+    error_category: ErrorCategory | None
+    resolved: bool | None
+    regression_free: bool | None
+    policy_clean: bool | None
+    usage: ResourceUsage
+
+
+class UsageAggregate(EvalModel):
+    """包含失败和无效 Trial 的总投入与成功单位成本。"""
+
+    wall_time_seconds: float
+    model_calls: int
+    tool_calls: int
+    input_tokens: int | None
+    output_tokens: int | None
+    cost_usd: float | None
+    tokens_per_success: float | None
+    tool_calls_per_success: float | None
+    time_per_success: float | None
+    cost_per_success: float | None
+
+
+class VariantSummary(EvalModel):
+    """单 Variant 的结果、排除项、重复统计和成本。"""
+
+    variant_id: Identifier
+    declared_trials: int
+    observed_trials: int
+    missing_trials: int
+    valid_trials: int
+    excluded_trials: int
+    successes: int
+    success_rate: float | None
+    pass_k: PositiveInt
+    pass_at_k: float | None
+    pass_power_k: float | None
+    pass_k_eligible_tasks: int
+    resolved_rate: float | None
+    regression_free_rate: float | None
+    policy_clean_rate: float | None
+    exclusions: dict[ErrorCategory, int]
+    usage: UsageAggregate
+
+
+class ExperimentSummary(EvalModel):
+    """可以由 Trial artifact 完全离线重建的 Experiment 摘要。"""
+
+    schema_version: int = SCHEMA_VERSION
+    experiment_id: Identifier
+    dataset_version: Identifier
+    task_ids: tuple[Identifier, ...]
+    repetitions: PositiveInt
+    variants: tuple[VariantSummary, ...]
+    efficient_variant_ids: tuple[Identifier, ...]
+    trials: tuple[TrialMetric, ...]
+    formulas: dict[str, str]

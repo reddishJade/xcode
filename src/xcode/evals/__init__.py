@@ -2,6 +2,8 @@
 
 from .schema import (
     ErrorCategory,
+    Experiment,
+    ExperimentSummary,
     Task,
     Trial,
     TrialResult,
@@ -11,6 +13,8 @@ from .schema import (
 
 __all__ = [
     "ErrorCategory",
+    "Experiment",
+    "ExperimentSummary",
     "Task",
     "Trial",
     "TrialResult",
