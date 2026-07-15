@@ -37,3 +37,6 @@
 - 阶段 2 加入 MCP lazy connection 有限恢复任务。同一外置 verifier 在父版本行为
   3 failed / 回归 1 passed，在修复版本和只应用允许生产 patch 的参考工作区均为行为
   3 passed / 回归 1 passed；最终错误中的 bearer token 已由行为 oracle 验证脱敏。
+- 阶段 2 加入 provider transport 配置一致性任务。同一外置 verifier 在父版本行为
+  3 failed / 回归 4 passed，在修复版本和只应用两个允许生产 patch 的参考工作区均为
+  行为 3 passed / 回归 4 passed；至此首版数据集达到 10 个审核任务的语料门槛。

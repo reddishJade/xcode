@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "task_id": "xcode-provider-transports-match-runtime",
+  "dataset_version": "xcode-history-v1",
+  "prompt": "Provider profiles are selected from `xcode.config.json`, but the accepted transport values have drifted from the provider implementations registered at runtime. One advertised transport has no implementation or dependency, and unknown strings silently fall back to the default transport during config loading. Align the declared configuration transports with providers Xcode can actually construct, and make unsupported values fail fast with a useful error instead of changing providers silently. Remove unreachable factory handling left for unsupported transports. Do not modify tests. Run focused tests and avoid unrelated changes.",
+  "source": {
+    "kind": "git_history",
+    "repository": "https://github.com/reddishJade/xcode.git",
+    "revision": "10ad4f63f0c96828dd479c5964cbe9cd9b918a3a",
+    "license": "MIT"
+  },
+  "verifier_id": "xcode-provider-transports-match-runtime-hidden",
+  "allowed_paths": [
+    "src/xcode/ai/providers/factory.py",
+    "src/xcode/harness/config.py"
+  ],
+  "ignored_paths": [
+    ".coverage",
+    ".pytest_cache"
+  ],
+  "guides": ["AGENTS.md"],
+  "sensors": ["pytest", "pyright"],
+  "tags": ["provider", "configuration", "factory", "historical-fix"],
+  "budget": {
+    "wall_time_seconds": 900,
+    "model_calls": 40,
+    "tool_calls": 120,
+    "input_tokens": 1600000,
+    "output_tokens": 40000
+  },
+  "known_limitations": [
+    "The hidden oracle verifies registry/config consistency and parsing locally; it does not make paid provider API calls."
+  ]
+}

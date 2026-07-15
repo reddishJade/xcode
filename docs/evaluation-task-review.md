@@ -30,8 +30,9 @@
 | `5691546` enforce parallel tool worker limits | 配置的 worker 上限未进入 core loop，parallel batch 无界启动 handler；覆盖工具并行与资源控制。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 | `9fcee80` skip unindexable snapshot paths | 单个 Windows reserved/unindexable 路径会让整轮 hidden Git tree snapshot 失败；覆盖 session snapshot 与文件系统恢复。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 | `aef366d` reconnect failed MCP clients | 瞬时启动失败直接逃逸、失败客户端清理与最终错误脱敏不足；覆盖 MCP 恢复、生命周期并发与诊断安全。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
+| `bdf03d7` align declared provider transports | 配置接受未实现 transport 且未知值静默回退；覆盖 `xcode.config.json`、provider registry 与 fail-fast 诊断。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 
-九个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
+十个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
 不会进入 Agent 工作区。`6c1a27f` 已由真实模型运行两次，产生一次成功和一次有效能力
 失败；这个小样本只证明阶段 1 闭环，不构成阶段 2 基线。
 
@@ -146,3 +147,16 @@ oracle 缺口保留在 Task 的 `known_limitations`，不能扩大解释为全�
   注入，因此不依赖外部 MCP 服务，也不把 fake server 算作能力分。
 - 工程价值：测量 Agent 外部工具连接是否能从瞬时故障中恢复，同时避免无限重试、并发
   替换和凭据泄露把基础设施问题伪装成模型失败。
+
+### `bdf03d7`（2026-07-15）
+
+- 父提交：`10ad4f63f0c96828dd479c5964cbe9cd9b918a3a`。
+- 隐藏 oracle 比较公开配置 transport 集合与生产 provider registry，并通过真实
+  `xcode.config.json` 加载路径验证未实现值和拼写错误均明确失败，不静默切换 provider。
+- 同一外置 verifier：父版本行为 3 failed / 稳定回归 4 passed；修复版本和只应用
+  `src/xcode/harness/config.py`、`src/xcode/ai/providers/factory.py` patch 的参考工作区均为
+  行为 3 passed / 回归 4 passed。
+- 回归切片逐一加载四个已支持 transport，验证它们经过配置解析后保持原值；oracle 不发起
+  付费 API 请求，因此只测配置/registry 契约，不把 provider 可用性算作能力分。
+- 工程价值：测量 provider 选择是否忠实执行用户配置，让 transport 拼写和缺失实现尽早
+  形成可定位错误，避免后续把错误模型行为归因给 Agent。
