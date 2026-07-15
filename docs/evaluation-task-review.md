@@ -24,8 +24,9 @@
 | `337b989` preserve fallback wrapper across `set_model` | 热切换主模型会静默丢失 fallback 容灾层；覆盖 provider 恢复与运行时配置能力。 | 已入 `xcode-history-v1` | 阶段 2 基线重复运行。 |
 | `da58a39` avoid repeated watchdog masking idle watchdog | 连续工具错误被错误归因为重复调用；覆盖循环控制、工具失败反馈和恢复诊断。 | 已入 `xcode-history-v1` | 阶段 2 基线重复运行。 |
 | `6c1a27f` make `/thinking off` disable reasoning | 配置的 effort 覆盖关闭指令；覆盖模型控制与请求装配。 | 已入并完成真实闭环 | 1/2 Trial 成功仅用于阶段 1 闭环；阶段 2 需更多重复。 |
+| `797bce1` reset session grants on new sessions | 新会话错误继承临时授权，永久授权与恢复中的活动会话又不能被一并清空；覆盖权限与 session 生命周期。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 
-三个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
+四个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
 不会进入 Agent 工作区。`6c1a27f` 已由真实模型运行两次，产生一次成功和一次有效能力
 失败；这个小样本只证明阶段 1 闭环，不构成阶段 2 基线。
 
@@ -66,3 +67,15 @@ oracle 缺口保留在 Task 的 `known_limitations`，不能扩大解释为全�
   10 passed。
 - 工程价值：测量 Xcode 模型控制是否真正改变 provider 请求，不把 CLI 文案或 Agent
   自报状态当作成功。
+
+### `797bce1`（2026-07-15）
+
+- 父提交：`7ec0db84d759f0a5e9436198450674492c89b85e`。
+- 隐藏 oracle 分别验证 `clear_history()` 清除临时授权但保留永久授权，以及
+  `load_history([])` 开始新授权会话而非空历史恢复保持活动授权。
+- 同一外置 verifier：父版本行为 2 failed / 稳定回归 2 passed；修复版本行为 2 passed /
+  回归 2 passed；只向父版本应用两个允许生产文件的 patch 后同样为 2 passed / 2 passed。
+- 完整历史 structured-agent 测试超过 90 秒，因此回归切片限定为父版本已有的 history
+  restore 与 provider conversation reset 两项测试；覆盖缺口已写入 Task。
+- 工程价值：测量 session 与权限反馈的生命周期是否一致，避免新任务静默继承旧任务
+  的临时授权。

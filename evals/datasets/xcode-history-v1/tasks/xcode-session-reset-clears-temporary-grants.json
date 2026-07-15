@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "task_id": "xcode-session-reset-clears-temporary-grants",
+  "dataset_version": "xcode-history-v1",
+  "prompt": "Xcode keeps temporary permission grants for the lifetime of a session and permanent grants across sessions. Starting a new empty session through either history reset path currently leaves the previous session's temporary grants active. Fix session reset behavior so temporary grants are cleared, permanent grants are preserved, and loading a non-empty history does not discard the active session's grants. Do not modify tests. Run focused tests and avoid unrelated changes.",
+  "source": {
+    "kind": "git_history",
+    "repository": "https://github.com/reddishJade/xcode.git",
+    "revision": "7ec0db84d759f0a5e9436198450674492c89b85e",
+    "license": "MIT"
+  },
+  "verifier_id": "xcode-session-reset-clears-temporary-grants-hidden",
+  "allowed_paths": [
+    "src/xcode/harness/agent_runtime/structured.py",
+    "src/xcode/harness/agent_runtime/tool_gate.py"
+  ],
+  "ignored_paths": [
+    ".coverage",
+    ".pytest_cache"
+  ],
+  "guides": ["AGENTS.md"],
+  "sensors": ["pytest", "pyright"],
+  "tags": ["permissions", "session", "historical-fix"],
+  "budget": {
+    "wall_time_seconds": 900,
+    "model_calls": 40,
+    "tool_calls": 120,
+    "input_tokens": 1600000,
+    "output_tokens": 40000
+  },
+  "known_limitations": [
+    "The deterministic oracle uses in-memory grant stores; persistence backend integration remains covered only by the declared regression slice.",
+    "The full historical structured-agent test module exceeded 90 seconds during reference replay, so regression verification uses the two stable history/provider-reset tests declared by the verifier."
+  ]
+}
