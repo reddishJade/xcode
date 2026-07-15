@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "experiment_id": "phase2-baseline-full-deepseek-v4-flash-20260715a",
+  "captured_at": "2026-07-15",
+  "harness_revision": "76391bee05324a9522345c2d91d8302ecdbc41e8",
+  "xcode_dirty": false,
+  "dataset_version": "xcode-history-v1",
+  "task_count": 10,
+  "variant_id": "full",
+  "provider": "openai_chat",
+  "model": "deepseek-v4-flash",
+  "repetitions": 2,
+  "declared_trials": 20,
+  "observed_trials": 20,
+  "missing_trials": 0,
+  "valid_trials": 17,
+  "excluded_trials": 3,
+  "exclusions": {
+    "budget_exceeded": 3
+  },
+  "successes": 2,
+  "success_rate": 0.11764705882352941,
+  "pass_k": 2,
+  "pass_at_k": 0.125,
+  "pass_power_k": 0.125,
+  "pass_k_eligible_tasks": 8,
+  "resolved_rate": 0.11764705882352941,
+  "regression_free_rate": 1.0,
+  "policy_clean_rate": 0.5882352941176471,
+  "usage": {
+    "wall_time_seconds": 6384.576388145011,
+    "model_calls": 739,
+    "tool_calls": 1093,
+    "input_tokens": 22624847,
+    "output_tokens": 512583,
+    "cost_usd": null,
+    "tokens_per_success": 11312423.5,
+    "tool_calls_per_success": 546.5,
+    "time_per_success": 3192.2881940725056,
+    "cost_per_success": null
+  },
+  "task_outcomes": {
+    "xcode-mcp-retries-failed-lazy-connections": {
+      "valid": 2,
+      "successes": 0,
+      "excluded": 0
+    },
+    "xcode-mcp-unknown-overrides-are-diagnosed": {
+      "valid": 2,
+      "successes": 0,
+      "excluded": 0
+    },
+    "xcode-observer-hooks-do-not-block-agent": {
+      "valid": 0,
+      "successes": 0,
+      "excluded": 2
+    },
+    "xcode-parallel-tools-respect-worker-limit": {
+      "valid": 2,
+      "successes": 2,
+      "excluded": 0
+    },
+    "xcode-provider-transports-match-runtime": {
+      "valid": 2,
+      "successes": 0,
+      "excluded": 0
+    },
+    "xcode-session-reset-clears-temporary-grants": {
+      "valid": 1,
+      "successes": 0,
+      "excluded": 1
+    },
+    "xcode-set-model-preserves-fallback": {
+      "valid": 2,
+      "successes": 0,
+      "excluded": 0
+    },
+    "xcode-snapshot-skips-unindexable-path": {
+      "valid": 2,
+      "successes": 0,
+      "excluded": 0
+    },
+    "xcode-thinking-off-overrides-effort": {
+      "valid": 2,
+      "successes": 0,
+      "excluded": 0
+    },
+    "xcode-watchdog-preserves-tool-error-signal": {
+      "valid": 2,
+      "successes": 0,
+      "excluded": 0
+    }
+  },
+  "artifact_hashes": {
+    "experiment.json": "4116d1f1dc2c24012d97e0a679b83adf4da3c7b601bdf9db37a60f8070638082",
+    "trials.jsonl": "febafa49272eb64502da17804c5e67d1b31f22eff26475d0c64e8c0993a6a258",
+    "summary.json": "49c9b29e7cff394e67a3ce83423accad978e9d9f5d46cc68988f2d754e0d81fb",
+    "report.md": "9a1fa4479a2693f3347933253629b8a6cf1263a271de553a15098b722030b5a9",
+    "experiment-checksums.json": "733ba65da9f9dac4b97a4075a1ba1ca63ec6e72bea5a03e02c8d49e4d0ccdddb"
+  },
+  "limitations": [
+    "This baseline measures one model, one full Xcode variant, one repository-derived dataset, and two repetitions per task.",
+    "Three budget-exceeded trials are excluded from the success-rate denominator but included in all aggregate resource usage.",
+    "Cost in USD was unavailable from provider telemetry and is not estimated.",
+    "A single-variant efficiency frontier is only an absolute baseline; it does not establish harness gain."
+  ]
+}

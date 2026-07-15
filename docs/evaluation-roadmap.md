@@ -278,19 +278,18 @@ src/xcode/evals/
   `eval-results/artifacts/phase1-baseline-thinking-20260715a/`。
 - 任务集进度：已固化 3 个真实 Git 历史修复 Task，分别覆盖 provider fallback 恢复、
   工具错误/watchdog 协作、thinking/model 请求控制；三者均完成父失败、修复通过的
-  外置差分和只应用生产 patch 的参考重放。数量达到阶段 1 的 3 至 5 个要求下限，但
   外置差分和只应用生产 patch 的参考重放。数量达到阶段 1 的 3 至 5 个要求下限。
 - 结论边界：阶段 1 只证明真实闭环、隔离、判分、重复恢复和证据保存成立；1/2 的
   单任务观察不是稳定能力基线，不得外推为总体成功率。三个任务均来自单一仓库，回归
   verifier 使用声明的稳定切片而非完整历史套件。阶段 2 仍需至少 10 个任务和多次 Trial。
 
-### 阶段 2（进行中）
+### 阶段 2（已通过，2026-07-15）
 
 - Git 复现基线：阶段 0–1 实现提交为 `a45dc01`，覆盖率忽略规则提交为 `4d5ecac`；后者
   工作树干净时运行的 `phase1-clean-thinking-20260715a` 精确记录
   `harness_revision=4d5ecac7e6ce30aed8c2ef88a5d408f5b53801cc` 和 `xcode_dirty=false`。
   该 Trial 为有效能力失败（2/3 隐藏行为通过、回归与 policy 通过），证明 Git 身份与
-  能力结果分离保存；阶段 2 正式基线仍未形成。
+  能力结果分离保存。
 - 任务扩展：新增 session reset 授权生命周期、external observer 后台调度、MCP 未知
   override 诊断和 parallel tool worker limit Task，均完成父失败/修复通过及只应用生产
   patch 的参考重放；随后加入 snapshot unindexable path、MCP lazy connection recovery
@@ -301,8 +300,26 @@ src/xcode/evals/
   成本，并计算 `success_rate`、`pass@k`、`pass^k`、分项通过率和初始效率前沿。
 - 离线证据：Experiment 声明、逐 Trial JSONL、结构化 summary、Markdown 报告和控制文件
   checksum 均从已封存 Trial artifact 重建；报告过程不读取 provider 或重新运行 Agent。
-- 当前限制：尚未在固定的干净 Xcode commit、Task 数据版本和 `xcode.config.json` 模型配置
-  上完成阶段 2 多重复基线，因此不能从阶段 1 的零散 Trial 宣称第一版总体结果。
+- 固定基线：Experiment `phase2-baseline-full-deepseek-v4-flash-20260715a` 在干净提交
+  `76391bee05324a9522345c2d91d8302ecdbc41e8` 上，使用 `xcode-history-v1` 的 10 个任务、
+  `xcode.config.json` 配置的 `openai_chat/deepseek-v4-flash` 和 `full` Variant，每任务
+  两次独立 Trial；20/20 均形成封存 artifact，workspace 与 session 不复用。
+- 基线结果：17 个有效 Trial 中 2 成功，`success_rate=11.76%`；3 个 Trial 因
+  `budget_exceeded` 排除。具备两次有效结果的 8 个任务上，`pass@2=12.5%`、
+  `pass^2=12.5%`。目标验证通过率为 11.76%，回归验证通过率为 100%，policy clean
+  通过率为 58.82%。成功集中在 parallel tool worker limit Task 的两次重复。
+- 基线成本：所有 20 个 Trial（含失败和排除项）累计 22,624,847 input tokens、
+  512,583 output tokens、739 次模型调用、1,093 次工具调用和 6,384.58 秒；每次成功
+  分摊 11,312,423.5 input tokens、546.5 次工具调用和 3,192.29 秒。provider 未返回
+  USD 成本，因此不估算 `cost_per_success`。
+- 可复现证据：20 个 Trial 的环境快照一致记录 clean revision、数据版本、模型和 Variant；
+  离线命令重新校验所有 Trial checksum 后重建同一 summary/report。去除 trace 和源码的
+  固定摘要保存在
+  `evals/baselines/phase2-baseline-full-deepseek-v4-flash-20260715a.json`，并记录原始控制
+  artifact 的 SHA-256；完整原始证据仍在被 Git 忽略的 `eval-results/artifacts/`。
+- 结论边界：该结果只描述这一模型、完整 Xcode、单仓库历史任务集和每任务两次重复；
+  单 Variant 的效率前沿只是绝对坐标，不能解释为 harness gain。阶段 3 必须在相同任务、
+  模型、预算和重复策略下加入可运行的 `minimal` 配对对照。
 
 ## 路线变更记录
 
@@ -315,3 +332,4 @@ src/xcode/evals/
 | 2026-07-15 | 阶段 0 通过，进入阶段 1 | 新 schema 强制区分 Agent 可见 Task、隐藏 VerifierSpec、有效 Trial 与基础设施错误；旧模块逐项审计完成。当前没有真实能力分数。 |
 | 2026-07-15 | Eval 使用独立非交互 build policy | 真实 trace 证明普通 act/build 静态规则和 shell unresolved-effect 会产生无审批机制的 ask；Eval 改由 bubblewrap 承担宿主文件边界，显式网络 deny 保留，沙盒内残余 ask 自动单次放行。 |
 | 2026-07-15 | 阶段 1 通过，进入阶段 2 | 同一真实历史任务产生 1 次独立 verifier 成功和 1 次有效能力失败；两次均从精确父提交恢复独立 workspace，并完整保存哈希封存 artifact。该证据只证明闭环，不作为稳定基线。 |
+| 2026-07-15 | 阶段 2 通过，进入阶段 3 | 10 个审核任务各完成两次真实 Trial；17 个有效结果中 2 成功，3 个预算排除，所有成本均进入聚合。固定摘要和原始 artifact 哈希已版本化；结论限定于 `deepseek-v4-flash` 与 `full` Variant。 |
