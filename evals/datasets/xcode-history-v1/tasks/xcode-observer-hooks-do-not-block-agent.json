@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "task_id": "xcode-observer-hooks-do-not-block-agent",
+  "dataset_version": "xcode-history-v1",
+  "prompt": "Xcode supports external observer hooks for post-tool and other non-critical runtime events. A slow or failing observer currently runs inline with event emission, delaying the coding loop and allowing observer failures to interrupt Agent progress. Preserve the blocking semantics of pre-tool control hooks, but make non-critical external observer hooks non-blocking and isolate their failures while retaining a deterministic way to drain pending work during controlled shutdown or tests. Do not modify tests. Run focused tests and avoid unrelated changes.",
+  "source": {
+    "kind": "git_history",
+    "repository": "https://github.com/reddishJade/xcode.git",
+    "revision": "eb4c6ec50ab1472d86b962c89effbcd8f5186257",
+    "license": "MIT"
+  },
+  "verifier_id": "xcode-observer-hooks-do-not-block-agent-hidden",
+  "allowed_paths": [
+    "src/xcode/harness/assembly.py",
+    "src/xcode/harness/observability/hooks.py"
+  ],
+  "ignored_paths": [
+    ".coverage",
+    ".pytest_cache"
+  ],
+  "guides": ["AGENTS.md"],
+  "sensors": ["pytest", "pyright"],
+  "tags": ["hooks", "latency", "error-recovery", "historical-fix"],
+  "budget": {
+    "wall_time_seconds": 900,
+    "model_calls": 40,
+    "tool_calls": 120,
+    "input_tokens": 1600000,
+    "output_tokens": 40000
+  },
+  "known_limitations": [
+    "The deterministic oracle uses thread synchronization around a local runner double; it does not execute a slow third-party observer process during grading.",
+    "The historical synchronous non-pre event wiring test is intentionally excluded because the expected behavior changes to background completion; regression checks retain external execution redaction and blocking pre-tool semantics instead."
+  ]
+}

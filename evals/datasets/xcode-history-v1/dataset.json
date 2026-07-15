@@ -4,7 +4,7 @@
   "created_at": "2026-07-15",
   "source_repository": "https://github.com/reddishJade/xcode.git",
   "license": "MIT",
-  "task_count": 4,
+  "task_count": 5,
   "task_source": "Manually reviewed historical fixes with parent-fail/fix-pass deterministic oracles",
   "agent_visible": [
     "task prompt",

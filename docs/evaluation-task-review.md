@@ -25,8 +25,9 @@
 | `da58a39` avoid repeated watchdog masking idle watchdog | 连续工具错误被错误归因为重复调用；覆盖循环控制、工具失败反馈和恢复诊断。 | 已入 `xcode-history-v1` | 阶段 2 基线重复运行。 |
 | `6c1a27f` make `/thinking off` disable reasoning | 配置的 effort 覆盖关闭指令；覆盖模型控制与请求装配。 | 已入并完成真实闭环 | 1/2 Trial 成功仅用于阶段 1 闭环；阶段 2 需更多重复。 |
 | `797bce1` reset session grants on new sessions | 新会话错误继承临时授权，永久授权与恢复中的活动会话又不能被一并清空；覆盖权限与 session 生命周期。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
+| `dd296ea` dispatch external observer hooks in background | 非关键 observer 同步阻塞事件发射且异常可中断 Agent；覆盖主循环延迟、观测与故障隔离。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 
-四个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
+五个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
 不会进入 Agent 工作区。`6c1a27f` 已由真实模型运行两次，产生一次成功和一次有效能力
 失败；这个小样本只证明阶段 1 闭环，不构成阶段 2 基线。
 
@@ -79,3 +80,16 @@ oracle 缺口保留在 Task 的 `known_limitations`，不能扩大解释为全�
   restore 与 provider conversation reset 两项测试；覆盖缺口已写入 Task。
 - 工程价值：测量 session 与权限反馈的生命周期是否一致，避免新任务静默继承旧任务
   的临时授权。
+
+### `dd296ea`（2026-07-15）
+
+- 父提交：`eb4c6ec50ab1472d86b962c89effbcd8f5186257`。
+- 隐藏 oracle 通过 assembly 的真实 hook 装配路径，用线程屏障验证非关键 observer 尚未
+  完成时事件发射线程已经返回，并验证 observer 异常不会回传给发射者。
+- 同一外置 verifier：父版本行为 2 failed / 稳定回归 2 passed；修复版本和只应用两个
+  允许生产文件 patch 的参考工作区均为行为 2 passed / 回归 2 passed。
+- 旧 `test_hook_manager_wires_all_non_pre_events` 假设 emit 返回时外部命令已经完成，与新
+  语义直接冲突，因此不伪装成不变回归；隐藏 oracle 使用 `drain_background()` 验证最终
+  完成，回归切片保留外部执行脱敏和 blocking pre-tool deny 行为。
+- 工程价值：判断观测扩展是否给 coding loop 引入尾延迟或故障耦合，不以线程/队列事件
+  本身作为能力结果。

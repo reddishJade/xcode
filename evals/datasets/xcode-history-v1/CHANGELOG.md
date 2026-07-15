@@ -22,3 +22,6 @@
 - 阶段 2 扩展加入 session reset 授权生命周期任务，覆盖临时授权、永久授权和非空历史
   恢复的差异。同一外置 verifier 在父版本行为 2 failed / 回归 2 passed，在修复版本和
   只应用允许生产 patch 的参考工作区均为行为 2 passed / 回归 2 passed。
+- 阶段 2 加入 non-critical external observer 后台调度任务。同一外置 verifier 在父版本
+  行为 2 failed / 回归 2 passed，在修复版本和只应用允许生产 patch 的参考工作区均为
+  行为 2 passed / 回归 2 passed；旧同步完成断言因语义被有意改变而不作为回归项。
