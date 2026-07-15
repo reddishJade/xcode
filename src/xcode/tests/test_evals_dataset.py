@@ -9,7 +9,7 @@ def test_xcode_history_dataset_loads_without_hidden_material() -> None:
     repository = Path(__file__).parents[3]
     tasks = load_tasks(repository / "evals/datasets/xcode-history-v1")
 
-    assert len(tasks) == 7
+    assert len(tasks) == 8
     task = next(
         task for task in tasks if task.task_id == "xcode-set-model-preserves-fallback"
     )
@@ -71,6 +71,15 @@ def test_xcode_history_dataset_loads_without_hidden_material() -> None:
     assert "5691546" not in worker_payload
     assert "asyncio.Semaphore" not in worker_payload
 
+    snapshot = next(
+        task
+        for task in tasks
+        if task.task_id == "xcode-snapshot-skips-unindexable-path"
+    )
+    snapshot_payload = snapshot.model_dump_json()
+    assert "9fcee80" not in snapshot_payload
+    assert "failed_paths" not in snapshot_payload
+
     metadata = repository / "evals/datasets/xcode-history-v1/dataset.json"
     assert metadata.is_file()
-    assert '"task_count": 7' in metadata.read_text(encoding="utf-8")
+    assert '"task_count": 8' in metadata.read_text(encoding="utf-8")

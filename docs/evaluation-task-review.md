@@ -28,8 +28,9 @@
 | `dd296ea` dispatch external observer hooks in background | 非关键 observer 同步阻塞事件发射且异常可中断 Agent；覆盖主循环延迟、观测与故障隔离。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 | `994bc24` diagnose unknown MCP overrides | 拼写错误或过期的精确工具 override 被静默忽略；覆盖 MCP 配置反馈与外部能力可诊断性。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 | `5691546` enforce parallel tool worker limits | 配置的 worker 上限未进入 core loop，parallel batch 无界启动 handler；覆盖工具并行与资源控制。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
+| `9fcee80` skip unindexable snapshot paths | 单个 Windows reserved/unindexable 路径会让整轮 hidden Git tree snapshot 失败；覆盖 session snapshot 与文件系统恢复。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 
-七个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
+八个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
 不会进入 Agent 工作区。`6c1a27f` 已由真实模型运行两次，产生一次成功和一次有效能力
 失败；这个小样本只证明阶段 1 闭环，不构成阶段 2 基线。
 
@@ -120,3 +121,15 @@ oracle 缺口保留在 Task 的 `known_limitations`，不能扩大解释为全�
   由隐藏 oracle 覆盖。
 - 工程价值：判断并行工具吞吐是否以可控资源上限实现，为后续工具并行 Variant 的效果/
   成本归因提供真实任务，而不是把并发计数器自身当作能力分。
+
+### `9fcee80`（2026-07-15）
+
+- 父提交：`1fd099d0eb0641a0b208a001921be40549fc0d4e`。
+- 隐藏 oracle 注入一个路径级 `git add` 失败，验证有效路径仍被逐个处理、tree id 正常产生、
+  失败路径进入 skipped diagnostics，并验证常见 `nul` reserved-name 形式预先排除。
+- 同一外置 verifier：父版本行为 2 failed / 正常 snapshot 回归 1 passed；修复版本和只应用
+  `src/xcode/harness/snapshot.py` patch 的参考工作区均为行为 2 passed / 回归 1 passed。
+- 正常回归在真实临时 Git tree 中验证普通源码进入 snapshot、`.env` secret 被排除；失败
+  注入用于跨平台确定性，不把 Linux 上可创建 `nul` 文件的偶然行为当作 Windows oracle。
+- 工程价值：测量 session snapshot 是否能容忍局部文件系统异常，避免一次特殊路径破坏
+  整轮 undo/restore 证据。

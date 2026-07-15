@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "task_id": "xcode-snapshot-skips-unindexable-path",
+  "dataset_version": "xcode-history-v1",
+  "prompt": "Xcode creates hidden Git tree snapshots of a workspace so changes can be inspected and restored. On platforms where a workspace entry such as a Windows reserved device name cannot be indexed, one failing path currently aborts the entire snapshot and loses coverage for every valid file. Make snapshot tracking skip and report unindexable paths while still producing a tree for the remaining files, and exclude common `nul` reserved-name forms proactively. Do not modify tests. Run focused tests and avoid unrelated changes.",
+  "source": {
+    "kind": "git_history",
+    "repository": "https://github.com/reddishJade/xcode.git",
+    "revision": "1fd099d0eb0641a0b208a001921be40549fc0d4e",
+    "license": "MIT"
+  },
+  "verifier_id": "xcode-snapshot-skips-unindexable-path-hidden",
+  "allowed_paths": [
+    "src/xcode/harness/snapshot.py"
+  ],
+  "ignored_paths": [
+    ".coverage",
+    ".pytest_cache"
+  ],
+  "guides": ["AGENTS.md"],
+  "sensors": ["pytest", "pyright"],
+  "tags": ["snapshot", "session", "filesystem", "historical-fix"],
+  "budget": {
+    "wall_time_seconds": 900,
+    "model_calls": 40,
+    "tool_calls": 120,
+    "input_tokens": 1600000,
+    "output_tokens": 40000
+  },
+  "known_limitations": [
+    "The hidden failure oracle injects a Git add rejection deterministically on Linux; it does not require a Windows host or create an actual Windows device path."
+  ]
+}
