@@ -9,7 +9,7 @@ def test_xcode_history_dataset_loads_without_hidden_material() -> None:
     repository = Path(__file__).parents[3]
     tasks = load_tasks(repository / "evals/datasets/xcode-history-v1")
 
-    assert len(tasks) == 8
+    assert len(tasks) == 9
     task = next(
         task for task in tasks if task.task_id == "xcode-set-model-preserves-fallback"
     )
@@ -80,6 +80,15 @@ def test_xcode_history_dataset_loads_without_hidden_material() -> None:
     assert "9fcee80" not in snapshot_payload
     assert "failed_paths" not in snapshot_payload
 
+    mcp_reconnect = next(
+        task
+        for task in tasks
+        if task.task_id == "xcode-mcp-retries-failed-lazy-connections"
+    )
+    mcp_reconnect_payload = mcp_reconnect.model_dump_json()
+    assert "aef366d" not in mcp_reconnect_payload
+    assert "MAX_LAZY_CONNECT_ATTEMPTS" not in mcp_reconnect_payload
+
     metadata = repository / "evals/datasets/xcode-history-v1/dataset.json"
     assert metadata.is_file()
-    assert '"task_count": 8' in metadata.read_text(encoding="utf-8")
+    assert '"task_count": 9' in metadata.read_text(encoding="utf-8")

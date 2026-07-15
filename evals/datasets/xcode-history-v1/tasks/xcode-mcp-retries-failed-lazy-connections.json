@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "task_id": "xcode-mcp-retries-failed-lazy-connections",
+  "dataset_version": "xcode-history-v1",
+  "prompt": "Xcode lazily starts configured MCP servers when a tool is first needed. A transient startup or handshake failure currently escapes immediately, while later calls may race to replace the failed client and diagnostics can expose credentials. Make lazy connection recovery finite and safe: retry transient failures within one request, serialize client lifecycle access, stop failed clients, and report a redacted final error when the attempt budget is exhausted. Reject invalid attempt budgets. Do not modify tests. Run focused tests and avoid unrelated changes.",
+  "source": {
+    "kind": "git_history",
+    "repository": "https://github.com/reddishJade/xcode.git",
+    "revision": "097824eba88546f5090a9cf49747ea58cd695537",
+    "license": "MIT"
+  },
+  "verifier_id": "xcode-mcp-retries-failed-lazy-connections-hidden",
+  "allowed_paths": [
+    "src/xcode/harness/mcp/client.py"
+  ],
+  "ignored_paths": [
+    ".coverage",
+    ".pytest_cache"
+  ],
+  "guides": ["AGENTS.md"],
+  "sensors": ["pytest", "pyright"],
+  "tags": ["mcp", "reliability", "concurrency", "security", "historical-fix"],
+  "budget": {
+    "wall_time_seconds": 900,
+    "model_calls": 40,
+    "tool_calls": 120,
+    "input_tokens": 1600000,
+    "output_tokens": 40000
+  },
+  "known_limitations": [
+    "The hidden oracle uses local MCP client doubles to make startup failures deterministic; it does not launch an external MCP process."
+  ]
+}

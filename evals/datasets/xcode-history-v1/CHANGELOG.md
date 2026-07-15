@@ -34,3 +34,6 @@
 - 阶段 2 加入 snapshot unindexable path 隔离任务。同一外置 verifier 在父版本行为
   2 failed / 回归 1 passed，在修复版本和只应用允许生产 patch 的参考工作区均为行为
   2 passed / 回归 1 passed。
+- 阶段 2 加入 MCP lazy connection 有限恢复任务。同一外置 verifier 在父版本行为
+  3 failed / 回归 1 passed，在修复版本和只应用允许生产 patch 的参考工作区均为行为
+  3 passed / 回归 1 passed；最终错误中的 bearer token 已由行为 oracle 验证脱敏。

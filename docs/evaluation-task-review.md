@@ -29,8 +29,9 @@
 | `994bc24` diagnose unknown MCP overrides | 拼写错误或过期的精确工具 override 被静默忽略；覆盖 MCP 配置反馈与外部能力可诊断性。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 | `5691546` enforce parallel tool worker limits | 配置的 worker 上限未进入 core loop，parallel batch 无界启动 handler；覆盖工具并行与资源控制。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 | `9fcee80` skip unindexable snapshot paths | 单个 Windows reserved/unindexable 路径会让整轮 hidden Git tree snapshot 失败；覆盖 session snapshot 与文件系统恢复。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
+| `aef366d` reconnect failed MCP clients | 瞬时启动失败直接逃逸、失败客户端清理与最终错误脱敏不足；覆盖 MCP 恢复、生命周期并发与诊断安全。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 
-八个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
+九个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
 不会进入 Agent 工作区。`6c1a27f` 已由真实模型运行两次，产生一次成功和一次有效能力
 失败；这个小样本只证明阶段 1 闭环，不构成阶段 2 基线。
 
@@ -133,3 +134,15 @@ oracle 缺口保留在 Task 的 `known_limitations`，不能扩大解释为全�
   注入用于跨平台确定性，不把 Linux 上可创建 `nul` 文件的偶然行为当作 Windows oracle。
 - 工程价值：测量 session snapshot 是否能容忍局部文件系统异常，避免一次特殊路径破坏
   整轮 undo/restore 证据。
+
+### `aef366d`（2026-07-15）
+
+- 父提交：`097824eba88546f5090a9cf49747ea58cd695537`。
+- 隐藏 oracle 注入首次握手失败，验证同一 lazy request 在有限预算内重试并清理失败客户端；
+  耗尽路径验证所有客户端均停止、最终 bearer token 脱敏，零尝试预算被拒绝。
+- 同一外置 verifier：父版本行为 3 failed / 稳定回归 1 passed；修复版本和只应用
+  `src/xcode/harness/mcp/client.py` patch 的参考工作区均为行为 3 passed / 回归 1 passed。
+- 回归切片验证已连接客户端复用、单次启动和显式 stop 清理；启动故障由本地 client double
+  注入，因此不依赖外部 MCP 服务，也不把 fake server 算作能力分。
+- 工程价值：测量 Agent 外部工具连接是否能从瞬时故障中恢复，同时避免无限重试、并发
+  替换和凭据泄露把基础设施问题伪装成模型失败。

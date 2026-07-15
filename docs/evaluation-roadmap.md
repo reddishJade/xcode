@@ -293,8 +293,8 @@ src/xcode/evals/
   能力结果分离保存；阶段 2 正式基线仍未形成。
 - 任务扩展：新增 session reset 授权生命周期、external observer 后台调度、MCP 未知
   override 诊断和 parallel tool worker limit Task，均完成父失败/修复通过及只应用生产
-  patch 的参考重放；随后加入 snapshot unindexable path Task 并完成同样三重重放；当前
-  为 8/10 个审核任务。
+  patch 的参考重放；随后加入 snapshot unindexable path 与 MCP lazy connection recovery
+  Task 并完成同样三重重放；当前为 9/10 个审核任务。
 - 当前限制：尚无 Experiment 重复调度、指标聚合和离线报告；不能从阶段 1 的零散 Trial
   计算或宣称第一版总体基线。
 
