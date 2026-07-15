@@ -121,6 +121,8 @@ class VerifierRunner:
 
 def _matches_any_path(path: str, patterns: tuple[str, ...]) -> bool:
     """Task 路径项匹配文件本身或目录内任意后代。"""
+    if "." in patterns:
+        return True
     return any(
         path == pattern or path.startswith(f"{pattern.rstrip('/')}/")
         for pattern in patterns

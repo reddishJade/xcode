@@ -6,7 +6,7 @@ import sys
 import pytest
 
 from xcode.evals.schema import ResourceBudget, Task, TaskSource, VerifierSpec
-from xcode.evals.verifier import VerifierError, VerifierRunner
+from xcode.evals.verifier import VerifierError, VerifierRunner, _matches_any_path
 
 
 def _task() -> Task:
@@ -196,3 +196,7 @@ Path("verifier-result.json").write_text(json.dumps({
 
     assert result.policy_clean is False
     assert result.details["policy_violations"] == ["forbidden.txt"]
+
+
+def test_dot_allowed_path_permits_entire_workspace() -> None:
+    assert _matches_any_path("requests/models.py", (".",)) is True
