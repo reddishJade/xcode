@@ -296,8 +296,13 @@ src/xcode/evals/
   patch 的参考重放；随后加入 snapshot unindexable path、MCP lazy connection recovery
   与 provider transport consistency Task 并完成同样三重重放；当前为 10/10 个审核任务，
   阶段 2 的语料门槛已满足。
-- 当前限制：尚无 Experiment 重复调度、指标聚合和离线报告；不能从阶段 1 的零散 Trial
-  计算或宣称第一版总体基线。
+- Experiment 基础设施：已增加严格的 task/Variant/repetition 配对展开、恢复时完整 Trial
+  跳过与不完整目录隔离；聚合明确从成功率分母排除无效 Trial，但将其资源消耗计入单位
+  成本，并计算 `success_rate`、`pass@k`、`pass^k`、分项通过率和初始效率前沿。
+- 离线证据：Experiment 声明、逐 Trial JSONL、结构化 summary、Markdown 报告和控制文件
+  checksum 均从已封存 Trial artifact 重建；报告过程不读取 provider 或重新运行 Agent。
+- 当前限制：尚未在固定的干净 Xcode commit、Task 数据版本和 `xcode.config.json` 模型配置
+  上完成阶段 2 多重复基线，因此不能从阶段 1 的零散 Trial 宣称第一版总体结果。
 
 ## 路线变更记录
 

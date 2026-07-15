@@ -53,6 +53,8 @@ markers = [
 
 [project.scripts]
 xcode = "xcode.main:main"
+xcode-eval = "xcode.evals.cli:main"
+xcode-eval-report = "xcode.evals.reporting:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
