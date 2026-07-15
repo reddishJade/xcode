@@ -28,3 +28,6 @@
 - 阶段 2 加入 MCP unknown exact override 诊断任务。同一外置 verifier 在父版本行为
   1 failed / 回归 2 passed，在修复版本和只应用允许生产 patch 的参考工作区均为行为
   1 passed / 回归 2 passed。
+- 阶段 2 加入 parallel tool worker limit 任务。同一外置 verifier 在父版本行为
+  2 failed / 回归 2 passed，在修复版本和只应用允许生产 patch 的参考工作区均为行为
+  2 passed / 回归 2 passed；异步并发 oracle 在修复工作区连续 5 次稳定通过。

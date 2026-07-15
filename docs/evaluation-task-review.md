@@ -27,8 +27,9 @@
 | `797bce1` reset session grants on new sessions | 新会话错误继承临时授权，永久授权与恢复中的活动会话又不能被一并清空；覆盖权限与 session 生命周期。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 | `dd296ea` dispatch external observer hooks in background | 非关键 observer 同步阻塞事件发射且异常可中断 Agent；覆盖主循环延迟、观测与故障隔离。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 | `994bc24` diagnose unknown MCP overrides | 拼写错误或过期的精确工具 override 被静默忽略；覆盖 MCP 配置反馈与外部能力可诊断性。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
+| `5691546` enforce parallel tool worker limits | 配置的 worker 上限未进入 core loop，parallel batch 无界启动 handler；覆盖工具并行与资源控制。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 
-六个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
+七个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
 不会进入 Agent 工作区。`6c1a27f` 已由真实模型运行两次，产生一次成功和一次有效能力
 失败；这个小样本只证明阶段 1 闭环，不构成阶段 2 基线。
 
@@ -105,3 +106,17 @@ oracle 缺口保留在 Task 的 `known_limitations`，不能扩大解释为全�
   2 passed。
 - 工程价值：测量 MCP 配置错误是否形成 Agent/用户可定位反馈，避免把外部能力缺失误判
   为模型无能；grader 使用本地 client double 保持确定性，不把 fake MCP 算作能力分。
+
+### `5691546`（2026-07-15）
+
+- 父提交：`b5cb3dcfb41ecfc1cd2264de5007cb232f36cd78`。
+- 隐藏 oracle 用受控异步执行替身测量 6-call parallel batch 的最大活跃数严格等于配置 2，
+  并通过正式 `build_loop_config()` 验证公开 `AgentConfig.tool_workers` 传播到 core loop。
+- 同一外置 verifier：父版本行为 2 failed / 稳定回归 2 passed；修复版本和只应用三个
+  允许生产文件 patch 的参考工作区均为行为 2 passed / 回归 2 passed；修复行为测试连续
+  5 次通过。
+- 历史 direct-execute 测试在父环境产生不退出线程，因此不进入 grader；回归切片保留
+  execution-mode metadata 与 sequential barrier 分区，实际 bounded execution/result count
+  由隐藏 oracle 覆盖。
+- 工程价值：判断并行工具吞吐是否以可控资源上限实现，为后续工具并行 Variant 的效果/
+  成本归因提供真实任务，而不是把并发计数器自身当作能力分。

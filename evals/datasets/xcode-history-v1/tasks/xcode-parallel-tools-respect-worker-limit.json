@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "task_id": "xcode-parallel-tools-respect-worker-limit",
+  "dataset_version": "xcode-history-v1",
+  "prompt": "Xcode exposes a tool worker limit in its Agent configuration, but a parallel batch currently starts every concurrency-safe tool handler at once and the configured limit is not propagated into the core loop. Enforce the configured worker bound for each parallel batch while preserving sequential barriers, cancellation checks for queued work, and collection of handler errors. Treat non-positive worker values as a minimum capacity of one. Do not modify tests. Run focused tests and avoid unrelated changes.",
+  "source": {
+    "kind": "git_history",
+    "repository": "https://github.com/reddishJade/xcode.git",
+    "revision": "b5cb3dcfb41ecfc1cd2264de5007cb232f36cd78",
+    "license": "MIT"
+  },
+  "verifier_id": "xcode-parallel-tools-respect-worker-limit-hidden",
+  "allowed_paths": [
+    "src/xcode/agent/config.py",
+    "src/xcode/agent/tool_execution.py",
+    "src/xcode/harness/agent_runtime/config.py"
+  ],
+  "ignored_paths": [
+    ".coverage",
+    ".pytest_cache"
+  ],
+  "guides": ["AGENTS.md"],
+  "sensors": ["pytest", "pyright"],
+  "tags": ["tools", "parallelism", "resource-control", "historical-fix"],
+  "budget": {
+    "wall_time_seconds": 900,
+    "model_calls": 40,
+    "tool_calls": 120,
+    "input_tokens": 1600000,
+    "output_tokens": 40000
+  },
+  "known_limitations": [
+    "The deterministic oracle measures local handler concurrency with synchronization primitives; it does not benchmark wall-clock speedup or external command saturation.",
+    "A historical direct-execute regression test hangs in the parent environment, so the stable regression slice covers execution-mode metadata and sequential barrier partitioning; bounded execution and result count are checked by the hidden behavior oracle."
+  ]
+}
