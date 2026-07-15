@@ -333,3 +333,4 @@ src/xcode/evals/
 | 2026-07-15 | Eval 使用独立非交互 build policy | 真实 trace 证明普通 act/build 静态规则和 shell unresolved-effect 会产生无审批机制的 ask；Eval 改由 bubblewrap 承担宿主文件边界，显式网络 deny 保留，沙盒内残余 ask 自动单次放行。 |
 | 2026-07-15 | 阶段 1 通过，进入阶段 2 | 同一真实历史任务产生 1 次独立 verifier 成功和 1 次有效能力失败；两次均从精确父提交恢复独立 workspace，并完整保存哈希封存 artifact。该证据只证明闭环，不作为稳定基线。 |
 | 2026-07-15 | 阶段 2 通过，进入阶段 3 | 10 个审核任务各完成两次真实 Trial；17 个有效结果中 2 成功，3 个预算排除，所有成本均进入聚合。固定摘要和原始 artifact 哈希已版本化；结论限定于 `deepseek-v4-flash` 与 `full` Variant。 |
+| 2026-07-15 | 冻结阶段 3 `full/minimal` Variant v1 | minimal 保留模型、任务、预算、安全边界、核心工具和项目指令，只关闭 compaction、fallback、工具并发、request hygiene、重复工具 watchdog 与 contextual retrieval prompt；配对指标仅使用双方有效的相同 task/repetition。 |

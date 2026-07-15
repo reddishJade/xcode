@@ -199,6 +199,48 @@ def test_aggregate_excludes_invalid_results_but_keeps_their_cost() -> None:
     assert minimal.missing_trials == 4
     assert summary.efficient_variant_ids == ("full",)
     assert len(summary.trials) == 4
+    assert summary.comparisons[0].observed_pairs == 0
+
+
+def test_aggregate_computes_only_strictly_paired_harness_gain() -> None:
+    experiment = _experiment()
+    trials = build_trials(experiment, (_task("task-a"), _task("task-b")))
+    selected = {
+        (trial.task_id, trial.variant.variant_id): trial
+        for trial in trials
+        if trial.repetition == 0
+    }
+    outcomes = {
+        ("task-a", "full"): (True, 20),
+        ("task-a", "minimal"): (False, 10),
+        ("task-b", "full"): (False, 20),
+        ("task-b", "minimal"): (True, 10),
+    }
+    records = tuple(
+        TrialRecord(
+            selected[key],
+            _result(
+                selected[key],
+                success=success,
+                input_tokens=input_tokens,
+            ),
+        )
+        for key, (success, input_tokens) in outcomes.items()
+    )
+
+    comparison = aggregate_experiment(experiment, records).comparisons[0]
+
+    assert comparison.candidate_variant_id == "full"
+    assert comparison.control_variant_id == "minimal"
+    assert comparison.declared_pairs == 4
+    assert comparison.observed_pairs == 2
+    assert comparison.missing_pairs == 2
+    assert comparison.valid_pairs == 2
+    assert comparison.candidate_wins == 1
+    assert comparison.control_wins == 1
+    assert comparison.ties == 0
+    assert comparison.harness_gain == 0
+    assert comparison.input_tokens_delta == 20
 
 
 def test_aggregate_rejects_duplicate_trial_artifacts() -> None:

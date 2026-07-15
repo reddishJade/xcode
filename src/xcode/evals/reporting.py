@@ -193,6 +193,20 @@ def _render_markdown(summary: ExperimentSummary) -> str:
             f"- `{variant.variant_id}`: excluded={variant.excluded_trials}, "
             f"missing={variant.missing_trials}" + (f" ({detail})" if detail else "")
         )
+    comparisons = [
+        "| Candidate | Control | Valid / observed pairs | Gain | Wins / losses | "
+        "Input token delta |",
+        "|---|---|---:|---:|---:|---:|",
+    ]
+    for comparison in summary.comparisons:
+        comparisons.append(
+            "| "
+            f"{comparison.candidate_variant_id} | {comparison.control_variant_id} "
+            f"| {comparison.valid_pairs} / {comparison.observed_pairs} "
+            f"| {_percent(comparison.harness_gain)} "
+            f"| {comparison.candidate_wins} / {comparison.control_wins} "
+            f"| {_number(comparison.input_tokens_delta)} |"
+        )
     return "\n".join(
         [
             f"# Experiment {summary.experiment_id}",
@@ -201,6 +215,14 @@ def _render_markdown(summary: ExperimentSummary) -> str:
             f"repetitions: {summary.repetitions}.",
             "",
             *rows,
+            "",
+            "## Paired comparisons",
+            "",
+            *(
+                comparisons
+                if summary.comparisons
+                else ["No paired Variant comparison."]
+            ),
             "",
             "## Exclusions and missing trials",
             "",

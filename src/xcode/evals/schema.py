@@ -325,6 +325,27 @@ class VariantSummary(EvalModel):
     usage: UsageAggregate
 
 
+class VariantComparison(EvalModel):
+    """同 task/repetition 上两个 Variant 的配对结果与成本差。"""
+
+    candidate_variant_id: Identifier
+    control_variant_id: Identifier
+    declared_pairs: int
+    observed_pairs: int
+    missing_pairs: int
+    valid_pairs: int
+    invalid_pairs: int
+    candidate_successes: int
+    control_successes: int
+    candidate_wins: int
+    control_wins: int
+    ties: int
+    harness_gain: float | None
+    input_tokens_delta: int | None
+    tool_calls_delta: int
+    wall_time_seconds_delta: float
+
+
 class ExperimentSummary(EvalModel):
     """可以由 Trial artifact 完全离线重建的 Experiment 摘要。"""
 
@@ -334,6 +355,7 @@ class ExperimentSummary(EvalModel):
     task_ids: tuple[Identifier, ...]
     repetitions: PositiveInt
     variants: tuple[VariantSummary, ...]
+    comparisons: tuple[VariantComparison, ...]
     efficient_variant_ids: tuple[Identifier, ...]
     trials: tuple[TrialMetric, ...]
     formulas: dict[str, str]

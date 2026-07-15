@@ -20,6 +20,7 @@ from xcode.harness.config import XcodeRuntimeConfig
 
 from .policy import approve_eval_action
 from .schema import ResourceUsage, Task, Trial
+from .variants import build_eval_variant_runtime, configure_eval_variant_app
 
 
 class ExecutorError(RuntimeError):
@@ -56,9 +57,12 @@ class RealXcodeExecutor:
             or trial.dataset_version != task.dataset_version
         ):
             raise ExecutorError("trial and task identity do not match")
-        runtime = runtime_config.model_copy(
+        variant_runtime = build_eval_variant_runtime(
+            runtime_config, trial.variant.variant_id
+        )
+        runtime = variant_runtime.model_copy(
             update={
-                "agent": runtime_config.agent.model_copy(
+                "agent": variant_runtime.agent.model_copy(
                     update={"max_steps": trial.budget.model_calls}
                 )
             }
@@ -75,6 +79,7 @@ class RealXcodeExecutor:
             env_files=env_files,
             runtime_config=runtime,
         )
+        configure_eval_variant_app(app, trial.variant.variant_id)
         app.agent.approval_callback = approve_eval_action
         try:
             async with asyncio.timeout(trial.budget.wall_time_seconds):

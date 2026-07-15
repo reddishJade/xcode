@@ -14,6 +14,7 @@ from .schema import (
     TrialMetric,
     TrialResult,
     UsageAggregate,
+    VariantComparison,
     VariantSummary,
 )
 
@@ -51,6 +52,10 @@ def aggregate_experiment(
         )
         for variant in experiment.variants
     )
+    comparisons = _build_comparisons(
+        experiment=experiment,
+        by_variant=by_variant,
+    )
     metrics = tuple(
         _trial_metric(record)
         for record in sorted(records, key=lambda item: item.trial.trial_id)
@@ -61,6 +66,7 @@ def aggregate_experiment(
         task_ids=experiment.task_ids,
         repetitions=experiment.repetitions,
         variants=summaries,
+        comparisons=comparisons,
         efficient_variant_ids=_efficiency_frontier(summaries),
         trials=metrics,
         formulas={
@@ -238,7 +244,9 @@ def _efficiency_frontier(summaries: tuple[VariantSummary, ...]) -> tuple[str, ..
     eligible = [
         summary
         for summary in summaries
-        if summary.success_rate is not None and summary.usage.input_tokens is not None
+        if summary.missing_trials == 0
+        and summary.success_rate is not None
+        and summary.usage.input_tokens is not None
     ]
     efficient: list[str] = []
     for candidate in eligible:
@@ -250,6 +258,101 @@ def _efficiency_frontier(summaries: tuple[VariantSummary, ...]) -> tuple[str, ..
         if not dominated:
             efficient.append(candidate.variant_id)
     return tuple(efficient)
+
+
+def _build_comparisons(
+    *,
+    experiment: Experiment,
+    by_variant: dict[str, list[TrialRecord]],
+) -> tuple[VariantComparison, ...]:
+    comparisons: list[VariantComparison] = []
+    variants = experiment.variants
+    for candidate_index, candidate in enumerate(variants):
+        for control in variants[candidate_index + 1 :]:
+            comparisons.append(
+                _compare_variants(
+                    candidate_variant_id=candidate.variant_id,
+                    control_variant_id=control.variant_id,
+                    declared_pairs=(len(experiment.task_ids) * experiment.repetitions),
+                    candidate_records=by_variant[candidate.variant_id],
+                    control_records=by_variant[control.variant_id],
+                )
+            )
+    return tuple(comparisons)
+
+
+def _compare_variants(
+    *,
+    candidate_variant_id: str,
+    control_variant_id: str,
+    declared_pairs: int,
+    candidate_records: list[TrialRecord],
+    control_records: list[TrialRecord],
+) -> VariantComparison:
+    def key(record: TrialRecord) -> tuple[str, int]:
+        return record.trial.task_id, record.trial.repetition
+
+    candidates = {key(record): record for record in candidate_records}
+    controls = {key(record): record for record in control_records}
+    observed_keys = sorted(candidates.keys() & controls.keys())
+    observed = [(candidates[item], controls[item]) for item in observed_keys]
+    valid = [
+        pair
+        for pair in observed
+        if pair[0].result.valid_trial and pair[1].result.valid_trial
+    ]
+    candidate_successes = sum(pair[0].result.success for pair in valid)
+    control_successes = sum(pair[1].result.success for pair in valid)
+    candidate_wins = sum(
+        pair[0].result.success and not pair[1].result.success for pair in valid
+    )
+    control_wins = sum(
+        pair[1].result.success and not pair[0].result.success for pair in valid
+    )
+    input_tokens_delta = _paired_optional_token_delta(observed)
+    return VariantComparison(
+        candidate_variant_id=candidate_variant_id,
+        control_variant_id=control_variant_id,
+        declared_pairs=declared_pairs,
+        observed_pairs=len(observed),
+        missing_pairs=declared_pairs - len(observed),
+        valid_pairs=len(valid),
+        invalid_pairs=len(observed) - len(valid),
+        candidate_successes=candidate_successes,
+        control_successes=control_successes,
+        candidate_wins=candidate_wins,
+        control_wins=control_wins,
+        ties=len(valid) - candidate_wins - control_wins,
+        harness_gain=(
+            (candidate_successes - control_successes) / len(valid) if valid else None
+        ),
+        input_tokens_delta=input_tokens_delta,
+        tool_calls_delta=sum(
+            candidate.result.usage.tool_calls - control.result.usage.tool_calls
+            for candidate, control in observed
+        ),
+        wall_time_seconds_delta=sum(
+            candidate.result.usage.wall_time_seconds
+            - control.result.usage.wall_time_seconds
+            for candidate, control in observed
+        ),
+    )
+
+
+def _paired_optional_token_delta(
+    pairs: list[tuple[TrialRecord, TrialRecord]],
+) -> int | None:
+    values = [
+        (candidate.result.usage.input_tokens, control.result.usage.input_tokens)
+        for candidate, control in pairs
+    ]
+    if any(candidate is None or control is None for candidate, control in values):
+        return None
+    return sum(
+        candidate - control
+        for candidate, control in values
+        if candidate is not None and control is not None
+    )
 
 
 def _dominates(candidate: VariantSummary, other: VariantSummary) -> bool:

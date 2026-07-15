@@ -10,9 +10,8 @@ import platform
 import shutil
 import subprocess
 import sys
-from typing import Any
 
-from xcode.harness.config import discover_runtime_config
+from xcode.harness.config import discover_runtime_config, XcodeRuntimeConfig
 
 from .artifacts import ArtifactStore
 from .dataset import load_tasks
@@ -22,6 +21,13 @@ from .policy import build_eval_runtime, EVAL_EXECUTION_MODE
 from .reporting import ExperimentArtifactStore
 from .schema import Experiment, ModelConfig, Task, Variant, VerifierSpec
 from .trial_runner import TrialRunner
+from .variants import (
+    build_eval_variant_runtime,
+    EVAL_VARIANT_PROFILE_VERSION,
+    FULL_VARIANT_ID,
+    MINIMAL_VARIANT_ID,
+    variant_capabilities,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -53,12 +59,16 @@ def main(argv: list[str] | None = None) -> int:
     profile = runtime.provider.model_profiles["main"]
     harness_revision = _git(control_root, "rev-parse", "HEAD")
     dirty = bool(_git(control_root, "status", "--porcelain"))
-    sanitized_runtime = runtime.model_dump(mode="json")
-    for model_profile in sanitized_runtime["provider"]["model_profiles"].values():
-        model_profile["api_key"] = "<redacted-configured>"
-    variant = _full_variant(
-        harness_revision=harness_revision,
-        sanitized_runtime=sanitized_runtime,
+    variant_ids = tuple(args.variant) or (FULL_VARIANT_ID,)
+    if len(set(variant_ids)) != len(variant_ids):
+        parser.error("--variant values must be unique")
+    variants = tuple(
+        _variant_snapshot(
+            variant_id=variant_id,
+            harness_revision=harness_revision,
+            runtime=runtime,
+        )
+        for variant_id in variant_ids
     )
     repetitions = (
         args.repetitions if args.repetitions is not None else args.repetition + 1
@@ -68,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         experiment_id=args.experiment_id,
         dataset_version=next(iter(dataset_versions)),
         task_ids=task_ids,
-        variants=(variant,),
+        variants=variants,
         model=ModelConfig(
             provider=profile.transport,
             model=profile.chat_model,
@@ -180,29 +190,32 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--experiment-id", required=True)
     parser.add_argument("--repetition", type=int, default=0)
     parser.add_argument("--repetitions", type=int)
+    parser.add_argument(
+        "--variant",
+        action="append",
+        choices=(FULL_VARIANT_ID, MINIMAL_VARIANT_ID),
+        default=[],
+    )
     return parser
 
 
-def _full_variant(
+def _variant_snapshot(
     *,
+    variant_id: str,
     harness_revision: str,
-    sanitized_runtime: dict[str, Any],
+    runtime: XcodeRuntimeConfig,
 ) -> Variant:
+    effective = build_eval_variant_runtime(runtime, variant_id)
+    sanitized_runtime = effective.model_dump(mode="json")
+    for model_profile in sanitized_runtime["provider"]["model_profiles"].values():
+        model_profile["api_key"] = "<redacted-configured>"
     return Variant(
-        variant_id="full",
+        variant_id=variant_id,
         harness_revision=harness_revision,
-        capabilities={
-            "context_assembly": True,
-            "tools": True,
-            "compaction": True,
-            "error_recovery": True,
-            "permission_feedback": True,
-            "session": True,
-            "mcp": True,
-            "memory": True,
-        },
+        capabilities=variant_capabilities(variant_id),
         config={
             "runtime": sanitized_runtime,
+            "eval_variant_profile": EVAL_VARIANT_PROFILE_VERSION,
             "execution_mode": EVAL_EXECUTION_MODE,
             "isolation": "bubblewrap",
             "external_network_tools": "denied",
