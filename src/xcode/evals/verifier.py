@@ -28,6 +28,7 @@ class VerifierRunner:
         workspace: Path,
         changed_paths: tuple[str, ...],
         log_path: Path,
+        patch_path: Path | None = None,
     ) -> VerifierResult:
         """验证边界后运行命令；非零退出可判为任务失败而非 runner 失败。"""
         workspace = workspace.resolve()
@@ -39,10 +40,11 @@ class VerifierRunner:
         if result_path.exists():
             result_path.unlink()
 
+        patch_value = str(patch_path.resolve()) if patch_path is not None else "{patch}"
         command = tuple(
-            token.replace("{workspace}", str(workspace)).replace(
-                "{hidden_root}", str(hidden_root)
-            )
+            token.replace("{workspace}", str(workspace))
+            .replace("{hidden_root}", str(hidden_root))
+            .replace("{patch}", patch_value)
             for token in spec.command
         )
         environment = {

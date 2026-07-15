@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from xcode.evals.artifacts import ArtifactStore
+from xcode.evals.cli import _verifier_spec
 from xcode.evals.schema import (
     ErrorCategory,
     ResourceBudget,
@@ -155,3 +156,35 @@ def test_fast_command_matches_reference_shape(tmp_path: Path) -> None:
         "--output",
         str(tmp_path / "report.json"),
     )
+
+
+def test_lite_task_uses_patch_aware_external_verifier(tmp_path: Path) -> None:
+    source = tmp_path / "instances.jsonl"
+    source.write_text(
+        json.dumps(
+            {
+                "instance_id": "pallets__flask-123",
+                "repo": "pallets/flask",
+                "base_commit": "c" * 40,
+                "problem_statement": "Fix it.",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    task = to_task(
+        load_instances_jsonl(source)[0],
+        dataset_version="swebench-lite-smoke-v1",
+        license_name="MIT",
+        budget=_budget(),
+    )
+
+    spec = _verifier_spec(
+        control_root=tmp_path / "control",
+        private_root=tmp_path / "private",
+        task=task,
+    )
+
+    assert spec.version == "swebench-3.0.11"
+    assert spec.command[-1] == "{patch}"
+    assert spec.timeout_seconds == 300

@@ -1,6 +1,7 @@
 """独立 verifier 边界与结果协议测试。"""
 
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -68,6 +69,49 @@ Path("verifier-result.json").write_text(json.dumps({
     assert result.resolved is True
     assert result.regression_free is True
     assert result.policy_clean is True
+
+
+def test_verifier_expands_sealed_patch_path(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    hidden = tmp_path / "hidden"
+    workspace.mkdir()
+    hidden.mkdir()
+    patch = tmp_path / "artifacts/changes.patch"
+    patch.parent.mkdir()
+    patch.write_text("diff --git a/a.py b/a.py\n", encoding="utf-8")
+    (hidden / "verify.py").write_text(
+        """
+import json
+import sys
+from pathlib import Path
+
+patch = Path(sys.argv[1])
+Path('verifier-result.json').write_text(json.dumps({
+    'resolved': patch.read_text(encoding='utf-8').startswith('diff --git'),
+    'regression_free': True,
+}), encoding='utf-8')
+""",
+        encoding="utf-8",
+    )
+    task = _task()
+    spec = VerifierSpec(
+        verifier_id=task.verifier_id,
+        version="v1",
+        command=(sys.executable, "verify.py", "{patch}"),
+        hidden_root=str(hidden),
+        timeout_seconds=10,
+    )
+
+    result = VerifierRunner().run(
+        spec=spec,
+        task=task,
+        workspace=workspace,
+        changed_paths=(),
+        log_path=tmp_path / "artifacts/verifier.log",
+        patch_path=patch,
+    )
+
+    assert result.resolved is True
     assert result.details["exit_code"] == 0
 
 

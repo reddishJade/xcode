@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "task_id": "psf__requests-2148",
+  "dataset_version": "swebench-lite-smoke-v1",
+  "prompt": "You are solving a SWE-bench Lite issue in the checked-out repository.\nInstance: psf__requests-2148\nBase commit: fe693c492242ae532211e0c173324f09ca8cf227\n\nProblem statement:\nA connection reset can surface as a raw socket.error while Requests consumes a response body. Callers expect Requests exceptions when using Requests, such as requests.exceptions.ConnectionError, rather than an unwrapped socket error. Resolve this behavior in the repository.\n\nEdit the repository to resolve the issue. Use local validation when useful; do not fetch network resources or modify benchmark infrastructure.",
+  "source": {
+    "kind": "swe-bench-lite",
+    "repository": "https://github.com/psf/requests.git",
+    "revision": "fe693c492242ae532211e0c173324f09ca8cf227",
+    "license": "Apache-2.0",
+    "upstream_id": "psf__requests-2148"
+  },
+  "verifier_id": "swebench-lite-fast",
+  "allowed_paths": [
+    "."
+  ],
+  "tags": [
+    "external",
+    "swebench-lite"
+  ],
+  "budget": {
+    "wall_time_seconds": 300,
+    "model_calls": 20,
+    "tool_calls": 60,
+    "input_tokens": 2000000,
+    "output_tokens": 100000
+  },
+  "known_limitations": [
+    "Prediction generation alone is not a benchmark result.",
+    "The separate swe-bench-fast control-plane scorer is required for a resolved verdict."
+  ]
+}

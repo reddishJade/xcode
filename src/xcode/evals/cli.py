@@ -20,6 +20,7 @@ from .isolation import BubblewrapExecutor
 from .policy import build_eval_runtime, EVAL_EXECUTION_MODE
 from .reporting import ExperimentArtifactStore
 from .schema import Experiment, ModelConfig, Task, Variant, VerifierSpec
+from .swebench_lite import SWE_BENCH_LITE_KIND
 from .trial_runner import TrialRunner
 from .variants import (
     build_eval_variant_runtime,
@@ -229,6 +230,18 @@ def _verifier_spec(
     private_root: Path,
     task: Task,
 ) -> VerifierSpec:
+    if task.source.kind == SWE_BENCH_LITE_KIND:
+        return VerifierSpec(
+            verifier_id=task.verifier_id,
+            version="swebench-3.0.11",
+            command=(
+                str(control_root / ".venv/bin/python"),
+                "verify.py",
+                "{patch}",
+            ),
+            hidden_root=str((private_root / task.task_id).resolve()),
+            timeout_seconds=300,
+        )
     return VerifierSpec(
         verifier_id=task.verifier_id,
         version="v1",

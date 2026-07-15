@@ -107,7 +107,11 @@ def test_swebench_lite_smoke_dataset_contains_only_public_task_material() -> Non
     repository = Path(__file__).parents[3]
     root = repository / "evals/datasets/swebench-lite-smoke-v1"
 
-    (task,) = load_tasks(root)
+    task = next(
+        task
+        for task in load_tasks(root)
+        if task.task_id == "astropy__astropy-12907"
+    )
 
     assert task.source.kind == "swe-bench-lite"
     assert task.source.upstream_id == "astropy__astropy-12907"

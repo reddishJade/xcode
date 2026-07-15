@@ -92,6 +92,8 @@ class TrialRunner:
                 )
             changes = changed_paths(workspace.initial_files, workspace.root)
             agent_patch = workspace_patch(workspace.initial_files, workspace.root)
+            patch_path = paths.resolve(paths.manifest.patch)
+            patch_path.write_text(agent_patch, encoding="utf-8")
             termination_error = _termination_error(execution.termination_reason)
             verifier_result = (
                 self._verifier.run(
@@ -100,6 +102,7 @@ class TrialRunner:
                     workspace=workspace.root,
                     changed_paths=changes,
                     log_path=paths.resolve(paths.manifest.verifier_log),
+                    patch_path=patch_path,
                 )
                 if termination_error is None
                 else None
