@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "task_id": "astropy__astropy-12907",
+  "dataset_version": "swebench-lite-smoke-v1",
+  "prompt": "You are solving a SWE-bench Lite issue in the checked-out repository.\nInstance: astropy__astropy-12907\nBase commit: d16bfe05a744909de4b27f5875fe0d4ed41ce607\n\nProblem statement:\nModeling's `separability_matrix` does not compute separability correctly for nested CompoundModels. A simple compound model has a diagonal separability matrix, and combining Pix2Sky_TAN with that compound model incorrectly makes the two Linear1D outputs depend on both inputs. Resolve this behavior in the repository.\n\nEdit the repository to resolve the issue. Use local validation when useful; do not fetch network resources or modify benchmark infrastructure.",
+  "source": {
+    "kind": "swe-bench-lite",
+    "repository": "https://github.com/astropy/astropy.git",
+    "revision": "d16bfe05a744909de4b27f5875fe0d4ed41ce607",
+    "license": "BSD-3-Clause",
+    "upstream_id": "astropy__astropy-12907"
+  },
+  "verifier_id": "swebench-lite-fast",
+  "allowed_paths": [
+    "."
+  ],
+  "tags": [
+    "external",
+    "swebench-lite"
+  ],
+  "budget": {
+    "wall_time_seconds": 300,
+    "model_calls": 20,
+    "tool_calls": 60,
+    "input_tokens": 2000000,
+    "output_tokens": 100000
+  },
+  "known_limitations": [
+    "Prediction generation alone is not a benchmark result.",
+    "The separate swe-bench-fast control-plane scorer is required for a resolved verdict."
+  ]
+}

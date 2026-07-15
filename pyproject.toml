@@ -55,6 +55,7 @@ markers = [
 xcode = "xcode.main:main"
 xcode-eval = "xcode.evals.cli:main"
 xcode-eval-report = "xcode.evals.reporting:main"
+xcode-eval-swebench-lite = "xcode.evals.swebench_lite:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

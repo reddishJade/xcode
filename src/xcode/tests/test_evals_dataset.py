@@ -101,3 +101,17 @@ def test_xcode_history_dataset_loads_without_hidden_material() -> None:
     metadata = repository / "evals/datasets/xcode-history-v1/dataset.json"
     assert metadata.is_file()
     assert '"task_count": 10' in metadata.read_text(encoding="utf-8")
+
+
+def test_swebench_lite_smoke_dataset_contains_only_public_task_material() -> None:
+    repository = Path(__file__).parents[3]
+    root = repository / "evals/datasets/swebench-lite-smoke-v1"
+
+    (task,) = load_tasks(root)
+
+    assert task.source.kind == "swe-bench-lite"
+    assert task.source.upstream_id == "astropy__astropy-12907"
+    payload = task.model_dump_json()
+    assert "test_patch" not in payload
+    assert "FAIL_TO_PASS" not in payload
+    assert "diff --git" not in payload

@@ -1,0 +1,14 @@
+{
+  "dataset_version": "swebench-lite-smoke-v1",
+  "source": "SWE-bench Lite public test split",
+  "source_url": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Lite",
+  "license": "MIT benchmark metadata; upstream repository license recorded per task",
+  "task_count": 1,
+  "purpose": "external prediction-generation smoke only; scoring remains a separate swe-bench-fast control-plane run",
+  "selection": {
+    "instance_ids": [
+      "astropy__astropy-12907"
+    ],
+    "selection_reason": "first public Lite record, pinned to the benchmark base commit"
+  }
+}
