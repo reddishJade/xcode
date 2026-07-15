@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "task_id": "xcode-thinking-off-overrides-effort",
+  "dataset_version": "xcode-history-v1",
+  "prompt": "For OpenAI-compatible model profiles, Xcode exposes a runtime command that disables model thinking. When the profile also has a configured reasoning effort such as high, disabling thinking is currently ineffective: outgoing requests still carry the configured effort, and the model status API does not report the disabled state using its existing `off` vocabulary. Fix the runtime behavior so the explicit off setting wins without changing enabled-thinking behavior. Do not modify tests. Run focused tests and avoid unrelated changes.",
+  "source": {
+    "kind": "git_history",
+    "repository": "https://github.com/reddishJade/xcode.git",
+    "revision": "c0d4426f5bf8590c29530866f7b52423e331cc47",
+    "license": "MIT"
+  },
+  "verifier_id": "xcode-thinking-off-overrides-effort-hidden",
+  "allowed_paths": [
+    "src/xcode/ai/providers/openai.py",
+    "src/xcode/harness/app.py"
+  ],
+  "ignored_paths": [
+    ".coverage",
+    ".pytest_cache"
+  ],
+  "guides": ["AGENTS.md"],
+  "sensors": ["pytest", "pyright"],
+  "tags": ["model-control", "provider-request", "historical-fix"],
+  "budget": {
+    "wall_time_seconds": 900,
+    "model_calls": 40,
+    "tool_calls": 120,
+    "input_tokens": 1600000,
+    "output_tokens": 40000
+  },
+  "known_limitations": [
+    "The deterministic oracle inspects OpenAI-compatible request parameters with a local client double; it does not make a paid provider request during grading."
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "dataset_id": "xcode-history",
+  "version": "xcode-history-v1",
+  "created_at": "2026-07-15",
+  "source_repository": "https://github.com/reddishJade/xcode.git",
+  "license": "MIT",
+  "task_count": 3,
+  "task_source": "Manually reviewed historical fixes with parent-fail/fix-pass deterministic oracles",
+  "agent_visible": [
+    "task prompt",
+    "parent revision workspace",
+    "repository AGENTS.md and ordinary project tests"
+  ],
+  "agent_hidden": [
+    "fix revision",
+    "reference patch",
+    "private behavior tests",
+    "verifier command and result protocol"
+  ],
+  "known_limitations": [
+    "All v1 tasks come from one repository and a narrow July 2026 history window.",
+    "Reference replay proves deterministic oracle behavior but is not a model capability score.",
+    "Per-task regression slices are declared in task metadata and do not imply full-suite coverage."
+  ]
+}

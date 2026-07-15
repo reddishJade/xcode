@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "task_id": "xcode-set-model-preserves-fallback",
+  "dataset_version": "xcode-history-v1",
+  "prompt": "Xcode supports a configured fallback model for provider failures. After changing the main model at runtime with the application API, later failures no longer switch to the configured fallback, and failover state from the previous main model can leak into the replacement. Fix this regression while preserving behavior for non-main model profiles. Run the relevant tests and avoid unrelated changes.",
+  "source": {
+    "kind": "git_history",
+    "repository": "https://github.com/reddishJade/xcode.git",
+    "revision": "7441803cdb3ccd98cb3937ba2f7b83e1c07f5e05",
+    "license": "MIT"
+  },
+  "verifier_id": "xcode-set-model-preserves-fallback-hidden",
+  "allowed_paths": [
+    "src/xcode/harness/app.py",
+    "src/xcode/harness/agent_runtime/fallback.py"
+  ],
+  "ignored_paths": [
+    ".coverage",
+    ".pytest_cache",
+    "src/xcode/__pycache__"
+  ],
+  "guides": ["AGENTS.md"],
+  "sensors": ["pytest", "pyright"],
+  "tags": ["provider-recovery", "runtime-config", "historical-fix"],
+  "budget": {
+    "wall_time_seconds": 900,
+    "model_calls": 40,
+    "tool_calls": 120,
+    "input_tokens": 1600000,
+    "output_tokens": 40000
+  },
+  "known_limitations": [
+    "The deterministic oracle uses provider test doubles because paid provider failover would make grading unstable; the Agent still runs with a real model and real Xcode.",
+    "Regression verification runs the stable model-mode, provider-configuration, and provider-runtime slice (17 tests), not the full historical suite, which exceeded 300 seconds in reference replay."
+  ]
+}

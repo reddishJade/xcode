@@ -31,5 +31,7 @@ dist/
 
 # --- 杂项 ---
 diff.log
+verifier-result.json
+eval-results/
 docs/notes/
 tmp/

@@ -245,6 +245,8 @@ uv run pyright src/
 |---|---|
 | [AGENTS.md](AGENTS.md) | Agent 开发入口、编码规范 |
 | [CONFIG.md](CONFIG.md) | 运行时配置参考 |
+| [docs/evaluation-strategy.md](docs/evaluation-strategy.md) | Eval 长期目标、边界与测量契约 |
+| [docs/evaluation-roadmap.md](docs/evaluation-roadmap.md) | Eval 全局阶段路线与验收门槛 |
 | `src/xcode/main.py` | CLI 入口点与子命令 |
 | `src/xcode/harness/assembly/` | 运行时装配与工具注册 |
 | [docs/source-review.md](docs/source-review.md) | 源码级架构审查 |

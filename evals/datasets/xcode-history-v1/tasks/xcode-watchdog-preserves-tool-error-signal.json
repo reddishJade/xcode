@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "task_id": "xcode-watchdog-preserves-tool-error-signal",
+  "dataset_version": "xcode-history-v1",
+  "prompt": "Xcode has separate safeguards for repeated tool calls and for consecutive unproductive steps. When an identical write operation repeatedly fails, the run currently stops with a repeated-tool-call diagnosis before the persistent tool failure can be handled by the idle/error path. Fix the watchdog coordination so all-error repetitions preserve the underlying failure signal, while successful or partly successful repeated calls are still bounded. Run focused tests and avoid unrelated changes.",
+  "source": {
+    "kind": "git_history",
+    "repository": "https://github.com/reddishJade/xcode.git",
+    "revision": "d17a8db80fcbd7c521c9dc67f1c5314981d1d06d",
+    "license": "MIT"
+  },
+  "verifier_id": "xcode-watchdog-preserves-tool-error-signal-hidden",
+  "allowed_paths": [
+    "src/xcode/agent/agent_loop.py",
+    "src/xcode/agent/watchdog.py"
+  ],
+  "ignored_paths": [
+    ".coverage",
+    ".pytest_cache"
+  ],
+  "guides": ["AGENTS.md"],
+  "sensors": ["pytest", "pyright"],
+  "tags": ["error-recovery", "loop-control", "historical-fix"],
+  "budget": {
+    "wall_time_seconds": 900,
+    "model_calls": 40,
+    "tool_calls": 120,
+    "input_tokens": 1600000,
+    "output_tokens": 40000
+  },
+  "known_limitations": [
+    "The deterministic oracle exercises watchdog state transitions directly; it does not make paid provider calls or require an actual disk-full host."
+  ]
+}
