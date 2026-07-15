@@ -25,3 +25,6 @@
 - 阶段 2 加入 non-critical external observer 后台调度任务。同一外置 verifier 在父版本
   行为 2 failed / 回归 2 passed，在修复版本和只应用允许生产 patch 的参考工作区均为
   行为 2 passed / 回归 2 passed；旧同步完成断言因语义被有意改变而不作为回归项。
+- 阶段 2 加入 MCP unknown exact override 诊断任务。同一外置 verifier 在父版本行为
+  1 failed / 回归 2 passed，在修复版本和只应用允许生产 patch 的参考工作区均为行为
+  1 passed / 回归 2 passed。

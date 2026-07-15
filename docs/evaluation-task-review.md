@@ -26,8 +26,9 @@
 | `6c1a27f` make `/thinking off` disable reasoning | 配置的 effort 覆盖关闭指令；覆盖模型控制与请求装配。 | 已入并完成真实闭环 | 1/2 Trial 成功仅用于阶段 1 闭环；阶段 2 需更多重复。 |
 | `797bce1` reset session grants on new sessions | 新会话错误继承临时授权，永久授权与恢复中的活动会话又不能被一并清空；覆盖权限与 session 生命周期。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 | `dd296ea` dispatch external observer hooks in background | 非关键 observer 同步阻塞事件发射且异常可中断 Agent；覆盖主循环延迟、观测与故障隔离。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
+| `994bc24` diagnose unknown MCP overrides | 拼写错误或过期的精确工具 override 被静默忽略；覆盖 MCP 配置反馈与外部能力可诊断性。 | 已入 `xcode-history-v1` | 阶段 2 真实模型 Trial。 |
 
-五个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
+六个候选均已入集并完成父失败/修复通过的隔离重放；提交说明、参考 patch 和原隐藏测试
 不会进入 Agent 工作区。`6c1a27f` 已由真实模型运行两次，产生一次成功和一次有效能力
 失败；这个小样本只证明阶段 1 闭环，不构成阶段 2 基线。
 
@@ -93,3 +94,14 @@ oracle 缺口保留在 Task 的 `known_limitations`，不能扩大解释为全�
   完成，回归切片保留外部执行脱敏和 blocking pre-tool deny 行为。
 - 工程价值：判断观测扩展是否给 coding loop 引入尾延迟或故障耦合，不以线程/队列事件
   本身作为能力结果。
+
+### `994bc24`（2026-07-15）
+
+- 父提交：`169edcc84bb0b54e1c63e325decee3bee59527aa`。
+- 隐藏 oracle 通过正式 `build_mcp_tools()` 路径提供本地 discovered catalog，验证未知
+  精确 override 产生稳定 warning、通配符不被误报且有效工具仍注册并继承默认元数据。
+- 同一外置 verifier：父版本行为 1 failed / 稳定 MCP 注册回归 2 passed；修复版本和
+  只应用 `src/xcode/harness/mcp/tools.py` patch 的参考工作区均为行为 1 passed / 回归
+  2 passed。
+- 工程价值：测量 MCP 配置错误是否形成 Agent/用户可定位反馈，避免把外部能力缺失误判
+  为模型无能；grader 使用本地 client double 保持确定性，不把 fake MCP 算作能力分。
