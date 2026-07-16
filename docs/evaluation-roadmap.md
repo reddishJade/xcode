@@ -339,6 +339,12 @@ src/xcode/evals/
   Trial。将其留下的 patch 单独送入同一官方 scorer 后，仍是 10 个 `FAIL_TO_PASS` 通过、
   同一个 `PASS_TO_PASS` 回归失败。该单任务交叉证据更支持修复方案/模型输出存在回归，
   但不能替代多任务、多重复的框架归因实验。
+- 预算阶梯：同一 Xcode、模型、任务和 verifier 将模型调用上限从 20 提高到 40 后，
+  Experiment `phase5-swebench-lite-requests-2148-budget40-20260716a` 形成有效 Trial，
+  40 次模型调用、43 次工具调用、858,435 input tokens、21,765 output tokens、292.26 秒；
+  官方判定 `resolved=true`、`regression_free=true`、`policy_clean=true`。40 次版本在
+  两个具体读取路径分别转换 `socket.error`，并通过回归测试；因此当前证据把 20 次档的
+  失败归为预算不足的优先假设，暂不据此更换模型。该结论仍只覆盖单一外部任务。
 
 ## 路线变更记录
 
