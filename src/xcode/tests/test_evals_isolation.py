@@ -93,6 +93,28 @@ def test_bubblewrap_accepts_precreated_output_directory(tmp_path: Path) -> None:
     assert output.is_dir()
 
 
+def test_bubblewrap_keeps_uv_launcher_path(tmp_path: Path) -> None:
+    source = tmp_path / "source/xcode"
+    virtualenv = tmp_path / "venv"
+    runtime = tmp_path / "python"
+    uv_target = tmp_path / "uv-target"
+    uv_launcher = tmp_path / "uv"
+    workspace = tmp_path / "workspace"
+    output = tmp_path / "output"
+    for path in (source, virtualenv, runtime, workspace, output):
+        path.mkdir(parents=True)
+    uv_target.touch()
+    uv_launcher.symlink_to(uv_target)
+    executor = BubblewrapExecutor(
+        xcode_source=source,
+        virtualenv=virtualenv,
+        python_runtime=runtime,
+        uv_executable=uv_launcher,
+    )
+
+    assert executor._uv_executable == uv_launcher.absolute()
+
+
 def test_bubblewrap_converts_timeout_to_isolation_error(tmp_path: Path) -> None:
     source = tmp_path / "source/xcode"
     virtualenv = tmp_path / "venv"

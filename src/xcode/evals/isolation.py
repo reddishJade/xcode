@@ -46,7 +46,8 @@ class BubblewrapExecutor:
         self._xcode_source = xcode_source.resolve()
         self._virtualenv = virtualenv.resolve()
         self._python_runtime = python_runtime.resolve()
-        self._uv_executable = uv_executable.resolve()
+        # 保留启动器路径，避免宿主运行时替换 uv 版本后缓存失效的真实路径。
+        self._uv_executable = uv_executable.absolute()
 
     def run(
         self,
