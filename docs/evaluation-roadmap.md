@@ -347,11 +347,11 @@ src/xcode/evals/
 - 外部入口：`swebench-lite-smoke-v1` 固化公开任务字段、仓库 commit、许可证和
   `problem_statement`；Agent 不可见隐藏 patch、测试和 verifier 命令。prediction 生成
   与官方评分分离，独立 verifier 使用 `swebench==3.0.11` 的 Docker scorer。
-- 真实运行：`psf__requests-2148` 有 3 次有效 `full` Trial（20 次预算 1 次、40 次预算
+- 真实运行：`psf__requests-2148` 有 4 次有效 `full` Trial（20 次预算 2 次、40 次预算
   2 次）；`astropy__astropy-12907` 和 `django__django-10914` 各有 2 次有效 40 次预算
-  Trial。7 次 Trial 均保存 trace、patch、verifier 日志和 checksum。
-- 外部判定：7 次有效 Trial 中 6 次 `resolved=true` 且 `regression_free=true`，外部 smoke
-  成功率为 6/7（85.71%）；唯一失败是 Requests 的 20 次预算 Trial。仅看统一的
+  Trial。8 次 Trial 均保存 trace、patch、verifier 日志和 checksum。
+- 外部判定：8 次有效 Trial 中 7 次 `resolved=true` 且 `regression_free=true`，外部 smoke
+  成功率为 7/8（87.5%）；唯一失败是 Requests 的一次 20 次预算 Trial。仅看统一的
   `external-40` profile，3 个不同仓库任务共 6/6 成功。该结果满足本路线临时设定的
   “3 个任务、每任务 2 次有效重复”外部门槛 A，但仍只覆盖 `deepseek-v4-flash/full`，
   不能解释 harness gain 或跨模型稳定性。
@@ -368,7 +368,9 @@ src/xcode/evals/
   40 次模型调用、43 次工具调用、858,435 input tokens、21,765 output tokens、292.26 秒；
   官方判定 `resolved=true`、`regression_free=true`、`policy_clean=true`。40 次版本在
   两个具体读取路径分别转换 `socket.error`，并通过回归测试；因此当前证据把 20 次档的
-  失败归为预算不足的优先假设，暂不据此更换模型。该结论仍只覆盖单一外部任务。
+  失败归为预算不足的优先假设，暂不据此更换模型。随后同一 20 次 profile 的复验也成功，
+  说明低预算结果包含明显模型随机性；后续必须按预算档报告重复分布，不能把单次失败直接
+  解释为预算不足或模型不可解。
 - 预算重复：Requests 的第二次 40 次预算 Trial（`phase5-swebench-lite-requests-2148-budget40-20260716b`）
   使用正式 `external-40` profile，22 次模型调用、27 次工具调用、302,303 input tokens、
   104.65 秒，官方判定 `resolved=true`、`regression_free=true`。因此 Requests 在 40 次档
@@ -380,6 +382,10 @@ src/xcode/evals/
 - Django 任务（`django__django-10914`）的两次 40 次预算 Trial 分别消耗 983,625/749,941
   input tokens 和 204.34/219.91 秒，均由官方 scorer 判定 resolved 且无回归；它补充了与
   Requests、Astropy 不同仓库和文件权限语义的外部任务分布。
+- 超时修复后的 Requests 20 次 Trial（`post-timeout-fix-requests-2148-budget20-20260716a`）
+  消耗 285,712 input tokens、23 次工具调用和 111.76 秒，仍以 `step_limit` 正常结束，
+  官方判定 resolved 且无回归。它作为修复后真实路径验证和预算随机性证据，不单独改变
+  配对 Variant 结论。
 - 跨框架 40 次对照：FirstCoder `36318b8` 在同一模型、任务和 40 次调用上限下正常生成
   patch，但官方 scorer 判定 `resolved=false`；10 个 `FAIL_TO_PASS` 通过，
   `test_redirect_with_wrong_gzipped_header` 与 `test_stream_timeout` 两个既有测试失败。
@@ -404,5 +410,5 @@ src/xcode/evals/
 | 2026-07-16 | 暂缓阶段 3 内部配对，先验证阶段 5 外部边界 | 内部配对 smoke 暂停；新增 SWE-bench Lite 公开字段 adapter 与官方 Docker scorer。`psf__requests-2148` 的 1 次有效 Trial 因既有测试回归而未解决，证明判分链路成立但不足以通过阶段门槛。 |
 | 2026-07-16 | 增加模型可解性与预算校准门槛 | 同一外部任务在 20 次调用下失败、40 次调用下由 Xcode 成功；FirstCoder 40 次对照仍有回归但受缺失模块兼容层影响。后续先固定预算档、扩展任务和重复，再判断模型替换或 harness 增益。 |
 | 2026-07-16 | 外部 40 次预算校准继续有效 | Requests 第二次 40 次 Trial 成功；Astropy 在补齐私有 verifier、预热官方镜像后 40 次 Trial 成功。当前外部证据为 Requests 2/2、Astropy 1/1，阶段 5 仍缺第三任务及足够重复。 |
-| 2026-07-16 | 外部门槛 A 达到，暂不宣称阶段 5 完成 | Django 40 次预算完成 2/2，Astropy 补齐第二次后为 2/2；3 个仓库共 7 次有效 Trial、6 次成功。后续必须扩展至少一个模型系列并进行同任务同模型同预算的 `full/minimal` 配对，才能完成归因与阶段 5 全部要求。 |
+| 2026-07-16 | 外部门槛 A 达到，暂不宣称阶段 5 完成 | Django 40 次预算完成 2/2，Astropy 补齐第二次后为 2/2；3 个仓库共 8 次有效 Trial、7 次成功。后续必须扩展至少一个模型系列并进行同任务同模型同预算的 `full/minimal` 配对，才能完成归因与阶段 5 全部要求。 |
 | 2026-07-16 | 外部配对 smoke 启动，阶段 3 仍未通过 | Django、Requests 各完成一次有效 `full/minimal` 配对且均成功平局；Astropy 配对因隔离 worker 收尾超时无效。新增 TimeoutExpired 封存修复和测试，后续继续验证三任务多重复。 |
