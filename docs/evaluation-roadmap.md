@@ -329,9 +329,13 @@ src/xcode/evals/
   配对；两边使用同一任务、模型、预算和 repetition，两个 Variant 均形成有效 Trial，
   官方 verifier 均 `resolved=true`、`regression_free=true`、`policy_clean=true`。
 - 配对结果：Django 配对的 `harness_gain=0`，full/minimal 都成功，full 比 minimal 多用
-  83.82 秒；Requests 配对同样 `harness_gain=0`，full 比 minimal 多用 25.42 秒。两组
-  都是成功平局，不能解释为 harness 无增益，当前只能说明在这两个任务的一次重复上没有
-  可观测成功率差异。
+  83.82 秒；Requests 的一次重复配对同样是成功平局，full 比 minimal 多用 25.42 秒。
+  这些单次结果不能解释为 harness 无增益。
+- 重复配对：修复 uv launcher 后，Requests 的 `phase3-external-pair-requests-2148-budget40-20260716c`
+  完成 2/2 有效配对；`full` 成功 1/2、`minimal` 成功 0/2，报告的配对
+  `harness_gain=50%`，full 相比 minimal 少 630,372 input tokens 和 41.60 秒。该结果
+  提示 harness 差异可能影响同一任务的收敛与回归控制，但只有 2 对，必须继续跨任务和
+  重复验证，不能作为最终增益估计。
 - Astropy 配对限制：full Agent 已生成 patch，独立手工 scorer 判定该 patch resolved，
   但隔离 worker 在退出阶段超过 `external-40` wall budget，未形成合法 Trial；该运行按
   `agent_failure`/执行器收尾问题排除，不进入配对分数。此前 Astropy 的两次单 Variant
@@ -415,4 +419,5 @@ src/xcode/evals/
 | 2026-07-16 | 外部 40 次预算校准继续有效 | Requests 第二次 40 次 Trial 成功；Astropy 在补齐私有 verifier、预热官方镜像后 40 次 Trial 成功。当前外部证据为 Requests 2/2、Astropy 1/1，阶段 5 仍缺第三任务及足够重复。 |
 | 2026-07-16 | 外部门槛 A 达到，暂不宣称阶段 5 完成 | Django 40 次预算完成 2/2，Astropy 补齐第二次后为 2/2；3 个仓库共 8 次有效 Trial、7 次成功。后续必须扩展至少一个模型系列并进行同任务同模型同预算的 `full/minimal` 配对，才能完成归因与阶段 5 全部要求。 |
 | 2026-07-16 | 外部配对 smoke 启动，阶段 3 仍未通过 | Django、Requests 各完成一次有效 `full/minimal` 配对且均成功平局；Astropy 配对因隔离 worker 收尾超时无效。新增 TimeoutExpired 封存修复和测试，后续继续验证三任务多重复。 |
-| 2026-07-16 | 修复 uv launcher 滚动导致的重复 Trial 无效 | Requests 2-repetition 队列中 3 次 Trial 因缓存旧 uv Cellar 目标路径失败；执行器改为保留 launcher 符号路径，并加入隔离契约测试。失败结果保留为环境分层，不计入 harness gain。 |
+| 2026-07-16 | 修复 uv launcher 滚动导致的重复 Trial 无效 | Requests 旧 2-repetition 队列中 3 次 Trial 因缓存旧 uv Cellar 目标路径失败；执行器改为保留 launcher 符号路径，并加入隔离契约测试。失败结果保留为环境分层，不计入 harness gain。 |
+| 2026-07-16 | Requests 配对重复出现初步 full 优势 | 修复后 2 对 Requests 配对全部有效，full 1/2、minimal 0/2，配对 gain=50%；仍属小样本，下一步扩展 Django/Astropy 配对重复和第二模型，避免把任务随机性当作稳定 harness gain。 |
