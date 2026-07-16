@@ -125,6 +125,7 @@ class Trial(EvalModel):
     repetition: Annotated[int, Field(ge=0)]
     workspace_revision: str
     command: tuple[str, ...]
+    budget_profile: Identifier = "task"
 
 
 class Experiment(EvalModel):
@@ -138,6 +139,8 @@ class Experiment(EvalModel):
     model: ModelConfig
     repetitions: PositiveInt
     command: tuple[str, ...]
+    budget_profile: Identifier = "task"
+    budget_override: ResourceBudget | None = None
 
     @model_validator(mode="after")
     def validate_comparison_axes(self) -> Self:
@@ -153,6 +156,10 @@ class Experiment(EvalModel):
         variant_ids = [variant.variant_id for variant in self.variants]
         if len(set(variant_ids)) != len(variant_ids):
             raise ValueError("experiment variant ids must be unique")
+        if self.budget_profile == "task" and self.budget_override is not None:
+            raise ValueError("task budget profile cannot have an override")
+        if self.budget_profile != "task" and self.budget_override is None:
+            raise ValueError("non-task budget profile requires an override")
         return self
 
 

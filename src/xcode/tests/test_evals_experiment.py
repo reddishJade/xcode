@@ -134,6 +134,25 @@ def test_experiment_builds_strictly_paired_unique_trials() -> None:
     assert trials[0].workspace_revision == "parent-task-a"
 
 
+def test_experiment_budget_profile_overrides_task_budget() -> None:
+    experiment = _experiment().model_copy(
+        update={
+            "budget_profile": "external-40",
+            "budget_override": ResourceBudget(
+                wall_time_seconds=600,
+                model_calls=40,
+                tool_calls=120,
+            ),
+        }
+    )
+
+    trial = build_trials(experiment, (_task("task-a"), _task("task-b")))[0]
+
+    assert trial.budget_profile == "external-40"
+    assert trial.budget.model_calls == 40
+    assert trial.budget != _task("task-a").budget
+
+
 def test_experiment_rejects_missing_or_foreign_dataset_tasks() -> None:
     with pytest.raises(ExperimentError, match="missing"):
         build_trials(_experiment(), (_task("task-a"),))

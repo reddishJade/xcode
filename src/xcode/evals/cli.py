@@ -14,6 +14,7 @@ import sys
 from xcode.harness.config import discover_runtime_config, XcodeRuntimeConfig
 
 from .artifacts import ArtifactStore
+from .budget_profiles import available_budget_profiles, resolve_budget_profile
 from .dataset import load_tasks
 from .experiment import build_trials
 from .isolation import BubblewrapExecutor
@@ -91,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
         repetitions=repetitions,
         command=command,
+        budget_profile=args.budget_profile,
+        budget_override=resolve_budget_profile(args.budget_profile),
     )
     scheduled = build_trials(experiment, selected_tasks)
     if args.repetitions is None:
@@ -189,6 +192,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--private-root", type=Path, required=True)
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--experiment-id", required=True)
+    parser.add_argument(
+        "--budget-profile",
+        choices=available_budget_profiles(),
+        default="task",
+        help="冻结 Experiment 使用的预算档；默认使用每个 Task 的预算。",
+    )
     parser.add_argument("--repetition", type=int, default=0)
     parser.add_argument("--repetitions", type=int)
     parser.add_argument(

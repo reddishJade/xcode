@@ -41,10 +41,11 @@ def build_trials(experiment: Experiment, tasks: Iterable[Task]) -> tuple[Trial, 
                         dataset_version=experiment.dataset_version,
                         variant=variant,
                         model=experiment.model,
-                        budget=task.budget,
+                        budget=experiment.budget_override or task.budget,
                         repetition=repetition,
                         workspace_revision=task.source.revision,
                         command=experiment.command,
+                        budget_profile=experiment.budget_profile,
                     )
                 )
     return tuple(trials)
