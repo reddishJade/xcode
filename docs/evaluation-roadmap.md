@@ -341,6 +341,9 @@ src/xcode/evals/
   已加入 `test_evals_isolation.py`。修复后的真实 Trial 仍需继续验证。
 - 阶段边界：当前只有 2 个有效外部配对、每对 1 次重复，且仅覆盖一个模型和 `full`/`minimal`；
   阶段 3 仍未通过，需扩展到三任务并增加重复后才能报告稳定 harness gain。
+- 重复队列限制：Requests 的 2-repetition 配对实验中，仅 `full.r0` 有效；其余 3 次在
+  Agent 启动前因宿主 `uv` 版本滚动后仍引用旧 Cellar 路径而记为 `agent_failure`，不进入
+  配对分数。执行器已改为保留稳定 launcher 路径，需重新运行该重复队列确认修复。
 
 ### 阶段 5（外部 smoke，外部门槛 A 已通过，完整阶段未通过，2026-07-16）
 
@@ -412,3 +415,4 @@ src/xcode/evals/
 | 2026-07-16 | 外部 40 次预算校准继续有效 | Requests 第二次 40 次 Trial 成功；Astropy 在补齐私有 verifier、预热官方镜像后 40 次 Trial 成功。当前外部证据为 Requests 2/2、Astropy 1/1，阶段 5 仍缺第三任务及足够重复。 |
 | 2026-07-16 | 外部门槛 A 达到，暂不宣称阶段 5 完成 | Django 40 次预算完成 2/2，Astropy 补齐第二次后为 2/2；3 个仓库共 8 次有效 Trial、7 次成功。后续必须扩展至少一个模型系列并进行同任务同模型同预算的 `full/minimal` 配对，才能完成归因与阶段 5 全部要求。 |
 | 2026-07-16 | 外部配对 smoke 启动，阶段 3 仍未通过 | Django、Requests 各完成一次有效 `full/minimal` 配对且均成功平局；Astropy 配对因隔离 worker 收尾超时无效。新增 TimeoutExpired 封存修复和测试，后续继续验证三任务多重复。 |
+| 2026-07-16 | 修复 uv launcher 滚动导致的重复 Trial 无效 | Requests 2-repetition 队列中 3 次 Trial 因缓存旧 uv Cellar 目标路径失败；执行器改为保留 launcher 符号路径，并加入隔离契约测试。失败结果保留为环境分层，不计入 harness gain。 |
