@@ -222,16 +222,15 @@ src/xcode/evals/
 
 ## 近期实施队列
 
-阶段 0、1 已达到文档门槛，当前只展开阶段 2，后续阶段保持全局可见但不提前堆叠
-实现：
+阶段 0、1、2 已达到文档门槛。阶段 3 的内部 `full/minimal` 配对实验暂缓，当前优先
+推进阶段 5 的外部真实任务边界；阶段 4、6 保持全局可见但不提前堆叠实现：
 
-1. 继续按人工审核清单扩展到至少 10 个真实任务；
-2. 为 Experiment、重复调度、聚合指标和离线报告定义领域契约；
-3. 固定 Task 数据版本、Xcode commit、模型配置和统一预算，运行第一版基线；
+1. 暂停内部 `full/minimal` 配对运行，保留已冻结的 Variant 契约和实现；
+2. 用公开字段建立外部 benchmark adapter，先完成小规模真实任务 smoke；
+3. 对外部任务坚持 Agent 生成 prediction、官方 scorer 独立判分的边界；
 4. 从原始 Trial artifact 离线计算有效数、排除项、`success_rate`、`pass@k`、
    `pass^k` 和资源联合分布；
-5. 确保每个聚合结果都能反查哈希封存的单 Trial artifact，达到阶段 2 门槛后再进入
-   配对 Variant。
+5. 外部 smoke 通过环境与协议审计后，再扩展任务数量和模型矩阵。
 
 ## 阶段证据与限制
 
@@ -321,6 +320,20 @@ src/xcode/evals/
   单 Variant 的效率前沿只是绝对坐标，不能解释为 harness gain。阶段 3 必须在相同任务、
   模型、预算和重复策略下加入可运行的 `minimal` 配对对照。
 
+### 阶段 5（外部 smoke，未通过阶段门槛，2026-07-16）
+
+- 外部入口：`swebench-lite-smoke-v1` 固化公开任务字段、仓库 commit、许可证和
+  `problem_statement`；Agent 不可见隐藏 patch、测试和 verifier 命令。prediction 生成
+  与官方评分分离，独立 verifier 使用 `swebench==3.0.11` 的 Docker scorer。
+- 真实运行：Experiment `phase5-swebench-lite-requests-2148-20260716d` 在
+  `psf__requests-2148` 上完成 1 次 `full` Trial；Agent 产生 2 个变更文件，Trial
+  `valid_trial=true`、`policy_clean=true`，并保存 trace、patch、verifier 日志和 checksum。
+- 外部判定：官方容器成功应用 patch，10 个 `FAIL_TO_PASS` 测试通过，但 1 个既有
+  `PASS_TO_PASS` 测试失败，因此 `resolved=false`、`regression_free=false`，最终成功率
+  为 0/1。该结果证明外部评分链路可用，不构成外部能力结论或阶段 5 通过。
+- 环境限制：首次冷启动因镜像构建超过单 Trial verifier 预算而无效；缓存镜像后的本轮
+  官方 scorer 执行约 223 秒完成。两类结果均保留为环境与任务证据，不混入成功率。
+
 ## 路线变更记录
 
 路线发生实质调整时，在此追加日期、决定、证据和影响。不要覆盖过去的方向，使后续
@@ -334,3 +347,4 @@ src/xcode/evals/
 | 2026-07-15 | 阶段 1 通过，进入阶段 2 | 同一真实历史任务产生 1 次独立 verifier 成功和 1 次有效能力失败；两次均从精确父提交恢复独立 workspace，并完整保存哈希封存 artifact。该证据只证明闭环，不作为稳定基线。 |
 | 2026-07-15 | 阶段 2 通过，进入阶段 3 | 10 个审核任务各完成两次真实 Trial；17 个有效结果中 2 成功，3 个预算排除，所有成本均进入聚合。固定摘要和原始 artifact 哈希已版本化；结论限定于 `deepseek-v4-flash` 与 `full` Variant。 |
 | 2026-07-15 | 冻结阶段 3 `full/minimal` Variant v1 | minimal 保留模型、任务、预算、安全边界、核心工具和项目指令，只关闭 compaction、fallback、工具并发、request hygiene、重复工具 watchdog 与 contextual retrieval prompt；配对指标仅使用双方有效的相同 task/repetition。 |
+| 2026-07-16 | 暂缓阶段 3 内部配对，先验证阶段 5 外部边界 | 内部配对 smoke 暂停；新增 SWE-bench Lite 公开字段 adapter 与官方 Docker scorer。`psf__requests-2148` 的 1 次有效 Trial 因既有测试回归而未解决，证明判分链路成立但不足以通过阶段门槛。 |
