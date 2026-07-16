@@ -222,8 +222,8 @@ src/xcode/evals/
 
 ## 近期实施队列
 
-阶段 0、1、2 已达到文档门槛。阶段 3 的内部 `full/minimal` 配对实验暂缓，当前优先
-推进阶段 5 的外部真实任务边界；阶段 4、6 保持全局可见但不提前堆叠实现：
+阶段 0、1、2 已达到文档门槛。阶段 3 的内部配对实验仍暂缓，但已在外部任务上做
+`full/minimal` 归因 smoke；阶段 4、6 保持全局可见但不提前堆叠实现：
 
 1. 暂停内部 `full/minimal` 配对运行，保留已冻结的 Variant 契约和实现；
 2. 把 20/40/60 等预算档提升为版本化 Experiment 变量，不再依赖临时复制 dataset
@@ -233,7 +233,7 @@ src/xcode/evals/
 4. 用公开字段建立外部 benchmark adapter，坚持 Agent 生成 prediction、官方 scorer
    独立判分的边界；
 5. 阶段 5 外部门槛已达到第一道门槛：3 个不同仓库任务、每任务至少 2 次有效重复，
-   公开预算档、无效 Trial 和可解性分层；下一步扩展模型矩阵并执行配对 Variant。
+   公开预算档、无效 Trial 和可解性分层；下一步扩展模型矩阵，并继续配对 Variant 重复。
 
 ## 阶段证据与限制
 
@@ -323,6 +323,25 @@ src/xcode/evals/
   单 Variant 的效率前沿只是绝对坐标，不能解释为 harness gain。阶段 3 必须在相同任务、
   模型、预算和重复策略下加入可运行的 `minimal` 配对对照。
 
+### 阶段 3 外部配对 smoke（进行中，2026-07-16）
+
+- 配对契约：Django 与 Requests 各完成 1 个 `external-40` repetition 的 `full/minimal`
+  配对；两边使用同一任务、模型、预算和 repetition，两个 Variant 均形成有效 Trial，
+  官方 verifier 均 `resolved=true`、`regression_free=true`、`policy_clean=true`。
+- 配对结果：Django 配对的 `harness_gain=0`，full/minimal 都成功，full 比 minimal 多用
+  83.82 秒；Requests 配对同样 `harness_gain=0`，full 比 minimal 多用 25.42 秒。两组
+  都是成功平局，不能解释为 harness 无增益，当前只能说明在这两个任务的一次重复上没有
+  可观测成功率差异。
+- Astropy 配对限制：full Agent 已生成 patch，独立手工 scorer 判定该 patch resolved，
+  但隔离 worker 在退出阶段超过 `external-40` wall budget，未形成合法 Trial；该运行按
+  `agent_failure`/执行器收尾问题排除，不进入配对分数。此前 Astropy 的两次单 Variant
+  full Trial 仍保持有效记录。
+- 可靠性修复：`BubblewrapExecutor` 现在把 `subprocess.TimeoutExpired` 转换成
+  `IsolationError`，由 TrialRunner 封存为无效 Trial，而不是留下半成品目录；对应契约测试
+  已加入 `test_evals_isolation.py`。修复后的真实 Trial 仍需继续验证。
+- 阶段边界：当前只有 2 个有效外部配对、每对 1 次重复，且仅覆盖一个模型和 `full`/`minimal`；
+  阶段 3 仍未通过，需扩展到三任务并增加重复后才能报告稳定 harness gain。
+
 ### 阶段 5（外部 smoke，外部门槛 A 已通过，完整阶段未通过，2026-07-16）
 
 - 外部入口：`swebench-lite-smoke-v1` 固化公开任务字段、仓库 commit、许可证和
@@ -386,3 +405,4 @@ src/xcode/evals/
 | 2026-07-16 | 增加模型可解性与预算校准门槛 | 同一外部任务在 20 次调用下失败、40 次调用下由 Xcode 成功；FirstCoder 40 次对照仍有回归但受缺失模块兼容层影响。后续先固定预算档、扩展任务和重复，再判断模型替换或 harness 增益。 |
 | 2026-07-16 | 外部 40 次预算校准继续有效 | Requests 第二次 40 次 Trial 成功；Astropy 在补齐私有 verifier、预热官方镜像后 40 次 Trial 成功。当前外部证据为 Requests 2/2、Astropy 1/1，阶段 5 仍缺第三任务及足够重复。 |
 | 2026-07-16 | 外部门槛 A 达到，暂不宣称阶段 5 完成 | Django 40 次预算完成 2/2，Astropy 补齐第二次后为 2/2；3 个仓库共 7 次有效 Trial、6 次成功。后续必须扩展至少一个模型系列并进行同任务同模型同预算的 `full/minimal` 配对，才能完成归因与阶段 5 全部要求。 |
+| 2026-07-16 | 外部配对 smoke 启动，阶段 3 仍未通过 | Django、Requests 各完成一次有效 `full/minimal` 配对且均成功平局；Astropy 配对因隔离 worker 收尾超时无效。新增 TimeoutExpired 封存修复和测试，后续继续验证三任务多重复。 |
