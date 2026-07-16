@@ -328,9 +328,9 @@ src/xcode/evals/
 - 外部入口：`swebench-lite-smoke-v1` 固化公开任务字段、仓库 commit、许可证和
   `problem_statement`；Agent 不可见隐藏 patch、测试和 verifier 命令。prediction 生成
   与官方评分分离，独立 verifier 使用 `swebench==3.0.11` 的 Docker scorer。
-- 真实运行：Experiment `phase5-swebench-lite-requests-2148-20260716d` 在
-  `psf__requests-2148` 上完成 1 次 `full` Trial；Agent 产生 2 个变更文件，Trial
-  `valid_trial=true`、`policy_clean=true`，并保存 trace、patch、verifier 日志和 checksum。
+- 真实运行：`psf__requests-2148` 已完成 3 次有效 `full` Trial（20 次预算 1 次、
+  40 次预算 2 次）；`astropy__astropy-12907` 已完成 1 次有效 40 次预算 Trial。
+  每次均保存 trace、patch、verifier 日志和 checksum。
 - 外部判定：官方容器成功应用 patch，10 个 `FAIL_TO_PASS` 测试通过，但 1 个既有
   `PASS_TO_PASS` 测试失败，因此 `resolved=false`、`regression_free=false`，最终成功率
   为 0/1。该结果证明外部评分链路可用，不构成外部能力结论或阶段 5 通过。
@@ -348,6 +348,14 @@ src/xcode/evals/
   官方判定 `resolved=true`、`regression_free=true`、`policy_clean=true`。40 次版本在
   两个具体读取路径分别转换 `socket.error`，并通过回归测试；因此当前证据把 20 次档的
   失败归为预算不足的优先假设，暂不据此更换模型。该结论仍只覆盖单一外部任务。
+- 预算重复：Requests 的第二次 40 次预算 Trial（`phase5-swebench-lite-requests-2148-budget40-20260716b`）
+  使用正式 `external-40` profile，22 次模型调用、27 次工具调用、302,303 input tokens、
+  104.65 秒，官方判定 `resolved=true`、`regression_free=true`。因此 Requests 在 40 次档
+  当前为 2/2 成功，但仍只是单一任务证据。
+- 任务扩展：Astropy 首次运行因私有 verifier 尚未配置而记为 `verifier_failure`，不计入有效率；
+  预热官方镜像后重跑 `phase5-swebench-lite-astropy-12907-budget40-20260716c`，35 次模型调用、
+  41 次工具调用、716,322 input tokens、329.34 秒，官方判定 `resolved=true`、
+  `regression_free=true`。这表明首次失败是评测环境准备问题，不是模型能力判定。
 - 跨框架 40 次对照：FirstCoder `36318b8` 在同一模型、任务和 40 次调用上限下正常生成
   patch，但官方 scorer 判定 `resolved=false`；10 个 `FAIL_TO_PASS` 通过，
   `test_redirect_with_wrong_gzipped_header` 与 `test_stream_timeout` 两个既有测试失败。
@@ -371,3 +379,4 @@ src/xcode/evals/
 | 2026-07-15 | 冻结阶段 3 `full/minimal` Variant v1 | minimal 保留模型、任务、预算、安全边界、核心工具和项目指令，只关闭 compaction、fallback、工具并发、request hygiene、重复工具 watchdog 与 contextual retrieval prompt；配对指标仅使用双方有效的相同 task/repetition。 |
 | 2026-07-16 | 暂缓阶段 3 内部配对，先验证阶段 5 外部边界 | 内部配对 smoke 暂停；新增 SWE-bench Lite 公开字段 adapter 与官方 Docker scorer。`psf__requests-2148` 的 1 次有效 Trial 因既有测试回归而未解决，证明判分链路成立但不足以通过阶段门槛。 |
 | 2026-07-16 | 增加模型可解性与预算校准门槛 | 同一外部任务在 20 次调用下失败、40 次调用下由 Xcode 成功；FirstCoder 40 次对照仍有回归但受缺失模块兼容层影响。后续先固定预算档、扩展任务和重复，再判断模型替换或 harness 增益。 |
+| 2026-07-16 | 外部 40 次预算校准继续有效 | Requests 第二次 40 次 Trial 成功；Astropy 在补齐私有 verifier、预热官方镜像后 40 次 Trial 成功。当前外部证据为 Requests 2/2、Astropy 1/1，阶段 5 仍缺第三任务及足够重复。 |
