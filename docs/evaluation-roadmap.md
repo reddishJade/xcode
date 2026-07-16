@@ -333,6 +333,12 @@ src/xcode/evals/
   为 0/1。该结果证明外部评分链路可用，不构成外部能力结论或阶段 5 通过。
 - 环境限制：首次冷启动因镜像构建超过单 Trial verifier 预算而无效；缓存镜像后的本轮
   官方 scorer 执行约 223 秒完成。两类结果均保留为环境与任务证据，不混入成功率。
+- 框架对照：同一任务、模型、预算和官方 verifier 下，FirstCoder `36318b8` 也生成了
+  等价的功能 patch；它在第 20 次模型调用达到自身 `provider_call_limit`，因仓库缺少
+  `firstcoder.agent.tool_settlement` 还需临时兼容层才能启动，因此不计为有效 FirstCoder
+  Trial。将其留下的 patch 单独送入同一官方 scorer 后，仍是 10 个 `FAIL_TO_PASS` 通过、
+  同一个 `PASS_TO_PASS` 回归失败。该单任务交叉证据更支持修复方案/模型输出存在回归，
+  但不能替代多任务、多重复的框架归因实验。
 
 ## 路线变更记录
 
