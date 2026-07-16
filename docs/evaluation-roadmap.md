@@ -226,11 +226,14 @@ src/xcode/evals/
 推进阶段 5 的外部真实任务边界；阶段 4、6 保持全局可见但不提前堆叠实现：
 
 1. 暂停内部 `full/minimal` 配对运行，保留已冻结的 Variant 契约和实现；
-2. 用公开字段建立外部 benchmark adapter，先完成小规模真实任务 smoke；
-3. 对外部任务坚持 Agent 生成 prediction、官方 scorer 独立判分的边界；
-4. 从原始 Trial artifact 离线计算有效数、排除项、`success_rate`、`pass@k`、
-   `pass^k` 和资源联合分布；
-5. 外部 smoke 通过环境与协议审计后，再扩展任务数量和模型矩阵。
+2. 把 20/40/60 等预算档提升为版本化 Experiment 变量，不再依赖临时复制 dataset
+   文件来改变预算；
+3. 在外部任务上完成模型可解性校准：先跑 `psf__requests-2148` 的第二次 40 次重复，
+   再跑 `astropy__astropy-12907` 的 40 次 Trial；
+4. 用公开字段建立外部 benchmark adapter，坚持 Agent 生成 prediction、官方 scorer
+   独立判分的边界；
+5. 阶段 5 外部门槛暂定为至少 3 个任务、每任务至少 2 次有效重复，并公开预算档、
+   无效 Trial 和可解性分层；达到该门槛后再扩展任务数量和模型矩阵。
 
 ## 阶段证据与限制
 
@@ -367,3 +370,4 @@ src/xcode/evals/
 | 2026-07-15 | 阶段 2 通过，进入阶段 3 | 10 个审核任务各完成两次真实 Trial；17 个有效结果中 2 成功，3 个预算排除，所有成本均进入聚合。固定摘要和原始 artifact 哈希已版本化；结论限定于 `deepseek-v4-flash` 与 `full` Variant。 |
 | 2026-07-15 | 冻结阶段 3 `full/minimal` Variant v1 | minimal 保留模型、任务、预算、安全边界、核心工具和项目指令，只关闭 compaction、fallback、工具并发、request hygiene、重复工具 watchdog 与 contextual retrieval prompt；配对指标仅使用双方有效的相同 task/repetition。 |
 | 2026-07-16 | 暂缓阶段 3 内部配对，先验证阶段 5 外部边界 | 内部配对 smoke 暂停；新增 SWE-bench Lite 公开字段 adapter 与官方 Docker scorer。`psf__requests-2148` 的 1 次有效 Trial 因既有测试回归而未解决，证明判分链路成立但不足以通过阶段门槛。 |
+| 2026-07-16 | 增加模型可解性与预算校准门槛 | 同一外部任务在 20 次调用下失败、40 次调用下由 Xcode 成功；FirstCoder 40 次对照仍有回归但受缺失模块兼容层影响。后续先固定预算档、扩展任务和重复，再判断模型替换或 harness 增益。 |
