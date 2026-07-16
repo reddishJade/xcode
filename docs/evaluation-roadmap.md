@@ -228,12 +228,12 @@ src/xcode/evals/
 1. 暂停内部 `full/minimal` 配对运行，保留已冻结的 Variant 契约和实现；
 2. 把 20/40/60 等预算档提升为版本化 Experiment 变量，不再依赖临时复制 dataset
    文件来改变预算；
-3. 在外部任务上完成模型可解性校准：先跑 `psf__requests-2148` 的第二次 40 次重复，
-   再跑 `astropy__astropy-12907` 的 40 次 Trial；
+3. 在外部任务上完成模型可解性校准：已完成 Requests 的 20/40 次预算阶梯，
+   并完成 Astropy、Django 的 40 次预算重复；
 4. 用公开字段建立外部 benchmark adapter，坚持 Agent 生成 prediction、官方 scorer
    独立判分的边界；
-5. 阶段 5 外部门槛暂定为至少 3 个任务、每任务至少 2 次有效重复，并公开预算档、
-   无效 Trial 和可解性分层；达到该门槛后再扩展任务数量和模型矩阵。
+5. 阶段 5 外部门槛已达到第一道门槛：3 个不同仓库任务、每任务至少 2 次有效重复，
+   公开预算档、无效 Trial 和可解性分层；下一步扩展模型矩阵并执行配对 Variant。
 
 ## 阶段证据与限制
 
@@ -323,17 +323,19 @@ src/xcode/evals/
   单 Variant 的效率前沿只是绝对坐标，不能解释为 harness gain。阶段 3 必须在相同任务、
   模型、预算和重复策略下加入可运行的 `minimal` 配对对照。
 
-### 阶段 5（外部 smoke，未通过阶段门槛，2026-07-16）
+### 阶段 5（外部 smoke，外部门槛 A 已通过，完整阶段未通过，2026-07-16）
 
 - 外部入口：`swebench-lite-smoke-v1` 固化公开任务字段、仓库 commit、许可证和
   `problem_statement`；Agent 不可见隐藏 patch、测试和 verifier 命令。prediction 生成
   与官方评分分离，独立 verifier 使用 `swebench==3.0.11` 的 Docker scorer。
-- 真实运行：`psf__requests-2148` 已完成 3 次有效 `full` Trial（20 次预算 1 次、
-  40 次预算 2 次）；`astropy__astropy-12907` 已完成 1 次有效 40 次预算 Trial。
-  每次均保存 trace、patch、verifier 日志和 checksum。
-- 外部判定：官方容器成功应用 patch，10 个 `FAIL_TO_PASS` 测试通过，但 1 个既有
-  `PASS_TO_PASS` 测试失败，因此 `resolved=false`、`regression_free=false`，最终成功率
-  为 0/1。该结果证明外部评分链路可用，不构成外部能力结论或阶段 5 通过。
+- 真实运行：`psf__requests-2148` 有 3 次有效 `full` Trial（20 次预算 1 次、40 次预算
+  2 次）；`astropy__astropy-12907` 和 `django__django-10914` 各有 2 次有效 40 次预算
+  Trial。7 次 Trial 均保存 trace、patch、verifier 日志和 checksum。
+- 外部判定：7 次有效 Trial 中 6 次 `resolved=true` 且 `regression_free=true`，外部 smoke
+  成功率为 6/7（85.71%）；唯一失败是 Requests 的 20 次预算 Trial。仅看统一的
+  `external-40` profile，3 个不同仓库任务共 6/6 成功。该结果满足本路线临时设定的
+  “3 个任务、每任务 2 次有效重复”外部门槛 A，但仍只覆盖 `deepseek-v4-flash/full`，
+  不能解释 harness gain 或跨模型稳定性。
 - 环境限制：首次冷启动因镜像构建超过单 Trial verifier 预算而无效；缓存镜像后的本轮
   官方 scorer 执行约 223 秒完成。两类结果均保留为环境与任务证据，不混入成功率。
 - 框架对照：同一任务、模型、预算和官方 verifier 下，FirstCoder `36318b8` 也生成了
@@ -356,6 +358,9 @@ src/xcode/evals/
   预热官方镜像后重跑 `phase5-swebench-lite-astropy-12907-budget40-20260716c`，35 次模型调用、
   41 次工具调用、716,322 input tokens、329.34 秒，官方判定 `resolved=true`、
   `regression_free=true`。这表明首次失败是评测环境准备问题，不是模型能力判定。
+- Django 任务（`django__django-10914`）的两次 40 次预算 Trial 分别消耗 983,625/749,941
+  input tokens 和 204.34/219.91 秒，均由官方 scorer 判定 resolved 且无回归；它补充了与
+  Requests、Astropy 不同仓库和文件权限语义的外部任务分布。
 - 跨框架 40 次对照：FirstCoder `36318b8` 在同一模型、任务和 40 次调用上限下正常生成
   patch，但官方 scorer 判定 `resolved=false`；10 个 `FAIL_TO_PASS` 通过，
   `test_redirect_with_wrong_gzipped_header` 与 `test_stream_timeout` 两个既有测试失败。
@@ -380,3 +385,4 @@ src/xcode/evals/
 | 2026-07-16 | 暂缓阶段 3 内部配对，先验证阶段 5 外部边界 | 内部配对 smoke 暂停；新增 SWE-bench Lite 公开字段 adapter 与官方 Docker scorer。`psf__requests-2148` 的 1 次有效 Trial 因既有测试回归而未解决，证明判分链路成立但不足以通过阶段门槛。 |
 | 2026-07-16 | 增加模型可解性与预算校准门槛 | 同一外部任务在 20 次调用下失败、40 次调用下由 Xcode 成功；FirstCoder 40 次对照仍有回归但受缺失模块兼容层影响。后续先固定预算档、扩展任务和重复，再判断模型替换或 harness 增益。 |
 | 2026-07-16 | 外部 40 次预算校准继续有效 | Requests 第二次 40 次 Trial 成功；Astropy 在补齐私有 verifier、预热官方镜像后 40 次 Trial 成功。当前外部证据为 Requests 2/2、Astropy 1/1，阶段 5 仍缺第三任务及足够重复。 |
+| 2026-07-16 | 外部门槛 A 达到，暂不宣称阶段 5 完成 | Django 40 次预算完成 2/2，Astropy 补齐第二次后为 2/2；3 个仓库共 7 次有效 Trial、6 次成功。后续必须扩展至少一个模型系列并进行同任务同模型同预算的 `full/minimal` 配对，才能完成归因与阶段 5 全部要求。 |
