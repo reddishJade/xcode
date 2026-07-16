@@ -70,14 +70,20 @@ class BubblewrapExecutor:
             ensure_ascii=False,
         )
         command = self._command(workspace=workspace, output=output)
-        completed = subprocess.run(
-            command,
-            input=request,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=trial.budget.wall_time_seconds + 30,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                input=request,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=trial.budget.wall_time_seconds + 30,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise IsolationError(
+                "isolated Xcode exceeded wall-clock timeout "
+                f"({trial.budget.wall_time_seconds + 30}s grace included)"
+            ) from error
         if completed.returncode != 0:
             raise IsolationError(
                 "isolated Xcode failed "
