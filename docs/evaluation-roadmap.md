@@ -345,6 +345,13 @@ src/xcode/evals/
   官方判定 `resolved=true`、`regression_free=true`、`policy_clean=true`。40 次版本在
   两个具体读取路径分别转换 `socket.error`，并通过回归测试；因此当前证据把 20 次档的
   失败归为预算不足的优先假设，暂不据此更换模型。该结论仍只覆盖单一外部任务。
+- 跨框架 40 次对照：FirstCoder `36318b8` 在同一模型、任务和 40 次调用上限下正常生成
+  patch，但官方 scorer 判定 `resolved=false`；10 个 `FAIL_TO_PASS` 通过，
+  `test_redirect_with_wrong_gzipped_header` 与 `test_stream_timeout` 两个既有测试失败。
+  FirstCoder 当前 commit 缺少 `firstcoder.agent.tool_settlement`，运行使用了仅限本次进程的
+  兼容层，因此该结果是 patch-level 交叉证据，不计入正式有效 Trial。它提示 harness
+  差异可能影响模型是否能在更高预算下收敛，但需要无兼容层的可运行对照和更多任务才能
+  形成 Harness gain 结论。
 
 ## 路线变更记录
 

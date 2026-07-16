@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "experiment_id": "phase5-swebench-lite-requests-2148-firstcoder-control-20260716a",
+  "dataset_version": "swebench-lite-smoke-v1",
+  "task_id": "psf__requests-2148",
+  "framework": {
+    "name": "FirstCoder",
+    "revision": "36318b85d02000830249d4af656fc136676d304d",
+    "compatibility_shim": true,
+    "formal_trial_valid": false,
+    "invalid_reason": "FirstCoder HEAD imports missing firstcoder.agent.tool_settlement"
+  },
+  "model": {
+    "name": "deepseek-v4-flash",
+    "provider_transport": "openai_chat"
+  },
+  "budget": {
+    "model_calls": 40,
+    "tool_calls": 120,
+    "wall_time_seconds": 600
+  },
+  "agent": {
+    "completed_without_exception": true,
+    "changed_paths": ["requests/models.py"],
+    "patch_sha256": "cca14496cbeafd24b0f7fe0ca75aa884a4744632a64a6d6862b65a9a405a305f"
+  },
+  "official_verifier": {
+    "version": "swebench-3.0.11",
+    "resolved": false,
+    "regression_free": false,
+    "fail_to_pass_successes": 10,
+    "pass_to_pass_failures": [
+      "test_requests.py::RequestsTestCase::test_redirect_with_wrong_gzipped_header",
+      "test_requests.py::TestTimeout::test_stream_timeout"
+    ]
+  },
+  "interpretation": "Patch-level cross-framework evidence only; do not aggregate as a formal FirstCoder Trial."
+}
