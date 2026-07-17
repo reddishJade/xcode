@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from xcode.agent.types import ToolSpec
-from xcode.coding_agent.tools.prompt import (
+from xcode.harness.agent_runtime.prompting.tools import (
     build_tool_prompt,
-    _compact_tool_params,
+    compact_tool_params,
     build_tool_guidelines,
 )
 
@@ -46,7 +46,7 @@ class TestBuildToolPrompt:
 class TestCompactToolParams:
     def test_no_schema(self) -> None:
         tool = _make_tool("t")
-        assert _compact_tool_params(tool) == []
+        assert compact_tool_params(tool) == []
 
     def test_required_params_marked(self) -> None:
         tool = _make_tool(
@@ -57,7 +57,7 @@ class TestCompactToolParams:
                 "required": ["path"],
             },
         )
-        params = _compact_tool_params(tool)
+        params = compact_tool_params(tool)
         assert any("path" in p and "string" in p for p in params)
 
     def test_optional_params_marked(self) -> None:
@@ -68,7 +68,7 @@ class TestCompactToolParams:
                 "properties": {"limit": {"type": "integer"}},
             },
         )
-        params = _compact_tool_params(tool)
+        params = compact_tool_params(tool)
         assert any("?" in p and "limit" in p for p in params)
 
 

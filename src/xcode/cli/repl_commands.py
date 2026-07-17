@@ -1062,7 +1062,7 @@ def _compute_context_summary(
     registry = getattr(agent, "registry", None)
     if registry is not None:
         snap = registry
-        from xcode.coding_agent.tools.prompt import (
+        from xcode.harness.agent_runtime.prompting import (
             build_tool_prompt,
             build_tool_guidelines,
         )

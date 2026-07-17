@@ -26,12 +26,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 import platform
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from xcode.harness.config import DEFAULT_PROMPT_MODULES
 from xcode.agent.types import ToolSpec
-from xcode.coding_agent.tools.prompt import build_tool_guidelines, build_tool_prompt
-from xcode.coding_agent.tools.shell_adapter import ShellSpec
 
 from ..contextual import ContextualRetrievalState
 from ..git_preflight import build_git_preflight
@@ -46,11 +44,22 @@ from .identity import (
     VOLATILE_PROMPT_MODULE_ORDER,
 )
 from .token_budget import MAX_CWD_ENTRIES
+from .tools import build_tool_guidelines, build_tool_prompt
 
 if TYPE_CHECKING:
     from xcode.harness.memory import MemoryManager
 
 type PromptCacheKey = tuple[object, ...]
+
+
+class ShellInfo(Protocol):
+    """环境提示对 shell 规格的最小依赖。"""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def syntax(self) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -61,7 +70,7 @@ class PromptContext:
     resumed_notice: str | None = None
     interrupted_notice: str | None = None
     contextual_state: ContextualRetrievalState | None = None
-    shell_spec: ShellSpec | None = None
+    shell_spec: ShellInfo | None = None
     modules: tuple[str, ...] = DEFAULT_PROMPT_MODULES
 
 
@@ -251,7 +260,7 @@ def build_runtime_context_provider(
     interrupted_notice: Callable[[], str | None] | None = None,
     contextual_state: ContextualRetrievalState | None = None,
     modules: tuple[str, ...] | None = None,
-    shell_spec: ShellSpec | None = None,
+    shell_spec: ShellInfo | None = None,
     memory_manager: MemoryManager | None = None,
     todo_context_provider: Callable[[], str] | None = None,
 ) -> Callable[[str], list[str]]:
@@ -371,7 +380,7 @@ def render_memory_overview(
     return "\n".join(lines)
 
 
-def _environment_info(project_root: Path, shell_spec: ShellSpec | None = None) -> str:
+def _environment_info(project_root: Path, shell_spec: ShellInfo | None = None) -> str:
     lines = [
         "<environment>",
         f"os={platform.system()} {platform.release()}",
