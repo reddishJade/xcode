@@ -9,36 +9,36 @@ from collections.abc import AsyncIterator, Iterator
 from typing import cast
 from uuid import uuid4
 
-from ...agent.config import AgentContext, BeforeToolCallContext
-from ...agent.messages import (
+from xcode.agent.config import AgentContext, BeforeToolCallContext
+from xcode.agent.messages import (
     AgentMessage,
     AssistantMessage,
     ToolResultMessage,
 )
-from ...agent.types import AgentToolResult
-from ...agent.types import TextContent, ToolCallContent
-from ...agent.types import ToolSpec
-from ...agent.results import AgentLoopResult, TerminationReason
+from xcode.agent.types import AgentToolResult
+from xcode.agent.types import TextContent, ToolCallContent
+from xcode.agent.types import ToolSpec
+from xcode.agent.results import AgentLoopResult, TerminationReason
 from xcode.ai.providers.base import ModelProvider
-from xcode.coding_agent.execution_modes import ExecutionMode
-from ..config import AgentConfig
-from ..skill_activation import (
+from xcode.harness.config import AgentConfig
+from xcode.harness.skill_activation import (
     ExplicitSkillActivationResult,
     is_skill_activation_content,
 )
-from ..memory.manager import MemoryOutcome
-from ._mode_protocol import ToolGateMode
-from .agent_helpers import run_coro_sync
-from .config import (
+from xcode.harness.memory.manager import MemoryOutcome
+from xcode.harness.agent_runtime._mode_protocol import ToolGateMode
+from xcode.harness.agent_runtime.agent_helpers import run_coro_sync
+from xcode.harness.agent_runtime.config import (
     AgentRuntimeConfig,
     GateConfig,
     TurnSnapshot,
     build_turn_context_messages,
 )
-from .events import CodingAgentHarnessEvent
-from .harness import AgentHarness
-from .result import RunState, CodingAgentHarnessResult
-from xcode.coding_agent.execution_modes import (
+from xcode.harness.agent_runtime.events import CodingAgentHarnessEvent
+from xcode.harness.agent_runtime.harness import AgentHarness
+from xcode.harness.agent_runtime.result import RunState, CodingAgentHarnessResult
+from .execution_modes import (
+    ExecutionMode,
     ExecutionModeState,
     mode_notice,
 )
@@ -81,7 +81,9 @@ class CodingAgentHarness(AgentHarness):
     ) -> list[AgentMessage]:
         memory_overview: str | None = None
         if self._resumed_notice is not None and self._memory_manager is not None:
-            from .prompting.builder import render_memory_overview
+            from xcode.harness.agent_runtime.prompting.builder import (
+                render_memory_overview,
+            )
 
             memory_overview = render_memory_overview(self._memory_manager)
         return build_turn_context_messages(
@@ -101,7 +103,7 @@ class CodingAgentHarness(AgentHarness):
     def _build_result(
         self, visible_result: object, max_steps: int
     ) -> CodingAgentHarnessResult:
-        from .result import _build_structured_result
+        from xcode.harness.agent_runtime.result import _build_structured_result
 
         return _build_structured_result(
             cast(AgentLoopResult, visible_result),

@@ -16,9 +16,9 @@ from xcode.coding_agent.execution_modes import (
 
 from xcode.harness.agent_runtime import (
     CancellationToken,
-    CodingAgentHarness,
     ContextualRetrievalState,
 )
+from xcode.coding_agent.harness import CodingAgentHarness
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.harness.agent_runtime.prompting import build_runtime_context_provider

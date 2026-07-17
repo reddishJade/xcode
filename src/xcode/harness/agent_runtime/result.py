@@ -4,19 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from ...agent.results import AgentLoopResult, TerminationReason
 from ...agent.messages import AssistantMessage
 from xcode.ai.events import ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
-from xcode.coding_agent.execution_modes import ExecutionMode
 from .agent_helpers import text_from_blocks, to_dict
 from .events import FinalStructuredEvent
 from ..observability import EventCorrelation
 
+type ExecutionModeName = Literal["plan", "build", "act"]
 
-def _parse_execution_mode(value: object) -> ExecutionMode | None:
+
+def _parse_execution_mode(value: object) -> ExecutionModeName | None:
     if not isinstance(value, str):
         return None
     match value:
@@ -31,7 +32,7 @@ class RunState:
     """可序列化的运行状态快照。"""
 
     messages: list[dict[str, Any]]
-    current_mode: ExecutionMode = "act"
+    current_mode: ExecutionModeName = "act"
     last_agent: str = "main"
     needs_follow_up: bool = False
     todos: list[dict[str, Any]] | None = None
@@ -79,7 +80,7 @@ class CodingAgentHarnessResult:
 def _build_structured_result(
     result: AgentLoopResult,
     max_steps: int,
-    current_mode: ExecutionMode = "act",
+    current_mode: ExecutionModeName = "act",
     todos: list[dict[str, Any]] | None = None,
 ) -> CodingAgentHarnessResult:
     """将 AgentLoopResult 转换为 CodingAgentHarnessResult。"""

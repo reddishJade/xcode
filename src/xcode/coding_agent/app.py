@@ -13,10 +13,10 @@ from typing import Any, TYPE_CHECKING
 from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.config import AgentConfig, XcodeRuntimeConfig
 from xcode.harness.agent_runtime import (
-    CodingAgentHarness,
     ContextualRetrievalState,
     CodingAgentHarnessEvent,
 )
+from xcode.coding_agent.harness import CodingAgentHarness
 from xcode.agent.types import ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from xcode.harness.session_todo import SessionTodoState

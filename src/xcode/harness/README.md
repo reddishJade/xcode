@@ -6,7 +6,7 @@ Harness 为 coding product 提供会话、执行、安全、观测及 agent runt
 
 | 目录/文件 | 职责 |
 |---|---|
-| `agent_runtime/` | `AgentHarness` / `CodingAgentHarness`、压缩、tool gate、prompt |
+| `agent_runtime/` | `AgentHarness`、压缩、tool gate、prompt |
 | `config.py` | 运行时配置模型 |
 | `session/` / `session_todo.py` | 会话树与 TODO |
 | `skills/` / `skill_activation.py` | skill 发现、注册、激活 |
@@ -17,7 +17,7 @@ Harness 为 coding product 提供会话、执行、安全、观测及 agent runt
 | `security/` | 权限模型、PermissionEngine、规则匹配、shell 语义分析 |
 | `observability/` | 审计、关联 ID、hooks / external hooks |
 
-`CodingAgentHarness` 位于 `agent_runtime/`，是 harness 对 agent loop 的编码领域封装——执行模式（plan/build/act）、上下文压缩、重复调用检测、subagent 等。基类 `AgentHarness` 提供领域无关运行时核心。本层依赖 `agent` 与 `ai`，但不被它们反向依赖。
+`AgentHarness` 提供领域无关运行时核心；编码领域子类位于 `xcode.coding_agent.harness`。本层依赖 `agent` 与 `ai`，但不依赖 coding product。
 
 ## 导入约定
 
