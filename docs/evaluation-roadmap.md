@@ -348,6 +348,12 @@ src/xcode/evals/
 - 重复队列限制：Requests 的 2-repetition 配对实验中，仅 `full.r0` 有效；其余 3 次在
   Agent 启动前因宿主 `uv` 版本滚动后仍引用旧 Cellar 路径而记为 `agent_failure`，不进入
   配对分数。执行器已改为保留稳定 launcher 路径，需重新运行该重复队列确认修复。
+- 当前执行环境限制（2026-07-17）：在本会话的外层沙盒内，非特权 user namespace 被内核
+  禁止，`BubblewrapExecutor` 的 preflight 因 `bwrap: No permissions to create new namespace`
+  立即失败；Docker socket 也不可见。`env-preflight-django-20260717a` 已正确封存为
+  `agent_failure`、`valid_trial=false`，不计入外部成功率或配对结果。该限制只阻止当前环境
+  新增真实 Trial，不改变此前已完成的有效 artifact；恢复真实运行需要在允许 bubblewrap
+  user namespace 且 verifier 可访问 Docker 的沙盒中执行。
 
 ### 阶段 5（外部 smoke，外部门槛 A 已通过，完整阶段未通过，2026-07-16）
 
@@ -421,3 +427,4 @@ src/xcode/evals/
 | 2026-07-16 | 外部配对 smoke 启动，阶段 3 仍未通过 | Django、Requests 各完成一次有效 `full/minimal` 配对且均成功平局；Astropy 配对因隔离 worker 收尾超时无效。新增 TimeoutExpired 封存修复和测试，后续继续验证三任务多重复。 |
 | 2026-07-16 | 修复 uv launcher 滚动导致的重复 Trial 无效 | Requests 旧 2-repetition 队列中 3 次 Trial 因缓存旧 uv Cellar 目标路径失败；执行器改为保留 launcher 符号路径，并加入隔离契约测试。失败结果保留为环境分层，不计入 harness gain。 |
 | 2026-07-16 | Requests 配对重复出现初步 full 优势 | 修复后 2 对 Requests 配对全部有效，full 1/2、minimal 0/2，配对 gain=50%；仍属小样本，下一步扩展 Django/Astropy 配对重复和第二模型，避免把任务随机性当作稳定 harness gain。 |
+| 2026-07-17 | 记录当前沙盒的真实执行前置失败 | `env-preflight-django-20260717a` 在 Agent 启动前因外层沙盒禁止非特权 user namespace 而被封存为 `agent_failure`；Docker socket 同样不可见。该结果仅作为环境证据，不进入能力或配对统计；后续真实 Trial 必须迁移到允许 bubblewrap 与独立 verifier 的执行环境。 |
