@@ -367,14 +367,16 @@ class TreeSessionRepo:
         for e in raw:
             if e.type == "user":
                 text = str(e.content)
-            elif (
-                e.type == "event"
-                and isinstance(e.content, dict)
-                and e.content.get("type") == "message_start"
-                and isinstance(e.content.get("data"), dict)
-                and e.content.get("data", {}).get("role") == "user"
-            ):
-                text = str(e.content.get("data", {}).get("content", ""))
+            elif e.type == "event" and isinstance(e.content, dict):
+                data = e.content.get("data")
+                if (
+                    e.content.get("type") == "message_start"
+                    and isinstance(data, dict)
+                    and data.get("role") == "user"
+                ):
+                    text = str(data.get("content", ""))
+                else:
+                    continue
             else:
                 continue
             if text not in seen:
@@ -833,7 +835,7 @@ def _node_label(e: SessionEntry, child_count: int) -> str:
                         if key in inp:
                             preview = _collapse_text(str(inp[key]))
                             return f"{name}: {_truncate(preview, 60)}"
-                return name
+                return str(name)
             if sub == "tool_result" and "content" in data:
                 content = _collapse_text(str(data["content"]))
                 return f"{sub}: {_truncate(content, 50)}"

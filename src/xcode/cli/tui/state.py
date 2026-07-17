@@ -659,7 +659,7 @@ def _exploration_label(name: str, raw_input: ToolInput) -> str:
             "ls": "List",
             "dir": "List",
             "find": "List",
-        }.get(primary, "Read")
+        }.get(primary or "", "Read")
         return f"{prefix} {single_line_preview(command)}"
     label = brief_input(name, raw_input)
     if name in {"grep_search", "grep", "rg", "ack"}:
