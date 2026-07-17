@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from xcode.coding_agent.execution_modes import (
+    DEFAULT_MODE_FALLBACKS,
+    build_default_mode_rulesets,
     parse_execution_mode,
     mode_notice,
     PlanPolicy,
@@ -45,6 +49,25 @@ class TestModeNotice:
 
     def test_unknown(self) -> None:
         assert mode_notice("unknown") == ""
+
+
+class TestDefaultModeRulesets:
+    def test_returns_rules_without_mutating_security_globals(
+        self, tmp_path: Path
+    ) -> None:
+        rulesets = build_default_mode_rulesets(tmp_path)
+        assert set(rulesets) == {"plan", "build", "act"}
+        assert DEFAULT_MODE_FALLBACKS == {
+            "plan": "deny",
+            "build": "allow",
+            "act": "ask",
+        }
+        plan_patterns = {
+            rule.resource_pattern
+            for rule in rulesets["plan"]
+            if rule.resource_pattern is not None
+        }
+        assert (tmp_path / ".xcode" / "plans" / "*.md").as_posix() in plan_patterns
 
 
 class TestPlanPolicy:

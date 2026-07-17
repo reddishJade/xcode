@@ -41,7 +41,6 @@ from ..observability import (
 from ..security.permission_model import (
     ExternalDirectory,
     GrantStore,
-    MODE_DEFAULT_RULES,
     PolicyEvaluator,
     PathExtractor,
     Rule,
@@ -152,11 +151,15 @@ class ToolGate:
         permanent_grant_store: GrantStore | None = None,
         user_ruleset: tuple[Rule, ...] = (),
         user_rulesets: dict[str, tuple[Rule, ...]] | None = None,
+        default_mode_rulesets: dict[str, tuple[Rule, ...]] | None = None,
+        mode_fallbacks: dict[str, PermissionDecision] | None = None,
         tool_path_extractors: dict[str, PathExtractor] | None = None,
     ) -> None:
         self._mode = mode_state
         self._user_ruleset = user_ruleset
         self._user_rulesets = user_rulesets or {}
+        self._default_mode_rulesets = default_mode_rulesets or {}
+        self._mode_fallbacks = mode_fallbacks or {}
         self._tool_path_extractors = tool_path_extractors or {}
         self._approval_callback = approval_callback
         self._permission_policy = permission_policy
@@ -189,32 +192,10 @@ class ToolGate:
         return self._user_ruleset
 
     def _default_ruleset_for_mode(self, mode_name: str) -> tuple[Rule, ...]:
-        rules = MODE_DEFAULT_RULES.get(mode_name, ())
-        if mode_name != "plan" or self._project_root is None:
-            return rules
-        plan_pattern = (
-            self._project_root.resolve() / ".xcode" / "plans" / "*.md"
-        ).as_posix()
-        return rules + (
-            Rule(
-                action="write_file",
-                effect="allow",
-                resource_pattern=plan_pattern,
-            ),
-            Rule(
-                action="edit_file",
-                effect="allow",
-                resource_pattern=plan_pattern,
-            ),
-        )
+        return self._default_mode_rulesets.get(mode_name, ())
 
-    @staticmethod
-    def _fallback_for_mode(mode_name: str) -> PermissionDecision:
-        if mode_name == "plan":
-            return "deny"
-        if mode_name == "build":
-            return "allow"
-        return "ask"
+    def _fallback_for_mode(self, mode_name: str) -> PermissionDecision:
+        return self._mode_fallbacks.get(mode_name, "ask")
 
     def snapshot(self) -> ToolGateSnapshot:
         mode_name = self._mode.current_mode

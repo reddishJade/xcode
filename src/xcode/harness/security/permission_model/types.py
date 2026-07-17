@@ -45,11 +45,6 @@ UnresolvedReason = Literal[
 type GrantRecordData = dict[str, object]
 
 
-MODE_DEFAULT_RULES: dict[str, tuple[Rule, ...]] = {}
-PLAN_DEFAULT_RULES: tuple[Rule, ...] = ()
-ACT_DEFAULT_RULES: tuple[Rule, ...] = ()
-
-
 class Rule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

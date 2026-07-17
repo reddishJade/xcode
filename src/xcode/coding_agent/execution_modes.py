@@ -1,15 +1,16 @@
 """Plan / Build / Act 的工具可见性策略与三态 ruleset 初始化。
 
 PlanPolicy.filter_tools() 暴露 _PLAN_TOOLS，外加 write_file/edit_file（限 .xcode/plans/*.md）。
-初始化 MODE_DEFAULT_RULES，build 默认规则为透明的工具级 profile。
+提供默认 ruleset，build 默认规则为透明的工具级 profile。
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal, Protocol
 
 from xcode.ai.events import ToolCall
-from xcode.harness.security.permission_model import MODE_DEFAULT_RULES, Rule
+from xcode.harness.security.permission_model import Rule
 from xcode.harness.security.permissions import PermissionDecision
 from xcode.agent.types import ToolSpec
 
@@ -143,7 +144,7 @@ def registry_for_mode(
     return policy_for_mode(mode).filter_tools(registry)
 
 
-def mode_notice(mode: ExecutionMode) -> str:
+def mode_notice(mode: str) -> str:
     if mode == "plan":
         return (
             '<execution-mode name="plan">\n'
@@ -169,17 +170,10 @@ def mode_notice(mode: ExecutionMode) -> str:
     return ""
 
 
-# ── 初始化 MODE_DEFAULT_RULES ──
-
-
-def _init_mode_rulesets() -> None:
-    """填充 MODE_DEFAULT_RULES 全局字典。
-
-    在模块导入时执行一次。build 默认只声明工具级权限，不内置命令分类。
-    """
-    if MODE_DEFAULT_RULES:
-        return
-
+def build_default_mode_rulesets(
+    project_root: Path | None = None,
+) -> dict[str, tuple[Rule, ...]]:
+    """构建 coding product 的默认执行模式规则。"""
     read_rules = (
         Rule(action="read_file", effect="allow"),
         Rule(action="glob_files", effect="allow"),
@@ -214,7 +208,7 @@ def _init_mode_rulesets() -> None:
         Rule(action=rule.action, effect="ask") for rule in shell_rules
     )
 
-    MODE_DEFAULT_RULES["plan"] = read_rules + (
+    plan_rules = read_rules + (
         Rule(
             action="write_file",
             effect="allow",
@@ -226,9 +220,30 @@ def _init_mode_rulesets() -> None:
             resource_pattern=".xcode/plans/*.md",
         ),
     )
-    MODE_DEFAULT_RULES["build"] = read_rules + write_rules + shell_rules
-    # Act 以 ask 为兜底；显式放行只读工具，其他工具需 HITL。
-    MODE_DEFAULT_RULES["act"] = read_rules + ask_write_rules + ask_shell_rules
+    if project_root is not None:
+        plan_pattern = (project_root.resolve() / ".xcode" / "plans" / "*.md").as_posix()
+        plan_rules += (
+            Rule(
+                action="write_file",
+                effect="allow",
+                resource_pattern=plan_pattern,
+            ),
+            Rule(
+                action="edit_file",
+                effect="allow",
+                resource_pattern=plan_pattern,
+            ),
+        )
+    return {
+        "plan": plan_rules,
+        "build": read_rules + write_rules + shell_rules,
+        # Act 以 ask 为兜底；显式放行只读工具，其他工具需 HITL。
+        "act": read_rules + ask_write_rules + ask_shell_rules,
+    }
 
 
-_init_mode_rulesets()
+DEFAULT_MODE_FALLBACKS: dict[str, PermissionDecision] = {
+    "plan": "deny",
+    "build": "allow",
+    "act": "ask",
+}

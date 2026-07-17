@@ -19,3 +19,9 @@ class ToolGateMode(Protocol):
     def current_mode(self) -> str: ...
 
     def check_call(self, call: ToolCall) -> PermissionDecision: ...
+
+
+class RuntimeModeState(ToolGateMode, Protocol):
+    """运行循环额外需要的模式状态能力。"""
+
+    def check_plan_timeout(self) -> bool: ...

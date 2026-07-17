@@ -15,7 +15,7 @@ from ...agent.messages import (
     AssistantMessage,
     ToolResultMessage,
 )
-from ...agent.types import AgentTool, AgentToolResult
+from ...agent.types import AgentToolResult
 from ...agent.types import TextContent, ToolCallContent
 from ...agent.types import ToolSpec
 from ...agent.results import AgentLoopResult, TerminationReason
@@ -40,7 +40,7 @@ from .harness import AgentHarness
 from .result import RunState, CodingAgentHarnessResult
 from xcode.coding_agent.execution_modes import (
     ExecutionModeState,
-    policy_for_mode,
+    mode_notice,
 )
 
 __all__ = ["CodingAgentHarness"]
@@ -86,23 +86,15 @@ class CodingAgentHarness(AgentHarness):
             memory_overview = render_memory_overview(self._memory_manager)
         return build_turn_context_messages(
             question,
-            self._mode.current_mode,
             snapshot,
             self._resumed_notice,
+            mode_notice=mode_notice(self._mode.current_mode),
             memory_overview=memory_overview,
         )
 
     def _build_loop_config_extras(self) -> dict:
-        def tools_for_mode_fn(
-            reg: tuple[ToolSpec, ...], m: ExecutionMode
-        ) -> list[AgentTool]:
-            filtered = policy_for_mode(m).filter_tools(reg)
-            return self._gate.adapt_tools(filtered)
-
         return {
-            "mode": self._mode.current_mode,
             "mode_state": self._mode,
-            "tools_for_mode": tools_for_mode_fn,
             "skill_registry": self._runtime.skill_registry,
         }
 

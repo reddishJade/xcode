@@ -28,9 +28,8 @@ from ...agent.messages import (
     SystemMessage,
     UserMessage,
 )
-from ...agent.types import AgentTool
 from ..config import AgentConfig, RequestHygieneConfig
-from ..security import PermissionPolicy
+from ..security import PermissionDecision, PermissionPolicy
 from ..observability import (
     AuditLogger,
     ExternalHookRunner,
@@ -54,11 +53,7 @@ from ..session_todo import SessionTodoState
 
 
 from .compaction import CompactController, estimate_message_tokens
-from xcode.coding_agent.execution_modes import (
-    ExecutionMode,
-    ExecutionModeState,
-    mode_notice,
-)
+from ._mode_protocol import RuntimeModeState
 from .message_codec import messages_from_compacted_dicts
 from .tool_gate import ToolGate
 
@@ -93,6 +88,8 @@ class GateConfig:
     session_grant_store_provider: Callable[[], GrantStore | None] | None = None
     permanent_grant_store: GrantStore | None = None
     user_rulesets: dict[str, tuple[Rule, ...]] = field(default_factory=dict)
+    default_mode_rulesets: dict[str, tuple[Rule, ...]] = field(default_factory=dict)
+    mode_fallbacks: dict[str, PermissionDecision] = field(default_factory=dict)
     tool_path_extractors: dict[str, PathExtractor] = field(default_factory=dict)
     correlation: RuntimeCorrelation | None = None
 
@@ -139,13 +136,12 @@ def build_turn_snapshot(
 
 def build_turn_context_messages(
     question: str,
-    mode: ExecutionMode,
     snapshot: TurnSnapshot,
     resumed_notice: str | None,
+    mode_notice: str | None = None,
     memory_overview: str | None = None,
 ) -> list[AgentMessage]:
     typed: list[AgentMessage] = []
-    notice = mode_notice(mode)
     parts: list[str] = []
     if snapshot.runtime_context_provider is not None:
         parts = list(snapshot.runtime_context_provider(question))
@@ -153,8 +149,8 @@ def build_turn_context_messages(
         parts.append(f"<session-notices>\n{resumed_notice}\n</session-notices>")
     if memory_overview:
         parts.append(memory_overview)
-    if notice:
-        parts.append(notice)
+    if mode_notice:
+        parts.append(mode_notice)
     if parts:
         typed.append(SystemMessage(content="\n\n".join(p for p in parts if p)))
     return typed
@@ -239,11 +235,8 @@ def build_loop_config(
     prompt_instructions: tuple[dict, ...] = (),
     correlation: RuntimeCorrelation | None = None,
     # 以下为编码扩展参数，由 CodingAgentHarness 通过 _build_loop_config_extras 传入
-    mode_state: ExecutionModeState | None = None,
+    mode_state: RuntimeModeState | None = None,
     skill_registry: SkillRegistry | None = None,
-    mode: ExecutionMode | None = None,
-    tools_for_mode: Callable[[tuple[ToolSpec, ...], ExecutionMode], list[AgentTool]]
-    | None = None,
     watchdog_repeated_tool_skip: frozenset[str] | None = None,
 ) -> AgentLoopConfig:
     active_correlation = correlation or RuntimeCorrelation("local")

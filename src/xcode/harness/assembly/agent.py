@@ -9,6 +9,10 @@ from xcode.ai.providers.base import ModelProvider
 from xcode.agent.types import ToolSpec
 from xcode.coding_agent.tools import ShellSpec
 from xcode.coding_agent.tools.apply_patch import extract_patch_paths
+from xcode.coding_agent.execution_modes import (
+    DEFAULT_MODE_FALLBACKS,
+    build_default_mode_rulesets,
+)
 
 from ..agent_runtime import (
     CancellationToken,
@@ -127,6 +131,8 @@ def build_agent(
             audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
             external_directories=external_directories_from_security(sec),
             user_rulesets=mode_rulesets_from_runtime_config(runtime_config),
+            default_mode_rulesets=build_default_mode_rulesets(project_root),
+            mode_fallbacks=DEFAULT_MODE_FALLBACKS,
             tool_path_extractors={"apply_patch": extract_patch_paths},
         ),
         runtime=AgentRuntimeConfig(

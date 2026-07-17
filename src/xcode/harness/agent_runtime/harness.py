@@ -145,6 +145,8 @@ class AgentHarness:
             session_grant_store_provider=gate.session_grant_store_provider,
             permanent_grant_store=gate.permanent_grant_store,
             user_rulesets=gate.user_rulesets,
+            default_mode_rulesets=gate.default_mode_rulesets,
+            mode_fallbacks=gate.mode_fallbacks,
             tool_path_extractors=gate.tool_path_extractors,
         )
         self.audit_logger = gate.audit_logger
