@@ -351,6 +351,10 @@ src/xcode/evals/
   `verifier_failure`；minimal 形成有效 Trial 但 `resolved=false`。由于 full 无效，该 pair
   的 `valid_pairs=0`、不计算 gain；这项结果只说明 Requests/Pro 仍需独立预算校准和重复，
   不能解释为 harness 失败。
+- Requests/Pro 独立校准：`phase5-calibration-deepseek-v4-pro-requests-2148-budget20-20260717a`
+  在 20 次预算下仍生成空 patch，官方 verifier 报告 `Instances with empty patches: 1`，
+  因而 Trial 无效。该结果与此前 40 次配对的 full 空 patch 一致，暂不启动新的 Pro
+  Requests 配对，先保留为模型/任务可解性分层证据。
 - 重复配对：修复 uv launcher 后，Requests 的 `phase3-external-pair-requests-2148-budget40-20260716c`
   完成 2/2 有效配对；`full` 成功 1/2、`minimal` 成功 0/2，报告的配对
   `harness_gain=50%`，full 相比 minimal 少 630,372 input tokens 和 41.60 秒。该结果
@@ -459,3 +463,4 @@ src/xcode/evals/
 | 2026-07-17 | 恢复宿主真实执行并完成 Django 第二对配对 | 宿主只读 preflight 的 `unshare`、`bwrap`、Docker 均通过；补齐 SWE-bench 3.0.11 后，`phase3-external-pair-django-10914-budget40-20260717c` 的 full/minimal 均为有效成功。该对 gain=0%，full 少 136,578 input tokens、快 118.24 秒；结合此前 full 较慢的单对，成本方向尚不稳定。 |
 | 2026-07-17 | Astropy 配对恢复并完成首对有效 Trial | 用户恢复目标 commit 后，本地校验 `d16bfe05…` 与 tree `4d9ea46e…`；`phase3-external-pair-astropy-12907-budget40-20260717b` 的 full/minimal 均有效成功，gain=0%。此前的 worker 收尾超时不再重现，但仍需重复和第二模型。 |
 | 2026-07-17 | 第二模型完成预算校准并启动归因 | `deepseek-v4-pro` 在 Django 的 20/40 次预算均有效成功；同模型 40 次 `full/minimal` 配对也均成功，gain=0%，full 少 69,919 input tokens 但慢 56.64 秒。Astropy 第二模型配对的 full 因 600 秒墙钟无效、minimal 成功；Requests 配对的 full 生成空 patch、minimal 未解决；两者均排除。第二模型目前只有一个有效跨任务配对，不能提前宣称跨模型 harness 增益。 |
+| 2026-07-17 | Requests/Pro 20 次校准仍为空 patch | `phase5-calibration-deepseek-v4-pro-requests-2148-budget20-20260717a` 在 318,708 input tokens、161.04 秒后生成空 patch，官方 verifier 排除。与 40 次配对的 full 结果一致，暂不把失败归因于 harness，也不启动新的 Pro Requests 配对。 |
