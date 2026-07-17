@@ -30,16 +30,16 @@ from ...agent.messages import (
 )
 from ...agent.types import AgentTool
 from ..config import AgentConfig, RequestHygieneConfig
+from ..security import PermissionPolicy
 from ..observability import (
     AuditLogger,
     ExternalHookRunner,
     HookManager,
     HookRecord,
-    PermissionPolicy,
     RuntimeCorrelation,
     hook_correlation_fields,
 )
-from ..observability.permission_model import (
+from ..security.permission_model import (
     ExternalDirectory,
     GrantStore,
     PolicyEvaluator,

@@ -99,8 +99,8 @@ if TYPE_CHECKING:
     from xcode.harness.snapshot import SnapshotService, SnapshotResult
 
     from xcode.agent.types import ToolInput, ToolSpec
-    from xcode.harness.observability import HITLResult
-    from xcode.harness.observability.permission_model import (
+    from xcode.harness.security import HITLResult
+    from xcode.harness.security.permission_model import (
         SessionGrantStoreManager,
     )
     from xcode.harness.session import SessionStore
@@ -151,7 +151,7 @@ class _XcodeTui:
         self._repl_state = ReplState()
         self._snapshot_store = _init_snapshot_store(project_root)
         self._state = _TuiState(mode=self._repl_state.mode, project_root=project_root)
-        from xcode.harness.observability.permission_model import FileGrantStore
+        from xcode.harness.security.permission_model import FileGrantStore
 
         self._permanent_grant_store = FileGrantStore.for_project_root(project_root)
         self._restore_startup_session(resume_latest, auto_continue, session_id)
@@ -159,7 +159,7 @@ class _XcodeTui:
         self._committing = False
         self._grant_store_manager: SessionGrantStoreManager | None = None
         try:
-            from xcode.harness.observability.permission_model import (
+            from xcode.harness.security.permission_model import (
                 SessionGrantStoreManager,
             )
 
@@ -1173,7 +1173,7 @@ class _XcodeTui:
         self._refresh()
 
     def _approval_callback(self, tool: ToolSpec, action_input: ToolInput) -> HITLResult:
-        from xcode.harness.observability import HITLResult
+        from xcode.harness.security import HITLResult
 
         request = _HitlRequest(
             tool_name=tool.name,
@@ -1221,7 +1221,7 @@ class _XcodeTui:
             self._complete_approval(result)
 
     def _finish_denial(self, suggestion: str) -> None:
-        from xcode.harness.observability import HITLResult
+        from xcode.harness.security import HITLResult
 
         self._complete_approval(HITLResult("deny", "once", suggestion=suggestion))
 

@@ -53,9 +53,9 @@ from .tool_gate import ToolGate
 from ._mode_protocol import ToolGateMode
 from ..config import AgentConfig, RequestHygieneConfig
 from xcode.ai.events import ToolCall
-from ..observability.permissions import PermissionDecision
+from ..security.permissions import PermissionDecision
 from ..observability import HookRecord, RuntimeCorrelation
-from ..observability.permission_model import GrantStore
+from ..security.permission_model import GrantStore
 from ...agent.types import ApprovalCallback
 
 _PROMPT_VERSION_CACHE: str | None = None

@@ -14,8 +14,8 @@ from rich.panel import Panel
 import questionary
 
 from .repl_tools import brief_input
-from xcode.harness.observability import HITLResult
-from xcode.harness.observability.permissions import HITLDecision, HITLScope
+from xcode.harness.security import HITLResult
+from xcode.harness.security.permissions import HITLDecision, HITLScope
 from xcode.agent.types import ToolInput, ToolSpec
 
 

@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import cast
 
 from ..config import ModeRuleRuntimeConfig, SecurityRuntimeConfig, XcodeRuntimeConfig
-from ..observability import PermissionDecision, PermissionPolicy, StaticPermission
-from ..observability.permission_model import ExternalDirectory, Rule
+from ..security import PermissionDecision, PermissionPolicy, StaticPermission
+from ..security.permission_model import ExternalDirectory, Rule
 
 
 def _rule_from_runtime_config(rule: ModeRuleRuntimeConfig) -> Rule:

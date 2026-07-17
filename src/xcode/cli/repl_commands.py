@@ -50,7 +50,7 @@ from .setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
 from .config_cmd import _cmd_add, _cmd_edit, _cmd_delete
 from .config_cmd import BOOL_FIELDS
 from .repl_tools import run_tool_command
-from xcode.harness.observability import (
+from xcode.harness.security import (
     FileGrantStore,
     InMemoryGrantStore,
     PermissionApprovalCallback,

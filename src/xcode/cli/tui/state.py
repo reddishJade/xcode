@@ -21,7 +21,7 @@ from .rendering import (
     render_line_fragments,
     visible_lines,
 )
-from xcode.harness.observability.shell_analyzer import analyze_shell_command
+from xcode.harness.security.shell_analyzer import analyze_shell_command
 
 
 _THINKING_ANSI = "\x1b[38;2;128;128;128m"
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
         CodingAgentHarnessEvent,
         FinalStructuredEvent,
     )
-    from xcode.harness.observability import HITLResult
+    from xcode.harness.security import HITLResult
     from xcode.harness.session import SessionEntry
 
 

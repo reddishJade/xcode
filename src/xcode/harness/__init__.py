@@ -10,7 +10,8 @@ from .execution_env import (
     SubprocessExecutionEnv,
     SubprocessShell,
 )
-from .observability import HookManager, PermissionPolicy
+from .observability import HookManager
+from .security import PermissionPolicy
 from xcode.agent.types import ToolOutput, ToolSpec
 
 __all__ = [

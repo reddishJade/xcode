@@ -22,21 +22,23 @@ from ...agent.types import TextContent, ToolCallContent, ToolSpecAdapter
 from ._mode_protocol import ToolGateMode
 from .tool_audit import build_audit_record, emit_audit
 from .tool_hooks import emit_hook, emit_tool_hook, tool_result_text
-from ..observability import (
-    AuditLogger,
-    ExternalHookRunner,
-    HookManager,
-    HookRecord,
+from ..security import (
     PermissionEngine,
     PermissionEngineConfig,
     PermissionDecision,
     PermissionEngineResult,
     PermissionPolicy,
+)
+from ..observability import (
+    AuditLogger,
+    ExternalHookRunner,
+    HookManager,
+    HookRecord,
     RuntimeCorrelation,
     hook_correlation_fields,
     HookCorrelationFields,
 )
-from ..observability.permission_model import (
+from ..security.permission_model import (
     ExternalDirectory,
     GrantStore,
     MODE_DEFAULT_RULES,

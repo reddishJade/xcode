@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from xcode.harness.observability.permission_model.utils import (
+from xcode.harness.security.permission_model.utils import (
     _command_grant_pattern,
     _grant_target_pattern,
     _looks_absolute,
@@ -12,7 +12,7 @@ from xcode.harness.observability.permission_model.utils import (
     _access_satisfies,
     create_grant_record,
 )
-from xcode.harness.observability.permission_model.types import (
+from xcode.harness.security.permission_model.types import (
     Action,
     Target,
     GrantRecord,

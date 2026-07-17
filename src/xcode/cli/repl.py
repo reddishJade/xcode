@@ -55,8 +55,8 @@ from xcode.harness.agent_runtime.events import (
     ToolUseStructuredEvent,
 )
 from xcode.harness.agent_runtime.result import CodingAgentHarnessResult
-from xcode.harness.observability import FileGrantStore
-from xcode.harness.observability.permission_model import SessionGrantStoreManager
+from xcode.harness.security import FileGrantStore
+from xcode.harness.security.permission_model import SessionGrantStoreManager
 from xcode.harness.session import SessionInfoView as SessionMetadataView, SessionStore
 from xcode.harness.snapshot import (
     SnapshotStore,

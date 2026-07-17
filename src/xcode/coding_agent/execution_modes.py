@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Literal, Protocol
 
 from xcode.ai.events import ToolCall
-from xcode.harness.observability.permission_model import MODE_DEFAULT_RULES, Rule
-from xcode.harness.observability.permissions import PermissionDecision
+from xcode.harness.security.permission_model import MODE_DEFAULT_RULES, Rule
+from xcode.harness.security.permissions import PermissionDecision
 from xcode.agent.types import ToolSpec
 
 

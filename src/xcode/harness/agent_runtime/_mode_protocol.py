@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from xcode.ai.events import ToolCall
-from ..observability.permissions import PermissionDecision
+from ..security.permissions import PermissionDecision
 
 
 class ToolGateMode(Protocol):

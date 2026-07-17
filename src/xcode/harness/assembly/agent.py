@@ -26,7 +26,7 @@ from ..observability import (
     JsonlAuditLogger,
     SignalHookManager,
 )
-from ..observability.permission_model import PolicyEvaluator
+from ..security.permission_model import PolicyEvaluator
 
 from .security import (
     external_directories_from_security,

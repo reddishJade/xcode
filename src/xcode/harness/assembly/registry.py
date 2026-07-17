@@ -18,7 +18,8 @@ from ..config import XcodeRuntimeConfig, AgentConfig
 from ..execution_env import ExecutionEnv
 from ..agent_runtime import CancellationToken, ContextualRetrievalState
 from ..session_todo import SessionTodoState
-from ..observability import ExternalHookRunner, PolicyEvaluator
+from ..security import PolicyEvaluator
+from ..observability import ExternalHookRunner
 
 if TYPE_CHECKING:
     from ..skills import SkillRegistry

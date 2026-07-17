@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from xcode.harness.observability.permission_model.action import (
+from xcode.harness.security.permission_model.action import (
     ActionExtractor,
     _normalize_path_text,
     _filesystem_command_path_arguments,

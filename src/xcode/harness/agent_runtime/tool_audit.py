@@ -9,7 +9,7 @@ from ...agent.types import ToolCallContent
 from ..observability import AuditLogger, AuditRecord, HookCorrelationFields, redact_text
 
 if TYPE_CHECKING:
-    from ..observability import PermissionEngineResult
+    from ..security import PermissionEngineResult
 
 
 def emit_audit(

@@ -9,7 +9,7 @@ from .app_contract import ReplApp
 from .markdown import MarkdownRenderer
 from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.session import SessionStore
-from xcode.harness.observability import (
+from xcode.harness.security import (
     FileGrantStore,
     InMemoryGrantStore,
     PermissionPolicy,

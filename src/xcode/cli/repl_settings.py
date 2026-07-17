@@ -8,13 +8,13 @@ import questionary
 
 from .setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
 from xcode.ai.models import parse_model_mode
-from xcode.harness.observability import (
+from xcode.harness.security import (
     FileGrantStore,
     InMemoryGrantStore,
     PermissionDecision,
     PermissionPolicy,
 )
-from xcode.harness.observability.permission_model import StaticPermission
+from xcode.harness.security.permission_model import StaticPermission
 from .reasoning_effort import (
     reasoning_effort_levels_for_transport,
 )

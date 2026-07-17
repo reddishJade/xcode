@@ -6,7 +6,7 @@
 - 标记不可静态确认的效果（变量/glob/命令替换/wrapper/解析错误）
 
 依赖关系：
-- 单向依赖 permission_model.py（Target, PermissionAccess, UnresolvedEffect）
+- 单向依赖 permission_model 包（Target, PermissionAccess, UnresolvedEffect）
 - 不反向依赖 permission_model 的其他分组
 """
 
