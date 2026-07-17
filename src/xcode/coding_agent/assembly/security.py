@@ -5,9 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from ..config import ModeRuleRuntimeConfig, SecurityRuntimeConfig, XcodeRuntimeConfig
-from ..security import PermissionDecision, PermissionPolicy, StaticPermission
-from ..security.permission_model import ExternalDirectory, Rule
+from xcode.harness.config import (
+    ModeRuleRuntimeConfig,
+    SecurityRuntimeConfig,
+    XcodeRuntimeConfig,
+)
+from xcode.harness.security import (
+    PermissionDecision,
+    PermissionPolicy,
+    StaticPermission,
+)
+from xcode.harness.security.permission_model import ExternalDirectory, Rule
 
 
 def _rule_from_runtime_config(rule: ModeRuleRuntimeConfig) -> Rule:

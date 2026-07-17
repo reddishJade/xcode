@@ -1,8 +1,7 @@
 """Coding product tool registry builder.
 
-Extracted from harness/assembly.py to give the product layer explicit ownership
-of tool composition decisions (which tools belong to which group, how they are
-constructed, and what runtime values they receive).
+The product layer owns tool composition decisions: which tools belong to each
+group, how they are constructed, and which runtime values they receive.
 """
 
 from __future__ import annotations

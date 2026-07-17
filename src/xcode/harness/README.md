@@ -1,12 +1,11 @@
-# Xcode Harness — 应用运行时
+# Xcode Harness — 通用运行时
 
-Harness 是 Xcode 最外层的应用装配与运行时层，把 Agent 循环、LLM provider、工具系统、安全策略和观测基础设施组合为可运行的应用。
+Harness 为 coding product 提供会话、执行、安全、观测及 agent runtime 基础设施。产品装配位于 `xcode.coding_agent.assembly`，不属于本层。
 
 ## 目录职责
 
 | 目录/文件 | 职责 |
 |---|---|
-| `app.py` / `assembly/` | 读取配置并装配组件 |
 | `agent_runtime/` | `AgentHarness` / `CodingAgentHarness`、压缩、tool gate、prompt |
 | `config.py` | 运行时配置模型 |
 | `session/` / `session_todo.py` | 会话树与 TODO |

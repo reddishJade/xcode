@@ -1,6 +1,6 @@
 """Xcode 应用入口。
 
-XcodeApp 数据类和 build_app 编排函数。装配逻辑委托给 assembly.py。
+XcodeApp 数据类和 build_app 编排函数。装配逻辑委托给 assembly 子包。
 """
 
 from __future__ import annotations

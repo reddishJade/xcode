@@ -10,7 +10,7 @@ from .cli.repl import run_repl
 from .cli.tui import run_tui
 from .cli.setup_wizard import has_valid_config, run_setup_wizard
 from .harness.config import discover_runtime_config, resolve_config_path
-from .harness.app import build_app
+from .coding_agent.app import build_app
 
 
 def _build_config_parser(subparsers) -> None:

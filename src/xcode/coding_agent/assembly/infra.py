@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..config import XcodeRuntimeConfig, resolve_config_path
-from ..agent_runtime import CancellationToken, ContextualRetrievalState
-from ..agent_runtime.compaction import CompactController, LayeredCompactor
-from ..memory import MemoryManager
+from xcode.harness.config import XcodeRuntimeConfig, resolve_config_path
+from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
+from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
+from xcode.harness.memory import MemoryManager
 
 
 @dataclass(frozen=True)

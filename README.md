@@ -64,7 +64,7 @@ uv pip install -e ".[dev]"
 
 ```python
 from pathlib import Path
-from xcode.harness.app import build_app
+from xcode.coding_agent.app import build_app
 
 app = build_app(project_root=Path.cwd())
 
@@ -246,7 +246,7 @@ uv run pyright src/
 | [AGENTS.md](AGENTS.md) | Agent 开发入口、编码规范 |
 | [CONFIG.md](CONFIG.md) | 运行时配置参考 |
 | `src/xcode/main.py` | CLI 入口点与子命令 |
-| `src/xcode/harness/assembly/` | 运行时装配与工具注册 |
+| `src/xcode/coding_agent/assembly/` | Coding 产品装配与工具注册 |
 | [docs/source-review.md](docs/source-review.md) | 源码级架构审查 |
 
 

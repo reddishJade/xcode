@@ -14,24 +14,24 @@ from xcode.coding_agent.execution_modes import (
     build_default_mode_rulesets,
 )
 
-from ..agent_runtime import (
+from xcode.harness.agent_runtime import (
     CancellationToken,
     CodingAgentHarness,
     ContextualRetrievalState,
 )
-from ..agent_runtime.config import AgentRuntimeConfig, GateConfig
-from ..agent_runtime.compaction import CompactController, LayeredCompactor
-from ..agent_runtime.prompting import build_runtime_context_provider
-from ..config import AgentConfig, XcodeRuntimeConfig
-from ..session_todo import SessionTodoState
-from ..observability import (
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
+from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
+from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
+from xcode.harness.config import AgentConfig, XcodeRuntimeConfig
+from xcode.harness.session_todo import SessionTodoState
+from xcode.harness.observability import (
     ExternalHookRunner,
     HookManager,
     HookRecord,
     JsonlAuditLogger,
     SignalHookManager,
 )
-from ..security.permission_model import PolicyEvaluator
+from xcode.harness.security.permission_model import PolicyEvaluator
 
 from .security import (
     external_directories_from_security,
@@ -40,7 +40,7 @@ from .security import (
 )
 
 if TYPE_CHECKING:
-    from ..skills import SkillRegistry
+    from xcode.harness.skills import SkillRegistry
 
 
 def build_hook_manager(
@@ -105,7 +105,7 @@ def build_agent(
     memory_manager: Any | None = None,
     todo_state: SessionTodoState | None = None,
 ) -> CodingAgentHarness:
-    from ..memory import MemoryManager
+    from xcode.harness.memory import MemoryManager
 
     memory_manager = memory_manager or MemoryManager(project_root)
 

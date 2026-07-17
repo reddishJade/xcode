@@ -14,16 +14,16 @@ from xcode.coding_agent.tools.subagent import build_subagent_tool
 from xcode.coding_agent.tools import ShellSpec, detect_shell
 from xcode.coding_agent.registry import build_project_scoped_registry
 
-from ..config import XcodeRuntimeConfig, AgentConfig
-from ..execution_env import ExecutionEnv
-from ..agent_runtime import CancellationToken, ContextualRetrievalState
-from ..session_todo import SessionTodoState
-from ..security import PolicyEvaluator
-from ..observability import ExternalHookRunner
+from xcode.harness.config import XcodeRuntimeConfig, AgentConfig
+from xcode.harness.execution_env import ExecutionEnv
+from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
+from xcode.harness.session_todo import SessionTodoState
+from xcode.harness.security import PolicyEvaluator
+from xcode.harness.observability import ExternalHookRunner
 
 if TYPE_CHECKING:
-    from ..skills import SkillRegistry
-    from ..mcp import McpRuntimeRegistry
+    from xcode.harness.skills import SkillRegistry
+    from xcode.harness.mcp import McpRuntimeRegistry
 
 
 def build_search_tools_tool(
@@ -77,7 +77,7 @@ def _discover_skills(
     runtime_config: XcodeRuntimeConfig,
     skills_dir: Path | None,
 ) -> SkillRegistry | None:
-    from ..skills import SkillRegistry, build_skill_search_dirs
+    from xcode.harness.skills import SkillRegistry, build_skill_search_dirs
 
     skill_registry = SkillRegistry()
     skill_registry.discover(
@@ -140,11 +140,11 @@ def _extend_registry_with_features(
     runtime_config: XcodeRuntimeConfig,
     memory_manager: Any | None = None,
 ) -> tuple[ToolSpec, ...]:
-    from ..mcp import build_mcp_tools
+    from xcode.harness.mcp import build_mcp_tools
 
     registry += build_mcp_tools(project_root, mcp_runtime_registry)
 
-    from ..memory import MemoryManager, build_memory_tools
+    from xcode.harness.memory import MemoryManager, build_memory_tools
 
     if memory_manager is not None:
         registry += build_memory_tools(memory_manager)
@@ -175,7 +175,7 @@ def build_tool_registry(
     SkillRegistry | None,
     McpRuntimeRegistry,
 ]:
-    from ..mcp import McpRuntimeRegistry
+    from xcode.harness.mcp import McpRuntimeRegistry
 
     closers: list[Callable[[], None]] = []
     shell_spec = detect_shell(runtime_config.tools.shell)
