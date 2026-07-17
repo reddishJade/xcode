@@ -36,7 +36,7 @@ from .evaluators import (
     StructuredBoundaryPolicyEvaluator,
     evaluate_policy_constraints,
 )
-from .action import ActionExtractor
+from .action import ActionExtractor, PathExtractor
 from .utils import (
     compute_shadow_approval_candidate,
     create_grant_record,
@@ -46,6 +46,7 @@ __all__ = [
     "ACT_DEFAULT_RULES",
     "Action",
     "ActionExtractor",
+    "PathExtractor",
     "ApprovalCandidate",
     "ApprovalResult",
     "BoundaryContext",

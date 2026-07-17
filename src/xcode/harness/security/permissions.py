@@ -24,6 +24,7 @@ from .permission_model import (
     GrantStore,
     PolicyEvaluator,
     PermissionResolver,
+    PathExtractor,
     Rule,
     StaticPermission,
     Verdict,
@@ -135,6 +136,7 @@ class PermissionEngineConfig:
     permanent_grant_store: GrantStore | None = None
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
     tool_action_profiles: dict[str, tuple[str, str]] = field(default_factory=dict)
+    tool_path_extractors: dict[str, PathExtractor] = field(default_factory=dict)
 
     # ── 三态 ruleset 支持 ──
     mode_ruleset: tuple[Rule, ...] = ()
@@ -172,8 +174,12 @@ class PermissionEngine:
         approval_callback: PermissionApprovalCallback | None = None,
     ) -> PermissionEngineResult:
         profile = self._config.tool_action_profiles.get(tool_name)
+        path_extractor = self._config.tool_path_extractors.get(tool_name)
         action = ActionExtractor().extract(
-            tool_name, tool_input, action_profile=profile
+            tool_name,
+            tool_input,
+            action_profile=profile,
+            path_extractor=path_extractor,
         )
 
         # Tier 0: restricted_dirs 硬阻断

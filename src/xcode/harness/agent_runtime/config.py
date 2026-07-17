@@ -43,6 +43,7 @@ from ..security.permission_model import (
     ExternalDirectory,
     GrantStore,
     PolicyEvaluator,
+    PathExtractor,
     Rule,
 )
 from ...agent.types import ApprovalCallback, ToolSpec
@@ -92,6 +93,7 @@ class GateConfig:
     session_grant_store_provider: Callable[[], GrantStore | None] | None = None
     permanent_grant_store: GrantStore | None = None
     user_rulesets: dict[str, tuple[Rule, ...]] = field(default_factory=dict)
+    tool_path_extractors: dict[str, PathExtractor] = field(default_factory=dict)
     correlation: RuntimeCorrelation | None = None
 
 

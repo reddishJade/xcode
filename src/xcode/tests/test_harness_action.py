@@ -38,6 +38,20 @@ def test_unknown_tool() -> None:
     assert action.capability == "unknown"
 
 
+def test_apply_patch_uses_injected_path_extractor() -> None:
+    extractor = ActionExtractor()
+    action = extractor.extract(
+        "apply_patch",
+        {"patch_text": "opaque"},
+        ("patch", "path"),
+        path_extractor=lambda _tool_input: ("src/old.py", "src/new.py"),
+    )
+    assert [target.value for target in action.targets] == [
+        "src/old.py",
+        "src/new.py",
+    ]
+
+
 def test_load_skill_action() -> None:
     extractor = ActionExtractor()
     action = extractor.extract("load_skill", {"name": "my-skill"}, ("skill", "skill"))

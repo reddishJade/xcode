@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from .types import Action, PermissionAccess, Target, UnresolvedEffect
 from .utils import _looks_absolute
+
+type PathExtractor = Callable[[Mapping[str, object]], tuple[str, ...]]
 
 
 class ActionExtractor:
@@ -15,8 +17,9 @@ class ActionExtractor:
         tool_name: str,
         tool_input: Mapping[str, object],
         action_profile: tuple[str, str] | None = None,
+        path_extractor: PathExtractor | None = None,
     ) -> Action:
-        action = self._extract_inner(tool_name, tool_input)
+        action = self._extract_inner(tool_name, tool_input, path_extractor)
         if action_profile is not None:
             capability_name, _ = action_profile
             action = Action(
@@ -30,7 +33,10 @@ class ActionExtractor:
         return action
 
     def _extract_inner(
-        self, tool_name: str, tool_input: Mapping[str, object]
+        self,
+        tool_name: str,
+        tool_input: Mapping[str, object],
+        path_extractor: PathExtractor | None,
     ) -> Action:
         if tool_name == "read_file":
             return self._path_action(tool_name, tool_input, "read", "read_file", "read")
@@ -43,7 +49,7 @@ class ActionExtractor:
                 tool_name, tool_input, "edit", "edit_file", "write"
             )
         if tool_name == "apply_patch":
-            return self._apply_patch_action(tool_name, tool_input)
+            return self._apply_patch_action(tool_name, tool_input, path_extractor)
         if tool_name == "bash":
             return self._bash_action(tool_name, tool_input)
         if tool_name == "shell":
@@ -114,11 +120,14 @@ class ActionExtractor:
         )
 
     def _apply_patch_action(
-        self, tool_name: str, tool_input: Mapping[str, object]
+        self,
+        tool_name: str,
+        tool_input: Mapping[str, object],
+        path_extractor: PathExtractor | None,
     ) -> Action:
         targets = tuple(
             Target(kind="path", value=_normalize_path_text(path), access="write")
-            for path in self._patch_paths(tool_input)
+            for path in self._patch_paths(tool_input, path_extractor)
         )
         return Action(
             tool=tool_name,
@@ -233,12 +242,15 @@ class ActionExtractor:
             for path in path_arguments
         )
 
-    def _patch_paths(self, tool_input: Mapping[str, object]) -> tuple[str, ...]:
-        from xcode.coding_agent.tools.apply_patch import extract_patch_paths
-
-        extracted = extract_patch_paths(dict(tool_input))
-        if extracted:
-            return extracted
+    def _patch_paths(
+        self,
+        tool_input: Mapping[str, object],
+        path_extractor: PathExtractor | None,
+    ) -> tuple[str, ...]:
+        if path_extractor is not None:
+            extracted = path_extractor(tool_input)
+            if extracted:
+                return extracted
 
         raw_path = tool_input.get("path")
         if isinstance(raw_path, str) and raw_path.strip():

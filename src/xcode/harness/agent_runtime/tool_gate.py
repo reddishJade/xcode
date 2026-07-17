@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
@@ -43,6 +43,7 @@ from ..security.permission_model import (
     GrantStore,
     MODE_DEFAULT_RULES,
     PolicyEvaluator,
+    PathExtractor,
     Rule,
 )
 from ...agent.types import (
@@ -122,6 +123,7 @@ class ToolGateSnapshot:
     mode_ruleset: tuple[Rule, ...] = ()
     user_ruleset: tuple[Rule, ...] = ()
     mode_fallback: PermissionDecision = "ask"
+    tool_path_extractors: dict[str, PathExtractor] = field(default_factory=dict)
 
 
 class ToolGate:
@@ -150,10 +152,12 @@ class ToolGate:
         permanent_grant_store: GrantStore | None = None,
         user_ruleset: tuple[Rule, ...] = (),
         user_rulesets: dict[str, tuple[Rule, ...]] | None = None,
+        tool_path_extractors: dict[str, PathExtractor] | None = None,
     ) -> None:
         self._mode = mode_state
         self._user_ruleset = user_ruleset
         self._user_rulesets = user_rulesets or {}
+        self._tool_path_extractors = tool_path_extractors or {}
         self._approval_callback = approval_callback
         self._permission_policy = permission_policy
         self._restricted_dirs = restricted_dirs
@@ -229,6 +233,7 @@ class ToolGate:
             permanent_grant_store=self._permanent_grant_store,
             mode_ruleset=default_rules,
             mode_fallback=fallback,
+            tool_path_extractors=self._tool_path_extractors,
         )
 
     def snapshot_for(self, registry: tuple[ToolSpec, ...]) -> ToolGateSnapshot:
@@ -249,6 +254,7 @@ class ToolGate:
             permanent_grant_store=self._permanent_grant_store,
             mode_ruleset=default_rules,
             mode_fallback=fallback,
+            tool_path_extractors=self._tool_path_extractors,
         )
 
     def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
@@ -496,6 +502,7 @@ class ToolGate:
                 session_grant_store=snapshot.session_grant_store,
                 permanent_grant_store=snapshot.permanent_grant_store,
                 tool_action_profiles=action_profiles,
+                tool_path_extractors=snapshot.tool_path_extractors,
                 mode_ruleset=snapshot.mode_ruleset,
                 user_ruleset=snapshot.user_ruleset,
                 mode_fallback=snapshot.mode_fallback,

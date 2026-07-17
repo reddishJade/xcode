@@ -145,6 +145,7 @@ class AgentHarness:
             session_grant_store_provider=gate.session_grant_store_provider,
             permanent_grant_store=gate.permanent_grant_store,
             user_rulesets=gate.user_rulesets,
+            tool_path_extractors=gate.tool_path_extractors,
         )
         self.audit_logger = gate.audit_logger
         self._history: list[AgentMessage] = []
