@@ -228,14 +228,16 @@ Trial，双方均 `resolved=true`、`regression_free=true`、`policy_clean=true`
 
 ## 近期实施队列
 
-阶段 0、1、2 已达到文档门槛。阶段 3 的内部配对实验仍暂缓，但已在外部任务上做
-`full/minimal` 归因 smoke；阶段 4、6 保持全局可见但不提前堆叠实现：
+阶段 0、1、2 已达到文档门槛。阶段 3 已在外部任务上进行 `full/minimal` 归因 smoke，
+但跨模型矩阵尚未满足门槛；阶段 4 已实现首个单能力 Variant 并完成一次 smoke，阶段 6
+尚未开始。当前分支暂时封存，恢复后继续以下队列：
 
 1. 暂停内部 `full/minimal` 配对运行，保留已冻结的 Variant 契约和实现；
 2. 把 20/40/60 等预算档提升为版本化 Experiment 变量，不再依赖临时复制 dataset
    文件来改变预算；
-3. 在外部任务上完成模型可解性校准：已完成 Requests 的 20/40 次预算阶梯，
-   并完成 Astropy、Django 的 40 次预算重复；
+3. 在外部任务上按模型分别完成可解性校准：`deepseek-v4-flash` 已覆盖 Requests 的
+   20/40 次预算及 Astropy、Django 的 40 次预算重复；`deepseek-v4-pro` 目前仅 Django
+   通过 20/40 次校准，Requests 20 次仍为空 patch，Astropy/Requests 配对仍需分层；
 4. 用公开字段建立外部 benchmark adapter，坚持 Agent 生成 prediction、官方 scorer
    独立判分的边界；
 5. 阶段 5 外部门槛已达到第一道门槛：3 个不同仓库任务、每任务至少 2 次有效重复，
