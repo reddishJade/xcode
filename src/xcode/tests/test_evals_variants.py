@@ -57,6 +57,20 @@ def test_minimal_variant_removes_runtime_compactor() -> None:
     assert app.agent._compact_controller is None
 
 
+def test_no_compaction_variant_preserves_other_capabilities() -> None:
+    runtime = XcodeRuntimeConfig()
+    variant = build_eval_variant_runtime(runtime, "no-compaction")
+    capabilities = variant_capabilities("no-compaction")
+
+    assert variant is runtime
+    assert capabilities["compaction"] is False
+    assert capabilities["provider_fallback"] is True
+    assert capabilities["parallel_tools"] is True
+    assert capabilities["request_hygiene"] is True
+    assert capabilities["repeated_tool_watchdog"] is True
+    assert capabilities["contextual_retrieval_prompt"] is True
+
+
 def test_unknown_variant_is_rejected() -> None:
     try:
         build_eval_variant_runtime(XcodeRuntimeConfig(), "unknown")

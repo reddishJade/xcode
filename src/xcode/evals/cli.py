@@ -28,6 +28,7 @@ from .variants import (
     EVAL_VARIANT_PROFILE_VERSION,
     FULL_VARIANT_ID,
     MINIMAL_VARIANT_ID,
+    NO_COMPACTION_VARIANT_ID,
     variant_capabilities,
 )
 
@@ -203,7 +204,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--variant",
         action="append",
-        choices=(FULL_VARIANT_ID, MINIMAL_VARIANT_ID),
+        choices=(FULL_VARIANT_ID, MINIMAL_VARIANT_ID, NO_COMPACTION_VARIANT_ID),
         default=[],
     )
     return parser

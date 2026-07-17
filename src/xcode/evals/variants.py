@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 FULL_VARIANT_ID = "full"
 MINIMAL_VARIANT_ID = "minimal"
+NO_COMPACTION_VARIANT_ID = "no-compaction"
 EVAL_VARIANT_PROFILE_VERSION = "v1"
 
 _MINIMAL_PROMPT_EXCLUSIONS = frozenset({"git_preflight", "contextual_retrieval"})
@@ -26,6 +27,8 @@ def build_eval_variant_runtime(
 ) -> XcodeRuntimeConfig:
     """生成 Variant 的正式 runtime 配置快照。"""
     if variant_id == FULL_VARIANT_ID:
+        return runtime
+    if variant_id == NO_COMPACTION_VARIANT_ID:
         return runtime
     if variant_id != MINIMAL_VARIANT_ID:
         raise EvalVariantError(f"unknown Eval variant: {variant_id}")
@@ -62,6 +65,11 @@ def build_eval_variant_runtime(
 def configure_eval_variant_app(app: XcodeApp, variant_id: str) -> None:
     """应用无法仅靠序列化配置表达的运行时差异。"""
     if variant_id == FULL_VARIANT_ID:
+        return
+    if variant_id == NO_COMPACTION_VARIANT_ID:
+        app.agent.compactor = None
+        app.agent._runtime.compactor = None
+        app.agent._compact_controller = None
         return
     if variant_id != MINIMAL_VARIANT_ID:
         raise EvalVariantError(f"unknown Eval variant: {variant_id}")
@@ -100,4 +108,9 @@ def variant_capabilities(variant_id: str) -> dict[str, bool]:
             "repeated_tool_watchdog": False,
             "contextual_retrieval_prompt": False,
         }
+    if variant_id == NO_COMPACTION_VARIANT_ID:
+        return {**shared, "compaction": False, "provider_fallback": True,
+                "parallel_tools": True, "request_hygiene": True,
+                "repeated_tool_watchdog": True,
+                "contextual_retrieval_prompt": True}
     raise EvalVariantError(f"unknown Eval variant: {variant_id}")
