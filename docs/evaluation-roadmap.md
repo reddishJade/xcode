@@ -162,6 +162,12 @@ src/xcode/evals/
 - 无显著收益或产生负收益的能力同样如实报告；
 - 权限和安全消融不削弱 verifier 隔离或宿主机安全边界。
 
+首个单能力 smoke：Django `external-40` 上的 `no-compaction` 与 `full` 各完成 1 个有效
+Trial，双方均 `resolved=true`、`regression_free=true`、`policy_clean=true`。本轮
+`no-compaction` 使用 633,056 input tokens、134.27 秒，`full` 使用 859,314 input tokens、
+218.90 秒；两者均成功，暂只能记录为一次成功平局和成本观察，不能证明 compaction 的
+因果收益。该任务未形成长上下文压力，仍需专门压力任务和重复后才能满足阶段 4 门槛。
+
 ## 阶段 5：任务规模与外部可比性
 
 ### 目标
@@ -464,3 +470,4 @@ src/xcode/evals/
 | 2026-07-17 | Astropy 配对恢复并完成首对有效 Trial | 用户恢复目标 commit 后，本地校验 `d16bfe05…` 与 tree `4d9ea46e…`；`phase3-external-pair-astropy-12907-budget40-20260717b` 的 full/minimal 均有效成功，gain=0%。此前的 worker 收尾超时不再重现，但仍需重复和第二模型。 |
 | 2026-07-17 | 第二模型完成预算校准并启动归因 | `deepseek-v4-pro` 在 Django 的 20/40 次预算均有效成功；同模型 40 次 `full/minimal` 配对也均成功，gain=0%，full 少 69,919 input tokens 但慢 56.64 秒。Astropy 第二模型配对的 full 因 600 秒墙钟无效、minimal 成功；Requests 配对的 full 生成空 patch、minimal 未解决；两者均排除。第二模型目前只有一个有效跨任务配对，不能提前宣称跨模型 harness 增益。 |
 | 2026-07-17 | Requests/Pro 20 次校准仍为空 patch | `phase5-calibration-deepseek-v4-pro-requests-2148-budget20-20260717a` 在 318,708 input tokens、161.04 秒后生成空 patch，官方 verifier 排除。与 40 次配对的 full 结果一致，暂不把失败归因于 harness，也不启动新的 Pro Requests 配对。 |
+| 2026-07-17 | 阶段4首个 no-compaction smoke 完成 | Django `external-40` 的 `no-compaction` 与 `full` 各 1 次有效成功；前者 633,056 input tokens/134.27 秒，后者 859,314/218.90 秒。记录为成功平局和成本观察，尚非 compaction 因果结论；需要长上下文压力与重复。 |
