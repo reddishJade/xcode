@@ -27,6 +27,11 @@
 工作区没有外部 MCP 配置或既有跨 session memory，因此这两项不会伪装成 Variant 差异；
 它们留给阶段 4 的真实压力任务独立消融。
 
+阶段 4 首个单能力 Variant 为 `no-compaction`：它保留 provider fallback、并行工具、
+request hygiene、repeated-tool watchdog 和 contextual retrieval，仅移除 compactor 与
+compact controller。该 Variant 用于长上下文真实任务的 paired ablation，不与 `minimal`
+的总体对照结果混合。
+
 ## 配对和报告规则
 
 `full` 是 candidate，`minimal` 是 control。`harness_gain` 只在双方 Trial 都有效的严格
