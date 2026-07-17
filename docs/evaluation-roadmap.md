@@ -323,14 +323,15 @@ src/xcode/evals/
   单 Variant 的效率前沿只是绝对坐标，不能解释为 harness gain。阶段 3 必须在相同任务、
   模型、预算和重复策略下加入可运行的 `minimal` 配对对照。
 
-### 阶段 3 外部配对 smoke（进行中，2026-07-16）
+### 阶段 3 外部配对 smoke（进行中，更新至 2026-07-17）
 
-- 配对契约：Django 与 Requests 各完成 1 个 `external-40` repetition 的 `full/minimal`
-  配对；两边使用同一任务、模型、预算和 repetition，两个 Variant 均形成有效 Trial，
-  官方 verifier 均 `resolved=true`、`regression_free=true`、`policy_clean=true`。
-- 配对结果：Django 配对的 `harness_gain=0`，full/minimal 都成功，full 比 minimal 多用
-  83.82 秒；Requests 的一次重复配对同样是成功平局，full 比 minimal 多用 25.42 秒。
-  这些单次结果不能解释为 harness 无增益。
+- 配对契约：Django 与 Requests 使用同一任务、模型、预算和 repetition 比较
+  `full/minimal`；官方 verifier 对有效 Trial 均独立报告
+  `resolved=true`、`regression_free=true`、`policy_clean=true`。
+- 单次配对结果：Django 的第一对是成功平局，full 比 minimal 多用 83.82 秒；Requests
+  的第一对同样是成功平局，full 比 minimal 多用 25.42 秒；Django 的第二对
+  `phase3-external-pair-django-10914-budget40-20260717c` 仍是成功平局，但 full 少用
+  136,578 input tokens、快 118.24 秒。成本方向相反，不能解释为稳定效率增益。
 - 重复配对：修复 uv launcher 后，Requests 的 `phase3-external-pair-requests-2148-budget40-20260716c`
   完成 2/2 有效配对；`full` 成功 1/2、`minimal` 成功 0/2，报告的配对
   `harness_gain=50%`，full 相比 minimal 少 630,372 input tokens 和 41.60 秒。该结果
@@ -343,26 +344,28 @@ src/xcode/evals/
 - 可靠性修复：`BubblewrapExecutor` 现在把 `subprocess.TimeoutExpired` 转换成
   `IsolationError`，由 TrialRunner 封存为无效 Trial，而不是留下半成品目录；对应契约测试
   已加入 `test_evals_isolation.py`。修复后的真实 Trial 仍需继续验证。
-- 阶段边界：当前只有 2 个有效外部配对、每对 1 次重复，且仅覆盖一个模型和 `full`/`minimal`；
-  阶段 3 仍未通过，需扩展到三任务并增加重复后才能报告稳定 harness gain。
-- 重复队列限制：Requests 的 2-repetition 配对实验中，仅 `full.r0` 有效；其余 3 次在
-  Agent 启动前因宿主 `uv` 版本滚动后仍引用旧 Cellar 路径而记为 `agent_failure`，不进入
-  配对分数。执行器已改为保留稳定 launcher 路径，需重新运行该重复队列确认修复。
-- 当前执行环境限制（2026-07-17）：在本会话的外层沙盒内，非特权 user namespace 被内核
+- 阶段边界：当前 Requests 有 2 个有效配对、Django 有 2 个有效配对，Astropy 配对仍无
+  合法 Trial；实验仅覆盖一个模型，阶段 3 仍未通过，需完成三任务重复并加入第二模型后
+  才能报告稳定 harness gain。
+- 重复队列限制：Requests 旧 2-repetition 配对实验中仅 `full.r0` 有效的 3 次失败仍保留
+  为环境分层；修复稳定 uv launcher 后的 2 对有效结果已单独记录，不与旧失败混合。
+- 当前默认执行环境限制（2026-07-17）：在本会话的外层沙盒内，非特权 user namespace 被
   禁止，`BubblewrapExecutor` 的 preflight 因 `bwrap: No permissions to create new namespace`
   立即失败；Docker socket 也不可见。`env-preflight-django-20260717a` 已正确封存为
-  `agent_failure`、`valid_trial=false`，不计入外部成功率或配对结果。该限制只阻止当前环境
-  新增真实 Trial，不改变此前已完成的有效 artifact；恢复真实运行需要在允许 bubblewrap
-  user namespace 且 verifier 可访问 Docker 的沙盒中执行。
+  `agent_failure`、`valid_trial=false`，不计入外部成功率或配对结果。随后切换到允许宿主
+  bubblewrap 与 Docker 的执行路径，重新建立 `/tmp/xcode-swebench-venv` 并安装
+  `swebench==3.0.11`；verifier-only 复核通过，默认沙盒限制不再阻止后续真实 Trial。
 
-### 阶段 5（外部 smoke，外部门槛 A 已通过，完整阶段未通过，2026-07-16）
+### 阶段 5（外部 smoke，外部门槛 A 已通过，完整阶段未通过，更新至 2026-07-17）
 
 - 外部入口：`swebench-lite-smoke-v1` 固化公开任务字段、仓库 commit、许可证和
   `problem_statement`；Agent 不可见隐藏 patch、测试和 verifier 命令。prediction 生成
   与官方评分分离，独立 verifier 使用 `swebench==3.0.11` 的 Docker scorer。
-- 真实运行：`psf__requests-2148` 有 4 次有效 `full` Trial（20 次预算 2 次、40 次预算
-  2 次）；`astropy__astropy-12907` 和 `django__django-10914` 各有 2 次有效 40 次预算
-  Trial。8 次 Trial 均保存 trace、patch、verifier 日志和 checksum。
+- 真实运行：外部门槛 A 的基线为 `psf__requests-2148` 4 次有效 `full` Trial（20 次预算
+  2 次、40 次预算 2 次），`astropy__astropy-12907` 和 `django__django-10914` 各有 2 次
+  有效 40 次预算 Trial；这 8 次 Trial 均保存 trace、patch、verifier 日志和 checksum。
+  随后的 Django 配对实验又增加 1 次有效 `full` 和 1 次有效 `minimal` Trial；配对
+  Trial 单独用于阶段 3 归因，不替换门槛 A 的冻结基线。
 - 外部判定：8 次有效 Trial 中 7 次 `resolved=true` 且 `regression_free=true`，外部 smoke
   成功率为 7/8（87.5%）；唯一失败是 Requests 的一次 20 次预算 Trial。仅看统一的
   `external-40` profile，3 个不同仓库任务共 6/6 成功。该结果满足本路线临时设定的
@@ -395,6 +398,10 @@ src/xcode/evals/
 - Django 任务（`django__django-10914`）的两次 40 次预算 Trial 分别消耗 983,625/749,941
   input tokens 和 204.34/219.91 秒，均由官方 scorer 判定 resolved 且无回归；它补充了与
   Requests、Astropy 不同仓库和文件权限语义的外部任务分布。
+- Django 配对追加的 `full` Trial 消耗 849,438 input tokens、367.08 秒，官方判定
+  `resolved=true`、`regression_free=true`；对应 `minimal` Trial 消耗 986,016 input tokens、
+  485.32 秒，同样通过官方判定。它们证明配对链路可重复封存，但单对成功平局不能改变
+  阶段 3 尚未通过的结论。
 - 超时修复后的 Requests 20 次 Trial（`post-timeout-fix-requests-2148-budget20-20260716a`）
   消耗 285,712 input tokens、23 次工具调用和 111.76 秒，仍以 `step_limit` 正常结束，
   官方判定 resolved 且无回归。它作为修复后真实路径验证和预算随机性证据，不单独改变
@@ -427,4 +434,5 @@ src/xcode/evals/
 | 2026-07-16 | 外部配对 smoke 启动，阶段 3 仍未通过 | Django、Requests 各完成一次有效 `full/minimal` 配对且均成功平局；Astropy 配对因隔离 worker 收尾超时无效。新增 TimeoutExpired 封存修复和测试，后续继续验证三任务多重复。 |
 | 2026-07-16 | 修复 uv launcher 滚动导致的重复 Trial 无效 | Requests 旧 2-repetition 队列中 3 次 Trial 因缓存旧 uv Cellar 目标路径失败；执行器改为保留 launcher 符号路径，并加入隔离契约测试。失败结果保留为环境分层，不计入 harness gain。 |
 | 2026-07-16 | Requests 配对重复出现初步 full 优势 | 修复后 2 对 Requests 配对全部有效，full 1/2、minimal 0/2，配对 gain=50%；仍属小样本，下一步扩展 Django/Astropy 配对重复和第二模型，避免把任务随机性当作稳定 harness gain。 |
-| 2026-07-17 | 记录当前沙盒的真实执行前置失败 | `env-preflight-django-20260717a` 在 Agent 启动前因外层沙盒禁止非特权 user namespace 而被封存为 `agent_failure`；Docker socket 同样不可见。该结果仅作为环境证据，不进入能力或配对统计；后续真实 Trial 必须迁移到允许 bubblewrap 与独立 verifier 的执行环境。 |
+| 2026-07-17 | 记录当前沙盒的真实执行前置失败 | `env-preflight-django-20260717a` 在 Agent 启动前因外层沙盒禁止非特权 user namespace 而被封存为 `agent_failure`；Docker socket 同样不可见。该结果仅作为环境证据，不进入能力或配对统计；随后已切换到允许 bubblewrap 与独立 verifier 的宿主执行路径。 |
+| 2026-07-17 | 恢复宿主真实执行并完成 Django 第二对配对 | 宿主只读 preflight 的 `unshare`、`bwrap`、Docker 均通过；补齐 SWE-bench 3.0.11 后，`phase3-external-pair-django-10914-budget40-20260717c` 的 full/minimal 均为有效成功。该对 gain=0%，full 少 136,578 input tokens、快 118.24 秒；结合此前 full 较慢的单对，成本方向尚不稳定。 |
