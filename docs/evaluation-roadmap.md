@@ -335,6 +335,13 @@ src/xcode/evals/
 - Astropy 配对：`phase3-external-pair-astropy-12907-budget40-20260717b` 的 full/minimal
   均为有效成功，配对 gain=0%；full 少 177,055 input tokens，但多用 27.74 秒。它修复了
   先前 worker 收尾超时导致无合法 Trial 的缺口，但只有 1 对，不能单独解释 harness 增益。
+- 第二模型校准与配对：注册表已有的 `deepseek-v4-pro` 在同一 Django 任务上完成
+  `external-20`（20 calls，267,304 input tokens，135.26 秒）和
+  `external-40`（29 calls，456,974 input tokens，210.10 秒）可解性校准，官方判定均通过。
+  随后
+  `phase3-second-model-pair-django-10914-deepseek-v4-pro-budget40-20260717a` 的
+  full/minimal 均有效成功，gain=0%；full 少 69,919 input tokens，但多用 56.64 秒。
+  这仍是单任务第二模型证据，不能代表跨任务稳定增益。
 - 重复配对：修复 uv launcher 后，Requests 的 `phase3-external-pair-requests-2148-budget40-20260716c`
   完成 2/2 有效配对；`full` 成功 1/2、`minimal` 成功 0/2，报告的配对
   `harness_gain=50%`，full 相比 minimal 少 630,372 input tokens 和 41.60 秒。该结果
@@ -347,9 +354,10 @@ src/xcode/evals/
 - 可靠性修复：`BubblewrapExecutor` 现在把 `subprocess.TimeoutExpired` 转换成
   `IsolationError`，由 TrialRunner 封存为无效 Trial，而不是留下半成品目录；对应契约测试
   已加入 `test_evals_isolation.py`。修复后的真实 Trial 仍需继续验证。
-- 阶段边界：当前 Requests 有 2 个有效配对、Django 有 2 个有效配对、Astropy 有 1 个
-  有效配对；三任务均已覆盖，但实验仅覆盖一个模型且重复数不均衡，阶段 3 仍未通过，需
-  补齐跨任务重复并加入第二模型后才能报告稳定 harness gain。
+- 阶段边界：`deepseek-v4-flash` 下 Requests 有 2 个有效配对、Django 有 2 个有效配对、
+  Astropy 有 1 个有效配对；`deepseek-v4-pro` 已完成 Django 的 20/40 校准和 1 个有效
+  配对。三任务均已覆盖，但第二模型尚未跨任务重复，阶段 3 仍未通过，需补齐跨模型、
+  跨任务重复后才能报告稳定 harness gain。
 - 重复队列限制：Requests 旧 2-repetition 配对实验中仅 `full.r0` 有效的 3 次失败仍保留
   为环境分层；修复稳定 uv launcher 后的 2 对有效结果已单独记录，不与旧失败混合。
 - 当前默认执行环境限制（2026-07-17）：在本会话的外层沙盒内，非特权 user namespace 被
@@ -440,3 +448,4 @@ src/xcode/evals/
 | 2026-07-17 | 记录当前沙盒的真实执行前置失败 | `env-preflight-django-20260717a` 在 Agent 启动前因外层沙盒禁止非特权 user namespace 而被封存为 `agent_failure`；Docker socket 同样不可见。该结果仅作为环境证据，不进入能力或配对统计；随后已切换到允许 bubblewrap 与独立 verifier 的宿主执行路径。 |
 | 2026-07-17 | 恢复宿主真实执行并完成 Django 第二对配对 | 宿主只读 preflight 的 `unshare`、`bwrap`、Docker 均通过；补齐 SWE-bench 3.0.11 后，`phase3-external-pair-django-10914-budget40-20260717c` 的 full/minimal 均为有效成功。该对 gain=0%，full 少 136,578 input tokens、快 118.24 秒；结合此前 full 较慢的单对，成本方向尚不稳定。 |
 | 2026-07-17 | Astropy 配对恢复并完成首对有效 Trial | 用户恢复目标 commit 后，本地校验 `d16bfe05…` 与 tree `4d9ea46e…`；`phase3-external-pair-astropy-12907-budget40-20260717b` 的 full/minimal 均有效成功，gain=0%。此前的 worker 收尾超时不再重现，但仍需重复和第二模型。 |
+| 2026-07-17 | 第二模型完成预算校准并启动归因 | `deepseek-v4-pro` 在 Django 的 20/40 次预算均有效成功；同模型 40 次 `full/minimal` 配对也均成功，gain=0%，full 少 69,919 input tokens 但慢 56.64 秒。第二模型目前只有单任务配对，不能提前宣称跨模型 harness 增益。 |
