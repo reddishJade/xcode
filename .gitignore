@@ -14,6 +14,7 @@
 # --- Python 缓存与构建 ——
 *.py[cod]
 __pycache__/
+.coverage
 *.egg-info/
 
 # --- 环境与配置 ——
@@ -29,7 +30,14 @@ build/
 dist/
 *.spec
 
+# --- Eval 本地产物（任务私有数据、仓库 checkout 和运行日志） ---
+.eval-repos/
+evals/private/
+logs/
+
 # --- 杂项 ---
 diff.log
+verifier-result.json
+eval-results/
 docs/notes/
 tmp/
