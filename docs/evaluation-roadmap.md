@@ -252,8 +252,7 @@ Trial，双方均 `resolved=true`、`regression_free=true`、`policy_clean=true`
 - 契约：`src/xcode/evals/schema.py` 定义不依赖 fake provider 或旧 pipeline 事件的
   Task、Variant、Trial、VerifierSpec、VerifierResult、TrialResult、错误分类与 artifact
   索引；Task 只含不透明 verifier id，隐藏命令不进入 Agent 可见对象。
-- 审计：[evaluation-legacy-audit.md](evaluation-legacy-audit.md) 对旧模块逐项记录保留、
-  重写、迁入 pytest 或废弃决定，并明确旧场景均不得直接计能力分。
+- `eval-legacy` 仅保留为历史分支；旧 Eval 场景不进入新能力分数。
 - Test 边界：`test_evals_schema.py` 只验证基础设施契约，不产生能力分数。
 - 限制：尚无通过审核的真实 Task、隔离 workspace、真实 executor 或独立 verifier
   Trial，因此阶段 1 尚未通过，也没有 Xcode 能力结论。

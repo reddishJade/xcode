@@ -30,6 +30,11 @@ build/
 dist/
 *.spec
 
+# --- Eval 本地产物（任务私有数据、仓库 checkout 和运行日志） ---
+.eval-repos/
+evals/private/
+logs/
+
 # --- 杂项 ---
 diff.log
 verifier-result.json
