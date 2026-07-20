@@ -95,9 +95,8 @@ class _LogEntry:
     markdown: bool = False
     exploration_calls: list[_ExplorationCall] = field(default_factory=list)
     text_parts: list[str] | None = None
-    _markdown_cache_content: str | None = field(default=None, repr=False)
-    _markdown_plain_lines: list[str] | None = field(default=None, repr=False)
-    _markdown_ansi_lines: list[str] | None = field(default=None, repr=False)
+    _ansi_cache_key: tuple[object, ...] | None = field(default=None, repr=False)
+    _ansi_lines: list[str] | None = field(default=None, repr=False)
 
     def content(self) -> str:
         """返回日志内容；流式回答使用分块存储以避免反复复制全文。"""
@@ -105,24 +104,64 @@ class _LogEntry:
             return "".join(self.text_parts)
         return self.text
 
-    def markdown_lines(self, color: bool) -> list[str]:
-        """按消息缓存 Markdown 布局，流式内容变化时自动失效。"""
-        content = self.content()
-        if self._markdown_cache_content != content:
-            self._markdown_cache_content = content
-            self._markdown_plain_lines = None
-            self._markdown_ansi_lines = None
-        if color:
-            if self._markdown_ansi_lines is None:
-                self._markdown_ansi_lines = markdown_ansi_lines(
-                    _render_citations(content)
-                )
-            return self._markdown_ansi_lines
-        if self._markdown_plain_lines is None:
-            self._markdown_plain_lines = rendered_markdown_lines(
-                _render_citations(content)
+    def freeze_content(self) -> None:
+        """将完成的流式内容固化，后续读取不再重复拼接分块。"""
+        if self.text_parts is None:
+            return
+        self.text = "".join(self.text_parts)
+        self.text_parts = None
+
+    def cached_ansi_lines(
+        self,
+        render_key: tuple[object, ...],
+        render: Callable[[], list[str]],
+    ) -> list[str]:
+        """每条已完成消息只保留一份 ANSI 渲染缓存。"""
+        exploration_key = tuple(
+            (
+                call.tool_id,
+                call.name,
+                call.label,
+                call.solo_label,
+                call.complete,
+                call.failed,
+                call.detail,
             )
-        return self._markdown_plain_lines
+            for call in self.exploration_calls
+        )
+        cache_key = (
+            self.role,
+            self.text,
+            self.markdown,
+            exploration_key,
+            ("streaming", len(self.text_parts))
+            if self.text_parts is not None
+            else ("complete",),
+            *render_key,
+        )
+        if self._ansi_cache_key != cache_key or self._ansi_lines is None:
+            self._ansi_cache_key = cache_key
+            self._ansi_lines = render()
+        return self._ansi_lines
+
+
+@dataclass(frozen=True)
+class _DisplayBlock:
+    """一个可独立缓存和裁剪的显示块。"""
+
+    lines: list[str]
+    leading_blank: bool = False
+
+    @property
+    def line_count(self) -> int:
+        return len(self.lines) + int(self.leading_blank)
+
+    def line_at(self, index: int) -> str:
+        if self.leading_blank:
+            if index == 0:
+                return ""
+            index -= 1
+        return self.lines[index]
 
 
 @dataclass
@@ -241,6 +280,7 @@ class _TuiState:
             self._handle_text_delta(event.data)
         elif event.type == "tool_use":
             self._finish_thinking()
+            self._commit_streaming_answer()
             self._record_tool_use(event.data.id, event.data.name, event.data.input)
         elif event.type == "tool_update":
             self._handle_tool_update(event.data.tool_name, event.data.partial_result)
@@ -261,8 +301,8 @@ class _TuiState:
     def fragments(
         self, limit: int | None = None, scrollback: int = 0
     ) -> StyleAndTextTuples:
-        blocks = self._render_blocks(color=True)
-        total = sum(len(block) for block in blocks)
+        blocks = self._display_blocks(color=True)
+        total = sum(block.line_count for block in blocks)
         if limit is None or total <= limit:
             start = 0
             end = total
@@ -272,11 +312,12 @@ class _TuiState:
         result: StyleAndTextTuples = []
         offset = 0
         for block in blocks:
-            block_end = offset + len(block)
+            block_end = offset + block.line_count
             if block_end > start and offset < end:
-                for line in block[
-                    max(0, start - offset) : min(len(block), end - offset)
-                ]:
+                local_start = max(0, start - offset)
+                local_end = min(block.line_count, end - offset)
+                for index in range(local_start, local_end):
+                    line = block.line_at(index)
                     result.extend(render_line_fragments(line))
                     result.append(("", "\n"))
             offset = block_end
@@ -285,53 +326,32 @@ class _TuiState:
         return result
 
     def line_count(self) -> int:
-        """返回当前显示内容的行数，不创建完整的扁平行列表。"""
-        return sum(len(block) for block in self._render_blocks(color=False))
+        """返回当前显示行数，复用完成消息的单份 ANSI 缓存。"""
+        return sum(block.line_count for block in self._display_blocks(color=True))
 
     # ── 文本渲染（纯文本：用于滚动高度计算） ──
 
     def lines(self) -> list[str]:
-        lines: list[str] = []
-        self._append_log_entries(lines, rendered_markdown_lines, color_thinking=False)
-        if self.streaming_answer is not None:
-            self._append_entry_lines(
-                self.streaming_answer,
-                lines,
-                rendered_markdown_lines,
-                color_thinking=False,
-                show_tool_expand=False,
-                show_tool_collapse=False,
-            )
-        if self.thinking.strip():
-            self._thinking_lines(lines, color=False)
-        self._append_subagent_lines(lines)
-        self._append_hitl_lines(lines)
-        return lines
+        return self._flatten_blocks(self._display_blocks(color=False))
 
     # ── ANSI 渲染（彩色：用于片段生成） ──
 
     def ansi_lines(self) -> list[str]:
+        return self._flatten_blocks(self._display_blocks(color=True))
+
+    @staticmethod
+    def _flatten_blocks(blocks: list[_DisplayBlock]) -> list[str]:
         lines: list[str] = []
-        self._append_log_entries(lines, markdown_ansi_lines, color_thinking=True)
-        if self.streaming_answer is not None:
-            self._append_entry_lines(
-                self.streaming_answer,
-                lines,
-                markdown_ansi_lines,
-                color_thinking=True,
-                show_tool_expand=False,
-                show_tool_collapse=False,
-            )
-        if self.thinking.strip():
-            self._thinking_lines(lines, color=True)
-        self._append_subagent_lines(lines)
-        self._append_hitl_lines(lines)
+        for block in blocks:
+            if block.leading_blank:
+                lines.append("")
+            lines.extend(block.lines)
         return lines
 
-    def _render_blocks(self, color: bool) -> list[list[str]]:
-        """按消息块生成行，供行数计算和可见区域渲染复用。"""
+    def _display_blocks(self, color: bool) -> list[_DisplayBlock]:
+        """生成轻量布局索引；完成消息的行内容由消息自身缓存。"""
         md_fn = markdown_ansi_lines if color else rendered_markdown_lines
-        blocks: list[list[str]] = []
+        blocks: list[_DisplayBlock] = []
         latest_tool_index = max(
             (
                 index
@@ -351,97 +371,83 @@ class _TuiState:
         )
 
         for index, entry in enumerate(self.log):
-            block: list[str] = []
-            if blocks and entry.role not in {"tool", "tool-detail", "exploration"}:
-                block.append("")
-            self._append_entry_lines(
-                entry,
-                block,
-                md_fn,
-                color_thinking=color,
-                show_tool_expand=(self.tool_collapsed and index == latest_tool_index),
-                show_tool_collapse=(
-                    not self.tool_collapsed
-                    and (
-                        index == latest_detail_index
-                        or (entry.role == "exploration" and index == latest_tool_index)
-                    )
-                ),
+            show_tool_expand = self.tool_collapsed and index == latest_tool_index
+            show_tool_collapse = not self.tool_collapsed and (
+                index == latest_detail_index
+                or (entry.role == "exploration" and index == latest_tool_index)
             )
-            if block:
-                blocks.append(block)
+            lines = self._entry_block_lines(
+                entry,
+                md_fn,
+                color,
+                show_tool_expand,
+                show_tool_collapse,
+            )
+            if lines:
+                blocks.append(
+                    _DisplayBlock(
+                        lines,
+                        leading_blank=bool(blocks)
+                        and entry.role not in {"tool", "tool-detail", "exploration"},
+                    )
+                )
 
         if self.streaming_answer is not None:
-            block = [""] if blocks else []
-            self._append_entry_lines(
+            lines = self._entry_block_lines(
                 self.streaming_answer,
-                block,
                 md_fn,
-                color_thinking=color,
-                show_tool_expand=False,
-                show_tool_collapse=False,
+                color,
+                False,
+                False,
             )
-            if block:
-                blocks.append(block)
+            if lines:
+                blocks.append(_DisplayBlock(lines, leading_blank=bool(blocks)))
 
         if self.thinking.strip():
-            block = [""] if blocks else []
-            self._thinking_lines(block, color=color)
-            blocks.append(block)
-        self._append_optional_block(blocks, self._append_subagent_lines)
-        self._append_optional_block(blocks, self._append_hitl_lines)
+            lines = self._thinking_lines(color=color)
+            blocks.append(_DisplayBlock(lines, leading_blank=bool(blocks)))
+        self._append_optional_block(blocks, self._subagent_lines())
+        self._append_optional_block(blocks, self._hitl_lines())
         return blocks
 
     @staticmethod
-    def _append_optional_block(
-        blocks: list[list[str]], append: Callable[[list[str]], None]
-    ) -> None:
-        block = [""] if blocks else []
-        append(block)
-        if len(block) > 1 or (block and block[0]):
-            blocks.append(block)
+    def _append_optional_block(blocks: list[_DisplayBlock], lines: list[str]) -> None:
+        if lines:
+            blocks.append(_DisplayBlock(lines, leading_blank=bool(blocks)))
 
-    # ── 内部渲染方法 ──
-
-    def _append_log_entries(
+    def _entry_block_lines(
         self,
-        lines: list[str],
+        entry: _LogEntry,
         md_fn: Callable[[str], list[str]],
-        color_thinking: bool,
-    ) -> None:
-        """按工具组渲染日志，并只在当前工具组显示折叠提示。"""
-        latest_tool_index = max(
-            (
-                index
-                for index, entry in enumerate(self.log)
-                if entry.role in {"tool", "exploration"}
-            ),
-            default=-1,
-        )
-        latest_detail_index = max(
-            (
-                index
-                for index, entry in enumerate(self.log)
-                if index > latest_tool_index
-                and entry.role in {"tool-detail", "exploration"}
-            ),
-            default=-1,
-        )
-        for index, entry in enumerate(self.log):
+        color: bool,
+        show_tool_expand: bool,
+        show_tool_collapse: bool,
+    ) -> list[str]:
+        def render() -> list[str]:
+            lines: list[str] = []
             self._append_entry_lines(
                 entry,
                 lines,
                 md_fn,
-                color_thinking=color_thinking,
-                show_tool_expand=(self.tool_collapsed and index == latest_tool_index),
-                show_tool_collapse=(
-                    not self.tool_collapsed
-                    and (
-                        index == latest_detail_index
-                        or (entry.role == "exploration" and index == latest_tool_index)
-                    )
-                ),
+                color_thinking=color,
+                show_tool_expand=show_tool_expand,
+                show_tool_collapse=show_tool_collapse,
             )
+            return lines
+
+        if not color:
+            return render()
+        return entry.cached_ansi_lines(
+            (
+                self.tool_collapsed,
+                self.thinking_collapsed,
+                show_tool_expand,
+                show_tool_collapse,
+            ),
+            render,
+        )
+
+    # ── 内部渲染方法 ──
 
     def _append_entry_lines(
         self,
@@ -454,8 +460,6 @@ class _TuiState:
     ) -> None:
         if entry.role == "tool-detail" and self.tool_collapsed:
             return
-        if lines and entry.role not in {"tool", "tool-detail", "exploration"}:
-            lines.append("")
         if entry.role == "command":
             cmd_lines = entry.content().splitlines() or [""]
             lines.append(f"> {cmd_lines[0]}")
@@ -501,7 +505,7 @@ class _TuiState:
                 color=color_thinking,
             )
         elif entry.markdown:
-            lines.extend(entry.markdown_lines(color_thinking))
+            lines.extend(md_fn(_render_citations(entry.content())))
         else:
             lines.extend(entry.content().splitlines() or [""])
 
@@ -525,9 +529,8 @@ class _TuiState:
         if show_tool_collapse:
             lines[-1] += " (ctrl+o to collapse)"
 
-    def _thinking_lines(self, lines: list[str], color: bool) -> None:
-        if lines:
-            lines.append("")
+    def _thinking_lines(self, color: bool) -> list[str]:
+        lines: list[str] = []
         dur = self.thinking_core.duration_ms
         if dur:
             self._append_thinking_line(
@@ -538,6 +541,7 @@ class _TuiState:
         if not self.thinking_collapsed:
             for tl in self.thinking.splitlines():
                 self._append_thinking_line(lines, f"  {tl.lstrip()}", color)
+        return lines
 
     def _append_thinking_entry(
         self, entry: _LogEntry, lines: list[str], plain_text: bool, color: bool
@@ -564,26 +568,26 @@ class _TuiState:
         else:
             lines.append(text)
 
-    def _append_subagent_lines(self, lines: list[str]) -> None:
+    def _subagent_lines(self) -> list[str]:
         if not self.subagents or self.tool_collapsed:
-            return
-        if lines:
-            lines.append("")
+            return []
+        lines: list[str] = []
         lines.append("● Subagents")
         for index in sorted(self.subagents):
             slot = self.subagents[index]
             lines.append(f"  └ [{index}] {slot.task}")
             if slot.tool:
                 lines.append(f"      {slot.tool}")
+        return lines
 
-    def _append_hitl_lines(self, lines: list[str]) -> None:
+    def _hitl_lines(self) -> list[str]:
         if self.pending_hitl is None:
-            return
-        if lines:
-            lines.append("")
+            return []
+        lines: list[str] = []
         lines.append("? Authorization request")
         for line in self.pending_hitl.preview:
             lines.append(f"  {line}")
+        return lines
 
     # ── 工具事件记录（直接追加到 log） ──
 
@@ -605,6 +609,7 @@ class _TuiState:
         if self.streaming_answer is None:
             return
         if self.streaming_answer.content():
+            self.streaming_answer.freeze_content()
             self.log.append(self.streaming_answer)
         self.streaming_answer = None
 

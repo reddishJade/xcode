@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from asyncio import TimerHandle
 from contextlib import redirect_stdout
 from io import StringIO
 import re
@@ -133,6 +134,7 @@ def run_tui(
 
 class _XcodeTui:
     _STREAM_REFRESH_INTERVAL = 0.05
+    _EVENT_DRAIN_TIMEOUT = 5.0
 
     def __init__(
         self,
@@ -175,8 +177,10 @@ class _XcodeTui:
         self._awaiting_denial_suggestion = False
         self._exit_pending = 0.0
         self._last_stream_refresh = 0.0
+        self._stream_refresh_handle: TimerHandle | None = None
         self._agent_event_queue: Queue[AgentHarnessEvent] = Queue()
         self._agent_event_queue_lock = threading.Lock()
+        self._agent_event_drain_lock = threading.Lock()
         self._agent_event_drain_scheduled = False
 
         # ── UI 组件 ──
@@ -1249,6 +1253,7 @@ class _XcodeTui:
     def _run_turn(self, text: str) -> None:
         snapshot = self._snapshot_store
         _snapshot_ctx = _enter_snapshot_ctx(snapshot, self._store.session_id)
+        turn_log_start = len(self._state.log)
 
         answer = ""
         tool_names: list[str] = []
@@ -1301,7 +1306,7 @@ class _XcodeTui:
         except Exception as exc:
             self._wait_for_agent_events()
             flush_thinking()
-            self._save_partial_answer()
+            self._save_partial_answer(turn_log_start)
             detail = str(exc) or repr(exc)
             self._state.log.append(
                 _LogEntry("error", f"[error] {type(exc).__name__}: {detail}")
@@ -1318,7 +1323,7 @@ class _XcodeTui:
             self._store.append("assistant", answer)
             self._store.update_summary()
         else:
-            self._save_partial_answer()
+            self._save_partial_answer(turn_log_start)
 
         self._refresh()
 
@@ -1340,10 +1345,12 @@ class _XcodeTui:
             return
         self._submit_pending_inject()
 
-    def _save_partial_answer(self) -> None:
+    def _save_partial_answer(self, turn_log_start: int) -> None:
         """将中断前已经流式显示的回答写入会话，供恢复和后续注入使用。"""
         partial = "".join(
-            entry.content() for entry in self._state.log if entry.role == "xcode"
+            entry.content()
+            for entry in self._state.log[turn_log_start:]
+            if entry.role == "xcode"
         ).strip()
         if self._state.streaming_answer is not None:
             partial = (partial + self._state.streaming_answer.content()).strip()
@@ -1368,12 +1375,13 @@ class _XcodeTui:
 
     def _drain_agent_events(self) -> None:
         """在 UI 线程批量处理已排队事件，并最多触发一次重绘。"""
-        while True:
-            try:
-                event = self._agent_event_queue.get_nowait()
-            except Empty:
-                break
-            self._state.handle_event(event)
+        with self._agent_event_drain_lock:
+            while True:
+                try:
+                    event = self._agent_event_queue.get_nowait()
+                except Empty:
+                    break
+                self._state.handle_event(event)
         self._refresh_streaming()
         with self._agent_event_queue_lock:
             self._agent_event_drain_scheduled = False
@@ -1390,14 +1398,22 @@ class _XcodeTui:
         loop = self._application.loop
         if loop is None:
             return
+        if loop.is_closed() or not loop.is_running():
+            self._drain_agent_events()
+            return
         completed = Event()
 
         def finish() -> None:
             self._drain_agent_events()
             completed.set()
 
-        loop.call_soon_threadsafe(finish)
-        completed.wait()
+        try:
+            loop.call_soon_threadsafe(finish)
+        except RuntimeError:
+            self._drain_agent_events()
+            return
+        if not completed.wait(self._EVENT_DRAIN_TIMEOUT):
+            self._drain_agent_events()
 
     # ── 刷新 ──
 
@@ -1480,9 +1496,29 @@ class _XcodeTui:
     def _refresh_streaming(self) -> None:
         """限制流式输出重绘频率，避免每个 delta 都触发完整布局。"""
         now = perf_counter()
-        if now - self._last_stream_refresh < self._STREAM_REFRESH_INTERVAL:
+        elapsed = now - self._last_stream_refresh
+        if elapsed < self._STREAM_REFRESH_INTERVAL:
+            loop = self._application.loop
+            if (
+                loop is not None
+                and loop.is_running()
+                and self._stream_refresh_handle is None
+            ):
+                self._stream_refresh_handle = loop.call_later(
+                    self._STREAM_REFRESH_INTERVAL - elapsed,
+                    self._flush_stream_refresh,
+                )
             return
+        if self._stream_refresh_handle is not None:
+            self._stream_refresh_handle.cancel()
+            self._stream_refresh_handle = None
         self._last_stream_refresh = now
+        self._refresh()
+
+    def _flush_stream_refresh(self) -> None:
+        """补发节流窗口末尾的最后一次流式重绘。"""
+        self._stream_refresh_handle = None
+        self._last_stream_refresh = perf_counter()
         self._refresh()
 
     def _status_text(self) -> str:
