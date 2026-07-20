@@ -48,13 +48,13 @@ from xcode.harness.agent_runtime.events import (
     AssistantToolUseBlock,
     FinalStructuredEvent,
     ReasoningDeltaStructuredEvent,
-    CodingAgentHarnessEvent,
+    AgentHarnessEvent,
     TextDeltaStructuredEvent,
     ToolResultStructuredEvent,
     ToolUpdateStructuredEvent,
     ToolUseStructuredEvent,
 )
-from xcode.harness.agent_runtime.result import CodingAgentHarnessResult
+from xcode.harness.agent_runtime.result import AgentHarnessResult
 from xcode.harness.security import FileGrantStore
 from xcode.harness.security.permission_model import SessionGrantStoreManager
 from xcode.harness.session import SessionInfoView as SessionMetadataView, SessionStore
@@ -429,9 +429,7 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
         ask_stream = getattr(ctx.app, "ask_stream", None)
         if not callable(ask_stream):
             raise TypeError("app does not support ask_stream")
-        typed_ask_stream = cast(
-            Callable[..., Iterator[CodingAgentHarnessEvent]], ask_stream
-        )
+        typed_ask_stream = cast(Callable[..., Iterator[AgentHarnessEvent]], ask_stream)
         for event in typed_ask_stream(text, mode=ctx.state.mode):
             # ponytail: 只记录有意义的事件，不存流式碎片
             if event.type not in {
@@ -498,7 +496,7 @@ class _ReplTurnRenderer:
         self.reasoning_handler = ReasoningHandler(self.live_console, self.state)
         self.tool_names_in_turn: list[str] = []
 
-    def handle_event(self, event: CodingAgentHarnessEvent) -> None:
+    def handle_event(self, event: AgentHarnessEvent) -> None:
         if isinstance(event, ReasoningDeltaStructuredEvent):
             self.tool_handler.flush_group()
             self.reasoning_handler.handle_delta(event.data)
@@ -557,7 +555,7 @@ class _ReplTurnRenderer:
         self.current_step_thoughts = []
         self.streamed_text = False
 
-    def _handle_final_event(self, event_data: CodingAgentHarnessResult) -> None:
+    def _handle_final_event(self, event_data: AgentHarnessResult) -> None:
         self.tool_handler.flush_group()
         final_answer = "".join(self.current_step_thoughts).strip()
         if not final_answer and event_data.answer:

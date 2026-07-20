@@ -14,7 +14,7 @@ from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.config import AgentConfig, XcodeRuntimeConfig
 from xcode.harness.agent_runtime import (
     ContextualRetrievalState,
-    CodingAgentHarnessEvent,
+    AgentHarnessEvent,
 )
 from xcode.coding_agent.harness import CodingAgentHarness
 from xcode.agent.types import ToolSpec
@@ -136,12 +136,12 @@ class XcodeApp:
 
     def ask_stream(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> Iterator[CodingAgentHarnessEvent]:
+    ) -> Iterator[AgentHarnessEvent]:
         yield from self.agent.run_stream(question, mode=mode)
 
     async def aask_stream(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> AsyncIterator[CodingAgentHarnessEvent]:
+    ) -> AsyncIterator[AgentHarnessEvent]:
         async for event in self.agent.arun_stream(question, mode=mode):
             yield event
 

@@ -1048,10 +1048,12 @@ def _compute_context_summary(
 ) -> _ContextSummary:
     """计算分类 token 用量，并更新 state 供底栏使用。"""
     from xcode.agent._compaction import estimate_tokens
-    from xcode.harness.agent_runtime.prompting.identity import (
+    from xcode.coding_agent.prompting.identity import (
         CORE_IDENTITY,
-        TOOL_DISCIPLINE,
+    )
+    from xcode.harness.agent_runtime.prompting.identity import (
         SEARCH_STRATEGY,
+        TOOL_DISCIPLINE,
     )
 
     categories: list[tuple[str, int]] = []

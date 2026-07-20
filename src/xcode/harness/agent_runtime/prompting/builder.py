@@ -35,7 +35,6 @@ from ..contextual import ContextualRetrievalState
 from ..git_preflight import build_git_preflight
 from .identity import (
     CITATION_INSTRUCTION,
-    CORE_IDENTITY,
     DYNAMIC_PROMPT_MODULE_ORDER,
     SEARCH_STRATEGY,
     STABLE_PROMPT_MODULE_ORDER,
@@ -72,6 +71,7 @@ class PromptContext:
     contextual_state: ContextualRetrievalState | None = None
     shell_spec: ShellInfo | None = None
     modules: tuple[str, ...] = DEFAULT_PROMPT_MODULES
+    identity: str = ""
 
 
 class SystemPromptBuilder:
@@ -123,7 +123,8 @@ class StableRegionBuilder:
                     continue
                 match module:
                     case "identity":
-                        inv_parts.append(CORE_IDENTITY)
+                        if context.identity:
+                            inv_parts.append(context.identity)
                     case "tool_discipline":
                         inv_parts.append(TOOL_DISCIPLINE)
                     case "citations":
@@ -263,6 +264,7 @@ def build_runtime_context_provider(
     shell_spec: ShellInfo | None = None,
     memory_manager: MemoryManager | None = None,
     todo_context_provider: Callable[[], str] | None = None,
+    identity: str = "",
 ) -> Callable[[str], list[str]]:
     """构建每轮运行时上下文，并按问题主动召回 opt-in 记忆。"""
     builder = prompt_builder or SystemPromptBuilder()
@@ -286,6 +288,7 @@ def build_runtime_context_provider(
                         project_root=root, registry=(), question=""
                     ).modules,
                     shell_spec=shell_spec,
+                    identity=identity,
                 )
             )
         ]

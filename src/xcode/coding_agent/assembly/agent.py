@@ -7,6 +7,14 @@ from typing import TYPE_CHECKING, Any
 
 from xcode.ai.providers.base import ModelProvider
 from xcode.agent.types import ToolSpec
+from xcode.agent.context import (
+    ActiveDiffCollector,
+    ContextCollectorRegistry,
+    DefaultContextAssembler,
+    InstructionCollector,
+    NotesCollector,
+    RecentValidationCollector,
+)
 from xcode.coding_agent.tools import ShellSpec
 from xcode.coding_agent.tools.apply_patch import extract_patch_paths
 from xcode.coding_agent.execution_modes import (
@@ -19,7 +27,7 @@ from xcode.harness.agent_runtime import (
     ContextualRetrievalState,
 )
 from xcode.coding_agent.harness import CodingAgentHarness
-from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
+from xcode.harness.agent_runtime.config import GateConfig
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.harness.config import AgentConfig, XcodeRuntimeConfig
@@ -38,6 +46,8 @@ from .security import (
     mode_rulesets_from_runtime_config,
     permission_policy_from_security,
 )
+from ..runtime import CodingAgentRuntimeConfig
+from ..prompting import CORE_IDENTITY
 
 if TYPE_CHECKING:
     from xcode.harness.skills import SkillRegistry
@@ -117,6 +127,24 @@ def build_agent(
     )
 
     sec = runtime_config.security
+    context_collectors = ContextCollectorRegistry()
+    context_collectors.register(
+        InstructionCollector(
+            sources=tuple(
+                i.model_dump(exclude_none=True)
+                for i in runtime_config.prompt.instructions
+            ),
+            project_root=project_root,
+        )
+    )
+    context_collectors.register(ActiveDiffCollector(project_root))
+    context_collectors.register(RecentValidationCollector())
+    context_collectors.register(NotesCollector(project_root))
+    if skill_registry is not None:
+        from xcode.harness.skills import SkillIndexCollector
+
+        context_collectors.register(SkillIndexCollector(skill_registry))
+
     return CodingAgentHarness(
         provider=llm,
         registry=registry,
@@ -135,7 +163,7 @@ def build_agent(
             mode_fallbacks=DEFAULT_MODE_FALLBACKS,
             tool_path_extractors={"apply_patch": extract_patch_paths},
         ),
-        runtime=AgentRuntimeConfig(
+        runtime=CodingAgentRuntimeConfig(
             compactor=compactor,
             compact_controller=compact_controller,
             cancellation_token=cancellation_token,
@@ -149,15 +177,14 @@ def build_agent(
                 todo_context_provider=(
                     todo_state.render_context if todo_state is not None else None
                 ),
+                identity=CORE_IDENTITY,
             ),
             fallback_provider=fallback_provider,
             project_root=project_root,
             request_hygiene=runtime_config.request_hygiene,
+            context_collectors=context_collectors,
+            context_assembler=DefaultContextAssembler(),
             skill_registry=skill_registry,
-            prompt_instructions=tuple(
-                i.model_dump(exclude_none=True)
-                for i in runtime_config.prompt.instructions
-            ),
             memory_manager=memory_manager,
             todo_state=todo_state,
         ),

@@ -1,4 +1,4 @@
-"""AgentEvent → CodingAgentHarnessEvent 翻译纯函数单元测试。"""
+"""AgentEvent 到 AgentHarnessEvent 的翻译纯函数单元测试。"""
 
 from __future__ import annotations
 

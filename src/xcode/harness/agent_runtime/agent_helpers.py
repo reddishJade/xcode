@@ -24,7 +24,7 @@ from .async_worker import IsolatedAsyncWorker
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .events import CodingAgentHarnessEvent
+    from .events import AgentHarnessEvent
 
 T = TypeVar("T")
 
@@ -144,7 +144,7 @@ def run_coro_sync(coro: Coroutine[Any, Any, T]) -> T:
 
 @dataclass(frozen=True)
 class _StreamItem:
-    event: CodingAgentHarnessEvent
+    event: AgentHarnessEvent
 
 
 @dataclass(frozen=True)
@@ -161,9 +161,9 @@ _StreamMessage = _StreamItem | _StreamError | _StreamDone
 
 
 def aiter_to_sync_iter(
-    async_iter: AsyncIterator[CodingAgentHarnessEvent],
+    async_iter: AsyncIterator[AgentHarnessEvent],
     cancellation_token: CancellationToken,
-) -> Iterator[CodingAgentHarnessEvent]:
+) -> Iterator[AgentHarnessEvent]:
     items: queue.Queue[_StreamMessage] = queue.Queue()
     worker = IsolatedAsyncWorker(name="xcode-sync-stream-worker")
 

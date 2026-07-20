@@ -11,14 +11,7 @@ from xcode.ai.providers.base import ModelProvider
 from xcode.ai.models import effective_compact_threshold
 from ...agent._compaction import extract_prompt_tokens_from_usage
 from ...agent.config import AgentLoopConfig, AgentLoopTurnUpdate
-from ...agent.context import (
-    ActiveDiffCollector,
-    ContextCollectorRegistry,
-    DefaultContextAssembler,
-    InstructionCollector,
-    NotesCollector,
-    RecentValidationCollector,
-)
+from ...agent.context import ContextCollectorRegistry, DefaultContextAssembler
 from ...agent._hygiene import apply_request_hygiene
 from ...agent._codec import convert_to_llm as _convert_to_llm
 from .prompting.citations import decorate_citable_messages
@@ -46,10 +39,7 @@ from ..security.permission_model import (
     Rule,
 )
 from ...agent.types import ApprovalCallback, ToolSpec
-from ..skills import SkillRegistry
-from ..memory import MemoryManager
 from .cancellation import CancellationToken
-from ..session_todo import SessionTodoState
 
 
 from .compaction import CompactController, estimate_message_tokens
@@ -106,10 +96,8 @@ class AgentRuntimeConfig:
     fallback_provider: ModelProvider | None = None
     project_root: Path | None = None
     request_hygiene: RequestHygieneConfig | None = None
-    skill_registry: SkillRegistry | None = None
-    memory_manager: MemoryManager | None = None
-    todo_state: SessionTodoState | None = None
-    prompt_instructions: tuple[dict, ...] = ()
+    context_collectors: ContextCollectorRegistry | None = None
+    context_assembler: DefaultContextAssembler | None = None
 
 
 @dataclass(frozen=True)
@@ -231,12 +219,11 @@ def build_loop_config(
     steer: Callable[[AgentMessage], None],
     emit_hook: Callable[[HookRecord], None],
     get_prompt_version: Callable[[], str],
-    project_root: Path | None = None,
-    prompt_instructions: tuple[dict, ...] = (),
+    context_collectors: ContextCollectorRegistry | None = None,
+    context_assembler: DefaultContextAssembler | None = None,
     correlation: RuntimeCorrelation | None = None,
-    # 以下为编码扩展参数，由 CodingAgentHarness 通过 _build_loop_config_extras 传入
+    # 领域扩展参数由上层装配后注入。
     mode_state: RuntimeModeState | None = None,
-    skill_registry: SkillRegistry | None = None,
     watchdog_repeated_tool_skip: frozenset[str] | None = None,
 ) -> AgentLoopConfig:
     active_correlation = correlation or RuntimeCorrelation("local")
@@ -297,43 +284,11 @@ def build_loop_config(
             )
         return None
 
-    # 构建上下文收集器 + 组装器
-    registry_: ContextCollectorRegistry | None = None
-    assembler: DefaultContextAssembler | None = None
-    if project_root is not None:
-        from xcode.harness.skills import (
-            SkillIndexCollector,
-            SkillRegistry,
-            build_skill_search_dirs,
-        )
-
-        registry_ = ContextCollectorRegistry()
-        registry_.register(
-            InstructionCollector(
-                sources=prompt_instructions,
-                project_root=project_root,
-            )
-        )
-        registry_.register(ActiveDiffCollector(project_root))
-        registry_.register(RecentValidationCollector())
-        registry_.register(NotesCollector(project_root))
-        sr = skill_registry
-        if sr is None:
-            sr = SkillRegistry()
-            sr.discover(
-                build_skill_search_dirs(
-                    project_root,
-                    trust_project_skills=False,
-                )
-            )
-        registry_.register(SkillIndexCollector(sr))
-        assembler = DefaultContextAssembler()
-
     return AgentLoopConfig(
         provider=snapshot.provider,
         convert_to_llm=_convert_to_llm_with_citations,
-        context_collectors=registry_,
-        context_assembler=assembler,
+        context_collectors=context_collectors,
+        context_assembler=context_assembler,
         max_steps=snapshot.config.max_steps,
         tool_workers=snapshot.config.tool_workers,
         tool_timeout_seconds=float(snapshot.config.tool_timeout_seconds),

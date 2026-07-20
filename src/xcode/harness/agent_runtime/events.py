@@ -1,4 +1,4 @@
-"""AgentEvent → CodingAgentHarnessEvent 事件翻译。"""
+"""AgentEvent 到 AgentHarnessEvent 的事件翻译。"""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from xcode.agent.types import (
 from ..observability import EventCorrelation, RuntimeCorrelation
 
 if TYPE_CHECKING:
-    from .result import CodingAgentHarnessResult
+    from .result import AgentHarnessResult
 
 
 @dataclass(frozen=True)
@@ -158,11 +158,11 @@ class CompactionStructuredEvent:
 class FinalStructuredEvent:
     type: Literal["final"]
     step: int
-    data: CodingAgentHarnessResult
+    data: AgentHarnessResult
     correlation: EventCorrelation = field(default_factory=EventCorrelation)
 
 
-type CodingAgentHarnessEvent = (
+type AgentHarnessEvent = (
     MessageStartStructuredEvent
     | TurnEndStructuredEvent
     | TextDeltaStructuredEvent
@@ -188,7 +188,7 @@ class _StreamTranslationState:
 def _translate_event(
     event: AgentEvent,
     state: _StreamTranslationState,
-) -> CodingAgentHarnessEvent | list[CodingAgentHarnessEvent] | None:
+) -> AgentHarnessEvent | list[AgentHarnessEvent] | None:
     if isinstance(event, AgentStartEvent):
         return None
 
@@ -229,7 +229,7 @@ def _translate_event(
 def _translate_message_update(
     event: MessageUpdateEvent,
     state: _StreamTranslationState,
-) -> CodingAgentHarnessEvent | None:
+) -> AgentHarnessEvent | None:
     msg = event.message
     if not isinstance(msg, AssistantMessage) or not msg.content:
         return None
@@ -346,7 +346,7 @@ def _translate_tool_execution_update(
 def _translate_tool_execution_end(
     event: ToolExecutionEndEvent,
     state: _StreamTranslationState,
-) -> CodingAgentHarnessEvent | list[CodingAgentHarnessEvent]:
+) -> AgentHarnessEvent | list[AgentHarnessEvent]:
     result_event = ToolResultStructuredEvent(
         "tool_result",
         state.step,

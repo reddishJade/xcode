@@ -29,7 +29,7 @@ _ANSI_RESET = "\x1b[0m"
 
 if TYPE_CHECKING:
     from xcode.harness.agent_runtime.events import (
-        CodingAgentHarnessEvent,
+        AgentHarnessEvent,
         FinalStructuredEvent,
     )
     from xcode.harness.security import HITLResult
@@ -203,7 +203,7 @@ class _TuiState:
         )
         self.log.append(_LogEntry("thinking", text + suffix))
 
-    def handle_event(self, event: CodingAgentHarnessEvent) -> None:
+    def handle_event(self, event: AgentHarnessEvent) -> None:
         if event.type == "reasoning_delta":
             self.thinking_core.handle_delta(event.data)
         elif event.type == "text_delta":

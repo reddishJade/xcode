@@ -33,7 +33,7 @@ from .config import (
 from .events import (
     _StreamTranslationState,
     _translate_event,
-    CodingAgentHarnessEvent,
+    AgentHarnessEvent,
 )
 from .fallback import _FallbackWithRetryPrimary
 from .message_codec import messages_from_run_state
@@ -41,7 +41,7 @@ from .result import (
     _build_structured_result,
     _final_event,
     RunState,
-    CodingAgentHarnessResult,
+    AgentHarnessResult,
 )
 from .run_control import (
     ActiveRunHandle,
@@ -64,10 +64,10 @@ _PROMPT_VERSION_CACHE: str | None = None
 def _get_prompt_version() -> str:
     global _PROMPT_VERSION_CACHE
     if _PROMPT_VERSION_CACHE is None:
-        from .prompting.identity import PROMPT_VERSION as _v
+        from .prompting.identity import prompt_version
 
-        _PROMPT_VERSION_CACHE = _v
-    return _PROMPT_VERSION_CACHE or "unknown"
+        _PROMPT_VERSION_CACHE = prompt_version()
+    return _PROMPT_VERSION_CACHE or "runtime"
 
 
 __all__ = ["AgentHarness"]
@@ -193,11 +193,11 @@ class AgentHarness:
 
     def _build_result(
         self, visible_result: object, max_steps: int
-    ) -> CodingAgentHarnessResult:
+    ) -> AgentHarnessResult:
         """构建 turn 结果。子类可覆盖以注入 current_mode 等。"""
         return _build_structured_result(visible_result, max_steps)  # type: ignore[arg-type]
 
-    def _post_run(self, final: CodingAgentHarnessResult) -> None:
+    def _post_run(self, final: AgentHarnessResult) -> None:
         """turn 完成后的子类钩子。例如记忆反馈。"""
         pass
 
@@ -313,28 +313,26 @@ class AgentHarness:
     def history_messages(self) -> list[AgentMessage]:
         return list(self._history)
 
-    def run(self, question: str) -> CodingAgentHarnessResult:
+    def run(self, question: str) -> AgentHarnessResult:
         return run_coro_sync(self.arun(question))
 
-    async def run_async(self, question: str) -> CodingAgentHarnessResult:
+    async def run_async(self, question: str) -> AgentHarnessResult:
         return await self.arun(question)
 
-    async def arun(self, question: str) -> CodingAgentHarnessResult:
-        result: CodingAgentHarnessResult | None = None
+    async def arun(self, question: str) -> AgentHarnessResult:
+        result: AgentHarnessResult | None = None
         async for event in self.arun_stream(question):
             if event.type == "final":
                 result = event.data
         assert result is not None
         return result
 
-    def run_stream(self, question: str) -> Iterator[CodingAgentHarnessEvent]:
+    def run_stream(self, question: str) -> Iterator[AgentHarnessEvent]:
         yield from aiter_to_sync_iter(
             self.arun_stream(question), self.cancellation_token
         )
 
-    async def arun_stream(
-        self, question: str
-    ) -> AsyncIterator[CodingAgentHarnessEvent]:
+    async def arun_stream(self, question: str) -> AsyncIterator[AgentHarnessEvent]:
         from .tool_hooks import emit_hook as _emit_hook
 
         snapshot = build_turn_snapshot(
@@ -365,8 +363,8 @@ class AgentHarness:
             steer=self.steer,
             emit_hook=lambda rec: _emit_hook(self._hook_manager, rec),
             get_prompt_version=_get_prompt_version,
-            project_root=self.project_root,
-            prompt_instructions=self._runtime.prompt_instructions,
+            context_collectors=self._runtime.context_collectors,
+            context_assembler=self._runtime.context_assembler,
             correlation=self._correlation,
             **self._build_loop_config_extras(),
         )

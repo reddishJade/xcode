@@ -7,7 +7,7 @@ from xcode.agent.messages import AgentMessage, UserMessage
 from xcode.harness.agent_runtime import (
     BusyMessageMode,
     CancellationToken,
-    CodingAgentHarnessEvent,
+    AgentHarnessEvent,
     SubmitOutcome,
 )
 from xcode.coding_agent.execution_modes import ExecutionMode
@@ -78,6 +78,6 @@ class ReplApp(ModelControlApp, ToolRegistryApp, Protocol):
 
     def ask_stream(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> Iterator[CodingAgentHarnessEvent]: ...
+    ) -> Iterator[AgentHarnessEvent]: ...
 
     def hook_diagnostics(self) -> tuple[ExternalHookDiagnostic, ...]: ...

@@ -1,10 +1,10 @@
-"""CodingAgentHarness 结果类型与转换。"""
+"""AgentHarness 结果类型与转换。"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 from ...agent.results import AgentLoopResult, TerminationReason
 from ...agent.messages import AssistantMessage
@@ -14,38 +14,16 @@ from .agent_helpers import text_from_blocks, to_dict
 from .events import FinalStructuredEvent
 from ..observability import EventCorrelation
 
-type ExecutionModeName = Literal["plan", "build", "act"]
-
-
-def _parse_execution_mode(value: object) -> ExecutionModeName | None:
-    if not isinstance(value, str):
-        return None
-    match value:
-        case "plan" | "build" | "act":
-            return value
-        case _:
-            return None
-
 
 @dataclass(frozen=True)
 class RunState:
-    """可序列化的运行状态快照。"""
+    """通用、可序列化的运行状态快照。"""
 
     messages: list[dict[str, Any]]
-    current_mode: ExecutionModeName = "act"
-    last_agent: str = "main"
-    needs_follow_up: bool = False
-    todos: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 可序列化字典。"""
-        return {
-            "messages": self.messages,
-            "current_mode": self.current_mode,
-            "last_agent": self.last_agent,
-            "needs_follow_up": self.needs_follow_up,
-            "todos": self.todos or [],
-        }
+        return {"messages": self.messages}
 
     @classmethod
     def from_dict(cls, payload: object) -> "RunState":
@@ -53,17 +31,11 @@ class RunState:
         if not isinstance(payload, Mapping):
             return cls(messages=[])
         raw_messages = payload.get("messages", [])
-        return cls(
-            messages=_message_dicts(raw_messages),
-            current_mode=_parse_execution_mode(payload.get("current_mode")) or "act",
-            last_agent=str(payload.get("last_agent", "main")),
-            needs_follow_up=bool(payload.get("needs_follow_up", False)),
-            todos=_todo_dicts(payload.get("todos", [])),
-        )
+        return cls(messages=_message_dicts(raw_messages))
 
 
 @dataclass(frozen=True)
-class CodingAgentHarnessResult:
+class AgentHarnessResult:
     answer: str
     messages: list[dict[str, Any]]
     steps: int
@@ -80,10 +52,8 @@ class CodingAgentHarnessResult:
 def _build_structured_result(
     result: AgentLoopResult,
     max_steps: int,
-    current_mode: ExecutionModeName = "act",
-    todos: list[dict[str, Any]] | None = None,
-) -> CodingAgentHarnessResult:
-    """将 AgentLoopResult 转换为 CodingAgentHarnessResult。"""
+) -> AgentHarnessResult:
+    """将 AgentLoopResult 转换为 AgentHarnessResult。"""
     answer_parts: list[str] = []
     tool_calls: list[ToolCall] = []
     messages: list[dict[str, Any]] = []
@@ -135,7 +105,7 @@ def _build_structured_result(
     elif result.termination_reason is TerminationReason.STEP_LIMIT and not answer:
         answer = "step limit reached"
 
-    return CodingAgentHarnessResult(
+    return AgentHarnessResult(
         answer=answer,
         messages=messages,
         steps=result.steps,
@@ -147,8 +117,6 @@ def _build_structured_result(
         error_detail=result.error_detail,
         run_state=RunState(
             messages=messages,
-            current_mode=current_mode,
-            todos=todos or [],
         ),
     )
 
@@ -159,15 +127,9 @@ def _message_dicts(value: object) -> list[dict[str, Any]]:
     return [dict(item) for item in value if isinstance(item, Mapping)]
 
 
-def _todo_dicts(value: object) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    return [dict(item) for item in value if isinstance(item, Mapping)]
-
-
 def _final_event(
     step: int,
-    result: CodingAgentHarnessResult,
+    result: AgentHarnessResult,
     correlation: EventCorrelation | None = None,
 ) -> FinalStructuredEvent:
     return FinalStructuredEvent(

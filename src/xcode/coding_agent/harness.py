@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 from typing import cast
 from uuid import uuid4
 
@@ -34,14 +35,16 @@ from xcode.harness.agent_runtime.config import (
     TurnSnapshot,
     build_turn_context_messages,
 )
-from xcode.harness.agent_runtime.events import CodingAgentHarnessEvent
+from xcode.harness.agent_runtime.events import AgentHarnessEvent
 from xcode.harness.agent_runtime.harness import AgentHarness
-from xcode.harness.agent_runtime.result import RunState, CodingAgentHarnessResult
+from xcode.harness.agent_runtime.result import AgentHarnessResult, RunState
 from .execution_modes import (
     ExecutionMode,
     ExecutionModeState,
     mode_notice,
 )
+from .state import CodingRunState
+from .runtime import CodingAgentRuntimeConfig
 
 __all__ = ["CodingAgentHarness"]
 
@@ -58,7 +61,10 @@ class CodingAgentHarness(AgentHarness):
         runtime: AgentRuntimeConfig | None = None,
     ) -> None:
         gate = gate or GateConfig()
-        runtime = runtime or AgentRuntimeConfig()
+        runtime = runtime or CodingAgentRuntimeConfig()
+        if not isinstance(runtime, CodingAgentRuntimeConfig):
+            raise TypeError("CodingAgentHarness requires CodingAgentRuntimeConfig")
+        self._coding_runtime = runtime
         self._mode = ExecutionModeState()
         self._memory_manager = runtime.memory_manager
         self._todo_state = runtime.todo_state
@@ -97,39 +103,49 @@ class CodingAgentHarness(AgentHarness):
     def _build_loop_config_extras(self) -> dict:
         return {
             "mode_state": self._mode,
-            "skill_registry": self._runtime.skill_registry,
         }
 
     def _build_result(
         self, visible_result: object, max_steps: int
-    ) -> CodingAgentHarnessResult:
+    ) -> AgentHarnessResult:
         from xcode.harness.agent_runtime.result import _build_structured_result
 
-        return _build_structured_result(
+        result = _build_structured_result(
             cast(AgentLoopResult, visible_result),
             max_steps,
-            self._mode.current_mode,
-            todos=self._todo_state.to_dicts() if self._todo_state is not None else None,
+        )
+        return replace(
+            result,
+            run_state=CodingRunState(
+                messages=result.messages,
+                current_mode=self._mode.current_mode,
+                todos=(
+                    self._todo_state.to_dicts()
+                    if self._todo_state is not None
+                    else None
+                ),
+            ),
         )
 
     def _post_load_history(self, messages: list[AgentMessage]) -> None:
-        if self._runtime.skill_registry is not None:
-            self._runtime.skill_registry.restore_activations(messages)
+        if self._coding_runtime.skill_registry is not None:
+            self._coding_runtime.skill_registry.restore_activations(messages)
 
-    def _post_run(self, final: CodingAgentHarnessResult) -> None:
+    def _post_run(self, final: AgentHarnessResult) -> None:
         self._record_memory_feedback(final)
 
     def load_run_state(self, run_state: RunState) -> None:
         super().load_run_state(run_state)
-        if run_state.current_mode in {"act", "plan", "build"}:
+        if isinstance(run_state, CodingRunState):
             self._mode.set_mode(run_state.current_mode)
         if self._todo_state is not None:
-            self._todo_state.replace(run_state.todos or [])
+            todos = run_state.todos if isinstance(run_state, CodingRunState) else []
+            self._todo_state.replace(todos or [])
 
     def clear_history(self) -> None:
         super().clear_history()
-        if self._runtime.skill_registry is not None:
-            self._runtime.skill_registry.clear_activations()
+        if self._coding_runtime.skill_registry is not None:
+            self._coding_runtime.skill_registry.clear_activations()
         if self._todo_state is not None:
             self._todo_state.replace([])
 
@@ -137,7 +153,7 @@ class CodingAgentHarness(AgentHarness):
 
     def available_skill_names(self) -> tuple[str, ...]:
         """返回当前运行时允许显式激活的技能名称。"""
-        registry = self._runtime.skill_registry
+        registry = self._coding_runtime.skill_registry
         return registry.available_names() if registry is not None else ()
 
     def activate_skill(
@@ -171,18 +187,18 @@ class CodingAgentHarness(AgentHarness):
 
     def run(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> CodingAgentHarnessResult:
+    ) -> AgentHarnessResult:
         return run_coro_sync(self.arun(question, mode=mode))
 
     async def run_async(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> CodingAgentHarnessResult:
+    ) -> AgentHarnessResult:
         return await self.arun(question, mode=mode)
 
     async def arun(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> CodingAgentHarnessResult:
-        result: CodingAgentHarnessResult | None = None
+    ) -> AgentHarnessResult:
+        result: AgentHarnessResult | None = None
         async for event in self.arun_stream(question, mode=mode):
             if event.type == "final":
                 result = event.data
@@ -191,14 +207,14 @@ class CodingAgentHarness(AgentHarness):
 
     def run_stream(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> Iterator[CodingAgentHarnessEvent]:
+    ) -> Iterator[AgentHarnessEvent]:
         if mode is not None:
             self._mode.set_mode(mode)
         yield from super().run_stream(question)
 
     async def arun_stream(
         self, question: str, mode: ExecutionMode | None = None
-    ) -> AsyncIterator[CodingAgentHarnessEvent]:
+    ) -> AsyncIterator[AgentHarnessEvent]:
         if mode is not None:
             self._mode.set_mode(mode)
         async for event in super().arun_stream(question):
@@ -216,7 +232,7 @@ class CodingAgentHarness(AgentHarness):
                 status="unknown",
                 message="Skill name is required.",
             )
-        skill_registry = self._runtime.skill_registry
+        skill_registry = self._coding_runtime.skill_registry
         if skill_registry is None:
             return ExplicitSkillActivationResult(
                 name=name,
@@ -340,7 +356,7 @@ class CodingAgentHarness(AgentHarness):
 
     # ── 记忆反馈 ──
 
-    def _record_memory_feedback(self, final: CodingAgentHarnessResult) -> None:
+    def _record_memory_feedback(self, final: AgentHarnessResult) -> None:
         manager = self._memory_manager
         if manager is None:
             return
@@ -355,7 +371,7 @@ class CodingAgentHarness(AgentHarness):
         manager.record_session_outcome(outcome, source=source)
 
     def _memory_outcome_for_result(
-        self, final: CodingAgentHarnessResult
+        self, final: AgentHarnessResult
     ) -> MemoryOutcome | None:
         answer = final.answer.strip()
         if final.termination_reason is TerminationReason.COMPLETED:

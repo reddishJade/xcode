@@ -3,8 +3,8 @@
 from .cancellation import CancellationToken
 from .compaction import estimate_message_tokens
 from .contextual import ContextualRetrievalState
-from .events import CodingAgentHarnessEvent
-from .result import CodingAgentHarnessResult, RunState
+from .events import AgentHarnessEvent
+from .result import AgentHarnessResult, RunState
 from .run_control import (
     ActiveRunHandle,
     ActiveRunState,
@@ -19,8 +19,8 @@ __all__ = [
     "ActiveRunHandle",
     "ActiveRunState",
     "BusyMessageMode",
-    "CodingAgentHarnessEvent",
-    "CodingAgentHarnessResult",
+    "AgentHarnessEvent",
+    "AgentHarnessResult",
     "ContextualRetrievalState",
     "RunState",
     "SessionRunController",
