@@ -40,6 +40,7 @@ from ..app_contract import ReplApp
 from ..commands import ReplState
 from ..completion import CommandArgsSuggester, ReplCompleter
 from ..file_refs import expand_file_references
+from ..git import git_branch_name
 from ..markdown import TerminalMarkdownRenderer
 from ..repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
 from ..repl_hitl import HITL_CHOICES, parse_hitl_choice, tool_preview_lines
@@ -1438,7 +1439,9 @@ class _XcodeTui:
         model = str(info.get("model") or self._repl_state.model_name or "unknown")
         effort = str(info.get("reasoning_effort") or "")
         model_display = f"{model} ({effort})" if effort else model
-        return f"✦ Xcode\n· {model_display}\n: {self._project_root}"
+        branch = git_branch_name(self._project_root)
+        branch_line = f"\n⌘ {branch}" if branch else ""
+        return f"✦ Xcode\n· {model_display}\n: {self._project_root}{branch_line}"
 
 
 # ── 模块级工具函数 ──

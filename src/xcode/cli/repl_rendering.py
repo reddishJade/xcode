@@ -16,6 +16,7 @@ from rich.text import Text
 
 from .commands import CommandEntry, PromptLike, PromptText, ReplState
 from .completion import CommandArgsSuggester, ReplCompleter
+from .git import git_branch_name
 from .shared.thinking import (  # noqa: F401 — re-exported for back-compat
     format_elapsed,
     reasoning_preview_lines,
@@ -174,6 +175,9 @@ def print_startup_banner(app: object, root: Path) -> None:
     lines.append(f"thinking: {thinking}\n", style=CLI_COLOR_DIM)
     lines.append(f"effort:   {effort}\n", style=CLI_COLOR_DIM)
     lines.append(f"cwd:      {root}", style=CLI_COLOR_DIM)
+    branch = git_branch_name(root)
+    if branch:
+        lines.append(f"\nbranch:   {branch}", style=CLI_COLOR_DIM)
     console.print(
         Panel(lines, border_style=CLI_COLOR_DIM, padding=(0, 1), expand=False)
     )
@@ -252,11 +256,17 @@ def format_thinking(value: object) -> str:
     return "unknown"
 
 
-def make_bottom_toolbar(state: ReplState) -> Callable[[], str]:
+def make_bottom_toolbar(
+    state: ReplState, project_root: Path | None = None
+) -> Callable[[], str]:
     """返回 prompt_toolkit bottom_toolbar 可调用对象。"""
 
     def toolbar() -> str:
         parts = [f"cwd: {state.last_dir}"] if state.last_dir else []
+        if project_root is not None:
+            branch = git_branch_name(project_root)
+            if branch:
+                parts.append(f"branch: {branch}")
         if state.model_name:
             parts.append(f"model: {state.model_name}")
         parts.append(f"mode: {state.mode}")
@@ -337,7 +347,7 @@ def create_prompt_session(
 
     bottom_toolbar = None
     if state is not None:
-        bottom_toolbar = make_bottom_toolbar(state)
+        bottom_toolbar = make_bottom_toolbar(state, project_root)
 
     session: Any = cast(Any, PromptSession)(
         multiline=True,
