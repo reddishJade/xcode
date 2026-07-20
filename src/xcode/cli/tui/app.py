@@ -10,6 +10,7 @@ import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from queue import Empty, Queue
 from threading import Event
 from time import perf_counter
 from typing import TYPE_CHECKING, cast
@@ -58,7 +59,7 @@ from ..repl_tools import (
     run_shell_shortcut,
 )
 from xcode.agent.messages import UserMessage
-from xcode.harness.agent_runtime import SubmitStatus
+from xcode.harness.agent_runtime import AgentHarnessEvent, SubmitStatus
 from .state import (
     _CommandChoiceRequest,
     _CommandTextRequest,
@@ -174,6 +175,9 @@ class _XcodeTui:
         self._awaiting_denial_suggestion = False
         self._exit_pending = 0.0
         self._last_stream_refresh = 0.0
+        self._agent_event_queue: Queue[AgentHarnessEvent] = Queue()
+        self._agent_event_queue_lock = threading.Lock()
+        self._agent_event_drain_scheduled = False
 
         # ── UI 组件 ──
         self._output_control = TuiOutputControl(self._scroll_by)
@@ -1293,9 +1297,9 @@ class _XcodeTui:
                     answer = event.data.answer
                 if isinstance(event, (ToolUseStructuredEvent,)):
                     tool_names.append(event.data.name)
-                self._state.handle_event(event)
-                self._refresh_streaming()
+                self._dispatch_agent_event(event)
         except Exception as exc:
+            self._wait_for_agent_events()
             flush_thinking()
             self._save_partial_answer()
             detail = str(exc) or repr(exc)
@@ -1307,6 +1311,7 @@ class _XcodeTui:
             self._schedule_turn_commit()
             return
 
+        self._wait_for_agent_events()
         flush_thinking()
 
         if answer:
@@ -1340,9 +1345,59 @@ class _XcodeTui:
         partial = "".join(
             entry.content() for entry in self._state.log if entry.role == "xcode"
         ).strip()
+        if self._state.streaming_answer is not None:
+            partial = (partial + self._state.streaming_answer.content()).strip()
         if partial:
             self._store.append("assistant", partial)
             self._store.update_summary()
+
+    def _dispatch_agent_event(self, event: AgentHarnessEvent) -> None:
+        """将 agent 事件放入队列，由 UI loop 批量更新显示状态。"""
+        loop = self._application.loop
+        if loop is None:
+            self._state.handle_event(event)
+            self._refresh_streaming()
+            return
+
+        self._agent_event_queue.put(event)
+        with self._agent_event_queue_lock:
+            if self._agent_event_drain_scheduled:
+                return
+            self._agent_event_drain_scheduled = True
+        loop.call_soon_threadsafe(self._drain_agent_events)
+
+    def _drain_agent_events(self) -> None:
+        """在 UI 线程批量处理已排队事件，并最多触发一次重绘。"""
+        while True:
+            try:
+                event = self._agent_event_queue.get_nowait()
+            except Empty:
+                break
+            self._state.handle_event(event)
+        self._refresh_streaming()
+        with self._agent_event_queue_lock:
+            self._agent_event_drain_scheduled = False
+            has_pending = not self._agent_event_queue.empty()
+            if has_pending:
+                self._agent_event_drain_scheduled = True
+        if has_pending:
+            loop = self._application.loop
+            if loop is not None:
+                loop.call_soon(self._drain_agent_events)
+
+    def _wait_for_agent_events(self) -> None:
+        """等待本回合已产生的事件全部进入状态，避免保存结果时竞态。"""
+        loop = self._application.loop
+        if loop is None:
+            return
+        completed = Event()
+
+        def finish() -> None:
+            self._drain_agent_events()
+            completed.set()
+
+        loop.call_soon_threadsafe(finish)
+        completed.wait()
 
     # ── 刷新 ──
 
@@ -1393,7 +1448,7 @@ class _XcodeTui:
         return min(5, visual_lines)
 
     def _max_scrollback(self) -> int:
-        return max(0, len(self._state.lines()) - self._output_height())
+        return max(0, self._state.line_count() - self._output_height())
 
     def _should_capture_mouse(self) -> bool:
         """仅在 TUI 仍有可滚动历史时捕获滚轮。"""
@@ -1409,12 +1464,12 @@ class _XcodeTui:
         """更新会改变行数的显示状态，并保持当前视口的顶部位置。"""
         top_line = max(
             0,
-            len(self._state.lines()) - self._output_height() - self._scrollback,
+            self._state.line_count() - self._output_height() - self._scrollback,
         )
         update()
         self._scrollback = max(
             0,
-            len(self._state.lines()) - self._output_height() - top_line,
+            self._state.line_count() - self._output_height() - top_line,
         )
 
     def _refresh(self) -> None:

@@ -10,7 +10,8 @@ def test_streaming_answer_keeps_chunks_without_copying_previous_text() -> None:
     state._append_or_update_answer(" two")
     state._append_or_update_answer(" three")
 
-    entry = state.log[-1]
+    entry = state.streaming_answer
+    assert entry is not None
     assert entry.content() == "one two three"
     assert entry.text == ""
     assert entry.text_parts == ["one", " two", " three"]
