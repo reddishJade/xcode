@@ -95,6 +95,13 @@ class _LogEntry:
     text: str = ""
     markdown: bool = False
     exploration_calls: list[_ExplorationCall] = field(default_factory=list)
+    text_parts: list[str] | None = None
+
+    def content(self) -> str:
+        """返回日志内容；流式回答使用分块存储以避免反复复制全文。"""
+        if self.text_parts is not None:
+            return "".join(self.text_parts)
+        return self.text
 
 
 @dataclass
@@ -316,11 +323,11 @@ class _TuiState:
         if lines and entry.role not in {"tool", "tool-detail", "exploration"}:
             lines.append("")
         if entry.role == "command":
-            cmd_lines = entry.text.splitlines() or [""]
+            cmd_lines = entry.content().splitlines() or [""]
             lines.append(f"> {cmd_lines[0]}")
             lines.extend(f"  {line}" for line in cmd_lines[1:])
         elif entry.role == "you":
-            user_lines = entry.text.splitlines() or [""]
+            user_lines = entry.content().splitlines() or [""]
             lines.append(f"> {user_lines[0]}")
             lines.extend(f"  {line}" for line in user_lines[1:])
         elif entry.role == "tool":
@@ -348,7 +355,7 @@ class _TuiState:
             if show_tool_collapse and entry.exploration_calls:
                 lines[-1] += " (ctrl+o to collapse)"
         elif entry.role in {"", "tool-detail"}:
-            detail_lines = entry.text.splitlines() or [""]
+            detail_lines = entry.content().splitlines() or [""]
             if show_tool_collapse:
                 detail_lines[-1] += " (ctrl+o to collapse)"
             lines.extend(detail_lines)
@@ -360,9 +367,9 @@ class _TuiState:
                 color=color_thinking,
             )
         elif entry.markdown:
-            lines.extend(md_fn(_render_citations(entry.text)))
+            lines.extend(md_fn(_render_citations(entry.content())))
         else:
-            lines.extend(entry.text.splitlines() or [""])
+            lines.extend(entry.content().splitlines() or [""])
 
     def _append_single_exploration(
         self,
@@ -401,7 +408,7 @@ class _TuiState:
     def _append_thinking_entry(
         self, entry: _LogEntry, lines: list[str], plain_text: bool, color: bool
     ) -> None:
-        entry_lines = entry.text.splitlines() or [""]
+        entry_lines = entry.content().splitlines() or [""]
         has_timing = entry_lines[-1].startswith("Thought for ")
         dur_text = entry_lines[-1].removeprefix("Thought for ") if has_timing else ""
         if has_timing:
@@ -453,9 +460,13 @@ class _TuiState:
 
     def _append_or_update_answer(self, delta: str) -> None:
         if self.log and self.log[-1].role == "xcode" and self.log[-1].markdown:
-            self.log[-1] = _LogEntry("xcode", self.log[-1].text + delta, markdown=True)
+            entry = self.log[-1]
+            if entry.text_parts is None:
+                entry.text_parts = [entry.text]
+                entry.text = ""
+            entry.text_parts.append(delta)
         else:
-            self.log.append(_LogEntry("xcode", delta, markdown=True))
+            self.log.append(_LogEntry("xcode", markdown=True, text_parts=[delta]))
 
     def _record_tool_use(self, tool_id: str, name: str, raw_input: ToolInput) -> None:
         if _is_exploration_call(name, raw_input):

@@ -131,6 +131,8 @@ def run_tui(
 
 
 class _XcodeTui:
+    _STREAM_REFRESH_INTERVAL = 0.05
+
     def __init__(
         self,
         app: ReplApp,
@@ -171,6 +173,7 @@ class _XcodeTui:
         self._prompt_session = TuiPromptSession()
         self._awaiting_denial_suggestion = False
         self._exit_pending = 0.0
+        self._last_stream_refresh = 0.0
 
         # ── UI 组件 ──
         self._output_control = TuiOutputControl(self._scroll_by)
@@ -1271,6 +1274,7 @@ class _XcodeTui:
             thinking_started_at = None
 
         try:
+            self._last_stream_refresh = 0.0
             for event in self._agent_app.ask_stream(text, mode=self._repl_state.mode):
                 if event.type == "reasoning_delta":
                     thinking_parts.append(event.data)
@@ -1290,7 +1294,7 @@ class _XcodeTui:
                 if isinstance(event, (ToolUseStructuredEvent,)):
                     tool_names.append(event.data.name)
                 self._state.handle_event(event)
-                self._refresh()
+                self._refresh_streaming()
         except Exception as exc:
             flush_thinking()
             self._save_partial_answer()
@@ -1334,7 +1338,7 @@ class _XcodeTui:
     def _save_partial_answer(self) -> None:
         """将中断前已经流式显示的回答写入会话，供恢复和后续注入使用。"""
         partial = "".join(
-            entry.text for entry in self._state.log if entry.role == "xcode"
+            entry.content() for entry in self._state.log if entry.role == "xcode"
         ).strip()
         if partial:
             self._store.append("assistant", partial)
@@ -1417,6 +1421,14 @@ class _XcodeTui:
         self._scrollback = min(self._scrollback, self._max_scrollback())
         self._output_control.text = self._fragments()
         self._application.invalidate()
+
+    def _refresh_streaming(self) -> None:
+        """限制流式输出重绘频率，避免每个 delta 都触发完整布局。"""
+        now = perf_counter()
+        if now - self._last_stream_refresh < self._STREAM_REFRESH_INTERVAL:
+            return
+        self._last_stream_refresh = now
+        self._refresh()
 
     def _status_text(self) -> str:
         left = f"mode: {self._repl_state.mode}"
