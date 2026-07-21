@@ -267,6 +267,8 @@ class TreeSessionRepo:
         known = {item.id: item for item in self._load_metadata()}
         views: list[SessionInfoView] = []
         for path in self._session_paths():
+            if not self.is_meaningful_session(path):
+                continue
             meta = known.get(self._session_id(path))
             views.append(self._view_for_path(path, meta))
         sorted_views = sorted(views, key=lambda v: v.updated_at, reverse=True)
