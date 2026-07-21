@@ -112,6 +112,9 @@ class PermissionEngineResult:
     decision: PermissionDecision
     blocked: bool
     reason: str = ""
+    reason_code: str | None = None
+    overrideable: bool | None = None
+    remediation: str | None = None
     matched_rule: str | None = None
     source: str | None = None
     metadata: PermissionMetadata | None = None
@@ -121,6 +124,17 @@ class PermissionEngineResult:
     shadow_approval_candidate: ApprovalCandidate | None = None
     approval_result: ApprovalResult | None = None
     action: Action | None = None
+
+
+def _denial_details(verdict: Verdict) -> tuple[str | None, bool | None, str | None]:
+    """从裁决元数据中提取供界面消费的结构化拒绝说明。"""
+    reason_code_value = verdict.metadata.get("reason_code")
+    overrideable_value = verdict.metadata.get("overrideable")
+    remediation_value = verdict.metadata.get("remediation")
+    reason_code = reason_code_value if isinstance(reason_code_value, str) else None
+    overrideable = overrideable_value if isinstance(overrideable_value, bool) else None
+    remediation = remediation_value if isinstance(remediation_value, str) else None
+    return reason_code, overrideable, remediation
 
 
 @dataclass(frozen=True)
@@ -250,10 +264,14 @@ class PermissionEngine:
         )
 
         if verdict.decision == "deny":
+            reason_code, overrideable, remediation = _denial_details(verdict)
             return PermissionEngineResult(
                 decision="deny",
                 blocked=True,
                 reason=verdict.reason,
+                reason_code=reason_code,
+                overrideable=overrideable,
+                remediation=remediation,
                 matched_rule=verdict.source,
                 source=verdict.source,
             )
@@ -332,6 +350,7 @@ class PermissionEngine:
                     reason=c.reason,
                     winning_constraint=c,
                     constraints=(c,),
+                    metadata=c.metadata,
                 )
 
         # Step 2: ModePolicy 仍保留（execution_decision 来自 check_call）
@@ -348,6 +367,7 @@ class PermissionEngine:
                         reason=c.reason,
                         winning_constraint=c,
                         constraints=(c,),
+                        metadata=c.metadata,
                     )
 
         # Step 3: StaticPolicy（用户配置的静态规则）
@@ -404,6 +424,13 @@ class PermissionEngine:
             final_decision = rule_decision
 
         if final_decision != resolver_verdict.decision:
+            metadata: dict[str, object] = {}
+            if final_decision == "deny":
+                metadata = {
+                    "reason_code": "rule_denied",
+                    "overrideable": False,
+                    "remediation": "Update the configured permission rule.",
+                }
             return Verdict(
                 decision=final_decision,
                 source="rule_matcher",
@@ -413,6 +440,7 @@ class PermissionEngine:
                 ),
                 winning_constraint=None,
                 constraints=all_constraints,
+                metadata=metadata,
             )
 
         return resolver_verdict
@@ -483,6 +511,9 @@ class PermissionEngine:
                     decision="deny",
                     blocked=True,
                     reason=f"restricted path matched for tool: {action.tool}",
+                    reason_code="restricted_directory",
+                    overrideable=False,
+                    remediation="Remove or adjust the matching restricted_dirs entry.",
                     matched_rule=MATCHED_RESTRICTED_DIRS,
                     source=SOURCE_CONFIG,
                 )
@@ -495,6 +526,9 @@ class PermissionEngine:
                     "filesystem paths could not be extracted safely while "
                     f"restricted_dirs is configured for tool: {action.tool}"
                 ),
+                reason_code="unresolved_path_with_restricted_dirs",
+                overrideable=False,
+                remediation="Use a command or tool input with a statically resolvable path.",
                 matched_rule=MATCHED_RESTRICTED_DIRS,
                 source=SOURCE_CONFIG,
             )

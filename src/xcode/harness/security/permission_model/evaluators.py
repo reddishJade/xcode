@@ -31,6 +31,15 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
+def _deny_metadata(reason_code: str, remediation: str) -> dict[str, object]:
+    """构造不可由审批覆盖的拒绝说明。"""
+    return {
+        "reason_code": reason_code,
+        "overrideable": False,
+        "remediation": remediation,
+    }
+
+
 class ModePolicyEvaluator:
     def __init__(self, decision: PermissionDecisionV2 | None) -> None:
         self._decision: PermissionDecisionV2 | None = decision
@@ -44,6 +53,14 @@ class ModePolicyEvaluator:
                 source="mode",
                 reason=f"mode policy returned {self._decision} for {action.tool}",
                 operation=action.operation,
+                metadata=(
+                    _deny_metadata(
+                        "mode_denied",
+                        "Switch execution mode or update its permission rules.",
+                    )
+                    if self._decision == "deny"
+                    else {}
+                ),
             ),
         )
 
@@ -117,6 +134,14 @@ class StaticPolicyEvaluator:
     def _constraints_for_action(
         self, action: Action, decision: PermissionDecisionV2, reason: str
     ) -> tuple[Constraint, ...]:
+        metadata = (
+            _deny_metadata(
+                "rule_denied",
+                "Update the configured static permission rule.",
+            )
+            if decision == "deny"
+            else {}
+        )
         if not action.targets:
             return (
                 Constraint(
@@ -124,6 +149,7 @@ class StaticPolicyEvaluator:
                     source="rule",
                     reason=reason,
                     operation=action.operation,
+                    metadata=metadata,
                 ),
             )
 
@@ -135,6 +161,7 @@ class StaticPolicyEvaluator:
                 target_pattern=target.value,
                 operation=action.operation,
                 access=target.access,
+                metadata=metadata,
             )
             for target in action.targets
         )
@@ -167,6 +194,10 @@ class PathBoundaryPolicyEvaluator:
                     target_pattern=path_str,
                     operation=action.operation,
                     access=target.access,
+                    metadata=_deny_metadata(
+                        "outside_approved_roots",
+                        "Add the directory to external_directories with the required access.",
+                    ),
                 )
             return self._check_restrictions(path_str, path_str, action, target)
 
@@ -188,6 +219,10 @@ class PathBoundaryPolicyEvaluator:
                 target_pattern=path_str,
                 operation=action.operation,
                 access=target.access,
+                metadata=_deny_metadata(
+                    "outside_approved_roots",
+                    "Add the directory to external_directories with the required access.",
+                ),
             )
         except _BoundaryResolutionError as exc:
             candidate = self._try_external_directory(target, action)
@@ -200,6 +235,10 @@ class PathBoundaryPolicyEvaluator:
                 target_pattern=path_str,
                 operation=action.operation,
                 access=target.access,
+                metadata=_deny_metadata(
+                    "unresolved_path",
+                    "Use a canonical path without unresolved links or expansions.",
+                ),
             )
 
     def _try_external_directory(
@@ -241,6 +280,10 @@ class PathBoundaryPolicyEvaluator:
                 target_pattern=check_path,
                 operation=action.operation,
                 access=target.access,
+                metadata=_deny_metadata(
+                    "git_metadata",
+                    "Use Git commands instead of accessing .git metadata directly.",
+                ),
             )
 
         if _is_sensitive_path(check_path, access=target.access):
@@ -251,6 +294,10 @@ class PathBoundaryPolicyEvaluator:
                 target_pattern=check_path,
                 operation=action.operation,
                 access=target.access,
+                metadata=_deny_metadata(
+                    "sensitive_path",
+                    "Use a non-sensitive file; built-in sensitive paths cannot be approved.",
+                ),
             )
 
         if _is_blocked_workspace_path(check_path):
@@ -261,6 +308,10 @@ class PathBoundaryPolicyEvaluator:
                 target_pattern=check_path,
                 operation=action.operation,
                 access=target.access,
+                metadata=_deny_metadata(
+                    "workspace_blocked_path",
+                    "Use a path outside the built-in blocked workspace directories.",
+                ),
             )
 
         return Constraint(
