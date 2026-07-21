@@ -105,6 +105,20 @@ class SecurityExternalDirectory(BaseModel):
     access: DirAccess = "read"
 
 
+class SecuritySensitivePathOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(min_length=1)
+    access: DirAccess = "read"
+
+    @field_validator("path")
+    @classmethod
+    def _require_exact_path(cls, value: str) -> str:
+        """拒绝通配符，避免用户误以为例外会覆盖一组敏感文件。"""
+        if any(character in value for character in "*?[]"):
+            raise ValueError("sensitive path override must be an exact path")
+        return value
+
+
 class ModeRuleRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: str = Field(min_length=1)
@@ -147,6 +161,7 @@ class SecurityRuntimeConfig(BaseModel):
     )
     global_default: str | None = None
     external_directories: tuple[SecurityExternalDirectory, ...] = ()
+    sensitive_path_overrides: tuple[SecuritySensitivePathOverride, ...] = ()
 
     def resolve_approval_policy(self) -> str:
         return self.approval_policy

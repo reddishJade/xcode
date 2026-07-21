@@ -28,6 +28,7 @@ from .permission_model import (
     PermissionResolver,
     PathExtractor,
     Rule,
+    SensitivePathOverride,
     StaticPermission,
     Verdict,
     compute_shadow_approval_candidate,
@@ -148,6 +149,7 @@ class PermissionEngineConfig:
     shadow_model_enabled: bool = False
     project_root: Path | None = None
     external_directories: tuple[ExternalDirectory, ...] = ()
+    sensitive_path_overrides: tuple[SensitivePathOverride, ...] = ()
     session_grant_store: GrantStore | None = None
     permanent_grant_store: GrantStore | None = None
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
@@ -480,6 +482,7 @@ class PermissionEngine:
         return BoundaryContext(
             project_root=self._config.project_root,
             external_directories=self._config.external_directories,
+            sensitive_path_overrides=self._config.sensitive_path_overrides,
         )
 
     def _shadow_diff(

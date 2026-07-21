@@ -92,6 +92,19 @@ class ExternalDirectory(BaseModel):
         return self
 
 
+class SensitivePathOverride(BaseModel):
+    """对单个环境配置文件的显式访问例外。"""
+
+    model_config = ConfigDict(extra="forbid")
+    path: Path
+    access: DirAccess = "read"
+
+    @model_validator(mode="after")
+    def _resolve_path(self) -> SensitivePathOverride:
+        self.path = self.path.expanduser().resolve(strict=False)
+        return self
+
+
 class StaticPermission(BaseModel):
     model_config = ConfigDict(extra="forbid")
     tool: str
@@ -142,6 +155,7 @@ class BoundaryContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
     project_root: Path
     external_directories: tuple[ExternalDirectory, ...] = ()
+    sensitive_path_overrides: tuple[SensitivePathOverride, ...] = ()
 
 
 class ApprovalResult(BaseModel):

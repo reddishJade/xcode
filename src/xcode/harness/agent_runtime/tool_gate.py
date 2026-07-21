@@ -44,6 +44,7 @@ from ..security.permission_model import (
     PolicyEvaluator,
     PathExtractor,
     Rule,
+    SensitivePathOverride,
 )
 from ...agent.types import (
     ApprovalCallback,
@@ -117,6 +118,7 @@ class ToolGateSnapshot:
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
     project_root: Path | None = None
     external_directories: tuple[ExternalDirectory, ...] = ()
+    sensitive_path_overrides: tuple[SensitivePathOverride, ...] = ()
     session_grant_store: GrantStore | None = None
     permanent_grant_store: GrantStore | None = None
     mode_ruleset: tuple[Rule, ...] = ()
@@ -146,6 +148,7 @@ class ToolGate:
         hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
         project_root: Path | None = None,
         external_directories: tuple[ExternalDirectory, ...] = (),
+        sensitive_path_overrides: tuple[SensitivePathOverride, ...] = (),
         session_grant_store: GrantStore | None = None,
         session_grant_store_provider: Callable[[], GrantStore | None] | None = None,
         permanent_grant_store: GrantStore | None = None,
@@ -166,6 +169,7 @@ class ToolGate:
         self._restricted_dirs = restricted_dirs
         self._hook_constraint_providers = hook_constraint_providers
         self._external_directories = external_directories
+        self._sensitive_path_overrides = sensitive_path_overrides
         self._hook_manager = hook_manager
         self._external_hook_runner = external_hook_runner
         self._external_hooks_subagent = external_hooks_subagent
@@ -210,6 +214,7 @@ class ToolGate:
             hook_constraint_providers=self._hook_constraint_providers,
             project_root=self._project_root,
             external_directories=self._external_directories,
+            sensitive_path_overrides=self._sensitive_path_overrides,
             session_grant_store=self._resolve_session_store(),
             permanent_grant_store=self._permanent_grant_store,
             mode_ruleset=default_rules,
@@ -231,6 +236,7 @@ class ToolGate:
             hook_constraint_providers=self._hook_constraint_providers,
             project_root=self._project_root,
             external_directories=self._external_directories,
+            sensitive_path_overrides=self._sensitive_path_overrides,
             session_grant_store=self._resolve_session_store(),
             permanent_grant_store=self._permanent_grant_store,
             mode_ruleset=default_rules,
@@ -287,6 +293,7 @@ class ToolGate:
             hook_constraint_providers=self._hook_constraint_providers,
             project_root=self._project_root,
             external_directories=self._external_directories,
+            sensitive_path_overrides=self._sensitive_path_overrides,
             session_grant_store=self._session_grant_store,
             session_grant_store_provider=self._session_grant_store_provider,
             permanent_grant_store=self._permanent_grant_store,
@@ -516,6 +523,7 @@ class ToolGate:
                 hook_constraint_providers=snapshot.hook_constraint_providers,
                 project_root=snapshot.project_root,
                 external_directories=snapshot.external_directories,
+                sensitive_path_overrides=snapshot.sensitive_path_overrides,
                 session_grant_store=snapshot.session_grant_store,
                 permanent_grant_store=snapshot.permanent_grant_store,
                 tool_action_profiles=action_profiles,

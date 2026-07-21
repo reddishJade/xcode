@@ -286,7 +286,18 @@ class PathBoundaryPolicyEvaluator:
                 ),
             )
 
-        if _is_sensitive_path(check_path, access=target.access):
+        if _is_sensitive_path(
+            check_path, access=target.access
+        ) and not self._sensitive_override_allows(check_path, target):
+            remediation = (
+                "Add this exact environment file to sensitive_path_overrides "
+                "with the required access."
+                if self._is_environment_path(check_path)
+                else (
+                    "Use a non-sensitive file; credential paths cannot be approved "
+                    "or overridden."
+                )
+            )
             return Constraint(
                 decision="deny",
                 source="boundary",
@@ -296,7 +307,7 @@ class PathBoundaryPolicyEvaluator:
                 access=target.access,
                 metadata=_deny_metadata(
                     "sensitive_path",
-                    "Use a non-sensitive file; built-in sensitive paths cannot be approved.",
+                    remediation,
                 ),
             )
 
@@ -322,6 +333,34 @@ class PathBoundaryPolicyEvaluator:
             operation=action.operation,
             access=target.access,
         )
+
+    def _sensitive_override_allows(self, check_path: str, target: Target) -> bool:
+        """仅允许配置中精确声明的环境文件访问例外。"""
+        if self._context is None:
+            return False
+        if target.access not in {"read", "write"}:
+            return False
+        path = Path(check_path)
+        if not self._is_environment_path(check_path):
+            return False
+        if any(part in CREDENTIAL_PATH_PARTS for part in path.parts):
+            return False
+        if not path.is_absolute():
+            path = self._context.project_root / path
+        try:
+            resolved = path.expanduser().resolve(strict=False)
+        except (OSError, RuntimeError):
+            return False
+        return any(
+            resolved == override.path
+            and _access_satisfies(override.access, target.access)
+            for override in self._context.sensitive_path_overrides
+        )
+
+    def _is_environment_path(self, check_path: str) -> bool:
+        """判断路径是否属于可显式配置例外的环境文件。"""
+        name = Path(check_path).name
+        return name == ".env" or name.startswith(".env.")
 
     def _resolve_workspace_path(self, target: Target) -> str:
         assert self._context is not None

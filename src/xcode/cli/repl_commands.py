@@ -1425,6 +1425,11 @@ def _revert_turn(
                     external_directories=getattr(undo_agent, "external_directories", ())
                     if undo_agent is not None
                     else (),
+                    sensitive_path_overrides=getattr(
+                        undo_agent, "sensitive_path_overrides", ()
+                    )
+                    if undo_agent is not None
+                    else (),
                     session_grant_store=ctx.session_grant_store,
                     permanent_grant_store=ctx.permanent_grant_store,
                 )

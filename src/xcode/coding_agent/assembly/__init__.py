@@ -19,6 +19,7 @@ from .security import (
     external_directories_from_security,
     mode_rulesets_from_runtime_config,
     permission_policy_from_security,
+    sensitive_path_overrides_from_security,
 )
 
 __all__ = [
@@ -32,5 +33,6 @@ __all__ = [
     "external_directories_from_security",
     "mode_rulesets_from_runtime_config",
     "permission_policy_from_security",
+    "sensitive_path_overrides_from_security",
     "resolve_config",
 ]

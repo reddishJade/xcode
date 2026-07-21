@@ -28,6 +28,7 @@ from .permission_model import (
     evaluate_policy_constraints,
     GrantStore,
     Rule,
+    SensitivePathOverride,
 )
 from .shell_analyzer import (
     CommandSemanticsRegistry,
@@ -82,6 +83,7 @@ __all__ = [
     "PosixAnalyzer",
     "PowerShellAnalyzer",
     "Rule",
+    "SensitivePathOverride",
     "SessionGrantStoreManager",
     "ShellAnalysis",
     "ShellAnalysisPolicyEvaluator",

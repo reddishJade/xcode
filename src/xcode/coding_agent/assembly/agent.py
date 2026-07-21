@@ -45,6 +45,7 @@ from .security import (
     external_directories_from_security,
     mode_rulesets_from_runtime_config,
     permission_policy_from_security,
+    sensitive_path_overrides_from_security,
 )
 from ..runtime import CodingAgentRuntimeConfig
 from ..prompting import CORE_IDENTITY
@@ -158,6 +159,9 @@ def build_agent(
             external_hooks_cwd=project_root,
             audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
             external_directories=external_directories_from_security(sec),
+            sensitive_path_overrides=sensitive_path_overrides_from_security(
+                sec, project_root
+            ),
             user_rulesets=mode_rulesets_from_runtime_config(runtime_config),
             default_mode_rulesets=build_default_mode_rulesets(project_root),
             mode_fallbacks=DEFAULT_MODE_FALLBACKS,

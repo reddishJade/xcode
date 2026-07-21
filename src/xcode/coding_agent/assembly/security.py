@@ -15,7 +15,11 @@ from xcode.harness.security import (
     PermissionPolicy,
     StaticPermission,
 )
-from xcode.harness.security.permission_model import ExternalDirectory, Rule
+from xcode.harness.security.permission_model import (
+    ExternalDirectory,
+    Rule,
+    SensitivePathOverride,
+)
 
 
 # 用户配置中的权限名。这里刻意不复用内部 capability，避免把 webfetch 等
@@ -82,6 +86,20 @@ def external_directories_from_security(
             if ext not in dirs:
                 dirs.append(ext)
     return tuple(dirs)
+
+
+def sensitive_path_overrides_from_security(
+    security: SecurityRuntimeConfig,
+    project_root: Path,
+) -> tuple[SensitivePathOverride, ...]:
+    """将用户配置转换为规范化的精确敏感路径例外。"""
+    overrides: list[SensitivePathOverride] = []
+    for item in security.sensitive_path_overrides:
+        path = Path(item.path)
+        if not path.is_absolute():
+            path = project_root / path
+        overrides.append(SensitivePathOverride(path=path, access=item.access))
+    return tuple(overrides)
 
 
 def permission_policy_from_security(

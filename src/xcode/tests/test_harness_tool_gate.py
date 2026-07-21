@@ -9,7 +9,11 @@ from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 from xcode.harness.agent_runtime.harness import AgentHarness
 from xcode.harness.agent_runtime.tool_gate import _permission_notice, _stricter_decision
 from xcode.harness.security import PermissionEngineResult
-from xcode.harness.security.permission_model import ApprovalResult, ExternalDirectory
+from xcode.harness.security.permission_model import (
+    ApprovalResult,
+    ExternalDirectory,
+    SensitivePathOverride,
+)
 
 
 class TestStricterDecision:
@@ -53,3 +57,17 @@ def test_agent_harness_propagates_external_directories(tmp_path: Path) -> None:
 
     assert harness.external_directories == (external,)
     assert harness._gate.snapshot().external_directories == (external,)
+
+
+def test_agent_harness_propagates_sensitive_path_overrides(tmp_path: Path) -> None:
+    override = SensitivePathOverride(path=tmp_path / ".env", access="read")
+
+    harness = AgentHarness(
+        provider=cast(Any, object()),
+        registry=(),
+        gate=GateConfig(sensitive_path_overrides=(override,)),
+        runtime=AgentRuntimeConfig(project_root=tmp_path),
+    )
+
+    assert harness.sensitive_path_overrides == (override,)
+    assert harness._gate.snapshot().sensitive_path_overrides == (override,)

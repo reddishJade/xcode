@@ -37,6 +37,7 @@ from ..security.permission_model import (
     PolicyEvaluator,
     PathExtractor,
     Rule,
+    SensitivePathOverride,
 )
 from ...agent.types import ApprovalCallback, ToolSpec
 from .cancellation import CancellationToken
@@ -74,6 +75,7 @@ class GateConfig:
     audit_logger: AuditLogger | None = None
     session_id: str = "local"
     external_directories: tuple[ExternalDirectory, ...] = ()
+    sensitive_path_overrides: tuple[SensitivePathOverride, ...] = ()
     session_grant_store: GrantStore | None = None
     session_grant_store_provider: Callable[[], GrantStore | None] | None = None
     permanent_grant_store: GrantStore | None = None
