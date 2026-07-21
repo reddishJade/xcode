@@ -2,7 +2,56 @@
 
 from __future__ import annotations
 
-from xcode.coding_agent.tools.subagent import _max_concurrent, _parse_tasks
+from typing import Any, cast
+
+import pytest
+
+from xcode.agent.agent import Agent
+from xcode.agent.config import AgentContext, AfterToolCallContext, BeforeToolCallContext
+from xcode.agent.messages import AssistantMessage
+from xcode.agent.types import AgentToolResult, TextContent, ToolCallContent, ToolSpec
+from xcode.coding_agent.tools.subagent import (
+    _max_concurrent,
+    _parse_tasks,
+    _run_one,
+    build_subagent_tool,
+)
+from xcode.harness.agent_runtime.tool_gate import ToolGate
+from xcode.harness.observability import AuditRecord
+from xcode.harness.security import HITLResult
+from xcode.harness.security.permission_model import InMemoryGrantStore, Rule
+
+
+class _AllowMode:
+    current_mode = "act"
+
+    def check_call(self, _call: object) -> str:
+        return "allow"
+
+
+def _tool(name: str) -> ToolSpec:
+    return ToolSpec(
+        name=name,
+        description=name,
+        input_hint="JSON",
+        handler=lambda _data, _update=None: "executed",
+        schema={"type": "object"},
+    )
+
+
+def _gate(**kwargs: Any) -> ToolGate:
+    return ToolGate(
+        mode_state=cast(Any, _AllowMode()),
+        approval_callback=kwargs.get("approval_callback"),
+        permission_policy=None,
+        hook_manager=None,
+        audit_logger=kwargs.get("audit_logger"),
+        session_id="test-session",
+        project_root=kwargs.get("project_root"),
+        session_grant_store=kwargs.get("session_grant_store"),
+        user_ruleset=kwargs.get("user_ruleset", ()),
+        mode_fallbacks={"act": "allow"},
+    )
 
 
 def test_parse_single_prompt() -> None:
@@ -54,6 +103,129 @@ def test_bounded_prompt_adds_summary_constraint() -> None:
     prompt = _bounded_prompt("Inspect auth")
     assert "Inspect auth" in prompt
     assert "return a concise summary" in prompt
+
+
+def test_subagent_fails_closed_without_permission_gate() -> None:
+    tool = build_subagent_tool(
+        model=cast(Any, object()),
+        coding_tools=[],
+        research_tools=[],
+    )
+
+    result = tool.handler({"prompt": "inspect"}, None)
+
+    assert result == "Error: subagent permission gate is not configured"
+
+
+@pytest.mark.asyncio
+async def test_subagent_edit_obeys_parent_deny(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    edit_tool = _tool("edit_file")
+    gate = _gate(
+        project_root=tmp_path,
+        user_ruleset=(Rule(action="edit_file", effect="deny"),),
+    )
+
+    async def fake_prompt(_self: Agent, _text: str, **kwargs: object) -> str:
+        config = kwargs["loop_config"]
+        before = cast(Any, config).before_tool_call
+        assert before is not None
+        tool_call = ToolCallContent(
+            id="edit-1",
+            name="edit_file",
+            arguments={"path": str(tmp_path / "blocked.py")},
+        )
+        result = before(
+            BeforeToolCallContext(
+                assistant_message=AssistantMessage(content=[tool_call]),
+                tool_call=tool_call,
+                args=tool_call.arguments or {},
+                context=AgentContext(),
+            ),
+            None,
+        )
+        assert result is not None and result.block
+        return "blocked"
+
+    monkeypatch.setattr(Agent, "prompt", fake_prompt)
+
+    result = await _run_one(
+        {"description": "edit", "prompt": "edit file", "subagent_type": "coding"},
+        cast(Any, object()),
+        [edit_tool],
+        [],
+        None,
+        None,
+        gate,
+    )
+
+    assert result == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_subagent_reuses_session_grant_and_audits_child_calls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    approvals: list[dict[str, Any]] = []
+    audits: list[AuditRecord] = []
+    store = InMemoryGrantStore()
+
+    def approve(_spec: ToolSpec, data: dict[str, Any]) -> HITLResult:
+        approvals.append(data)
+        return HITLResult("allow", "session")
+
+    gate = _gate(
+        project_root=tmp_path,
+        approval_callback=approve,
+        audit_logger=audits.append,
+        session_grant_store=store,
+        user_ruleset=(Rule(action="bash", effect="ask"),),
+    )
+    bash_tool = _tool("bash")
+    call_index = 0
+
+    async def fake_prompt(_self: Agent, _text: str, **kwargs: object) -> str:
+        nonlocal call_index
+        call_index += 1
+        config = cast(Any, kwargs["loop_config"])
+        tool_call = ToolCallContent(
+            id=f"bash-{call_index}",
+            name="bash",
+            arguments={"command": "git status"},
+        )
+        assistant = AssistantMessage(content=[tool_call])
+        before_ctx = BeforeToolCallContext(
+            assistant_message=assistant,
+            tool_call=tool_call,
+            args=tool_call.arguments or {},
+            context=AgentContext(),
+        )
+        assert config.before_tool_call(before_ctx, None) is None
+        config.after_tool_call(
+            AfterToolCallContext(
+                assistant_message=assistant,
+                tool_call=tool_call,
+                args=before_ctx.args,
+                result=AgentToolResult(content=[TextContent(text="ok")]),
+                is_error=False,
+                context=AgentContext(),
+            ),
+            None,
+        )
+        return "ok"
+
+    monkeypatch.setattr(Agent, "prompt", fake_prompt)
+    task = {"description": "status", "prompt": "run status", "subagent_type": "coding"}
+
+    await _run_one(task, cast(Any, object()), [bash_tool], [], None, None, gate)
+    await _run_one(task, cast(Any, object()), [bash_tool], [], None, None, gate)
+
+    assert len(approvals) == 1
+    assert [record.tool for record in audits] == ["bash", "bash"]
+    assert audits[0].approval_scope == "session"
+    assert audits[1].matched_rule == "session_grant"
+    assert audits[1].approval_grant_id is not None
 
 
 def test_subagent_updates_keep_numbered_slots() -> None:

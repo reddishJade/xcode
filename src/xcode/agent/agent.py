@@ -128,23 +128,29 @@ class Agent:
         *,
         model: ModelProvider | None = None,
         system_prompt: str | None = None,
+        loop_config: AgentLoopConfig | None = None,
         signal: CancellationSignal | None = None,
         on_update: Callable[[str], None] | None = None,
     ) -> str:
-        """轻量 prompt API：创建简化 AgentLoopConfig 并执行。
+        """轻量 prompt API：创建或使用调用方提供的 AgentLoopConfig 执行。
 
-        用于 subagent 等自包含场景。不依赖 hooks / permissions / compaction。
+        subagent 等需要权限边界的调用方必须显式注入 hooks。
         """
         model = model or self._model
         if model is None:
             raise ValueError("model is required for prompt()")
         sp = system_prompt if system_prompt is not None else self._system_prompt
         history: list[AgentMessage] = [SystemMessage(content=sp)] if sp else []
-        config = AgentLoopConfig(
-            provider=model,
-            max_steps=25,
-            convert_to_llm=convert_to_llm,
+        config = loop_config or AgentLoopConfig(
+            provider=model, max_steps=25, convert_to_llm=convert_to_llm
         )
+        config_updates: dict[str, object] = {}
+        if config.provider is None:
+            config_updates["provider"] = model
+        if config.convert_to_llm is None:
+            config_updates["convert_to_llm"] = convert_to_llm
+        if config_updates:
+            config = config.model_copy(update=config_updates)
 
         def _emit(event: AgentEvent) -> None:
             if on_update is None:

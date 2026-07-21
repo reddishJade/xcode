@@ -6,8 +6,10 @@ from collections.abc import Callable
 from typing import Any
 
 from xcode.agent.agent import Agent
+from xcode.agent.config import AgentLoopConfig
 from xcode.ai.providers.base import ModelProvider
-from xcode.agent.types import AgentTool, CancellationSignal, ToolSpec, ToolSpecAdapter
+from xcode.agent.types import CancellationSignal, ToolSpec
+from xcode.harness.agent_runtime.tool_gate import ToolGate
 
 
 BUILD_SUBAGENT_PROMPTS: dict[str, str] = {
@@ -38,16 +40,34 @@ MAX_BATCH_TASKS = 16
 DEFAULT_MAX_CONCURRENT = 4
 
 
-def build_subagent_tool(
-    model: ModelProvider,
-    coding_tools: list[ToolSpec],
-    research_tools: list[ToolSpec],
-    cancellation_token: CancellationSignal | None = None,
-) -> ToolSpec:
-    def handler(
+class _SubagentHandler:
+    """子代理处理器；门控由产品装配完成后绑定，未绑定时拒绝运行。"""
+
+    def __init__(
+        self,
+        model: ModelProvider,
+        coding_tools: list[ToolSpec],
+        research_tools: list[ToolSpec],
+        cancellation_token: CancellationSignal | None,
+    ) -> None:
+        self._model = model
+        self._coding_tools = coding_tools
+        self._research_tools = research_tools
+        self._cancellation_token = cancellation_token
+        self._permission_gate: ToolGate | None = None
+
+    def bind_permission_gate(self, gate: ToolGate) -> None:
+        """绑定父代理权限门控。"""
+        self._permission_gate = gate
+
+    def __call__(
+        self,
         data: dict[str, Any],
         on_update: Callable[[str], None] | None = None,
     ) -> str:
+        gate = self._permission_gate
+        if gate is None:
+            return "Error: subagent permission gate is not configured"
         tasks_or_error = _parse_tasks(data)
         if isinstance(tasks_or_error, str):
             return tasks_or_error
@@ -56,26 +76,45 @@ def build_subagent_tool(
 
         async def _run() -> str:
             if len(tasks) == 1:
-                task = tasks[0]
                 return await _run_one(
-                    task,
-                    model,
-                    coding_tools,
-                    research_tools,
-                    cancellation_token,
+                    tasks[0],
+                    self._model,
+                    self._coding_tools,
+                    self._research_tools,
+                    self._cancellation_token,
                     on_update,
+                    gate,
                 )
             return await _run_batch(
                 tasks,
                 max_concurrent,
-                model,
-                coding_tools,
-                research_tools,
-                cancellation_token,
+                self._model,
+                self._coding_tools,
+                self._research_tools,
+                self._cancellation_token,
                 on_update,
+                gate,
             )
 
         return async_run(_run())
+
+
+def bind_subagent_permission_gate(
+    registry: tuple[ToolSpec, ...], gate: ToolGate
+) -> None:
+    """把产品层已装配的权限门控绑定到 subagent 工具。"""
+    for spec in registry:
+        if spec.name == "subagent" and isinstance(spec.handler, _SubagentHandler):
+            spec.handler.bind_permission_gate(gate)
+
+
+def build_subagent_tool(
+    model: ModelProvider,
+    coding_tools: list[ToolSpec],
+    research_tools: list[ToolSpec],
+    cancellation_token: CancellationSignal | None = None,
+) -> ToolSpec:
+    handler = _SubagentHandler(model, coding_tools, research_tools, cancellation_token)
 
     return ToolSpec(
         name="subagent",
@@ -201,6 +240,7 @@ async def _run_batch(
     research_tools: list[ToolSpec],
     cancellation_token: CancellationSignal | None,
     on_update: Callable[[str], None] | None,
+    permission_gate: ToolGate,
 ) -> str:
     semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -218,6 +258,7 @@ async def _run_batch(
                     research_tools,
                     cancellation_token,
                     task_update,
+                    permission_gate,
                 )
             except Exception as exc:
                 if on_update is not None:
@@ -256,16 +297,28 @@ async def _run_one(
     research_tools: list[ToolSpec],
     cancellation_token: CancellationSignal | None,
     on_update: Callable[[str], None] | None,
+    permission_gate: ToolGate,
 ) -> str:
     subagent_type = task["subagent_type"]
     system_prompt = BUILD_SUBAGENT_PROMPTS.get(
         subagent_type, BUILD_SUBAGENT_PROMPTS["default"]
     )
     raw_tools = coding_tools if subagent_type == "coding" else research_tools
-    adapted: list[AgentTool] = [ToolSpecAdapter(spec) for spec in raw_tools]
+    child_gate = permission_gate.fork_for_subagent()
+    registry = tuple(raw_tools)
+    gate_snapshot = child_gate.snapshot_for(registry)
+    adapted = child_gate.adapt_tools(registry)
+    loop_config = AgentLoopConfig(
+        provider=model,
+        max_steps=25,
+        before_tool_call=child_gate.build_before_tool_hook(gate_snapshot),
+        after_tool_call=child_gate.build_after_tool_hook(gate_snapshot),
+        is_tool_productive=child_gate.build_is_tool_productive_hook(gate_snapshot),
+    )
     agent = Agent(tools=adapted, model=model, system_prompt=system_prompt)
     return await agent.prompt(
         _bounded_prompt(task["prompt"]),
+        loop_config=loop_config,
         signal=cancellation_token,
         on_update=on_update,
     )

@@ -270,6 +270,33 @@ class ToolGate:
         if isinstance(store, _ClearableGrantStore):
             store.clear()
 
+    def fork_for_subagent(self) -> ToolGate:
+        """派生隔离运行状态、共享权限配置和 grant 的子代理门控。"""
+        return ToolGate(
+            mode_state=self._mode,
+            approval_callback=self._approval_callback,
+            permission_policy=self._permission_policy,
+            hook_manager=self._hook_manager,
+            audit_logger=self._audit_logger,
+            session_id=self._session_id,
+            external_hook_runner=self._external_hook_runner,
+            external_hooks_subagent=True,
+            external_hooks_cwd=self._external_hooks_cwd,
+            correlation=self._correlation,
+            restricted_dirs=self._restricted_dirs,
+            hook_constraint_providers=self._hook_constraint_providers,
+            project_root=self._project_root,
+            external_directories=self._external_directories,
+            session_grant_store=self._session_grant_store,
+            session_grant_store_provider=self._session_grant_store_provider,
+            permanent_grant_store=self._permanent_grant_store,
+            user_ruleset=self._user_ruleset,
+            user_rulesets=self._user_rulesets,
+            default_mode_rulesets=self._default_mode_rulesets,
+            mode_fallbacks=self._mode_fallbacks,
+            tool_path_extractors=self._tool_path_extractors,
+        )
+
     @property
     def session_id(self) -> str:
         return self._session_id

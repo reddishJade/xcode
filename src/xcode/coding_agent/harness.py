@@ -69,6 +69,9 @@ class CodingAgentHarness(AgentHarness):
         self._memory_manager = runtime.memory_manager
         self._todo_state = runtime.todo_state
         super().__init__(provider, registry, config, gate, runtime)
+        from xcode.coding_agent.tools.subagent import bind_subagent_permission_gate
+
+        bind_subagent_permission_gate(self._registry, self._gate)
 
     # ── AgentHarness 扩展点覆盖 ──
 
