@@ -64,3 +64,25 @@ def test_multi_target_approval_only_offers_once(tmp_path: Path) -> None:
 
     assert result.decision == "allow"
     assert requests[0].allowed_scopes == ("once",)
+
+
+def test_invalid_approval_scope_is_rejected_instead_of_downgraded(
+    tmp_path: Path,
+) -> None:
+    def approve(_request: ApprovalRequest) -> HITLResult:
+        return HITLResult("allow", "permanent")
+
+    engine = PermissionEngine(PermissionEngineConfig(project_root=tmp_path))
+    tool = ToolSpec("bash", "", "", lambda _data, _update: "")
+
+    result = engine.decide(
+        "bash",
+        {"command": "cp source.txt target.txt"},
+        tool_spec=tool,
+        approval_callback=approve,
+    )
+
+    assert result.decision == "deny"
+    assert result.blocked is True
+    assert result.reason_code == "invalid_approval_scope"
+    assert result.approval_result is None

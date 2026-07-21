@@ -623,8 +623,6 @@ class PermissionEngine:
         tool_input: dict[str, Any] | None = None,
     ) -> PermissionEngineResult:
         """执行 ask 后的授权查找、回调调用和授权写入。"""
-        is_multi_target = len(action.targets) > 1
-
         candidate = compute_shadow_approval_candidate(
             action,
             session_grant_store=self._config.session_grant_store,
@@ -643,7 +641,6 @@ class PermissionEngine:
             approval_callback=approval_callback,
             tool_spec=tool_spec,
             tool_input=tool_input,
-            is_multi_target=is_multi_target,
         )
 
     def _cutover_grant_result(
@@ -720,7 +717,6 @@ class PermissionEngine:
         approval_callback: PermissionApprovalCallback | None = None,
         tool_spec: PermissionToolSpec | None = None,
         tool_input: dict[str, Any] | None = None,
-        is_multi_target: bool = False,
     ) -> PermissionEngineResult:
         """无匹配授权时调用 approval_callback 并写入新授权存储。"""
 
@@ -755,29 +751,26 @@ class PermissionEngine:
                 approval_result=ApprovalResult(decision="deny", scope=hitl.scope),
             )
 
-        # 允许 — 根据 scope 写入授权
-        effective_scope = hitl.scope
+        if hitl.scope not in request.allowed_scopes:
+            return PermissionEngineResult(
+                decision="deny",
+                blocked=True,
+                reason=(
+                    f"approval scope {hitl.scope} is not valid for tool: {action.tool}"
+                ),
+                reason_code="invalid_approval_scope",
+                overrideable=False,
+                remediation="Retry the approval and select one of the offered scopes.",
+                matched_rule=MATCHED_STATIC_ASK,
+                source=SOURCE_CONFIG,
+            )
+
+        # 允许 — 根据实际展示并选择的 scope 写入授权
         metadata: PermissionMetadata = _approval_metadata("allow", hitl.scope)
-
-        # unknown-tool tools are session/once only — downgrade permanent
-        if action.capability == "unknown" and hitl.scope == "permanent":
-            effective_scope = "session"
-            metadata = dict(metadata)
-            metadata["requested_scope"] = "permanent"
-            metadata["effective_scope"] = "session"
-            metadata["capability_scope_restriction"] = True
-
-        if is_multi_target and hitl.scope in ("session", "permanent"):
-            effective_scope = "once"
-            metadata = dict(metadata)
-            metadata["requested_scope"] = hitl.scope
-            metadata["effective_scope"] = "once"
-            metadata["multi_target_restriction"] = True
-
-        write_scope = effective_scope
-        if write_scope == "session" and not is_multi_target:
+        write_scope = hitl.scope
+        if write_scope == "session":
             self._write_grants(action, decision="allow", scope="session")
-        elif write_scope == "permanent" and not is_multi_target:
+        elif write_scope == "permanent":
             self._write_grants(action, decision="allow", scope="permanent")
 
         return PermissionEngineResult(
@@ -788,7 +781,7 @@ class PermissionEngine:
             metadata=metadata,
             approval_result=ApprovalResult(
                 decision="allow",
-                scope=effective_scope,
+                scope=hitl.scope,
             ),
         )
 
