@@ -123,6 +123,7 @@ def _execute_tool_via_gate(
         restricted_dirs=getattr(agent, "restricted_dirs", ()),
         hook_constraint_providers=getattr(agent, "hook_constraint_providers", ()),
         project_root=getattr(agent, "project_root", None),
+        external_directories=getattr(agent, "external_directories", ()),
     )
     snapshot = gate.snapshot_for((tool,))
     before_hook = gate.build_before_tool_hook(snapshot)

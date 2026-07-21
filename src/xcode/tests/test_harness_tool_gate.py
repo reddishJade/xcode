@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any, cast
+
+from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
+from xcode.harness.agent_runtime.harness import AgentHarness
 from xcode.harness.agent_runtime.tool_gate import _permission_notice, _stricter_decision
 from xcode.harness.security import PermissionEngineResult
-from xcode.harness.security.permission_model import ApprovalResult
+from xcode.harness.security.permission_model import ApprovalResult, ExternalDirectory
 
 
 class TestStricterDecision:
@@ -34,3 +39,17 @@ def test_permission_notice_describes_automatic_session_grant() -> None:
     )
 
     assert _permission_notice(result) == "Allowed by session grant"
+
+
+def test_agent_harness_propagates_external_directories(tmp_path: Path) -> None:
+    external = ExternalDirectory(path=tmp_path / "shared", access="read")
+
+    harness = AgentHarness(
+        provider=cast(Any, object()),
+        registry=(),
+        gate=GateConfig(external_directories=(external,)),
+        runtime=AgentRuntimeConfig(project_root=tmp_path),
+    )
+
+    assert harness.external_directories == (external,)
+    assert harness._gate.snapshot().external_directories == (external,)

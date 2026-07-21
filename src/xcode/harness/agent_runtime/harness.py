@@ -126,6 +126,7 @@ class AgentHarness:
         )
         self.permission_policy = resolved_permission_policy
         self.restricted_dirs = gate.restricted_dirs
+        self.external_directories = gate.external_directories
         self.hook_constraint_providers = gate.hook_constraint_providers
         self._gate = ToolGate(
             mode_state=self._build_gate_mode(),
@@ -141,6 +142,7 @@ class AgentHarness:
             restricted_dirs=gate.restricted_dirs,
             hook_constraint_providers=gate.hook_constraint_providers,
             project_root=runtime.project_root,
+            external_directories=gate.external_directories,
             session_grant_store=gate.session_grant_store,
             session_grant_store_provider=gate.session_grant_store_provider,
             permanent_grant_store=gate.permanent_grant_store,
