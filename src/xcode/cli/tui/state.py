@@ -257,6 +257,7 @@ class _TuiState:
                 str(data.get("tool_use_id", "")),
                 str(data.get("status", "ok")),
                 str(data.get("content", "")),
+                str(data.get("permission_notice") or ""),
             )
 
     def _restore_thinking(self, data: object) -> None:
@@ -289,6 +290,7 @@ class _TuiState:
                 event.data.tool_use_id,
                 event.data.status,
                 event.data.content,
+                event.data.permission_notice or "",
             )
         elif event.type == "final":
             self._finish_answer(event)
@@ -650,20 +652,24 @@ class _TuiState:
             label = label[:1].upper() + label[1:]
         return label
 
-    def _record_tool_result(self, tool_id: str, status: str, content: str) -> None:
+    def _record_tool_result(
+        self, tool_id: str, status: str, content: str, permission_notice: str = ""
+    ) -> None:
         exploration = self._find_exploration_call(tool_id)
         if exploration is not None:
             exploration.complete = True
             exploration.failed = status != "ok"
-            exploration.detail = (
+            detail = (
                 _successful_tool_detail(exploration.name, content)
                 if status == "ok"
                 else f"✗ {single_line_preview(content)}"
             )
+            exploration.detail = _append_permission_notice(detail, permission_notice)
             return
         name = self.tool_names.pop(tool_id, "")
         if status == "ok":
             detail = _successful_tool_detail(name, content)
+            detail = _append_permission_notice(detail, permission_notice)
             self.log.append(_LogEntry("tool-detail", f"  ⎿  {detail}"))
             return
         self.log.append(
@@ -771,6 +777,13 @@ def _successful_tool_detail(name: str, content: str) -> str:
         matches = sum(bool(re.search(r":\d+:", line)) for line in content.splitlines())
         return f"{matches} matches"
     return "done"
+
+
+def _append_permission_notice(detail: str, permission_notice: str) -> str:
+    """把自动授权来源附加到工具执行摘要。"""
+    if not permission_notice:
+        return detail
+    return f"{detail} · {permission_notice}"
 
 
 def _is_exploration_call(name: str, raw_input: ToolInput) -> bool:

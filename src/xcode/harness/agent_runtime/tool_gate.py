@@ -379,6 +379,15 @@ class ToolGate:
                 self._hook_correlation_fields(ctx.tool_call.id),
             )
             perm_result = self._last_perm_results.pop(ctx.tool_call.id, None)
+            permission_notice = _permission_notice(perm_result)
+            if permission_notice is not None:
+                details = (
+                    dict(ctx.result.details)
+                    if isinstance(ctx.result.details, dict)
+                    else {}
+                )
+                details["permission_notice"] = permission_notice
+                ctx.result.details = details
             emit_audit(
                 self._audit_logger,
                 self._session_id,
@@ -562,3 +571,16 @@ def _stricter_decision(
         "deny": 2,
     }
     return proposed if priority[proposed] > priority[current] else current
+
+
+def _permission_notice(result: PermissionEngineResult | None) -> str | None:
+    """为自动命中的 grant 生成用户可见说明。"""
+    if result is None or result.approval_result is None:
+        return None
+    if result.approval_result.decision != "allow":
+        return None
+    if result.matched_rule == "session_grant":
+        return "Allowed by session grant"
+    if result.matched_rule == "persistent_grant":
+        return "Allowed by permanent grant"
+    return None

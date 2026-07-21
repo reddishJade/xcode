@@ -127,6 +127,7 @@ class ToolResultBlock:
     tool_use_id: str
     content: str
     status: Literal["ok", "error"] = "ok"
+    permission_notice: str | None = None
     type: str = "tool_result"
 
 
@@ -347,6 +348,11 @@ def _translate_tool_execution_end(
     event: ToolExecutionEndEvent,
     state: _StreamTranslationState,
 ) -> AgentHarnessEvent | list[AgentHarnessEvent]:
+    permission_notice: str | None = None
+    if event.result is not None and event.result.metadata is not None:
+        raw_notice = event.result.metadata.get("permission_notice")
+        if isinstance(raw_notice, str):
+            permission_notice = raw_notice
     result_event = ToolResultStructuredEvent(
         "tool_result",
         state.step,
@@ -354,6 +360,7 @@ def _translate_tool_execution_end(
             tool_use_id=event.tool_call_id,
             content=str(event.result.content) if event.result else "",
             status="error" if event.is_error else "ok",
+            permission_notice=permission_notice,
         ),
         state.correlation.snapshot(event.tool_call_id),
     )

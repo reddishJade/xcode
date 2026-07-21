@@ -75,7 +75,10 @@ def test_tool_execution_end() -> None:
             tool_call_id="c1",
             tool_name="read_file",
             result=ToolResultMessage(
-                tool_call_id="c1", tool_name="read_file", content="result text"
+                tool_call_id="c1",
+                tool_name="read_file",
+                content="result text",
+                metadata={"permission_notice": "Allowed by session grant"},
             ),
             is_error=False,
         ),
@@ -83,6 +86,7 @@ def test_tool_execution_end() -> None:
     )
     assert isinstance(result, ToolResultStructuredEvent)
     assert result.data.status == "ok"
+    assert result.data.permission_notice == "Allowed by session grant"
 
 
 def test_tool_execution_end_error() -> None:

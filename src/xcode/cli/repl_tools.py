@@ -432,6 +432,7 @@ def _event_payload(event: AgentHarnessEvent) -> object:
             "tool_use_id": event.data.tool_use_id,
             "content": event.data.content,
             "status": event.data.status,
+            "permission_notice": event.data.permission_notice,
             "type": "tool_result",
         }
 
@@ -481,6 +482,8 @@ def print_tool_result_rich(
     verbosity: str,
     console: Console,
 ) -> None:
+    if data.permission_notice:
+        console.print(Text(f"  ↳ {data.permission_notice}", style=CLI_COLOR_INFO))
     if data.status == "ok" and verbosity == "normal":
         return
     border = {

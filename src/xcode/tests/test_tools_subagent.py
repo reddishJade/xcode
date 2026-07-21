@@ -190,6 +190,7 @@ async def test_subagent_reuses_session_grant_and_audits_child_calls(
     )
     bash_tool = _tool("bash")
     call_index = 0
+    tool_results: list[AgentToolResult] = []
 
     async def fake_prompt(_self: Agent, _text: str, **kwargs: object) -> str:
         nonlocal call_index
@@ -208,17 +209,19 @@ async def test_subagent_reuses_session_grant_and_audits_child_calls(
             context=AgentContext(),
         )
         assert config.before_tool_call(before_ctx, None) is None
+        tool_result = AgentToolResult(content=[TextContent(text="ok")])
         config.after_tool_call(
             AfterToolCallContext(
                 assistant_message=assistant,
                 tool_call=tool_call,
                 args=before_ctx.args,
-                result=AgentToolResult(content=[TextContent(text="ok")]),
+                result=tool_result,
                 is_error=False,
                 context=AgentContext(),
             ),
             None,
         )
+        tool_results.append(tool_result)
         return "ok"
 
     monkeypatch.setattr(Agent, "prompt", fake_prompt)
@@ -232,6 +235,7 @@ async def test_subagent_reuses_session_grant_and_audits_child_calls(
     assert audits[0].approval_scope == "session"
     assert audits[1].matched_rule == "session_grant"
     assert audits[1].approval_grant_id is not None
+    assert tool_results[1].details == {"permission_notice": "Allowed by session grant"}
 
 
 def test_subagent_updates_keep_numbered_slots() -> None:
