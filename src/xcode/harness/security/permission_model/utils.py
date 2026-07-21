@@ -33,7 +33,8 @@ _COMMAND_GRANT_ARITY: dict[tuple[str, ...], int] = {
 }
 
 
-def _command_grant_pattern(command: str) -> str:
+def command_grant_pattern(command: str) -> str:
+    """返回 shell 命令持久授权实际匹配的命令模式。"""
     try:
         tokens = shlex.split(command)
     except ValueError:
@@ -52,7 +53,7 @@ def _command_grant_pattern(command: str) -> str:
 
 def _grant_target_pattern(target: Target) -> str:
     if target.kind == "command":
-        return _command_grant_pattern(target.value)
+        return command_grant_pattern(target.value)
     return target.value
 
 

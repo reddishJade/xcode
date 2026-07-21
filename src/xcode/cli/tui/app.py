@@ -47,6 +47,7 @@ from ..markdown import TerminalMarkdownRenderer
 from ..repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
 from ..repl_hitl import (
     HITL_CHOICES,
+    approval_scope_lines,
     hitl_choices,
     parse_hitl_choice,
     tool_preview_lines,
@@ -1196,7 +1197,14 @@ class _XcodeTui:
             tool_name=approval.tool.name,
             preview=[
                 _strip_rich_markup(line)
-                for line in tool_preview_lines(approval.tool, approval.action_input)
+                for line in (
+                    tool_preview_lines(approval.tool, approval.action_input)
+                    + approval_scope_lines(
+                        approval.tool,
+                        approval.action_input,
+                        approval.allowed_scopes,
+                    )
+                )
             ],
             event=Event(),
         )

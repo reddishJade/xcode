@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from xcode.harness.security.permission_model.utils import (
-    _command_grant_pattern,
+    command_grant_pattern,
     _grant_target_pattern,
     _looks_absolute,
     _is_sensitive_path,
@@ -21,19 +21,19 @@ from xcode.harness.security.permission_model.types import (
 
 class TestCommandGrantPattern:
     def test_simple_command(self) -> None:
-        result = _command_grant_pattern("ls -la")
+        result = command_grant_pattern("ls -la")
         assert result == "ls *"
 
     def test_git_subcommand(self) -> None:
-        result = _command_grant_pattern("git push origin main")
+        result = command_grant_pattern("git push origin main")
         assert result == "git push *"
 
     def test_npm_run(self) -> None:
-        result = _command_grant_pattern("npm run build --production")
+        result = command_grant_pattern("npm run build --production")
         assert result == "npm run build *"
 
     def test_complex_shlex(self) -> None:
-        result = _command_grant_pattern("echo 'hello world' > /dev/null")
+        result = command_grant_pattern("echo 'hello world' > /dev/null")
         assert result.startswith("echo")
 
 

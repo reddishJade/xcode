@@ -15,6 +15,7 @@ import questionary
 
 from .repl_tools import brief_input
 from xcode.harness.security import HITLResult
+from xcode.harness.security.permission_model.utils import command_grant_pattern
 from xcode.harness.security.permissions import HITLDecision, HITLScope
 from xcode.agent.types import ApprovalRequest, ApprovalScope, ToolInput, ToolSpec
 
@@ -70,7 +71,7 @@ class ReplHITLHandler:
     def __call__(self, request: ApprovalRequest) -> HITLResult:
         tool = request.tool
         action_input = request.action_input
-        _print_tool_preview(tool, action_input)
+        _print_tool_preview(tool, action_input, request.allowed_scopes)
         choice = _ask_hitl_choice_with_timeout(
             tool,
             action_input,
@@ -95,9 +96,14 @@ class ReplHITLHandler:
 # ── Preview ──
 
 
-def _print_tool_preview(tool: ToolSpec, action_input: ToolInput) -> None:
+def _print_tool_preview(
+    tool: ToolSpec,
+    action_input: ToolInput,
+    allowed_scopes: tuple[ApprovalScope, ...],
+) -> None:
     """在 HITL 提示之前打印丰富的工具预览信息。"""
     lines = tool_preview_lines(tool, action_input)
+    lines.extend(approval_scope_lines(tool, action_input, allowed_scopes))
 
     if lines:
         _console.print()
@@ -132,6 +138,36 @@ def tool_preview_lines(tool: ToolSpec, action_input: ToolInput) -> list[str]:
         brief = brief_input(tool.name, action_input)
         lines.append(f"[bold]Input:[/bold] {brief}")
 
+    return lines
+
+
+def approval_scope_lines(
+    tool: ToolSpec,
+    action_input: ToolInput,
+    allowed_scopes: tuple[ApprovalScope, ...],
+) -> list[str]:
+    """说明 session/permanent 选项实际会授予的范围。"""
+    if not {"session", "permanent"}.intersection(allowed_scopes):
+        return []
+
+    if tool.name == "bash":
+        command = action_input.get("command") or action_input.get("input", "")
+        subject = (
+            f"bash commands matching [bold]{command_grant_pattern(command)}[/bold]"
+            if command
+            else "this bash action"
+        )
+    else:
+        subject = f"this [bold]{tool.name}[/bold] action"
+
+    lines: list[str] = []
+    if "session" in allowed_scopes:
+        lines.append(f"[dim]Session allow: {subject} until this session ends.[/dim]")
+    if "permanent" in allowed_scopes:
+        lines.append(
+            "[yellow]Always allow: save this rule for this project in "
+            ".local/approval_grants.json.[/yellow]"
+        )
     return lines
 
 
