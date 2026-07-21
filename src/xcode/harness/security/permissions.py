@@ -489,7 +489,7 @@ class PermissionEngine:
 
         if self._requires_restricted_path_fallback(action, path_targets):
             return PermissionEngineResult(
-                decision="ask",
+                decision="deny",
                 blocked=True,
                 reason=(
                     "filesystem paths could not be extracted safely while "
@@ -543,7 +543,7 @@ class PermissionEngine:
         action: Action,
         path_targets: tuple[Any, ...],
     ) -> bool:
-        """对无法结构化解析的高风险文件系统输入采用 ask。"""
+        """判断高风险文件系统输入是否缺少可验证的结构化路径。"""
         if action.tool in {"read_file", "write_file", "edit_file", "apply_patch"}:
             return not path_targets
         if action.capability != "shell" or path_targets:
