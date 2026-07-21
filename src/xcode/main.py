@@ -93,6 +93,10 @@ def _build_tui_parser(subparsers) -> None:
     subparsers.add_parser("tui", help="Run the full-screen terminal UI")
 
 
+def _build_cli_parser(subparsers) -> None:
+    subparsers.add_parser("cli", help="Run the interactive command-line REPL")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Xcode coding agent.")
     parser.add_argument(
@@ -105,10 +109,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--config", type=Path, help="Path to xcode.config.json runtime settings."
     )
     parser.add_argument(
-        "--sessions-dir", type=Path, help="REPL session transcript directory."
+        "--sessions-dir", type=Path, help="Session transcript directory."
     )
     parser.add_argument(
-        "--resume", action="store_true", help="Open the REPL resume picker on startup."
+        "--resume",
+        action="store_true",
+        help="Open the session resume picker on startup.",
     )
     parser.add_argument(
         "--continue",
@@ -125,6 +131,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     _build_config_parser(subparsers)
     _build_setup_parser(subparsers)
     _build_tui_parser(subparsers)
+    _build_cli_parser(subparsers)
     return parser.parse_args(argv)
 
 
@@ -191,22 +198,32 @@ def _run(args, runtime_config) -> int:
             auto_continue=args.continue_,
             resume_latest=args.resume,
         )
-    if args.session:
-        return run_repl(
-            app,
-            sessions_dir,
-            session_id=args.session,
-            project_root=args.project_root,
-        )
-    if args.continue_:
-        return run_repl(
-            app, sessions_dir, auto_continue=True, project_root=args.project_root
-        )
-    if args.resume:
-        return run_repl(
-            app, sessions_dir, resume_latest=True, project_root=args.project_root
-        )
-    return run_repl(app, sessions_dir, project_root=args.project_root)
+    if args.command == "cli":
+        if args.session:
+            return run_repl(
+                app,
+                sessions_dir,
+                session_id=args.session,
+                project_root=args.project_root,
+            )
+        if args.continue_:
+            return run_repl(
+                app, sessions_dir, auto_continue=True, project_root=args.project_root
+            )
+        if args.resume:
+            return run_repl(
+                app, sessions_dir, resume_latest=True, project_root=args.project_root
+            )
+        return run_repl(app, sessions_dir, project_root=args.project_root)
+
+    return run_tui(
+        app,
+        args.project_root,
+        sessions_dir,
+        session_id=args.session,
+        auto_continue=args.continue_,
+        resume_latest=args.resume,
+    )
 
 
 def _build_app_from_config(project_root: Path, runtime_config):

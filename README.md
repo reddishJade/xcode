@@ -80,11 +80,14 @@ print(answer)
 # 直接提问（单轮，自动退出）
 xcode "列出当前目录所有 Python 文件。"
 
-# REPL 模式（多轮对话，支持 /slash 命令）
+# TUI 全屏终端界面（默认启动方式）
 xcode
 
-# TUI 全屏终端界面
+# 显式启动 TUI
 xcode tui
+
+# CLI / REPL 模式（多轮对话，支持 /slash 命令）
+xcode cli
 
 # 管理 provider API 配置
 xcode config list
