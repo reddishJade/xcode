@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from xcode.harness.security.permissions import PermissionEngine, PermissionEngineConfig
+from xcode.agent.types import ApprovalRequest, ToolSpec
+from xcode.harness.security.permissions import (
+    HITLResult,
+    PermissionEngine,
+    PermissionEngineConfig,
+)
 
 
 def test_unresolved_restricted_path_is_explicit_deny() -> None:
@@ -38,3 +43,24 @@ def test_external_path_denial_has_actionable_remediation(tmp_path: Path) -> None
     assert result.remediation == (
         "Add the directory to external_directories with the required access."
     )
+
+
+def test_multi_target_approval_only_offers_once(tmp_path: Path) -> None:
+    requests: list[ApprovalRequest] = []
+
+    def approve(request: ApprovalRequest) -> HITLResult:
+        requests.append(request)
+        return HITLResult("allow", "once")
+
+    engine = PermissionEngine(PermissionEngineConfig(project_root=tmp_path))
+    tool = ToolSpec("bash", "", "", lambda _data, _update: "")
+
+    result = engine.decide(
+        "bash",
+        {"command": "cp source.txt target.txt"},
+        tool_spec=tool,
+        approval_callback=approve,
+    )
+
+    assert result.decision == "allow"
+    assert requests[0].allowed_scopes == ("once",)

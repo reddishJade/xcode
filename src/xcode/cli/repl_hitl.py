@@ -16,16 +16,23 @@ import questionary
 from .repl_tools import brief_input
 from xcode.harness.security import HITLResult
 from xcode.harness.security.permissions import HITLDecision, HITLScope
-from xcode.agent.types import ToolInput, ToolSpec
+from xcode.agent.types import ApprovalRequest, ApprovalScope, ToolInput, ToolSpec
 
 
 _DEFAULT_HITL_TIMEOUT: float = 300.0
-HITL_CHOICES = (
-    "Allow (once)",
-    "Allow this session",
-    "Always allow",
-    "Deny",
-)
+_SCOPE_CHOICE = {
+    "once": "Allow (once)",
+    "session": "Allow this session",
+    "permanent": "Always allow",
+}
+
+
+def hitl_choices(allowed_scopes: tuple[ApprovalScope, ...]) -> tuple[str, ...]:
+    """将引擎允许的授权范围转换成界面选项。"""
+    return tuple(_SCOPE_CHOICE[scope] for scope in allowed_scopes) + ("Deny",)
+
+
+HITL_CHOICES = hitl_choices(("once", "session", "permanent"))
 _console = Console()
 
 
@@ -60,10 +67,15 @@ class ReplHITLHandler:
         self._prompt = prompt
         self._timeout = timeout
 
-    def __call__(self, tool: ToolSpec, action_input: ToolInput) -> HITLResult:
+    def __call__(self, request: ApprovalRequest) -> HITLResult:
+        tool = request.tool
+        action_input = request.action_input
         _print_tool_preview(tool, action_input)
         choice = _ask_hitl_choice_with_timeout(
-            tool, action_input, timeout=self._timeout
+            tool,
+            action_input,
+            choices=hitl_choices(request.allowed_scopes),
+            timeout=self._timeout,
         )
         suggestion = ""
         if choice == "Deny":
@@ -283,6 +295,7 @@ def _preview_search(tool_name: str, action_input: dict, lines: list[str]) -> Non
 def _ask_hitl_choice_with_timeout(
     tool: ToolSpec,
     action_input: ToolInput,
+    choices: tuple[str, ...],
     timeout: float,
 ) -> str | None:
     """显示 questionary 授权选择，支持超时自动 deny。"""
@@ -290,7 +303,7 @@ def _ask_hitl_choice_with_timeout(
 
     def run_prompt() -> None:
         try:
-            results.put(_show_select_prompt(tool, action_input))
+            results.put(_show_select_prompt(tool, action_input, choices))
         except BaseException as exc:
             results.put(exc)
 
@@ -310,12 +323,14 @@ def _ask_hitl_choice_with_timeout(
     return result
 
 
-def _show_select_prompt(tool: ToolSpec, action_input: ToolInput) -> str | None:
+def _show_select_prompt(
+    tool: ToolSpec, action_input: ToolInput, choices: tuple[str, ...]
+) -> str | None:
     """显示 questionary 授权选择界面。"""
     brief = brief_input(tool.name, action_input)
     return questionary.select(
         f"Authorization required: {tool.name}\nInput: {brief}",
-        choices=HITL_CHOICES,
+        choices=choices,
     ).ask()
 
 

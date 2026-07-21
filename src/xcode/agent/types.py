@@ -121,7 +121,20 @@ type ToolUpdateCallback = Callable[[AgentToolResult], None]
 ToolInput = dict[str, Any]
 ActionHandler = Callable[[ToolInput, Callable[[str], None] | None], str]
 HITLResult = Any
-ApprovalCallback = Callable[["ToolSpec", ToolInput], HITLResult]
+ApprovalScope = Literal["once", "session", "permanent"]
+
+
+@dataclass(frozen=True)
+class ApprovalRequest:
+    """权限引擎传给交互层的审批请求。"""
+
+    tool: "ToolSpec"
+    action_input: ToolInput
+    allowed_scopes: tuple[ApprovalScope, ...]
+    reason: str
+
+
+ApprovalCallback = Callable[[ApprovalRequest], HITLResult]
 
 
 @dataclass(frozen=True)

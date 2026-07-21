@@ -9,7 +9,13 @@ import pytest
 from xcode.agent.agent import Agent
 from xcode.agent.config import AgentContext, AfterToolCallContext, BeforeToolCallContext
 from xcode.agent.messages import AssistantMessage
-from xcode.agent.types import AgentToolResult, TextContent, ToolCallContent, ToolSpec
+from xcode.agent.types import (
+    AgentToolResult,
+    ApprovalRequest,
+    TextContent,
+    ToolCallContent,
+    ToolSpec,
+)
 from xcode.coding_agent.tools.subagent import (
     _max_concurrent,
     _parse_tasks,
@@ -171,8 +177,8 @@ async def test_subagent_reuses_session_grant_and_audits_child_calls(
     audits: list[AuditRecord] = []
     store = InMemoryGrantStore()
 
-    def approve(_spec: ToolSpec, data: dict[str, Any]) -> HITLResult:
-        approvals.append(data)
+    def approve(request: ApprovalRequest) -> HITLResult:
+        approvals.append(request.action_input)
         return HITLResult("allow", "session")
 
     gate = _gate(

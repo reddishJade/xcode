@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
+from xcode.agent.types import ApprovalRequest, ApprovalScope
+
 from ..session import JsonValue
 from .permission_model import (
     Action,
@@ -52,7 +54,7 @@ class HITLResult:
 
 
 PermissionToolSpec = Any
-PermissionApprovalCallback = Callable[[Any, dict[str, Any]], HITLResult]
+PermissionApprovalCallback = Callable[[ApprovalRequest], HITLResult]
 
 
 class PermissionPolicy:
@@ -730,7 +732,13 @@ class PermissionEngine:
                 matched_rule=MATCHED_STATIC_ASK,
             )
 
-        hitl = approval_callback(tool_spec, tool_input or {})
+        request = ApprovalRequest(
+            tool=tool_spec,
+            action_input=tool_input or {},
+            allowed_scopes=_allowed_approval_scopes(action),
+            reason=verdict.reason,
+        )
+        hitl = approval_callback(request)
 
         if hitl.decision == "deny":
             metadata = _approval_metadata("deny", hitl.scope)
@@ -807,3 +815,12 @@ class PermissionEngine:
 
 
 PermissionCheckResult = PermissionEngineResult
+
+
+def _allowed_approval_scopes(action: Action) -> tuple[ApprovalScope, ...]:
+    """返回当前动作可真实持久化的审批范围。"""
+    if len(action.targets) > 1:
+        return ("once",)
+    if action.capability == "unknown":
+        return ("once", "session")
+    return ("once", "session", "permanent")

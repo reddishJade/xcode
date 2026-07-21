@@ -45,7 +45,12 @@ from ..file_refs import expand_file_references
 from ..git import git_branch_name
 from ..markdown import TerminalMarkdownRenderer
 from ..repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
-from ..repl_hitl import HITL_CHOICES, parse_hitl_choice, tool_preview_lines
+from ..repl_hitl import (
+    HITL_CHOICES,
+    hitl_choices,
+    parse_hitl_choice,
+    tool_preview_lines,
+)
 from xcode.coding_agent.tools.question import CUSTOM_OPTION_LABEL
 from ..repl import current_effort_options, current_model_options
 from ..repl_sessions import (
@@ -101,7 +106,7 @@ if TYPE_CHECKING:
 
     from xcode.harness.snapshot import SnapshotService, SnapshotResult
 
-    from xcode.agent.types import ToolInput, ToolSpec
+    from xcode.agent.types import ApprovalRequest
     from xcode.harness.security import HITLResult
     from xcode.harness.security.permission_model import (
         SessionGrantStoreManager,
@@ -1184,22 +1189,25 @@ class _XcodeTui:
         self._scrollback = 0
         self._refresh()
 
-    def _approval_callback(self, tool: ToolSpec, action_input: ToolInput) -> HITLResult:
+    def _approval_callback(self, approval: ApprovalRequest) -> HITLResult:
         from xcode.harness.security import HITLResult
 
         request = _HitlRequest(
-            tool_name=tool.name,
+            tool_name=approval.tool.name,
             preview=[
                 _strip_rich_markup(line)
-                for line in tool_preview_lines(tool, action_input)
+                for line in tool_preview_lines(approval.tool, approval.action_input)
             ],
             event=Event(),
         )
         self._state.pending_hitl = request
 
         def show_choices() -> None:
+            choices = hitl_choices(approval.allowed_scopes)
+            self._approval_choices.values = [(choice, choice) for choice in choices]
             self._approval_choices._selected_index = 0
-            self._approval_choices.current_value = HITL_CHOICES[0]
+            self._approval_choices.current_value = choices[0]
+            self._approval_choices.current_values = [choices[0]]
             self._application.layout.focus(self._approval_choices)
             self._refresh()
 
@@ -1422,7 +1430,7 @@ class _XcodeTui:
 
     def _output_height(self) -> int:
         approval_height = (
-            len(HITL_CHOICES)
+            len(self._approval_choices.values)
             if self._state.pending_hitl is not None
             and not self._awaiting_denial_suggestion
             else 0
