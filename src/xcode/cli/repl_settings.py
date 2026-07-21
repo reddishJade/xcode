@@ -8,13 +8,14 @@ import questionary
 
 from .setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
 from xcode.ai.models import parse_model_mode
+from xcode.coding_agent.assembly.security import permission_policy_from_security
+from xcode.harness.config import SecurityRuntimeConfig
 from xcode.harness.security import (
     FileGrantStore,
     InMemoryGrantStore,
     PermissionDecision,
     PermissionPolicy,
 )
-from xcode.harness.security.permission_model import StaticPermission
 from .reasoning_effort import (
     reasoning_effort_levels_for_transport,
 )
@@ -409,9 +410,9 @@ def add_permission_rule_interactive(
         return False
 
     security = config.setdefault("security", {})
-    rules = list(security.get("rules", ()))
-    rules.append(rule)
-    security["rules"] = rules
+    tools = dict(security.get("tools", {}))
+    tools[str(rule["tool"])] = decision
+    security["tools"] = tools
     _save_config(config, config_path)
     print(f"Added {format_permission_rule(rule)}")
     return True
@@ -471,28 +472,39 @@ def _policy_from_config(config: dict[str, Any]) -> PermissionPolicy | None:
     security = config.get("security", {})
     if not isinstance(security, dict):
         return None
-    rules: list[StaticPermission] = []
-    for raw in security.get("rules", ()):
-        if not isinstance(raw, dict):
-            continue
-        try:
-            rules.append(StaticPermission.model_validate(raw))
-        except ValueError:
-            continue
-    global_default = security.get("global_default")
-    if not _is_permission_decision(global_default):
-        global_default = None
-    if not rules and global_default is None:
+    try:
+        runtime_security = SecurityRuntimeConfig.model_validate(security)
+    except ValueError:
         return None
-    return PermissionPolicy(tuple(rules), global_default=global_default)
+    return permission_policy_from_security(runtime_security)
 
 
 def _security_rules(config: dict[str, Any]) -> list[dict[str, Any]]:
     security = config.get("security", {})
     if not isinstance(security, dict):
         return []
-    rules = security.get("rules", ())
-    return [rule for rule in rules if isinstance(rule, dict)]
+    result: list[dict[str, Any]] = []
+    permissions = security.get("permissions", {})
+    if isinstance(permissions, dict):
+        result.extend(
+            {
+                "permission": name,
+                "decision": decision,
+            }
+            for name, decision in permissions.items()
+            if isinstance(name, str) and _is_permission_decision(decision)
+        )
+    tools = security.get("tools", {})
+    if isinstance(tools, dict):
+        result.extend(
+            {
+                "tool": name,
+                "decision": decision,
+            }
+            for name, decision in tools.items()
+            if isinstance(name, str) and _is_permission_decision(decision)
+        )
+    return result
 
 
 def _recently_denied(store: object | None) -> list[str]:
@@ -527,7 +539,10 @@ def _recently_denied(store: object | None) -> list[str]:
 
 def format_permission_rule(rule: dict[str, Any]) -> str:
     decision = str(rule.get("decision", "ask"))
-    label = _tool_label(rule)
+    if rule.get("permission"):
+        label = f"permission:{rule['permission']}"
+    else:
+        label = _tool_label(rule)
     parts = [f"{label}: {decision}"]
     target_type = rule.get("target_type")
     target = rule.get("target")

@@ -137,7 +137,14 @@ class SecurityRuntimeConfig(BaseModel):
     network_access: StrictBool = True
     writable_roots: tuple[str, ...] = ()
     restricted_dirs: tuple[str, ...] = ()
-    rules: tuple[dict[str, Any], ...] = ()
+    permissions: dict[str, Literal["allow", "ask", "deny"]] = Field(
+        default_factory=dict,
+        description="User-facing permission names mapped to decisions, such as read or edit.",
+    )
+    tools: dict[str, Literal["allow", "ask", "deny"]] = Field(
+        default_factory=dict,
+        description="Concrete tool names mapped to decisions, such as glob_files.",
+    )
     global_default: str | None = None
     external_directories: tuple[SecurityExternalDirectory, ...] = ()
 
