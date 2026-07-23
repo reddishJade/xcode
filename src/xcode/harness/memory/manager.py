@@ -646,6 +646,17 @@ class MemoryManager:
             return MemoryExclusionReason.CANDIDATE_CONTEXT_MISMATCH
         return None
 
+    def _exact_automatic_injection_reason(
+        self,
+        record: MemoryRecord,
+        context: MemoryRetrievalContext,
+    ) -> MemoryExclusionReason | None:
+        """对 exact-ID 自动注入执行完整的全局 gate。"""
+        retrieval_reason = self._retrieval_gate_reason(record, 1.0)
+        if retrieval_reason is not None:
+            return retrieval_reason
+        return self._automatic_injection_reason(record, context)
+
     def _candidate_decision(
         self,
         record: MemoryRecord,
@@ -696,10 +707,19 @@ class MemoryManager:
         max_tokens: int | None,
     ) -> MemoryCandidateDecision:
         token_count = self._estimate_block_tokens(self.render_prompt_packet(record))
-        lifecycle_reason = self._automatic_injection_reason(record, context)
-        if lifecycle_reason is not None:
+        automatic_reason = self._exact_automatic_injection_reason(record, context)
+        if automatic_reason is not None:
             decision: Literal["injected", "excluded", "budget_rejected"] = "excluded"
-            reason = MemoryExclusionReason.EXACT_ID_AUDIT
+            reason = (
+                automatic_reason
+                if automatic_reason
+                in {
+                    MemoryExclusionReason.NON_FINITE_SCORE,
+                    MemoryExclusionReason.SCORE_BELOW_MINIMUM,
+                    MemoryExclusionReason.CONFIDENCE_BELOW_MINIMUM,
+                }
+                else MemoryExclusionReason.EXACT_ID_AUDIT
+            )
         elif max_tokens is not None and token_count > max(max_tokens, 0):
             decision = "budget_rejected"
             reason = MemoryExclusionReason.BUDGET_EXCEEDED
@@ -758,12 +778,16 @@ class MemoryManager:
                 eligible_exact = [
                     record
                     for record in exact
-                    if self._is_automatic_injection_eligible(record, context)
+                    if self._exact_automatic_injection_reason(record, context) is None
                 ]
                 exact_exclusion_reasons = tuple(
                     reason
                     for record in exact
-                    if (reason := self._automatic_injection_reason(record, context))
+                    if (
+                        reason := self._exact_automatic_injection_reason(
+                            record, context
+                        )
+                    )
                     is not None
                 )
             ranked_exact = [

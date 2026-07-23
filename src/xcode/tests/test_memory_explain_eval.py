@@ -49,6 +49,7 @@ def _manager(
     user: tuple[str, ...] = (),
     *,
     min_retrieval_score: float = 0.0,
+    min_confidence: float = 0.0,
 ) -> MemoryManager:
     tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "MEMORY.md").write_text("\n".join(project), encoding="utf-8")
@@ -59,6 +60,7 @@ def _manager(
         tmp_path,
         user_memory_file=user_file,
         min_retrieval_score=min_retrieval_score,
+        min_confidence=min_confidence,
     )
 
 
@@ -261,6 +263,51 @@ def test_prompt_exact_id_matches_explain_lifecycle_decision(
         assert trace.candidates[0].reason is MemoryExclusionReason.INJECTED
     else:
         assert trace.candidates[0].reason is MemoryExclusionReason.EXACT_ID_AUDIT
+
+
+def test_prompt_exact_id_obeys_global_confidence_gate_but_remains_auditable(
+    tmp_path: Path,
+) -> None:
+    manager = _manager(
+        tmp_path,
+        (
+            _block(
+                "Low confidence exact",
+                memory_id="mem_low",
+                confidence=0.1,
+            ),
+        ),
+        min_confidence=0.8,
+    )
+    context = MemoryRetrievalContext(query="mem_low")
+
+    production = manager.search_memory_records(
+        "mem_low",
+        source="prompt",
+        track_usage=False,
+        retrieval_context=context,
+    )
+    trace = manager.explain_memory_retrieval(
+        "mem_low",
+        retrieval_context=context,
+    )
+    api_audit = manager.search_memory_records(
+        "mem_low",
+        source="api",
+        track_usage=False,
+    )
+    tool_audit = manager.search_memory_records(
+        "mem_low",
+        source="tool",
+        track_usage=False,
+    )
+
+    assert production == []
+    assert trace.injected == ()
+    assert trace.candidates[0].decision == "excluded"
+    assert trace.candidates[0].reason is MemoryExclusionReason.CONFIDENCE_BELOW_MINIMUM
+    assert [record.memory_id for record in api_audit] == ["mem_low"]
+    assert [record.memory_id for record in tool_audit] == ["mem_low"]
 
 
 def test_layers_with_same_title_remain_separately_explainable(tmp_path: Path) -> None:
