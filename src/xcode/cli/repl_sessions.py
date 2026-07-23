@@ -73,6 +73,7 @@ def resume_latest(store: SessionStore) -> SessionMetadataView | None:
 
 def sync_agent_history(app: object, store: SessionStore) -> None:
     """把当前 transcript 的文本历史同步到支持该接口的 agent。"""
+    sync_compaction_source(app, store, None)
     agent = getattr(app, "agent", None)
     load_history = getattr(agent, "load_history", None)
     if not callable(load_history):
@@ -87,6 +88,21 @@ def sync_agent_history(app: object, store: SessionStore) -> None:
             "The transcript history above has been loaded as context. "
             "Continue the task as if the session was uninterrupted."
         )
+
+
+def sync_compaction_source(
+    app: object,
+    store: SessionStore,
+    message_id: str | None,
+) -> None:
+    """向 agent 绑定真实会话 ID 和触发当前回合的原消息 ID。"""
+    agent = getattr(app, "agent", None)
+    if agent is None:
+        return
+    agent.session_id = store.session_id
+    setter = getattr(agent, "set_compaction_source_message_id", None)
+    if callable(setter):
+        setter(message_id)
 
 
 def _restore_contextual_state(app: object, records: list[SessionRecord]) -> None:

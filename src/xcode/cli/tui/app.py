@@ -58,6 +58,7 @@ from ..repl_sessions import (
     print_saved_conversation,
     select_session_interactively,
     sync_agent_history,
+    sync_compaction_source,
 )
 from ..repl_skills import activate_skill, available_skill_names, parse_skill_invocation
 from ..repl_tools import (
@@ -520,7 +521,8 @@ class _XcodeTui:
         if references:
             self._store.append("event", file_reference_event(references))
         if outcome.status is SubmitStatus.STEER_ACCEPTED:
-            self._store.append("user", text)
+            message_id = self._store.append("user", text)
+            sync_compaction_source(self._agent_app, self._store, message_id)
             self._state.log.append(
                 _LogEntry("system", f"[steer] accepted by {outcome.run_id}")
             )
@@ -667,7 +669,8 @@ class _XcodeTui:
             self._refresh()
             return
 
-        self._store.append("user", text)
+        message_id = self._store.append("user", text)
+        sync_compaction_source(self._agent_app, self._store, message_id)
         expanded_text, references = expand_file_references(text, self._project_root)
         if references:
             self._store.append("event", file_reference_event(references))

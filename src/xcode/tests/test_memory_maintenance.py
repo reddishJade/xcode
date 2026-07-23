@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from xcode.harness.memory import MemoryManager
+from xcode.harness.memory import MemoryRetrievalContext
 
 
 def _block(
@@ -86,6 +87,42 @@ def test_maintenance_apply_promotes_merges_and_archives_superseded(
     archives = list(manager.archive_dir.glob("*.md"))
     assert len(archives) == 2
     assert any("Retry forever" in path.read_text(encoding="utf-8") for path in archives)
+
+
+def test_maintenance_merge_preserves_contradiction_quarantine(tmp_path: Path) -> None:
+    manager = _manager(
+        tmp_path,
+        (
+            _block(
+                "Verified duplicate",
+                "Retry once.",
+                status="active",
+                validity="verified",
+            ),
+            _block(
+                "Contradicted duplicate",
+                "Retry once.",
+                status="needs_review",
+                validity="contradicted",
+            ),
+        ),
+    )
+
+    report = manager.maintain_memory(apply=True)
+
+    assert report.applied
+    records = manager.read_memory_records(layer="project")
+    assert len(records) == 1
+    assert records[0].status == "needs_review"
+    assert records[0].validity == "contradicted"
+    assert (
+        manager.search_memory_records(
+            "provider timeout",
+            source="prompt",
+            retrieval_context=MemoryRetrievalContext(query="provider timeout"),
+        )
+        == []
+    )
 
 
 def test_maintenance_refuses_to_overwrite_changed_snapshot(

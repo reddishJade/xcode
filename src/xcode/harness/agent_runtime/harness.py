@@ -295,6 +295,15 @@ class AgentHarness:
         self._gate.session_id = value
         self._correlation.session_id = value
         self._run_controller.session_id = value
+        setter = getattr(self.compactor, "set_source_session_id", None)
+        if callable(setter):
+            setter(value)
+
+    def set_compaction_source_message_id(self, message_id: str | None) -> None:
+        """把会话存储层生成的真实消息 ID 传给 compactor。"""
+        setter = getattr(self.compactor, "set_source_message_id", None)
+        if callable(setter):
+            setter(message_id)
 
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history = deepcopy(messages)

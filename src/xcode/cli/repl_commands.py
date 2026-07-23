@@ -576,9 +576,11 @@ def cmd_steer(cmd: str, ctx: CommandContext) -> bool:
         return False
     msg = parts[1].strip()
     from xcode.agent.messages import UserMessage
+    from .repl_sessions import sync_compaction_source
 
     if ctx.app.agent.try_steer(UserMessage(content=msg)):
-        ctx.store.append("user", msg)
+        message_id = ctx.store.append("user", msg)
+        sync_compaction_source(ctx.app, ctx.store, message_id)
         print("[steer] injected into the active run")
     else:
         ctx.state.pending_inject = msg

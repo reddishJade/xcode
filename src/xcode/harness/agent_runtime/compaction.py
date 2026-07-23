@@ -133,6 +133,8 @@ class LayeredCompactor:
         self.compact_token_threshold = compact_token_threshold
         self.budget_trigger_token_ratio = budget_trigger_token_ratio
         self.on_compact = on_compact
+        self.source_session_id: str | None = None
+        self.source_message_id: str | None = None
         self.last_transcript_path: Path | None = None
         # 累积文件跟踪（跨压缩轮次）
         self._cumulative_read_files: set[str] = set()
@@ -140,6 +142,17 @@ class LayeredCompactor:
         # 会话树条目（用于无损历史追踪）
         self.entries: list[CompactionEntry] = []
         self._last_entry_id: str | None = None
+
+    def set_source_session_id(self, session_id: str | None) -> None:
+        """设置产生压缩内容的真实会话 ID。"""
+        normalized = session_id.strip() if session_id else None
+        if normalized != self.source_session_id:
+            self.source_message_id = None
+        self.source_session_id = normalized
+
+    def set_source_message_id(self, message_id: str | None) -> None:
+        """设置触发当前压缩回合的真实原消息 ID。"""
+        self.source_message_id = message_id.strip() if message_id else None
 
     def _accumulate_file_ops(self, messages: list[dict[str, Any]]) -> None:
         """从消息中提取文件操作，合并到累积跟踪状态。"""

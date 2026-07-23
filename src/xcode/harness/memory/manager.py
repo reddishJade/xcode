@@ -1472,31 +1472,40 @@ class MemoryManager:
         fields["memory-id"] = existing.memory_id
         if existing.created_at:
             fields["created"] = existing.created_at
-        status_rank = {
-            "obsolete": 0,
-            "deprecated": 1,
-            "superseded": 2,
-            "needs_review": 3,
-            "candidate": 4,
-            "active": 5,
-        }
-        fields["status"] = max(
-            (existing.status, incoming.status),
-            key=lambda value: status_rank.get(value, 0),
-        )
-        validity_rank = {
-            "contradicted": 0,
-            "corrected": 1,
-            "needs_review": 2,
-            "unknown": 3,
-            "derived": 4,
-            "user_confirmed": 5,
-            "verified": 6,
-        }
-        fields["validity"] = max(
-            (existing.validity, incoming.validity),
-            key=lambda value: validity_rank.get(value, 0),
-        )
+        quarantined_validities = {"needs_review", "corrected", "contradicted"}
+        validity_values = {existing.validity, incoming.validity}
+        if validity_values & quarantined_validities:
+            fields["status"] = "needs_review"
+            fields["validity"] = next(
+                value
+                for value in ("contradicted", "corrected", "needs_review")
+                if value in validity_values
+            )
+        elif "needs_review" in {existing.status, incoming.status}:
+            fields["status"] = "needs_review"
+            fields["validity"] = "needs_review"
+        else:
+            status_rank = {
+                "obsolete": 0,
+                "deprecated": 1,
+                "superseded": 2,
+                "candidate": 3,
+                "active": 4,
+            }
+            fields["status"] = max(
+                (existing.status, incoming.status),
+                key=lambda value: status_rank.get(value, 0),
+            )
+            validity_rank = {
+                "unknown": 0,
+                "derived": 1,
+                "user_confirmed": 2,
+                "verified": 3,
+            }
+            fields["validity"] = max(
+                (existing.validity, incoming.validity),
+                key=lambda value: validity_rank.get(value, 0),
+            )
         confidences = [
             value
             for value in (existing.confidence_value, incoming.confidence_value)

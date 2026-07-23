@@ -30,6 +30,7 @@ from .repl_sessions import (
     print_saved_conversation,
     resume_interactively,
     sync_agent_history,
+    sync_compaction_source,
 )
 from .repl_skills import (
     activate_skill,
@@ -289,7 +290,8 @@ def run_repl(
             _print_raw_output(output)
             continue
 
-        store.append("user", text)
+        message_id = store.append("user", text)
+        sync_compaction_source(app, store, message_id)
 
         expanded_text, references = expand_file_references(text, root)
         if references:
@@ -460,7 +462,8 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
                 inject_text = ""
             if inject_text:
                 ctx.state.pending_inject = inject_text
-                ctx.store.append("user", inject_text)
+                message_id = ctx.store.append("user", inject_text)
+                sync_compaction_source(ctx.app, ctx.store, message_id)
             else:
                 ctx.state.pending_partial = None
                 print("[interrupt cancelled]")

@@ -31,12 +31,10 @@ def build_shared_infra(
     memory_manager = MemoryManager(project_root)
 
     def _combined_on_compact(summary: str) -> None:
-        transcript = compactor.last_transcript_path
-        entry = compactor.entries[-1] if compactor.entries else None
         memory_manager.consolidate(
             summary,
-            source_session=transcript.stem if transcript is not None else None,
-            source_message=entry.id if entry is not None else None,
+            source_session=compactor.source_session_id,
+            source_message=compactor.source_message_id,
         )
         memory_manager.record_explicit_references(summary)
         memory_manager.record_llm_references(summary)

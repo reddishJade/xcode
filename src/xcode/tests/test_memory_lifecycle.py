@@ -14,6 +14,9 @@ from xcode.harness.memory import (
     MemoryRetrievalContext,
     build_memory_tools,
 )
+from xcode.coding_agent.assembly.infra import build_shared_infra
+from xcode.harness.config import XcodeRuntimeConfig
+from xcode.harness.session import SessionStore
 
 
 def _block(
@@ -147,6 +150,42 @@ def test_consolidation_uses_deterministic_quality_split_and_provenance(
     assert record.evidence == (
         MemoryEvidence("session", "session-real"),
         MemoryEvidence("message", "message-real"),
+    )
+
+
+def test_compaction_consolidation_uses_real_session_store_ids(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions", project_root=tmp_path)
+    source_message_id = store.append("user", "Keep provider retries bounded.")
+    infra = build_shared_infra(tmp_path, XcodeRuntimeConfig())
+
+    def judge(_text: str) -> list[MemoryJudgeResult]:
+        return [
+            MemoryJudgeResult(
+                is_worth_remembering=True,
+                confidence=0.9,
+                scope="providers",
+                related_files=("src/provider.py",),
+                suggested_title="Auditable provider retry",
+                suggested_context="Provider timeout policy",
+                suggested_solution="Retry once with bounded backoff.",
+                suggested_takeaways="Reuse only for provider timeouts.",
+            )
+        ]
+
+    infra.memory_manager.set_consolidate_judge_fn(judge)
+    infra.compactor.set_source_session_id(store.session_id)
+    infra.compactor.set_source_message_id(source_message_id)
+    assert infra.compactor.on_compact is not None
+    infra.compactor.on_compact(
+        "## Key Decisions\n- Keep provider retries bounded and scoped"
+    )
+
+    record = infra.memory_manager.read_memory_records(layer="project")[0]
+    assert record.source_session == store.session_id
+    assert record.source_message == source_message_id
+    assert record.evidence == (
+        MemoryEvidence("session", store.session_id),
+        MemoryEvidence("message", source_message_id),
     )
 
 
