@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from html import escape
 import json
+import math
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -43,6 +44,9 @@ from .parsing import (
 type MemoryLayer = Literal["project", "user"]
 type MemoryLayerFilter = Literal["all", "project", "user"]
 type MemoryOutcome = Literal["success", "failure", "corrected"]
+
+_DEFAULT_SEMANTIC_WEIGHT = 0.4
+_EMBEDDING_FAILURES = (ArithmeticError, RuntimeError, TypeError, ValueError)
 
 
 @dataclass(frozen=True)
@@ -286,6 +290,27 @@ class MemoryManager:
                 budget -= tokens
         return result
 
+    def select_budgeted_records(
+        self,
+        candidates: Sequence[MemoryRecord],
+        *,
+        max_tokens: int,
+    ) -> list[MemoryRecord]:
+        """按当前检索顺序装箱，不用全局重要性替换更相关记录。"""
+        if max_tokens <= 0:
+            return []
+        from xcode.agent._compaction import estimate_tokens
+
+        selected: list[MemoryRecord] = []
+        remaining = max_tokens
+        for record in candidates:
+            tokens = estimate_tokens(self.render_prompt_packet(record))
+            if tokens > remaining:
+                break
+            selected.append(record)
+            remaining -= tokens
+        return selected
+
     def _sort_by_importance(
         self,
         records: list[MemoryRecord],
@@ -365,18 +390,42 @@ class MemoryManager:
         track_usage: bool = True,
         retrieval_context: MemoryRetrievalContext | None = None,
     ) -> list[MemoryRecord]:
-        """跨层级执行检索和重排并返回带来源的记录。"""
+        """跨层级执行统一的混合检索、重排和 gate。"""
+        return self._search_memory_records(
+            query,
+            limit=limit,
+            scope=scope,
+            layer=layer,
+            source=source,
+            track_usage=track_usage,
+            retrieval_context=retrieval_context,
+            semantic_weight=_DEFAULT_SEMANTIC_WEIGHT,
+        )
+
+    def _search_memory_records(
+        self,
+        query: str,
+        *,
+        limit: int,
+        scope: str | None,
+        layer: MemoryLayerFilter,
+        source: str,
+        track_usage: bool,
+        retrieval_context: MemoryRetrievalContext | None,
+        semantic_weight: float,
+    ) -> list[MemoryRecord]:
+        """执行唯一的检索流水线，供公开入口和兼容入口复用。"""
         started_at = time.perf_counter()
         context = self._coerce_retrieval_context(
             query,
             scope=scope,
             retrieval_context=retrieval_context,
         )
-        candidates = self.retrieve_memory_candidates(
+        lexical_candidates = self.retrieve_memory_candidates(
             context,
             layer=layer,
         )
-        if not candidates or limit <= 0:
+        if not lexical_candidates or limit <= 0:
             if source == "tool":
                 self._emit_trace(
                     MemoryTraceEvent(
@@ -386,6 +435,12 @@ class MemoryManager:
                     )
                 )
             return []
+
+        candidates = self.fuse_memory_candidates(
+            lexical_candidates,
+            context,
+            semantic_weight=semantic_weight,
+        )
 
         ranked = self.rerank_memory_candidates(
             candidates,
@@ -425,7 +480,7 @@ class MemoryManager:
         *,
         layer: MemoryLayerFilter = "all",
     ) -> list[MemoryRecord]:
-        """返回 lexical candidate 集，供后续 rerank 使用。"""
+        """执行 BM25 词法召回，返回带词法分数的候选。"""
         context = self._coerce_retrieval_context(query)
         records = self.read_memory_records(layer=layer)
         blocks = [record.block for record in records]
@@ -452,39 +507,65 @@ class MemoryManager:
         candidates: list[MemoryRecord] = []
         for score, record in zip(scores, records, strict=True):
             lexical = self._weighted_lexical_score(record, context, bm25_score=score)
-            candidates.append(
-                MemoryRecord(
-                    block=record.block,
-                    title=record.title,
-                    fields=record.fields,
-                    memory_id=record.memory_id,
-                    memory_type=record.memory_type,
-                    scope=record.scope,
-                    source_session=record.source_session,
-                    related_files=record.related_files,
-                    related_symbols=record.related_symbols,
-                    created_at=record.created_at,
-                    modified_at=record.modified_at,
-                    confidence_value=record.confidence_value,
-                    status=record.status,
-                    validity=record.validity,
-                    supersedes=record.supersedes,
-                    evidence=record.evidence,
-                    retrieval_count=record.retrieval_count,
-                    injection_count=record.injection_count,
-                    reference_count=record.reference_count,
-                    adoption_count=record.adoption_count,
-                    success_count=record.success_count,
-                    failure_count=record.failure_count,
-                    correction_count=record.correction_count,
-                    utility=record.utility,
-                    last_outcome=record.last_outcome,
-                    score=round(lexical, 6),
-                    layer=record.layer,
-                )
-            )
+            candidates.append(replace(record, score=round(lexical, 6)))
         candidates.sort(key=lambda r: (-r.score, r.title))
         return candidates
+
+    def fuse_memory_candidates(
+        self,
+        candidates: Sequence[MemoryRecord],
+        query: str | MemoryRetrievalContext,
+        *,
+        semantic_weight: float = _DEFAULT_SEMANTIC_WEIGHT,
+    ) -> list[MemoryRecord]:
+        """融合词法与语义分数；嵌入不可用时原样返回词法候选。"""
+        context = self._coerce_retrieval_context(query)
+        semantic_scores = self._semantic_scores(candidates, context)
+        if semantic_scores is None:
+            return list(candidates)
+
+        bounded_weight = min(max(semantic_weight, 0.0), 1.0)
+        lexical_max = max((record.score for record in candidates), default=0.0)
+        semantic_max = max(semantic_scores, default=0.0)
+        score_scale = max(lexical_max, 1.0)
+        fused: list[MemoryRecord] = []
+        for record, semantic_score in zip(candidates, semantic_scores, strict=True):
+            lexical_norm = record.score / lexical_max if lexical_max > 0 else 0.0
+            semantic_norm = (
+                max(semantic_score, 0.0) / semantic_max if semantic_max > 0 else 0.0
+            )
+            score = (
+                lexical_norm * (1.0 - bounded_weight) + semantic_norm * bounded_weight
+            ) * score_scale
+            fused.append(replace(record, score=round(score, 6)))
+        fused.sort(key=lambda record: (-record.score, record.title))
+        return fused
+
+    def _semantic_scores(
+        self,
+        candidates: Sequence[MemoryRecord],
+        context: MemoryRetrievalContext,
+    ) -> list[float] | None:
+        """计算语义相似度；嵌入失败时返回 None 触发词法降级。"""
+        if self.embedding_fn is None:
+            return None
+        try:
+            query_vector = self.embedding_fn(context.lexical_text())
+            if not query_vector or not all(
+                math.isfinite(value) for value in query_vector
+            ):
+                raise ValueError("查询嵌入向量无效")
+            scores: list[float] = []
+            for record in candidates:
+                record_vector = self.embedding_fn(record.block)
+                if len(record_vector) != len(query_vector) or not all(
+                    math.isfinite(value) for value in record_vector
+                ):
+                    raise ValueError("记忆嵌入向量无效")
+                scores.append(_cosine_similarity(query_vector, record_vector))
+            return scores
+        except _EMBEDDING_FAILURES:
+            return None
 
     def rerank_memory_candidates(
         self,
@@ -503,45 +584,25 @@ class MemoryManager:
                 context.query,
                 context.scope,
             )
-            if adjusted < self.min_retrieval_score or not self._passes_confidence_gate(
-                candidate
-            ):
+            if not self._passes_retrieval_gate(candidate, adjusted):
                 continue
-            ranked.append(
-                MemoryRecord(
-                    block=candidate.block,
-                    title=candidate.title,
-                    fields=candidate.fields,
-                    memory_id=candidate.memory_id,
-                    memory_type=candidate.memory_type,
-                    scope=candidate.scope,
-                    source_session=candidate.source_session,
-                    related_files=candidate.related_files,
-                    related_symbols=candidate.related_symbols,
-                    created_at=candidate.created_at,
-                    modified_at=candidate.modified_at,
-                    confidence_value=candidate.confidence_value,
-                    status=candidate.status,
-                    validity=candidate.validity,
-                    supersedes=candidate.supersedes,
-                    evidence=candidate.evidence,
-                    retrieval_count=candidate.retrieval_count,
-                    injection_count=candidate.injection_count,
-                    reference_count=candidate.reference_count,
-                    adoption_count=candidate.adoption_count,
-                    success_count=candidate.success_count,
-                    failure_count=candidate.failure_count,
-                    correction_count=candidate.correction_count,
-                    utility=candidate.utility,
-                    last_outcome=candidate.last_outcome,
-                    score=round(adjusted, 6),
-                    layer=candidate.layer,
-                )
-            )
+            ranked.append(replace(candidate, score=round(adjusted, 6)))
         ranked.sort(key=lambda r: (-r.score, r.title))
         if limit is not None and limit > 0:
             return ranked[:limit]
         return ranked
+
+    def _passes_retrieval_gate(
+        self,
+        candidate: MemoryRecord,
+        score: float,
+    ) -> bool:
+        """统一执行最终分数阈值与置信度 gate。"""
+        return (
+            math.isfinite(score)
+            and score >= self.min_retrieval_score
+            and self._passes_confidence_gate(candidate)
+        )
 
     # ── 评测 ──
 
@@ -1792,7 +1853,7 @@ class MemoryManager:
             )
 
     def adopt_injected_records(self, *, source: str = "session") -> int:
-        """将当前 session 中已注入的记忆按保守策略标记为采用。"""
+        """兼容入口：仅将已确认引用的注入记忆标记为采用。"""
         records_by_layer = {
             current_layer: {
                 record.memory_id: record
@@ -1802,7 +1863,7 @@ class MemoryManager:
         }
         adopted_records: list[MemoryRecord] = []
         for (layer, memory_id), usage in self._session_usage.items():
-            if not usage.injected or usage.adopted:
+            if not usage.injected or not usage.referenced or usage.adopted:
                 continue
             record = records_by_layer.get(layer, {}).get(memory_id)
             if record is None:
@@ -1814,10 +1875,7 @@ class MemoryManager:
         return len(adopted_records)
 
     def record_compaction_referenced_feedback(self) -> int:
-        """在 compaction 时，对已被引用的记忆执行采纳 + 成功反馈。
-
-        仅在 record_explicit_references 之后调用，不会影响未引用的记忆。
-        """
+        """在 compaction 时把已引用记忆标为采用，结果反馈留到任务结束。"""
         records_by_layer = {
             current_layer: {
                 record.memory_id: record
@@ -1832,11 +1890,17 @@ class MemoryManager:
             record = records_by_layer.get(layer, {}).get(memory_id)
             if record is None:
                 continue
-            # 标记为已采纳
             usage.adopted = True
-            # 即时写回一条成功反馈
-            next_fields = self._feedback_fields_for_record(record, usage, "success")
-            self._replace_record_by_memory_id(record, next_fields)
+            self._emit_trace(
+                MemoryTraceEvent(
+                    type="used",
+                    memory_id=record.memory_id,
+                    layer=record.layer,
+                    title=record.title,
+                    score=usage.score,
+                    source="compaction",
+                )
+            )
             updated += 1
         return updated
 
@@ -1850,8 +1914,7 @@ class MemoryManager:
             return 0
 
         # 收集已注入但未确认引用的记忆
-        candidate_titles: list[str] = []
-        title_to_key: dict[str, tuple[str, str]] = {}
+        candidate_keys_by_title: dict[str, list[tuple[str, str]]] = {}
         records_by_layer = {
             current_layer: {
                 record.memory_id: record
@@ -1865,8 +1928,16 @@ class MemoryManager:
             record = records_by_layer.get(layer, {}).get(memory_id)
             if record is None:
                 continue
-            candidate_titles.append(record.title)
-            title_to_key[record.title.lower()] = (layer, memory_id)
+            candidate_keys_by_title.setdefault(record.title.casefold(), []).append(
+                (layer, memory_id)
+            )
+
+        candidate_titles = [
+            records_by_layer[layer][memory_id].title
+            for keys in candidate_keys_by_title.values()
+            if len(keys) == 1
+            for layer, memory_id in keys
+        ]
 
         if not candidate_titles:
             return 0
@@ -1878,8 +1949,9 @@ class MemoryManager:
 
         matched = 0
         for title in matched_titles:
-            key = title_to_key.get(title.lower())
-            if key is not None:
+            keys = candidate_keys_by_title.get(title.casefold(), [])
+            if len(keys) == 1:
+                key = keys[0]
                 usage = self._session_usage.get(key)
                 if usage is not None and not usage.referenced:
                     usage.referenced = True
@@ -1897,13 +1969,19 @@ class MemoryManager:
             }
             for current_layer in self._selected_layers("all")
         }
+        title_counts: dict[str, int] = {}
+        for layer, memory_id in self._session_usage:
+            record = records_by_layer.get(layer, {}).get(memory_id)
+            if record is not None:
+                title = record.title.casefold()
+                title_counts[title] = title_counts.get(title, 0) + 1
         for (layer, memory_id), usage in self._session_usage.items():
             record = records_by_layer.get(layer, {}).get(memory_id)
             if record is None:
                 continue
-            if (
-                memory_id.casefold() in normalized
-                or record.title.casefold() in normalized
+            if memory_id.casefold() in normalized or (
+                title_counts.get(record.title.casefold()) == 1
+                and record.title.casefold() in normalized
             ):
                 if not usage.referenced:
                     matched += 1
@@ -1980,7 +2058,8 @@ class MemoryManager:
         utility = record.utility
         status = record.status
         validity = record.validity
-        if usage.adopted:
+        attributed = usage.referenced or usage.adopted
+        if attributed:
             if outcome == "success":
                 success_count += 1
                 utility += 1.0
@@ -2007,7 +2086,7 @@ class MemoryManager:
             "failure-count": str(failure_count),
             "correction-count": str(correction_count),
             "utility": f"{utility:.2f}",
-            "last-outcome": outcome,
+            "last-outcome": outcome if attributed else (record.last_outcome or ""),
             "status": status,
             "validity": validity,
             "modified": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
@@ -2088,111 +2167,19 @@ class MemoryManager:
         source: str = "api",
         track_usage: bool = True,
         retrieval_context: MemoryRetrievalContext | None = None,
-        semantic_weight: float = 0.4,
+        semantic_weight: float = _DEFAULT_SEMANTIC_WEIGHT,
     ) -> list[MemoryRecord]:
-        """语义嵌入 + BM25 混合检索。
-
-        当配置了 embedding_fn 时，结合语义相似度与 BM25 词法分数做混合排序；
-        否则回退到纯 BM25 检索。
-        """
-        if self.embedding_fn is None:
-            return self.search_memory_records(
-                query,
-                limit=limit,
-                scope=scope,
-                layer=layer,
-                source=source,
-                track_usage=track_usage,
-                retrieval_context=retrieval_context,
-            )
-
-        started_at = time.perf_counter()
-        context = self._coerce_retrieval_context(
+        """兼容旧 API；委托给统一检索流水线。"""
+        return self._search_memory_records(
             query,
+            limit=limit,
             scope=scope,
-            retrieval_context=retrieval_context,
-        )
-        candidates = self.retrieve_memory_candidates(
-            context,
             layer=layer,
+            source=source,
+            track_usage=track_usage,
+            retrieval_context=retrieval_context,
+            semantic_weight=semantic_weight,
         )
-        if not candidates or limit <= 0:
-            if source == "tool":
-                self._emit_trace(
-                    MemoryTraceEvent(
-                        type="tool_searched",
-                        latency_ms=self._elapsed_ms(started_at),
-                        source=source,
-                    )
-                )
-            return []
-
-        # BM25 分数已在 candidate 的 score 字段上
-        bm25_scores = {c.memory_id: c.score for c in candidates}
-
-        # 语义嵌入
-        try:
-            query_vec = self.embedding_fn(context.lexical_text())
-            block_texts = [record.block for record in candidates]
-            block_vecs = [self.embedding_fn(block) for block in block_texts]
-            semantic_scores = {
-                record.memory_id: _cosine_similarity(query_vec, bv)
-                for record, bv in zip(candidates, block_vecs)
-            }
-        except Exception:
-            # 嵌入失败时降级到纯 BM25
-            semantic_scores = {c.memory_id: 0.0 for c in candidates}
-
-        # 混合：semantic_weight * 语义 + (1 - semantic_weight) * BM25
-        max_bm25 = max(bm25_scores.values()) if bm25_scores else 1.0
-        max_sem = max(semantic_scores.values()) if semantic_scores else 1.0
-        for record in candidates:
-            bm25_norm = bm25_scores.get(record.memory_id, 0.0) / max(max_bm25, 1e-8)
-            sem_norm = semantic_scores.get(record.memory_id, 0.0) / max(max_sem, 1e-8)
-            combined = sem_norm * semantic_weight + bm25_norm * (1.0 - semantic_weight)
-            combined *= max(max_bm25, 1e-8)  # rescale to original magnitude
-
-        ranked = sorted(
-            candidates,
-            key=lambda r: (
-                -(
-                    semantic_scores.get(r.memory_id, 0.0)
-                    / max(max_sem, 1e-8)
-                    * semantic_weight
-                    + bm25_scores.get(r.memory_id, 0.0)
-                    / max(max_bm25, 1e-8)
-                    * (1.0 - semantic_weight)
-                )
-                * max(max_bm25, 1e-8),
-                r.title,
-            ),
-        )
-
-        elapsed_ms = self._elapsed_ms(started_at)
-        if track_usage and ranked:
-            self._touch_lru(ranked)
-            self._mark_session_usage(ranked, usage="retrieved")
-        for record in ranked[:limit]:
-            self._emit_trace(
-                MemoryTraceEvent(
-                    type="retrieved",
-                    memory_id=self._memory_id(record.layer, record.title),
-                    layer=record.layer,
-                    title=record.title,
-                    score=record.score,
-                    latency_ms=elapsed_ms,
-                    source=source,
-                )
-            )
-        if source == "tool":
-            self._emit_trace(
-                MemoryTraceEvent(
-                    type="tool_searched",
-                    latency_ms=elapsed_ms,
-                    source=source,
-                )
-            )
-        return ranked[:limit]
 
     def render_prompt_packet(self, record: MemoryRecord) -> str:
         """将记忆渲染为短小、可审计的 prompt packet。"""

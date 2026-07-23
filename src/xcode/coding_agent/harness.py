@@ -365,12 +365,11 @@ class CodingAgentHarness(AgentHarness):
             return
         if final.answer:
             manager.record_explicit_references(final.answer)
+            manager.record_llm_references(final.answer)
         outcome = self._memory_outcome_for_result(final)
         if outcome is None:
             return
         source = f"runtime:{self.session_id}"
-        if outcome == "success":
-            manager.adopt_injected_records(source=source)
         manager.record_session_outcome(outcome, source=source)
 
     def _memory_outcome_for_result(

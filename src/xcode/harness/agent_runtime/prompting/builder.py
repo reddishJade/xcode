@@ -332,7 +332,6 @@ def _render_memory_context(
             contextual_state.recent_files if contextual_state is not None else ()
         ),
     )
-    # 先用 BM25 召回候选，再用预算控制注入量
     candidates = manager.search_memory_records(
         question,
         limit=10,
@@ -342,16 +341,9 @@ def _render_memory_context(
     if not candidates:
         return ""
 
-    # 按 token 预算裁剪
-    budgeted = manager.read_budgeted_records(max_tokens=max_tokens, layer="all")
-    if not budgeted:
-        return ""
-    # 取 BM25 召回与预算裁剪的交集
-    candidate_ids = {r.memory_id for r in candidates}
-    selected = [r for r in budgeted if r.memory_id in candidate_ids]
+    selected = manager.select_budgeted_records(candidates, max_tokens=max_tokens)
     if not selected:
-        # 预算裁剪后无交集，退回到 BM25 结果
-        selected = candidates[:1]
+        return ""
 
     manager.record_injected_records(selected)
 
