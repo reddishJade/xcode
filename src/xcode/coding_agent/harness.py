@@ -1,6 +1,6 @@
 """CodingAgentHarness — 编码领域专用的 agent 运行时。
 
-继承自 AgentHarness，添加执行模式（plan/build/act）、技能激活和记忆反馈。
+继承自 AgentHarness，添加执行模式（plan/build/act）和技能激活。
 """
 
 from __future__ import annotations
@@ -19,14 +19,13 @@ from xcode.agent.messages import (
 from xcode.agent.types import AgentToolResult
 from xcode.agent.types import TextContent, ToolCallContent
 from xcode.agent.types import ToolSpec
-from xcode.agent.results import AgentLoopResult, TerminationReason
+from xcode.agent.results import AgentLoopResult
 from xcode.ai.providers.base import ModelProvider
 from xcode.harness.config import AgentConfig
 from xcode.harness.skill_activation import (
     ExplicitSkillActivationResult,
     is_skill_activation_content,
 )
-from xcode.harness.memory.manager import MemoryOutcome
 from xcode.harness.agent_runtime._mode_protocol import ToolGateMode
 from xcode.harness.agent_runtime.agent_helpers import run_coro_sync
 from xcode.harness.agent_runtime.config import (
@@ -50,7 +49,7 @@ __all__ = ["CodingAgentHarness"]
 
 
 class CodingAgentHarness(AgentHarness):
-    """编码 agent 运行时。添加执行模式、技能激活、记忆反馈。"""
+    """编码 agent 运行时。添加执行模式和技能激活。"""
 
     def __init__(
         self,
@@ -133,9 +132,6 @@ class CodingAgentHarness(AgentHarness):
     def _post_load_history(self, messages: list[AgentMessage]) -> None:
         if self._coding_runtime.skill_registry is not None:
             self._coding_runtime.skill_registry.restore_activations(messages)
-
-    def _post_run(self, final: AgentHarnessResult) -> None:
-        self._record_memory_feedback(final)
 
     def load_run_state(self, run_state: RunState) -> None:
         super().load_run_state(run_state)
@@ -356,33 +352,3 @@ class CodingAgentHarness(AgentHarness):
             content=content,
             tool_call_id=tool_call_id,
         )
-
-    # ── 记忆反馈 ──
-
-    def _record_memory_feedback(self, final: AgentHarnessResult) -> None:
-        manager = self._memory_manager
-        if manager is None:
-            return
-        if final.answer:
-            manager.record_explicit_references(final.answer)
-            manager.record_llm_references(final.answer)
-        outcome = self._memory_outcome_for_result(final)
-        if outcome is None:
-            return
-        source = f"runtime:{self.session_id}"
-        manager.record_session_outcome(outcome, source=source)
-
-    def _memory_outcome_for_result(
-        self, final: AgentHarnessResult
-    ) -> MemoryOutcome | None:
-        answer = final.answer.strip()
-        if final.termination_reason is TerminationReason.COMPLETED:
-            return "success" if answer else None
-        if final.termination_reason in {
-            TerminationReason.PROVIDER_ERROR,
-            TerminationReason.WATCHDOG,
-        }:
-            return "failure"
-        if final.termination_reason is TerminationReason.STEP_LIMIT and not answer:
-            return "failure"
-        return None

@@ -222,23 +222,6 @@ def build_app(
     )
 
     fallback_provider = providers.llms.get("fallback")
-    # 创建 LLM provider 后，为 MemoryManager 接入 LLM 记忆质量评判和语义检索
-    from xcode.harness.memory.manager import (
-        build_memory_consolidate_judge_fn,
-        build_memory_embedding_fn,
-        build_memory_judge_fn,
-        build_memory_reference_judge_fn,
-    )
-
-    memory_manager.set_judge_fn(build_memory_judge_fn(providers.llm))
-    memory_manager.set_consolidate_judge_fn(
-        build_memory_consolidate_judge_fn(providers.llm)
-    )
-    memory_manager.set_reference_judge_fn(
-        build_memory_reference_judge_fn(providers.llm)
-    )
-    memory_manager.set_embedding_fn(build_memory_embedding_fn())
-
     # 为 LayeredCompactor 接入 LLM 驱动的摘要生成，替代纯规则 fallback
     from xcode.harness.agent_runtime.compaction import build_compact_summarize_fn
 

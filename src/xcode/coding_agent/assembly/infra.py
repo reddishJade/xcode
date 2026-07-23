@@ -30,33 +30,24 @@ def build_shared_infra(
 
     memory_manager = MemoryManager(project_root)
 
-    def _combined_on_compact(summary: str) -> None:
-        memory_manager.consolidate(
-            summary,
-            source_session=compactor.source_session_id,
-            source_message=compactor.source_message_id,
+    configured_sessions_dir = runtime_config.paths.sessions_dir
+    if configured_sessions_dir:
+        resolved_sessions_dir = resolve_config_path(
+            project_root,
+            configured_sessions_dir,
         )
-        memory_manager.record_explicit_references(summary)
-        memory_manager.record_llm_references(summary)
-        memory_manager.record_compaction_referenced_feedback()
-
-    transcript_dir = (
-        resolve_config_path(project_root, runtime_config.paths.sessions_dir)
-        if runtime_config.paths.sessions_dir
-        else project_root / ".local" / "sessions"
-    )
-    checkpoint_dir = (
-        resolve_config_path(project_root, runtime_config.paths.sessions_dir)
-        if runtime_config.paths.sessions_dir
-        else project_root / ".xcode" / "checkpoints"
-    )
+        assert resolved_sessions_dir is not None
+        transcript_dir = resolved_sessions_dir
+        checkpoint_dir = transcript_dir / "checkpoints"
+    else:
+        transcript_dir = project_root / ".local" / "sessions"
+        checkpoint_dir = project_root / ".xcode" / "checkpoints"
 
     compactor = LayeredCompactor(
         transcript_dir=transcript_dir,
         checkpoint_dir=checkpoint_dir,
         max_recent_messages=runtime_config.agent.max_recent_messages,
         keep_recent_tokens=runtime_config.agent.keep_recent_tokens,
-        on_compact=_combined_on_compact,
     )
     return SharedInfra(
         contextual_state=contextual_state,

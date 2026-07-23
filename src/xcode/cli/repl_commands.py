@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-import shlex
 import subprocess
 import sys
 from collections.abc import Callable
@@ -63,8 +62,7 @@ from xcode.harness.memory import (
     MemoryLayer,
     MemoryLayerFilter,
     MemoryManager,
-    MemoryRetrievalContext,
-    evaluate_case_file,
+    build_memory_block,
 )
 from xcode.agent.types import ToolSpec
 from xcode.harness.session import SessionStore
@@ -837,28 +835,13 @@ def cmd_memory(cmd: str, ctx: CommandContext) -> bool:
         return _list_memory(manager, payload)
     if action == "search":
         return _search_memory(manager, payload)
-    if action == "explain":
-        return _explain_memory(manager, payload)
-    if action == "eval":
-        return _eval_memory(manager, payload, ctx.project_root)
     if action == "add":
         return _add_memory(manager, payload)
-    if action == "maintain":
-        return _maintain_memory(manager, payload)
 
     print("Usage: /memory list [all|project|user]")
     print("       /memory search <query>")
-    print("       /memory explain <query> [--scope S] [--file F] [--symbol S]")
-    print("       /memory eval [case-file] [--json]")
-    print("       /memory maintain [all|project|user] [--apply]")
-    print(
-        "       /memory add [project|user] "
-        "<title> | <context> | <solution> | <files> | <takeaways>"
-    )
-    print(
-        "Example: /memory add project Title | Context here | Solution here | "
-        "src/file.py | Key takeaway"
-    )
+    print("       /memory add [project|user] <title> | <durable note>")
+    print("Example: /memory add project Retry policy | Retry providers at most twice.")
     return False
 
 
@@ -898,104 +881,8 @@ def _search_memory(manager: MemoryManager, query: str) -> bool:
     return False
 
 
-def _explain_memory(manager: MemoryManager, payload: str) -> bool:
-    """解析 explain 参数并打印严格只读的检索决策。"""
-    try:
-        tokens = shlex.split(payload)
-    except ValueError as exc:
-        print(f"Invalid memory explain arguments: {exc}")
-        return False
-    values: dict[str, str] = {}
-    query_parts: list[str] = []
-    symbols: list[str] = []
-    index = 0
-    value_options = {"--scope", "--file", "--symbol", "--limit", "--layer", "--budget"}
-    while index < len(tokens):
-        token = tokens[index]
-        if token in value_options:
-            if index + 1 >= len(tokens):
-                print(f"{token} requires a value.")
-                return False
-            if token == "--symbol":
-                symbols.extend(
-                    part.strip()
-                    for part in tokens[index + 1].split(",")
-                    if part.strip()
-                )
-            else:
-                values[token] = tokens[index + 1]
-            index += 2
-            continue
-        query_parts.append(token)
-        index += 1
-    query = " ".join(query_parts).strip()
-    if not query:
-        print("Usage: /memory explain <query> [--scope S] [--file F] [--symbol S]")
-        return False
-    layer = values.get("--layer", "all")
-    if layer not in {"all", "project", "user"}:
-        print("Memory layer must be one of: all, project, user.")
-        return False
-    try:
-        limit = int(values.get("--limit", "5"))
-        budget = int(values.get("--budget", "1200"))
-    except ValueError:
-        print("--limit and --budget must be integers.")
-        return False
-    context = MemoryRetrievalContext(
-        query=query,
-        scope=values.get("--scope"),
-        current_file=values.get("--file"),
-        symbols=tuple(symbols),
-    )
-    trace = manager.explain_memory_retrieval(
-        query,
-        limit=limit,
-        layer=cast(MemoryLayerFilter, layer),
-        retrieval_context=context,
-        max_tokens=budget,
-    )
-    print(trace.render())
-    return False
-
-
-def _eval_memory(
-    manager: MemoryManager,
-    payload: str,
-    project_root: Path,
-) -> bool:
-    """运行版本化离线评测并输出文本或稳定 JSON。"""
-    try:
-        tokens = shlex.split(payload)
-    except ValueError as exc:
-        print(f"Invalid memory eval arguments: {exc}")
-        return False
-    json_output = "--json" in tokens
-    paths = [token for token in tokens if token != "--json"]
-    if len(paths) > 1:
-        print("Usage: /memory eval [case-file] [--json]")
-        return False
-    case_file = (
-        Path(paths[0]).expanduser()
-        if paths
-        else project_root / "docs" / "memory_eval.yaml"
-    )
-    if not case_file.is_absolute():
-        case_file = project_root / case_file
-    if not case_file.is_file():
-        print(f"Memory eval case file not found: {case_file}")
-        return False
-    try:
-        report = evaluate_case_file(manager, case_file)
-    except (OSError, TypeError, ValueError) as exc:
-        print(f"Memory eval failed: {exc}")
-        return False
-    print(report.to_json() if json_output else report.render())
-    return False
-
-
 def _add_memory(manager: MemoryManager, payload: str) -> bool:
-    """解析单行结构化输入并写入指定记忆层级。"""
+    """解析单行 Markdown 记忆并写入指定层级。"""
     layer = "project"
     value = payload
     first, separator, remainder = payload.partition(" ")
@@ -1003,63 +890,22 @@ def _add_memory(manager: MemoryManager, payload: str) -> bool:
         layer = first.lower()
         value = remainder.strip()
 
-    status: str | None = None
-    validity: str | None = None
-    confidence: float | None = None
-    while value.startswith("--"):
-        option, separator, remainder = value.partition(" ")
-        if not separator:
-            break
-        raw_value, value_separator, remaining = remainder.partition(" ")
-        if not value_separator:
-            break
-        if option == "--status":
-            status = raw_value
-        elif option == "--validity":
-            validity = raw_value
-        elif option == "--confidence":
-            try:
-                confidence = float(raw_value)
-            except ValueError:
-                print("Memory confidence must be a number between 0 and 1.")
-                return False
-            if not 0.0 <= confidence <= 1.0:
-                print("Memory confidence must be a number between 0 and 1.")
-                return False
-        else:
-            break
-        value = remaining.strip()
-
-    fields = [field.strip() for field in value.split("|")]
-    if len(fields) == 1 and fields[0]:
-        title, context = _split_memory_shorthand(fields[0])
-        fields = [title, context, context, ".", context]
-    if len(fields) != 5 or any(not field for field in fields):
-        print(
-            "Usage: /memory add [project|user] "
-            "<title> | <context> | <solution> | <files> | <takeaways>"
-        )
-        print("Short form: /memory add [project|user] <title>: <note>")
+    title, separator, body = value.partition("|")
+    if not separator:
+        title, body = _split_memory_shorthand(value)
+    if not title.strip() or not body.strip():
+        print("Usage: /memory add [project|user] <title> | <durable note>")
         return False
 
-    title, context, solution, files, takeaways = fields
-    block = (
-        f"## {title}\n"
-        f"- Context/Query: {context}\n"
-        f"- Solution: {solution}\n"
-        f"- Files: {files}\n"
-        f"- Takeaways: {takeaways}\n"
-    )
+    block = build_memory_block(title, body)
     memory_layer = cast(MemoryLayer, layer)
     if not manager.add_memory_block(
         block,
-        source="repl",
-        confidence=confidence,
-        status=status,
-        validity=validity,
         layer=memory_layer,
     ):
-        print("Memory was rejected by validation or duplicate detection.")
+        print(
+            "Memory was rejected because it is empty or duplicates an existing entry."
+        )
         return False
 
     memory_file = (
@@ -1067,23 +913,6 @@ def _add_memory(manager: MemoryManager, payload: str) -> bool:
     )
     print(f"Added {layer} memory: {title}")
     print(f"Path: {memory_file}")
-    return False
-
-
-def _maintain_memory(manager: MemoryManager, payload: str) -> bool:
-    """以 dry-run 或显式 apply 模式维护长期记忆。"""
-    tokens = payload.split()
-    apply = "--apply" in tokens
-    layer_values = [token for token in tokens if token != "--apply"]
-    layer = layer_values[0].lower() if layer_values else "all"
-    if layer not in {"all", "project", "user"} or len(layer_values) > 1:
-        print("Usage: /memory maintain [all|project|user] [--apply]")
-        return False
-    report = manager.maintain_memory(
-        cast(MemoryLayerFilter, layer),
-        apply=apply,
-    )
-    print(report.render())
     return False
 
 

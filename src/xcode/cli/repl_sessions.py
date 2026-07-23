@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import questionary
 from rich.console import Console
@@ -23,6 +24,7 @@ from xcode.harness.session import (
     SessionInfoView as SessionMetadataView,
 )
 from xcode.harness.session import SessionStore
+from xcode.harness.memory import load_session_checkpoint
 
 
 @dataclass(frozen=True)
@@ -79,15 +81,51 @@ def sync_agent_history(app: object, store: SessionStore) -> None:
     if not callable(load_history):
         return
     records = store.build_branch()
-    load_history(records_to_agent_messages(records))
+    messages, rebuilt = _resume_messages(agent, store.session_id, records)
+    load_history(messages)
     _restore_contextual_state(app, records)
     set_notice = getattr(agent, "set_resumed_notice", None)
     if callable(set_notice):
-        set_notice(
-            "This conversation was resumed from a previous session. "
-            "The transcript history above has been loaded as context. "
-            "Continue the task as if the session was uninterrupted."
-        )
+        if rebuilt:
+            set_notice(
+                "This long-running session was rebuilt from its latest checkpoint "
+                "plus the verbatim transcript tail. Continue from the recorded next "
+                "action without asking the user to restate the goal."
+            )
+        else:
+            set_notice(
+                "This conversation was resumed from a previous session. "
+                "The transcript history above has been loaded as context. "
+                "Continue the task as if the session was uninterrupted."
+            )
+
+
+def _resume_messages(
+    agent: object,
+    session_id: str,
+    records: list[SessionRecord],
+) -> tuple[list[AgentMessage], bool]:
+    """优先用 checkpoint + 原文 tail 恢复，失配时回退完整历史。"""
+    compactor = getattr(agent, "compactor", None)
+    checkpoint_dir = getattr(compactor, "checkpoint_dir", None)
+    if not isinstance(checkpoint_dir, Path):
+        return records_to_agent_messages(records), False
+    checkpoint = load_session_checkpoint(checkpoint_dir, session_id)
+    if checkpoint is None:
+        return records_to_agent_messages(records), False
+    boundary_index = next(
+        (
+            index
+            for index, record in enumerate(records)
+            if record.id == checkpoint.boundary_message_id
+        ),
+        None,
+    )
+    if boundary_index is None:
+        return records_to_agent_messages(records), False
+    tail = records[boundary_index:]
+    seed = UserMessage(content=checkpoint.render_rebuild_prompt())
+    return [seed, *records_to_agent_messages(tail)], True
 
 
 def sync_compaction_source(

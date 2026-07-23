@@ -134,7 +134,7 @@ xcode --resume
 | `/config` | 模型配置 | 管理 provider profile |
 | `/tool [list\|NAME INPUT]` | 信息工具 | 查看/调用工具 |
 | `/skill NAME` | 信息工具 | 显式激活技能 |
-| `/memory` | 信息工具 | 检索、解释、评测、维护或添加记忆 |
+| `/memory` | 信息工具 | 列出、检索或显式添加长期记忆 |
 | `/permissions [list\|clear]` | 信息工具 | 查看或清除权限授权 |
 | `/hooks` | 信息工具 | 查看外部 hook 状态 |
 | `/mcp status\|reload` | 信息工具 | 查看 MCP 状态或重载 |
@@ -154,12 +154,12 @@ xcode --resume
 - **核心工具闭环** — 20+ 内置工具：文件读写编辑、glob/grep/bash/subagent/webfetch/websearch/question/todowrite 等。`edit_file` 依赖 read-before-edit SHA256 指纹校验。
 - **工具并发分区** — 只读且并发安全的工具并行执行；写操作、高风险命令保持串行。
 - **权限与审计** — `PermissionEngine` 统一执行工具权限判定、HITL 审批和输出脱敏；`JsonlAuditLogger` 记录审计日志；shell 命令安全分析器。
-- **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果，`RepeatDetector` 消除重复，压缩后重建文件指纹。
+- **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果；compact 后按 session 写入 checkpoint，resume 使用 checkpoint + 原文 tail 重建上下文。
 - **REPL 会话管理** — 24 个 `/slash` 命令，支持 plan/build/act、会话分支、回退、undo（快照恢复）、模型切换、config 管理、session transcript 落盘。
 - **TUI 全屏终端** — 基于 `prompt-toolkit` 的类 VSCode 全屏交互界面。
 - **Subagent 委托** — `subagent` 单入口委派子任务，实时流式展示子 agent 进度；支持 worktree 文件系统隔离。
 - **MCP 协议** — 基于官方 Python SDK 连接本地 stdio server，自动发现 `.local/mcp_config.json` 并注册 `mcp__{server}__{tool}` 动态工具。
-- **记忆系统** — 项目根 `MEMORY.md` + 用户级 `~/.xcode/memory/`，BM25 检索注入 `<memory>` 上下文。
+- **记忆系统** — 项目根 `MEMORY.md` + 用户级 `~/.xcode/memory/` 是可审查的长期事实源；Agent 通过 BM25 工具按需检索。
 - **外部 Hook** — 可配置事件驱动的外部命令 hooks（git 前置检查、自定义通知等）。
 - **实验能力** — 可显式启用 tasks、mailbox、progress 和 daemon 心跳；默认全部关闭。
 
@@ -171,13 +171,10 @@ xcode --resume
 
 实验能力默认关闭，只通过 `experimental.tasks`、`experimental.mailbox`、`experimental.progress` 启用。
 
-每轮检索项目根 `MEMORY.md` 与用户级 `~/.xcode/memory/MEMORY.md`，BM25
-匹配最多 3 条记录注入 `<memory>` 上下文。`search_memory` 是只读、低风险
-工具。`/memory explain <query>` 只读展示候选分数、生命周期隔离、排序和
-token 预算决策；可用 `--scope`、`--file`、`--symbol`、`--limit`、
-`--layer` 和 `--budget` 补充上下文。`/memory eval [case-file] [--json]`
-运行版本化离线案例；默认案例位于 `docs/memory_eval.yaml`，质量门禁要求
-forbidden、生命周期安全、预算和确定性违规均为零。
+`search_memory` 是只读、低风险的 BM25 检索工具。运行时不会在每轮自动
+注入检索结果；resume/rebuild 才会在独立预算内注入项目与用户记忆。长期
+记忆只保存用户规则、架构决定和经过验证的跨 session 事实，当前进度与
+下一步动作由 `.xcode/checkpoints/<session-id>/checkpoint.md` 负责。
 
 ---
 

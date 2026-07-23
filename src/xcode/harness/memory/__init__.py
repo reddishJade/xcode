@@ -1,81 +1,27 @@
-"""项目级与用户级长期记忆管理。"""
+"""面向长任务连续性的文件式记忆。"""
 
+from .checkpoint import (
+    SessionCheckpoint,
+    load_session_checkpoint,
+    write_session_checkpoint,
+)
 from .manager import (
-    MemoryConsolidateJudgeFn,
-    MemoryEmbeddingFn,
-    MemoryJudgeFn,
-    MemoryJudgeResult,
     MemoryLayer,
     MemoryLayerFilter,
-    MemoryLifecyclePolicy,
-    MemoryMaintenanceReport,
     MemoryManager,
-    MemoryReferenceJudgeFn,
-    MemoryRerankPolicy,
-    MemoryRetrievalContext,
-    build_memory_consolidate_judge_fn,
-    build_memory_embedding_fn,
-    build_memory_judge_fn,
-    build_memory_reference_judge_fn,
+    build_memory_block,
 )
-from .evaluation import (
-    MemoryEvalCase,
-    MemoryEvalFailure,
-    MemoryEvalReport,
-    evaluate_case_file,
-    evaluate_memory_cases,
-    load_memory_eval_cases,
-)
-from .parsing import (
-    MemoryEvidence,
-    MemoryRecord,
-    MemorySearchEvalCase,
-    MemorySearchEvalResult,
-    MemoryTraceEvent,
-    MemoryType,
-)
+from .parsing import MemoryRecord
 from .tools import build_memory_tools
-from .retrieval import (
-    MemoryCandidateDecision,
-    MemoryExclusionReason,
-    MemoryRetrievalMetrics,
-    MemoryRetrievalTrace,
-    MemoryScoreBreakdown,
-)
 
 __all__ = [
-    "MemoryEmbeddingFn",
-    "MemoryCandidateDecision",
-    "MemoryExclusionReason",
-    "MemoryRetrievalMetrics",
-    "MemoryRetrievalTrace",
-    "MemoryScoreBreakdown",
-    "MemoryEvalCase",
-    "MemoryEvalFailure",
-    "MemoryEvalReport",
-    "MemoryJudgeFn",
-    "MemoryJudgeResult",
     "MemoryLayer",
     "MemoryLayerFilter",
     "MemoryManager",
-    "MemoryLifecyclePolicy",
-    "MemoryMaintenanceReport",
-    "MemoryRerankPolicy",
-    "MemoryRetrievalContext",
-    "MemoryEvidence",
     "MemoryRecord",
-    "MemorySearchEvalCase",
-    "MemorySearchEvalResult",
-    "MemoryTraceEvent",
-    "MemoryConsolidateJudgeFn",
-    "MemoryReferenceJudgeFn",
-    "MemoryType",
-    "build_memory_consolidate_judge_fn",
-    "build_memory_embedding_fn",
-    "build_memory_judge_fn",
-    "build_memory_reference_judge_fn",
+    "SessionCheckpoint",
+    "build_memory_block",
     "build_memory_tools",
-    "evaluate_case_file",
-    "evaluate_memory_cases",
-    "load_memory_eval_cases",
+    "load_session_checkpoint",
+    "write_session_checkpoint",
 ]
