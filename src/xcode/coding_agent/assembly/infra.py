@@ -9,6 +9,7 @@ from xcode.harness.config import XcodeRuntimeConfig, resolve_config_path
 from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.harness.memory import MemoryManager
+from xcode.harness.session import SessionHistory
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class SharedInfra:
     compact_controller: CompactController
     compactor: LayeredCompactor
     memory_manager: MemoryManager
+    session_history: SessionHistory
 
 
 def build_shared_infra(
@@ -49,10 +51,12 @@ def build_shared_infra(
         max_recent_messages=runtime_config.agent.max_recent_messages,
         keep_recent_tokens=runtime_config.agent.keep_recent_tokens,
     )
+    session_history = SessionHistory(transcript_dir)
     return SharedInfra(
         contextual_state=contextual_state,
         cancellation_token=cancellation_token,
         compact_controller=compact_controller,
         compactor=compactor,
         memory_manager=memory_manager,
+        session_history=session_history,
     )

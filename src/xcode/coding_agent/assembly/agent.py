@@ -114,6 +114,7 @@ def build_agent(
     skill_registry: SkillRegistry | None = None,
     external_hook_runner: ExternalHookRunner | None = None,
     memory_manager: Any | None = None,
+    session_history: Any | None = None,
     todo_state: SessionTodoState | None = None,
 ) -> CodingAgentHarness:
     from xcode.harness.memory import MemoryManager
@@ -190,6 +191,7 @@ def build_agent(
             context_assembler=DefaultContextAssembler(),
             skill_registry=skill_registry,
             memory_manager=memory_manager,
+            session_history=session_history,
             todo_state=todo_state,
         ),
     )

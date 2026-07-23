@@ -35,6 +35,20 @@ def _entry(
     )
 
 
+def _summary(cycle: int) -> str:
+    return (
+        "[Compressed]\n"
+        "## Goal\nComplete the long-running migration without changing API v1.\n\n"
+        "## Constraints & Preferences\nPreserve the user's exact API constraint.\n\n"
+        "## Progress\n"
+        f"### Done\n- [x] Completed context cycle {cycle}.\n\n"
+        "### In Progress\n- [ ] Continue implementation.\n\n"
+        "## Key Decisions\n- Keep API v1 stable.\n\n"
+        "## Next Steps\n1. Run integration tests.\n\n"
+        "## Critical Context\nThe transcript remains authoritative."
+    )
+
+
 def test_checkpoint_is_isolated_by_session_and_preserves_full_summary(
     tmp_path: Path,
 ) -> None:
@@ -139,3 +153,67 @@ def test_compaction_writes_session_scoped_checkpoint(tmp_path: Path) -> None:
     assert checkpoint is not None
     assert checkpoint.boundary_message_id == "u2"
     assert checkpoint.path == tmp_path / "session-a" / "checkpoint.md"
+
+
+def test_degenerate_update_cannot_replace_usable_checkpoint(tmp_path: Path) -> None:
+    original = write_session_checkpoint(
+        tmp_path,
+        session_id="session-a",
+        boundary_message_id="u1",
+        summary=_summary(1),
+    )
+
+    result = write_session_checkpoint(
+        tmp_path,
+        session_id="session-a",
+        boundary_message_id="u2",
+        summary="too short",
+    )
+
+    assert result == original
+    assert load_session_checkpoint(tmp_path, "session-a") == original
+
+
+def test_two_compact_cycles_roll_previous_state_forward(tmp_path: Path) -> None:
+    seen: list[list[dict[str, object]]] = []
+
+    def summarize(messages: list[dict[str, object]]) -> str:
+        seen.append(messages)
+        return _summary(len(seen))
+
+    compactor = LayeredCompactor(
+        checkpoint_dir=tmp_path,
+        max_recent_messages=1,
+        keep_recent_tokens=20,
+        summarize_fn=summarize,
+    )
+    compactor.set_source_session_id("session-a")
+    compactor.set_source_message_id("u1")
+    first = compactor(
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "start migration"},
+            {"role": "assistant", "content": "working"},
+            {"role": "user", "content": "continue"},
+        ]
+    )
+
+    compactor.set_source_message_id("u2")
+    second = compactor(
+        [
+            *first,
+            {"role": "assistant", "content": "more work"},
+            {"role": "user", "content": "continue again"},
+        ]
+    )
+    checkpoint = load_session_checkpoint(tmp_path, "session-a")
+
+    assert len(seen) == 2
+    assert any(
+        "Completed context cycle 1" in str(message.get("content", ""))
+        for message in seen[1]
+    )
+    assert checkpoint is not None
+    assert checkpoint.boundary_message_id == "u2"
+    assert "Completed context cycle 2" in checkpoint.body
+    assert "Completed context cycle 2" in str(second[1]["content"])

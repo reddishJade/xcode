@@ -218,6 +218,7 @@ def build_app(
         skills_dir=cfg.skills_dir,
         external_hook_runner=external_hook_runner,
         memory_manager=memory_manager,
+        session_history=infra.session_history,
         todo_state=todo_state,
     )
 
@@ -243,6 +244,7 @@ def build_app(
         skill_registry=skill_registry,
         external_hook_runner=external_hook_runner,
         memory_manager=memory_manager,
+        session_history=infra.session_history,
         todo_state=todo_state,
     )
 

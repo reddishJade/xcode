@@ -531,6 +531,10 @@ type SummarizeFn = Callable[[list[dict[str, Any]]], str | Awaitable[str]]
 SUMMARIZE_SYSTEM_PROMPT = (
     "Summarize the following conversation turns into a structured markdown summary. "
     "Preserve architecture decisions, file changes, and TODO items. "
+    "If the input contains an earlier [Compressed] summary or <session-checkpoint>, "
+    "treat it as authoritative state: update it with newer facts instead of "
+    "summarizing it as ordinary conversation. Never drop an unfinished goal, an "
+    "explicit user constraint, or the next action. "
     "Use the following format:\n\n"
     "## Goal\n"
     "[What the user is trying to accomplish]\n\n"
@@ -688,32 +692,43 @@ def summarize_messages(
     if not older:
         return [messages[0], *protected_older, *messages[recent_start:]]
 
+    summary_content = ""
     if summarize_fn:
-        raw = summarize_fn(older)
-        if isinstance(raw, Awaitable):
-            raw = asyncio.get_event_loop().run_until_complete(raw)
-        summary_content = str(raw).strip()
-        if not summary_content.startswith("[Compressed]"):
-            summary_content = "[Compressed]\n" + summary_content
-    else:
-        summary_content = "[Compressed]\n" + _fallback_structured_summary(older)
+        try:
+            raw = summarize_fn(older)
+            if isinstance(raw, Awaitable):
+                raw = asyncio.get_event_loop().run_until_complete(raw)
+            summary_content = str(raw).strip()
+        except (RuntimeError, TimeoutError, ValueError):
+            summary_content = ""
+    if not _is_usable_summary(summary_content):
+        summary_content = _fallback_structured_summary(older)
+    if not summary_content.startswith("[Compressed]"):
+        summary_content = "[Compressed]\n" + summary_content
 
     if compact_instructions and compact_instructions.frozen_identifiers:
         summary_content = _protect_identifiers(
             summary_content, compact_instructions.frozen_identifiers
         )
 
-    summary = {
-        "role": "user",
-        "content": summary_content,
-    }
     # 注入累积文件操作信息到摘要
     if read_files or modified_files:
         tracked = _render_file_tracking(read_files or set(), modified_files or set())
         if tracked:
             summary_content += "\n\n" + tracked
 
+    summary = {
+        "role": "user",
+        "content": summary_content,
+    }
     return [messages[0], summary, *protected_older, *messages[recent_start:]]
+
+
+def _is_usable_summary(summary: str) -> bool:
+    """拒绝空、截断或缺少继续任务所需字段的摘要。"""
+    normalized = summary.removeprefix("[Compressed]").strip()
+    required = ("## Goal", "## Progress", "## Next Steps")
+    return len(normalized) >= 80 and all(section in normalized for section in required)
 
 
 def _activated_skill_message_indices(messages: list[dict[str, Any]]) -> set[int]:

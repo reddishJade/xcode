@@ -138,6 +138,9 @@ def sync_compaction_source(
     if agent is None:
         return
     agent.session_id = store.session_id
+    history_setter = getattr(agent, "set_history_session_id", None)
+    if callable(history_setter):
+        history_setter(store.session_id)
     setter = getattr(agent, "set_compaction_source_message_id", None)
     if callable(setter):
         setter(message_id)

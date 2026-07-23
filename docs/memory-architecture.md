@@ -68,15 +68,16 @@ Do not add these without evidence from real long-running task failures:
 - online explain/metrics platforms for a local Markdown search;
 - automatic retrieval injection on every user turn.
 
-## Remaining long-horizon work
+## Stop point
 
-The current implementation establishes a small correct base. MiMo-style parity
-would additionally require:
+The implemented checkpoint/history cycle is the product boundary:
 
-- early checkpoint extraction before the context is nearly full;
-- a raw-history search/around tool for details older than the rebuild boundary;
-- an independent single-writer path for promoting repeatedly verified facts
-  from session checkpoints into project memory.
+- compact updates the previous structured state instead of repeatedly
+  summarizing it as ordinary conversation;
+- degenerate summaries cannot replace a usable checkpoint;
+- `history search/around` retrieves exact details older than the rebuild
+  boundary.
 
-These belong to checkpoint/history integration. They must not expand the
-per-record Memory model.
+Early background extraction and automatic project-memory promotion are not
+planned. They require evidence from real long-running task failures and must
+not expand the per-record Memory model.

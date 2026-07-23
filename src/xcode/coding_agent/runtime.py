@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig
 from xcode.harness.memory import MemoryManager
+from xcode.harness.session import SessionHistory
 from xcode.harness.session_todo import SessionTodoState
 from xcode.harness.skills import SkillRegistry
 
@@ -16,5 +17,6 @@ class CodingAgentRuntimeConfig(AgentRuntimeConfig):
 
     skill_registry: SkillRegistry | None = None
     memory_manager: MemoryManager | None = None
+    session_history: SessionHistory | None = None
     todo_state: SessionTodoState | None = None
     prompt_instructions: tuple[dict, ...] = ()

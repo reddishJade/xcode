@@ -40,9 +40,12 @@ def write_session_checkpoint(
     read_files: set[str] | None = None,
     modified_files: set[str] | None = None,
 ) -> SessionCheckpoint:
-    """以原子替换写入当前 session 的最新 checkpoint。"""
+    """以原子替换写入 checkpoint；退化更新不会覆盖可用旧状态。"""
     path = _checkpoint_path(root, session_id)
     state = summary.removeprefix("[Compressed]").strip()
+    previous = load_session_checkpoint(root, session_id)
+    if not _is_usable_state(state) and previous is not None:
+        return previous
     sections = [
         "# Session checkpoint",
         f"Boundary-Message-ID: {boundary_message_id}",
@@ -106,6 +109,11 @@ def _render_files(read_files: set[str], modified_files: set[str]) -> str:
         lines.append("### Modified")
         lines.extend(f"- {path}" for path in sorted(modified_files))
     return "\n".join(lines)
+
+
+def _is_usable_state(state: str) -> bool:
+    required = ("## Goal", "## Progress", "## Next Steps")
+    return len(state) >= 80 and all(section in state for section in required)
 
 
 def _atomic_write(path: Path, content: str) -> None:

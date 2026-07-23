@@ -66,8 +66,11 @@ class CodingAgentHarness(AgentHarness):
         self._coding_runtime = runtime
         self._mode = ExecutionModeState()
         self._memory_manager = runtime.memory_manager
+        self._session_history = runtime.session_history
         self._todo_state = runtime.todo_state
         super().__init__(provider, registry, config, gate, runtime)
+        if self._session_history is not None:
+            self._session_history.set_session_id(self.session_id)
         from xcode.coding_agent.tools.subagent import bind_subagent_permission_gate
 
         bind_subagent_permission_gate(self._registry, self._gate)
@@ -154,6 +157,11 @@ class CodingAgentHarness(AgentHarness):
         """返回当前运行时允许显式激活的技能名称。"""
         registry = self._coding_runtime.skill_registry
         return registry.available_names() if registry is not None else ()
+
+    def set_history_session_id(self, session_id: str) -> None:
+        """绑定 history 工具当前读取的真实 session。"""
+        if self._session_history is not None:
+            self._session_history.set_session_id(session_id)
 
     def activate_skill(
         self, skill_name: str, mode: ExecutionMode | None = None

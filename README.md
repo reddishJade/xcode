@@ -167,7 +167,7 @@ xcode --resume
 
 ## 工具能力
 
-稳定工具默认注册：`read`/`write`/`edit`/`glob`/`grep`/`list_dir`/`truncate`、`websearch`/`webfetch`、`question`、`bash`、`search_tools`、`subagent`、worktree、`todowrite`、`search_memory`、`apply_patch`。发现 skill 时注册 `load_skill`；存在 MCP 配置时注册 `mcp__{server}__{tool}` 动态工具。
+稳定工具默认注册：`read`/`write`/`edit`/`glob`/`grep`/`list_dir`/`truncate`、`websearch`/`webfetch`、`question`、`bash`、`search_tools`、`subagent`、worktree、`todowrite`、`history`、`search_memory`、`apply_patch`。发现 skill 时注册 `load_skill`；存在 MCP 配置时注册 `mcp__{server}__{tool}` 动态工具。
 
 实验能力默认关闭，只通过 `experimental.tasks`、`experimental.mailbox`、`experimental.progress` 启用。
 
@@ -175,6 +175,10 @@ xcode --resume
 注入检索结果；resume/rebuild 才会在独立预算内注入项目与用户记忆。长期
 记忆只保存用户规则、架构决定和经过验证的跨 session 事实，当前进度与
 下一步动作由 `.xcode/checkpoints/<session-id>/checkpoint.md` 负责。
+
+`history` 只读取当前 session 的当前分支：`search` 按关键词定位旧消息，
+`around` 按 message id 读取原文邻域。compact 后的 checkpoint 滚动更新，
+旧 checkpoint 是下一轮摘要的权威基线；退化摘要不会覆盖已有可用状态。
 
 ---
 

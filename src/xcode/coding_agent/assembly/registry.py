@@ -139,6 +139,7 @@ def _extend_registry_with_features(
     mcp_runtime_registry: McpRuntimeRegistry,
     runtime_config: XcodeRuntimeConfig,
     memory_manager: Any | None = None,
+    session_history: Any | None = None,
 ) -> tuple[ToolSpec, ...]:
     from xcode.harness.mcp import build_mcp_tools
 
@@ -150,6 +151,10 @@ def _extend_registry_with_features(
         registry += build_memory_tools(memory_manager)
     else:
         registry += build_memory_tools(MemoryManager(project_root))
+    if session_history is not None:
+        from xcode.harness.session import build_history_tools
+
+        registry += build_history_tools(session_history)
     return registry
 
 
@@ -167,6 +172,7 @@ def build_tool_registry(
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
     external_hook_runner: ExternalHookRunner | None = None,
     memory_manager: Any | None = None,
+    session_history: Any | None = None,
     todo_state: SessionTodoState | None = None,
 ) -> tuple[
     tuple[ToolSpec, ...],
@@ -202,6 +208,7 @@ def build_tool_registry(
         mcp_runtime_registry,
         runtime_config,
         memory_manager=memory_manager,
+        session_history=session_history,
     )
 
     child_registry = _build_child_registry(
