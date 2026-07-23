@@ -830,9 +830,12 @@ def cmd_memory(cmd: str, ctx: CommandContext) -> bool:
         return _search_memory(manager, payload)
     if action == "add":
         return _add_memory(manager, payload)
+    if action == "maintain":
+        return _maintain_memory(manager, payload)
 
     print("Usage: /memory list [all|project|user]")
     print("       /memory search <query>")
+    print("       /memory maintain [all|project|user] [--apply]")
     print(
         "       /memory add [project|user] "
         "<title> | <context> | <solution> | <files> | <takeaways>"
@@ -889,6 +892,33 @@ def _add_memory(manager: MemoryManager, payload: str) -> bool:
         layer = first.lower()
         value = remainder.strip()
 
+    status: str | None = None
+    validity: str | None = None
+    confidence: float | None = None
+    while value.startswith("--"):
+        option, separator, remainder = value.partition(" ")
+        if not separator:
+            break
+        raw_value, value_separator, remaining = remainder.partition(" ")
+        if not value_separator:
+            break
+        if option == "--status":
+            status = raw_value
+        elif option == "--validity":
+            validity = raw_value
+        elif option == "--confidence":
+            try:
+                confidence = float(raw_value)
+            except ValueError:
+                print("Memory confidence must be a number between 0 and 1.")
+                return False
+            if not 0.0 <= confidence <= 1.0:
+                print("Memory confidence must be a number between 0 and 1.")
+                return False
+        else:
+            break
+        value = remaining.strip()
+
     fields = [field.strip() for field in value.split("|")]
     if len(fields) == 1 and fields[0]:
         title, context = _split_memory_shorthand(fields[0])
@@ -910,7 +940,14 @@ def _add_memory(manager: MemoryManager, payload: str) -> bool:
         f"- Takeaways: {takeaways}\n"
     )
     memory_layer = cast(MemoryLayer, layer)
-    if not manager.add_memory_block(block, source="repl", layer=memory_layer):
+    if not manager.add_memory_block(
+        block,
+        source="repl",
+        confidence=confidence,
+        status=status,
+        validity=validity,
+        layer=memory_layer,
+    ):
         print("Memory was rejected by validation or duplicate detection.")
         return False
 
@@ -919,6 +956,23 @@ def _add_memory(manager: MemoryManager, payload: str) -> bool:
     )
     print(f"Added {layer} memory: {title}")
     print(f"Path: {memory_file}")
+    return False
+
+
+def _maintain_memory(manager: MemoryManager, payload: str) -> bool:
+    """以 dry-run 或显式 apply 模式维护长期记忆。"""
+    tokens = payload.split()
+    apply = "--apply" in tokens
+    layer_values = [token for token in tokens if token != "--apply"]
+    layer = layer_values[0].lower() if layer_values else "all"
+    if layer not in {"all", "project", "user"} or len(layer_values) > 1:
+        print("Usage: /memory maintain [all|project|user] [--apply]")
+        return False
+    report = manager.maintain_memory(
+        cast(MemoryLayerFilter, layer),
+        apply=apply,
+    )
+    print(report.render())
     return False
 
 

@@ -39,6 +39,7 @@ class MemoryRecord:
     memory_type: MemoryType
     scope: str | None = None
     source_session: str | None = None
+    source_message: str | None = None
     related_files: tuple[str, ...] = ()
     related_symbols: tuple[str, ...] = ()
     created_at: str | None = None
@@ -137,7 +138,8 @@ def parse_memory_record(block: str, *, layer: str = "project") -> MemoryRecord:
         memory_id=memory_id,
         memory_type=memory_type,
         scope=fields.get("scope"),
-        source_session=fields.get("source-session") or fields.get("source"),
+        source_session=fields.get("source-session"),
+        source_message=fields.get("source-message"),
         related_files=_parse_list_field(
             fields.get("related-files") or fields.get("files")
         ),
@@ -333,6 +335,8 @@ def with_metadata(
     *,
     layer: str,
     source: str | None,
+    source_session: str | None = None,
+    source_message: str | None = None,
     scope: str | None,
     confidence: float | None,
     memory_type: MemoryType | None = None,
@@ -367,8 +371,10 @@ def with_metadata(
         additions.append(f"- Memory-Type: {normalized_type}")
     if source and "source" not in existing:
         additions.append(f"- Source: {source}")
-    if source and "source-session" not in existing:
-        additions.append(f"- Source-Session: {source}")
+    if source_session and "source-session" not in existing:
+        additions.append(f"- Source-Session: {source_session}")
+    if source_message and "source-message" not in existing:
+        additions.append(f"- Source-Message: {source_message}")
     if scope and "scope" not in existing:
         additions.append(f"- Scope: {scope}")
     if confidence is not None and "confidence" not in existing:
@@ -402,6 +408,10 @@ def with_metadata(
         additions.append(f"- Last-Outcome: {last_outcome}")
     if "created" not in existing:
         additions.append(f"- Created: {time.strftime('%Y-%m-%d', time.localtime())}")
+    if "modified" not in existing and "last_modified" not in existing:
+        additions.append(
+            f"- Modified: {time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime())}"
+        )
     if additions:
         lines.extend(additions)
     return "\n".join(lines)

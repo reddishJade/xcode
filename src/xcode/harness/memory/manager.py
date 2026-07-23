@@ -1,16 +1,18 @@
 """基于 BM25 的 MEMORY.md 记忆系统。
 
-支持质量门（拒绝低质量/重复块）、冲突合并（同标题合并字段）、
-保留策略（超过 max_blocks 时结合质量与使用信号淘汰较弱记忆）。
+支持质量门、证据合并、冲突隔离、确定性生命周期和安全维护。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from hashlib import sha256
 from html import escape
 import json
 import math
+import os
+import tempfile
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -47,6 +49,52 @@ type MemoryOutcome = Literal["success", "failure", "corrected"]
 
 _DEFAULT_SEMANTIC_WEIGHT = 0.4
 _EMBEDDING_FAILURES = (ArithmeticError, RuntimeError, TypeError, ValueError)
+
+
+@dataclass(frozen=True)
+class MemoryLifecyclePolicy:
+    """集中定义长期记忆的确定性生命周期阈值。"""
+
+    active_confidence: float = 0.75
+    candidate_prompt_confidence: float = 0.80
+    candidate_promotion_successes: int = 2
+    verification_successes: int = 2
+    stale_after_days: int = 180
+    candidate_score_multiplier: float = 0.65
+    verified_score_multiplier: float = 1.15
+    contradicted_score_multiplier: float = 0.1
+
+
+@dataclass(frozen=True)
+class MemoryMaintenanceReport:
+    """一次确定性维护分析或执行的结果。"""
+
+    applied: bool
+    duplicate_merges: tuple[str, ...] = ()
+    candidate_promotions: tuple[str, ...] = ()
+    needs_review: tuple[str, ...] = ()
+    superseded: tuple[str, ...] = ()
+    archive_candidates: tuple[str, ...] = ()
+    evidence_merges: tuple[str, ...] = ()
+    conflicts: tuple[str, ...] = ()
+
+    def render(self) -> str:
+        """渲染适合 REPL 的稳定文本报告。"""
+        mode = "apply" if self.applied else "dry-run"
+        lines = [f"Memory maintenance ({mode})"]
+        sections = (
+            ("duplicate merges", self.duplicate_merges),
+            ("candidate promotions", self.candidate_promotions),
+            ("needs_review records", self.needs_review),
+            ("superseded records", self.superseded),
+            ("archive candidates", self.archive_candidates),
+            ("evidence merges", self.evidence_merges),
+            ("conflicts", self.conflicts),
+        )
+        for label, values in sections:
+            rendered = ", ".join(values) if values else "none"
+            lines.append(f"- {label}: {rendered}")
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -178,6 +226,7 @@ class MemoryManager:
         min_retrieval_score: float = 0.2,
         min_confidence: float = 0.0,
         rerank_policy: MemoryRerankPolicy | None = None,
+        lifecycle_policy: MemoryLifecyclePolicy | None = None,
         judge_fn: MemoryJudgeFn | None = None,
         embedding_fn: MemoryEmbeddingFn | None = None,
         consolidate_judge_fn: MemoryConsolidateJudgeFn | None = None,
@@ -202,6 +251,7 @@ class MemoryManager:
         self.min_retrieval_score = min_retrieval_score
         self.min_confidence = min_confidence
         self.rerank_policy = rerank_policy or MemoryRerankPolicy()
+        self.lifecycle_policy = lifecycle_policy or MemoryLifecyclePolicy()
         self.judge_fn: MemoryJudgeFn | None = judge_fn
         self.embedding_fn: MemoryEmbeddingFn | None = embedding_fn
         self.consolidate_judge_fn: MemoryConsolidateJudgeFn | None = (
@@ -248,7 +298,12 @@ class MemoryManager:
             return []
         from xcode.agent._compaction import estimate_tokens
 
-        records = self.read_memory_records(layer=layer)
+        records = [
+            record
+            for record in self.read_memory_records(layer=layer)
+            if record.status == "active"
+            and record.validity not in {"needs_review", "corrected", "contradicted"}
+        ]
         if not records:
             return []
         sorted_records = self._sort_by_importance(records)
@@ -274,7 +329,12 @@ class MemoryManager:
             return []
         from xcode.agent._compaction import estimate_tokens
 
-        records = self.read_memory_records(layer=layer)
+        records = [
+            record
+            for record in self.read_memory_records(layer=layer)
+            if record.status == "active"
+            and record.validity not in {"needs_review", "corrected", "contradicted"}
+        ]
         if not records:
             return []
         sorted_records = self._sort_by_importance(records)
@@ -416,6 +476,17 @@ class MemoryManager:
     ) -> list[MemoryRecord]:
         """执行唯一的检索流水线，供公开入口和兼容入口复用。"""
         started_at = time.perf_counter()
+        exact = [
+            record
+            for record in self.read_memory_records(layer=layer)
+            if record.memory_id.casefold() == query.strip().casefold()
+        ]
+        if exact:
+            ranked_exact = [replace(record, score=1.0) for record in exact[:limit]]
+            if track_usage:
+                self._touch_lru(ranked_exact)
+                self._mark_session_usage(ranked_exact, usage="retrieved")
+            return ranked_exact
         context = self._coerce_retrieval_context(
             query,
             scope=scope,
@@ -448,6 +519,12 @@ class MemoryManager:
             scope=scope,
             limit=limit,
         )
+        if source == "prompt":
+            ranked = [
+                record
+                for record in ranked
+                if self._is_automatic_injection_eligible(record, context)
+            ]
         elapsed_ms = self._elapsed_ms(started_at)
         if track_usage and ranked:
             self._touch_lru(ranked)
@@ -742,6 +819,12 @@ class MemoryManager:
             )
         if candidate.status == "needs_review":
             adjusted *= self.rerank_policy.needs_review_multiplier
+        if candidate.status == "candidate":
+            adjusted *= self.lifecycle_policy.candidate_score_multiplier
+        if candidate.validity == "verified":
+            adjusted *= self.lifecycle_policy.verified_score_multiplier
+        if candidate.validity == "contradicted":
+            adjusted *= self.lifecycle_policy.contradicted_score_multiplier
         if candidate.utility != 0.0:
             adjusted *= max(
                 self.rerank_policy.utility_multiplier_min,
@@ -762,6 +845,33 @@ class MemoryManager:
         if query_terms and query_terms.intersection(tokenize(provenance_text)):
             adjusted *= self.rerank_policy.provenance_bonus
         return adjusted
+
+    def _is_automatic_injection_eligible(
+        self,
+        record: MemoryRecord,
+        context: MemoryRetrievalContext,
+    ) -> bool:
+        """限制自动注入，显式搜索仍可审计所有状态。"""
+        if record.status in {"needs_review", "superseded", "deprecated", "obsolete"}:
+            return False
+        if record.validity in {"needs_review", "corrected", "contradicted"}:
+            return False
+        if record.status != "candidate":
+            return True
+        confidence = record.confidence_value or 0.0
+        if confidence < self.lifecycle_policy.candidate_prompt_confidence:
+            return False
+        normalized_files = {item.casefold() for item in record.related_files}
+        normalized_symbols = {item.casefold() for item in record.related_symbols}
+        if context.current_file and context.current_file.casefold() in normalized_files:
+            return True
+        if normalized_symbols.intersection(
+            symbol.casefold() for symbol in context.symbols
+        ):
+            return True
+        if context.scope and record.scope:
+            return bool(tokenize_set(context.scope) & tokenize_set(record.scope))
+        return False
 
     def _scope_multiplier(self, candidate: MemoryRecord, scope: str) -> float:
         scope_terms = set(tokenize(scope))
@@ -1004,6 +1114,8 @@ class MemoryManager:
         block: str,
         *,
         source: str | None = None,
+        source_session: str | None = None,
+        source_message: str | None = None,
         scope: str | None = None,
         confidence: float | None = None,
         memory_type: MemoryType | None = None,
@@ -1014,16 +1126,21 @@ class MemoryManager:
         layer: MemoryLayer = "project",
     ) -> bool:
         """校验并写入指定记忆层级。"""
+        effective_evidence = tuple(evidence)
+        if not effective_evidence and source == "repl":
+            effective_evidence = (MemoryEvidence("user", "explicit-confirmation"),)
         return self._persist_memory_block(
             block,
             source=source,
+            source_session=source_session,
+            source_message=source_message,
             scope=scope,
             confidence=confidence,
             memory_type=memory_type,
-            status=status,
-            validity=validity,
+            status=status or "active",
+            validity=validity or "user_confirmed",
             supersedes=tuple(supersedes),
-            evidence=evidence,
+            evidence=effective_evidence,
             retrieval_count=None,
             injection_count=None,
             reference_count=None,
@@ -1042,6 +1159,8 @@ class MemoryManager:
         block: str,
         *,
         source: str | None,
+        source_session: str | None,
+        source_message: str | None,
         scope: str | None,
         confidence: float | None,
         memory_type: MemoryType | None,
@@ -1073,6 +1192,8 @@ class MemoryManager:
             block,
             layer=layer,
             source=source,
+            source_session=source_session,
+            source_message=source_message,
             scope=scope,
             confidence=confidence,
             memory_type=memory_type,
@@ -1098,8 +1219,18 @@ class MemoryManager:
             if self._try_merge_block(block, new_title, existing_records, layer, source):
                 return True
 
+        duplicate = self._find_duplicate_record(block, existing_records)
+        if duplicate is not None and parse_memory_record(block, layer=layer).evidence:
+            merged = self._merge_equivalent_records(
+                duplicate,
+                parse_memory_record(block, layer=layer),
+            )
+            self._replace_record_by_memory_id(duplicate, parse_fields(merged))
+            return True
+
+        duplicate_candidates = [] if supersedes else existing_records
         if self._reject_if_low_quality(
-            block, new_title, existing_records, layer, source
+            block, new_title, duplicate_candidates, layer, source
         ):
             return False
 
@@ -1170,6 +1301,9 @@ class MemoryManager:
             )
             self._archive_block(merged_block, layer)
             return False
+        merged_title = extract_title(merged_block)
+        if merged_title.casefold() != new_title.casefold():
+            return self._write_new_block(merged_block, merged_title, layer, source)
         self._emit_trace(
             MemoryTraceEvent(
                 type="superseded",
@@ -1225,10 +1359,10 @@ class MemoryManager:
         source: str | None,
     ) -> bool:
         """将记忆块追加到存储文件。"""
-        memory_file = self._memory_file(layer)
-        memory_file.parent.mkdir(parents=True, exist_ok=True)
-        with memory_file.open("a", encoding="utf-8") as file:
-            file.write("\n" + block.strip() + "\n")
+        blocks = self.read_memory_blocks(layer=layer)
+        blocks.append(block.strip() + "\n")
+        self._write_blocks(blocks, layer)
+        self._mark_superseded_targets(parse_memory_record(block, layer=layer))
         self._enforce_lru(layer)
         self._emit_trace(
             MemoryTraceEvent(
@@ -1260,7 +1394,7 @@ class MemoryManager:
                 updated.append(existing_block.rstrip() + "\n")
         if not found:
             updated.append(new_block.strip() + "\n")
-        self._memory_file(layer).write_text("".join(updated), encoding="utf-8")
+        self._write_blocks(updated, layer)
 
     def _merge_with_existing(
         self,
@@ -1271,28 +1405,173 @@ class MemoryManager:
         new_lower = new_title.lower()
         for record in existing_records:
             if record.title.lower() == new_lower:
-                new_fields = parse_fields(new_block)
-                old_fields = record.fields
-                merged = {}
-                merged.update(old_fields)
-                for key, value in new_fields.items():
-                    if value.strip():
-                        merged[key] = value
-                merged["last_modified"] = time.strftime(
-                    "%Y-%m-%dT%H:%M:%S", time.localtime()
+                incoming = parse_memory_record(new_block, layer=record.layer)
+                if self._same_conclusion(record, incoming):
+                    return self._merge_equivalent_records(record, incoming)
+                suffix = sha256(new_block.encode("utf-8")).hexdigest()[:8]
+                conflict_title = f"{new_title} (conflict {suffix})"
+                fields = dict(incoming.fields)
+                fields.update(
+                    {
+                        "memory-id": build_memory_id(
+                            layer=record.layer, title=conflict_title
+                        ),
+                        "status": "needs_review",
+                        "validity": "contradicted",
+                        "supersedes": record.memory_id,
+                        "modified": self._now(),
+                    }
                 )
-
-                lines = [f"## {new_title}"]
-                mandatory = ["Context/Query", "Solution", "Files", "Takeaways"]
-                for field in mandatory:
-                    key = field.lower()
-                    if key in merged:
-                        lines.append(f"- {field}: {merged.pop(key)}")
-                for key, value in merged.items():
-                    display_key = key.capitalize() if "_" not in key else key
-                    lines.append(f"- {display_key}: {value}")
-                return "\n".join(lines) + "\n"
+                return self._render_fields(conflict_title, fields)
         return None
+
+    def _same_conclusion(
+        self,
+        left: MemoryRecord,
+        right: MemoryRecord,
+    ) -> bool:
+        """判断同标题记录是否表达同一结论。"""
+        return tokenize_set(self._conclusion_text(left)) == tokenize_set(
+            self._conclusion_text(right)
+        )
+
+    def _merge_equivalent_records(
+        self,
+        existing: MemoryRecord,
+        incoming: MemoryRecord,
+    ) -> str:
+        """合并同结论记录，同时保留稳定 ID、创建时间和全部证据。"""
+        fields = dict(existing.fields)
+        for key, value in incoming.fields.items():
+            if value.strip() and key not in {
+                "memory-id",
+                "created",
+                "source",
+                "source-session",
+                "source-message",
+                "status",
+                "validity",
+                "confidence",
+                "supersedes",
+            }:
+                fields[key] = value
+        for key in ("source", "source-session", "source-message"):
+            values = [
+                item.strip()
+                for raw in (existing.fields.get(key, ""), incoming.fields.get(key, ""))
+                for item in raw.split(",")
+                if item.strip()
+            ]
+            if values:
+                fields[key] = ", ".join(dict.fromkeys(values))
+        evidence = tuple(dict.fromkeys((*existing.evidence, *incoming.evidence)))
+        if evidence:
+            fields["evidence"] = "; ".join(
+                f"{item.kind}:{item.reference}" for item in evidence
+            )
+        fields["memory-id"] = existing.memory_id
+        if existing.created_at:
+            fields["created"] = existing.created_at
+        status_rank = {
+            "obsolete": 0,
+            "deprecated": 1,
+            "superseded": 2,
+            "needs_review": 3,
+            "candidate": 4,
+            "active": 5,
+        }
+        fields["status"] = max(
+            (existing.status, incoming.status),
+            key=lambda value: status_rank.get(value, 0),
+        )
+        validity_rank = {
+            "contradicted": 0,
+            "corrected": 1,
+            "needs_review": 2,
+            "unknown": 3,
+            "derived": 4,
+            "user_confirmed": 5,
+            "verified": 6,
+        }
+        fields["validity"] = max(
+            (existing.validity, incoming.validity),
+            key=lambda value: validity_rank.get(value, 0),
+        )
+        confidences = [
+            value
+            for value in (existing.confidence_value, incoming.confidence_value)
+            if value is not None
+        ]
+        if confidences:
+            fields["confidence"] = f"{max(confidences):.2f}"
+        supersedes = tuple(dict.fromkeys((*existing.supersedes, *incoming.supersedes)))
+        if supersedes:
+            fields["supersedes"] = ", ".join(supersedes)
+        for key in (
+            "retrieval-count",
+            "injection-count",
+            "reference-count",
+            "adoption-count",
+            "success-count",
+            "failure-count",
+            "correction-count",
+        ):
+            fields[key] = str(
+                int(existing.fields.get(key, "0") or 0)
+                + int(incoming.fields.get(key, "0") or 0)
+            )
+        fields["utility"] = f"{existing.utility + incoming.utility:.2f}"
+        fields["modified"] = self._now()
+        return self._render_fields(existing.title, fields)
+
+    def _find_duplicate_record(
+        self,
+        block: str,
+        records: Sequence[MemoryRecord],
+    ) -> MemoryRecord | None:
+        """找到正文高度重复的记录，供新证据合并。"""
+        new_fields = parse_fields(block)
+        new_text = " ".join(
+            new_fields.get(key, "")
+            for key in ("context/query", "solution", "files", "takeaways")
+        )
+        new_tokens = tokenize_set(new_text)
+        if not new_tokens:
+            return None
+        for record in records:
+            old_text = " ".join(
+                record.fields.get(key, "")
+                for key in ("context/query", "solution", "files", "takeaways")
+            )
+            old_tokens = tokenize_set(old_text)
+            if (
+                old_tokens
+                and len(new_tokens & old_tokens) / min(len(new_tokens), len(old_tokens))
+                >= _NOVELTY_THRESHOLD
+            ):
+                return record
+        return None
+
+    def _mark_superseded_targets(self, incoming: MemoryRecord) -> None:
+        """明确替代时将同层旧记录标为 superseded。"""
+        if incoming.status == "needs_review":
+            return
+        for target_id in incoming.supersedes:
+            target = next(
+                (
+                    record
+                    for record in self.read_memory_records(
+                        layer=cast("MemoryLayer", incoming.layer)
+                    )
+                    if record.memory_id == target_id
+                ),
+                None,
+            )
+            if target is not None:
+                self._replace_record_by_memory_id(
+                    target,
+                    {"status": "superseded", "modified": self._now()},
+                )
 
     # ── 摘要处理（Goal/Progress/Key Decisions/Next Steps）──
 
@@ -1323,11 +1602,17 @@ class MemoryManager:
             sections[current_key] = "\n".join(current_lines).strip()
         return sections
 
-    def consolidate(self, summary: str) -> None:
+    def consolidate(
+        self,
+        summary: str,
+        *,
+        source_session: str | None = None,
+        source_message: str | None = None,
+    ) -> None:
         """从压缩摘要中提取可复用记忆并写入正式存储。
 
         解析 Goal/Progress/Key Decisions/Next Steps 结构化格式的摘要，
-        从 Key Decisions 节提取架构决策记忆，从 Goal 节提取项目上下文（首次出现时）。
+        仅从 Key Decisions 节提取可复用长期知识；其余章节只属于 checkpoint。
 
         当配置了 consolidate_judge_fn 时，将整个 Key Decisions 节文本交给 LLM，
         由 LLM 一次完成筛选、合并、重组；否则逐条子弹走 judge_fn 或纯模板回退。
@@ -1336,29 +1621,38 @@ class MemoryManager:
 
         # Key Decisions：优先使用节级 LLM 评判
         decisions_text = sections.get("key decisions", "").strip()
+        evidence = tuple(
+            item
+            for item in (
+                MemoryEvidence("session", source_session) if source_session else None,
+                MemoryEvidence("message", source_message) if source_message else None,
+            )
+            if item is not None
+        )
         if decisions_text:
             if self.consolidate_judge_fn is not None:
-                self._consolidate_with_section_judge(decisions_text)
+                self._consolidate_with_section_judge(
+                    decisions_text,
+                    source_session=source_session,
+                    source_message=source_message,
+                    evidence=evidence,
+                )
             else:
-                self._consolidate_with_bullet_judge(decisions_text)
+                self._consolidate_with_bullet_judge(
+                    decisions_text,
+                    source_session=source_session,
+                    source_message=source_message,
+                    evidence=evidence,
+                )
 
-        # Goal → project context（仅当文件为空时）
-        goal = sections.get("goal", "").strip()
-        if goal and len(goal) > 30 and self._should_seed_project_context(goal):
-            block = (
-                f"## Project context\n"
-                f"- Context/Query: {goal.split(chr(10))[0] if chr(10) in goal else goal}\n"
-                f"- Solution: (learn from ongoing work)\n"
-                f"- Files: (see project)\n"
-                f"- Takeaways: {goal[:200]}"
-            )
-            self._ingest_consolidation_candidate(
-                block,
-                source="consolidation",
-                layer="project",
-            )
-
-    def _consolidate_with_section_judge(self, decisions_text: str) -> None:
+    def _consolidate_with_section_judge(
+        self,
+        decisions_text: str,
+        *,
+        source_session: str | None = None,
+        source_message: str | None = None,
+        evidence: Sequence[MemoryEvidence] = (),
+    ) -> None:
         """使用节级 LLM 评判整个 Key Decisions 节。
 
         LLM 一次看到所有决策的前后文，可以合并相关条目、
@@ -1368,7 +1662,12 @@ class MemoryManager:
             results = self.consolidate_judge_fn(decisions_text)  # type: ignore[misc]
         except Exception:
             # 节级评判失败时降级到逐条评判
-            self._consolidate_with_bullet_judge(decisions_text)
+            self._consolidate_with_bullet_judge(
+                decisions_text,
+                source_session=source_session,
+                source_message=source_message,
+                evidence=evidence,
+            )
             return
 
         for result in results:
@@ -1389,10 +1688,20 @@ class MemoryManager:
                 self._ingest_consolidation_candidate(
                     block,
                     source="consolidation",
+                    source_session=source_session,
+                    source_message=source_message,
+                    evidence=evidence,
                     layer="project",
                 )
 
-    def _consolidate_with_bullet_judge(self, decisions_text: str) -> None:
+    def _consolidate_with_bullet_judge(
+        self,
+        decisions_text: str,
+        *,
+        source_session: str | None = None,
+        source_message: str | None = None,
+        evidence: Sequence[MemoryEvidence] = (),
+    ) -> None:
         """逐条子弹评判（回退路径：无 consolidate_judge_fn 时使用）。"""
         decisions = self._extract_bullet_items(decisions_text)
         for decision_text in decisions:
@@ -1401,6 +1710,9 @@ class MemoryManager:
                 self._ingest_consolidation_candidate(
                     block,
                     source="consolidation",
+                    source_session=source_session,
+                    source_message=source_message,
+                    evidence=evidence,
                     layer="project",
                 )
 
@@ -1422,8 +1734,6 @@ class MemoryManager:
             f"- Files: {files}",
             f"- Takeaways: {takeaways}",
             f"- Confidence: {result.confidence:.2f}",
-            "- status: active",
-            "- validity: derived",
             "- memory-type: semantic",
         ]
         if result.scope:
@@ -1524,8 +1834,6 @@ class MemoryManager:
             f"- Files: {files}\n"
             f"- Takeaways: {takeaways}\n"
             f"- Confidence: {result.confidence:.2f}\n"
-            f"- status: active\n"
-            f"- validity: derived\n"
             f"- memory-type: semantic"
             f"{scope_line}\n"
         )
@@ -1551,8 +1859,7 @@ class MemoryManager:
             f"- Solution: {body_part[:200]}\n"
             f"- Files: (see project)\n"
             f"- Takeaways: {body_part[:200]}\n"
-            f"- status: active\n"
-            f"- validity: derived\n"
+            f"- Confidence: 0.50\n"
             f"- memory-type: semantic\n"
         )
 
@@ -1569,6 +1876,9 @@ class MemoryManager:
         block: str,
         *,
         source: str,
+        source_session: str | None = None,
+        source_message: str | None = None,
+        evidence: Sequence[MemoryEvidence] = (),
         layer: MemoryLayer,
     ) -> None:
         """将 compaction 产物经轻量 gate 后直接写入正式记忆。"""
@@ -1586,16 +1896,32 @@ class MemoryManager:
             )
             self._archive_block(block, layer)
             return
+        fields = parse_fields(block)
+        confidence = parse_memory_record(block, layer=layer).confidence_value or 0.0
+        explicit_scope = bool(
+            fields.get("scope")
+            or (
+                fields.get("files")
+                and fields.get("files") not in {"(see project)", "."}
+            )
+        )
+        status = (
+            "active"
+            if confidence >= self.lifecycle_policy.active_confidence and explicit_scope
+            else "candidate"
+        )
         self._persist_memory_block(
             block,
             source=source,
+            source_session=source_session,
+            source_message=source_message,
             scope=None,
             confidence=None,
             memory_type=None,
-            status=None,
-            validity=None,
+            status=status,
+            validity="derived",
             supersedes=(),
-            evidence=(),
+            evidence=evidence,
             retrieval_count=None,
             injection_count=None,
             reference_count=None,
@@ -1635,9 +1961,9 @@ class MemoryManager:
         """将无效或淘汰块归档到对应层级。"""
         archive_dir = self._archive_dir(layer)
         archive_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = int(time.time() * 1000)
-        archive_file = archive_dir / f"corrupt_{timestamp}.md"
-        archive_file.write_text(block, encoding="utf-8")
+        timestamp = time.time_ns()
+        archive_file = archive_dir / f"memory_{timestamp}.md"
+        self._atomic_write_text(archive_file, block)
 
     # ── 保留与遗忘策略 ──
 
@@ -1770,16 +2096,37 @@ class MemoryManager:
         return {}
 
     def _write_lru(self, lru: dict[str, float]) -> None:
-        self.lru_file.parent.mkdir(parents=True, exist_ok=True)
-        self.lru_file.write_text(
+        self._atomic_write_text(
+            self.lru_file,
             json.dumps(lru, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
     def _write_blocks(self, blocks: list[str], layer: MemoryLayer) -> None:
         """覆盖写入指定层级的全部记忆块。"""
         content = "\n".join(b.rstrip() for b in blocks if b.strip())
-        self._memory_file(layer).write_text(content + "\n", encoding="utf-8")
+        self._atomic_write_text(
+            self._memory_file(layer),
+            content + "\n" if content else "",
+        )
+
+    def _atomic_write_text(self, path: Path, content: str) -> None:
+        """在目标目录内写临时文件并原子替换，失败时保留原文件。"""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        file_descriptor, raw_path = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+        )
+        temporary = Path(raw_path)
+        try:
+            with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
 
     def _memory_file(self, layer: MemoryLayer) -> Path:
         """返回指定层级的 MEMORY.md 路径。"""
@@ -2063,9 +2410,20 @@ class MemoryManager:
             if outcome == "success":
                 success_count += 1
                 utility += 1.0
+                if (
+                    usage.adopted
+                    and status == "candidate"
+                    and success_count
+                    >= self.lifecycle_policy.candidate_promotion_successes
+                ):
+                    status = "active"
                 if status == "needs_review" and success_count >= failure_count:
                     status = "active"
-                if validity in {"needs_review", "corrected"}:
+                if (
+                    usage.adopted
+                    and success_count >= self.lifecycle_policy.verification_successes
+                    and validity in {"unknown", "derived", "needs_review", "corrected"}
+                ):
                     validity = "verified"
             elif outcome == "failure":
                 failure_count += 1
@@ -2092,6 +2450,37 @@ class MemoryManager:
             "modified": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
         }
 
+    def record_contradiction(
+        self,
+        memory_id: str,
+        *,
+        evidence: Sequence[MemoryEvidence] = (),
+        layer: MemoryLayerFilter = "all",
+    ) -> bool:
+        """用明确的新证据将旧结论降级为 contradicted。"""
+        record = next(
+            (
+                item
+                for item in self.read_memory_records(layer=layer)
+                if item.memory_id == memory_id
+            ),
+            None,
+        )
+        if record is None:
+            return False
+        merged_evidence = tuple(dict.fromkeys((*record.evidence, *evidence)))
+        updates = {
+            "status": "needs_review",
+            "validity": "contradicted",
+            "modified": self._now(),
+        }
+        if merged_evidence:
+            updates["evidence"] = "; ".join(
+                f"{item.kind}:{item.reference}" for item in merged_evidence
+            )
+        self._replace_record_by_memory_id(record, updates)
+        return True
+
     def _replace_record_by_memory_id(
         self,
         record: MemoryRecord,
@@ -2113,6 +2502,171 @@ class MemoryManager:
                 updated.append(existing_record.block.rstrip() + "\n")
         if replaced:
             self._write_blocks(updated, cast("MemoryLayer", record.layer))
+
+    def maintain_memory(
+        self,
+        layer: MemoryLayerFilter = "all",
+        *,
+        apply: bool = False,
+    ) -> MemoryMaintenanceReport:
+        """分析或执行确定性维护；默认 dry-run 且不修改任何文件。"""
+        snapshots: dict[MemoryLayer, str | None] = {
+            current_layer: self._read_raw_memory(current_layer)
+            for current_layer in self._selected_layers(layer)
+        }
+        duplicate_merges: list[str] = []
+        candidate_promotions: list[str] = []
+        needs_review: list[str] = []
+        superseded: list[str] = []
+        archive_candidates: list[str] = []
+        evidence_merges: list[str] = []
+        analyzed: dict[MemoryLayer, list[MemoryRecord]] = {}
+
+        for current_layer in self._selected_layers(layer):
+            records = self.read_memory_records(layer=current_layer)
+            analyzed[current_layer] = records
+            groups = self._maintenance_duplicate_groups(records)
+            for group in groups:
+                duplicate_merges.append(
+                    f"{current_layer}:{group[0].title} ({len(group)})"
+                )
+                if len(set(item.evidence for item in group)) > 1:
+                    evidence_merges.append(f"{current_layer}:{group[0].title}")
+            for record in records:
+                label = f"{current_layer}:{record.title}"
+                if (
+                    record.status == "candidate"
+                    and record.success_count
+                    >= self.lifecycle_policy.candidate_promotion_successes
+                ):
+                    candidate_promotions.append(label)
+                if record.status == "needs_review" or record.validity in {
+                    "needs_review",
+                    "corrected",
+                    "contradicted",
+                }:
+                    needs_review.append(label)
+                if record.status == "superseded":
+                    superseded.append(label)
+                if self._is_archive_candidate(record):
+                    archive_candidates.append(label)
+
+        report_kwargs = {
+            "duplicate_merges": tuple(duplicate_merges),
+            "candidate_promotions": tuple(candidate_promotions),
+            "needs_review": tuple(needs_review),
+            "superseded": tuple(superseded),
+            "archive_candidates": tuple(archive_candidates),
+            "evidence_merges": tuple(evidence_merges),
+        }
+        if not apply:
+            return MemoryMaintenanceReport(applied=False, **report_kwargs)
+
+        conflicts = tuple(
+            current_layer
+            for current_layer, snapshot in snapshots.items()
+            if self._read_raw_memory(current_layer) != snapshot
+        )
+        if conflicts:
+            return MemoryMaintenanceReport(
+                applied=False,
+                conflicts=conflicts,
+                **report_kwargs,
+            )
+
+        for current_layer, records in analyzed.items():
+            self._apply_maintenance_records(current_layer, records)
+        return MemoryMaintenanceReport(applied=True, **report_kwargs)
+
+    def _maintenance_duplicate_groups(
+        self,
+        records: Sequence[MemoryRecord],
+    ) -> list[list[MemoryRecord]]:
+        """按规范化正文分组重复记录，层级由调用者隔离。"""
+        groups: dict[tuple[str, ...], list[MemoryRecord]] = {}
+        for record in records:
+            signature = tuple(
+                sorted(
+                    tokenize_set(
+                        " ".join(
+                            record.fields.get(key, "")
+                            for key in (
+                                "context/query",
+                                "solution",
+                                "files",
+                                "takeaways",
+                            )
+                        )
+                    )
+                )
+            )
+            if signature:
+                groups.setdefault(signature, []).append(record)
+        return [group for group in groups.values() if len(group) > 1]
+
+    def _is_archive_candidate(self, record: MemoryRecord) -> bool:
+        if record.status in {"superseded", "obsolete"}:
+            return True
+        if record.status != "deprecated":
+            return False
+        timestamp = self._record_timestamp(record)
+        if timestamp is None:
+            return False
+        age_days = (time.time() - timestamp) / 86400.0
+        return age_days >= self.lifecycle_policy.stale_after_days
+
+    def _apply_maintenance_records(
+        self,
+        layer: MemoryLayer,
+        records: Sequence[MemoryRecord],
+    ) -> None:
+        """应用已校验的单层维护计划，并归档所有移除记录。"""
+        duplicate_ids: set[str] = set()
+        replacements: dict[str, str] = {}
+        for group in self._maintenance_duplicate_groups(records):
+            primary = group[0]
+            merged = primary
+            merged_block = primary.block
+            for duplicate in group[1:]:
+                merged_block = self._merge_equivalent_records(merged, duplicate)
+                merged = parse_memory_record(merged_block, layer=layer)
+                duplicate_ids.add(duplicate.memory_id)
+                self._archive_block(duplicate.block, layer)
+            replacements[primary.memory_id] = merged_block
+
+        kept: list[str] = []
+        for record in records:
+            if record.memory_id in duplicate_ids:
+                continue
+            if self._is_archive_candidate(record):
+                self._archive_block(record.block, layer)
+                continue
+            block = replacements.get(record.memory_id, record.block)
+            current = parse_memory_record(block, layer=layer)
+            if (
+                current.status == "candidate"
+                and current.success_count
+                >= self.lifecycle_policy.candidate_promotion_successes
+            ):
+                block = self._rewrite_record_block(
+                    current,
+                    {
+                        "status": "active",
+                        "validity": (
+                            "verified"
+                            if current.success_count
+                            >= self.lifecycle_policy.verification_successes
+                            else "derived"
+                        ),
+                        "modified": self._now(),
+                    },
+                )
+            kept.append(block)
+        self._write_blocks(kept, layer)
+
+    def _read_raw_memory(self, layer: MemoryLayer) -> str | None:
+        path = self._memory_file(layer)
+        return path.read_text(encoding="utf-8") if path.exists() else None
 
     def _rewrite_record_block(
         self,
@@ -2139,6 +2693,20 @@ class MemoryManager:
                 continue
             lines.append(f"- {self._display_field_name(key)}: {value}")
         return "\n".join(lines).strip() + "\n"
+
+    def _render_fields(self, title: str, fields: dict[str, str]) -> str:
+        """按稳定字段顺序渲染任意记录。"""
+        record = MemoryRecord(
+            block="",
+            title=title,
+            fields={},
+            memory_id=fields.get("memory-id", ""),
+            memory_type="semantic",
+        )
+        return self._rewrite_record_block(record, fields)
+
+    def _now(self) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
 
     def _display_field_name(self, key: str) -> str:
         parts = [part.capitalize() for part in key.split("-")]
@@ -2188,6 +2756,8 @@ class MemoryManager:
                 f'<record id="{escape(record.memory_id)}" '
                 f'type="{escape(record.memory_type)}" '
                 f'layer="{escape(record.layer)}" '
+                f'status="{escape(record.status)}" '
+                f'validity="{escape(record.validity)}" '
                 f'score="{record.score:.3f}">'
             ),
             f"<conclusion>{escape(self._conclusion_text(record))}</conclusion>",
@@ -2208,6 +2778,7 @@ class MemoryManager:
         lines = [
             (
                 f"[{record.layer}] id={record.memory_id} type={record.memory_type} "
+                f"status={record.status} validity={record.validity} "
                 f"score={record.score:.3f}"
             ),
             f"title: {record.title}",
