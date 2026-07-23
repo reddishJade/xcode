@@ -1485,27 +1485,34 @@ class MemoryManager:
             fields["status"] = "needs_review"
             fields["validity"] = "needs_review"
         else:
-            status_rank = {
-                "obsolete": 0,
-                "deprecated": 1,
-                "superseded": 2,
-                "candidate": 3,
-                "active": 4,
-            }
-            fields["status"] = max(
-                (existing.status, incoming.status),
-                key=lambda value: status_rank.get(value, 0),
-            )
-            validity_rank = {
-                "unknown": 0,
-                "derived": 1,
-                "user_confirmed": 2,
-                "verified": 3,
-            }
-            fields["validity"] = max(
-                (existing.validity, incoming.validity),
-                key=lambda value: validity_rank.get(value, 0),
-            )
+            statuses = {existing.status, incoming.status}
+            terminal_statuses = {"superseded", "obsolete", "deprecated"}
+            reusable_statuses = {"active", "candidate"}
+            if statuses & terminal_statuses and statuses & reusable_statuses:
+                fields["status"] = "needs_review"
+                fields["validity"] = "needs_review"
+            else:
+                status_rank = {
+                    "candidate": 0,
+                    "active": 1,
+                    "deprecated": 2,
+                    "superseded": 3,
+                    "obsolete": 4,
+                }
+                fields["status"] = max(
+                    statuses,
+                    key=lambda value: status_rank.get(value, 0),
+                )
+                validity_rank = {
+                    "unknown": 0,
+                    "derived": 1,
+                    "user_confirmed": 2,
+                    "verified": 3,
+                }
+                fields["validity"] = max(
+                    (existing.validity, incoming.validity),
+                    key=lambda value: validity_rank.get(value, 0),
+                )
         confidences = [
             value
             for value in (existing.confidence_value, incoming.confidence_value)
@@ -2611,7 +2618,17 @@ class MemoryManager:
             )
             if signature:
                 groups.setdefault(signature, []).append(record)
-        return [group for group in groups.values() if len(group) > 1]
+        duplicate_groups = [
+            sorted(
+                group, key=lambda record: (record.memory_id, record.title.casefold())
+            )
+            for group in groups.values()
+            if len(group) > 1
+        ]
+        return sorted(
+            duplicate_groups,
+            key=lambda group: (group[0].memory_id, group[0].title.casefold()),
+        )
 
     def _is_archive_candidate(self, record: MemoryRecord) -> bool:
         if record.status in {"superseded", "obsolete"}:
@@ -2647,11 +2664,11 @@ class MemoryManager:
         for record in records:
             if record.memory_id in duplicate_ids:
                 continue
-            if self._is_archive_candidate(record):
-                self._archive_block(record.block, layer)
-                continue
             block = replacements.get(record.memory_id, record.block)
             current = parse_memory_record(block, layer=layer)
+            if self._is_archive_candidate(current):
+                self._archive_block(current.block, layer)
+                continue
             if (
                 current.status == "candidate"
                 and current.success_count

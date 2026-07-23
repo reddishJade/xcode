@@ -36,6 +36,7 @@ def _block(
 
 
 def _manager(tmp_path: Path, blocks: tuple[str, ...]) -> MemoryManager:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "MEMORY.md").write_text("\n".join(blocks), encoding="utf-8")
     user_file = tmp_path / "user" / "MEMORY.md"
     user_file.parent.mkdir(exist_ok=True)
@@ -53,6 +54,7 @@ def test_maintenance_dry_run_is_strictly_read_only(tmp_path: Path) -> None:
             _block("待审", "不要重试。", status="needs_review"),
         ),
     )
+
     before = manager.memory_file.read_bytes()
     report = manager.maintain_memory()
     assert not report.applied
@@ -80,7 +82,7 @@ def test_maintenance_apply_promotes_merges_and_archives_superseded(
     assert report.applied
     records = manager.read_memory_records(layer="project")
     assert len(records) == 2
-    duplicate = next(record for record in records if record.title == "Duplicate A")
+    duplicate = next(record for record in records if record.evidence)
     assert {item.kind for item in duplicate.evidence} == {"test", "commit"}
     candidate = next(record for record in records if record.title == "Candidate")
     assert (candidate.status, candidate.validity) == ("active", "verified")
@@ -123,6 +125,62 @@ def test_maintenance_merge_preserves_contradiction_quarantine(tmp_path: Path) ->
         )
         == []
     )
+
+
+@pytest.mark.parametrize("terminal_status", ["superseded", "obsolete", "deprecated"])
+def test_terminal_and_active_duplicate_merge_is_order_independent(
+    tmp_path: Path,
+    terminal_status: str,
+) -> None:
+    active = _block(
+        "Active duplicate",
+        "Retry once.",
+        status="active",
+        validity="verified",
+        evidence="test:active-proof",
+    )
+    terminal = _block(
+        "Terminal duplicate",
+        "Retry once.",
+        status=terminal_status,
+        validity="derived",
+        evidence=f"commit:{terminal_status}-proof",
+    )
+    outcomes: list[tuple[str, str, str, str, tuple[tuple[str, str], ...]]] = []
+
+    for reversed_order, blocks in enumerate(((terminal, active), (active, terminal))):
+        manager = _manager(tmp_path / str(reversed_order), blocks)
+        report = manager.maintain_memory(apply=True)
+
+        assert report.applied
+        records = manager.read_memory_records(layer="project")
+        assert len(records) == 1
+        record = records[0]
+        assert (record.status, record.validity) == ("needs_review", "needs_review")
+        assert {(item.kind, item.reference) for item in record.evidence} == {
+            ("test", "active-proof"),
+            ("commit", f"{terminal_status}-proof"),
+        }
+        assert len(list(manager.archive_dir.glob("*.md"))) == 1
+        assert (
+            manager.search_memory_records(
+                "provider timeout",
+                source="prompt",
+                retrieval_context=MemoryRetrievalContext(query="provider timeout"),
+            )
+            == []
+        )
+        outcomes.append(
+            (
+                record.title,
+                record.memory_id,
+                record.status,
+                record.validity,
+                tuple(sorted((item.kind, item.reference) for item in record.evidence)),
+            )
+        )
+
+    assert outcomes[0] == outcomes[1]
 
 
 def test_maintenance_refuses_to_overwrite_changed_snapshot(
