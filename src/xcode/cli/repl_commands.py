@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable
@@ -58,7 +59,13 @@ from xcode.harness.security import (
     PermissionEngineConfig,
     PermissionPolicy,
 )
-from xcode.harness.memory import MemoryLayer, MemoryLayerFilter, MemoryManager
+from xcode.harness.memory import (
+    MemoryLayer,
+    MemoryLayerFilter,
+    MemoryManager,
+    MemoryRetrievalContext,
+    evaluate_case_file,
+)
 from xcode.agent.types import ToolSpec
 from xcode.harness.session import SessionStore
 from xcode.harness.snapshot import SnapshotStore, TurnSnapshotRecord
@@ -830,6 +837,10 @@ def cmd_memory(cmd: str, ctx: CommandContext) -> bool:
         return _list_memory(manager, payload)
     if action == "search":
         return _search_memory(manager, payload)
+    if action == "explain":
+        return _explain_memory(manager, payload)
+    if action == "eval":
+        return _eval_memory(manager, payload, ctx.project_root)
     if action == "add":
         return _add_memory(manager, payload)
     if action == "maintain":
@@ -837,6 +848,8 @@ def cmd_memory(cmd: str, ctx: CommandContext) -> bool:
 
     print("Usage: /memory list [all|project|user]")
     print("       /memory search <query>")
+    print("       /memory explain <query> [--scope S] [--file F] [--symbol S]")
+    print("       /memory eval [case-file] [--json]")
     print("       /memory maintain [all|project|user] [--apply]")
     print(
         "       /memory add [project|user] "
@@ -882,6 +895,102 @@ def _search_memory(manager: MemoryManager, query: str) -> bool:
         print(f"[{record.layer}] score={record.score:.3f}")
         print(record.block.strip())
         print()
+    return False
+
+
+def _explain_memory(manager: MemoryManager, payload: str) -> bool:
+    """解析 explain 参数并打印严格只读的检索决策。"""
+    try:
+        tokens = shlex.split(payload)
+    except ValueError as exc:
+        print(f"Invalid memory explain arguments: {exc}")
+        return False
+    values: dict[str, str] = {}
+    query_parts: list[str] = []
+    symbols: list[str] = []
+    index = 0
+    value_options = {"--scope", "--file", "--symbol", "--limit", "--layer", "--budget"}
+    while index < len(tokens):
+        token = tokens[index]
+        if token in value_options:
+            if index + 1 >= len(tokens):
+                print(f"{token} requires a value.")
+                return False
+            if token == "--symbol":
+                symbols.extend(
+                    part.strip()
+                    for part in tokens[index + 1].split(",")
+                    if part.strip()
+                )
+            else:
+                values[token] = tokens[index + 1]
+            index += 2
+            continue
+        query_parts.append(token)
+        index += 1
+    query = " ".join(query_parts).strip()
+    if not query:
+        print("Usage: /memory explain <query> [--scope S] [--file F] [--symbol S]")
+        return False
+    layer = values.get("--layer", "all")
+    if layer not in {"all", "project", "user"}:
+        print("Memory layer must be one of: all, project, user.")
+        return False
+    try:
+        limit = int(values.get("--limit", "5"))
+        budget = int(values.get("--budget", "1200"))
+    except ValueError:
+        print("--limit and --budget must be integers.")
+        return False
+    context = MemoryRetrievalContext(
+        query=query,
+        scope=values.get("--scope"),
+        current_file=values.get("--file"),
+        symbols=tuple(symbols),
+    )
+    trace = manager.explain_memory_retrieval(
+        query,
+        limit=limit,
+        layer=cast(MemoryLayerFilter, layer),
+        retrieval_context=context,
+        max_tokens=budget,
+    )
+    print(trace.render())
+    return False
+
+
+def _eval_memory(
+    manager: MemoryManager,
+    payload: str,
+    project_root: Path,
+) -> bool:
+    """运行版本化离线评测并输出文本或稳定 JSON。"""
+    try:
+        tokens = shlex.split(payload)
+    except ValueError as exc:
+        print(f"Invalid memory eval arguments: {exc}")
+        return False
+    json_output = "--json" in tokens
+    paths = [token for token in tokens if token != "--json"]
+    if len(paths) > 1:
+        print("Usage: /memory eval [case-file] [--json]")
+        return False
+    case_file = (
+        Path(paths[0]).expanduser()
+        if paths
+        else project_root / "docs" / "memory_eval.yaml"
+    )
+    if not case_file.is_absolute():
+        case_file = project_root / case_file
+    if not case_file.is_file():
+        print(f"Memory eval case file not found: {case_file}")
+        return False
+    try:
+        report = evaluate_case_file(manager, case_file)
+    except (OSError, TypeError, ValueError) as exc:
+        print(f"Memory eval failed: {exc}")
+        return False
+    print(report.to_json() if json_output else report.render())
     return False
 
 

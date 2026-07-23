@@ -42,6 +42,13 @@ from .parsing import (
     tokenize_set,
     with_metadata,
 )
+from .retrieval import (
+    MemoryCandidateDecision,
+    MemoryExclusionReason,
+    MemoryRetrievalMetrics,
+    MemoryRetrievalTrace,
+    MemoryScoreBreakdown,
+)
 
 type MemoryLayer = Literal["project", "user"]
 type MemoryLayerFilter = Literal["all", "project", "user"]
@@ -260,6 +267,7 @@ class MemoryManager:
         self.reference_judge_fn: MemoryReferenceJudgeFn | None = reference_judge_fn
         self._trace_events: list[MemoryTraceEvent] = []
         self._session_usage: dict[tuple[str, str], _SessionMemoryUsage] = {}
+        self.retrieval_metrics = MemoryRetrievalMetrics()
 
     # ── 读取 ──
 
@@ -358,6 +366,9 @@ class MemoryManager:
     ) -> list[MemoryRecord]:
         """按当前检索顺序装箱，不用全局重要性替换更相关记录。"""
         if max_tokens <= 0:
+            self.retrieval_metrics.observe_budget(
+                used_tokens=0, token_budget=max_tokens
+            )
             return []
         from xcode.agent._compaction import estimate_tokens
 
@@ -369,6 +380,10 @@ class MemoryManager:
                 break
             selected.append(record)
             remaining -= tokens
+        self.retrieval_metrics.observe_budget(
+            used_tokens=max_tokens - remaining,
+            token_budget=max_tokens,
+        )
         return selected
 
     def _sort_by_importance(
@@ -462,6 +477,256 @@ class MemoryManager:
             semantic_weight=_DEFAULT_SEMANTIC_WEIGHT,
         )
 
+    def explain_memory_retrieval(
+        self,
+        query: str,
+        *,
+        limit: int = 3,
+        scope: str | None = None,
+        layer: MemoryLayerFilter = "all",
+        retrieval_context: MemoryRetrievalContext | None = None,
+        max_tokens: int | None = 1200,
+        semantic_weight: float = _DEFAULT_SEMANTIC_WEIGHT,
+    ) -> MemoryRetrievalTrace:
+        """只读解释真实检索、生命周期 gate、排序和预算决策。"""
+        started_at = time.perf_counter()
+        context = self._coerce_retrieval_context(
+            query, scope=scope, retrieval_context=retrieval_context
+        )
+        records = self.read_memory_records(layer=layer)
+        exact = [
+            record
+            for record in records
+            if record.memory_id.casefold() == query.strip().casefold()
+        ]
+        if exact:
+            decisions = tuple(
+                self._exact_audit_decision(
+                    record,
+                    context,
+                    rank=index + 1,
+                    max_tokens=max_tokens,
+                )
+                for index, record in enumerate(exact[: max(limit, 0)])
+            )
+            used_tokens = sum(
+                item.token_count for item in decisions if item.decision == "injected"
+            )
+            trace = MemoryRetrievalTrace(
+                query_fingerprint=self._query_fingerprint(query),
+                layer=layer,
+                limit=limit,
+                token_budget=max_tokens,
+                used_tokens=used_tokens,
+                exact_id_query=True,
+                elapsed_ms=self._elapsed_ms(started_at),
+                candidates=decisions,
+            )
+            self.retrieval_metrics.observe(trace)
+            return trace
+
+        bm25_scores: dict[tuple[str, str], float] = {}
+        lexical_candidates = self.retrieve_memory_candidates(
+            context, layer=layer, _bm25_scores=bm25_scores
+        )
+        lexical_scores = {
+            (record.layer, record.memory_id): record.score
+            for record in lexical_candidates
+        }
+        semantic_scores: dict[tuple[str, str], float] = {}
+        fused = self.fuse_memory_candidates(
+            lexical_candidates,
+            context,
+            semantic_weight=semantic_weight,
+            _semantic_scores_out=semantic_scores,
+        )
+        scored: list[tuple[MemoryRecord, MemoryScoreBreakdown]] = []
+        for record in fused:
+            key = (record.layer, record.memory_id)
+            breakdown = self._score_breakdown(
+                record,
+                context.query,
+                context.scope,
+                bm25_score=bm25_scores.get(key, 0.0),
+                lexical_score=lexical_scores.get(key, record.score),
+                semantic_score=semantic_scores.get(key),
+            )
+            scored.append((record, breakdown))
+        scored.sort(
+            key=lambda item: (
+                -item[1].final_score,
+                item[0].title,
+                item[0].layer,
+                item[0].memory_id,
+            )
+        )
+
+        admitted_rank = 0
+        remaining = max_tokens
+        used_tokens = 0
+        budget_blocked = max_tokens is not None and max_tokens <= 0
+        decisions_list: list[MemoryCandidateDecision] = []
+        for record, breakdown in scored:
+            token_count = self._estimate_block_tokens(self.render_prompt_packet(record))
+            reason = self._retrieval_gate_reason(record, breakdown.final_score)
+            rank: int | None = None
+            decision: Literal["injected", "excluded", "budget_rejected"] = "excluded"
+            if reason is None:
+                lifecycle_reason = self._automatic_injection_reason(record, context)
+                if lifecycle_reason is not None:
+                    reason = lifecycle_reason
+                else:
+                    admitted_rank += 1
+                    rank = admitted_rank
+                    if admitted_rank > max(limit, 0):
+                        reason = MemoryExclusionReason.LIMIT_EXCEEDED
+                    elif budget_blocked or (
+                        remaining is not None and token_count > remaining
+                    ):
+                        reason = MemoryExclusionReason.BUDGET_EXCEEDED
+                        decision = "budget_rejected"
+                        budget_blocked = True
+                    else:
+                        reason = MemoryExclusionReason.INJECTED
+                        decision = "injected"
+                        if remaining is not None:
+                            remaining -= token_count
+                        used_tokens += token_count
+            decisions_list.append(
+                self._candidate_decision(
+                    record,
+                    context,
+                    breakdown,
+                    rank=rank,
+                    token_count=token_count,
+                    decision=decision,
+                    reason=reason,
+                )
+            )
+        trace = MemoryRetrievalTrace(
+            query_fingerprint=self._query_fingerprint(query),
+            layer=layer,
+            limit=limit,
+            token_budget=max_tokens,
+            used_tokens=used_tokens,
+            exact_id_query=False,
+            elapsed_ms=self._elapsed_ms(started_at),
+            candidates=tuple(decisions_list),
+        )
+        self.retrieval_metrics.observe(trace)
+        return trace
+
+    def _retrieval_gate_reason(
+        self, record: MemoryRecord, score: float
+    ) -> MemoryExclusionReason | None:
+        if not math.isfinite(score):
+            return MemoryExclusionReason.NON_FINITE_SCORE
+        if score < self.min_retrieval_score:
+            return MemoryExclusionReason.SCORE_BELOW_MINIMUM
+        if not self._passes_confidence_gate(record):
+            return MemoryExclusionReason.CONFIDENCE_BELOW_MINIMUM
+        return None
+
+    def _automatic_injection_reason(
+        self,
+        record: MemoryRecord,
+        context: MemoryRetrievalContext,
+    ) -> MemoryExclusionReason | None:
+        if record.status in {"needs_review", "superseded", "deprecated", "obsolete"}:
+            return MemoryExclusionReason.LIFECYCLE_STATUS
+        if record.validity in {"needs_review", "corrected", "contradicted"}:
+            return MemoryExclusionReason.LIFECYCLE_VALIDITY
+        if record.status != "candidate":
+            return None
+        if (
+            record.confidence_value or 0.0
+        ) < self.lifecycle_policy.candidate_prompt_confidence:
+            return MemoryExclusionReason.CANDIDATE_LOW_CONFIDENCE
+        if not self._has_strong_candidate_context(record, context):
+            return MemoryExclusionReason.CANDIDATE_CONTEXT_MISMATCH
+        return None
+
+    def _candidate_decision(
+        self,
+        record: MemoryRecord,
+        context: MemoryRetrievalContext,
+        score: MemoryScoreBreakdown,
+        *,
+        rank: int | None,
+        token_count: int,
+        decision: Literal["injected", "excluded", "budget_rejected"],
+        reason: MemoryExclusionReason,
+    ) -> MemoryCandidateDecision:
+        normalized_files = {item.casefold() for item in record.related_files}
+        normalized_symbols = {item.casefold() for item in record.related_symbols}
+        scope_match = (
+            bool(tokenize_set(context.scope) & tokenize_set(record.scope))
+            if context.scope and record.scope
+            else None
+        )
+        return MemoryCandidateDecision(
+            memory_id=record.memory_id,
+            title=record.title,
+            layer=record.layer,
+            status=record.status,
+            validity=record.validity,
+            score=score,
+            scope_match=scope_match,
+            file_match=bool(
+                context.current_file
+                and context.current_file.casefold() in normalized_files
+            ),
+            symbol_match=bool(
+                normalized_symbols.intersection(
+                    symbol.casefold() for symbol in context.symbols
+                )
+            ),
+            rank=rank,
+            token_count=token_count,
+            decision=decision,
+            reason=reason,
+        )
+
+    def _exact_audit_decision(
+        self,
+        record: MemoryRecord,
+        context: MemoryRetrievalContext,
+        *,
+        rank: int,
+        max_tokens: int | None,
+    ) -> MemoryCandidateDecision:
+        token_count = self._estimate_block_tokens(self.render_prompt_packet(record))
+        lifecycle_reason = self._automatic_injection_reason(record, context)
+        if lifecycle_reason is not None:
+            decision: Literal["injected", "excluded", "budget_rejected"] = "excluded"
+            reason = MemoryExclusionReason.EXACT_ID_AUDIT
+        elif max_tokens is not None and token_count > max(max_tokens, 0):
+            decision = "budget_rejected"
+            reason = MemoryExclusionReason.BUDGET_EXCEEDED
+        else:
+            decision = "injected"
+            reason = MemoryExclusionReason.INJECTED
+        return MemoryCandidateDecision(
+            memory_id=record.memory_id,
+            title=record.title,
+            layer=record.layer,
+            status=record.status,
+            validity=record.validity,
+            score=MemoryScoreBreakdown(
+                lexical_score=1.0, fused_score=1.0, final_score=1.0
+            ),
+            scope_match=None,
+            file_match=False,
+            symbol_match=False,
+            rank=rank,
+            token_count=token_count,
+            decision=decision,
+            reason=reason,
+        )
+
+    def _query_fingerprint(self, query: str) -> str:
+        return sha256(query.encode("utf-8")).hexdigest()[:12]
+
     def _search_memory_records(
         self,
         query: str,
@@ -476,32 +741,63 @@ class MemoryManager:
     ) -> list[MemoryRecord]:
         """执行唯一的检索流水线，供公开入口和兼容入口复用。"""
         started_at = time.perf_counter()
+        context = self._coerce_retrieval_context(
+            query,
+            scope=scope,
+            retrieval_context=retrieval_context,
+        )
         exact = [
             record
             for record in self.read_memory_records(layer=layer)
             if record.memory_id.casefold() == query.strip().casefold()
         ]
         if exact:
-            ranked_exact = [replace(record, score=1.0) for record in exact[:limit]]
+            eligible_exact = exact
+            exact_exclusion_reasons: tuple[MemoryExclusionReason, ...] = ()
+            if source == "prompt":
+                eligible_exact = [
+                    record
+                    for record in exact
+                    if self._is_automatic_injection_eligible(record, context)
+                ]
+                exact_exclusion_reasons = tuple(
+                    reason
+                    for record in exact
+                    if (reason := self._automatic_injection_reason(record, context))
+                    is not None
+                )
+            ranked_exact = [
+                replace(record, score=1.0) for record in eligible_exact[:limit]
+            ]
             if track_usage:
                 self._touch_lru(ranked_exact)
                 self._mark_session_usage(ranked_exact, usage="retrieved")
+            self.retrieval_metrics.observe_search(
+                candidate_statuses=tuple(record.status for record in exact),
+                injected_layers=tuple(record.layer for record in ranked_exact),
+                exclusion_reasons=exact_exclusion_reasons,
+                latency_ms=self._elapsed_ms(started_at),
+            )
             return ranked_exact
-        context = self._coerce_retrieval_context(
-            query,
-            scope=scope,
-            retrieval_context=retrieval_context,
-        )
         lexical_candidates = self.retrieve_memory_candidates(
             context,
             layer=layer,
         )
         if not lexical_candidates or limit <= 0:
+            elapsed_ms = self._elapsed_ms(started_at)
+            self.retrieval_metrics.observe_search(
+                candidate_statuses=tuple(
+                    record.status for record in lexical_candidates
+                ),
+                injected_layers=(),
+                exclusion_reasons=(),
+                latency_ms=elapsed_ms,
+            )
             if source == "tool":
                 self._emit_trace(
                     MemoryTraceEvent(
                         type="tool_searched",
-                        latency_ms=self._elapsed_ms(started_at),
+                        latency_ms=elapsed_ms,
                         source=source,
                     )
                 )
@@ -517,7 +813,7 @@ class MemoryManager:
             candidates,
             context,
             scope=scope,
-            limit=limit,
+            limit=None,
         )
         if source == "prompt":
             ranked = [
@@ -525,7 +821,30 @@ class MemoryManager:
                 for record in ranked
                 if self._is_automatic_injection_eligible(record, context)
             ]
+        ranked = ranked[:limit]
         elapsed_ms = self._elapsed_ms(started_at)
+        ranked_keys = {(record.layer, record.memory_id) for record in ranked}
+        exclusion_reasons: list[MemoryExclusionReason] = []
+        for candidate in candidates:
+            reason = self._retrieval_gate_reason(
+                candidate,
+                self._apply_rerank_policy(candidate, context.query, context.scope),
+            )
+            if reason is None and source == "prompt":
+                reason = self._automatic_injection_reason(candidate, context)
+            if (
+                reason is None
+                and (candidate.layer, candidate.memory_id) not in ranked_keys
+            ):
+                reason = MemoryExclusionReason.LIMIT_EXCEEDED
+            if reason is not None:
+                exclusion_reasons.append(reason)
+        self.retrieval_metrics.observe_search(
+            candidate_statuses=tuple(record.status for record in candidates),
+            injected_layers=tuple(record.layer for record in ranked),
+            exclusion_reasons=tuple(exclusion_reasons),
+            latency_ms=elapsed_ms,
+        )
         if track_usage and ranked:
             self._touch_lru(ranked)
             self._mark_session_usage(ranked, usage="retrieved")
@@ -556,6 +875,7 @@ class MemoryManager:
         query: str | MemoryRetrievalContext,
         *,
         layer: MemoryLayerFilter = "all",
+        _bm25_scores: dict[tuple[str, str], float] | None = None,
     ) -> list[MemoryRecord]:
         """执行 BM25 词法召回，返回带词法分数的候选。"""
         context = self._coerce_retrieval_context(query)
@@ -584,8 +904,10 @@ class MemoryManager:
         candidates: list[MemoryRecord] = []
         for score, record in zip(scores, records, strict=True):
             lexical = self._weighted_lexical_score(record, context, bm25_score=score)
+            if _bm25_scores is not None:
+                _bm25_scores[(record.layer, record.memory_id)] = round(score, 6)
             candidates.append(replace(record, score=round(lexical, 6)))
-        candidates.sort(key=lambda r: (-r.score, r.title))
+        candidates.sort(key=lambda r: (-r.score, r.title, r.layer, r.memory_id))
         return candidates
 
     def fuse_memory_candidates(
@@ -594,6 +916,7 @@ class MemoryManager:
         query: str | MemoryRetrievalContext,
         *,
         semantic_weight: float = _DEFAULT_SEMANTIC_WEIGHT,
+        _semantic_scores_out: dict[tuple[str, str], float] | None = None,
     ) -> list[MemoryRecord]:
         """融合词法与语义分数；嵌入不可用时原样返回词法候选。"""
         context = self._coerce_retrieval_context(query)
@@ -607,6 +930,10 @@ class MemoryManager:
         score_scale = max(lexical_max, 1.0)
         fused: list[MemoryRecord] = []
         for record, semantic_score in zip(candidates, semantic_scores, strict=True):
+            if _semantic_scores_out is not None:
+                _semantic_scores_out[(record.layer, record.memory_id)] = round(
+                    semantic_score, 6
+                )
             lexical_norm = record.score / lexical_max if lexical_max > 0 else 0.0
             semantic_norm = (
                 max(semantic_score, 0.0) / semantic_max if semantic_max > 0 else 0.0
@@ -615,7 +942,14 @@ class MemoryManager:
                 lexical_norm * (1.0 - bounded_weight) + semantic_norm * bounded_weight
             ) * score_scale
             fused.append(replace(record, score=round(score, 6)))
-        fused.sort(key=lambda record: (-record.score, record.title))
+        fused.sort(
+            key=lambda record: (
+                -record.score,
+                record.title,
+                record.layer,
+                record.memory_id,
+            )
+        )
         return fused
 
     def _semantic_scores(
@@ -664,7 +998,7 @@ class MemoryManager:
             if not self._passes_retrieval_gate(candidate, adjusted):
                 continue
             ranked.append(replace(candidate, score=round(adjusted, 6)))
-        ranked.sort(key=lambda r: (-r.score, r.title))
+        ranked.sort(key=lambda r: (-r.score, r.title, r.layer, r.memory_id))
         if limit is not None and limit > 0:
             return ranked[:limit]
         return ranked
@@ -675,11 +1009,7 @@ class MemoryManager:
         score: float,
     ) -> bool:
         """统一执行最终分数阈值与置信度 gate。"""
-        return (
-            math.isfinite(score)
-            and score >= self.min_retrieval_score
-            and self._passes_confidence_gate(candidate)
-        )
+        return self._retrieval_gate_reason(candidate, score) is None
 
     # ── 评测 ──
 
@@ -805,46 +1135,97 @@ class MemoryManager:
         query: str,
         scope: str | None,
     ) -> float:
-        adjusted = candidate.score
-        if adjusted <= 0:
-            return 0.0
+        return self._score_breakdown(candidate, query, scope).final_score
+
+    def _score_breakdown(
+        self,
+        candidate: MemoryRecord,
+        query: str,
+        scope: str | None,
+        *,
+        bm25_score: float = 0.0,
+        lexical_score: float | None = None,
+        semantic_score: float | None = None,
+    ) -> MemoryScoreBreakdown:
+        """执行真实重排计算并同时返回可解释倍率。"""
+        fused_score = candidate.score
+        if fused_score <= 0:
+            return MemoryScoreBreakdown(
+                bm25_score=bm25_score,
+                lexical_score=lexical_score
+                if lexical_score is not None
+                else fused_score,
+                semantic_score=semantic_score,
+                fused_score=fused_score,
+                final_score=0.0,
+            )
+        status_multiplier = 1.0
         if candidate.status in {"deprecated", "superseded", "obsolete"}:
-            adjusted *= self.rerank_policy.deprecated_status_multiplier
+            status_multiplier = self.rerank_policy.deprecated_status_multiplier
+        if candidate.status == "needs_review":
+            status_multiplier *= self.rerank_policy.needs_review_multiplier
+        if candidate.status == "candidate":
+            status_multiplier *= self.lifecycle_policy.candidate_score_multiplier
         confidence = candidate.confidence_value
+        confidence_multiplier = 1.0
         if confidence is not None:
             bounded = min(max(confidence, 0.0), 1.0)
-            adjusted *= (
+            confidence_multiplier = (
                 self.rerank_policy.confidence_base
                 + bounded * self.rerank_policy.confidence_scale
             )
-        if candidate.status == "needs_review":
-            adjusted *= self.rerank_policy.needs_review_multiplier
-        if candidate.status == "candidate":
-            adjusted *= self.lifecycle_policy.candidate_score_multiplier
+        validity_multiplier = 1.0
         if candidate.validity == "verified":
-            adjusted *= self.lifecycle_policy.verified_score_multiplier
+            validity_multiplier *= self.lifecycle_policy.verified_score_multiplier
         if candidate.validity == "contradicted":
-            adjusted *= self.lifecycle_policy.contradicted_score_multiplier
+            validity_multiplier *= self.lifecycle_policy.contradicted_score_multiplier
+        utility_multiplier = 1.0
         if candidate.utility != 0.0:
-            adjusted *= max(
+            utility_multiplier = max(
                 self.rerank_policy.utility_multiplier_min,
                 min(
                     self.rerank_policy.utility_multiplier_max,
                     1.0 + candidate.utility * self.rerank_policy.utility_scale,
                 ),
             )
-        adjusted *= self._negative_transfer_multiplier(candidate, query, scope)
-        if scope:
-            adjusted *= self._scope_multiplier(candidate, scope)
-        adjusted *= self._freshness_multiplier(candidate)
+        negative_transfer = self._negative_transfer_multiplier(candidate, query, scope)
+        scope_multiplier = self._scope_multiplier(candidate, scope) if scope else 1.0
+        freshness_multiplier = self._freshness_multiplier(candidate)
         query_terms = set(tokenize(query))
         provenance_text = " ".join(
             candidate.fields.get(key, "")
             for key in ("source", "session", "validated", "validation")
         )
+        provenance_multiplier = 1.0
         if query_terms and query_terms.intersection(tokenize(provenance_text)):
-            adjusted *= self.rerank_policy.provenance_bonus
-        return adjusted
+            provenance_multiplier = self.rerank_policy.provenance_bonus
+        final_score = fused_score
+        for multiplier in (
+            status_multiplier,
+            confidence_multiplier,
+            validity_multiplier,
+            utility_multiplier,
+            negative_transfer,
+            scope_multiplier,
+            freshness_multiplier,
+            provenance_multiplier,
+        ):
+            final_score *= multiplier
+        return MemoryScoreBreakdown(
+            bm25_score=bm25_score,
+            lexical_score=lexical_score if lexical_score is not None else fused_score,
+            semantic_score=semantic_score,
+            fused_score=fused_score,
+            status_multiplier=status_multiplier,
+            confidence_multiplier=confidence_multiplier,
+            validity_multiplier=validity_multiplier,
+            utility_multiplier=utility_multiplier,
+            negative_transfer_multiplier=negative_transfer,
+            scope_multiplier=scope_multiplier,
+            freshness_multiplier=freshness_multiplier,
+            provenance_multiplier=provenance_multiplier,
+            final_score=round(final_score, 6),
+        )
 
     def _is_automatic_injection_eligible(
         self,
@@ -852,15 +1233,14 @@ class MemoryManager:
         context: MemoryRetrievalContext,
     ) -> bool:
         """限制自动注入，显式搜索仍可审计所有状态。"""
-        if record.status in {"needs_review", "superseded", "deprecated", "obsolete"}:
-            return False
-        if record.validity in {"needs_review", "corrected", "contradicted"}:
-            return False
-        if record.status != "candidate":
-            return True
-        confidence = record.confidence_value or 0.0
-        if confidence < self.lifecycle_policy.candidate_prompt_confidence:
-            return False
+        return self._automatic_injection_reason(record, context) is None
+
+    def _has_strong_candidate_context(
+        self,
+        record: MemoryRecord,
+        context: MemoryRetrievalContext,
+    ) -> bool:
+        """判断 candidate 是否有足够强的文件、符号或 scope 上下文。"""
         normalized_files = {item.casefold() for item in record.related_files}
         normalized_symbols = {item.casefold() for item in record.related_symbols}
         if context.current_file and context.current_file.casefold() in normalized_files:

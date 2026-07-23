@@ -1,0 +1,145 @@
+version: 1
+
+# 默认语料刻意很小，覆盖语言、层级、生命周期、上下文和预算门禁。
+project: &project
+  - |
+    ## 中文超时处理
+    - Memory-ID: mem_zh_timeout
+    - Context/Query: 中文 provider timeout 混合关键词
+    - Solution: 使用有界指数退避处理终端超时。
+    - Files: src/provider.py
+    - Related-Symbols: ProviderClient
+    - Scope: providers
+    - Takeaways: 中文查询应召回中文记忆。
+    - Status: active
+    - Validity: verified
+    - Confidence: 0.95
+  - |
+    ## English retry policy
+    - Memory-ID: mem_en_retry
+    - Context/Query: English provider retry timeout
+    - Solution: Retry once with bounded backoff.
+    - Files: src/retry.py
+    - Related-Symbols: retry_request
+    - Scope: providers
+    - Takeaways: Keep retries bounded.
+    - Status: active
+    - Validity: verified
+    - Confidence: 0.95
+  - |
+    ## Shared title
+    - Memory-ID: mem_project_shared
+    - Context/Query: project-only cache policy
+    - Solution: Use the project cache.
+    - Files: src/cache.py
+    - Scope: cache
+    - Takeaways: Project policy wins in project scope.
+    - Status: active
+    - Validity: verified
+  - |
+    ## Scoped candidate
+    - Memory-ID: mem_scoped_candidate
+    - Context/Query: tentative provider circuit breaker
+    - Solution: Use the scoped candidate only with strong context.
+    - Files: src/provider.py
+    - Related-Symbols: ProviderClient
+    - Scope: providers
+    - Takeaways: Candidate injection requires a strong match.
+    - Status: candidate
+    - Validity: derived
+    - Confidence: 0.95
+  - |
+    ## Weak candidate
+    - Memory-ID: mem_weak_candidate
+    - Context/Query: tentative weak retry
+    - Solution: Do not inject automatically.
+    - Files: src/weak.py
+    - Scope: providers
+    - Takeaways: Low confidence stays isolated.
+    - Status: candidate
+    - Validity: derived
+    - Confidence: 0.40
+  - |
+    ## Needs review
+    - Memory-ID: mem_review
+    - Context/Query: unsafe legacy retry review
+    - Solution: Audit only.
+    - Files: src/legacy.py
+    - Takeaways: Never inject while under review.
+    - Status: needs_review
+    - Validity: needs_review
+  - |
+    ## Contradicted
+    - Memory-ID: mem_contradicted
+    - Context/Query: contradicted retry forever
+    - Solution: Retry forever.
+    - Files: src/legacy.py
+    - Takeaways: This conclusion is contradicted.
+    - Status: active
+    - Validity: contradicted
+  - |
+    ## Superseded
+    - Memory-ID: mem_superseded
+    - Context/Query: superseded obsolete deprecated retry
+    - Solution: Old behavior.
+    - Files: src/legacy.py
+    - Takeaways: Keep only for audit.
+    - Status: superseded
+    - Validity: verified
+  - |
+    ## Successful feedback
+    - Memory-ID: mem_success
+    - Context/Query: feedback ranking stable cache
+    - Solution: Proven successful solution.
+    - Files: src/cache.py
+    - Takeaways: Positive utility improves ranking.
+    - Status: active
+    - Validity: verified
+    - Utility: 1.0
+    - Success-Count: 4
+  - |
+    ## Failed feedback
+    - Memory-ID: mem_failed
+    - Context/Query: feedback ranking stable cache
+    - Solution: Previously failed solution.
+    - Files: src/cache.py
+    - Takeaways: Negative feedback lowers ranking.
+    - Status: active
+    - Validity: unknown
+    - Utility: -1.0
+    - Failure-Count: 3
+    - Last-Outcome: failure
+
+user: &user
+  - |
+    ## Shared title
+    - Memory-ID: mem_user_shared
+    - Context/Query: user-only editor preference
+    - Solution: Use the user preference.
+    - Files: config/editor.toml
+    - Scope: preferences
+    - Takeaways: User memory remains separately addressable.
+    - Status: active
+    - Validity: user_confirmed
+
+cases:
+  - {id: zh, query: "终端超时", expected: [mem_zh_timeout], project_memory: *project, user_memory: *user}
+  - {id: en, query: "English retry timeout", expected: [mem_en_retry], project_memory: *project, user_memory: *user}
+  - {id: mixed, query: "provider 超时 timeout", expected: [mem_zh_timeout], project_memory: *project, user_memory: *user}
+  - {id: project-layer, query: "project-only cache policy", layer: project, expected: [mem_project_shared], forbidden: [mem_user_shared], project_memory: *project, user_memory: *user}
+  - {id: user-layer, query: "user-only editor preference", layer: user, expected: [mem_user_shared], forbidden: [mem_project_shared], project_memory: *project, user_memory: *user}
+  - {id: verified-first, query: "provider timeout", expected: [mem_zh_timeout], max_rank: {mem_zh_timeout: 1}, project_memory: *project, user_memory: *user}
+  - {id: weak-candidate, query: "tentative weak retry", expected: [], forbidden: [mem_weak_candidate], project_memory: *project, user_memory: *user}
+  - {id: candidate-file, query: "tentative provider circuit breaker", context: {current_file: src/provider.py}, expected: [mem_scoped_candidate], project_memory: *project, user_memory: *user}
+  - {id: needs-review, query: "unsafe legacy retry review", expected: [], forbidden: [mem_review], project_memory: *project, user_memory: *user}
+  - {id: contradicted, query: "contradicted retry forever", expected: [], forbidden: [mem_contradicted], project_memory: *project, user_memory: *user}
+  - {id: superseded, query: "superseded obsolete deprecated retry", expected: [], forbidden: [mem_superseded], project_memory: *project, user_memory: *user}
+  - {id: exact-audit, query: mem_contradicted, require_injection: false, expected: [mem_contradicted], project_memory: *project, user_memory: *user}
+  - {id: current-file, query: "provider", context: {current_file: src/provider.py}, expected: [mem_zh_timeout], project_memory: *project, user_memory: *user}
+  - {id: symbol, query: "circuit breaker", context: {symbols: [ProviderClient]}, expected: [mem_scoped_candidate], project_memory: *project, user_memory: *user}
+  - {id: scope-hit, query: "cache policy", context: {scope: cache}, expected: [mem_project_shared], project_memory: *project, user_memory: *user}
+  - {id: feedback, query: "feedback ranking stable cache", expected: [mem_success], max_rank: {mem_success: 1}, project_memory: *project, user_memory: *user}
+  - {id: budget-competition, query: "feedback ranking stable cache", top_k: 1, token_budget: 1200, expected: [mem_success], project_memory: *project, user_memory: *user}
+  - {id: single-over-budget, query: "English retry timeout", token_budget: 1, expected: [], project_memory: *project, user_memory: *user}
+  - {id: stable-dedup-order, query: "Shared title", require_injection: false, expected: [mem_project_shared, mem_user_shared], project_memory: *project, user_memory: *user}
+  - {id: deterministic-repeat, query: "feedback ranking stable cache", expected: [mem_success], project_memory: *project, user_memory: *user}

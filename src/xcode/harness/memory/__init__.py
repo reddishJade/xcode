@@ -18,6 +18,14 @@ from .manager import (
     build_memory_judge_fn,
     build_memory_reference_judge_fn,
 )
+from .evaluation import (
+    MemoryEvalCase,
+    MemoryEvalFailure,
+    MemoryEvalReport,
+    evaluate_case_file,
+    evaluate_memory_cases,
+    load_memory_eval_cases,
+)
 from .parsing import (
     MemoryEvidence,
     MemoryRecord,
@@ -27,9 +35,24 @@ from .parsing import (
     MemoryType,
 )
 from .tools import build_memory_tools
+from .retrieval import (
+    MemoryCandidateDecision,
+    MemoryExclusionReason,
+    MemoryRetrievalMetrics,
+    MemoryRetrievalTrace,
+    MemoryScoreBreakdown,
+)
 
 __all__ = [
     "MemoryEmbeddingFn",
+    "MemoryCandidateDecision",
+    "MemoryExclusionReason",
+    "MemoryRetrievalMetrics",
+    "MemoryRetrievalTrace",
+    "MemoryScoreBreakdown",
+    "MemoryEvalCase",
+    "MemoryEvalFailure",
+    "MemoryEvalReport",
     "MemoryJudgeFn",
     "MemoryJudgeResult",
     "MemoryLayer",
@@ -52,4 +75,7 @@ __all__ = [
     "build_memory_judge_fn",
     "build_memory_reference_judge_fn",
     "build_memory_tools",
+    "evaluate_case_file",
+    "evaluate_memory_cases",
+    "load_memory_eval_cases",
 ]

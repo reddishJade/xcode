@@ -134,7 +134,7 @@ xcode --resume
 | `/config` | 模型配置 | 管理 provider profile |
 | `/tool [list\|NAME INPUT]` | 信息工具 | 查看/调用工具 |
 | `/skill NAME` | 信息工具 | 显式激活技能 |
-| `/memory` | 信息工具 | 检索、列出或添加记忆 |
+| `/memory` | 信息工具 | 检索、解释、评测、维护或添加记忆 |
 | `/permissions [list\|clear]` | 信息工具 | 查看或清除权限授权 |
 | `/hooks` | 信息工具 | 查看外部 hook 状态 |
 | `/mcp status\|reload` | 信息工具 | 查看 MCP 状态或重载 |
@@ -171,7 +171,13 @@ xcode --resume
 
 实验能力默认关闭，只通过 `experimental.tasks`、`experimental.mailbox`、`experimental.progress` 启用。
 
-每轮检索项目根 `MEMORY.md` 与用户级 `~/.xcode/memory/MEMORY.md`，BM25 匹配最多 3 条记录注入 `<memory>` 上下文。`search_memory` 是只读、低风险工具。
+每轮检索项目根 `MEMORY.md` 与用户级 `~/.xcode/memory/MEMORY.md`，BM25
+匹配最多 3 条记录注入 `<memory>` 上下文。`search_memory` 是只读、低风险
+工具。`/memory explain <query>` 只读展示候选分数、生命周期隔离、排序和
+token 预算决策；可用 `--scope`、`--file`、`--symbol`、`--limit`、
+`--layer` 和 `--budget` 补充上下文。`/memory eval [case-file] [--json]`
+运行版本化离线案例；默认案例位于 `docs/memory_eval.yaml`，质量门禁要求
+forbidden、生命周期安全、预算和确定性违规均为零。
 
 ---
 
