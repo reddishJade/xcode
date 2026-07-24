@@ -31,8 +31,7 @@ from .permission_model import (
     SensitivePathOverride,
 )
 from .shell_analyzer import (
-    CommandSemanticsRegistry,
-    FileEffect,
+    CmdAnalyzer,
     PosixAnalyzer,
     PowerShellAnalyzer,
     ShellAnalysis,
@@ -58,10 +57,9 @@ __all__ = [
     "ApprovalCandidate",
     "ApprovalResult",
     "BoundaryContext",
-    "CommandSemanticsRegistry",
+    "CmdAnalyzer",
     "Constraint",
     "ExternalDirectory",
-    "FileEffect",
     "FileGrantStore",
     "FingerprintLookupResult",
     "GrantRecord",

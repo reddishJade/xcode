@@ -60,7 +60,7 @@ def _shlex_extract(command: str) -> tuple[str | None, str | None, set[str]]:
 
     返回 (primary_command, subcommand, flags)。
     短 flag 的字符会排序归一化（-rf → -fr），以便与 flags_any 匹配。
-    这是 ShellAnalyzer 尚未就绪时的轻量降级路径。
+    这是 Shell 分类不可用时的轻量降级路径。
     """
     try:
         tokens = shlex.split(command)
@@ -111,7 +111,7 @@ def matches(
     """判断 action 是否匹配 rule。
 
     支持两种调用方式：
-    1. 已提取的结构化 shell 字段传入（由调用方从 ShellAnalyzer 获取）
+    1. 已提取的结构化 shell 字段传入
     2. 传入 shell_command 原始字符串，内部用 shlex 提取（降级路径）
 
     对于非 shell 工具（capability != "shell"），只匹配 action + resource_pattern。

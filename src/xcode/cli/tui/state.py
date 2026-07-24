@@ -797,7 +797,7 @@ def _is_exploration_call(name: str, raw_input: ToolInput) -> bool:
         return False
     analysis = analyze_shell_command(command)
     return (
-        analysis.ast_available
+        analysis.classification_available
         and not analysis.parse_error
         and analysis.primary_command
         in {

@@ -40,6 +40,7 @@ UnresolvedReason = Literal[
     "eval_like",
     "parse_error",
     "unsupported_shell",
+    "dangerous_command",
 ]
 
 type GrantRecordData = dict[str, object]

@@ -144,7 +144,7 @@ class ActionExtractor:
         if isinstance(command, str) and command.strip():
             normalized_command = command.strip()
             analysis = self._analyze_command(normalized_command, "posix")
-            if analysis.ast_available:
+            if analysis.classification_available:
                 targets = (
                     Target(
                         kind="command",
@@ -185,7 +185,7 @@ class ActionExtractor:
             analysis = self._analyze_command(normalized_command, "posix")
             targets.extend(analysis.resolved_paths)
             all_unresolved.extend(analysis.unresolved_effects)
-            if not analysis.ast_available:
+            if not analysis.classification_available:
                 targets.extend(self._shell_path_targets(normalized_command))
         return Action(
             tool=tool_name,
@@ -215,7 +215,7 @@ class ActionExtractor:
                     "primary_command": None,
                     "shell_type": shell_type,
                     "parse_error": True,
-                    "ast_available": False,
+                    "classification_available": False,
                 },
             )()
 
