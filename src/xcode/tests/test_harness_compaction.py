@@ -6,7 +6,6 @@ from xcode.harness.agent_runtime.compaction import (
     context_collapse_clean,
     _compute_recent_count_from_tokens,
     _find_turn_boundary,
-    _is_tool_result_message,
     _inactive_branch_id,
     _branch_summary_should_run,
     _protect_identifiers,
@@ -66,18 +65,6 @@ class TestFindTurnBoundary:
     def test_clamps_to_max(self) -> None:
         msgs = [_msg("system"), _msg("user")]
         assert _find_turn_boundary(msgs, 5) == 1
-
-
-class TestIsToolResultMessage:
-    def test_tool_role(self) -> None:
-        assert _is_tool_result_message({"role": "tool"})
-
-    def test_tool_result_in_content(self) -> None:
-        msg = {"role": "user", "content": [{"type": "tool_result"}]}
-        assert _is_tool_result_message(msg)
-
-    def test_plain_message(self) -> None:
-        assert not _is_tool_result_message({"role": "user"})
 
 
 class TestInactiveBranchId:

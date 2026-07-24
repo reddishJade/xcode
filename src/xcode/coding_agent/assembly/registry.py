@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -14,12 +14,10 @@ from xcode.coding_agent.tools.subagent import build_subagent_tool
 from xcode.coding_agent.tools import ShellSpec, detect_shell
 from xcode.coding_agent.registry import build_project_scoped_registry
 
-from xcode.harness.config import XcodeRuntimeConfig, AgentConfig
+from xcode.harness.config import XcodeRuntimeConfig
 from xcode.harness.execution_env import ExecutionEnv
 from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
 from xcode.harness.session_todo import SessionTodoState
-from xcode.harness.security import PolicyEvaluator
-from xcode.harness.observability import ExternalHookRunner
 
 if TYPE_CHECKING:
     from xcode.harness.skills import SkillRegistry
@@ -161,16 +159,11 @@ def _extend_registry_with_features(
 def build_tool_registry(
     project_root: Path,
     llm: ModelProvider,
-    llm_profiles: Mapping[str, ModelProvider] | None,
-    config: AgentConfig,
     runtime_config: XcodeRuntimeConfig,
     contextual_state: ContextualRetrievalState | None = None,
-    compact_controller: Any = None,
     cancel_event: CancellationToken | None = None,
     env: ExecutionEnv | None = None,
     skills_dir: Path | None = None,
-    hook_constraint_providers: tuple[PolicyEvaluator, ...] = (),
-    external_hook_runner: ExternalHookRunner | None = None,
     memory_manager: Any | None = None,
     session_history: Any | None = None,
     todo_state: SessionTodoState | None = None,

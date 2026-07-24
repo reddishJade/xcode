@@ -16,7 +16,6 @@ from xcode.agent._codec import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
 from xcode.agent.config import CompactInstructions
 from xcode.harness.memory.checkpoint import write_session_checkpoint
 from ..skill_activation import is_skill_activation_content
-from ...agent.types import ToolSpec
 
 """分层上下文压缩工具。"""
 
@@ -645,19 +644,6 @@ def _find_turn_boundary(
     return index  # fallback
 
 
-def _is_tool_result_message(message: dict[str, Any]) -> bool:
-    """判断消息是否为 tool result 消息。"""
-    role = message.get("role", "")
-    if role == "tool":
-        return True
-    content = message.get("content")
-    if isinstance(content, list):
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "tool_result":
-                return True
-    return False
-
-
 def summarize_messages(
     messages: list[dict[str, Any]],
     max_recent_messages: int = 8,
@@ -874,22 +860,6 @@ def _summarize_branch_messages(
     return "\n".join(summary_lines)
 
 
-def _preserved_recent_count(
-    messages: list[dict[str, Any]],
-    instructions: CompactInstructions,
-    base_count: int,
-) -> int:
-    """根据优先级估算需要额外保留的消息数。"""
-    extra = 0
-    has_top = "architecture_decision" in instructions.priorities
-    has_high = "modified_file" in instructions.priorities
-    if has_top and len(messages) > 20:
-        extra += 2
-    if has_high and len(messages) > 15:
-        extra += 1
-    return extra
-
-
 def _protect_identifiers(
     summary: str,
     frozen: list[str],
@@ -917,20 +887,6 @@ def save_transcript(messages: list[dict[str, Any]], transcript_dir: Path) -> Pat
         for message in messages:
             file.write(json.dumps(message, ensure_ascii=False, default=str) + "\n")
     return path
-
-
-def build_compact_tool(controller: CompactController) -> ToolSpec:
-    return ToolSpec(
-        name="compact",
-        description="Request manual context compaction before the next model call.",
-        input_hint="empty",
-        handler=lambda _input, _on_update=None: controller.request(),
-        schema={
-            "type": "object",
-            "properties": {},
-            "additionalProperties": False,
-        },
-    )
 
 
 def _extract_file_ops_from_messages(
