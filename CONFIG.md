@@ -2,7 +2,7 @@
 
 `xcode.config.json` 位于项目根目录。`python -m xcode.main` 和 `build_app()` 自动读取它；`--config` 用于显式指定其他路径。相对路径按 `--project-root` 解析。
 
-配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地 `.local/settings.json` → 环境变量 `XCODE_SANDBOX_MODE`、`XCODE_PERMISSION_MODE`、`XCODE_APPROVAL_POLICY`。
+配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地 `.local/settings.json` → 环境变量 `XCODE_PERMISSION_MODE`、`XCODE_APPROVAL_POLICY`。
 
 **没有配置文件时**启用正式内置能力（`core`、`subagent`、`worktree`、`memory`，以及存在
 可见 skill 时的 `skills`）；`tasks`、`mailbox`、`progress` 和 daemon 仍需显式启用。零配置可用。
@@ -243,10 +243,7 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `permission_mode` | string | `"normal"` | `strict`、`normal`、`permissive` |
-| `sandbox_mode` | bool | `false` | 沙箱模式 |
 | `approval_policy` | string | `"never"` | `always`、`never` |
-| `network_access` | bool | `true` | 网络访问 |
-| `writable_roots` | array | `[]` | 可写目录白名单 |
 | `restricted_dirs` | array | `[]` | 禁止访问目录列表 |
 | `rules` | array | `[]` | 静态权限规则列表 |
 | `global_default` | string/null | `null` | 无规则匹配时的默认决策：`allow`、`ask`、`deny` |

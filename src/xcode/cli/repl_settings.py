@@ -339,47 +339,28 @@ def _handle_workspace_tab(
     project_root: Path,
     restricted_dirs: tuple[str, ...],
 ) -> bool:
-    _render_workspace_tab(config, project_root, restricted_dirs)
-    action = questionary.select(
+    del config, config_path
+    _render_workspace_tab(project_root, restricted_dirs)
+    questionary.select(
         "Select action:",
-        choices=["Add directory…", "Back"],
-        default="Add directory…",
+        choices=["Back"],
+        default="Back",
     ).ask()
-    if action != "Add directory…":
-        return False
-    directory = questionary.text("Directory:", default=str(project_root)).ask()
-    if directory is None or not directory.strip():
-        return False
-    security = config.setdefault("security", {})
-    roots = list(security.get("writable_roots", ()))
-    roots.append(directory.strip())
-    security["writable_roots"] = roots
-    _save_config(config, config_path)
-    return True
+    return False
 
 
 def _render_workspace_tab(
-    config: dict[str, Any],
     project_root: Path,
     restricted_dirs: tuple[str, ...],
 ) -> None:
     print(_permission_header("Workspace"))
     print()
-    print(
-        "   Xcode can read files in the workspace, and make edits when auto-accept edits is on."
-    )
+    print("   Structured file tools stay inside the project.")
+    print("   Shell commands run with the current user's host permissions.")
     print()
     print(f"     -  {project_root} (Original working directory)")
-    security = config.get("security", {})
-    writable_roots: object = ()
-    if isinstance(security, dict):
-        writable_roots = security.get("writable_roots", ())
-    if isinstance(writable_roots, list | tuple):
-        for root in writable_roots:
-            print(f"     -  {root}")
     for directory in restricted_dirs:
         print(f"     -  {directory} (restricted)")
-    print("     1. Add directory…")
     print()
 
 

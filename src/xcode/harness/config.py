@@ -147,10 +147,7 @@ class ExecutionModesRuntimeConfig(BaseModel):
 class SecurityRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     permission_mode: PermissionMode = "normal"
-    sandbox_mode: StrictBool = False
     approval_policy: ApprovalPolicy = "never"
-    network_access: StrictBool = True
-    writable_roots: tuple[str, ...] = ()
     restricted_dirs: tuple[str, ...] = ()
     permissions: dict[str, Literal["allow", "ask", "deny"]] = Field(
         default_factory=dict,
@@ -166,11 +163,6 @@ class SecurityRuntimeConfig(BaseModel):
 
     def resolve_approval_policy(self) -> str:
         return self.approval_policy
-
-    def resolve_sandbox_mode(self) -> bool:
-        if self.permission_mode == "strict":
-            return True
-        return self.sandbox_mode
 
 
 _INSTRUCTION_PRIORITIES: frozenset[str] = frozenset(
@@ -493,18 +485,6 @@ def _build_env_override_raw() -> tuple[
         security["permission_mode"] = permission_mode
         sources[("security", "permission_mode")] = (
             "environment variable XCODE_PERMISSION_MODE"
-        )
-
-    sandbox_mode = os.getenv("XCODE_SANDBOX_MODE")
-    if sandbox_mode is not None:
-        if sandbox_mode == "true":
-            security["sandbox_mode"] = True
-        elif sandbox_mode == "false":
-            security["sandbox_mode"] = False
-        else:
-            security["sandbox_mode"] = sandbox_mode
-        sources[("security", "sandbox_mode")] = (
-            "environment variable XCODE_SANDBOX_MODE"
         )
 
     approval_policy = os.getenv("XCODE_APPROVAL_POLICY")
