@@ -2,9 +2,9 @@
 
 `xcode.config.json` 位于项目根目录。`python -m xcode.main` 和 `build_app()` 自动读取它；`--config` 用于显式指定其他路径。相对路径按 `--project-root` 解析。
 
-配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地 `.local/settings.json` → 环境变量 `XCODE_PERMISSION_MODE`、`XCODE_APPROVAL_POLICY`。
+配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地 `.local/settings.json` → 环境变量 `XCODE_APPROVAL_POLICY`。
 
-**没有配置文件时**启用正式内置能力（`core`、`subagent`、`worktree`、`memory`，以及存在
+**没有配置文件时**启用正式内置能力（`core`、`subagent`、`memory`，以及存在
 可见 skill 时的 `skills`）。零配置可用。
 
 ---
@@ -19,7 +19,7 @@
 |---|---|---|---|
 | `transport` | string | `"openai_chat"` | `openai_chat`、`deepseek_chat`、`mimo_chat`、`chatglm_chat` |
 | `chat_model` | string | `"deepseek-v4-flash"` | 聊天模型名 |
-| `base_url` | string | `""` | OpenAI-compatible API 地址 |
+| `base_url` | string | `"https://api.deepseek.com"` | OpenAI-compatible API 地址 |
 | `api_key` | string | `""` | 显式 API key；留空按环境变量查找 |
 | `thinking` | bool | `true` | 传给支持 thinking 的 provider |
 | `reasoning_effort` | string/null | `"high"` | DeepSeek 等支持 effort 的 provider。值：`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max` |
@@ -100,20 +100,22 @@ xcode config delete subagent                          # 删除 subagent profile
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `max_steps` | int | `20` | 单次任务最大循环轮次 |
-| `execution_mode` | string | `"act"` | 默认执行模式：`plan`、`build`、`act` |
 | `compact_threshold` | int | `0` | 消息数阈值；0 关闭 |
 | `compact_token_threshold` | int | `0` | token 阈值；0 关闭 |
 | `max_recent_messages` | int | `10` | 压缩时保留的近期消息数 |
+| `keep_recent_tokens` | int | `20000` | 压缩时为近期原文保留的 token 预算 |
+| `reserve_tokens` | int | `16384` | 为模型输出和工具交互保留的 token 预算 |
+| `compact_trigger_ratio` | float | `0.7` | 相对上下文窗口的自动压缩触发比例 |
 | `tool_workers` | int | `4` | 单个 parallel batch 的最大活跃工具数；小于 1 时按 1 执行 |
-| `subagent_workers` | int | `4` | 最大活跃 delegated subagent 运行数；超限时 `subagent` 返回 busy |
+| `tool_timeout_seconds` | float | `120.0` | 单个工具调用超时 |
 | `watchdog_repeated_tool_limit` | int | `3` | 连续重复同一工具阈值 |
 
 ---
 
 ## execution_modes
 
-执行模式是同一 agent 上可切换的权限 profile。`agent.execution_mode` 选择启动模式，
-REPL 可在运行时切换；切换不会丢失会话上下文。
+执行模式是同一 agent 上可切换的权限 profile。新会话从 `act` 启动，恢复会话时
+恢复已保存的模式；REPL 可在运行时切换，切换不会丢失会话上下文。
 
 | mode | 工具可见性 | 内置规则与 fallback |
 |---|---|---|
@@ -240,26 +242,39 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `permission_mode` | string | `"normal"` | `strict`、`normal`、`permissive` |
 | `approval_policy` | string | `"never"` | `always`、`never` |
 | `restricted_dirs` | array | `[]` | 禁止访问目录列表 |
-| `rules` | array | `[]` | 静态权限规则列表 |
+| `permissions` | object | `{}` | 权限组到决策的映射；支持 `read`、`edit`、`shell`、`web`、`subagent`、`skill` |
+| `tools` | object | `{}` | 具体工具名到决策的映射；覆盖同名权限组展开结果 |
 | `global_default` | string/null | `null` | 无规则匹配时的默认决策：`allow`、`ask`、`deny` |
 | `external_directories` | array | `[]` | 外部目录白名单，每条包含 `path`（必填）和 `access`（可选，默认 `"read"`；可选值 `read`/`write`/`read_write`） |
+| `sensitive_path_overrides` | array | `[]` | 敏感路径的精确例外；不接受通配符 |
 
-### rules 规则格式
+### 静态权限示例
 
 ```json
-{"tool": "read_file", "decision": "allow"}
-{"tool": "bash", "decision": "ask", "input_contains": "curl"}
-{"tool": "*", "decision": "deny"}
+{
+  "security": {
+    "permissions": {
+      "read": "allow",
+      "edit": "ask",
+      "shell": "ask"
+    },
+    "tools": {
+      "webfetch": "deny"
+    },
+    "global_default": "ask"
+  }
+}
 ```
 
-`security.rules` 是独立于 `execution_modes` ruleset 的旧静态策略。规则按声明顺序
-匹配，最后匹配的规则生效；无规则匹配时使用 `global_default`。路径边界、mode
-policy、静态策略、shell 可解析性与 mode ruleset 的结果取更严格决策，优先级为
-`deny > ask > allow`。静态策略因此可以收紧 mode 权限，但不能通过 `allow` 放宽其他
-策略产生的 `ask` 或 `deny`。
+权限组先展开为具体工具，`tools` 中的具体工具配置随后覆盖。未匹配项使用
+`global_default`；未设置 `global_default` 且 `approval_policy` 为 `always` 时，
+默认请求确认。路径边界、mode policy、静态策略、shell 可解析性与 mode ruleset
+共同参与裁决，`deny` 和 `ask` 不能被更宽松的静态配置绕过。
+
+权限提示与 shell 效果分析不是 OS sandbox。Xcode 不隔离 agent 进程；需要真实
+隔离时，应在容器或虚拟机中运行。
 
 ### external_directories 示例
 
@@ -314,7 +329,11 @@ Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
 
 ### 工具注册
 
-稳定工具默认注册：文件读写编辑、`glob_files`、`find_files`、`list_dir`、`grep_search`、`websearch`、`webfetch`、`question`、`bash`、`search_tools`、`subagent`、worktree、`todowrite`、`search_memory`。发现 skill 时注册 `load_skill`；存在 `.local/mcp_config.json` 时注册 `mcp__{server}__{tool}` 动态工具。
+稳定工具默认注册：`read_file`、`write_file`、`edit_file`、`apply_patch`、
+`glob_files`、`find_files`、`list_dir`、`grep_search`、`websearch`、
+`webfetch`、`question`、`bash`、`search_tools`、`subagent`、`todowrite`、
+`history`、`search_memory`。发现 skill 时注册 `load_skill`；存在
+`.local/mcp_config.json` 时注册 `mcp__{server}__{tool}` 动态工具。
 
 `search_tools` 工具按关键字搜索当前已注册工具。
 `websearch` 通过 Exa / Parallel MCP provider 搜索网络，默认 Exa；支持 `query`、
@@ -322,8 +341,9 @@ Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
 和 `timeout`。可通过环境变量 `EXA_API_KEY` / `PARALLEL_API_KEY` 或
 `OPENCODE_EXPERIMENTAL_PARALLEL` 切换/鉴权。`webfetch` 支持 `markdown`、`text`、
 `html` 输出格式，自动解压 gzip/deflate，最多读取 5MB，并在截断时标记结果。
-运行时按每轮用户问题合并检索项目根 `MEMORY.md` 与
-`~/.xcode/memory/MEMORY.md`，并将匹配记录注入 `<memory>` 上下文。
+运行时不会按每轮用户问题自动检索 Memory。Agent 通过 `search_memory` 按需合并
+检索项目根 `MEMORY.md` 与 `~/.xcode/memory/MEMORY.md`；resume/rebuild 才会在
+独立预算内注入相关记忆。
 `search_memory` 的 schema 接受必填 `query`，以及可选 `limit`（1-10）、
 `scope` 和 `layer`（`all` / `project` / `user`）；工具标记为只读。
 MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺少这些

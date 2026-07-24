@@ -151,13 +151,13 @@ xcode --resume
 
 - **结构化 Agent 循环** — `CodingAgentHarness` 消费 provider 流式事件，统一处理 text、reasoning、tool_use、tool_result 和 final answer。
 - **三执行模式** — `plan`（只读）、`build`（允许写入）、`act`（每次询问），规则引擎按 findLast 覆盖权限。
-- **核心工具闭环** — 20+ 内置工具：文件读写编辑、glob/grep/bash/subagent/webfetch/websearch/question/todowrite 等。`edit_file` 依赖 read-before-edit SHA256 指纹校验。
+- **核心工具闭环** — 内置文件读写编辑、glob/grep/bash/subagent/webfetch/websearch/question/todowrite 等工具。`edit_file` 依赖 read-before-edit SHA256 指纹校验。
 - **工具并发分区** — 只读且并发安全的工具并行执行；写操作、高风险命令保持串行。
-- **权限与审计** — `PermissionEngine` 统一执行工具权限判定、HITL 审批和输出脱敏；`JsonlAuditLogger` 记录审计日志；shell 命令安全分析器。
+- **权限与审计** — `PermissionEngine` 统一执行工具权限判定、HITL 审批和输出脱敏；`JsonlAuditLogger` 记录审计日志；shell 效果分析器对无法保守解析的命令请求确认。
 - **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果；compact 后按 session 写入 checkpoint，resume 使用 checkpoint + 原文 tail 重建上下文。
-- **REPL 会话管理** — 24 个 `/slash` 命令，支持 plan/build/act、会话分支、回退、undo（快照恢复）、模型切换、config 管理、session transcript 落盘。
+- **REPL 会话管理** — `/slash` 命令支持 plan/build/act、会话分支、回退、undo（快照恢复）、模型切换、config 管理、session transcript 落盘。
 - **TUI 全屏终端** — 基于 `prompt-toolkit` 的类 VSCode 全屏交互界面。
-- **Subagent 委托** — `subagent` 单入口委派子任务，实时流式展示子 agent 进度；支持 worktree 文件系统隔离。
+- **Subagent 委托** — `subagent` 单入口委派子任务，实时流式展示子 agent 进度；子 agent 共享项目目录，并继承父 agent 的权限门控。
 - **MCP 协议** — 基于官方 Python SDK 连接本地 stdio server，自动发现 `.local/mcp_config.json` 并注册 `mcp__{server}__{tool}` 动态工具。
 - **记忆系统** — 项目根 `MEMORY.md` + 用户级 `~/.xcode/memory/` 是可审查的长期事实源；Agent 通过 BM25 工具按需检索。
 - **外部 Hook** — 可配置事件驱动的外部命令 hooks（git 前置检查、自定义通知等）。
@@ -166,7 +166,11 @@ xcode --resume
 
 ## 工具能力
 
-稳定工具默认注册：`read`/`write`/`edit`/`glob`/`grep`/`list_dir`/`truncate`、`websearch`/`webfetch`、`question`、`bash`、`search_tools`、`subagent`、worktree、`todowrite`、`history`、`search_memory`、`apply_patch`。发现 skill 时注册 `load_skill`；存在 MCP 配置时注册 `mcp__{server}__{tool}` 动态工具。
+稳定工具默认注册：`read_file`、`write_file`、`edit_file`、`apply_patch`、
+`glob_files`、`find_files`、`list_dir`、`grep_search`、`websearch`、
+`webfetch`、`question`、`bash`、`search_tools`、`subagent`、`todowrite`、
+`history`、`search_memory`。发现 skill 时注册 `load_skill`；存在 MCP 配置时
+注册 `mcp__{server}__{tool}` 动态工具。
 
 `search_memory` 是只读、低风险的 BM25 检索工具。运行时不会在每轮自动
 注入检索结果；resume/rebuild 才会在独立预算内注入项目与用户记忆。长期
@@ -193,7 +197,10 @@ xcode.config.json               ← 项目级
 环境变量                          ← 最高优先级
 ```
 
-**零配置可用**：无配置文件时启用核心工具（core、subagent、worktree、memory）。
+**零配置可用**：无配置文件时启用核心工具、subagent 和 memory。
+
+Xcode 不为 agent 提供 OS 级 sandbox。权限提示和 shell 效果分析用于帮助用户
+了解并确认操作，不构成安全隔离；需要隔离时应在容器或虚拟机中运行 Xcode。
 
 所有字段默认值及完整参考见 [CONFIG.md](CONFIG.md)。
 
@@ -208,7 +215,7 @@ xcode.config.json               ← 项目级
 | `ai/` | `src/xcode/ai/` | 多 provider LLM API：OpenAI-compatible 基类 + DeepSeek/ChatGLM/MiMo 适配器，流式传输、缓存、thinking |
 | `agent/` | `src/xcode/agent/` | Agent loop 合约：消息/事件类型、上下文压缩、工具执行分区、watchdog、provider 抽象 |
 | `harness/` | `src/xcode/harness/` | 应用装配、运行时配置、session 存储、权限引擎/审计/MCP/skill 发现/记忆管理/外部 hooks/执行环境 |
-| `coding_agent/` | `src/xcode/coding_agent/` | 工具层：文件读写编辑、glob/grep/bash/subagent/webfetch/websearch 等 20+ 工具 |
+| `coding_agent/` | `src/xcode/coding_agent/` | 产品工具装配：文件读写编辑、glob/grep/bash/subagent/webfetch/websearch 等 |
 | `cli/` | `src/xcode/cli/` | REPL UI、TUI、slash command 系统、setup wizard、配置管理 |
 
 运行路径：`main.py` → `build_app()` → `CodingAgentHarness` → `Agent` loop → provider stream → tool execution。
