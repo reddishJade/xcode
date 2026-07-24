@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 import json
 import re
 
@@ -31,6 +32,26 @@ class GoalVerdict:
     ok: bool
     reason: str
     impossible: bool = False
+
+
+class GoalDecisionStatus(StrEnum):
+    """一次 Goal 验收的明确结果。"""
+
+    NO_GOAL = "no_goal"
+    SATISFIED = "satisfied"
+    UNSATISFIED = "unsatisfied"
+    IMPOSSIBLE = "impossible"
+    UNAVAILABLE = "unavailable"
+    REENTRY_LIMIT = "reentry_limit"
+
+
+@dataclass(frozen=True)
+class GoalDecision:
+    """GoalController 对本次停止请求作出的决定。"""
+
+    status: GoalDecisionStatus
+    reason: str | None = None
+    feedback: str | None = None
 
 
 class GoalController:
@@ -69,24 +90,31 @@ class GoalController:
         self._terminal_notice = None
         return notice
 
-    async def verify(self, messages: list[AgentMessage]) -> str | None:
-        """返回继续工作的反馈；返回 None 表示本次允许终止。"""
+    async def verify(self, messages: list[AgentMessage]) -> GoalDecision:
+        """验收停止条件，并返回无歧义的结构化决定。"""
         condition = self._condition
         if condition is None:
-            return None
+            return GoalDecision(GoalDecisionStatus.NO_GOAL)
         try:
             provider = self._provider() if callable(self._provider) else self._provider
             verdict = await _evaluate(provider, condition, messages)
         except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
-            self._terminal_notice = f"Goal verification unavailable: {exc}"
-            return None
+            reason = str(exc)
+            self._terminal_notice = f"Goal verification unavailable: {reason}"
+            return GoalDecision(GoalDecisionStatus.UNAVAILABLE, reason=reason)
         if verdict.ok:
             self.clear()
-            return None
+            return GoalDecision(
+                GoalDecisionStatus.SATISFIED,
+                reason=verdict.reason,
+            )
         if verdict.impossible:
             self._terminal_notice = f"Goal judged impossible: {verdict.reason}"
             self.clear()
-            return None
+            return GoalDecision(
+                GoalDecisionStatus.IMPOSSIBLE,
+                reason=verdict.reason,
+            )
         self._reacts += 1
         if self._reacts > self._max_reacts:
             self._terminal_notice = (
@@ -94,13 +122,28 @@ class GoalController:
                 f"{verdict.reason}"
             )
             self.clear()
-            return None
-        return (
+            return GoalDecision(
+                GoalDecisionStatus.REENTRY_LIMIT,
+                reason=verdict.reason,
+            )
+        feedback = (
             "<goal-verification>\n"
             f"Stop condition is not yet satisfied: {verdict.reason}\n"
             "Continue working and produce transcript evidence before stopping.\n"
             "</goal-verification>"
         )
+        return GoalDecision(
+            GoalDecisionStatus.UNSATISFIED,
+            reason=verdict.reason,
+            feedback=feedback,
+        )
+
+    async def completion_feedback(
+        self,
+        messages: list[AgentMessage],
+    ) -> str | None:
+        """将结构化 Goal 决定适配为通用 Agent Loop 的反馈接口。"""
+        return (await self.verify(messages)).feedback
 
 
 async def _evaluate(
@@ -114,8 +157,7 @@ async def _evaluate(
         {
             "role": "user",
             "content": (
-                "Has this stop condition been satisfied?\n\n"
-                f"Condition: {condition}"
+                f"Has this stop condition been satisfied?\n\nCondition: {condition}"
             ),
         },
     ]

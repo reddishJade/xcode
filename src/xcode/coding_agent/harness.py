@@ -111,7 +111,7 @@ class CodingAgentHarness(AgentHarness):
     def _build_loop_config_extras(self) -> dict:
         return {
             "mode_state": self._mode,
-            "completion_verifier": self._goal.verify,
+            "completion_verifier": self._goal.completion_feedback,
         }
 
     def _build_result(
