@@ -12,6 +12,7 @@ import questionary
 
 from .app_contract import ReplApp
 from xcode.harness.session.types import SessionEntry, SessionInfoView
+from xcode.harness.session.types import JsonValue
 
 from .commands import (
     COMMAND_GROUP_EXIT,
@@ -715,22 +716,68 @@ def _extract_compact_summary(messages: list[dict[str, Any]]) -> str | None:
 
 
 def cmd_goal(cmd: str, ctx: CommandContext) -> bool:
-    """设置、显示或清除当前 session 的停止条件。"""
+    """设置、显示、暂停、恢复或清除当前 session 的停止条件。"""
     parts = cmd.split(maxsplit=1)
     condition = parts[1].strip() if len(parts) == 2 else ""
     agent = ctx.app.agent
     if not condition:
         active = agent.goal_condition
-        print(f"Goal: {active}" if active else "No active goal.")
+        if active is None:
+            print("No active goal.")
+        else:
+            status = "paused" if agent.goal_paused else "active"
+            print(f"Goal: {active} [{status}]")
         return False
-    if condition.lower() in {"clear", "reset"}:
+    action = condition.lower()
+    if action in {"clear", "reset"}:
         agent.clear_goal()
+        _persist_goal_state(ctx)
         print("Goal cleared.")
         return False
+    if action == "pause":
+        active = agent.goal_condition
+        if active is None:
+            print("No active goal to pause.")
+        elif agent.goal_paused:
+            print(f"Goal already paused: {active}")
+        else:
+            agent.pause_goal()
+            _persist_goal_state(ctx)
+            print(f"Goal paused: {active}")
+        return False
+    if action == "resume":
+        active = agent.goal_condition
+        if active is None:
+            print("No paused goal to resume.")
+        elif not agent.goal_paused:
+            print(f"Goal already active: {active}")
+        else:
+            agent.resume_goal()
+            _persist_goal_state(ctx)
+            ctx.state.pending_inject = (
+                "Continue working toward the active goal:\n\n" + active
+            )
+            print(f"Goal resumed: {active}")
+        return False
     agent.set_goal(condition)
+    _persist_goal_state(ctx)
     ctx.state.pending_inject = condition
     print(f"Goal set: {condition}")
     return False
+
+
+def _persist_goal_state(ctx: CommandContext) -> None:
+    """把斜杠命令产生的 Goal 状态立即写入当前 session。"""
+    goal_state: dict[str, JsonValue] = {
+        key: value for key, value in ctx.app.agent.goal_state.items()
+    }
+    ctx.store.append(
+        "event",
+        {
+            "type": "goal_state",
+            "data": goal_state,
+        },
+    )
 
 
 def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
@@ -1625,8 +1672,8 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     ),
     "/goal": CommandEntry(
         handler=cmd_goal,
-        desc="Set an independently verified stop condition.",
-        args_desc="<condition>|clear",
+        desc="Set, pause, resume, or clear an independently verified goal.",
+        args_desc="<condition>|pause|resume|clear",
         accepts_args=True,
         group=COMMAND_GROUP_MODE,
     ),

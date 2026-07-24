@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from xcode.harness.agent_runtime.result import RunState
+from xcode.harness.agent_runtime.goal import GoalState
 
 type ExecutionModeName = Literal["plan", "build", "act"]
 
@@ -19,6 +20,7 @@ class CodingRunState(RunState):
     last_agent: str = "main"
     needs_follow_up: bool = False
     todos: list[dict[str, Any]] | None = None
+    goal: GoalState | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 可序列化字典。"""
@@ -28,6 +30,7 @@ class CodingRunState(RunState):
             "last_agent": self.last_agent,
             "needs_follow_up": self.needs_follow_up,
             "todos": self.todos or [],
+            "goal": self.goal.to_dict() if self.goal is not None else None,
         }
 
     @classmethod
@@ -51,4 +54,9 @@ class CodingRunState(RunState):
             last_agent=str(payload.get("last_agent", "main")),
             needs_follow_up=bool(payload.get("needs_follow_up", False)),
             todos=todos,
+            goal=(
+                GoalState.from_dict(payload["goal"])
+                if isinstance(payload.get("goal"), Mapping)
+                else None
+            ),
         )

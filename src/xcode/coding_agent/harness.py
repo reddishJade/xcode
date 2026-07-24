@@ -133,6 +133,7 @@ class CodingAgentHarness(AgentHarness):
             run_state=CodingRunState(
                 messages=result.messages,
                 current_mode=self._mode.current_mode,
+                goal=self._goal.state,
                 todos=(
                     self._todo_state.to_dicts()
                     if self._todo_state is not None
@@ -157,6 +158,8 @@ class CodingAgentHarness(AgentHarness):
             else CodingRunState.from_dict(payload)
         )
         self._mode.set_mode(run_state.current_mode)
+        if run_state.goal is not None:
+            self._goal.restore(run_state.goal)
         if self._todo_state is not None:
             self._todo_state.replace(run_state.todos or [])
 
@@ -191,10 +194,34 @@ class CodingAgentHarness(AgentHarness):
         """清除当前停止条件。"""
         self._goal.clear()
 
+    def pause_goal(self) -> None:
+        """暂停当前停止条件的验收与自动重入。"""
+        self._goal.pause()
+
+    def resume_goal(self) -> None:
+        """恢复当前停止条件的验收与自动重入。"""
+        self._goal.resume()
+
+    @property
+    def goal_state(self) -> dict[str, str | bool | int | None]:
+        """返回可持久化的 Goal 状态。"""
+        return self._goal.state.to_dict()
+
+    def restore_goal_state(self, payload: object) -> None:
+        """从 session 事件恢复 Goal 状态。"""
+        from xcode.harness.agent_runtime.goal import GoalState
+
+        self._goal.restore(GoalState.from_dict(payload))
+
     @property
     def goal_condition(self) -> str | None:
         """返回当前停止条件。"""
         return self._goal.condition
+
+    @property
+    def goal_paused(self) -> bool:
+        """返回当前停止条件是否暂停。"""
+        return self._goal.paused
 
     def activate_skill(
         self, skill_name: str, mode: ExecutionMode | None = None

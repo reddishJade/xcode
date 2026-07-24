@@ -193,6 +193,47 @@ async def test_goal_reentry_is_bounded() -> None:
 
 
 @pytest.mark.asyncio
+async def test_paused_goal_skips_judge_and_preserves_reentry_count() -> None:
+    provider = _Provider(
+        ['{"ok": false, "reason": "still missing"}'] * 2,
+    )
+    goal = GoalController(provider, max_reacts=1)
+    goal.set("Commit exists")
+
+    first_rejection = await goal.verify([UserMessage(content="working")])
+    goal.pause()
+    paused = await goal.verify([UserMessage(content="paused turn")])
+    goal.resume()
+    after_resume = await goal.verify([UserMessage(content="working again")])
+
+    assert first_rejection.status is GoalDecisionStatus.UNSATISFIED
+    assert paused == GoalDecision(status=GoalDecisionStatus.PAUSED)
+    assert after_resume == GoalDecision(
+        status=GoalDecisionStatus.REENTRY_LIMIT,
+        reason="still missing",
+    )
+    assert len(provider.requests) == 2
+    assert goal.condition is None
+
+
+def test_setting_or_clearing_goal_resets_pause_state() -> None:
+    goal = GoalController(_Provider([]))
+    goal.set("First goal")
+    goal.pause()
+
+    goal.set("Replacement goal")
+
+    assert goal.condition == "Replacement goal"
+    assert goal.paused is False
+
+    goal.pause()
+    goal.clear()
+
+    assert goal.condition is None
+    assert goal.paused is False
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_reenters_through_real_goal_controller() -> None:
     provider = _Provider(
         [

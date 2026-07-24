@@ -87,6 +87,10 @@ def sync_agent_history(app: object, store: SessionStore) -> None:
     run_state = _latest_run_state(records)
     if callable(restore_metadata) and run_state is not None:
         restore_metadata(run_state)
+    goal_state = _latest_goal_state(records)
+    restore_goal = getattr(agent, "restore_goal_state", None)
+    if callable(restore_goal) and goal_state is not None:
+        restore_goal(goal_state)
     _restore_contextual_state(app, records)
     set_notice = getattr(agent, "set_resumed_notice", None)
     if callable(set_notice):
@@ -117,6 +121,23 @@ def _latest_run_state(records: list[SessionRecord]) -> object | None:
         run_state = data.get("run_state")
         if isinstance(run_state, dict):
             return run_state
+    return None
+
+
+def _latest_goal_state(records: list[SessionRecord]) -> object | None:
+    """读取最新 final 或 Goal 命令留下的状态，以时间顺序较新的为准。"""
+    for record in reversed(records):
+        if record.type != "event" or not isinstance(record.content, dict):
+            continue
+        event_type = record.content.get("type")
+        data = record.content.get("data")
+        if event_type == "goal_state" and isinstance(data, dict):
+            return data
+        if event_type != "final" or not isinstance(data, dict):
+            continue
+        run_state = data.get("run_state")
+        if isinstance(run_state, dict) and isinstance(run_state.get("goal"), dict):
+            return run_state["goal"]
     return None
 
 

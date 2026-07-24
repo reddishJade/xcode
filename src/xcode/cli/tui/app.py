@@ -1571,7 +1571,7 @@ class _XcodeTui:
 
 def _is_live_command(text: str) -> bool:
     """判断命令是否可以在 agent 回合执行期间提交。"""
-    return text.split(maxsplit=1)[0] in {"/steer", "/queue"}
+    return text.split(maxsplit=1)[0] in {"/steer", "/queue", "/goal"}
 
 
 def _tui_history(project_root: Path) -> History | None:
