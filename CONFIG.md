@@ -5,7 +5,7 @@
 配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地 `.local/settings.json` → 环境变量 `XCODE_PERMISSION_MODE`、`XCODE_APPROVAL_POLICY`。
 
 **没有配置文件时**启用正式内置能力（`core`、`subagent`、`worktree`、`memory`，以及存在
-可见 skill 时的 `skills`）；`tasks`、`mailbox`、`progress` 和 daemon 仍需显式启用。零配置可用。
+可见 skill 时的 `skills`）。零配置可用。
 
 ---
 
@@ -183,9 +183,7 @@ REPL 可在运行时切换；切换不会丢失会话上下文。
 |---|---|---|---|
 | `sessions_dir` | string/null | `null` | REPL 会话目录；未配置时 CLI 使用 `.local/sessions` |
 | `skills_dir` | string/null | `null` | 最高优先级 Skill 扫描目录；相对路径按项目根目录解析 |
-| `progress_summary` | string | `".local/progress_summary.md"` | progress 摘要路径；相对路径按项目根目录解析 |
-
-固定本地路径：`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`、`.local/tasks.json.d/`。
+固定本地路径：`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`。
 
 ---
 
@@ -285,8 +283,8 @@ policy、静态策略、shell 可解析性与 mode ruleset 的结果取更严格
 | `subagent_extra_tools` | string[] | `[]` | 额外允许 subagent 使用的主 agent 工具名；`todowrite` 默认不继承 |
 | `shell` | string | `"auto"` | `auto`、`pwsh`、`powershell`、`cmd`、`bash`、`zsh`、`sh`、`fish` |
 
-`todowrite` 是主 agent 默认可用的会话级工具，不属于持久化 `tasks` /
-`progress` 组。它以完整列表替换当前清单，最多允许一个 `in_progress` 项。清单写入
+`todowrite` 是主 agent 默认可用的会话级工具。它以完整列表替换当前清单，
+最多允许一个 `in_progress` 项。清单写入
 session transcript 和 `RunState`，并在每轮动态上下文中重新注入，因此不会因
 compaction 丢失。只有将 `"todowrite"` 加入 `subagent_extra_tools` 时，
 subagent 才会共享该会话清单。
@@ -333,28 +331,6 @@ MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺
 
 ---
 
-## experimental
-
-以下能力默认关闭，实现在 `xcode.experimental` 包内：
-
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `tasks` | bool | `false` | 持久化任务图和 Kanban 工具 |
-| `mailbox` | bool | `false` | 基于共享本地文件系统的跨进程 mailbox |
-| `progress` | bool | `false` | 长任务进度和 lease；要求同时启用 `tasks` |
-
-```json
-{
-  "experimental": {
-    "tasks": true,
-    "mailbox": true,
-    "progress": true
-  }
-}
-```
-
----
-
 ---
 
 ## prompt
@@ -389,18 +365,6 @@ MCP schema cache 记录配置 hash、协商协议版本和 server identity；缺
 配置非空时：先收集配置源，再收集回退文件。配置源与回退文件按路径去重，配置源优先。
 
 所有指令内容按 UTF-8 字节计入预算：≤32KB 完整注入，>32KB 压缩保留关键章节。
-
----
-
-## daemon
-
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `enabled` | bool | `false` | 是否构造 `HeartbeatDaemon` |
-| `interval_seconds` | int | `30` | 心跳轮询间隔 |
-
-Daemon 始终检查 Git 状态；仅在对应实验能力启用时检查 mailbox、tasks 和
-worktree prune。主循环单轮意外失败后会自动恢复。
 
 ---
 

@@ -22,7 +22,6 @@ from .context import (
     InstructionSource,
     NotesCollector,
     RecentValidationCollector,
-    TaskStateCollector,
     trim_to_budget,
 )
 from .events import AgentEvent
@@ -66,7 +65,6 @@ __all__ = [
     "RecentValidationCollector",
     "run_agent_loop",
     "SystemMessage",
-    "TaskStateCollector",
     "ToolResultMessage",
     "trim_to_budget",
     "UserMessage",

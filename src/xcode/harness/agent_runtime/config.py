@@ -273,7 +273,7 @@ def build_loop_config(
                 UserMessage(
                     content=(
                         "<reminder>You have gone several turns without updating "
-                        "task progress. Use update_task or save_task_progress to "
+                        "task progress. Use todowrite to "
                         "record progress before continuing.</reminder>"
                     )
                 )

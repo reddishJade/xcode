@@ -161,15 +161,12 @@ xcode --resume
 - **MCP 协议** — 基于官方 Python SDK 连接本地 stdio server，自动发现 `.local/mcp_config.json` 并注册 `mcp__{server}__{tool}` 动态工具。
 - **记忆系统** — 项目根 `MEMORY.md` + 用户级 `~/.xcode/memory/` 是可审查的长期事实源；Agent 通过 BM25 工具按需检索。
 - **外部 Hook** — 可配置事件驱动的外部命令 hooks（git 前置检查、自定义通知等）。
-- **实验能力** — 可显式启用 tasks、mailbox、progress 和 daemon 心跳；默认全部关闭。
 
 ---
 
 ## 工具能力
 
 稳定工具默认注册：`read`/`write`/`edit`/`glob`/`grep`/`list_dir`/`truncate`、`websearch`/`webfetch`、`question`、`bash`、`search_tools`、`subagent`、worktree、`todowrite`、`history`、`search_memory`、`apply_patch`。发现 skill 时注册 `load_skill`；存在 MCP 配置时注册 `mcp__{server}__{tool}` 动态工具。
-
-实验能力默认关闭，只通过 `experimental.tasks`、`experimental.mailbox`、`experimental.progress` 启用。
 
 `search_memory` 是只读、低风险的 BM25 检索工具。运行时不会在每轮自动
 注入检索结果；resume/rebuild 才会在独立预算内注入项目与用户记忆。长期
@@ -196,7 +193,7 @@ xcode.config.json               ← 项目级
 环境变量                          ← 最高优先级
 ```
 
-**零配置可用**：无配置文件时启用核心工具（core、subagent、worktree、memory）；`tasks`、`mailbox`、`progress`、daemon 需显式开启。
+**零配置可用**：无配置文件时启用核心工具（core、subagent、worktree、memory）。
 
 所有字段默认值及完整参考见 [CONFIG.md](CONFIG.md)。
 

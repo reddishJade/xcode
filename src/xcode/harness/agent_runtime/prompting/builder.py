@@ -10,7 +10,6 @@
 - 项目指令 → InstructionCollector
 - 活动 diff 摘要 → ActiveDiffCollector
 - 验证失败 → RecentValidationCollector
-- 任务/计划状态 → TaskStateCollector
 - 笔记文件 → NotesCollector
 - 技能摘要 → SkillIndexCollector
 

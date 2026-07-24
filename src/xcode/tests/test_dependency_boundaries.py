@@ -8,10 +8,10 @@ from pathlib import Path
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _FORBIDDEN_TARGETS = {
-    "ai": frozenset({"agent", "harness", "coding_agent", "cli", "experimental"}),
-    "agent": frozenset({"harness", "coding_agent", "cli", "experimental"}),
-    "harness": frozenset({"coding_agent", "cli", "experimental"}),
-    "coding_agent": frozenset({"cli", "experimental"}),
+    "ai": frozenset({"agent", "harness", "coding_agent", "cli"}),
+    "agent": frozenset({"harness", "coding_agent", "cli"}),
+    "harness": frozenset({"coding_agent", "cli"}),
+    "coding_agent": frozenset({"cli"}),
 }
 
 

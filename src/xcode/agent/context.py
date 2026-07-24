@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from pathlib import Path
@@ -33,7 +32,6 @@ class ContextBlockSource(StrEnum):
     ACTIVE_DIFF = "active_diff"
     NOTES = "notes"
     RECENT_VALIDATION = "recent_validation"
-    TASK_STATE = "task_state"
 
 
 # ── 注入目标枚举 ──
@@ -741,52 +739,6 @@ class RecentValidationCollector:
             priority=ContextPriority.HIGH,
             content=body,
         )
-
-
-# ── 内置收集器：任务状态 ──
-
-
-TASK_STATE_MAX_BYTES: int = 4 * 1024
-_TASK_STATE_TRUNCATED_MARKER = (
-    "<task-state-truncated>Task state truncated. "
-    "Use list_tasks for complete state.</task-state-truncated>"
-)
-
-
-class TaskStateCollector:
-    def __init__(
-        self,
-        provider: Callable[[], str] | None = None,
-        max_bytes: int = TASK_STATE_MAX_BYTES,
-    ) -> None:
-        self._provider = provider
-        self._max_bytes = max_bytes
-
-    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
-        if self._provider is None:
-            return []
-        try:
-            state_text = self._provider()
-        except Exception:
-            logger.exception("TaskStateCollector provider raised")
-            return []
-        if not state_text.strip():
-            return []
-        body = _apply_size_budget(
-            state_text,
-            self._max_bytes,
-            _TASK_STATE_TRUNCATED_MARKER,
-        )
-        if not body:
-            return []
-        return [
-            ContextBlock(
-                source=ContextBlockSource.TASK_STATE,
-                target=ContextBlockTarget.USER_CONTEXT,
-                priority=ContextPriority.HIGH,
-                content=body,
-            )
-        ]
 
 
 # ── 内置收集器：笔记 ──
