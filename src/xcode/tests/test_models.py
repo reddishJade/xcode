@@ -6,6 +6,7 @@ import pytest
 
 from xcode.ai.models import (
     ModelMode,
+    effective_compact_threshold,
     parse_model_mode,
     resolve_model,
     get_model,
@@ -65,6 +66,35 @@ class TestParseModelMode:
 
     def test_thinking_level_case_normalized(self) -> None:
         assert parse_model_mode("gpt-4:HIGH").thinking_level == "high"
+
+
+class TestCompactThreshold:
+    def test_known_model_compacts_at_configured_ratio(self) -> None:
+        threshold = effective_compact_threshold(
+            "gpt-5.5",
+            reserve_tokens=16_384,
+            trigger_ratio=0.7,
+        )
+
+        assert threshold == 735_000
+
+    def test_reserve_remains_hard_upper_bound(self) -> None:
+        threshold = effective_compact_threshold(
+            "chatglm/glm-5.1",
+            reserve_tokens=80_000,
+            trigger_ratio=0.7,
+        )
+
+        assert threshold == 120_000
+
+    def test_unknown_model_keeps_fallback_threshold(self) -> None:
+        threshold = effective_compact_threshold(
+            "unknown-model",
+            fallback_threshold=32_000,
+            trigger_ratio=0.7,
+        )
+
+        assert threshold == 32_000
 
 
 class TestResolveModel:

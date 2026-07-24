@@ -61,6 +61,7 @@ class AgentConfig(BaseModel):
     max_recent_messages: StrictInt = 10
     keep_recent_tokens: StrictInt = 20000
     reserve_tokens: StrictInt = 16384
+    compact_trigger_ratio: StrictFloat = Field(default=0.7, gt=0, lt=1)
     tool_workers: StrictInt = 4
     tool_timeout_seconds: StrictFloat | StrictInt = 120.0
     watchdog_repeated_tool_limit: StrictInt = 3

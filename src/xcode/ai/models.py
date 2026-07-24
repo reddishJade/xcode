@@ -201,10 +201,13 @@ def effective_compact_threshold(
     model: str | None,
     reserve_tokens: int = 0,
     fallback_threshold: int = 32000,
+    trigger_ratio: float = 0.7,
 ) -> int:
     context_window = get_model_context_window(model)
-    if context_window is not None and reserve_tokens > 0:
-        return context_window - reserve_tokens
+    if context_window is not None:
+        ratio_threshold = int(context_window * trigger_ratio)
+        reserved_threshold = context_window - max(reserve_tokens, 0)
+        return max(1, min(ratio_threshold, reserved_threshold))
     return fallback_threshold
 
 

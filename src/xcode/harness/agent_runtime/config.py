@@ -342,6 +342,7 @@ def _should_compact(
         trigger = effective_compact_threshold(
             model_str,
             reserve_tokens=snapshot.config.reserve_tokens,
+            trigger_ratio=snapshot.config.compact_trigger_ratio,
         )
         return last_prompt_tokens >= trigger
     from .agent_helpers import to_dict

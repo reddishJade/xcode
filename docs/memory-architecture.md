@@ -30,6 +30,8 @@ read-only `search_memory` tool when prior project knowledge may matter.
 
 ### Compact
 
+For models with a known context window, Xcode starts a new compact cycle at
+roughly 70% utilization instead of waiting for the window reserve boundary.
 The compactor keeps a verbatim recent tail and writes its full structured
 summary to the current session checkpoint. The checkpoint boundary is the real
 session message ID supplied by the transcript store.
