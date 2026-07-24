@@ -6,7 +6,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 import json
-import re
 
 from xcode.agent._codec import convert_to_llm
 from xcode.agent.messages import AgentMessage
@@ -181,10 +180,12 @@ async def _evaluate(
 
 
 def _parse_verdict(text: str) -> GoalVerdict:
-    match = re.search(r"\{.*\}", text.strip(), flags=re.DOTALL)
-    if match is None:
+    payloads = _decode_json_objects(text)
+    if not payloads:
         raise ValueError("judge returned no JSON verdict")
-    payload = json.loads(match.group(0))
+    if len(payloads) > 1:
+        raise ValueError("judge returned multiple JSON verdicts")
+    payload = payloads[0]
     if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
         raise ValueError("judge verdict must contain boolean ok")
     reason = str(payload.get("reason", "")).strip()
@@ -195,3 +196,22 @@ def _parse_verdict(text: str) -> GoalVerdict:
         impossible=bool(payload.get("impossible", False)),
         reason=reason,
     )
+
+
+def _decode_json_objects(text: str) -> list[object]:
+    """从带少量包装文本的响应中解码顶层 JSON 对象。"""
+    decoder = json.JSONDecoder()
+    payloads: list[object] = []
+    cursor = 0
+    while cursor < len(text):
+        start = text.find("{", cursor)
+        if start < 0:
+            break
+        try:
+            payload, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            cursor = start + 1
+            continue
+        payloads.append(payload)
+        cursor = end
+    return payloads
