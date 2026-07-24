@@ -35,6 +35,7 @@ from xcode.harness.agent_runtime.config import (
     build_turn_context_messages,
 )
 from xcode.harness.agent_runtime.events import AgentHarnessEvent
+from xcode.harness.agent_runtime.goal import GoalController
 from xcode.harness.agent_runtime.harness import AgentHarness
 from xcode.harness.agent_runtime.result import AgentHarnessResult, RunState
 from .execution_modes import (
@@ -68,7 +69,9 @@ class CodingAgentHarness(AgentHarness):
         self._memory_manager = runtime.memory_manager
         self._session_history = runtime.session_history
         self._todo_state = runtime.todo_state
+        self._goal_session_id = gate.session_id
         super().__init__(provider, registry, config, gate, runtime)
+        self._goal = GoalController(lambda: self.provider)
         if self._session_history is not None:
             self._session_history.set_session_id(self.session_id)
         from xcode.coding_agent.tools.subagent import bind_subagent_permission_gate
@@ -108,6 +111,7 @@ class CodingAgentHarness(AgentHarness):
     def _build_loop_config_extras(self) -> dict:
         return {
             "mode_state": self._mode,
+            "completion_verifier": self._goal.verify,
         }
 
     def _build_result(
@@ -119,8 +123,13 @@ class CodingAgentHarness(AgentHarness):
             cast(AgentLoopResult, visible_result),
             max_steps,
         )
+        goal_notice = self._goal.consume_terminal_notice()
+        answer = result.answer
+        if goal_notice:
+            answer = f"{answer}\n\n[{goal_notice}]".strip()
         return replace(
             result,
+            answer=answer,
             run_state=CodingRunState(
                 messages=result.messages,
                 current_mode=self._mode.current_mode,
@@ -146,6 +155,7 @@ class CodingAgentHarness(AgentHarness):
 
     def clear_history(self) -> None:
         super().clear_history()
+        self._goal.clear()
         if self._coding_runtime.skill_registry is not None:
             self._coding_runtime.skill_registry.clear_activations()
         if self._todo_state is not None:
@@ -160,8 +170,24 @@ class CodingAgentHarness(AgentHarness):
 
     def set_history_session_id(self, session_id: str) -> None:
         """绑定 history 工具当前读取的真实 session。"""
+        if session_id != self._goal_session_id:
+            self._goal.clear()
+            self._goal_session_id = session_id
         if self._session_history is not None:
             self._session_history.set_session_id(session_id)
+
+    def set_goal(self, condition: str) -> None:
+        """设置当前 session 的自然语言停止条件。"""
+        self._goal.set(condition)
+
+    def clear_goal(self) -> None:
+        """清除当前停止条件。"""
+        self._goal.clear()
+
+    @property
+    def goal_condition(self) -> str | None:
+        """返回当前停止条件。"""
+        return self._goal.condition
 
     def activate_skill(
         self, skill_name: str, mode: ExecutionMode | None = None

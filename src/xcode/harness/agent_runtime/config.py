@@ -10,7 +10,11 @@ from xcode.ai.providers.base import ModelProvider
 
 from xcode.ai.models import effective_compact_threshold
 from ...agent._compaction import extract_prompt_tokens_from_usage
-from ...agent.config import AgentLoopConfig, AgentLoopTurnUpdate
+from ...agent.config import (
+    AgentLoopConfig,
+    AgentLoopTurnUpdate,
+    CompletionVerifier,
+)
 from ...agent.context import ContextCollectorRegistry, DefaultContextAssembler
 from ...agent._hygiene import apply_request_hygiene
 from ...agent._codec import convert_to_llm as _convert_to_llm
@@ -227,6 +231,7 @@ def build_loop_config(
     # 领域扩展参数由上层装配后注入。
     mode_state: RuntimeModeState | None = None,
     watchdog_repeated_tool_skip: frozenset[str] | None = None,
+    completion_verifier: CompletionVerifier | None = None,
 ) -> AgentLoopConfig:
     active_correlation = correlation or RuntimeCorrelation("local")
     gate_snapshot = gate.snapshot_for(registry)
@@ -304,6 +309,7 @@ def build_loop_config(
         max_consecutive_idle_steps=4,
         should_compact=should_compact_fn,
         compact=compact_fn,
+        completion_verifier=completion_verifier,
         transform_context=transform_fn,
         is_tool_productive=gate.build_is_tool_productive_hook(gate_snapshot),
         before_tool_call=gate.build_before_tool_hook(gate_snapshot),

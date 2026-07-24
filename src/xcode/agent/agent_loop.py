@@ -253,6 +253,16 @@ async def _run_loop(
             # 模型没有请求工具 → 本轮结束
             emit(_turn_end_event(message, []))
 
+            if config.completion_verifier is not None:
+                feedback = await config.completion_verifier(current_context.messages)
+                if feedback:
+                    _append_messages(
+                        current_context,
+                        new_messages,
+                        [UserMessage(content=feedback)],
+                    )
+                    continue
+
             # 原子关闭入口并检查生成期间到达的末轮 steer。若存在，
             # 重新开放入口并让下一次模型调用消费这些消息。
             if finish_steering is not None and step < config.max_steps:

@@ -714,6 +714,25 @@ def _extract_compact_summary(messages: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def cmd_goal(cmd: str, ctx: CommandContext) -> bool:
+    """设置、显示或清除当前 session 的停止条件。"""
+    parts = cmd.split(maxsplit=1)
+    condition = parts[1].strip() if len(parts) == 2 else ""
+    agent = ctx.app.agent
+    if not condition:
+        active = agent.goal_condition
+        print(f"Goal: {active}" if active else "No active goal.")
+        return False
+    if condition.lower() in {"clear", "reset"}:
+        agent.clear_goal()
+        print("Goal cleared.")
+        return False
+    agent.set_goal(condition)
+    ctx.state.pending_inject = condition
+    print(f"Goal set: {condition}")
+    return False
+
+
 def cmd_permissions(cmd: str, ctx: CommandContext) -> bool:
     """列出或清除权限规则。"""
     handle_permissions(
@@ -1603,6 +1622,13 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
         handler=cmd_compact,
         desc="Manually request context compaction and shrink the session log.",
         group=COMMAND_GROUP_SESSION_ROLLBACK,
+    ),
+    "/goal": CommandEntry(
+        handler=cmd_goal,
+        desc="Set an independently verified stop condition.",
+        args_desc="<condition>|clear",
+        accepts_args=True,
+        group=COMMAND_GROUP_MODE,
     ),
     "/permissions": CommandEntry(
         handler=cmd_permissions,

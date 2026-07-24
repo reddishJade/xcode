@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -136,6 +136,7 @@ type AfterToolCallHook = Callable[
 ]
 type PrepareNextTurnHook = Callable[[], AgentLoopTurnUpdate | None]
 type ShouldStopAfterTurnHook = Callable[[ShouldStopAfterTurnContext], bool]
+type CompletionVerifier = Callable[[list[AgentMessage]], Awaitable[str | None]]
 
 # ── Callable type aliases（原 hooks.py）──
 
@@ -171,6 +172,7 @@ class AgentLoopConfig(BaseModel):
     after_tool_call: AfterToolCallHook | None = None
     prepare_next_turn: PrepareNextTurnHook | None = None
     should_stop_after_turn: ShouldStopAfterTurnHook | None = None
+    completion_verifier: CompletionVerifier | None = None
 
     max_steps: int = 50
 
