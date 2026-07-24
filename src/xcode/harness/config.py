@@ -24,7 +24,6 @@ ProviderTransport = Literal[
     "deepseek_chat",
     "mimo_chat",
 ]
-PermissionMode = Literal["strict", "normal", "permissive"]
 ApprovalPolicy = Literal["always", "never"]
 HookEventName = Literal[
     "pre_tool",
@@ -146,7 +145,6 @@ class ExecutionModesRuntimeConfig(BaseModel):
 
 class SecurityRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    permission_mode: PermissionMode = "normal"
     approval_policy: ApprovalPolicy = "never"
     restricted_dirs: tuple[str, ...] = ()
     permissions: dict[str, Literal["allow", "ask", "deny"]] = Field(
@@ -479,13 +477,6 @@ def _build_env_override_raw() -> tuple[
     raw: dict[str, Any] = {}
     sources: dict[tuple[str | int, ...], str] = {}
     security: dict[str, Any] = {}
-
-    permission_mode = os.getenv("XCODE_PERMISSION_MODE")
-    if permission_mode is not None:
-        security["permission_mode"] = permission_mode
-        sources[("security", "permission_mode")] = (
-            "environment variable XCODE_PERMISSION_MODE"
-        )
 
     approval_policy = os.getenv("XCODE_APPROVAL_POLICY")
     if approval_policy is not None:
