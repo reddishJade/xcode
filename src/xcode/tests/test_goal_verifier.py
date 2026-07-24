@@ -79,10 +79,26 @@ def test_parse_verdict_accepts_json_fence() -> None:
     )
 
 
+def test_parse_verdict_handles_braces_inside_json_strings() -> None:
+    verdict = _parse_verdict(
+        '{"ok": false, "reason": "missing output shaped like {name: value}"}'
+    )
+
+    assert verdict == GoalVerdict(
+        ok=False,
+        reason="missing output shaped like {name: value}",
+        impossible=False,
+    )
+
+
 @pytest.mark.parametrize(
     ("response", "error"),
     [
         ("not json", "judge returned no JSON verdict"),
+        (
+            '{"ok": false, "reason": "first"} {"ok": true, "reason": "second"}',
+            "judge returned multiple JSON verdicts",
+        ),
         ('{"reason": "missing ok"}', "judge verdict must contain boolean ok"),
         ('{"ok": true}', "judge verdict must contain reason"),
     ],
