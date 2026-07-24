@@ -147,11 +147,18 @@ class CodingAgentHarness(AgentHarness):
 
     def load_run_state(self, run_state: RunState) -> None:
         super().load_run_state(run_state)
-        if isinstance(run_state, CodingRunState):
-            self._mode.set_mode(run_state.current_mode)
+        self.restore_run_state_metadata(run_state)
+
+    def restore_run_state_metadata(self, payload: object) -> None:
+        """恢复模式与 todo，但不替换已经重建好的消息历史。"""
+        run_state = (
+            payload
+            if isinstance(payload, CodingRunState)
+            else CodingRunState.from_dict(payload)
+        )
+        self._mode.set_mode(run_state.current_mode)
         if self._todo_state is not None:
-            todos = run_state.todos if isinstance(run_state, CodingRunState) else []
-            self._todo_state.replace(todos or [])
+            self._todo_state.replace(run_state.todos or [])
 
     def clear_history(self) -> None:
         super().clear_history()

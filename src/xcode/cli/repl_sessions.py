@@ -83,6 +83,10 @@ def sync_agent_history(app: object, store: SessionStore) -> None:
     records = store.build_branch()
     messages, rebuilt = _resume_messages(agent, store.session_id, records)
     load_history(messages)
+    restore_metadata = getattr(agent, "restore_run_state_metadata", None)
+    run_state = _latest_run_state(records)
+    if callable(restore_metadata) and run_state is not None:
+        restore_metadata(run_state)
     _restore_contextual_state(app, records)
     set_notice = getattr(agent, "set_resumed_notice", None)
     if callable(set_notice):
@@ -98,6 +102,22 @@ def sync_agent_history(app: object, store: SessionStore) -> None:
                 "The transcript history above has been loaded as context. "
                 "Continue the task as if the session was uninterrupted."
             )
+
+
+def _latest_run_state(records: list[SessionRecord]) -> object | None:
+    """读取当前 branch 最近一次 final event 中已有的 run_state。"""
+    for record in reversed(records):
+        if record.type != "event" or not isinstance(record.content, dict):
+            continue
+        if record.content.get("type") != "final":
+            continue
+        data = record.content.get("data")
+        if not isinstance(data, dict):
+            continue
+        run_state = data.get("run_state")
+        if isinstance(run_state, dict):
+            return run_state
+    return None
 
 
 def _resume_messages(

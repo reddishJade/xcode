@@ -49,6 +49,10 @@ latest session checkpoint
 If the checkpoint is absent, corrupt, or belongs to another branch, Xcode falls
 back to the complete transcript.
 
+The latest final event already contains the structured coding run state. Resume
+restores its execution mode and todo list after rebuilding message history, so
+unfinished work does not depend on the checkpoint summary mentioning every todo.
+
 ## Invariants
 
 - Markdown is the source of truth for durable memory.
