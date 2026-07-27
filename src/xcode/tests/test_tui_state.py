@@ -24,3 +24,18 @@ def test_streaming_answer_renders_from_chunks() -> None:
 
     assert any("hello" in line for line in state.lines())
     assert any("world" in line for line in state.lines())
+
+
+def test_plain_entries_count_visual_lines_at_output_width() -> None:
+    state = _TuiState(project_root=Path("/project"))
+    state.add_user("abcdefghij")
+
+    assert state.lines(width=6) == ["> abcd", "efghij"]
+    assert state.line_count(width=6) == 2
+
+
+def test_plain_entries_wrap_wide_characters_by_display_width() -> None:
+    state = _TuiState(project_root=Path("/project"))
+    state.add_user("你好世界")
+
+    assert state.lines(width=6) == ["> 你好", "世界"]

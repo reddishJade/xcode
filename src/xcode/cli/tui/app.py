@@ -1437,7 +1437,12 @@ class _XcodeTui:
     # ── 刷新 ──
 
     def _fragments(self):
-        return self._state.fragments(self._output_height(), self._scrollback)
+        return self._state.fragments(
+            self._output_height(), self._scrollback, self._output_width()
+        )
+
+    def _output_width(self) -> int:
+        return max(1, self._application.output.get_size().columns)
 
     def _output_height(self) -> int:
         approval_height = (
@@ -1483,7 +1488,9 @@ class _XcodeTui:
         return min(5, visual_lines)
 
     def _max_scrollback(self) -> int:
-        return max(0, self._state.line_count() - self._output_height())
+        return max(
+            0, self._state.line_count(self._output_width()) - self._output_height()
+        )
 
     def _should_capture_mouse(self) -> bool:
         """仅在 TUI 仍有可滚动历史时捕获滚轮。"""
@@ -1499,12 +1506,16 @@ class _XcodeTui:
         """更新会改变行数的显示状态，并保持当前视口的顶部位置。"""
         top_line = max(
             0,
-            self._state.line_count() - self._output_height() - self._scrollback,
+            self._state.line_count(self._output_width())
+            - self._output_height()
+            - self._scrollback,
         )
         update()
         self._scrollback = max(
             0,
-            self._state.line_count() - self._output_height() - top_line,
+            self._state.line_count(self._output_width())
+            - self._output_height()
+            - top_line,
         )
 
     def _refresh(self) -> None:

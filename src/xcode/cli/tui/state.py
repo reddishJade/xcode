@@ -10,6 +10,7 @@ from threading import Event
 from typing import TYPE_CHECKING, cast
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples
+from prompt_toolkit.utils import get_cwidth
 
 from ..shared.thinking import ReasoningCore, format_elapsed, single_line_preview
 from ..repl_tools import brief_input, final_stop_reason, tool_call_text
@@ -301,9 +302,12 @@ class _TuiState:
     # ── 片段生成 ──
 
     def fragments(
-        self, limit: int | None = None, scrollback: int = 0
+        self,
+        limit: int | None = None,
+        scrollback: int = 0,
+        width: int | None = None,
     ) -> StyleAndTextTuples:
-        blocks = self._display_blocks(color=True)
+        blocks = self._display_blocks(color=True, width=width)
         total = sum(block.line_count for block in blocks)
         if limit is None or total <= limit:
             start = 0
@@ -327,19 +331,21 @@ class _TuiState:
                 break
         return result
 
-    def line_count(self) -> int:
+    def line_count(self, width: int | None = None) -> int:
         """返回当前显示行数，复用完成消息的单份 ANSI 缓存。"""
-        return sum(block.line_count for block in self._display_blocks(color=True))
+        return sum(
+            block.line_count for block in self._display_blocks(color=True, width=width)
+        )
 
     # ── 文本渲染（纯文本：用于滚动高度计算） ──
 
-    def lines(self) -> list[str]:
-        return self._flatten_blocks(self._display_blocks(color=False))
+    def lines(self, width: int | None = None) -> list[str]:
+        return self._flatten_blocks(self._display_blocks(color=False, width=width))
 
     # ── ANSI 渲染（彩色：用于片段生成） ──
 
-    def ansi_lines(self) -> list[str]:
-        return self._flatten_blocks(self._display_blocks(color=True))
+    def ansi_lines(self, width: int | None = None) -> list[str]:
+        return self._flatten_blocks(self._display_blocks(color=True, width=width))
 
     @staticmethod
     def _flatten_blocks(blocks: list[_DisplayBlock]) -> list[str]:
@@ -350,7 +356,9 @@ class _TuiState:
             lines.extend(block.lines)
         return lines
 
-    def _display_blocks(self, color: bool) -> list[_DisplayBlock]:
+    def _display_blocks(
+        self, color: bool, width: int | None = None
+    ) -> list[_DisplayBlock]:
         """生成轻量布局索引；完成消息的行内容由消息自身缓存。"""
         md_fn = markdown_ansi_lines if color else rendered_markdown_lines
         blocks: list[_DisplayBlock] = []
@@ -384,6 +392,7 @@ class _TuiState:
                 color,
                 show_tool_expand,
                 show_tool_collapse,
+                width,
             )
             if lines:
                 blocks.append(
@@ -401,15 +410,18 @@ class _TuiState:
                 color,
                 False,
                 False,
+                width,
             )
             if lines:
                 blocks.append(_DisplayBlock(lines, leading_blank=bool(blocks)))
 
         if self.thinking.strip():
-            lines = self._thinking_lines(color=color)
+            lines = self._thinking_lines(color=color, width=width)
             blocks.append(_DisplayBlock(lines, leading_blank=bool(blocks)))
-        self._append_optional_block(blocks, self._subagent_lines())
-        self._append_optional_block(blocks, self._hitl_lines())
+        self._append_optional_block(
+            blocks, _wrap_plain_lines(self._subagent_lines(), width)
+        )
+        self._append_optional_block(blocks, _wrap_plain_lines(self._hitl_lines(), width))
         return blocks
 
     @staticmethod
@@ -424,6 +436,7 @@ class _TuiState:
         color: bool,
         show_tool_expand: bool,
         show_tool_collapse: bool,
+        width: int | None,
     ) -> list[str]:
         def render() -> list[str]:
             lines: list[str] = []
@@ -434,8 +447,11 @@ class _TuiState:
                 color_thinking=color,
                 show_tool_expand=show_tool_expand,
                 show_tool_collapse=show_tool_collapse,
+                width=width,
             )
-            return lines
+            if entry.markdown or entry.role == "thinking":
+                return lines
+            return _wrap_plain_lines(lines, width)
 
         if not color:
             return render()
@@ -445,6 +461,7 @@ class _TuiState:
                 self.thinking_collapsed,
                 show_tool_expand,
                 show_tool_collapse,
+                width,
             ),
             render,
         )
@@ -459,6 +476,7 @@ class _TuiState:
         color_thinking: bool,
         show_tool_expand: bool,
         show_tool_collapse: bool,
+        width: int | None,
     ) -> None:
         if entry.role == "tool-detail" and self.tool_collapsed:
             return
@@ -505,6 +523,7 @@ class _TuiState:
                 lines,
                 plain_text=(md_fn is rendered_markdown_lines),
                 color=color_thinking,
+                width=width,
             )
         elif entry.markdown:
             lines.extend(md_fn(_render_citations(entry.content())))
@@ -531,22 +550,27 @@ class _TuiState:
         if show_tool_collapse:
             lines[-1] += " (ctrl+o to collapse)"
 
-    def _thinking_lines(self, color: bool) -> list[str]:
+    def _thinking_lines(self, color: bool, width: int | None) -> list[str]:
         lines: list[str] = []
         dur = self.thinking_core.duration_ms
         if dur:
             self._append_thinking_line(
-                lines, f"Thought for {format_elapsed(dur / 1000)}", color
+                lines, f"Thought for {format_elapsed(dur / 1000)}", color, width
             )
         else:
-            self._append_thinking_line(lines, "Thinking", color)
+            self._append_thinking_line(lines, "Thinking", color, width)
         if not self.thinking_collapsed:
             for tl in self.thinking.splitlines():
-                self._append_thinking_line(lines, f"  {tl.lstrip()}", color)
+                self._append_thinking_line(lines, f"  {tl.lstrip()}", color, width)
         return lines
 
     def _append_thinking_entry(
-        self, entry: _LogEntry, lines: list[str], plain_text: bool, color: bool
+        self,
+        entry: _LogEntry,
+        lines: list[str],
+        plain_text: bool,
+        color: bool,
+        width: int | None,
     ) -> None:
         entry_lines = entry.content().splitlines() or [""]
         has_timing = entry_lines[-1].startswith("Thought for ")
@@ -554,21 +578,26 @@ class _TuiState:
         if has_timing:
             entry_lines = entry_lines[:-1]
         if dur_text:
-            self._append_thinking_line(lines, f"Thought for {dur_text}", color)
+            self._append_thinking_line(
+                lines, f"Thought for {dur_text}", color, width
+            )
         else:
-            self._append_thinking_line(lines, "Thinking", color)
+            self._append_thinking_line(lines, "Thinking", color, width)
         if not self.thinking_collapsed:
             for tl in entry_lines:
                 self._append_thinking_line(
-                    lines, f"  {tl if plain_text else tl.lstrip()}", color
+                    lines, f"  {tl if plain_text else tl.lstrip()}", color, width
                 )
 
     @staticmethod
-    def _append_thinking_line(lines: list[str], text: str, color: bool) -> None:
-        if color:
-            lines.append(f"{_THINKING_ANSI}{text}{_ANSI_RESET}")
-        else:
-            lines.append(text)
+    def _append_thinking_line(
+        lines: list[str], text: str, color: bool, width: int | None
+    ) -> None:
+        for wrapped in _wrap_plain_line(text, width):
+            if color:
+                lines.append(f"{_THINKING_ANSI}{wrapped}{_ANSI_RESET}")
+            else:
+                lines.append(wrapped)
 
     def _subagent_lines(self) -> list[str]:
         if not self.subagents or self.tool_collapsed:
@@ -856,3 +885,27 @@ def _tool_output_preview(content: str) -> str:
     if len(content) > len(preview):
         return f"{preview}\n  … output truncated"
     return preview
+
+
+def _wrap_plain_lines(lines: list[str], width: int | None) -> list[str]:
+    """按终端显示宽度折叠无 ANSI 的文本行。"""
+    return [wrapped for line in lines for wrapped in _wrap_plain_line(line, width)]
+
+
+def _wrap_plain_line(line: str, width: int | None) -> list[str]:
+    """按字符显示宽度折叠单行，保留组合字符。"""
+    if width is None or width <= 0:
+        return [line]
+    wrapped: list[str] = []
+    current: list[str] = []
+    current_width = 0
+    for character in line:
+        character_width = get_cwidth(character)
+        if current and current_width + character_width > width:
+            wrapped.append("".join(current))
+            current = []
+            current_width = 0
+        current.append(character)
+        current_width += character_width
+    wrapped.append("".join(current))
+    return wrapped
