@@ -39,3 +39,15 @@ def test_plain_entries_wrap_wide_characters_by_display_width() -> None:
     state.add_user("你好世界")
 
     assert state.lines(width=6) == ["> 你好", "世界"]
+
+
+def test_markdown_reflows_when_output_width_changes() -> None:
+    state = _TuiState(project_root=Path("/project"))
+    state._append_or_update_answer("alpha beta gamma delta epsilon zeta")
+
+    narrow_lines = state.ansi_lines(width=12)
+    wide_lines = state.ansi_lines(width=80)
+
+    assert len(narrow_lines) > len(wide_lines)
+    assert state.line_count(width=12) == len(narrow_lines)
+    assert state.line_count(width=80) == len(wide_lines)

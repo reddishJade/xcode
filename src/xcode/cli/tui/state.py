@@ -20,6 +20,7 @@ from .rendering import (
     markdown_ansi_lines,
     rendered_markdown_lines,
     render_line_fragments,
+    wrap_ansi_lines,
 )
 from xcode.harness.security.shell_analyzer import analyze_shell_command
 
@@ -360,7 +361,11 @@ class _TuiState:
         self, color: bool, width: int | None = None
     ) -> list[_DisplayBlock]:
         """生成轻量布局索引；完成消息的行内容由消息自身缓存。"""
-        md_fn = markdown_ansi_lines if color else rendered_markdown_lines
+        markdown_renderer = markdown_ansi_lines if color else rendered_markdown_lines
+
+        def md_fn(text: str) -> list[str]:
+            return markdown_renderer(text, width)
+
         blocks: list[_DisplayBlock] = []
         latest_tool_index = max(
             (
@@ -421,7 +426,9 @@ class _TuiState:
         self._append_optional_block(
             blocks, _wrap_plain_lines(self._subagent_lines(), width)
         )
-        self._append_optional_block(blocks, _wrap_plain_lines(self._hitl_lines(), width))
+        self._append_optional_block(
+            blocks, _wrap_plain_lines(self._hitl_lines(), width)
+        )
         return blocks
 
     @staticmethod
@@ -444,12 +451,15 @@ class _TuiState:
                 entry,
                 lines,
                 md_fn,
+                plain_text=not color,
                 color_thinking=color,
                 show_tool_expand=show_tool_expand,
                 show_tool_collapse=show_tool_collapse,
                 width=width,
             )
-            if entry.markdown or entry.role == "thinking":
+            if entry.markdown:
+                return wrap_ansi_lines(lines, width) if color else lines
+            if entry.role == "thinking":
                 return lines
             return _wrap_plain_lines(lines, width)
 
@@ -473,6 +483,7 @@ class _TuiState:
         entry: _LogEntry,
         lines: list[str],
         md_fn: Callable[[str], list[str]],
+        plain_text: bool,
         color_thinking: bool,
         show_tool_expand: bool,
         show_tool_collapse: bool,
@@ -521,7 +532,7 @@ class _TuiState:
             self._append_thinking_entry(
                 entry,
                 lines,
-                plain_text=(md_fn is rendered_markdown_lines),
+                plain_text=plain_text,
                 color=color_thinking,
                 width=width,
             )
@@ -578,9 +589,7 @@ class _TuiState:
         if has_timing:
             entry_lines = entry_lines[:-1]
         if dur_text:
-            self._append_thinking_line(
-                lines, f"Thought for {dur_text}", color, width
-            )
+            self._append_thinking_line(lines, f"Thought for {dur_text}", color, width)
         else:
             self._append_thinking_line(lines, "Thinking", color, width)
         if not self.thinking_collapsed:
