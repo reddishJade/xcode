@@ -114,15 +114,10 @@ class CodingAgentHarness(AgentHarness):
             "completion_verifier": self._goal.completion_feedback,
         }
 
-    def _build_result(
-        self, visible_result: object, max_steps: int
-    ) -> AgentHarnessResult:
+    def _build_result(self, visible_result: object) -> AgentHarnessResult:
         from xcode.harness.agent_runtime.result import _build_structured_result
 
-        result = _build_structured_result(
-            cast(AgentLoopResult, visible_result),
-            max_steps,
-        )
+        result = _build_structured_result(cast(AgentLoopResult, visible_result))
         goal_notice = self._goal.consume_terminal_notice()
         answer = result.answer
         if goal_notice:

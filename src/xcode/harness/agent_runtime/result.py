@@ -49,10 +49,7 @@ class AgentHarnessResult:
     run_state: RunState | None = None
 
 
-def _build_structured_result(
-    result: AgentLoopResult,
-    max_steps: int,
-) -> AgentHarnessResult:
+def _build_structured_result(result: AgentLoopResult) -> AgentHarnessResult:
     """将 AgentLoopResult 转换为 AgentHarnessResult。"""
     answer_parts: list[str] = []
     tool_calls: list[ToolCall] = []

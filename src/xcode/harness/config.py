@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Annotated, Any, Callable, Literal
 
 from pydantic import (
     BaseModel,
@@ -54,7 +54,7 @@ DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    max_steps: StrictInt = 20
+    max_steps: Annotated[StrictInt, Field(gt=0)] | None = None
     compact_threshold: StrictInt = 0
     compact_token_threshold: StrictInt = 0
     max_recent_messages: StrictInt = 10

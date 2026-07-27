@@ -144,14 +144,16 @@ async def _run_loop(
 ) -> AgentLoopResult:
     """核心 agent 循环。
 
-    外层：步骤限制
+    外层：持续运行（可选步骤限制）
     内层：compact → 模型调用 → 重试 → max_tokens → 工具执行 → watchdog
     """
     metrics = AgentLoopMetrics()
     current_context = initial_context
     state = _LoopRunState(active_provider=config.provider)
 
-    for step in range(1, config.max_steps + 1):
+    step = 0
+    while config.max_steps is None or step < config.max_steps:
+        step += 1
         metrics.steps = step
 
         # ── 取消检查 ──
@@ -265,7 +267,9 @@ async def _run_loop(
 
             # 原子关闭入口并检查生成期间到达的末轮 steer。若存在，
             # 重新开放入口并让下一次模型调用消费这些消息。
-            if finish_steering is not None and step < config.max_steps:
+            if finish_steering is not None and (
+                config.max_steps is None or step < config.max_steps
+            ):
                 final_steers = finish_steering()
                 if final_steers:
                     _append_messages(current_context, new_messages, final_steers)
@@ -352,7 +356,7 @@ async def _run_loop(
     # 步骤耗尽
     result = AgentLoopResult(
         messages=new_messages,
-        steps=config.max_steps,
+        steps=step,
         termination_reason=TerminationReason.STEP_LIMIT,
         metrics=metrics,
         active_provider=state.active_provider,

@@ -174,7 +174,8 @@ class AgentLoopConfig(BaseModel):
     should_stop_after_turn: ShouldStopAfterTurnHook | None = None
     completion_verifier: CompletionVerifier | None = None
 
-    max_steps: int = 50
+    # 默认不限制循环步数；调用方仅在需要预算边界时显式设置正整数。
+    max_steps: Annotated[int, Field(gt=0)] | None = None
 
     max_step_retries: int = 3
     retry_backoff_base: float = 0.5

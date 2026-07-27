@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from xcode.agent.agent_loop import (
     _should_continue_max_tokens,
     _update_continuation_count,
@@ -13,6 +16,20 @@ from xcode.agent.agent_loop import (
 from xcode.agent.config import AgentLoopConfig
 from xcode.agent.messages import AssistantMessage
 from xcode.agent.types import TextContent
+from xcode.harness.config import AgentConfig
+
+
+class TestMaxSteps:
+    def test_default_is_unbounded(self) -> None:
+        assert AgentLoopConfig().max_steps is None
+        assert AgentConfig().max_steps is None
+
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_explicit_limit_must_be_positive(self, value: int) -> None:
+        with pytest.raises(ValidationError):
+            AgentLoopConfig(max_steps=value)
+        with pytest.raises(ValidationError):
+            AgentConfig(max_steps=value)
 
 
 class TestShouldContinueMaxTokens:

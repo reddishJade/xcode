@@ -196,11 +196,9 @@ class AgentHarness:
         """子类可返回额外的 build_loop_config 参数。"""
         return {}
 
-    def _build_result(
-        self, visible_result: object, max_steps: int
-    ) -> AgentHarnessResult:
+    def _build_result(self, visible_result: object) -> AgentHarnessResult:
         """构建 turn 结果。子类可覆盖以注入 current_mode 等。"""
-        return _build_structured_result(visible_result, max_steps)  # type: ignore[arg-type]
+        return _build_structured_result(visible_result)  # type: ignore[arg-type]
 
     def _post_run(self, final: AgentHarnessResult) -> None:
         """turn 完成后的子类钩子。例如记忆反馈。"""
@@ -428,7 +426,7 @@ class AgentHarness:
                 if context_messages
                 else result
             )
-            final = self._build_result(visible_result, snapshot.config.max_steps)
+            final = self._build_result(visible_result)
             self._post_run(final)
             yield _final_event(
                 result.steps,

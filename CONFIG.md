@@ -99,7 +99,7 @@ xcode config delete subagent                          # 删除 subagent profile
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `max_steps` | int | `20` | 单次任务最大循环轮次 |
+| `max_steps` | 正整数（可选） | 未设置 | 单次任务最大循环轮次；默认无限制 |
 | `compact_threshold` | int | `0` | 消息数阈值；0 关闭 |
 | `compact_token_threshold` | int | `0` | token 阈值；0 关闭 |
 | `max_recent_messages` | int | `10` | 压缩时保留的近期消息数 |

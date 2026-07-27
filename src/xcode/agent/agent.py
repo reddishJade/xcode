@@ -142,7 +142,7 @@ class Agent:
         sp = system_prompt if system_prompt is not None else self._system_prompt
         history: list[AgentMessage] = [SystemMessage(content=sp)] if sp else []
         config = loop_config or AgentLoopConfig(
-            provider=model, max_steps=25, convert_to_llm=convert_to_llm
+            provider=model, convert_to_llm=convert_to_llm
         )
         config_updates: dict[str, object] = {}
         if config.provider is None:

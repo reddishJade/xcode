@@ -310,7 +310,6 @@ async def _run_one(
     adapted = child_gate.adapt_tools(registry)
     loop_config = AgentLoopConfig(
         provider=model,
-        max_steps=25,
         before_tool_call=child_gate.build_before_tool_hook(gate_snapshot),
         after_tool_call=child_gate.build_after_tool_hook(gate_snapshot),
         is_tool_productive=child_gate.build_is_tool_productive_hook(gate_snapshot),

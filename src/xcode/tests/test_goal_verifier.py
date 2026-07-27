@@ -251,7 +251,6 @@ async def test_agent_loop_reenters_through_real_goal_controller() -> None:
         AgentContext(),
         AgentLoopConfig(
             provider=provider,
-            max_steps=3,
             completion_verifier=goal.completion_feedback,
         ),
         lambda _event: None,
