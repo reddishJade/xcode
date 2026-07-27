@@ -124,6 +124,7 @@ class ToolGateSnapshot:
     mode_ruleset: tuple[Rule, ...] = ()
     user_ruleset: tuple[Rule, ...] = ()
     mode_fallback: PermissionDecision = "ask"
+    shell_unresolved_policy: PermissionDecision = "ask"
     tool_path_extractors: dict[str, PathExtractor] = field(default_factory=dict)
 
 
@@ -156,6 +157,7 @@ class ToolGate:
         user_rulesets: dict[str, tuple[Rule, ...]] | None = None,
         default_mode_rulesets: dict[str, tuple[Rule, ...]] | None = None,
         mode_fallbacks: dict[str, PermissionDecision] | None = None,
+        shell_unresolved_policies: dict[str, PermissionDecision] | None = None,
         tool_path_extractors: dict[str, PathExtractor] | None = None,
     ) -> None:
         self._mode = mode_state
@@ -163,6 +165,7 @@ class ToolGate:
         self._user_rulesets = user_rulesets or {}
         self._default_mode_rulesets = default_mode_rulesets or {}
         self._mode_fallbacks = mode_fallbacks or {}
+        self._shell_unresolved_policies = shell_unresolved_policies or {}
         self._tool_path_extractors = tool_path_extractors or {}
         self._approval_callback = approval_callback
         self._permission_policy = permission_policy
@@ -201,10 +204,14 @@ class ToolGate:
     def _fallback_for_mode(self, mode_name: str) -> PermissionDecision:
         return self._mode_fallbacks.get(mode_name, "ask")
 
+    def _shell_unresolved_policy_for_mode(self, mode_name: str) -> PermissionDecision:
+        return self._shell_unresolved_policies.get(mode_name, "ask")
+
     def snapshot(self) -> ToolGateSnapshot:
         mode_name = self._mode.current_mode
         default_rules = self._default_ruleset_for_mode(mode_name)
         fallback = self._fallback_for_mode(mode_name)
+        shell_unresolved_policy = self._shell_unresolved_policy_for_mode(mode_name)
         return ToolGateSnapshot(
             user_ruleset=self._ruleset_for_mode(mode_name),
             approval_callback=self._approval_callback,
@@ -219,6 +226,7 @@ class ToolGate:
             permanent_grant_store=self._permanent_grant_store,
             mode_ruleset=default_rules,
             mode_fallback=fallback,
+            shell_unresolved_policy=shell_unresolved_policy,
             tool_path_extractors=self._tool_path_extractors,
         )
 
@@ -227,6 +235,7 @@ class ToolGate:
         mode_name = self._mode.current_mode
         default_rules = self._default_ruleset_for_mode(mode_name)
         fallback = self._fallback_for_mode(mode_name)
+        shell_unresolved_policy = self._shell_unresolved_policy_for_mode(mode_name)
         return ToolGateSnapshot(
             user_ruleset=self._ruleset_for_mode(mode_name),
             approval_callback=self._approval_callback,
@@ -241,6 +250,7 @@ class ToolGate:
             permanent_grant_store=self._permanent_grant_store,
             mode_ruleset=default_rules,
             mode_fallback=fallback,
+            shell_unresolved_policy=shell_unresolved_policy,
             tool_path_extractors=self._tool_path_extractors,
         )
 
@@ -301,6 +311,7 @@ class ToolGate:
             user_rulesets=self._user_rulesets,
             default_mode_rulesets=self._default_mode_rulesets,
             mode_fallbacks=self._mode_fallbacks,
+            shell_unresolved_policies=self._shell_unresolved_policies,
             tool_path_extractors=self._tool_path_extractors,
         )
 
@@ -531,6 +542,7 @@ class ToolGate:
                 mode_ruleset=snapshot.mode_ruleset,
                 user_ruleset=snapshot.user_ruleset,
                 mode_fallback=snapshot.mode_fallback,
+                shell_unresolved_policy=snapshot.shell_unresolved_policy,
             )
         )
         result = engine.decide(

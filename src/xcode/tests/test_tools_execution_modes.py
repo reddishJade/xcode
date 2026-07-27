@@ -6,6 +6,7 @@ from pathlib import Path
 
 from xcode.coding_agent.execution_modes import (
     DEFAULT_MODE_FALLBACKS,
+    DEFAULT_SHELL_UNRESOLVED_POLICIES,
     build_default_mode_rulesets,
     parse_execution_mode,
     mode_notice,
@@ -15,6 +16,7 @@ from xcode.coding_agent.execution_modes import (
     ExecutionModeState,
 )
 from xcode.ai.events import ToolCall
+from xcode.harness.agent_runtime.tool_gate import ToolGate
 
 
 class TestParseExecutionMode:
@@ -59,6 +61,10 @@ class TestDefaultModeRulesets:
         assert set(rulesets) == {"plan", "build", "act"}
         assert DEFAULT_MODE_FALLBACKS == {
             "plan": "deny",
+            "build": "allow",
+            "act": "ask",
+        }
+        assert DEFAULT_SHELL_UNRESOLVED_POLICIES == {
             "build": "allow",
             "act": "ask",
         }
@@ -146,3 +152,23 @@ class TestExecutionModeState:
         call = ToolCall(id="c1", name="read_file", input={})
         result = state.check_call(call)
         assert result in ("allow", "deny", "ask")
+
+    def test_tool_gate_freezes_shell_policy_for_current_mode(self) -> None:
+        state = ExecutionModeState()
+        gate = ToolGate(
+            mode_state=state,
+            approval_callback=None,
+            permission_policy=None,
+            hook_manager=None,
+            audit_logger=None,
+            session_id="test",
+            shell_unresolved_policies=DEFAULT_SHELL_UNRESOLVED_POLICIES,
+        )
+
+        state.set_mode("build")
+        build_snapshot = gate.snapshot()
+        state.set_mode("act")
+        act_snapshot = gate.snapshot()
+
+        assert build_snapshot.shell_unresolved_policy == "allow"
+        assert act_snapshot.shell_unresolved_policy == "ask"

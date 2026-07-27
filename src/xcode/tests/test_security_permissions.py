@@ -16,6 +16,122 @@ from xcode.harness.security.permissions import (
     PermissionEngineConfig,
 )
 from xcode.harness.security.permission_model import SensitivePathOverride
+from xcode.harness.security.permission_model import Rule
+
+
+def _bash_tool() -> ToolSpec:
+    return ToolSpec("bash", "", "", lambda _data, _update: "")
+
+
+def test_build_allows_unknown_shell_command_without_approval() -> None:
+    requests: list[ApprovalRequest] = []
+
+    def approve(request: ApprovalRequest) -> HITLResult:
+        requests.append(request)
+        return HITLResult("allow", "once")
+
+    engine = PermissionEngine(
+        PermissionEngineConfig(
+            mode_ruleset=(Rule(action="bash", effect="allow"),),
+            mode_fallback="allow",
+            shell_unresolved_policy="allow",
+        )
+    )
+
+    result = engine.decide(
+        "bash",
+        {"command": "git log --oneline -10"},
+        tool_spec=_bash_tool(),
+        approval_callback=approve,
+    )
+
+    assert result.decision == "allow"
+    assert result.blocked is False
+    assert requests == []
+
+
+def test_act_still_asks_for_unknown_shell_command() -> None:
+    requests: list[ApprovalRequest] = []
+
+    def approve(request: ApprovalRequest) -> HITLResult:
+        requests.append(request)
+        return HITLResult("allow", "once")
+
+    engine = PermissionEngine(
+        PermissionEngineConfig(
+            mode_ruleset=(Rule(action="bash", effect="ask"),),
+            mode_fallback="ask",
+            shell_unresolved_policy="ask",
+        )
+    )
+
+    result = engine.decide(
+        "bash",
+        {"command": "pytest -q"},
+        tool_spec=_bash_tool(),
+        approval_callback=approve,
+    )
+
+    assert result.decision == "allow"
+    assert len(requests) == 1
+
+
+def test_build_respects_explicit_user_shell_ask() -> None:
+    requests: list[ApprovalRequest] = []
+
+    def approve(request: ApprovalRequest) -> HITLResult:
+        requests.append(request)
+        return HITLResult("allow", "once")
+
+    engine = PermissionEngine(
+        PermissionEngineConfig(
+            mode_ruleset=(Rule(action="bash", effect="allow"),),
+            user_ruleset=(Rule(action="bash", effect="ask"),),
+            mode_fallback="allow",
+            shell_unresolved_policy="allow",
+        )
+    )
+
+    result = engine.decide(
+        "bash",
+        {"command": "pytest -q"},
+        tool_spec=_bash_tool(),
+        approval_callback=approve,
+    )
+
+    assert result.decision == "allow"
+    assert len(requests) == 1
+
+
+def test_build_respects_explicit_user_shell_deny() -> None:
+    engine = PermissionEngine(
+        PermissionEngineConfig(
+            mode_ruleset=(Rule(action="bash", effect="allow"),),
+            user_ruleset=(Rule(action="bash", effect="deny"),),
+            mode_fallback="allow",
+            shell_unresolved_policy="allow",
+        )
+    )
+
+    result = engine.decide("bash", {"command": "pytest -q"})
+
+    assert result.decision == "deny"
+    assert result.blocked is True
+
+
+def test_build_keeps_dangerous_shell_command_denied() -> None:
+    engine = PermissionEngine(
+        PermissionEngineConfig(
+            mode_ruleset=(Rule(action="bash", effect="allow"),),
+            mode_fallback="allow",
+            shell_unresolved_policy="allow",
+        )
+    )
+
+    result = engine.decide("bash", {"command": "rm -rf /"})
+
+    assert result.decision == "deny"
+    assert result.blocked is True
 
 
 def test_unresolved_restricted_path_is_explicit_deny() -> None:

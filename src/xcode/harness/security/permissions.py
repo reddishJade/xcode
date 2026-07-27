@@ -40,6 +40,7 @@ from .permission_model import GrantScope as _GrantScope
 
 
 PermissionDecision = Literal["allow", "deny", "ask"]
+ShellUnresolvedPolicy = Literal["allow", "deny", "ask"]
 HITLDecision = Literal["allow", "deny"]
 HITLScope = Literal["once", "session", "permanent"]
 type PermissionMetadata = dict[str, JsonValue]
@@ -163,6 +164,8 @@ class PermissionEngineConfig:
     """用户配置中当前模式的规则 override。从 xcode.config.json 加载。"""
     mode_fallback: PermissionDecision = "ask"
     """未匹配任何规则时的默认决策。plan='deny', build='allow', act='ask'。"""
+    shell_unresolved_policy: ShellUnresolvedPolicy = "ask"
+    """Shell 效果无法静态确认时的模式级决策；危险命令始终拒绝。"""
 
 
 class PermissionEngine:
@@ -384,12 +387,15 @@ class PermissionEngine:
                 global_default=self._config.static_policy.global_default,
             ).evaluate(action)
 
-        # Step 4: ShellAnalysis 不可解析效果 → ask
+        # Step 4: ShellAnalysis 不可解析效果按当前执行模式处理
         shell_constraints: tuple[Constraint, ...] = ()
         if action.capability == "shell" and action.unresolved_effects:
             from .shell_analyzer import ShellAnalysisPolicyEvaluator
 
-            shell_constraints = ShellAnalysisPolicyEvaluator().evaluate(action)
+            shell_constraints = ShellAnalysisPolicyEvaluator().evaluate(
+                action,
+                self._config.shell_unresolved_policy,
+            )
 
         # Step 5: RuleMatcher 三态 ruleset 匹配
         rules = rule_merge(

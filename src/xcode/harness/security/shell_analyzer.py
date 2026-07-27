@@ -1,7 +1,7 @@
 """保守的 Shell 命令分类。
 
 这里不模拟命令的完整文件副作用。分类器只识别少量确定的只读命令；
-动态语法、未知命令和写操作交给权限审批，明确危险的宿主操作直接拒绝。
+动态语法、未知命令和写操作由执行模式决定，明确危险的宿主操作直接拒绝。
 真正的文件和网络边界必须由 OS sandbox 提供。
 """
 
@@ -16,6 +16,7 @@ from typing import Literal
 from .permission_model import Action, Constraint, Target, UnresolvedEffect
 
 ShellType = Literal["posix", "powershell", "cmd"]
+ShellUnresolvedPolicy = Literal["allow", "ask", "deny"]
 
 _POSIX_READ_COMMANDS = frozenset(
     {
@@ -62,13 +63,19 @@ class ShellAnalysis:
 class ShellAnalysisPolicyEvaluator:
     """把保守分类结果转换为权限约束。"""
 
-    def evaluate(self, action: Action) -> tuple[Constraint, ...]:
+    def evaluate(
+        self,
+        action: Action,
+        unresolved_policy: ShellUnresolvedPolicy = "ask",
+    ) -> tuple[Constraint, ...]:
         constraints: list[Constraint] = []
         for effect in action.unresolved_effects:
             dangerous = effect.reason == "dangerous_command"
+            if not dangerous and unresolved_policy == "allow":
+                continue
             constraints.append(
                 Constraint(
-                    decision="deny" if dangerous else "ask",
+                    decision="deny" if dangerous else unresolved_policy,
                     source="shell_policy",
                     reason=f"{effect.reason}: {effect.fragment}",
                 )

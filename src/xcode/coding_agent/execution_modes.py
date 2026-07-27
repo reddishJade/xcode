@@ -157,7 +157,8 @@ def mode_notice(mode: str) -> str:
         return (
             '<execution-mode name="build">\n'
             "Build Mode is active. All tools are enabled; file writes and "
-            "shell commands are allowed without HITL approval.\n"
+            "shell commands run automatically unless explicit permission rules "
+            "or hard safety boundaries apply.\n"
             "</execution-mode>"
         )
     if mode == "act":
@@ -244,6 +245,12 @@ def build_default_mode_rulesets(
 
 DEFAULT_MODE_FALLBACKS: dict[str, PermissionDecision] = {
     "plan": "deny",
+    "build": "allow",
+    "act": "ask",
+}
+
+
+DEFAULT_SHELL_UNRESOLVED_POLICIES: dict[str, PermissionDecision] = {
     "build": "allow",
     "act": "ask",
 }

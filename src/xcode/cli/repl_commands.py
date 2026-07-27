@@ -519,10 +519,11 @@ def cmd_plan(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_build(cmd: str, ctx: CommandContext) -> bool:
-    """进入 Build Mode（允许普通文件变更，高风险操作需审批）。"""
+    """进入 Build Mode（自动执行工作区变更，保留显式规则和硬边界）。"""
     ctx.state.mode = "build"
     print(
-        "Build Mode enabled. Ordinary file mutations are allowed; high-risk actions require approval."
+        "Build Mode enabled. Workspace mutations and shell commands run "
+        "automatically; explicit permission rules and hard safety boundaries apply."
     )
     return False
 
@@ -1628,7 +1629,10 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     ),
     "/build": CommandEntry(
         handler=cmd_build,
-        desc="Enter Build Mode: ordinary file mutations allowed, high-risk actions require approval.",
+        desc=(
+            "Enter Build Mode: workspace mutations and shell commands run "
+            "automatically within configured safety boundaries."
+        ),
         group=COMMAND_GROUP_MODE,
     ),
     "/act": CommandEntry(

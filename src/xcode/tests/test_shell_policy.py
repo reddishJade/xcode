@@ -28,6 +28,21 @@ def test_unknown_command_requires_approval_without_guessing_side_effects() -> No
     assert not any(target.kind == "path" for target in action.targets)
 
 
+def test_build_policy_allows_unknown_command_without_a_constraint() -> None:
+    action = ActionExtractor().extract(
+        "bash",
+        {"command": "pytest -q"},
+        ("shell", "none"),
+    )
+
+    constraints = ShellAnalysisPolicyEvaluator().evaluate(
+        action,
+        unresolved_policy="allow",
+    )
+
+    assert constraints == ()
+
+
 def test_redirection_requires_approval() -> None:
     analysis = analyze_shell_command("rg needle src > result.txt")
 
@@ -48,6 +63,21 @@ def test_git_clean_is_denied_even_with_alternate_working_directory() -> None:
 
     assert [constraint.decision for constraint in constraints] == ["deny"]
     assert "git clean" in constraints[0].reason
+
+
+def test_build_policy_does_not_override_dangerous_command_denial() -> None:
+    action = ActionExtractor().extract(
+        "bash",
+        {"command": "git -C /tmp/repo clean -fdx"},
+        ("shell", "none"),
+    )
+
+    constraints = ShellAnalysisPolicyEvaluator().evaluate(
+        action,
+        unresolved_policy="allow",
+    )
+
+    assert [constraint.decision for constraint in constraints] == ["deny"]
 
 
 def test_recursive_root_delete_is_denied_but_scoped_delete_requires_approval() -> None:

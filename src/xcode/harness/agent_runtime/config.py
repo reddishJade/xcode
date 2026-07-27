@@ -86,6 +86,9 @@ class GateConfig:
     user_rulesets: dict[str, tuple[Rule, ...]] = field(default_factory=dict)
     default_mode_rulesets: dict[str, tuple[Rule, ...]] = field(default_factory=dict)
     mode_fallbacks: dict[str, PermissionDecision] = field(default_factory=dict)
+    shell_unresolved_policies: dict[str, PermissionDecision] = field(
+        default_factory=dict
+    )
     tool_path_extractors: dict[str, PathExtractor] = field(default_factory=dict)
     correlation: RuntimeCorrelation | None = None
 
