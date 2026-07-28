@@ -126,6 +126,9 @@ async def _run_all(
                         f"max_concurrency={record['max_concurrency']}",
                         flush=True,
                     )
+    workspace_root = output_dir / "workspaces"
+    if workspace_root.is_dir() and not any(workspace_root.iterdir()):
+        workspace_root.rmdir()
     return records
 
 
@@ -200,6 +203,7 @@ def _error_record(
         "unsafe_overlap_events": 0,
         "result_order_correct": False,
         "output_digest": "",
+        "workspace_digest": "",
         "tool_workers": task.tool_workers,
         "read_calls": sum(op.kind == "read" for op in task.operations),
         "write_calls": sum(op.kind == "write" for op in task.operations),

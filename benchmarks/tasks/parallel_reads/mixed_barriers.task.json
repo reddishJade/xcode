@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "mixed-read-write-barriers",
+  "description": "Verify parallel read batches remain separated by sequential writes.",
+  "workspace": "workspace",
+  "tool_workers": 4,
+  "operations": [
+    {"id": "read-01", "kind": "read", "path": "modules/module_01.py", "delay_ms": 100},
+    {"id": "read-02", "kind": "read", "path": "modules/module_02.py", "delay_ms": 100},
+    {"id": "write-01", "kind": "write", "path": "output/probe.txt", "delay_ms": 100, "content": "first\n"},
+    {"id": "write-02", "kind": "write", "path": "output/probe.txt", "delay_ms": 100, "content": "second\n"},
+    {"id": "read-03", "kind": "read", "path": "modules/module_03.py", "delay_ms": 100},
+    {"id": "read-04", "kind": "read", "path": "modules/module_04.py", "delay_ms": 100}
+  ]
+}

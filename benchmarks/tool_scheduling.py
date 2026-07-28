@@ -84,6 +84,7 @@ class SchedulingMeasurement:
     unsafe_overlap_events: int
     result_order_correct: bool
     output_digest: str
+    workspace_digest: str
     tool_workers: int
     timings: tuple[ToolTiming, ...]
 
@@ -166,7 +167,7 @@ def discover_scheduling_task_files(paths: list[Path]) -> tuple[Path, ...]:
         if path.is_file():
             discovered.add(path)
         elif path.is_dir():
-            discovered.update(item.resolve() for item in path.rglob("task.json"))
+            discovered.update(item.resolve() for item in path.rglob("*.task.json"))
         else:
             raise ValueError(f"task path does not exist: {path}")
     if not discovered:
@@ -224,6 +225,7 @@ async def measure_scheduling(
         digest.update(b"\0")
         digest.update(str(result.content).encode())
         digest.update(b"\0")
+    workspace_digest = _workspace_digest(workspace, task.operations)
     return SchedulingMeasurement(
         task_id=task.id,
         variant=variant,
@@ -238,6 +240,7 @@ async def measure_scheduling(
         unsafe_overlap_events=tracker.unsafe_overlap_events,
         result_order_correct=result_ids == expected_ids,
         output_digest=digest.hexdigest(),
+        workspace_digest=workspace_digest,
         tool_workers=task.tool_workers,
         timings=tuple(tracker.timings),
     )
@@ -394,6 +397,23 @@ def _tool_call(operation: SchedulingOperation) -> ToolCallContent:
 def _append_text(path: Path, content: str) -> None:
     with path.open("a", encoding="utf-8") as stream:
         stream.write(content)
+
+
+def _workspace_digest(
+    workspace: Path,
+    operations: tuple[SchedulingOperation, ...],
+) -> str:
+    digest = hashlib.sha256()
+    for relative in sorted({operation.path for operation in operations}):
+        path = (workspace / relative).resolve()
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        if path.is_file():
+            digest.update(path.read_bytes())
+        else:
+            digest.update(b"<absent>")
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _ignore_event(event: AgentEvent) -> None:

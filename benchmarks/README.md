@@ -1,10 +1,12 @@
-# Long-horizon context compaction benchmark
+# Benchmarks
+
+## Long-horizon context compaction benchmark
 
 This benchmark measures one controlled question: how much layered context
 compaction reduces cumulative input tokens, cost, and interrupted long sessions
 without lowering test-defined task success.
 
-## Experimental groups
+### Experimental groups
 
 - **Baseline** sets the runtime compactor to `None`. It keeps full logical
   history and restores full history after a simulated process restart.
@@ -37,7 +39,7 @@ summary requests. A run is excluded from token and cost aggregation if any
 provider request omits usage. Known-model cost uses the price snapshot in
 `src/xcode/ai/models.py` and is stored in every raw result.
 
-## Run the paired example
+### Run the paired example
 
 Use the same explicit model configuration and temperature for every group:
 
@@ -91,7 +93,7 @@ Use `--summary-mode deterministic` only for offline smoke runs. Resume and
 checkpoint behavior stays enabled, but summaries use the compactor's
 deterministic fallback rather than the production model summarizer.
 
-## Task contract
+### Task contract
 
 Each `task.json` declares:
 
@@ -107,7 +109,7 @@ claim. A resume run counts only when `checkpoint_resumes` is nonzero. Before
 publishing results, add 20–30 tasks with at least 10 turns, run multiple repeats,
 and inspect per-task pairs instead of reporting only a pooled mean.
 
-## Reported metrics
+### Reported metrics
 
 - `input_tokens_total` and `peak_input_tokens` come from provider usage;
 - `pre_compaction_input_tokens` covers turns before the declared compaction;
@@ -130,3 +132,55 @@ completeness. Reports show the cohort size on every row.
 
 Do not quote percentages from the example until enough paired task runs have
 completed and `usage_complete` is true for the included samples.
+
+## Tool scheduling benchmark
+
+This deterministic ablation measures the production tool scheduler without a
+model request. Both groups replay identical tool-call batches against isolated
+workspace copies:
+
+- **Serial** sets `AgentLoopConfig.tool_execution` to `sequential`;
+- **Xcode** uses production parallel partitioning, the configured worker cap,
+  and each tool's `parallel` or `sequential` side-effect classification.
+
+The included workloads read 5, 10, and 20 distinct files. A mixed workload
+adds real file writes between parallel-read batches to verify that writes never
+overlap another operation. Every operation performs real local file I/O and a
+declared controlled delay. The delay provides a reproducible I/O wait window;
+it must not be described as model latency or end-to-end Agent latency.
+
+Run the complete paired benchmark yourself:
+
+```sh
+uv run python -m benchmarks.runners.run_tool_scheduling \
+  benchmarks/tasks/parallel_reads \
+  --repeat 10 \
+  --warmup 1
+```
+
+The command does not call a model or API. It alternates Serial/Xcode order,
+shows live progress, writes every measured run immediately, and then produces
+`summary.json` and `report.md` below
+`benchmark-results/tool_scheduling/<timestamp>/`. Override the production-style
+worker cap with `--workers N`, preserve isolated copies with
+`--keep-workspaces`, or disable progress with `--no-progress`.
+
+Regenerate a report from raw records:
+
+```sh
+uv run python -m benchmarks.reports.generate_tool_scheduling_report \
+  benchmark-results/tool_scheduling/RUN_DIR
+```
+
+Performance cohorts require one successful Serial/Xcode pair, identical call
+counts and result order, zero unsafe write overlap, matching tool-output hashes,
+and matching final workspace hashes. Invalid pairs remain in raw results, are
+listed under `excluded_pairs`, and make the runner exit with status 2 after the
+report is written.
+
+The primary report is per workload and includes tool-stage P50/P95 latency,
+paired latency reduction, median speedup, and observed maximum concurrency.
+Safety metrics include output/workspace equivalence and write isolation. Since
+the benchmark deliberately excludes provider time, use its numbers for the
+tool-execution stage only; a separate model-driven task suite is required for
+an end-to-end Agent latency claim.

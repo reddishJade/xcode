@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "parallel-reads-20",
+  "description": "Read twenty independent files with four tool workers.",
+  "workspace": "workspace",
+  "tool_workers": 4,
+  "operations": [
+    {"id": "read-01", "kind": "read", "path": "modules/module_01.py", "delay_ms": 100},
+    {"id": "read-02", "kind": "read", "path": "modules/module_02.py", "delay_ms": 100},
+    {"id": "read-03", "kind": "read", "path": "modules/module_03.py", "delay_ms": 100},
+    {"id": "read-04", "kind": "read", "path": "modules/module_04.py", "delay_ms": 100},
+    {"id": "read-05", "kind": "read", "path": "modules/module_05.py", "delay_ms": 100},
+    {"id": "read-06", "kind": "read", "path": "modules/module_06.py", "delay_ms": 100},
+    {"id": "read-07", "kind": "read", "path": "modules/module_07.py", "delay_ms": 100},
+    {"id": "read-08", "kind": "read", "path": "modules/module_08.py", "delay_ms": 100},
+    {"id": "read-09", "kind": "read", "path": "modules/module_09.py", "delay_ms": 100},
+    {"id": "read-10", "kind": "read", "path": "modules/module_10.py", "delay_ms": 100},
+    {"id": "read-11", "kind": "read", "path": "modules/module_11.py", "delay_ms": 100},
+    {"id": "read-12", "kind": "read", "path": "modules/module_12.py", "delay_ms": 100},
+    {"id": "read-13", "kind": "read", "path": "modules/module_13.py", "delay_ms": 100},
+    {"id": "read-14", "kind": "read", "path": "modules/module_14.py", "delay_ms": 100},
+    {"id": "read-15", "kind": "read", "path": "modules/module_15.py", "delay_ms": 100},
+    {"id": "read-16", "kind": "read", "path": "modules/module_16.py", "delay_ms": 100},
+    {"id": "read-17", "kind": "read", "path": "modules/module_17.py", "delay_ms": 100},
+    {"id": "read-18", "kind": "read", "path": "modules/module_18.py", "delay_ms": 100},
+    {"id": "read-19", "kind": "read", "path": "modules/module_19.py", "delay_ms": 100},
+    {"id": "read-20", "kind": "read", "path": "modules/module_20.py", "delay_ms": 100}
+  ]
+}

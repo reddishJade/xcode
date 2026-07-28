@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "parallel-reads-10",
+  "description": "Read ten independent files with four tool workers.",
+  "workspace": "workspace",
+  "tool_workers": 4,
+  "operations": [
+    {"id": "read-01", "kind": "read", "path": "modules/module_01.py", "delay_ms": 100},
+    {"id": "read-02", "kind": "read", "path": "modules/module_02.py", "delay_ms": 100},
+    {"id": "read-03", "kind": "read", "path": "modules/module_03.py", "delay_ms": 100},
+    {"id": "read-04", "kind": "read", "path": "modules/module_04.py", "delay_ms": 100},
+    {"id": "read-05", "kind": "read", "path": "modules/module_05.py", "delay_ms": 100},
+    {"id": "read-06", "kind": "read", "path": "modules/module_06.py", "delay_ms": 100},
+    {"id": "read-07", "kind": "read", "path": "modules/module_07.py", "delay_ms": 100},
+    {"id": "read-08", "kind": "read", "path": "modules/module_08.py", "delay_ms": 100},
+    {"id": "read-09", "kind": "read", "path": "modules/module_09.py", "delay_ms": 100},
+    {"id": "read-10", "kind": "read", "path": "modules/module_10.py", "delay_ms": 100}
+  ]
+}

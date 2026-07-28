@@ -30,6 +30,7 @@ def _record(
         "max_concurrency": 1 if variant == "serial" else 4,
         "unsafe_overlap_events": 0,
         "output_digest": digest,
+        "workspace_digest": digest,
         "success": success,
     }
 
@@ -55,6 +56,12 @@ def test_report_computes_per_task_p50_p95_and_paired_speedup(
     assert stats["xcode_p50_seconds"] == 0.275
     assert stats["p50_latency_reduction"] == 0.75
     assert stats["median_paired_speedup"] == 4.0
+    quality = summary["quality"]
+    assert isinstance(quality, dict)
+    assert quality["serial_run_success_rate"] == 1.0
+    assert quality["xcode_run_success_rate"] == 1.0
+    assert quality["output_equivalence_rate"] == 1.0
+    assert quality["workspace_equivalence_rate"] == 1.0
     report = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert "n=2 pairs" in report
     assert "4.00x" in report
@@ -74,6 +81,11 @@ def test_report_excludes_failed_or_output_mismatched_pairs(tmp_path: Path) -> No
     excluded = summary["excluded_pairs"]
     assert isinstance(excluded, list)
     assert len(excluded) == 2
+    quality = summary["quality"]
+    assert isinstance(quality, dict)
+    assert quality["xcode_run_success_rate"] == 0.5
+    assert quality["output_equivalence_rate"] == 0.5
+    assert quality["workspace_equivalence_rate"] == 0.5
     report = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert "output digest mismatch" in report
     assert "xcode failed" in report

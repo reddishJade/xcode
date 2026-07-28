@@ -237,6 +237,20 @@ uv run python -m benchmarks.runners.run_ablation benchmarks/tasks/long_horizon `
 
 实验设计、任务格式和报告口径见 [benchmarks/README.md](benchmarks/README.md)。
 
+### 工具调度 benchmark
+
+确定性消融实验通过生产 `execute_tool_calls()` 重放相同的 5、10、20 文件
+读取批次，对比强制串行与副作用感知并发调度，并用混合读写 workload 验证
+写操作不与其他工具重叠。该命令不调用模型 API：
+
+```powershell
+uv run python -m benchmarks.runners.run_tool_scheduling `
+  benchmarks/tasks/parallel_reads --repeat 10 --warmup 1
+```
+
+报告按 workload 给出工具阶段 P50/P95 延迟、配对加速比、最大并发度、输出
+等价率和写隔离率；这些结果不等同于端到端 Agent 延迟。
+
 ### 单元测试
 
 ```powershell

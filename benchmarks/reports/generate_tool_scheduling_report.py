@@ -35,6 +35,7 @@ def write_tool_scheduling_report(
         "valid_pairs": len(pairs),
         "excluded_pairs": excluded,
         "overall": _summarize_pairs(pairs),
+        "quality": _quality_summary(records),
         "tasks": task_summaries,
     }
     _write_json(output_dir / "summary.json", summary)
@@ -103,6 +104,12 @@ def _select_pairs(
                 reasons.append("xcode failed")
             if serial.get("output_digest") != xcode.get("output_digest"):
                 reasons.append("output digest mismatch")
+            serial_workspace_digest = serial.get("workspace_digest")
+            xcode_workspace_digest = xcode.get("workspace_digest")
+            if not serial_workspace_digest or not xcode_workspace_digest:
+                reasons.append("workspace digest missing")
+            elif serial_workspace_digest != xcode_workspace_digest:
+                reasons.append("workspace digest mismatch")
             if _integer(serial, "call_count") != _integer(xcode, "call_count"):
                 reasons.append("call count mismatch")
             if not reasons:
@@ -131,8 +138,6 @@ def _summarize_pairs(pairs: list[_Pair]) -> dict[str, object]:
             "median_paired_speedup": None,
             "median_paired_latency_reduction": None,
             "xcode_max_concurrency": None,
-            "write_isolation_rate": None,
-            "output_equivalence_rate": None,
         }
     serial_durations = [_number(pair.serial, "duration_seconds") for pair in pairs]
     xcode_durations = [_number(pair.xcode, "duration_seconds") for pair in pairs]
@@ -149,14 +154,25 @@ def _summarize_pairs(pairs: list[_Pair]) -> dict[str, object]:
         _reduction(serial, xcode)
         for serial, xcode in zip(serial_durations, xcode_durations, strict=True)
     ]
+    homogeneous_workload = len({pair.task_id for pair in pairs}) == 1
     return {
         "pairs": len(pairs),
-        "call_count": _integer(pairs[0].serial, "call_count"),
-        "tool_workers": _integer(pairs[0].xcode, "tool_workers"),
-        "read_calls": _integer(pairs[0].xcode, "read_calls"),
-        "write_calls": _integer(pairs[0].xcode, "write_calls"),
-        "controlled_delay_ms_total": _number(
-            pairs[0].xcode, "controlled_delay_ms_total"
+        "call_count": (
+            _integer(pairs[0].serial, "call_count") if homogeneous_workload else None
+        ),
+        "tool_workers": (
+            _integer(pairs[0].xcode, "tool_workers") if homogeneous_workload else None
+        ),
+        "read_calls": (
+            _integer(pairs[0].xcode, "read_calls") if homogeneous_workload else None
+        ),
+        "write_calls": (
+            _integer(pairs[0].xcode, "write_calls") if homogeneous_workload else None
+        ),
+        "controlled_delay_ms_total": (
+            _number(pairs[0].xcode, "controlled_delay_ms_total")
+            if homogeneous_workload
+            else None
         ),
         "serial_p50_seconds": serial_p50,
         "xcode_p50_seconds": xcode_p50,
@@ -169,14 +185,73 @@ def _summarize_pairs(pairs: list[_Pair]) -> dict[str, object]:
         "xcode_max_concurrency": max(
             _integer(pair.xcode, "max_concurrency") for pair in pairs
         ),
-        "write_isolation_rate": statistics.mean(
-            float(_integer(pair.xcode, "unsafe_overlap_events") == 0) for pair in pairs
+    }
+
+
+def _quality_summary(records: list[dict[str, object]]) -> dict[str, object]:
+    serial_records = [record for record in records if record.get("variant") == "serial"]
+    xcode_records = [record for record in records if record.get("variant") == "xcode"]
+    xcode_write_records = [
+        record for record in xcode_records if _integer(record, "write_calls") > 0
+    ]
+    grouped: dict[tuple[str, int], dict[str, list[dict[str, object]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for record in records:
+        key = (str(record.get("task_id", "")), _integer(record, "repeat"))
+        grouped[key][str(record.get("variant", ""))].append(record)
+    complete_pairs = [
+        (variants["serial"][0], variants["xcode"][0])
+        for variants in grouped.values()
+        if len(variants.get("serial", [])) == 1 and len(variants.get("xcode", [])) == 1
+    ]
+    return {
+        "serial_run_success_rate": _boolean_rate(serial_records, "success"),
+        "xcode_run_success_rate": _boolean_rate(xcode_records, "success"),
+        "result_order_correct_rate": _boolean_rate(
+            xcode_records, "result_order_correct"
         ),
-        "output_equivalence_rate": statistics.mean(
-            float(pair.serial.get("output_digest") == pair.xcode.get("output_digest"))
-            for pair in pairs
+        "write_isolation_rate": (
+            statistics.mean(
+                float(_integer(record, "unsafe_overlap_events") == 0)
+                for record in xcode_write_records
+            )
+            if xcode_write_records
+            else None
+        ),
+        "unsafe_overlap_events_total": sum(
+            _integer(record, "unsafe_overlap_events") for record in xcode_records
+        ),
+        "complete_pairs": len(complete_pairs),
+        "output_equivalence_rate": (
+            statistics.mean(
+                float(
+                    bool(serial.get("output_digest"))
+                    and serial.get("output_digest") == xcode.get("output_digest")
+                )
+                for serial, xcode in complete_pairs
+            )
+            if complete_pairs
+            else None
+        ),
+        "workspace_equivalence_rate": (
+            statistics.mean(
+                float(
+                    bool(serial.get("workspace_digest"))
+                    and serial.get("workspace_digest") == xcode.get("workspace_digest")
+                )
+                for serial, xcode in complete_pairs
+            )
+            if complete_pairs
+            else None
         ),
     }
+
+
+def _boolean_rate(records: list[dict[str, object]], field: str) -> float | None:
+    if not records:
+        return None
+    return statistics.mean(float(bool(record.get(field))) for record in records)
 
 
 def _render_report(summary: dict[str, object]) -> str:
@@ -188,9 +263,12 @@ def _render_report(summary: dict[str, object]) -> str:
             f"pairs, {summary['valid_pairs']} valid performance pairs."
         ),
         "",
-        "This benchmark replays identical deterministic tool-call batches through ",
-        "the production scheduler. Serial forces every call to run sequentially; ",
-        "Xcode honors each tool's parallel/sequential execution classification.",
+        (
+            "This benchmark replays identical deterministic tool-call batches "
+            "through the production scheduler. Serial forces every call to run "
+            "sequentially; Xcode honors each tool's parallel/sequential execution "
+            "classification."
+        ),
         "Controlled delay models reproducible I/O waiting and is not model latency.",
         "",
         (
@@ -221,6 +299,8 @@ def _render_report(summary: dict[str, object]) -> str:
         )
     overall_raw = summary.get("overall")
     overall = overall_raw if isinstance(overall_raw, dict) else {}
+    quality_raw = summary.get("quality")
+    quality = quality_raw if isinstance(quality_raw, dict) else {}
     lines.extend(
         [
             "",
@@ -235,12 +315,23 @@ def _render_report(summary: dict[str, object]) -> str:
                 f"{_speedup(overall.get('median_paired_speedup'))}."
             ),
             (
-                "- Xcode write-isolation rate: "
-                f"{_percent(overall.get('write_isolation_rate'))}."
+                "- Serial/Xcode run success: "
+                f"{_percent(quality.get('serial_run_success_rate'))} / "
+                f"{_percent(quality.get('xcode_run_success_rate'))}."
             ),
             (
-                "- Serial/Xcode output equivalence: "
-                f"{_percent(overall.get('output_equivalence_rate'))}."
+                "- Serial/Xcode output/workspace equivalence: "
+                f"{_percent(quality.get('output_equivalence_rate'))} / "
+                f"{_percent(quality.get('workspace_equivalence_rate'))}."
+            ),
+            (
+                "- Xcode write-isolation rate: "
+                f"{_percent(quality.get('write_isolation_rate'))} "
+                f"(unsafe overlaps: {quality.get('unsafe_overlap_events_total', 0)})."
+            ),
+            (
+                "- Xcode result-order correctness: "
+                f"{_percent(quality.get('result_order_correct_rate'))}."
             ),
         ]
     )
