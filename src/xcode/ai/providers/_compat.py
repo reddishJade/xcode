@@ -140,7 +140,24 @@ class OpenAICompatProvider:
             "stream_options": {"include_usage": True},
         }
         self._build_thinking_params(params)
+        self._apply_stream_options(params)
         return params
+
+    def _apply_stream_options(self, params: dict[str, Any]) -> None:
+        """把通用采样选项下发到 OpenAI-compatible 请求。"""
+        opts = self._current_options
+        if opts is None:
+            return
+        if opts.temperature is not None:
+            params["temperature"] = opts.temperature
+        if opts.max_tokens is not None:
+            params["max_tokens"] = opts.max_tokens
+        if opts.top_p is not None:
+            params["top_p"] = opts.top_p
+        if opts.tool_choice is not None:
+            params["tool_choice"] = opts.tool_choice
+        if opts.response_extra_params:
+            params.update(opts.response_extra_params)
 
     def _call_chat_api(
         self,

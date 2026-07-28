@@ -1,0 +1,108 @@
+# Long-horizon context compaction benchmark
+
+This benchmark measures one controlled question: how much layered context
+compaction reduces cumulative input tokens, cost, and interrupted long sessions
+without lowering test-defined task success.
+
+## Experimental groups
+
+- **Baseline** sets the runtime compactor to `None`. It keeps full logical
+  history and restores full history after a simulated process restart.
+- **Xcode** enables `LayeredCompactor`, session checkpoint writes, and
+  checkpoint-plus-tail restoration.
+
+All other runtime configuration is shared. Request hygiene remains enabled in
+both groups, so the ablation isolates persistent layered compaction instead of
+mixing it with transport sanitation. Web tools and subagents are prohibited by
+a shared benchmark instruction. Both groups run in Build mode because the
+non-interactive benchmark has no HITL approval callback; workspace writes and
+verification commands therefore execute automatically under the same safety
+boundaries. Repeat order alternates to reduce time-order bias.
+
+Every copied fixture is initialized as a fresh, benchmark-owned Git repository
+with a deterministic initial commit. The commit is identical across paired
+runs, `git diff HEAD` therefore compares against the task fixture instead of a
+parent checkout, and runtime artifacts such as `.benchmark/` and Python caches
+are excluded from status output. Any fixture-provided `.git` metadata is not
+copied.
+
+Checkpoint and transcript state lives in a sibling runtime directory rather
+than inside the task workspace. The runner can still resume from it, while the
+Agent's workspace-scoped tools cannot treat internal benchmark state as task
+evidence. `--keep-workspaces` preserves both locations for debugging; normal
+runs remove them after writing the raw record.
+
+Provider `UsageUpdate` events are recorded for normal agent requests and model
+summary requests. A run is excluded from token and cost aggregation if any
+provider request omits usage. Known-model cost uses the price snapshot in
+`src/xcode/ai/models.py` and is stored in every raw result.
+
+## Run the paired example
+
+Use the same explicit model configuration and temperature for every group:
+
+```sh
+uv run python -m benchmarks.runners.run_ablation \
+  benchmarks/tasks/long_horizon/parser_recovery/task.json \
+  --config xcode.config.json \
+  --temperature 0 \
+  --repeat 3
+```
+
+This command makes real API calls. Raw JSON, `summary.json`, and `report.md` are
+written below `benchmark-results/long_horizon/<timestamp>/`. Add
+`--keep-workspaces` when a failed run needs manual inspection.
+
+Interactive terminals show an overall run bar plus the current task's turn,
+model request, tool, compaction, restart, and verification status. Redirected
+output and CI receive timestamped progress lines instead. Use `--no-progress`
+only when another process is supervising the command.
+
+Run groups separately when required:
+
+```sh
+uv run python -m benchmarks.runners.run_baseline TASK.json --repeat 3
+uv run python -m benchmarks.runners.run_xcode TASK.json --repeat 3
+```
+
+Regenerate a report from existing raw records:
+
+```sh
+uv run python -m benchmarks.reports.generate_report \
+  benchmark-results/long_horizon/RUN_DIR \
+  --output-dir benchmark-results/long_horizon/RUN_DIR
+```
+
+Use `--summary-mode deterministic` only for offline smoke runs. Resume and
+checkpoint behavior stays enabled, but summaries use the compactor's
+deterministic fallback rather than the production model summarizer.
+
+## Task contract
+
+Each `task.json` declares:
+
+- an isolated fixture workspace;
+- ordered user turns, including explicit compact/restart boundaries;
+- one test command that determines `task_success`;
+- deterministic state facts such as changed/unchanged file hashes, forbidden
+  paths, required text, and post-resume commands;
+- the recent-message and recent-token budgets used by the Xcode group.
+
+The included parser task is a wiring example, not enough evidence for a resume
+claim. A resume run counts only when `checkpoint_resumes` is nonzero. Before
+publishing results, add 20–30 tasks with at least 10 turns, run multiple repeats,
+and inspect per-task pairs instead of reporting only a pooled mean.
+
+## Reported metrics
+
+- `input_tokens_total` and `peak_input_tokens` come from provider usage;
+- `task_success` comes only from the verification process exit code;
+- `state_retention` is the fraction of deterministic facts that pass;
+- `context_overflow` is detected from provider/runtime context-limit errors;
+- `long_session_completed` requires tests, all turns, normal termination, and
+  no context overflow;
+- `repeated_read_calls` counts repeated reads of the same path as a diagnostic,
+  not a success criterion.
+
+Do not quote percentages from the example until enough paired task runs have
+completed and `usage_complete` is true for the included samples.

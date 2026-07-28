@@ -224,6 +224,18 @@ Xcode 不为 agent 提供 OS 级 sandbox。权限提示和 shell 效果分析用
 
 ## 评估与验证
 
+### 长程任务 benchmark
+
+`benchmarks/` 提供上下文压缩消融实验：对同一模型、温度和任务，配对运行
+完整历史 baseline 与启用 `LayeredCompactor`、checkpoint、resume 的 Xcode
+配置。任务成功由测试进程判定，状态保持由文件哈希、禁止路径和验证命令判定。
+
+```powershell
+uv run python -m benchmarks.runners.run_ablation benchmarks/tasks/long_horizon --repeat 3 --temperature 0
+```
+
+实验设计、任务格式和报告口径见 [benchmarks/README.md](benchmarks/README.md)。
+
 ### 单元测试
 
 ```powershell

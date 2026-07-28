@@ -1015,14 +1015,20 @@ def build_compact_summarize_fn(llm: object) -> SummarizeFn:
         if not older:
             return ""
         try:
-            loop = asyncio.get_running_loop()
-            future = asyncio.run_coroutine_threadsafe(
-                _summarize_async(older),
-                loop,
-            )
-            return future.result(timeout=60)
+            asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(_summarize_async(older))
+
+        # compactor 是同步钩子，不能在当前事件循环上等待同一个循环。
+        # 独立 worker 让摘要请求完成后再返回，同时避免遗留后台线程。
+        from .async_worker import IsolatedAsyncWorker
+
+        worker = IsolatedAsyncWorker(name="xcode-compaction-summary-worker")
+        try:
+            future = worker.submit(_summarize_async(older))
+            return future.result(timeout=60)
+        finally:
+            worker.close()
 
     return summarize
 

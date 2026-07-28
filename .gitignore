@@ -39,5 +39,6 @@ logs/
 diff.log
 verifier-result.json
 eval-results/
+benchmark-results/
 docs/notes/
 tmp/

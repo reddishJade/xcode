@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "parser-recovery",
+  "description": "Fix a configuration parser across ten evidence-driven turns, compact once, restart, and preserve compatibility constraints.",
+  "workspace": "workspace",
+  "compaction": {
+    "max_recent_messages": 6,
+    "keep_recent_tokens": 2000
+  },
+  "turns": [
+    {
+      "prompt": "Read TASK.md, the parser implementation, and its tests. Do not edit yet; report the likely failure mechanism."
+    },
+    {
+      "prompt": "Run the focused unit tests and confirm the root cause from the actual failure. Do not edit files yet."
+    },
+    {
+      "prompt": "Implement the smallest parser fix allowed by TASK.md. Keep the public API and compatibility document untouched."
+    },
+    {
+      "prompt": "Run the focused tests again. If they fail, diagnose and fix only the parser implementation."
+    },
+    {
+      "prompt": "Inspect the parser for the whitespace, comment, empty-key, and embedded-equals edge cases listed in TASK.md. Make only necessary corrections."
+    },
+    {
+      "prompt": "Run the full unittest suite and record the current failing test, if any, before doing more work."
+    },
+    {
+      "prompt": "Re-read TASK.md and verify that src/public_api.py and docs/compatibility.md still satisfy the no-edit constraint. Do not undo a correct parser fix.",
+      "compact_before": true,
+      "restart_after": true
+    },
+    {
+      "prompt": "Continue after the restart. State the active compatibility constraints, inspect the current diff, and correct any violation you find."
+    },
+    {
+      "prompt": "Run the full unittest suite once more. Address only failures caused by this task and avoid duplicate rewrites of already-correct code."
+    },
+    {
+      "prompt": "Perform a final evidence-based review: tests must pass, the parser must be changed, forbidden files must remain byte-identical, and no parser_v2.py may exist."
+    }
+  ],
+  "success_command": {
+    "argv": ["python", "-m", "unittest", "discover", "-s", "tests", "-q"],
+    "timeout_seconds": 30
+  },
+  "state_checks": [
+    {
+      "id": "parser-was-fixed",
+      "kind": "file_changed",
+      "path": "src/config_parser.py"
+    },
+    {
+      "id": "public-api-preserved",
+      "kind": "file_unchanged",
+      "path": "src/public_api.py"
+    },
+    {
+      "id": "compatibility-contract-preserved",
+      "kind": "file_unchanged",
+      "path": "docs/compatibility.md"
+    },
+    {
+      "id": "no-parallel-parser-created",
+      "kind": "path_absent",
+      "path": "src/parser_v2.py"
+    },
+    {
+      "id": "post-resume-tests-pass",
+      "kind": "command_succeeds",
+      "command": {
+        "argv": ["python", "-m", "unittest", "discover", "-s", "tests", "-q"],
+        "timeout_seconds": 30
+      }
+    }
+  ]
+}
