@@ -184,3 +184,17 @@ Safety metrics include output/workspace equivalence and write isolation. Since
 the benchmark deliberately excludes provider time, use its numbers for the
 tool-execution stage only; a separate model-driven task suite is required for
 an end-to-end Agent latency claim.
+
+Run the worker-count sweep without overwriting earlier results:
+
+```sh
+./benchmarks/scripts/run_tool_worker_sweep.sh
+```
+
+It benchmarks `1`, `2`, `4`, `8`, and `16` workers in separate directories.
+Optional positional arguments set `repeat`, `warmup`, and the output root:
+
+```sh
+./benchmarks/scripts/run_tool_worker_sweep.sh \
+  10 1 benchmark-results/tool_scheduling/my-worker-sweep
+```
