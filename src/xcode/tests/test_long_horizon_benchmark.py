@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+import argparse
 import json
 from pathlib import Path
 import subprocess
@@ -11,6 +12,7 @@ from typing import Any, cast
 
 import pytest
 
+from benchmarks.runners import _cli as benchmark_cli
 from benchmarks.evaluators.state_retention import (
     capture_initial_state,
     evaluate_state_retention,
@@ -18,8 +20,10 @@ from benchmarks.evaluators.state_retention import (
 )
 from benchmarks.models import CommandSpec, StateCheckSpec, load_task
 from benchmarks.reports.generate_report import render_markdown, summarize_records
+from benchmarks.runners._cli import _retryable_attempt
 from benchmarks.runners._long_horizon import (
     _benchmark_runtime_config,
+    _build_phase_metrics,
     _prepare_workspace,
     _repeated_read_calls,
     _run_turn,
@@ -102,12 +106,229 @@ def test_report_uses_only_paired_changes() -> None:
     assert "Task success is determined" in markdown
 
 
+def test_report_uses_same_complete_pair_cohort_for_values_and_change() -> None:
+    records = [
+        _record("baseline", 1000, True, True, repeat=1),
+        _record("xcode", 500, True, True, repeat=1),
+        _record("baseline", 2000, True, True, repeat=2),
+        {
+            **_record("xcode", 400, True, False, repeat=2),
+            "usage_incomplete_calls": [
+                {
+                    "call_index": 2,
+                    "kind": "agent",
+                    "error": "Request timed out",
+                    "retryable": True,
+                }
+            ],
+        },
+    ]
+
+    summary = summarize_records(records)
+    markdown = render_markdown(summary)
+
+    assert summary["cohorts"]["correctness_pairs"] == 2
+    assert summary["cohorts"]["complete_usage_pairs"] == 1
+    assert summary["variants"]["baseline"]["input_tokens_mean"] == 1000
+    assert summary["variants"]["xcode"]["input_tokens_mean"] == 500
+    assert summary["variants"]["baseline"]["usage_complete_runs"] == 2
+    assert summary["variants"]["baseline"]["token_cohort_runs"] == 1
+    assert summary["paired_changes"]["input_token_reduction"] == 0.5
+    assert len(summary["excluded_attempts"]) == 1
+    assert "n=1 pairs" in markdown
+    assert "Excluded attempts" in markdown
+
+
+def test_report_selects_first_complete_pair_attempt() -> None:
+    records = [
+        _record("baseline", 1000, True, True, attempt=1),
+        {
+            **_record("xcode", 200, True, False, attempt=1),
+            "usage_incomplete_calls": [
+                {
+                    "call_index": 1,
+                    "kind": "agent",
+                    "error": "Request timed out",
+                    "retryable": True,
+                }
+            ],
+        },
+        _record("baseline", 900, True, True, attempt=2),
+        _record("xcode", 450, True, True, attempt=2),
+    ]
+
+    summary = summarize_records(records)
+
+    assert summary["runs"] == 4
+    assert summary["pair_attempts"] == 2
+    assert summary["paired_runs"] == 1
+    assert summary["retried_pairs"] == 1
+    assert summary["selected_pairs"][0]["attempt"] == 2
+    assert summary["variants"]["baseline"]["input_tokens_mean"] == 900
+    assert summary["variants"]["xcode"]["input_tokens_mean"] == 450
+
+
+def test_report_keeps_post_compaction_pair_when_total_usage_is_incomplete() -> None:
+    baseline = {
+        **_record("baseline", 1000, True, True),
+        "post_compaction_input_tokens": 600,
+        "post_compaction_usage_complete": True,
+    }
+    xcode = {
+        **_record("xcode", 0, True, False),
+        "post_compaction_input_tokens": 300,
+        "post_compaction_usage_complete": True,
+    }
+
+    summary = summarize_records([baseline, xcode])
+
+    assert summary["cohorts"]["complete_usage_pairs"] == 0
+    assert summary["cohorts"]["post_compaction_usage_pairs"] == 1
+    assert summary["paired_changes"]["input_token_reduction"] is None
+    assert summary["paired_changes"]["post_compaction_input_token_reduction"] == 0.5
+
+
+def test_phase_metrics_have_independent_usage_completeness() -> None:
+    root = Path(__file__).resolve().parents[3]
+    task = load_task(
+        root / "benchmarks" / "tasks" / "long_horizon" / "parser_recovery" / "task.json"
+    )
+    turns: list[dict[str, object]] = []
+    for turn in range(1, 11):
+        calls = [_provider_call(10, has_usage=turn != 2)]
+        if turn == 7:
+            calls.insert(0, _provider_call(5, kind="compaction_summary"))
+        turns.append({"turn": turn, "provider_calls": calls})
+
+    metrics = _build_phase_metrics(task, turns)
+
+    assert metrics["compaction_turn"] == 7
+    assert metrics["restart_after_turn"] == 7
+    assert metrics["pre_compaction_input_tokens"] == 60
+    assert metrics["pre_compaction_usage_complete"] is False
+    assert metrics["post_compaction_input_tokens"] == 45
+    assert metrics["post_compaction_usage_complete"] is True
+    assert metrics["post_resume_input_tokens"] == 30
+    assert metrics["post_resume_usage_complete"] is True
+    assert metrics["compaction_summary_input_tokens"] == 5
+
+
+def test_transient_incomplete_usage_retries_but_missing_usage_does_not() -> None:
+    complete = _record("baseline", 1000, True, True)
+    transient = {
+        **_record("xcode", 500, True, False),
+        "retryable_usage_failure": True,
+    }
+    unexplained = {
+        **_record("xcode", 500, True, False),
+        "retryable_usage_failure": False,
+    }
+
+    assert _retryable_attempt([complete, transient]) is True
+    assert _retryable_attempt([complete, unexplained]) is False
+
+
+def test_cli_retries_the_whole_pair_and_preserves_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    task = SimpleNamespace(id="task-a")
+    reporter = _Reporter()
+
+    monkeypatch.setattr(benchmark_cli, "_runtime_config", lambda _path: object())
+    monkeypatch.setattr(
+        benchmark_cli,
+        "discover_task_files",
+        lambda _paths: (tmp_path / "task.json",),
+    )
+    monkeypatch.setattr(benchmark_cli, "load_task", lambda _path: task)
+    monkeypatch.setattr(
+        benchmark_cli,
+        "create_progress_reporter",
+        lambda _total, enabled: reporter,
+    )
+
+    def fake_run_task(
+        _task: object,
+        variant: str,
+        _runtime_config: object,
+        options: object,
+    ) -> dict[str, object]:
+        attempt = int(getattr(options, "attempt"))
+        incomplete = variant == "xcode" and attempt == 1
+        return {
+            **_record(variant, 100, True, not incomplete, attempt=attempt),
+            "retryable_usage_failure": incomplete,
+            "usage_incomplete_calls": (
+                [{"error": "Request timed out"}] if incomplete else []
+            ),
+        }
+
+    monkeypatch.setattr(benchmark_cli, "run_task", fake_run_task)
+    args = argparse.Namespace(
+        repeat=1,
+        max_pair_attempts=2,
+        config=None,
+        tasks=[tmp_path],
+        no_progress=False,
+        output_dir=tmp_path / "results",
+        temperature=0,
+        summary_mode="model",
+        keep_workspaces=False,
+    )
+
+    records = benchmark_cli._run_variants(args, ("baseline", "xcode"))
+
+    assert [(record["variant"], record["attempt"]) for record in records] == [
+        ("baseline", 1),
+        ("xcode", 1),
+        ("baseline", 2),
+        ("xcode", 2),
+    ]
+    assert reporter.added_runs == 2
+
+
+def test_strict_report_exits_after_writing_incomplete_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        benchmark_cli,
+        "write_report",
+        lambda _records, _output: {
+            "paired_runs": 2,
+            "cohorts": {"complete_usage_pairs": 1},
+        },
+    )
+    args = argparse.Namespace(
+        output_dir=tmp_path,
+        require_complete_usage=True,
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        benchmark_cli._write_and_validate_report(
+            [],
+            args,
+            ("baseline", "xcode"),
+        )
+
+    assert raised.value.code == 2
+
+
 def test_report_rejects_mismatched_pair_controls() -> None:
     baseline = {**_record("baseline", 1000, True, True), "model": "model-a"}
     xcode = {**_record("xcode", 500, True, True), "model": "model-b"}
 
     with pytest.raises(ValueError, match="differ on control model"):
         summarize_records([baseline, xcode])
+
+
+def test_report_keeps_usage_for_single_variant_runner() -> None:
+    summary = summarize_records([_record("baseline", 1000, True, True)])
+
+    assert summary["paired_runs"] == 0
+    assert summary["variants"]["baseline"]["runs"] == 1
+    assert summary["variants"]["baseline"]["input_tokens_mean"] == 1000
 
 
 def test_repeated_read_calls_count_same_path_only() -> None:
@@ -201,12 +422,23 @@ def _record(
     tokens: int,
     completed: bool,
     usage_complete: bool,
+    *,
+    repeat: int = 1,
+    attempt: int = 1,
 ) -> dict[str, object]:
     return {
         "task_id": "task-a",
         "variant": variant,
-        "repeat": 1,
+        "repeat": repeat,
+        "attempt": attempt,
+        "model": "test-model",
+        "temperature": 0,
+        "execution_mode": "build",
+        "summary_mode": "model",
+        "baseline_commit": "fixture-commit",
         "usage_complete": usage_complete,
+        "usage_incomplete_calls": [],
+        "retryable_usage_failure": False,
         "input_tokens_total": tokens,
         "peak_input_tokens": tokens,
         "input_cost_usd": tokens / 1_000_000,
@@ -216,6 +448,40 @@ def _record(
         "context_overflow": False,
         "duration_seconds": 1.0,
     }
+
+
+def _provider_call(
+    input_tokens: int,
+    *,
+    has_usage: bool = True,
+    kind: str = "agent",
+) -> dict[str, object]:
+    return {
+        "kind": kind,
+        "model": "test-model",
+        "input_tokens": input_tokens,
+        "output_tokens": 1,
+        "duration_seconds": 0.1,
+        "has_usage": has_usage,
+        "error": None,
+    }
+
+
+class _Reporter:
+    def __init__(self) -> None:
+        self.added_runs = 0
+
+    def __enter__(self) -> _Reporter:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def update(self, _event: object) -> None:
+        return None
+
+    def add_runs(self, count: int) -> None:
+        self.added_runs += count
 
 
 def _git(workspace: Path, *args: str) -> str:

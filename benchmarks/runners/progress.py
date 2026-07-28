@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import sys
 import threading
+import time
 from typing import IO, Literal, Protocol
 
 from rich.console import Console
@@ -23,6 +24,7 @@ ProgressStage = Literal[
     "run_started",
     "turn_started",
     "provider_started",
+    "provider_streaming",
     "provider_finished",
     "tool_started",
     "compaction",
@@ -43,6 +45,7 @@ class ProgressUpdate:
     variant: str
     repeat: int
     total_turns: int
+    attempt: int = 1
     turn: int | None = None
     detail: str = ""
 
@@ -60,6 +63,8 @@ class BenchmarkProgressReporter(Protocol):
     ) -> None: ...
 
     def update(self, event: ProgressUpdate) -> None: ...
+
+    def add_runs(self, count: int) -> None: ...
 
 
 class RichBenchmarkProgress:
@@ -141,6 +146,14 @@ class RichBenchmarkProgress:
                 return
             self._progress.update(self._current, status=status)
 
+    def add_runs(self, count: int) -> None:
+        """在发生重试时扩展总运行数。"""
+        if count <= 0:
+            return
+        with self._lock:
+            task = self._progress.tasks[self._overall]
+            self._progress.update(self._overall, total=(task.total or 0) + count)
+
 
 class PlainBenchmarkProgress:
     """管道、CI 和重定向输出中的逐行进度日志。"""
@@ -150,6 +163,7 @@ class PlainBenchmarkProgress:
         self._completed_runs = 0
         self._stream = stream
         self._lock = threading.RLock()
+        self._last_provider_activity_log = 0.0
 
     def __enter__(self) -> PlainBenchmarkProgress:
         return self
@@ -164,6 +178,13 @@ class PlainBenchmarkProgress:
 
     def update(self, event: ProgressUpdate) -> None:
         with self._lock:
+            if event.stage == "provider_started":
+                self._last_provider_activity_log = 0.0
+            elif event.stage == "provider_streaming":
+                now = time.monotonic()
+                if now - self._last_provider_activity_log < 30:
+                    return
+                self._last_provider_activity_log = now
             if event.stage == "run_completed":
                 self._completed_runs += 1
             timestamp = datetime.now().astimezone().strftime("%H:%M:%S")
@@ -178,6 +199,12 @@ class PlainBenchmarkProgress:
                 file=self._stream,
                 flush=True,
             )
+
+    def add_runs(self, count: int) -> None:
+        if count <= 0:
+            return
+        with self._lock:
+            self._total_runs += count
 
 
 class NullBenchmarkProgress:
@@ -197,6 +224,9 @@ class NullBenchmarkProgress:
     def update(self, event: ProgressUpdate) -> None:
         return None
 
+    def add_runs(self, count: int) -> None:
+        return None
+
 
 def create_progress_reporter(
     total_runs: int,
@@ -214,14 +244,16 @@ def create_progress_reporter(
 
 
 def _run_label(event: ProgressUpdate) -> str:
-    return f"{event.task_id} {event.variant} r{event.repeat}"
+    attempt = f" a{event.attempt}" if event.attempt > 1 else ""
+    return f"{event.task_id} {event.variant} r{event.repeat}{attempt}"
 
 
 def _status(event: ProgressUpdate) -> str:
     default = {
         "run_started": "preparing workspace",
         "turn_started": "starting turn",
-        "provider_started": "waiting for model",
+        "provider_started": "waiting for first model event",
+        "provider_streaming": "model request active",
         "provider_finished": "model response received",
         "tool_started": "running tool",
         "compaction": "compacting context",

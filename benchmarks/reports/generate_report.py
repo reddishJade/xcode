@@ -10,6 +10,7 @@ from statistics import fmean, median
 from typing import Any
 
 _VARIANTS = ("baseline", "xcode")
+_PHASES = ("pre_compaction", "post_compaction", "post_resume")
 
 
 def load_records(paths: list[Path]) -> list[dict[str, Any]]:
@@ -38,33 +39,121 @@ def load_records(paths: list[Path]) -> list[dict[str, Any]]:
 
 
 def summarize_records(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """聚合全部运行，并仅用同 task/repeat 的记录计算变化。"""
-    by_variant: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    paired: dict[tuple[str, int], dict[str, dict[str, Any]]] = defaultdict(dict)
+    """按逻辑配对选择主 attempt，并为每项指标建立一致 cohort。"""
+    paired_attempts: dict[tuple[str, int, int], dict[str, dict[str, Any]]] = (
+        defaultdict(dict)
+    )
+    variant_attempts: dict[tuple[str, int, str], list[dict[str, Any]]] = defaultdict(
+        list
+    )
     for record in records:
         variant = str(record.get("variant", ""))
         if variant not in _VARIANTS:
             continue
-        by_variant[variant].append(record)
-        key = (str(record.get("task_id", "")), int(record.get("repeat", 0)))
-        if variant in paired[key]:
+        task_id = str(record.get("task_id", ""))
+        repeat = int(record.get("repeat", 0))
+        attempt = _attempt_number(record)
+        key = (task_id, repeat, attempt)
+        if variant in paired_attempts[key]:
             raise ValueError(
-                "duplicate run for paired key "
-                f"task={key[0]!r}, repeat={key[1]}, variant={variant!r}"
+                "duplicate run for paired attempt "
+                f"task={task_id!r}, repeat={repeat}, attempt={attempt}, "
+                f"variant={variant!r}"
             )
-        paired[key][variant] = record
-    pairs = [value for value in paired.values() if len(value) == 2]
-    for pair in pairs:
+        paired_attempts[key][variant] = record
+        variant_attempts[(task_id, repeat, variant)].append(record)
+
+    complete_pair_attempts = [
+        pair for pair in paired_attempts.values() if len(pair) == 2
+    ]
+    for pair in complete_pair_attempts:
         _validate_pair_controls(pair)
-    variants = {
-        variant: _variant_summary(by_variant.get(variant, [])) for variant in _VARIANTS
+    logical_pairs: dict[tuple[str, int], list[dict[str, dict[str, Any]]]] = defaultdict(
+        list
+    )
+    for (task_id, repeat, _attempt), pair in paired_attempts.items():
+        if len(pair) == 2:
+            logical_pairs[(task_id, repeat)].append(pair)
+    selected_pairs = [
+        _select_primary_pair(logical_pairs[key]) for key in sorted(logical_pairs)
+    ]
+
+    selected_by_variant: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    paired_keys = set(logical_pairs)
+    for pair in selected_pairs:
+        for variant in _VARIANTS:
+            selected_by_variant[variant].append(pair[variant])
+    for (task_id, repeat, variant), attempts in variant_attempts.items():
+        if (task_id, repeat) in paired_keys:
+            continue
+        selected_by_variant[variant].append(_select_primary_record(attempts))
+
+    complete_usage_pairs = [
+        pair for pair in selected_pairs if _pair_usage_complete(pair)
+    ]
+    phase_pairs = {
+        phase: [
+            pair for pair in selected_pairs if _pair_phase_usage_complete(pair, phase)
+        ]
+        for phase in _PHASES
     }
+    usage_by_variant = {
+        variant: [pair[variant] for pair in complete_usage_pairs]
+        for variant in _VARIANTS
+    }
+    for variant in _VARIANTS:
+        usage_by_variant[variant].extend(
+            record
+            for record in selected_by_variant.get(variant, [])
+            if (
+                str(record.get("task_id", "")),
+                int(record.get("repeat", 0)),
+            )
+            not in paired_keys
+            and record.get("usage_complete")
+        )
+    variants = {
+        variant: _variant_summary(
+            selected_by_variant.get(variant, []),
+            usage_by_variant[variant],
+        )
+        for variant in _VARIANTS
+    }
+    for phase, pairs in phase_pairs.items():
+        field = f"{phase}_input_tokens"
+        for variant in _VARIANTS:
+            variants[variant][f"{field}_mean"] = _mean_field(
+                [pair[variant] for pair in pairs],
+                field,
+            )
+    excluded_attempts = [
+        _excluded_attempt(pair)
+        for pair in complete_pair_attempts
+        if not _pair_usage_complete(pair)
+    ]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "runs": len(records),
-        "paired_runs": len(pairs),
+        "primary_runs": sum(len(values) for values in selected_by_variant.values()),
+        "paired_runs": len(selected_pairs),
+        "pair_attempts": len(complete_pair_attempts),
+        "retried_pairs": sum(len(attempts) > 1 for attempts in logical_pairs.values()),
+        "cohorts": {
+            "correctness_pairs": len(selected_pairs),
+            "complete_usage_pairs": len(complete_usage_pairs),
+            **{
+                f"{phase}_usage_pairs": len(pairs)
+                for phase, pairs in phase_pairs.items()
+            },
+        },
         "variants": variants,
-        "paired_changes": _paired_changes(pairs),
+        "paired_changes": _paired_changes(
+            selected_pairs,
+            complete_usage_pairs,
+            phase_pairs,
+        ),
+        "selected_pairs": [_selected_pair_summary(pair) for pair in selected_pairs],
+        "excluded_attempts": excluded_attempts,
     }
 
 
@@ -74,18 +163,27 @@ def render_markdown(summary: dict[str, Any]) -> str:
     baseline = variants["baseline"]
     xcode = variants["xcode"]
     changes = summary["paired_changes"]
+    cohorts = summary["cohorts"]
+    correctness_cohort = _cohort(cohorts.get("correctness_pairs"))
+    usage_cohort = _cohort(cohorts.get("complete_usage_pairs"))
+    pre_cohort = _cohort(cohorts.get("pre_compaction_usage_pairs"))
+    post_cohort = _cohort(cohorts.get("post_compaction_usage_pairs"))
+    resume_cohort = _cohort(cohorts.get("post_resume_usage_pairs"))
     lines = [
         "# Long-horizon compaction ablation",
         "",
         (
-            f"Runs: {summary['runs']} total, {summary['paired_runs']} paired "
-            "task/repetition samples."
+            f"Runs: {summary['runs']} attempt records, "
+            f"{summary['pair_attempts']} pair attempts, "
+            f"{summary['paired_runs']} selected task/repetition pairs."
         ),
+        f"Retried logical pairs: {summary['retried_pairs']}.",
         "",
-        "| Metric | Baseline | Xcode | Paired change |",
-        "|---|---:|---:|---:|",
+        "| Metric | Cohort | Baseline | Xcode | Paired change |",
+        "|---|---:|---:|---:|---:|",
         _row(
             "Mean input tokens",
+            usage_cohort,
             baseline.get("input_tokens_mean"),
             xcode.get("input_tokens_mean"),
             changes.get("input_token_reduction"),
@@ -93,13 +191,39 @@ def render_markdown(summary: dict[str, Any]) -> str:
         ),
         _row(
             "Peak input tokens",
+            usage_cohort,
             baseline.get("peak_input_tokens_mean"),
             xcode.get("peak_input_tokens_mean"),
             changes.get("peak_input_token_reduction"),
             change_kind="percent",
         ),
         _row(
+            "Pre-compaction input tokens",
+            pre_cohort,
+            baseline.get("pre_compaction_input_tokens_mean"),
+            xcode.get("pre_compaction_input_tokens_mean"),
+            changes.get("pre_compaction_input_token_reduction"),
+            change_kind="percent",
+        ),
+        _row(
+            "Post-compaction input tokens",
+            post_cohort,
+            baseline.get("post_compaction_input_tokens_mean"),
+            xcode.get("post_compaction_input_tokens_mean"),
+            changes.get("post_compaction_input_token_reduction"),
+            change_kind="percent",
+        ),
+        _row(
+            "Post-resume input tokens",
+            resume_cohort,
+            baseline.get("post_resume_input_tokens_mean"),
+            xcode.get("post_resume_input_tokens_mean"),
+            changes.get("post_resume_input_token_reduction"),
+            change_kind="percent",
+        ),
+        _row(
             "Input cost (USD)",
+            usage_cohort,
             baseline.get("input_cost_mean"),
             xcode.get("input_cost_mean"),
             changes.get("input_cost_reduction"),
@@ -107,7 +231,16 @@ def render_markdown(summary: dict[str, Any]) -> str:
             change_kind="percent",
         ),
         _row(
+            "Duration (seconds)",
+            correctness_cohort,
+            baseline.get("duration_seconds_mean"),
+            xcode.get("duration_seconds_mean"),
+            changes.get("duration_reduction"),
+            change_kind="percent",
+        ),
+        _row(
             "Task success rate",
+            correctness_cohort,
             baseline.get("task_success_rate"),
             xcode.get("task_success_rate"),
             changes.get("task_success_change_pp"),
@@ -116,6 +249,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         ),
         _row(
             "Long-session completion rate",
+            correctness_cohort,
             baseline.get("long_session_completion_rate"),
             xcode.get("long_session_completion_rate"),
             changes.get("long_session_completion_change_pp"),
@@ -124,6 +258,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         ),
         _row(
             "State retention",
+            correctness_cohort,
             baseline.get("state_retention_mean"),
             xcode.get("state_retention_mean"),
             changes.get("state_retention_change_pp"),
@@ -132,6 +267,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         ),
         _row(
             "Context overflow rate",
+            correctness_cohort,
             baseline.get("context_overflow_rate"),
             xcode.get("context_overflow_rate"),
             changes.get("context_overflow_change_pp"),
@@ -139,9 +275,23 @@ def render_markdown(summary: dict[str, Any]) -> str:
             change_kind="points",
         ),
         "",
-        "Token and cost rows exclude runs whose provider did not return complete usage.",
+        (
+            "Post-compaction includes the compaction-summary request; post-resume "
+            "starts on the turn after the declared restart boundary."
+        ),
+        "Each metric excludes only pairs whose provider usage is incomplete for that metric.",
         "Task success is determined by the task verification command, not model self-report.",
     ]
+    excluded = summary.get("excluded_attempts")
+    if isinstance(excluded, list) and excluded:
+        lines.extend(["", "## Excluded attempts", ""])
+        for item in excluded:
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                f"- {item.get('task_id')} r{item.get('repeat')} "
+                f"a{item.get('attempt')}: {item.get('reason')}"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -160,8 +310,10 @@ def write_report(records: list[dict[str, Any]], output_dir: Path) -> dict[str, A
     return summary
 
 
-def _variant_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
-    usage_records = [record for record in records if record.get("usage_complete")]
+def _variant_summary(
+    records: list[dict[str, Any]],
+    usage_records: list[dict[str, Any]],
+) -> dict[str, Any]:
     retentions = [
         float(value)
         for record in records
@@ -175,7 +327,10 @@ def _variant_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
     durations = [float(record.get("duration_seconds", 0)) for record in records]
     return {
         "runs": len(records),
-        "usage_complete_runs": len(usage_records),
+        "usage_complete_runs": sum(
+            bool(record.get("usage_complete")) for record in records
+        ),
+        "token_cohort_runs": len(usage_records),
         "input_tokens_mean": _mean_field(usage_records, "input_tokens_total"),
         "input_tokens_median": _median_field(usage_records, "input_tokens_total"),
         "peak_input_tokens_mean": _mean_field(usage_records, "peak_input_tokens"),
@@ -191,14 +346,10 @@ def _variant_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _paired_changes(
-    pairs: list[dict[str, dict[str, Any]]],
+    selected_pairs: list[dict[str, dict[str, Any]]],
+    complete_usage_pairs: list[dict[str, dict[str, Any]]],
+    phase_pairs: dict[str, list[dict[str, dict[str, Any]]]],
 ) -> dict[str, float | None]:
-    complete_usage_pairs = [
-        pair
-        for pair in pairs
-        if pair["baseline"].get("usage_complete")
-        and pair["xcode"].get("usage_complete")
-    ]
     return {
         "input_token_reduction": _paired_reduction(
             complete_usage_pairs, "input_tokens_total"
@@ -215,26 +366,117 @@ def _paired_changes(
             ],
             "input_cost_usd",
         ),
-        "task_success_change_pp": _paired_point_change(pairs, "task_success"),
+        **{
+            f"{phase}_input_token_reduction": _paired_reduction(
+                pairs,
+                f"{phase}_input_tokens",
+            )
+            for phase, pairs in phase_pairs.items()
+        },
+        "duration_reduction": _paired_reduction(
+            selected_pairs,
+            "duration_seconds",
+        ),
+        "task_success_change_pp": _paired_point_change(selected_pairs, "task_success"),
         "long_session_completion_change_pp": _paired_point_change(
-            pairs, "long_session_completed"
+            selected_pairs, "long_session_completed"
         ),
         "state_retention_change_pp": _paired_numeric_point_change(
-            pairs, "state_retention"
+            selected_pairs, "state_retention"
         ),
-        "context_overflow_change_pp": _paired_point_change(pairs, "context_overflow"),
+        "context_overflow_change_pp": _paired_point_change(
+            selected_pairs, "context_overflow"
+        ),
     }
 
 
 def _validate_pair_controls(pair: dict[str, dict[str, Any]]) -> None:
     baseline = pair["baseline"]
     xcode = pair["xcode"]
-    for field in ("model", "temperature", "execution_mode"):
+    for field in (
+        "model",
+        "temperature",
+        "execution_mode",
+        "summary_mode",
+        "baseline_commit",
+    ):
         if baseline.get(field) != xcode.get(field):
             raise ValueError(
                 f"paired runs differ on control {field}: "
                 f"{baseline.get(field)!r} != {xcode.get(field)!r}"
             )
+
+
+def _attempt_number(record: dict[str, Any]) -> int:
+    value = record.get("attempt", 1)
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"invalid benchmark attempt: {value!r}")
+    return value
+
+
+def _select_primary_pair(
+    pairs: list[dict[str, dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    ordered = sorted(pairs, key=lambda pair: _attempt_number(pair["baseline"]))
+    return next((pair for pair in ordered if _pair_usage_complete(pair)), ordered[-1])
+
+
+def _select_primary_record(records: list[dict[str, Any]]) -> dict[str, Any]:
+    ordered = sorted(records, key=_attempt_number)
+    return next(
+        (record for record in ordered if record.get("usage_complete")),
+        ordered[-1],
+    )
+
+
+def _pair_usage_complete(pair: dict[str, dict[str, Any]]) -> bool:
+    return all(bool(pair[variant].get("usage_complete")) for variant in _VARIANTS)
+
+
+def _pair_phase_usage_complete(
+    pair: dict[str, dict[str, Any]],
+    phase: str,
+) -> bool:
+    return all(
+        bool(pair[variant].get(f"{phase}_usage_complete")) for variant in _VARIANTS
+    )
+
+
+def _selected_pair_summary(
+    pair: dict[str, dict[str, Any]],
+) -> dict[str, object]:
+    baseline = pair["baseline"]
+    return {
+        "task_id": str(baseline.get("task_id", "")),
+        "repeat": int(baseline.get("repeat", 0)),
+        "attempt": _attempt_number(baseline),
+        "usage_complete": _pair_usage_complete(pair),
+    }
+
+
+def _excluded_attempt(
+    pair: dict[str, dict[str, Any]],
+) -> dict[str, object]:
+    baseline = pair["baseline"]
+    reasons: list[str] = []
+    for variant in _VARIANTS:
+        record = pair[variant]
+        if record.get("usage_complete"):
+            continue
+        raw_issues = record.get("usage_incomplete_calls")
+        issues = raw_issues if isinstance(raw_issues, list) else []
+        errors = [
+            str(issue.get("error", "missing usage"))
+            for issue in issues
+            if isinstance(issue, dict)
+        ]
+        reasons.append(f"{variant}: {', '.join(errors) or 'provider usage incomplete'}")
+    return {
+        "task_id": str(baseline.get("task_id", "")),
+        "repeat": int(baseline.get("repeat", 0)),
+        "attempt": _attempt_number(baseline),
+        "reason": "; ".join(reasons),
+    }
 
 
 def _paired_reduction(
@@ -293,6 +535,7 @@ def _boolean_rate(records: list[dict[str, Any]], field: str) -> float | None:
 
 def _row(
     label: str,
+    cohort: str,
     baseline: object,
     xcode: object,
     change: object,
@@ -301,10 +544,15 @@ def _row(
     change_kind: str = "number",
 ) -> str:
     return (
-        f"| {label} | {_format_value(baseline, value_kind)} | "
+        f"| {label} | {cohort} | {_format_value(baseline, value_kind)} | "
         f"{_format_value(xcode, value_kind)} | "
         f"{_format_value(change, change_kind)} |"
     )
+
+
+def _cohort(value: object) -> str:
+    count = value if isinstance(value, int) and not isinstance(value, bool) else 0
+    return f"n={count} pairs"
 
 
 def _format_value(value: object, kind: str) -> str:

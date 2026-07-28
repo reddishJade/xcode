@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 
 from xcode.harness.config import (
     XcodeRuntimeConfig,
@@ -23,8 +24,7 @@ def run_variant_main(variant: Variant) -> None:
     parser = _parser(f"Run the {variant} long-horizon benchmark variant.")
     args = parser.parse_args()
     records = _run_variants(args, (variant,))
-    write_report(records, args.output_dir.resolve())
-    print(args.output_dir.resolve() / "report.md")
+    _write_and_validate_report(records, args, (variant,))
 
 
 def run_ablation_main() -> None:
@@ -32,8 +32,7 @@ def run_ablation_main() -> None:
     parser = _parser("Run paired baseline/Xcode long-horizon ablations.")
     args = parser.parse_args()
     records = _run_variants(args, ("baseline", "xcode"))
-    write_report(records, args.output_dir.resolve())
-    print(args.output_dir.resolve() / "report.md")
+    _write_and_validate_report(records, args, ("baseline", "xcode"))
 
 
 def _parser(description: str) -> argparse.ArgumentParser:
@@ -51,6 +50,22 @@ def _parser(description: str) -> argparse.ArgumentParser:
         help="explicit Xcode runtime config; otherwise discover config from cwd",
     )
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument(
+        "--max-pair-attempts",
+        type=int,
+        default=1,
+        help=(
+            "rerun a baseline/Xcode pair after transient incomplete usage; "
+            "original attempts are retained"
+        ),
+    )
+    parser.add_argument(
+        "--require-complete-usage",
+        "--fail-on-incomplete",
+        dest="require_complete_usage",
+        action="store_true",
+        help="write the report, then exit nonzero if a primary usage cohort is incomplete",
+    )
     parser.add_argument("--temperature", type=float)
     parser.add_argument(
         "--summary-mode",
@@ -77,6 +92,8 @@ def _run_variants(
 ) -> list[dict[str, object]]:
     if args.repeat <= 0:
         raise ValueError("--repeat must be positive")
+    if args.max_pair_attempts <= 0:
+        raise ValueError("--max-pair-attempts must be positive")
     runtime_config = _runtime_config(args.config)
     task_files = discover_task_files(args.tasks)
     tasks = [load_task(path) for path in task_files]
@@ -92,23 +109,103 @@ def _run_variants(
             if len(variants) == 2 and repetition % 2 == 0:
                 ordered = tuple(reversed(variants))
             for task in tasks:
-                for variant in ordered:
-                    options = RunOptions(
-                        output_dir=args.output_dir.resolve(),
-                        repeat=repetition,
-                        temperature=args.temperature,
-                        summary_mode=_summary_mode(args.summary_mode),
-                        keep_workspace=args.keep_workspaces,
-                        progress_callback=reporter.update,
-                    )
-                    record = run_task(task, variant, runtime_config, options)
-                    records.append(record)
+                for attempt in range(1, args.max_pair_attempts + 1):
+                    attempt_records: list[dict[str, object]] = []
+                    for variant in ordered:
+                        options = RunOptions(
+                            output_dir=args.output_dir.resolve(),
+                            repeat=repetition,
+                            attempt=attempt,
+                            temperature=args.temperature,
+                            summary_mode=_summary_mode(args.summary_mode),
+                            keep_workspace=args.keep_workspaces,
+                            progress_callback=reporter.update,
+                        )
+                        record = run_task(task, variant, runtime_config, options)
+                        attempt_records.append(record)
+                        records.append(record)
+                        attempt_label = f" a{attempt}" if attempt > 1 else ""
+                        print(
+                            f"{task.id} {variant} r{repetition}{attempt_label}: "
+                            f"success={record['task_success']} "
+                            f"usage_complete={record['usage_complete']} "
+                            f"input_tokens={record['input_tokens_total']}"
+                        )
+                    if all(
+                        bool(record.get("usage_complete")) for record in attempt_records
+                    ):
+                        break
+                    if attempt >= args.max_pair_attempts or not _retryable_attempt(
+                        attempt_records
+                    ):
+                        break
+                    reporter.add_runs(len(variants))
+                    reason = _attempt_issue_detail(attempt_records)
                     print(
-                        f"{task.id} {variant} r{repetition}: "
-                        f"success={record['task_success']} "
-                        f"input_tokens={record['input_tokens_total']}"
+                        f"{task.id} r{repetition}: retrying full pair as "
+                        f"attempt {attempt + 1}/{args.max_pair_attempts}: {reason}",
+                        file=sys.stderr,
+                        flush=True,
                     )
     return records
+
+
+def _retryable_attempt(records: list[dict[str, object]]) -> bool:
+    """仅对具有明确瞬时 provider 错误的 usage 缺失执行重跑。"""
+    incomplete = [record for record in records if not record.get("usage_complete")]
+    return bool(incomplete) and all(
+        bool(record.get("retryable_usage_failure")) for record in incomplete
+    )
+
+
+def _attempt_issue_detail(records: list[dict[str, object]]) -> str:
+    details: list[str] = []
+    for record in records:
+        if record.get("usage_complete"):
+            continue
+        variant = str(record.get("variant", "run"))
+        raw_issues = record.get("usage_incomplete_calls")
+        issues = raw_issues if isinstance(raw_issues, list) else []
+        errors = [
+            str(issue.get("error", "missing usage"))
+            for issue in issues
+            if isinstance(issue, dict)
+        ]
+        details.append(f"{variant}: {', '.join(errors) or 'missing usage'}")
+    return "; ".join(details) or "incomplete provider usage"
+
+
+def _write_and_validate_report(
+    records: list[dict[str, object]],
+    args: argparse.Namespace,
+    variants: tuple[Variant, ...],
+) -> None:
+    output_dir = args.output_dir.resolve()
+    summary = write_report(records, output_dir)
+    report_path = output_dir / "report.md"
+    print(report_path)
+    if not args.require_complete_usage:
+        return
+    if len(variants) == 2:
+        cohorts = summary.get("cohorts")
+        values = cohorts if isinstance(cohorts, dict) else {}
+        complete = int(values.get("complete_usage_pairs", 0))
+        expected = int(summary.get("paired_runs", 0))
+        is_incomplete = complete < expected
+    else:
+        raw_variant = summary.get("variants")
+        variant_values = raw_variant if isinstance(raw_variant, dict) else {}
+        raw_stats = variant_values.get(variants[0])
+        stats = raw_stats if isinstance(raw_stats, dict) else {}
+        is_incomplete = int(stats.get("usage_complete_runs", 0)) < int(
+            stats.get("runs", 0)
+        )
+    if is_incomplete:
+        print(
+            f"incomplete provider usage remains; see {report_path}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
 
 
 def _runtime_config(path: Path | None) -> XcodeRuntimeConfig:

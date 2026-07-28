@@ -46,17 +46,31 @@ uv run python -m benchmarks.runners.run_ablation \
   benchmarks/tasks/long_horizon/parser_recovery/task.json \
   --config xcode.config.json \
   --temperature 0 \
-  --repeat 3
+  --repeat 3 \
+  --max-pair-attempts 2 \
+  --require-complete-usage
 ```
 
 This command makes real API calls. Raw JSON, `summary.json`, and `report.md` are
 written below `benchmark-results/long_horizon/<timestamp>/`. Add
 `--keep-workspaces` when a failed run needs manual inspection.
 
+`--max-pair-attempts` retries both baseline and Xcode in fresh workspaces when
+a transient provider error leaves usage incomplete. Every attempt remains in
+raw JSON; the report selects the first complete pair and lists excluded
+attempts with their reasons. The default is one attempt to avoid unexpected API
+cost. `--require-complete-usage` (alias `--fail-on-incomplete`) writes the report
+and then exits with status 2 if any selected pair still lacks complete usage.
+
 Interactive terminals show an overall run bar plus the current task's turn,
-model request, tool, compaction, restart, and verification status. Redirected
-output and CI receive timestamped progress lines instead. Use `--no-progress`
-only when another process is supervising the command.
+model request, tool, compaction, restart, and verification status. During a
+model call, the status distinguishes waiting for the first event from active
+reasoning, answer streaming, tool calls, usage, and finalization. It also shows
+the request number, elapsed time, time since the last event, and event count,
+with a one-second heartbeat even when the provider is silent. Redirected output
+and CI receive timestamped lines with model heartbeats limited to one every 30
+seconds. Use `--no-progress` only when another process is supervising the
+command.
 
 Run groups separately when required:
 
@@ -96,6 +110,10 @@ and inspect per-task pairs instead of reporting only a pooled mean.
 ## Reported metrics
 
 - `input_tokens_total` and `peak_input_tokens` come from provider usage;
+- `pre_compaction_input_tokens` covers turns before the declared compaction;
+- `post_compaction_input_tokens` includes the summary request and all later
+  turns;
+- `post_resume_input_tokens` starts on the turn after the restart boundary;
 - `task_success` comes only from the verification process exit code;
 - `state_retention` is the fraction of deterministic facts that pass;
 - `context_overflow` is detected from provider/runtime context-limit errors;
@@ -103,6 +121,12 @@ and inspect per-task pairs instead of reporting only a pooled mean.
   no context overflow;
 - `repeated_read_calls` counts repeated reads of the same path as a diagnostic,
   not a success criterion.
+
+Each metric uses its own paired cohort. Total Token and cost require complete
+usage for the whole baseline/Xcode pair, while post-compaction metrics remain
+eligible when missing usage occurred only before that phase. Correctness and
+state-retention metrics include the selected attempt regardless of usage
+completeness. Reports show the cohort size on every row.
 
 Do not quote percentages from the example until enough paired task runs have
 completed and `usage_complete` is true for the included samples.

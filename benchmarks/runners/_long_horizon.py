@@ -15,7 +15,14 @@ import time
 from typing import Any, Literal
 from uuid import uuid4
 
-from xcode.ai.events import Message, ProviderEvent, UsageUpdate
+from xcode.ai.events import (
+    Message,
+    ProviderEvent,
+    ReasoningDelta,
+    TextDelta,
+    ToolCallEvent,
+    UsageUpdate,
+)
 from xcode.ai.models import get_models, get_providers
 from xcode.ai.providers.base import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
@@ -53,6 +60,16 @@ _OVERFLOW_MARKERS = (
     "prompt is too long",
     "too many tokens",
 )
+_TRANSIENT_PROVIDER_ERROR_MARKERS = (
+    "connection",
+    "incomplete chunked read",
+    "peer closed",
+    "rate limit",
+    "request timed out",
+    "temporarily unavailable",
+    "timeout",
+    "timed out",
+)
 
 _BENCHMARK_GIT_EXCLUDES = """\
 .benchmark/
@@ -63,6 +80,7 @@ _BENCHMARK_GIT_EXCLUDES = """\
 .coverage
 """
 _BENCHMARK_GIT_DATE = "2000-01-01T00:00:00+00:00"
+_PROVIDER_HEARTBEAT_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
@@ -71,6 +89,7 @@ class RunOptions:
 
     output_dir: Path
     repeat: int
+    attempt: int = 1
     temperature: float | None = None
     summary_mode: SummaryMode = "model"
     keep_workspace: bool = False
@@ -108,6 +127,7 @@ class InstrumentedProvider:
         self._calls = calls
         self._progress_callback = progress_callback
         self._lock = threading.Lock()
+        self._request_count = len(calls)
 
     @property
     def model(self) -> str:
@@ -144,8 +164,26 @@ class InstrumentedProvider:
         output_tokens = 0
         has_usage = False
         error: str | None = None
-        kind = "compaction summary" if not tools else "agent request"
-        self._emit_progress("provider_started", f"{kind} · {self._delegate.model}")
+        with self._lock:
+            self._request_count += 1
+            request_index = self._request_count
+        short_kind = "summary" if not tools else "agent"
+        label = f"{short_kind} #{request_index} · {self._delegate.model}"
+        activity_lock = threading.Lock()
+        activity: dict[str, float | int | str | None] = {
+            "events": 0,
+            "mode": "waiting first event",
+            "last_event": None,
+        }
+        heartbeat_stop = threading.Event()
+        self._emit_progress("provider_started", label)
+        heartbeat = self._start_provider_heartbeat(
+            heartbeat_stop,
+            activity_lock,
+            activity,
+            label,
+            started,
+        )
         try:
             async for event in self._delegate.stream(
                 messages,
@@ -157,11 +195,33 @@ class InstrumentedProvider:
                     input_tokens += event.input_tokens
                     output_tokens += event.output_tokens
                     has_usage = True
+                mode = _provider_event_mode(event)
+                should_emit = False
+                now = time.perf_counter()
+                with activity_lock:
+                    previous_mode = str(activity["mode"])
+                    activity["events"] = int(activity["events"] or 0) + 1
+                    activity["mode"] = mode
+                    activity["last_event"] = now
+                    should_emit = int(activity["events"]) == 1 or mode != previous_mode
+                if should_emit:
+                    self._emit_progress(
+                        "provider_streaming",
+                        _provider_activity_detail(
+                            label,
+                            activity_lock,
+                            activity,
+                            started,
+                        ),
+                    )
                 yield event
         except Exception as exc:
             error = str(exc)
             raise
         finally:
+            heartbeat_stop.set()
+            if heartbeat is not None:
+                heartbeat.join(timeout=1)
             record = ProviderCallRecord(
                 kind="compaction_summary" if not tools else "agent",
                 model=self._delegate.model,
@@ -174,7 +234,8 @@ class InstrumentedProvider:
             with self._lock:
                 self._calls.append(record)
             detail = (
-                f"{kind} · in={input_tokens} out={output_tokens} · "
+                f"{short_kind} #{request_index} · in={input_tokens} "
+                f"out={output_tokens} · "
                 f"{record.duration_seconds:.1f}s"
             )
             self._emit_progress("provider_finished", detail)
@@ -187,6 +248,68 @@ class InstrumentedProvider:
     def _emit_progress(self, stage: ProgressStage, detail: str) -> None:
         if self._progress_callback is not None:
             self._progress_callback(stage, detail)
+
+    def _start_provider_heartbeat(
+        self,
+        stop: threading.Event,
+        activity_lock: threading.Lock,
+        activity: dict[str, float | int | str | None],
+        label: str,
+        started: float,
+    ) -> threading.Thread | None:
+        if self._progress_callback is None:
+            return None
+
+        def heartbeat() -> None:
+            while not stop.wait(_PROVIDER_HEARTBEAT_SECONDS):
+                self._emit_progress(
+                    "provider_streaming",
+                    _provider_activity_detail(
+                        label,
+                        activity_lock,
+                        activity,
+                        started,
+                    ),
+                )
+
+        worker = threading.Thread(
+            target=heartbeat,
+            name="benchmark-provider-progress",
+            daemon=True,
+        )
+        worker.start()
+        return worker
+
+
+def _provider_event_mode(event: ProviderEvent) -> str:
+    if isinstance(event, ReasoningDelta):
+        return "reasoning"
+    if isinstance(event, TextDelta):
+        return "answer"
+    if isinstance(event, ToolCallEvent):
+        return "tool call"
+    if isinstance(event, UsageUpdate):
+        return "usage"
+    return "finalizing"
+
+
+def _provider_activity_detail(
+    label: str,
+    activity_lock: threading.Lock,
+    activity: dict[str, float | int | str | None],
+    started: float,
+) -> str:
+    now = time.perf_counter()
+    with activity_lock:
+        mode = str(activity["mode"])
+        events = int(activity["events"] or 0)
+        raw_last_event = activity["last_event"]
+    elapsed = now - started
+    if isinstance(raw_last_event, float):
+        freshness = f"last {now - raw_last_event:.1f}s ago"
+    else:
+        freshness = "no events yet"
+    return f"{label} · {mode} · elapsed {elapsed:.1f}s · {freshness} · events {events}"
 
 
 def _prepare_workspace(source: Path, workspace: Path) -> str:
@@ -278,13 +401,16 @@ def run_task(
                 task_id=task.id,
                 variant=variant,
                 repeat=options.repeat,
+                attempt=options.attempt,
                 total_turns=len(task.turns),
                 turn=turn,
                 detail=detail,
             )
         )
 
-    run_id = f"{task.id}-{variant}-r{options.repeat}-{uuid4().hex[:8]}"
+    run_id = (
+        f"{task.id}-{variant}-r{options.repeat}-a{options.attempt}-{uuid4().hex[:8]}"
+    )
     output_dir = options.output_dir.resolve()
     workspace = output_dir / "workspaces" / run_id
     if workspace.exists():
@@ -303,7 +429,7 @@ def run_task(
     restarts = 0
     checkpoint_resumes = 0
     boundary_indices: dict[str, int] = {}
-    session_id = f"bench-{task.id}-{variant}-r{options.repeat}"
+    session_id = f"bench-{task.id}-{variant}-r{options.repeat}-a{options.attempt}"
     runtime_dir = output_dir / "runtime" / run_id
     configured = _benchmark_runtime_config(
         runtime_config,
@@ -356,6 +482,10 @@ def run_task(
                         "turn": turn_index,
                         "duration_seconds": time.perf_counter() - turn_started,
                         "error": str(exc),
+                        "provider_calls": [
+                            call.to_dict() for call in calls[call_start:]
+                        ],
+                        "tool_calls": [],
                     }
                 )
                 break
@@ -454,12 +584,15 @@ def run_task(
     long_session_completed = (
         task_success and all_turns_completed and normal_termination and not overflow
     )
+    phase_metrics = _build_phase_metrics(task, turn_records)
+    usage_issues = _usage_incomplete_calls(calls)
     record: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": run_id,
         "task_id": task.id,
         "variant": variant,
         "repeat": options.repeat,
+        "attempt": options.attempt,
         "model": app.agent.provider.model,
         "temperature": options.temperature,
         "summary_mode": options.summary_mode,
@@ -474,6 +607,9 @@ def run_task(
         "output_tokens_total": output_tokens,
         "peak_input_tokens": max((call.input_tokens for call in calls), default=0),
         "usage_complete": bool(calls) and all(call.has_usage for call in calls),
+        "usage_incomplete_calls": usage_issues,
+        "retryable_usage_failure": bool(usage_issues)
+        and all(bool(issue["retryable"]) for issue in usage_issues),
         "pricing_by_model": {
             model: {
                 "input_per_million": prices[0],
@@ -497,6 +633,7 @@ def run_task(
         "provider_calls": [call.to_dict() for call in calls],
         "tool_calls_total": len(tool_calls),
         "repeated_read_calls": _repeated_read_calls(tool_calls),
+        **phase_metrics,
         "turns": turn_records,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -655,6 +792,142 @@ def _rebuild_history(
         *history[boundary:],
     ]
     return rebuilt, True
+
+
+def _build_phase_metrics(
+    task: LongHorizonTask,
+    turn_records: list[dict[str, object]],
+) -> dict[str, object]:
+    """按任务声明的压缩和重启边界聚合 provider usage。"""
+    compaction_turn = next(
+        (index for index, turn in enumerate(task.turns, 1) if turn.compact_before),
+        None,
+    )
+    restart_after_turn = next(
+        (index for index, turn in enumerate(task.turns, 1) if turn.restart_after),
+        None,
+    )
+    calls_by_turn: dict[int, list[dict[str, object]]] = {}
+    for record in turn_records:
+        turn = record.get("turn")
+        if isinstance(turn, int) and not isinstance(turn, bool):
+            calls_by_turn[turn] = _serialized_provider_calls(record)
+    all_calls = [call for turn in sorted(calls_by_turn) for call in calls_by_turn[turn]]
+    metrics: dict[str, object] = {
+        "compaction_turn": compaction_turn,
+        "restart_after_turn": restart_after_turn,
+    }
+    if compaction_turn is None:
+        metrics.update(_empty_phase_metrics("pre_compaction"))
+        metrics.update(_empty_phase_metrics("post_compaction"))
+    else:
+        metrics.update(
+            _phase_metrics(
+                "pre_compaction",
+                [
+                    call
+                    for turn, calls in calls_by_turn.items()
+                    if turn < compaction_turn
+                    for call in calls
+                ],
+            )
+        )
+        metrics.update(
+            _phase_metrics(
+                "post_compaction",
+                [
+                    call
+                    for turn, calls in calls_by_turn.items()
+                    if turn >= compaction_turn
+                    for call in calls
+                ],
+            )
+        )
+    if restart_after_turn is None:
+        metrics.update(_empty_phase_metrics("post_resume"))
+    else:
+        metrics.update(
+            _phase_metrics(
+                "post_resume",
+                [
+                    call
+                    for turn, calls in calls_by_turn.items()
+                    if turn > restart_after_turn
+                    for call in calls
+                ],
+            )
+        )
+    summary_calls = [
+        call for call in all_calls if call.get("kind") == "compaction_summary"
+    ]
+    metrics.update(_phase_metrics("compaction_summary", summary_calls))
+    return metrics
+
+
+def _serialized_provider_calls(
+    turn_record: dict[str, object],
+) -> list[dict[str, object]]:
+    raw_calls = turn_record.get("provider_calls")
+    if not isinstance(raw_calls, list):
+        return []
+    return [call for call in raw_calls if isinstance(call, dict)]
+
+
+def _phase_metrics(
+    prefix: str,
+    calls: list[dict[str, object]],
+) -> dict[str, object]:
+    input_tokens = [_integer_field(call, "input_tokens") for call in calls]
+    output_tokens = [_integer_field(call, "output_tokens") for call in calls]
+    return {
+        f"{prefix}_input_tokens": sum(input_tokens),
+        f"{prefix}_output_tokens": sum(output_tokens),
+        f"{prefix}_peak_input_tokens": max(input_tokens, default=0),
+        f"{prefix}_provider_calls": len(calls),
+        f"{prefix}_usage_complete": bool(calls)
+        and all(bool(call.get("has_usage")) for call in calls),
+    }
+
+
+def _empty_phase_metrics(prefix: str) -> dict[str, object]:
+    return {
+        f"{prefix}_input_tokens": None,
+        f"{prefix}_output_tokens": None,
+        f"{prefix}_peak_input_tokens": None,
+        f"{prefix}_provider_calls": 0,
+        f"{prefix}_usage_complete": False,
+    }
+
+
+def _integer_field(record: dict[str, object], field: str) -> int:
+    value = record.get(field)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _usage_incomplete_calls(
+    calls: list[ProviderCallRecord],
+) -> list[dict[str, object]]:
+    issues: list[dict[str, object]] = []
+    for index, call in enumerate(calls, 1):
+        if call.has_usage:
+            continue
+        error = call.error or "provider returned no usage"
+        issues.append(
+            {
+                "call_index": index,
+                "kind": call.kind,
+                "error": error,
+                "retryable": _is_transient_provider_error(call.error),
+            }
+        )
+    return issues
+
+
+def _is_transient_provider_error(error: str | None) -> bool:
+    if error is None:
+        return False
+    normalized = error.casefold()
+    return any(marker in normalized for marker in _TRANSIENT_PROVIDER_ERROR_MARKERS)
 
 
 def _model_prices(model_name: str) -> tuple[float, float] | None:
