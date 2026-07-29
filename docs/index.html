@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>xcode — 可扩展的 Python Coding Agent 运行时骨架</title>
+  <meta name="description" content="围绕结构化事件流、执行模式、路径安全、工具审批、审计脱敏、上下文压缩、REPL/TUI 会话与记忆系统构建的可测试 Coding Agent 运行时骨架。">
+  <meta property="og:title" content="xcode — 可扩展的 Python Coding Agent 运行时骨架">
+  <meta property="og:description" content="围绕结构化事件流、执行模式、路径安全、工具审批、审计脱敏、上下文压缩、REPL/TUI 会话与记忆系统构建的可测试 Coding Agent 运行时骨架。">
+  <meta property="og:url" content="https://reddishjade.github.io/xcode/">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://reddishjade.github.io/xcode/">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23141413'/%3E%3Cpath d='M18 20 L30 32 L18 44' stroke='%23d97757' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='34' y='40' width='14' height='6' rx='3' fill='%23e8e6dc'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;700;900&display=swap" rel="stylesheet">
+  <script>
+    (function() {
+      try {
+        var l = localStorage.getItem('xcode-lang');
+        if (!l) {
+          var nav = (navigator.language || '').toLowerCase();
+          if (nav.indexOf('zh') === 0) l = 'zh';
+          else if (nav.indexOf('en') === 0) l = 'en';
+          else l = 'zh';
+        }
+        if (l === 'zh' || l === 'en') { document.documentElement.dataset.lang = l; document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en'; }
+      } catch (e) {}
+      try {
+        var t = localStorage.getItem('xcode-theme');
+        if (t === 'light' || t === 'dark') { document.documentElement.dataset.theme = t; }
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    :root {
+      --ink: #141413;
+      --ink-soft: #3c3b36;
+      --paper: #e8e6dc;
+      --paper-2: #efede6;
+      --paper-3: #dfdcd2;
+      --clay: #d97757;
+      --clay-2: #b85c3d;
+      --olive: #788c5d;
+      --blue: #6a9bcc;
+      --line: color-mix(in srgb, var(--ink) 16%, transparent);
+      --line-soft: color-mix(in srgb, var(--ink) 9%, transparent);
+      --font-display: "Fraunces", "Noto Serif SC", serif;
+      --font-body: "Instrument Sans", "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, "Noto Sans SC", monospace;
+      --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #e8e6dc;
+        --ink-soft: #b8b5a8;
+        --paper: #141413;
+        --paper-2: #1c1b17;
+        --paper-3: #252420;
+        --clay: #e08a6d;
+        --clay-2: #d97757;
+        --olive: #8a9e6d;
+        --blue: #7da8cc;
+      }
+    }
+    html[data-theme="dark"] {
+      --ink: #e8e6dc;
+      --ink-soft: #b8b5a8;
+      --paper: #141413;
+      --paper-2: #1c1b17;
+      --paper-3: #252420;
+      --clay: #e08a6d;
+      --clay-2: #d97757;
+      --olive: #8a9e6d;
+      --blue: #7da8cc;
+    }
+    html[data-theme="light"] {
+      --ink: #141413;
+      --ink-soft: #3c3b36;
+      --paper: #e8e6dc;
+      --paper-2: #efede6;
+      --paper-3: #dfdcd2;
+      --clay: #d97757;
+      --clay-2: #b85c3d;
+      --olive: #788c5d;
+      --blue: #6a9bcc;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 88px; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0.22;
+      mix-blend-mode: soft-light;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+    }
+
+    ::selection { background: var(--clay); color: var(--paper); }
+    :focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+
+    a { color: inherit; text-decoration: none; }
+    h1, h2, h3, p { margin: 0; }
+
+    .lz, .le { display: inline; }
+    html[data-lang="zh"] .le, html[data-lang="en"] .lz { display: none !important; }
+
+    .wrap { width: min(1140px, 92vw); margin-inline: auto; }
+    .reveal { opacity: 0; transform: translateY(18px); transition: opacity .8s var(--ease), transform .8s var(--ease); }
+    .reveal.in { opacity: 1; transform: none; }
+
+    /* Nav */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      background: color-mix(in srgb, var(--paper) 86%, transparent);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 68px;
+    }
+    .nav-left { display: flex; align-items: center; gap: 32px; }
+    .logo {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: var(--font-mono); font-size: 18px; font-weight: 500; letter-spacing: -0.02em;
+    }
+    .logo-mark {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; border-radius: 6px;
+      background: var(--ink); color: var(--paper); font-size: 13px;
+    }
+    .nav-links { display: flex; gap: 22px; }
+    .nav-links a {
+      font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--ink-soft); position: relative; padding: 4px 0;
+    }
+    .nav-links a::after {
+      content: ""; position: absolute; bottom: 0; left: 0; width: 0; height: 1px; background: var(--clay);
+      transition: width .3s var(--ease);
+    }
+    .nav-links a:hover { color: var(--ink); }
+    .nav-links a:hover::after { width: 100%; }
+    .nav-right { display: flex; align-items: center; gap: 12px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+      padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
+      background: transparent; color: var(--ink); cursor: pointer;
+      transition: all .25s var(--ease);
+    }
+    .btn:hover { border-color: var(--clay); background: color-mix(in srgb, var(--clay) 8%, transparent); }
+    .btn-primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .btn-primary:hover { background: var(--clay); border-color: var(--clay); color: var(--paper); }
+    .btn-small { padding: 6px 10px; }
+    .lang-toggle { min-width: 42px; justify-content: center; }
+    .theme-toggle { width: 36px; justify-content: center; }
+    .theme-icon { display: none; width: 16px; height: 16px; }
+    .theme-icon.active { display: block; }
+
+    /* Hero */
+    .hero { padding-top: 140px; padding-bottom: 90px; }
+    .hero-grid {
+      display: grid; grid-template-columns: 1.05fr .95fr; gap: 64px; align-items: center;
+    }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--clay-2); margin-bottom: 22px;
+    }
+    .eyebrow::before {
+      content: ""; display: block; width: 24px; height: 1px; background: var(--clay);
+    }
+    .hero h1 {
+      font-family: var(--font-display); font-weight: 350; font-size: clamp(2.6rem, 6.2vw, 5.6rem);
+      line-height: 1.05; letter-spacing: -0.02em; margin-bottom: 24px;
+    }
+    .hero h1 em {
+      font-style: italic; color: var(--clay); font-weight: 500;
+    }
+    .hero-lede {
+      font-size: 1.15rem; line-height: 1.65; color: var(--ink-soft); max-width: 520px; margin-bottom: 34px;
+    }
+    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 38px; }
+    .hero-actions .btn { font-size: 13px; padding: 11px 20px; }
+    .hero-actions .btn-primary .lz::after { content: " →"; }
+    .hero-actions .btn-primary .le::after { content: " →"; }
+    .stats {
+      display: flex; gap: 28px; flex-wrap: wrap;
+      font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft);
+    }
+    .stats span { display: flex; align-items: center; gap: 8px; }
+    .stats span::before {
+      content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--clay);
+    }
+
+    /* Terminal */
+    .terminal-wrap { position: relative; }
+    .terminal {
+      background: #1b1a16; color: #d8d5cb; border-radius: 16px;
+      box-shadow:
+        0 2px 0 rgba(255,255,255,.04) inset,
+        0 32px 70px -24px rgba(0,0,0,.55),
+        0 0 0 1px var(--line-soft);
+      overflow: hidden; font-family: var(--font-mono); font-size: 13.5px; line-height: 1.7;
+    }
+    .term-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 14px 18px; background: rgba(0,0,0,.22);
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .term-dot { width: 11px; height: 11px; border-radius: 50%; }
+    .term-dot.r { background: #d97757; }
+    .term-dot.y { background: #d4a76a; }
+    .term-dot.g { background: #788c5d; }
+    .term-title { margin-left: auto; font-size: 11px; color: rgba(216,213,203,.5); }
+    .term-body { padding: 20px 22px 26px; min-height: 260px; }
+    .t-line { opacity: 0; transform: translateY(5px); transition: opacity .45s ease, transform .45s ease; white-space: pre-wrap; }
+    .t-line.on { opacity: 1; transform: none; }
+    .t-prompt { color: var(--clay); }
+    .t-prompt .sym { margin-right: 6px; color: var(--clay); }
+    .t-dim { color: rgba(216,213,203,.48); }
+    .t-tool .bullet { color: var(--blue); margin-right: 8px; }
+    .t-tool .path { color: #9fb8d8; }
+    .t-tool .diff-plus { color: var(--olive); }
+    .t-tool .diff-minus { color: var(--clay); }
+    .t-ok { color: var(--olive); }
+    .caret { display: inline-block; width: 8px; height: 1.1em; background: var(--clay); vertical-align: text-bottom; margin-left: 2px; animation: blink 1.05s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* Marquee */
+    .marquee {
+      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+      background: var(--paper-2); overflow: hidden; padding: 14px 0;
+    }
+    .marquee-track {
+      display: flex; width: max-content; gap: 32px;
+      animation: marquee 55s linear infinite;
+    }
+    .marquee:hover .marquee-track { animation-play-state: paused; }
+    .marquee span {
+      font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-soft); white-space: nowrap;
+      display: flex; align-items: center; gap: 32px;
+    }
+    .marquee span::after {
+      content: "◆"; font-size: 6px; color: var(--clay); opacity: .7;
+    }
+    @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
+    /* Sections */
+    section { padding: 90px 0; }
+    .sec-head { margin-bottom: 52px; }
+    .sec-kicker {
+      font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--clay-2); margin-bottom: 10px;
+    }
+    .sec-head h2 {
+      font-family: var(--font-display); font-weight: 400; font-size: clamp(2rem, 4.5vw, 3.2rem);
+      letter-spacing: -0.02em;
+    }
+    .sec-head h2 em { font-style: italic; color: var(--clay); }
+    .sec-rule { display: block; width: 70px; height: 2px; background: var(--clay); margin-top: 18px; }
+
+    /* Features */
+    .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0; }
+    .feature {
+      padding: 32px 36px 36px; border-top: 1px solid var(--line-soft); position: relative;
+      transition: background .3s ease;
+    }
+    .feature:nth-child(odd) { border-right: 1px solid var(--line-soft); }
+    .feature:hover { background: color-mix(in srgb, var(--clay) 5%, transparent); }
+    .feature-num {
+      font-family: var(--font-display); font-style: italic; font-weight: 500; font-size: 2.6rem;
+      color: var(--clay); line-height: 1; margin-bottom: 14px; display: block;
+    }
+    .feature h3 {
+      font-family: var(--font-display); font-weight: 500; font-size: 1.35rem; margin-bottom: 10px;
+    }
+    .feature p { color: var(--ink-soft); line-height: 1.65; }
+
+    /* Quick start */
+    .install-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 50px; align-items: start; }
+    .steps { display: flex; flex-direction: column; gap: 34px; }
+    .step { display: grid; grid-template-columns: 42px 1fr; gap: 16px; }
+    .step-num {
+      width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line);
+      display: grid; place-items: center; font-family: var(--font-mono); font-size: 14px; color: var(--clay);
+    }
+    .step h4 { font-family: var(--font-display); font-weight: 500; font-size: 1.2rem; margin-bottom: 6px; }
+    .step p { color: var(--ink-soft); font-size: .98rem; line-height: 1.6; }
+    .code-card {
+      background: #1b1a16; color: #d8d5cb; border-radius: 16px; overflow: hidden;
+      box-shadow: 0 24px 60px -20px rgba(0,0,0,.45); border: 1px solid var(--line-soft); margin-bottom: 18px; position: relative;
+    }
+    .code-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 16px; background: rgba(0,0,0,.22); border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .code-lang { font-family: var(--font-mono); font-size: 11px; color: rgba(216,213,203,.5); text-transform: uppercase; }
+    .copy-btn {
+      font-family: var(--font-mono); font-size: 11px; color: rgba(216,213,203,.7);
+      background: transparent; border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+      padding: 4px 8px; cursor: pointer; transition: all .2s;
+    }
+    .copy-btn:hover { border-color: var(--clay); color: var(--clay); }
+    .copy-btn.copied { color: var(--olive); border-color: var(--olive); }
+    pre { margin: 0; padding: 18px 20px; overflow-x: auto; }
+    pre code {
+      font-family: var(--font-mono); font-size: 13px; line-height: 1.75; color: #d8d5cb;
+      display: block; white-space: pre;
+    }
+    .code-comment { color: rgba(216,213,203,.42); }
+    .sandbox-note {
+      font-size: .88rem; color: var(--ink-soft); line-height: 1.55; border-left: 2px solid var(--clay); padding-left: 14px;
+    }
+    .cli-chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+    .chip {
+      font-family: var(--font-mono); font-size: 12px; padding: 7px 12px; border-radius: 999px;
+      background: var(--paper-3); border: 1px solid var(--line-soft); color: var(--ink-soft);
+    }
+
+    /* Slash commands */
+    .cmd-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .cmd-cell {
+      border: 1px solid var(--line-soft); border-radius: 12px; padding: 18px;
+      background: var(--paper-2); transition: transform .2s, border-color .2s;
+    }
+    .cmd-cell:hover { transform: translateY(-3px); border-color: var(--clay); }
+    .cmd-name { font-family: var(--font-mono); font-size: 15px; color: var(--clay); margin-bottom: 6px; }
+    .cmd-desc { font-size: .9rem; color: var(--ink-soft); line-height: 1.45; }
+    .cmd-more { margin-top: 24px; font-size: .92rem; color: var(--ink-soft); }
+    .cmd-more a { color: var(--clay); text-decoration: underline; text-underline-offset: 3px; }
+
+    /* Architecture */
+    .arch-stack { position: relative; }
+    .arch-row {
+      display: grid; grid-template-columns: 130px 1fr; gap: 24px; align-items: start;
+      padding: 22px 26px; border: 1px solid var(--line-soft); border-radius: 14px;
+      background: var(--paper-2); margin-bottom: 14px; position: relative;
+      transition: border-color .25s, transform .25s;
+    }
+    .arch-row:hover { border-color: var(--clay); transform: translateX(6px); }
+    .arch-name { font-family: var(--font-mono); font-size: 15px; color: var(--clay); font-weight: 500; }
+    .arch-desc h4 { font-family: var(--font-display); font-weight: 500; font-size: 1.15rem; margin-bottom: 4px; }
+    .arch-desc p { color: var(--ink-soft); font-size: .95rem; line-height: 1.55; }
+    .arch-flow {
+      margin-top: 28px; padding: 18px 22px; border-radius: 12px; background: var(--ink); color: var(--paper);
+      font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; overflow-x: auto;
+    }
+    .arch-flow span { opacity: .65; }
+
+    /* Benchmarks */
+    .bench-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .bench-card {
+      border: 1px solid var(--line-soft); border-radius: 16px; padding: 28px; background: var(--paper-2);
+    }
+    .bench-card h3 { font-family: var(--font-display); font-weight: 500; font-size: 1.3rem; margin-bottom: 10px; }
+    .bench-card p { color: var(--ink-soft); font-size: .95rem; line-height: 1.6; margin-bottom: 16px; }
+    .bench-tag {
+      display: inline-block; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 999px;       background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive);
+      margin-bottom: 12px;
+    }
+    .bench-tag.warn { background: color-mix(in srgb, var(--clay) 12%, transparent); color: var(--clay-2); }
+
+    /* Docs */
+    .docs-list { display: flex; flex-direction: column; border-top: 1px solid var(--line-soft); }
+    .doc-link {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 20px;
+      padding: 20px 0; border-bottom: 1px solid var(--line-soft);
+      transition: color .2s, padding-left .2s;
+    }
+    .doc-link:hover { color: var(--clay); padding-left: 10px; }
+    .doc-link strong { font-family: var(--font-display); font-weight: 500; font-size: 1.15rem; }
+    .doc-link span { color: var(--ink-soft); font-size: .95rem; }
+    .doc-link svg { flex-shrink: 0; width: 16px; height: 16px; color: var(--clay); }
+
+    /* Footer */
+    footer { padding: 50px 0 60px; border-top: 1px solid var(--line); }
+    .footer-inner { display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
+    .footer-left { display: flex; align-items: center; gap: 14px; font-family: var(--font-mono); font-size: 13px; color: var(--ink-soft); }
+    .footer-links { display: flex; gap: 22px; font-family: var(--font-mono); font-size: 12px; }
+    .footer-links a { color: var(--ink-soft); position: relative; }
+    .footer-links a:hover { color: var(--clay); }
+
+    /* Responsive */
+    @media (max-width: 980px) {
+      .hero-grid { grid-template-columns: 1fr; gap: 50px; }
+      .features { grid-template-columns: 1fr; }
+      .feature:nth-child(odd) { border-right: none; }
+      .install-grid, .bench-grid { grid-template-columns: 1fr; }
+      .cmd-grid { grid-template-columns: repeat(2, 1fr); }
+      .nav-links { display: none; }
+    }
+    @media (max-width: 560px) {
+      .hero { padding-top: 120px; }
+      .stats { gap: 14px; }
+      .cmd-grid { grid-template-columns: 1fr; }
+      .arch-row { grid-template-columns: 1fr; gap: 8px; }
+      .term-body { font-size: 12px; padding: 16px; }
+    }
+
+    /* Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .marquee-track { animation: none; }
+      .caret { animation: none; }
+      .reveal, .t-line { opacity: 1 !important; transform: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-inner">
+    <div class="nav-left">
+      <a class="logo" href="#top" aria-label="xcode home">
+        <span class="logo-mark">&gt;_</span>
+        <span>xcode</span>
+      </a>
+      <div class="nav-links">
+        <a href="#features"><span class="lz">特性</span><span class="le">Features</span></a>
+        <a href="#install"><span class="lz">安装</span><span class="le">Install</span></a>
+        <a href="#architecture"><span class="lz">架构</span><span class="le">Architecture</span></a>
+        <a href="#benchmarks">Benchmark</a>
+        <a href="#docs"><span class="lz">文档</span><span class="le">Docs</span></a>
+      </div>
+    </div>
+    <div class="nav-right">
+      <button class="btn btn-small theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Theme: auto">
+        <svg class="theme-icon theme-auto active" data-mode="auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <svg class="theme-icon theme-light" data-mode="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <svg class="theme-icon theme-dark" data-mode="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <button class="btn btn-small lang-toggle" id="langToggle" aria-label="Switch language">
+        <span class="lz">EN</span><span class="le">中</span>
+      </button>
+      <a class="btn btn-primary btn-small" href="https://github.com/reddishJade/xcode" target="_blank" rel="noopener">
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <div class="eyebrow reveal"><span class="lz">Python 3.12+ · MIT · v0.1.2</span><span class="le">Python 3.12+ · MIT · v0.1.2</span></div>
+        <h1 class="reveal" style="transition-delay:.08s">
+          <span class="lz">可扩展的 Python<br><em>Coding Agent</em> 运行时骨架</span>
+          <span class="le">An extensible<br><em>Python coding-agent</em> runtime harness</span>
+        </h1>
+        <p class="hero-lede reveal" style="transition-delay:.16s">
+          <span class="lz">围绕结构化事件流、执行模式、路径安全、工具审批、审计脱敏、上下文压缩、REPL/TUI 会话与记忆系统构建的可测试 Coding Agent 运行时骨架。</span>
+          <span class="le">A testable coding-agent runtime harness built around structured event streams, execution modes, path safety, tool approval, audited redaction, context compaction, REPL/TUI sessions, and a memory system.</span>
+        </p>
+        <div class="hero-actions reveal" style="transition-delay:.24s">
+          <a class="btn btn-primary" href="#install"><span class="lz">快速开始</span><span class="le">Quick Start</span></a>
+          <a class="btn" href="https://github.com/reddishJade/xcode" target="_blank" rel="noopener"><span class="lz">GitHub</span><span class="le">GitHub</span></a>
+        </div>
+        <div class="stats reveal" style="transition-delay:.32s">
+          <span>Python 3.12+</span>
+          <span><span class="lz">5 层架构</span><span class="le">5 layers</span></span>
+          <span><span class="lz">30+ Slash 命令</span><span class="le">30+ slash cmds</span></span>
+          <span><span class="lz">可扩展</span><span class="le">Extensible</span></span>
+        </div>
+      </div>
+
+      <div class="terminal-wrap reveal" style="transition-delay:.28s">
+        <div class="terminal" aria-label="xcode terminal demo">
+          <div class="term-bar">
+            <span class="term-dot r"></span>
+            <span class="term-dot y"></span>
+            <span class="term-dot g"></span>
+            <span class="term-title">xcode — tui</span>
+          </div>
+          <div class="term-body" id="termBody"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track">
+      <span>read_file</span><span>write_file</span><span>edit_file</span><span>apply_patch</span><span>glob_files</span><span>find_files</span><span>list_dir</span><span>grep_search</span><span>websearch</span><span>webfetch</span><span>question</span><span>bash</span><span>search_tools</span><span>subagent</span><span>todowrite</span><span>history</span><span>search_memory</span><span>load_skill</span><span>mcp__server__tool</span>
+      <span>read_file</span><span>write_file</span><span>edit_file</span><span>apply_patch</span><span>glob_files</span><span>find_files</span><span>list_dir</span><span>grep_search</span><span>websearch</span><span>webfetch</span><span>question</span><span>bash</span><span>search_tools</span><span>subagent</span><span>todowrite</span><span>history</span><span>search_memory</span><span>load_skill</span><span>mcp__server__tool</span>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <p class="sec-kicker">01 — <span class="lz">核心能力</span><span class="le">Capabilities</span></p>
+        <h2>
+          <span class="lz">把 coding agent 拆成<br><em>可测试、可扩展</em> 的部件</span>
+          <span class="le">Decompose a coding agent into<br><em>testable, extensible</em> parts</span>
+        </h2>
+        <span class="sec-rule"></span>
+      </header>
+      <div class="features">
+        <article class="feature reveal">
+          <span class="feature-num">01</span>
+          <h3><span class="lz">结构化 Agent 循环</span><span class="le">Structured agent loop</span></h3>
+          <p><span class="lz">CodingAgentHarness 统一消费 provider 流式事件——text、reasoning、tool_use、tool_result 与 final answer——在一个循环中完成全部交互。</span><span class="le">CodingAgentHarness consumes provider stream events — text, reasoning, tool_use, tool_result and final answers — in one closed loop.</span></p>
+        </article>
+        <article class="feature reveal">
+          <span class="feature-num">02</span>
+          <h3><span class="lz">三种执行模式</span><span class="le">Three execution modes</span></h3>
+          <p><span class="lz">plan 只读勘察，build 允许写入，act 逐步确认；findLast 规则引擎按序覆盖权限，HITL 审批贯穿始终。</span><span class="le">plan reads, build writes, act confirms each step; a findLast rule engine resolves permissions with HITL approval throughout.</span></p>
+        </article>
+        <article class="feature reveal">
+          <span class="feature-num">03</span>
+          <h3><span class="lz">工具并发分区</span><span class="le">Tool concurrency</span></h3>
+          <p><span class="lz">只读且并发安全的工具并行执行；写操作与高风险命令保持串行。edit_file 采用 read-before-edit SHA256 指纹校验。</span><span class="le">Read-only, concurrency-safe tools run in parallel while writes and risky commands stay serial. edit_file enforces read-before-edit with SHA256 fingerprint checks.</span></p>
+        </article>
+        <article class="feature reveal">
+          <span class="feature-num">04</span>
+          <h3><span class="lz">权限、审计与脱敏</span><span class="le">Permissions, audit & redaction</span></h3>
+          <p><span class="lz">PermissionEngine 统一权限判定与输出脱敏；JsonlAuditLogger 落盘审计日志；shell 效果分析器对无法保守解析的命令请求确认。</span><span class="le">PermissionEngine centralizes gating and output redaction; JsonlAuditLogger persists an audit trail; a shell-effect analyzer asks before commands it cannot parse conservatively.</span></p>
+        </article>
+        <article class="feature reveal">
+          <span class="feature-num">05</span>
+          <h3><span class="lz">上下文压缩与会话恢复</span><span class="le">Compaction & session resume</span></h3>
+          <p><span class="lz">LayeredCompactor 裁剪过期读取与旧工具结果，按 session 写 checkpoint；resume 以 checkpoint + 原文 tail 重建上下文。</span><span class="le">LayeredCompactor trims stale reads and old tool results into per-session checkpoints; resume rebuilds context from checkpoint plus the original tail.</span></p>
+        </article>
+        <article class="feature reveal">
+          <span class="feature-num">06</span>
+          <h3><span class="lz">记忆、MCP 与 Hooks</span><span class="le">Memory, MCP & hooks</span></h3>
+          <p><span class="lz">MEMORY.md 与用户级记忆库是可审查的长期事实源，BM25 按需检索；MCP stdio server 自动发现注册；外部 hooks 响应事件。</span><span class="le">MEMORY.md plus a user-level store form an auditable long-term memory with BM25 retrieval; MCP stdio servers are discovered automatically; external hooks react to events.</span></p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" style="background:var(--paper-2)">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <p class="sec-kicker">02 — <span class="lz">快速开始</span><span class="le">Quick Start</span></p>
+        <h2>
+          <span class="lz">克隆、安装、<em>直接对话</em></span>
+          <span class="le">Clone, install, <em>start talking</em></span>
+        </h2>
+        <span class="sec-rule"></span>
+      </header>
+      <div class="install-grid">
+        <div class="steps">
+          <div class="step reveal">
+            <div class="step-num">1</div>
+            <div>
+              <h4><span class="lz">克隆并安装</span><span class="le">Clone & install</span></h4>
+              <p><span class="lz">使用 uv 以 editable 模式安装；也可使用 pip。</span><span class="le">Install in editable mode with uv, or use pip.</span></p>
+            </div>
+          </div>
+          <div class="step reveal">
+            <div class="step-num">2</div>
+            <div>
+              <h4><span class="lz">配置 Provider</span><span class="le">Configure a provider</span></h4>
+              <p><span class="lz">运行交互式向导，或手动添加 OpenAI / DeepSeek / ChatGLM / MiMo profile。</span><span class="le">Run the interactive wizard, or manually add an OpenAI / DeepSeek / ChatGLM / MiMo profile.</span></p>
+            </div>
+          </div>
+          <div class="step reveal">
+            <div class="step-num">3</div>
+            <div>
+              <h4><span class="lz">启动会话</span><span class="le">Launch a session</span></h4>
+              <p><span class="lz">默认进入 TUI；cli 进入 REPL；-p 直接提问。--resume 可恢复历史会话。</span><span class="le">Default launches TUI; cli enters REPL; -p asks a single question. --resume picks a previous session.</span></p>
+            </div>
+          </div>
+          <p class="sandbox-note reveal">
+            <span class="lz"><strong>安全提示：</strong>Xcode 不为 agent 提供 OS 级沙箱。权限提示与 shell 效果分析仅用于辅助确认，不构成安全隔离；需要隔离时请在容器或虚拟机中运行。</span>
+            <span class="le"><strong>Safety note:</strong> Xcode does not provide an OS-level sandbox. Permission prompts and shell-effect analysis only help you confirm operations; they are not isolation. Run Xcode in a container or VM when isolation is required.</span>
+          </p>
+        </div>
+
+        <div class="reveal" style="transition-delay:.12s">
+          <div class="code-card">
+            <div class="code-header">
+              <span class="code-lang">Shell</span>
+              <button class="copy-btn" data-copy="#install-code" aria-label="复制"><span class="lz">复制</span><span class="le">Copy</span></button>
+            </div>
+            <pre><code id="install-code">git clone https://github.com/reddishJade/xcode.git
+cd xcode
+uv pip install -e .
+
+xcode setup          <span class="code-comment"># 交互式配置向导</span>
+<span class="code-comment"># 或: xcode config add main</span>
+
+xcode                <span class="code-comment"># 进入 TUI</span>
+xcode cli            <span class="code-comment"># REPL 模式</span>
+xcode -p "..."       <span class="code-comment"># 单发提问</span></code></pre>
+          </div>
+          <div class="cli-chips">
+            <span class="chip">xcode -p "..."</span>
+            <span class="chip">xcode tui</span>
+            <span class="chip">xcode cli</span>
+            <span class="chip">xcode --resume</span>
+            <span class="chip">xcode config list</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="commands">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <p class="sec-kicker">03 — <span class="lz">REPL 命令</span><span class="le">REPL Commands</span></p>
+        <h2>
+          <span class="lz">一个斜杠，<em>切换模式</em></span>
+          <span class="le">One slash to <em>switch modes</em></span>
+        </h2>
+        <span class="sec-rule"></span>
+      </header>
+      <div class="cmd-grid reveal">
+        <div class="cmd-cell">
+          <div class="cmd-name">/plan</div>
+          <div class="cmd-desc"><span class="lz">进入只读规划模式</span><span class="le">Enter read-only planning mode</span></div>
+        </div>
+        <div class="cmd-cell">
+          <div class="cmd-name">/build</div>
+          <div class="cmd-desc"><span class="lz">进入允许写入的构建模式</span><span class="le">Enter write-enabled build mode</span></div>
+        </div>
+        <div class="cmd-cell">
+          <div class="cmd-name">/act</div>
+          <div class="cmd-desc"><span class="lz">plan + build 二合一</span><span class="le">Plan and build in one shot</span></div>
+        </div>
+        <div class="cmd-cell">
+          <div class="cmd-name">/undo</div>
+          <div class="cmd-desc"><span class="lz">文件级快照撤销</span><span class="le">File-level snapshot undo</span></div>
+        </div>
+        <div class="cmd-cell">
+          <div class="cmd-name">/resume</div>
+          <div class="cmd-desc"><span class="lz">恢复历史会话</span><span class="le">Resume a past session</span></div>
+        </div>
+        <div class="cmd-cell">
+          <div class="cmd-name">/fork</div>
+          <div class="cmd-desc"><span class="lz">从指定消息分支新会话</span><span class="le">Branch a new session from a message</span></div>
+        </div>
+        <div class="cmd-cell">
+          <div class="cmd-name">/model</div>
+          <div class="cmd-desc"><span class="lz">显示或切换当前模型</span><span class="le">Show or switch the current model</span></div>
+        </div>
+        <div class="cmd-cell">
+          <div class="cmd-name">/memory</div>
+          <div class="cmd-desc"><span class="lz">检索或添加长期记忆</span><span class="le">Search or add long-term memory</span></div>
+        </div>
+      </div>
+      <p class="cmd-more reveal">
+        <span class="lz">完整 30+ 条 slash 命令见 <a href="https://github.com/reddishJade/xcode/blob/main/README.md" target="_blank" rel="noopener">README</a>。</span>
+        <span class="le">See the full 30+ slash commands in the <a href="https://github.com/reddishJade/xcode/blob/main/README.md" target="_blank" rel="noopener">README</a>.</span>
+      </p>
+    </div>
+  </section>
+
+  <section id="architecture" style="background:var(--paper-2)">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <p class="sec-kicker">04 — <span class="lz">架构</span><span class="le">Architecture</span></p>
+        <h2>
+          <span class="lz">五层骨架，<em>职责分离</em></span>
+          <span class="le">Five layers, <em>clear ownership</em></span>
+        </h2>
+        <span class="sec-rule"></span>
+      </header>
+      <div class="arch-stack reveal">
+        <div class="arch-row">
+          <div class="arch-name">cli/</div>
+          <div class="arch-desc">
+            <h4><span class="lz">交互层</span><span class="le">Interface layer</span></h4>
+            <p><span class="lz">REPL、TUI、slash 命令、setup 向导与配置管理。</span><span class="le">REPL, TUI, slash commands, setup wizard, and config management.</span></p>
+          </div>
+        </div>
+        <div class="arch-row">
+          <div class="arch-name">coding_agent/</div>
+          <div class="arch-desc">
+            <h4><span class="lz">产品工具装配</span><span class="le">Product tool assembly</span></h4>
+            <p><span class="lz">文件读写编辑、glob/grep、bash、subagent、webfetch/websearch 等。</span><span class="le">File read/write/edit, glob/grep, bash, subagent, webfetch/websearch, and more.</span></p>
+          </div>
+        </div>
+        <div class="arch-row">
+          <div class="arch-name">harness/</div>
+          <div class="arch-desc">
+            <h4><span class="lz">运行时与装配</span><span class="le">Runtime & assembly</span></h4>
+            <p><span class="lz">应用装配、会话存储、权限引擎、审计、MCP、记忆管理、外部 hooks。</span><span class="le">App assembly, session storage, permission engine, audit, MCP, memory, external hooks.</span></p>
+          </div>
+        </div>
+        <div class="arch-row">
+          <div class="arch-name">agent/</div>
+          <div class="arch-desc">
+            <h4><span class="lz">Agent 循环合约</span><span class="le">Agent loop contracts</span></h4>
+            <p><span class="lz">消息/事件类型、上下文压缩、工具执行分区、watchdog。</span><span class="le">Message/event types, context compaction, tool partitioning, watchdog.</span></p>
+          </div>
+        </div>
+        <div class="arch-row">
+          <div class="arch-name">ai/</div>
+          <div class="arch-desc">
+            <h4><span class="lz">Provider 适配</span><span class="le">Provider adapters</span></h4>
+            <p><span class="lz">OpenAI 兼容基类 + DeepSeek / ChatGLM / MiMo 适配器，支持流式、缓存与 thinking。</span><span class="le">OpenAI-compatible base + DeepSeek / ChatGLM / MiMo adapters with streaming, caching, and thinking.</span></p>
+          </div>
+        </div>
+      </div>
+      <div class="arch-flow reveal">
+        main.py <span>→</span> build_app() <span>→</span> CodingAgentHarness <span>→</span> Agent loop <span>→</span> provider stream <span>→</span> tool execution
+      </div>
+    </div>
+  </section>
+
+  <section id="benchmarks">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <p class="sec-kicker">05 — <span class="lz">评估</span><span class="le">Evaluation</span></p>
+        <h2>
+          <span class="lz">用 Benchmark <em>量化</em> 关键设计</span>
+          <span class="le"><em>Measure</em> the key design choices</span>
+        </h2>
+        <span class="sec-rule"></span>
+      </header>
+      <div class="bench-grid">
+        <div class="bench-card reveal">
+          <span class="bench-tag warn"><span class="lz">真实 API 调用</span><span class="le">Real API calls</span></span>
+          <h3><span class="lz">长程任务压缩消融</span><span class="le">Long-horizon compaction</span></h3>
+          <p><span class="lz">同模型、同温度、同任务配对运行：完整历史 baseline vs 启用 LayeredCompactor + checkpoint 的 Xcode 配置。测试进程判定任务成功，文件哈希与禁止路径判定状态保持。</span><span class="le">Paired runs with the same model, temperature, and task: full-history baseline vs Xcode with LayeredCompactor and checkpoints. Task success is judged by a test process; state retention is judged by file hashes and forbidden paths.</span></p>
+          <div class="code-card" style="box-shadow:none; margin-bottom:0">
+            <div class="code-header">
+              <span class="code-lang">Shell</span>
+              <button class="copy-btn" data-copy="#bench1" aria-label="复制"><span class="lz">复制</span><span class="le">Copy</span></button>
+            </div>
+            <pre style="padding:14px 18px"><code id="bench1">uv run python -m benchmarks.runners.run_ablation \
+  benchmarks/tasks/long_horizon \
+  --repeat 3 --temperature 0 \
+  --max-pair-attempts 2 --require-complete-usage</code></pre>
+          </div>
+        </div>
+        <div class="bench-card reveal">
+          <span class="bench-tag"><span class="lz">不调用模型</span><span class="le">No model calls</span></span>
+          <h3><span class="lz">工具调度消融</span><span class="le">Tool scheduling</span></h3>
+          <p><span class="lz">确定性消融：生产调度器重放 5/10/20 文件读取批次，对比强制串行与副作用感知并发调度；混合读写 workload 验证写操作不与其他工具重叠。结果仅反映工具执行阶段。</span><span class="le">Deterministic ablation: replay identical read batches through the production scheduler, comparing forced serial execution with side-effect-aware concurrency. Mixed read/write workloads verify writes never overlap other operations. Results reflect the tool-execution stage only.</span></p>
+          <div class="code-card" style="box-shadow:none; margin-bottom:0">
+            <div class="code-header">
+              <span class="code-lang">Shell</span>
+              <button class="copy-btn" data-copy="#bench2" aria-label="复制"><span class="lz">复制</span><span class="le">Copy</span></button>
+            </div>
+            <pre style="padding:14px 18px"><code id="bench2">uv run python -m benchmarks.runners.run_tool_scheduling \
+  benchmarks/tasks/parallel_reads \
+  --repeat 10 --warmup 1</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="docs" style="background:var(--paper-2)">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <p class="sec-kicker">06 — <span class="lz">文档</span><span class="le">Documentation</span></p>
+        <h2>
+          <span class="lz">继续<em>深入</em></span>
+          <span class="le">Go <em>deeper</em></span>
+        </h2>
+        <span class="sec-rule"></span>
+      </header>
+      <div class="docs-list reveal">
+        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/README.md" target="_blank" rel="noopener">
+          <div><strong>README.md</strong><br><span class="lz">完整使用手册与功能速查</span><span class="le">Full manual and feature reference</span></span></div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
+        </a>
+        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/CONFIG.md" target="_blank" rel="noopener">
+          <div><strong>CONFIG.md</strong><br><span class="lz">运行时配置参考与默认值</span><span class="le">Runtime configuration reference and defaults</span></span></div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
+        </a>
+        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/benchmarks/README.md" target="_blank" rel="noopener">
+          <div><strong>benchmarks/README.md</strong><br><span class="lz">Benchmark 实验设计与报告口径</span><span class="le">Benchmark design and reporting metrics</span></span></div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
+        </a>
+        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/docs/memory-architecture.md" target="_blank" rel="noopener">
+          <div><strong>docs/memory-architecture.md</strong><br><span class="lz">记忆系统架构</span><span class="le">Memory system architecture</span></span></div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
+        </a>
+        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/docs/review-standards.md" target="_blank" rel="noopener">
+          <div><strong>docs/review-standards.md</strong><br><span class="lz">代码审查标准</span><span class="le">Code review standards</span></span></div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
+        </a>
+        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/AGENTS.md" target="_blank" rel="noopener">
+          <div><strong>AGENTS.md</strong><br><span class="lz">编码规范与开发入口</span><span class="le">Coding guidelines and dev entry point</span></span></div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap footer-inner">
+    <div class="footer-left">
+      <span class="logo-mark">&gt;_</span>
+      <span>MIT © 2026 Xcode Contributors</span>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/reddishJade/xcode" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/reddishJade/xcode/issues" target="_blank" rel="noopener">Issues</a>
+      <a href="#top"><span class="lz">返回顶部</span><span class="le">Back to top</span></a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function() {
+  const TERM_DATA = {
+    zh: [
+      { type: "cmd", text: "xcode" },
+      { type: "banner", text: "xcode 0.1.2 · build 模式 · deepseek-v4-flash" },
+      { type: "prompt", text: "/act 给 main.py 加上 --version 选项" },
+      { type: "tool", name: "read_file", arg: "src/xcode/main.py" },
+      { type: "tool", name: "edit_file", arg: "src/xcode/main.py", diff: "+8 −2" },
+      { type: "tool", name: "bash", arg: "uv run pytest -q" },
+      { type: "ok", text: "测试通过 · --version 已接入 argparse" }
+    ],
+    en: [
+      { type: "cmd", text: "xcode" },
+      { type: "banner", text: "xcode 0.1.2 · build mode · deepseek-v4-flash" },
+      { type: "prompt", text: "/act add a --version flag to main.py" },
+      { type: "tool", name: "read_file", arg: "src/xcode/main.py" },
+      { type: "tool", name: "edit_file", arg: "src/xcode/main.py", diff: "+8 −2" },
+      { type: "tool", name: "bash", arg: "uv run pytest -q" },
+      { type: "ok", text: "Tests green · --version wired into argparse" }
+    ]
+  };
+
+  const termBody = document.getElementById('termBody');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let termRun = 0;
+  let timers = [];
+
+  function clearTimers() { timers.forEach(t => clearTimeout(t)); timers = []; }
+
+  function createLine(cls) {
+    const el = document.createElement('div');
+    el.className = 't-line ' + cls;
+    return el;
+  }
+
+  function renderTerm() {
+    const lang = document.documentElement.dataset.lang || 'zh';
+    const lines = TERM_DATA[lang];
+    termBody.innerHTML = '';
+    const els = lines.map((ln, i) => {
+      const el = createLine(i === 0 ? 't-prompt' : (ln.type === 'tool' ? 't-tool' : (ln.type === 'ok' ? 't-ok' : 't-dim')));
+      if (ln.type === 'cmd') el.innerHTML = '<span class="sym">$</span><span class="typed"></span><span class="caret"></span>';
+      else if (ln.type === 'prompt') el.innerHTML = '<span class="sym">❯</span><span class="typed"></span><span class="caret"></span>';
+      else if (ln.type === 'banner') el.textContent = ln.text;
+      else if (ln.type === 'tool') {
+        const [add, sub] = (ln.diff || '').split(' ');
+        el.innerHTML = '<span class="bullet">●</span>' +
+          ln.name.padEnd(10, ' ') + ' ' +
+          '<span class="path">' + escapeHtml(ln.arg) + '</span>' +
+          (ln.diff ? '  <span class="diff-plus">' + add + '</span> <span class="diff-minus">' + sub + '</span>' : '');
+      } else if (ln.type === 'ok') el.textContent = '✓ ' + ln.text;
+      termBody.appendChild(el);
+      return el;
+    });
+    return { els, lines };
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function wait(ms) { return new Promise(r => timers.push(setTimeout(r, ms))); }
+
+  async function playTerm() {
+    const runId = ++termRun;
+    clearTimers();
+    const { els, lines } = renderTerm();
+    if (reducedMotion) {
+      els.forEach(el => el.classList.add('on'));
+      return;
+    }
+    // Type first command
+    const cmdTyped = els[0].querySelector('.typed');
+    for (let i = 0; i <= lines[0].text.length; i++) {
+      if (runId !== termRun) return;
+      cmdTyped.textContent = lines[0].text.slice(0, i);
+      await wait(80);
+    }
+    if (runId !== termRun) return;
+    els[0].querySelector('.caret').remove();
+    els[1].classList.add('on');
+    await wait(380);
+    // Type prompt
+    const promptIdx = 2;
+    const promptTyped = els[promptIdx].querySelector('.typed');
+    for (let i = 0; i <= lines[promptIdx].text.length; i++) {
+      if (runId !== termRun) return;
+      promptTyped.textContent = lines[promptIdx].text.slice(0, i);
+      await wait(45);
+    }
+    if (runId !== termRun) return;
+    els[promptIdx].querySelector('.caret').remove();
+    // Stagger tool lines
+    for (let i = 3; i < els.length; i++) {
+      await wait(260);
+      if (runId !== termRun) return;
+      els[i].classList.add('on');
+    }
+    await wait(4200);
+    if (runId !== termRun) return;
+    // Fade out and restart
+    els.forEach(el => { el.style.transition = 'opacity .6s ease'; el.style.opacity = '0'; });
+    await wait(700);
+    if (runId !== termRun) return;
+    playTerm();
+  }
+
+  // Language toggle
+  const langBtn = document.getElementById('langToggle');
+  function setLang(lang) {
+    document.documentElement.dataset.lang = lang;
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+    try { localStorage.setItem('xcode-lang', lang); } catch (e) {}
+    document.title = lang === 'zh'
+      ? 'xcode — 可扩展的 Python Coding Agent 运行时骨架'
+      : 'xcode — An extensible Python coding-agent runtime harness';
+    playTerm();
+  }
+  langBtn.addEventListener('click', () => {
+    setLang(document.documentElement.dataset.lang === 'zh' ? 'en' : 'zh');
+  });
+
+  // Copy buttons
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-copy');
+      const el = document.getElementById(id);
+      const text = el ? el.innerText.replace(/\u00A0/g, ' ') : '';
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+      }
+      btn.classList.add('copied');
+      const original = btn.innerHTML;
+      btn.innerHTML = '<span class="lz">已复制</span><span class="le">Copied</span>';
+      setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = original; }, 1400);
+    });
+  });
+
+  // Scroll reveal
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); observer.unobserve(e.target); } });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+  // Fallback: ensure all reveals are visible even if IntersectionObserver misses
+  // (e.g., during full-page screenshots or when the viewport is resized after load).
+  setTimeout(() => {
+    document.querySelectorAll('.reveal:not(.in)').forEach((el, i) => {
+      setTimeout(() => el.classList.add('in'), i * 50);
+    });
+  }, 1600);
+
+  // Theme toggle
+  const themeBtn = document.getElementById('themeToggle');
+  const themeIcons = themeBtn.querySelectorAll('.theme-icon');
+  function applyTheme(mode) {
+    if (mode === 'auto') { delete document.documentElement.dataset.theme; }
+    else { document.documentElement.dataset.theme = mode; }
+    try { localStorage.setItem('xcode-theme', mode); } catch (e) {}
+    themeIcons.forEach(icon => icon.classList.toggle('active', icon.dataset.mode === mode));
+    themeBtn.title = mode === 'auto' ? 'Theme: auto' : 'Theme: ' + mode;
+  }
+  themeBtn.addEventListener('click', () => {
+    const current = document.documentElement.dataset.theme || 'auto';
+    applyTheme(current === 'auto' ? 'light' : (current === 'light' ? 'dark' : 'auto'));
+  });
+  applyTheme(document.documentElement.dataset.theme || 'auto');
+
+  // Start
+  playTerm();
+})();
+</script>
+
+</body>
+</html>

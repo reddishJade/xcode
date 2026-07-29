@@ -7,7 +7,7 @@
 `XCODE_APPROVAL_POLICY`。
 
 **没有配置文件时**启用正式内置能力（`core`、`subagent`、`memory`，以及存在
-可见 skill 时的 `skills`）。零配置可用。
+可见 skill 时的 `skills`）。配置分层覆盖。
 
 ---
 
