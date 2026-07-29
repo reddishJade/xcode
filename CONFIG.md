@@ -5,7 +5,7 @@
 配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地 `.local/settings.json` → 环境变量 `XCODE_APPROVAL_POLICY`。
 
 **没有配置文件时**启用正式内置能力（`core`、`subagent`、`memory`，以及存在
-可见 skill 时的 `skills`）。零配置可用。
+可见 skill 时的 `skills`）。配置分层覆盖。
 
 ---
 

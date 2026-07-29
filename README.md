@@ -4,7 +4,7 @@
     <code style="color:#141413; background:#e8e6dc; padding:0 12px; border-radius:4px;">xcode</code>
   </h1>
   <p style="font-size:1.2em; color:#141413;">
-    <strong>轻量级 Python Coding Agent 运行骨架</strong>
+    <strong>可扩展的 Python Coding Agent 运行时骨架</strong>
   </p>
   <p>
     <img src="https://img.shields.io/badge/python-3.12-%23141413?style=flat-square" alt="Python 3.12"/>&nbsp;
@@ -12,10 +12,15 @@
     <img src="https://img.shields.io/badge/license-MIT-%23788c5d?style=flat-square" alt="License MIT"/>&nbsp;
     <img src="https://img.shields.io/badge/status-active-%236a9bcc?style=flat-square" alt="Status Active"/>
   </p>
+  <p>
+    <a href="https://reddishjade.github.io/xcode/">项目主页</a> ·
+    <a href="CONFIG.md">配置参考</a> ·
+    <a href="benchmarks/README.md">Benchmark</a>
+  </p>
   <br/>
 </div>
 
-围绕结构化事件流、执行模式、路径安全、工具审批、审计脱敏、上下文压缩、REPL/TUI 会话和记忆系统构建的可测试 Coding Agent 运行骨架。**零配置即可运行。**
+围绕结构化事件流、执行模式、路径安全、工具审批、审计脱敏、上下文压缩、REPL/TUI 会话和记忆系统构建的可测试 Coding Agent 运行时骨架。
 
 ---
 
@@ -29,7 +34,7 @@
 ### 从源码安装（开发模式）
 
 ```powershell
-git clone https://github.com/your-org/xcode.git
+git clone https://github.com/reddishJade/xcode.git
 cd xcode
 uv pip install -e .
 ```
@@ -78,7 +83,7 @@ print(answer)
 
 ```powershell
 # 直接提问（单轮，自动退出）
-xcode "列出当前目录所有 Python 文件。"
+xcode -p "列出当前目录所有 Python 文件。"
 
 # TUI 全屏终端界面（默认启动方式）
 xcode
@@ -197,7 +202,7 @@ xcode.config.json               ← 项目级
 环境变量                          ← 最高优先级
 ```
 
-**零配置可用**：无配置文件时启用核心工具、subagent 和 memory。
+**配置分层覆盖**：全局 → 项目 → 本地 → 环境变量。
 
 Xcode 不为 agent 提供 OS 级 sandbox。权限提示和 shell 效果分析用于帮助用户
 了解并确认操作，不构成安全隔离；需要隔离时应在容器或虚拟机中运行 Xcode。
@@ -250,6 +255,8 @@ uv run python -m benchmarks.runners.run_tool_scheduling `
 
 报告按 workload 给出工具阶段 P50/P95 延迟、配对加速比、最大并发度、输出
 等价率和写隔离率；这些结果不等同于端到端 Agent 延迟。
+`benchmarks/scripts/run_tool_worker_sweep.sh` 可在独立目录中扫描
+1/2/4/8/16 worker 数，互不覆盖历史结果。
 
 ### 单元测试
 
@@ -284,11 +291,13 @@ uv run pyright src/
 
 | 文档 | 内容 |
 |---|---|
+| [项目主页](https://reddishjade.github.io/xcode/) | GitHub Pages 中英双语介绍站 |
 | [AGENTS.md](AGENTS.md) | Agent 开发入口、编码规范 |
 | [CONFIG.md](CONFIG.md) | 运行时配置参考 |
 | `src/xcode/main.py` | CLI 入口点与子命令 |
 | `src/xcode/coding_agent/assembly/` | Coding 产品装配与工具注册 |
-| [docs/source-review.md](docs/source-review.md) | 源码级架构审查 |
+| [docs/memory-architecture.md](docs/memory-architecture.md) | 记忆系统架构 |
+| [docs/review-standards.md](docs/review-standards.md) | 代码审查标准 |
 
 
 ---
