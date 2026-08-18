@@ -32,6 +32,7 @@ from .assembly import (
 )
 
 if TYPE_CHECKING:
+    from xcode.harness.agent_runtime.subagents import SubagentSessionManager
     from xcode.harness.memory import MemoryManager
     from xcode.harness.mcp import McpRuntimeRegistry
 
@@ -47,6 +48,7 @@ class XcodeApp:
 
     memory_manager: MemoryManager | None = None
     mcp_runtime: McpRuntimeRegistry | None = None
+    subagents: SubagentSessionManager | None = None
     session_recorder: SessionRecorder | None = None
     _model_profiles: dict[str, Any] | None = None
     _env_files: tuple[Path, ...] = ()
@@ -67,8 +69,8 @@ class XcodeApp:
         from xcode.ai.providers.registry import ModelProfileConfig
         from xcode.ai.providers.registry import ModelProfileProto
 
-        if profile != "main":
-            raise ValueError("only the main composition can be replaced at runtime")
+        if profile not in {"main", "subagent"}:
+            raise ValueError("profile must be main or subagent")
         if not self._model_profiles:
             return self.agent.provider.model
         profile_config = self._model_profiles.get(profile)
@@ -93,8 +95,13 @@ class XcodeApp:
                 model_profiles={profile: new_cfg},
             )
         )
-        new_provider = bundle.llm
-        self.agent.replace_primary_provider(new_provider)
+        new_provider = bundle.llms.get(profile, bundle.llm)
+        if profile == "main":
+            self.agent.replace_primary_provider(new_provider)
+        elif self.subagents is None:
+            raise RuntimeError("subagent runtime is not configured")
+        else:
+            self.subagents.replace_provider(new_provider)
         self._model_profiles[profile] = new_cfg
         return model
 
@@ -276,9 +283,10 @@ def build_app(
         closers,
         skill_registry,
         mcp_runtime_registry,
+        subagents,
     ) = _assembly.build_tool_registry(
         project_root=project_root,
-        llm=providers.llm,
+        subagent_provider=providers.llms.get("subagent", providers.llm),
         runtime_config=cfg.runtime_config,
         session_recorder=infra.session_recorder,
         contextual_state=infra.contextual_state,
@@ -324,6 +332,7 @@ def build_app(
         external_hook_runner=external_hook_runner,
         memory_manager=memory_manager,
         mcp_runtime=mcp_runtime_registry,
+        subagents=subagents,
         session_recorder=infra.session_recorder,
         _env_files=cfg.env_files,
         _model_profiles=cfg.runtime_config.provider.model_profiles,

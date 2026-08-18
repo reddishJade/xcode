@@ -22,6 +22,7 @@
 - provider 实际请求 -> `provider_request` envelope；
 - composition generation -> run snapshot -> `provider_request.composition_id`；
 - subagent lifecycle -> parent session ledger；
+- child descriptor/index lineage -> 独立 session surface -> cold continuation；
 - render intent -> CLI/TUI projection。
 
 ### 真实组合测试

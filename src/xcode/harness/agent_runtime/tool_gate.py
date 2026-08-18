@@ -268,6 +268,11 @@ class ToolGate:
         """返回当前 HITL 审批回调。"""
         return self._approval_callback
 
+    @property
+    def correlation(self) -> RuntimeCorrelation:
+        """返回这个 gate 自己的运行关联域。"""
+        return self._correlation
+
     def set_approval_callback(self, approval_callback: ApprovalCallback | None) -> None:
         """更新后续工具适配与前置检查使用的 HITL 回调。"""
         self._approval_callback = approval_callback
@@ -292,19 +297,24 @@ class ToolGate:
         if isinstance(store, _ClearableGrantStore):
             store.clear()
 
-    def fork_for_subagent(self) -> ToolGate:
-        """派生隔离运行状态、共享权限配置和 grant 的子代理门控。"""
+    def fork_for_subagent(
+        self,
+        session_id: str | None = None,
+        hook_manager: HookManager | None = None,
+    ) -> ToolGate:
+        """派生独立 correlation、共享权限配置和 grant 的子代理门控。"""
+        child_session_id = session_id or self._session_id
         return ToolGate(
             mode_state=self._mode,
             approval_callback=self._approval_callback,
             permission_policy=self._permission_policy,
-            hook_manager=self._hook_manager,
+            hook_manager=hook_manager,
             audit_logger=self._audit_logger,
-            session_id=self._session_id,
+            session_id=child_session_id,
             external_hook_runner=self._external_hook_runner,
             external_hooks_subagent=True,
             external_hooks_cwd=self._external_hooks_cwd,
-            correlation=self._correlation,
+            correlation=RuntimeCorrelation(child_session_id),
             restricted_dirs=self._restricted_dirs,
             hook_constraint_providers=self._hook_constraint_providers,
             project_root=self._project_root,

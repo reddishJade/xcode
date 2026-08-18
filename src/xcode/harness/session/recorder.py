@@ -11,7 +11,7 @@ from xcode.harness.agent_runtime.events import AgentHarnessEvent, FinalStructure
 from .event_codec import SESSION_EVENT_SCHEMA_VERSION, encode_session_event
 from .tree_store import TreeSessionRepo
 from .types import JsonValue
-from .subagent_runs import SubagentRunEvent
+from .subagent_runs import SubagentDescriptor, SubagentRunEvent
 from .surface import encode_surface_messages, surface_digest
 
 
@@ -168,6 +168,19 @@ class SessionRecorder:
                 "type": "subagent_run",
                 "step": 0,
                 "data": data,
+                "correlation": {},
+            },
+        )
+
+    def record_subagent_descriptor(self, descriptor: SubagentDescriptor) -> str:
+        """在 child session 写入不进入模型 surface 的稳定 descriptor。"""
+        return self.store.append(
+            "event",
+            {
+                "schema_version": SESSION_EVENT_SCHEMA_VERSION,
+                "type": "subagent/descriptor",
+                "step": 0,
+                "data": descriptor.model_dump(),
                 "correlation": {},
             },
         )

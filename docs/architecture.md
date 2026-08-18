@@ -136,10 +136,22 @@ intent 随 `ToolResultMessage` 进入 runtime event 和 session log。新增呈�
 
 ## 子代理
 
-每次委派创建 batch ID，每项任务创建 run ID。`subagent_run` 事件记录父 session、
-任务索引、描述、类型、状态、摘要或错误；父 `tool_result` 的 subagent intent
-保存同一批 ID。子代理继承父权限门控，但不继承隐式对话历史，任务 prompt
-必须自包含。
+子代理的身份是独立 durable session，不是父工具调用中的临时 `Agent` 对象。每个
+child 拥有自己的 session log、surface、inbox、composition generation 和 provider
+request envelope；`subagent/descriptor` 记录 child/parent session ID、one-shot 或
+continuable 模式、persona、provider model 和初始 composition ID。session index 的
+`parent_id` 提供无需激活 child 的 lineage 枚举。
+
+`subagent` 创建新 child。并行 batch 只允许 one-shot；需要后续对话时显式创建
+continuable child，再用 `subagent_continue` 按 child session ID 提交 FIFO turn。
+进程中没有 activation 时，manager 从 child log 重建 surface 后冷恢复同一个
+session。`subagent_list` 只读取 descriptor，不启动模型。Xcode 当前只实现 spawn，
+不会复制父 transcript；任务 prompt 必须自包含。
+
+每次 child turn 仍创建 batch/run ID，父 session 的 `subagent_run` 事件记录 child
+session ID、模式、状态、摘要或错误；父 tool result 的 subagent intent 保存 run
+关联。child 模型失败被解析为 completed/failed/cancelled 结果，基础设施不会通过
+共享 `messages[]` 假装成普通父对话。
 
 ## 组合根
 

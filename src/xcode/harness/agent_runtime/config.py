@@ -114,6 +114,7 @@ class AgentRuntimeConfig:
 
     session_inbox: SessionInbox
     gate: GateRuntimeConfig = field(default_factory=GateRuntimeConfig)
+    gate_instance: ToolGate | None = None
     compactor: StructuredCompactor | None = None
     compact_controller: CompactController | None = None
     cancellation_token: CancellationToken | None = None

@@ -4,49 +4,44 @@ import asyncio
 from asyncio import run as async_run
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
-from xcode.agent.agent import Agent
-from xcode.agent.config import AgentLoopConfig
-from xcode.ai.providers.base import ModelProvider
-from xcode.agent.types import (
-    CancellationSignal,
-    SubagentRenderIntent,
-    ToolOutput,
-    ToolSpec,
+from xcode.agent.types import SubagentRenderIntent, ToolOutput, ToolSpec
+from xcode.harness.agent_runtime.composition import AgentComposition
+from xcode.harness.agent_runtime.subagents import (
+    SubagentSessionManager,
+    SubagentTaskResult,
 )
 from xcode.harness.agent_runtime.tool_gate import ToolGate
-from xcode.harness.session.subagent_runs import SubagentRunEvent, SubagentRunStatus
+from xcode.harness.session.subagent_runs import SubagentMode
 
 
 BUILD_SUBAGENT_PROMPTS: dict[str, str] = {
     "coding": (
-        "You are an expert software engineer with full file system access. "
+        "You are an expert software engineer with local file system access. "
         "Complete the assigned task using available tools.\n\n"
-        "- Use read/grep/glob/list_dir to explore before making changes.\n"
-        "- Use bash to run tests, linters, or build commands.\n"
-        "- Use edit/write to make changes.\n"
+        "- Explore before making changes.\n"
+        "- Run focused tests, linters, or build commands.\n"
         "- Prefer small, focused changes and verify them.\n"
         "- Return a concise summary of what you did."
     ),
     "research": (
-        "You are a thorough research assistant with file system and web access.\n\n"
-        "- Use read/grep/glob/list_dir to inspect local files.\n"
-        "- Use websearch/webfetch to gather current external information.\n"
+        "You are a thorough research assistant with local file and web access.\n\n"
+        "- Inspect relevant local files.\n"
+        "- Use web tools for current external information.\n"
         "- Cite sources and files when possible.\n"
         "- Return a structured summary of your findings."
     ),
     "default": (
-        "You are a helpful AI assistant with file system access. "
-        "Complete the assigned task and return a concise summary."
+        "You are a helpful local AI assistant. Complete the assigned task and "
+        "return a concise summary."
     ),
 }
 
 
 MAX_BATCH_TASKS = 16
 DEFAULT_MAX_CONCURRENT = 4
-SubagentLifecycleSink = Callable[[SubagentRunEvent], object]
 
 
 @dataclass(frozen=True)
@@ -58,35 +53,16 @@ class _SubagentRun:
 
 
 class _SubagentHandler:
-    """子代理处理器；门控由产品装配完成后绑定，未绑定时拒绝运行。"""
+    """通过 session manager 创建 one-shot 或 continuable child。"""
 
-    def __init__(
-        self,
-        model: ModelProvider,
-        coding_tools: list[ToolSpec],
-        research_tools: list[ToolSpec],
-        cancellation_token: CancellationSignal | None,
-        lifecycle_sink: SubagentLifecycleSink,
-    ) -> None:
-        self._model = model
-        self._coding_tools = coding_tools
-        self._research_tools = research_tools
-        self._cancellation_token = cancellation_token
-        self._lifecycle_sink = lifecycle_sink
-        self._permission_gate: ToolGate | None = None
-
-    def bind_permission_gate(self, gate: ToolGate) -> None:
-        """绑定父代理权限门控。"""
-        self._permission_gate = gate
+    def __init__(self, manager: SubagentSessionManager) -> None:
+        self.manager = manager
 
     def __call__(
         self,
         data: dict[str, Any],
         on_update: Callable[[str], None] | None = None,
     ) -> str:
-        gate = self._permission_gate
-        if gate is None:
-            return "Error: subagent permission gate is not configured"
         tasks_or_error = _parse_tasks(data)
         if isinstance(tasks_or_error, str):
             return tasks_or_error
@@ -103,95 +79,130 @@ class _SubagentHandler:
             for index, task in enumerate(tasks, start=1)
         ]
 
-        async def _run() -> str:
-            if len(tasks) == 1:
-                return await _run_one(
-                    runs[0],
-                    self._model,
-                    self._coding_tools,
-                    self._research_tools,
-                    self._cancellation_token,
-                    on_update,
-                    gate,
-                    self._lifecycle_sink,
-                )
-            return await _run_batch(
+        async def execute() -> tuple[str, tuple[str, ...]]:
+            if len(runs) == 1:
+                result = await _run_one(runs[0], self.manager, on_update)
+                return _format_single(result, runs[0].task), (result.run_id,)
+            results = await _run_batch(
                 runs,
                 max_concurrent,
-                self._model,
-                self._coding_tools,
-                self._research_tools,
-                self._cancellation_token,
+                self.manager,
                 on_update,
-                gate,
-                self._lifecycle_sink,
             )
+            return results, tuple(run.run_id for run in runs)
 
-        result = async_run(_run())
+        text, run_ids = async_run(execute())
         return ToolOutput(
-            result,
+            text,
             render_intent=SubagentRenderIntent(
                 batch_id=batch_id,
-                run_ids=tuple(run.run_id for run in runs),
+                run_ids=run_ids,
             ),
         )
 
 
-def bind_subagent_permission_gate(
-    registry: tuple[ToolSpec, ...], gate: ToolGate
+class _SubagentContinueHandler:
+    def __init__(self, manager: SubagentSessionManager) -> None:
+        self.manager = manager
+
+    def __call__(
+        self,
+        data: dict[str, Any],
+        on_update: Callable[[str], None] | None = None,
+    ) -> str:
+        session_id = str(data.get("session_id", "")).strip()
+        prompt = str(data.get("prompt", "")).strip()
+        if not session_id or not prompt:
+            return "Error: session_id and prompt are required"
+        result = async_run(
+            self.manager.send(
+                session_id,
+                _bounded_prompt(prompt),
+                on_update=on_update,
+            )
+        )
+        return ToolOutput(
+            _format_continuation(result),
+            render_intent=SubagentRenderIntent(
+                batch_id=result.run_id,
+                run_ids=(result.run_id,),
+            ),
+        )
+
+
+class _SubagentListHandler:
+    def __init__(self, manager: SubagentSessionManager) -> None:
+        self.manager = manager
+
+    def __call__(
+        self,
+        _data: dict[str, Any],
+        _on_update: Callable[[str], None] | None = None,
+    ) -> str:
+        children = self.manager.list_children()
+        if not children:
+            return "No direct child sessions."
+        return "\n".join(
+            f"- {child.child_session_id}: {child.description} "
+            f"({child.mode}, {child.subagent_type})"
+            for child in children
+        )
+
+
+def bind_subagent_runtime(
+    registry: tuple[ToolSpec, ...],
+    composition_provider: Callable[[], AgentComposition],
+    gate: ToolGate,
 ) -> None:
-    """把产品层已装配的权限门控绑定到 subagent 工具。"""
-    for spec in registry:
-        if spec.name == "subagent" and isinstance(spec.handler, _SubagentHandler):
-            spec.handler.bind_permission_gate(gate)
+    """把父 composition 与权限域绑定到 registry 中的唯一 manager。"""
+    managers = {
+        cast(Any, spec.handler).manager
+        for spec in registry
+        if isinstance(
+            spec.handler,
+            _SubagentHandler | _SubagentContinueHandler | _SubagentListHandler,
+        )
+    }
+    for manager in managers:
+        manager.bind_parent(composition_provider, gate)
 
 
-def build_subagent_tool(
-    model: ModelProvider,
-    coding_tools: list[ToolSpec],
-    research_tools: list[ToolSpec],
-    lifecycle_sink: SubagentLifecycleSink,
-    cancellation_token: CancellationSignal | None = None,
-) -> ToolSpec:
-    handler = _SubagentHandler(
-        model,
-        coding_tools,
-        research_tools,
-        cancellation_token,
-        lifecycle_sink,
+def build_subagent_tools(
+    manager: SubagentSessionManager,
+) -> tuple[ToolSpec, ToolSpec, ToolSpec]:
+    """构建创建、续接与枚举 child session 的三个明确工具。"""
+    return (
+        _build_subagent_tool(manager),
+        _build_subagent_continue_tool(manager),
+        _build_subagent_list_tool(manager),
     )
 
+
+def _build_subagent_tool(manager: SubagentSessionManager) -> ToolSpec:
     return ToolSpec(
         name="subagent",
         description=(
-            "Launch one or more subagents for self-contained tasks. "
-            "Each subagent runs independently with file system and web access. "
-            "Use tasks for parallel fan-out when the work items do not depend on each other.\n\n"
-            "Available subagent types:\n"
-            "- coding: Expert software engineer (default)\n"
-            "- research: Research assistant with web access\n"
-            "- default: General-purpose assistant"
+            "Create local session-backed child agents. Use one_shot for bounded work; "
+            "use continuable when later follow-up turns will be required. Parallel tasks "
+            "are always independent one_shot children."
         ),
         input_hint=(
-            'JSON: {"description":"short label","prompt":"...", "subagent_type":"coding"} '
-            'or {"tasks":[{"description":"label","prompt":"..."}],"max_concurrent":4}'
+            'JSON: {"description":"label","prompt":"...","mode":"one_shot",'
+            '"subagent_type":"coding"}'
         ),
-        handler=handler,
+        handler=_SubagentHandler(manager),
         schema={
             "type": "object",
             "properties": {
-                "description": {
+                "description": {"type": "string"},
+                "prompt": {"type": "string"},
+                "mode": {
                     "type": "string",
-                    "description": "Short 3-7 word label for a single delegated task",
-                },
-                "prompt": {
-                    "type": "string",
-                    "description": "Complete task prompt for a single subagent",
+                    "enum": ["one_shot", "continuable"],
                 },
                 "subagent_type": {
                     "type": "string",
                     "enum": ["coding", "research", "default"],
-                    "description": "Type of subagent (default: coding)",
                 },
                 "tasks": {
                     "type": "array",
@@ -208,24 +219,53 @@ def build_subagent_tool(
                         "required": ["description", "prompt"],
                         "additionalProperties": False,
                     },
-                    "description": "Independent tasks to run in parallel",
                 },
                 "max_concurrent": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": MAX_BATCH_TASKS,
-                    "description": "Maximum parallel subagents for tasks (default: 4)",
                 },
             },
+            "oneOf": [
+                {"required": ["description", "prompt", "mode"]},
+                {"required": ["tasks"]},
+            ],
             "additionalProperties": False,
         },
-        prompt_snippet="Delegate independent work to one or more subagents",
+        prompt_snippet="Delegate work to an independent durable child session",
         prompt_guidelines=(
-            "Use subagent for substantial independent investigation or implementation tasks.",
-            "Use tasks only when the work items can run independently; the main agent synthesizes results.",
-            "Include all necessary context in each prompt; subagents do not inherit conversation history.",
-            "Do not poll delegated tasks; subagent returns the final result when done.",
+            "Use one_shot for bounded independent work.",
+            "Use continuable only when later subagent_continue turns are expected.",
+            "Child sessions receive the explicit task, not the parent transcript.",
         ),
+    )
+
+
+def _build_subagent_continue_tool(manager: SubagentSessionManager) -> ToolSpec:
+    return ToolSpec(
+        name="subagent_continue",
+        description="Send the next FIFO turn to a direct continuable child session.",
+        input_hint='JSON: {"session_id":"...","prompt":"..."}',
+        handler=_SubagentContinueHandler(manager),
+        schema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "prompt": {"type": "string"},
+            },
+            "required": ["session_id", "prompt"],
+            "additionalProperties": False,
+        },
+    )
+
+
+def _build_subagent_list_tool(manager: SubagentSessionManager) -> ToolSpec:
+    return ToolSpec(
+        name="subagent_list",
+        description="List durable direct child sessions without activating them.",
+        input_hint="JSON: {}",
+        handler=_SubagentListHandler(manager),
+        schema={"type": "object", "properties": {}, "additionalProperties": False},
     )
 
 
@@ -233,8 +273,11 @@ def _parse_tasks(data: dict[str, Any]) -> list[dict[str, str]] | str:
     raw_tasks = data.get("tasks")
     if raw_tasks is None:
         prompt = str(data.get("prompt", "")).strip()
+        mode = str(data.get("mode", "")).strip()
         if not prompt:
             return "Error: prompt is required"
+        if mode not in {"one_shot", "continuable"}:
+            return "Error: mode must be one_shot or continuable"
         return [
             {
                 "description": str(data.get("description", "subagent")).strip()
@@ -242,6 +285,7 @@ def _parse_tasks(data: dict[str, Any]) -> list[dict[str, str]] | str:
                 "prompt": prompt,
                 "subagent_type": str(data.get("subagent_type", "coding")).strip()
                 or "coding",
+                "mode": mode,
             }
         ]
     if not isinstance(raw_tasks, list):
@@ -266,6 +310,7 @@ def _parse_tasks(data: dict[str, Any]) -> list[dict[str, str]] | str:
                     raw_task.get("subagent_type", data.get("subagent_type", "coding"))
                 ).strip()
                 or "coding",
+                "mode": "one_shot",
             }
         )
     return tasks
@@ -280,45 +325,48 @@ def _max_concurrent(raw: object) -> int:
 async def _run_batch(
     runs: list[_SubagentRun],
     max_concurrent: int,
-    model: ModelProvider,
-    coding_tools: list[ToolSpec],
-    research_tools: list[ToolSpec],
-    cancellation_token: CancellationSignal | None,
+    manager: SubagentSessionManager,
     on_update: Callable[[str], None] | None,
-    permission_gate: ToolGate,
-    lifecycle_sink: SubagentLifecycleSink,
 ) -> str:
     semaphore = asyncio.Semaphore(max_concurrent)
 
-    async def limited(run: _SubagentRun) -> tuple[int, str, str]:
+    async def limited(run: _SubagentRun) -> tuple[int, str, SubagentTaskResult]:
         async with semaphore:
-            index = run.task_index
-            task = run.task
-            label = task["description"]
-            task_update = _task_update(index, on_update)
+            label = run.task["description"]
             if on_update is not None:
-                on_update(f"[{index}] → {label}")
+                on_update(f"[{run.task_index}] → {label}")
             result = await _run_one(
                 run,
-                model,
-                coding_tools,
-                research_tools,
-                cancellation_token,
-                task_update,
-                permission_gate,
-                lifecycle_sink,
+                manager,
+                _task_update(run.task_index, on_update),
             )
             if on_update is not None:
-                on_update(f"[{index}] ✓ {label}")
-            return index, label, result
+                on_update(f"[{run.task_index}] ✓ {label}")
+            return run.task_index, label, result
 
-    results = await asyncio.gather(
-        *(limited(run) for run in runs)
-    )
+    results = await asyncio.gather(*(limited(run) for run in runs))
     lines = [f"Subagent batch completed: {len(results)} task(s)"]
-    for index, label, result in sorted(results):
-        lines.append(f"\n## {index}. {label}\n{result.strip()}")
+    for index, label, result in sorted(results, key=lambda item: item[0]):
+        lines.append(f"\n## {index}. {label}\n{_format_result(result)}")
     return "\n".join(lines)
+
+
+async def _run_one(
+    run: _SubagentRun,
+    manager: SubagentSessionManager,
+    on_update: Callable[[str], None] | None,
+) -> SubagentTaskResult:
+    task = run.task
+    return await manager.execute(
+        description=task["description"],
+        prompt=_bounded_prompt(task["prompt"]),
+        subagent_type=task["subagent_type"],
+        mode=cast(SubagentMode, task["mode"]),
+        run_id=run.run_id,
+        batch_id=run.batch_id,
+        task_index=run.task_index,
+        on_update=on_update,
+    )
 
 
 def _task_update(
@@ -334,75 +382,23 @@ def _task_update(
     return update
 
 
-async def _run_one(
-    run: _SubagentRun,
-    model: ModelProvider,
-    coding_tools: list[ToolSpec],
-    research_tools: list[ToolSpec],
-    cancellation_token: CancellationSignal | None,
-    on_update: Callable[[str], None] | None,
-    permission_gate: ToolGate,
-    lifecycle_sink: SubagentLifecycleSink,
-) -> str:
-    task = run.task
-    lifecycle_sink(_lifecycle_event(run, "started"))
-    subagent_type = task["subagent_type"]
-    system_prompt = BUILD_SUBAGENT_PROMPTS.get(
-        subagent_type, BUILD_SUBAGENT_PROMPTS["default"]
-    )
-    raw_tools = coding_tools if subagent_type == "coding" else research_tools
-    child_gate = permission_gate.fork_for_subagent()
-    registry = tuple(raw_tools)
-    gate_snapshot = child_gate.snapshot_for(registry)
-    adapted = child_gate.adapt_tools(registry)
-    loop_config = AgentLoopConfig(
-        provider=model,
-        before_tool_call=child_gate.build_before_tool_hook(gate_snapshot),
-        after_tool_call=child_gate.build_after_tool_hook(gate_snapshot),
-        is_tool_productive=child_gate.build_is_tool_productive_hook(gate_snapshot),
-    )
-    agent = Agent(tools=adapted, model=model, system_prompt=system_prompt)
-    outcomes = await asyncio.gather(
-        agent.prompt(
-            _bounded_prompt(task["prompt"]),
-            loop_config=loop_config,
-            signal=cancellation_token,
-            on_update=on_update,
-        ),
-        return_exceptions=True,
-    )
-    outcome = outcomes[0]
-    if isinstance(outcome, BaseException):
-        status: SubagentRunStatus = (
-            "cancelled" if isinstance(outcome, asyncio.CancelledError) else "failed"
-        )
-        error = f"{type(outcome).__name__}: {outcome}"
-        lifecycle_sink(_lifecycle_event(run, status, error=error))
-        return f"Error: {error}"
-    if cancellation_token is not None and cancellation_token.is_cancelled():
-        lifecycle_sink(_lifecycle_event(run, "cancelled", summary=outcome))
-        return outcome
-    lifecycle_sink(_lifecycle_event(run, "completed", summary=outcome))
-    return outcome
+def _format_single(result: SubagentTaskResult, task: dict[str, str]) -> str:
+    body = _format_result(result)
+    if task["mode"] == "continuable":
+        return f"Continuable child session: {result.child_session_id}\n\n{body}"
+    return body
 
 
-def _lifecycle_event(
-    run: _SubagentRun,
-    status: SubagentRunStatus,
-    *,
-    summary: str = "",
-    error: str = "",
-) -> SubagentRunEvent:
-    return SubagentRunEvent(
-        run_id=run.run_id,
-        batch_id=run.batch_id,
-        task_index=run.task_index,
-        description=run.task["description"],
-        subagent_type=run.task["subagent_type"],
-        status=status,
-        summary=summary.strip()[:4000],
-        error=error.strip()[:1000],
-    )
+def _format_continuation(result: SubagentTaskResult) -> str:
+    return f"Child session: {result.child_session_id}\n\n{_format_result(result)}"
+
+
+def _format_result(result: SubagentTaskResult) -> str:
+    if result.status == "completed":
+        return result.answer
+    if result.status == "cancelled":
+        return "Cancelled"
+    return f"Error: {result.error}"
 
 
 def _bounded_prompt(prompt: str) -> str:

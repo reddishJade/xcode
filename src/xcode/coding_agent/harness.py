@@ -61,9 +61,9 @@ class CodingAgentHarness(AgentHarness):
         self._goal = GoalController(lambda: self.provider)
         if self._session_history is not None:
             self._session_history.set_session_id(self.session_id)
-        from xcode.coding_agent.tools.subagent import bind_subagent_permission_gate
+        from xcode.coding_agent.tools.subagent import bind_subagent_runtime
 
-        bind_subagent_permission_gate(self.registry, self._gate)
+        bind_subagent_runtime(self.registry, lambda: self.composition, self._gate)
 
     # ── AgentHarness 扩展点覆盖 ──
 

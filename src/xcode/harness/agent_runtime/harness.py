@@ -103,8 +103,11 @@ class AgentHarness:
         self.compactor = runtime.compactor
         self._compact_controller = runtime.compact_controller
         self.cancellation_token = runtime.cancellation_token or CancellationToken()
-        self._correlation = gate_runtime.correlation or RuntimeCorrelation(
-            gate_runtime.session_id
+        supplied_gate = runtime.gate_instance
+        self._correlation = (
+            supplied_gate.correlation
+            if supplied_gate is not None
+            else gate_runtime.correlation or RuntimeCorrelation(gate_runtime.session_id)
         )
         self._last_prompt_tokens: int | None = None
 
@@ -112,7 +115,7 @@ class AgentHarness:
         self.external_directories = gate.external_directories
         self.sensitive_path_overrides = gate.sensitive_path_overrides
         self.hook_constraint_providers = gate.hook_constraint_providers
-        self._gate = ToolGate(
+        self._gate = supplied_gate or ToolGate(
             mode_state=self._build_gate_mode(),
             approval_callback=gate_runtime.approval_callback,
             permission_policy=gate.permission_policy,

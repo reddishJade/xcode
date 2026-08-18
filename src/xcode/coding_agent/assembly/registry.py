@@ -10,13 +10,17 @@ from typing import Any, TYPE_CHECKING
 
 from xcode.ai.providers.base import ModelProvider
 from xcode.agent.types import ToolSpec
-from xcode.coding_agent.tools.subagent import build_subagent_tool
+from xcode.coding_agent.tools.subagent import (
+    BUILD_SUBAGENT_PROMPTS,
+    build_subagent_tools,
+)
 from xcode.coding_agent.tools import ShellSpec, detect_shell
 from xcode.coding_agent.registry import build_project_scoped_registry
 
 from xcode.harness.config import XcodeRuntimeConfig
 from xcode.harness.execution_env import Shell
 from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
+from xcode.harness.agent_runtime.subagents import SubagentSessionManager
 from xcode.harness.session_todo import SessionTodoState
 
 if TYPE_CHECKING:
@@ -159,7 +163,7 @@ def _extend_registry_with_features(
 
 def build_tool_registry(
     project_root: Path,
-    llm: ModelProvider,
+    subagent_provider: ModelProvider,
     runtime_config: XcodeRuntimeConfig,
     session_recorder: SessionRecorder,
     contextual_state: ContextualRetrievalState | None = None,
@@ -175,6 +179,7 @@ def build_tool_registry(
     tuple[Callable[[], None], ...],
     SkillRegistry | None,
     McpRuntimeRegistry,
+    SubagentSessionManager,
 ]:
     from xcode.harness.mcp import McpRuntimeRegistry
 
@@ -212,15 +217,14 @@ def build_tool_registry(
     )
     registry += (build_search_tools_tool(lambda: registry),)
 
-    registry += (
-        build_subagent_tool(
-            model=llm,
-            coding_tools=list(child_registry),
-            research_tools=list(child_registry),
-            lifecycle_sink=session_recorder.record_subagent_run,
-            cancellation_token=cancel_event,
-        ),
+    subagents = SubagentSessionManager(
+        provider=subagent_provider,
+        coding_tools=child_registry,
+        research_tools=child_registry,
+        system_prompts=BUILD_SUBAGENT_PROMPTS,
+        parent_store=session_recorder.store,
     )
+    registry += build_subagent_tools(subagents)
 
     closers.append(mcp_runtime_registry.close)
 
@@ -230,4 +234,5 @@ def build_tool_registry(
         tuple(closers),
         skill_registry,
         mcp_runtime_registry,
+        subagents,
     )

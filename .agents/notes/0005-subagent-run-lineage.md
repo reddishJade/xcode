@@ -1,5 +1,5 @@
 # Subagent run lineage is durable
-Status: Implemented
+Status: Superseded
 Date: 2026-08-18
 
 ## Context
@@ -25,4 +25,4 @@ UI、诊断和后续调度可以基于稳定 ID，而非解析进度字符串。
 
 ## Supersedes
 
-None
+Superseded by 0010-session-backed-subagents.md

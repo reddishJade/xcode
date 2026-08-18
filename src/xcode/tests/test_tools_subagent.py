@@ -1,34 +1,55 @@
-"""subagent 工具输入解析单元测试。"""
+"""Session-backed subagent 与 continuation 契约测试。"""
 
 from __future__ import annotations
 
+from copy import deepcopy
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from xcode.agent.agent import Agent
-from xcode.agent.config import AgentContext, AfterToolCallContext, BeforeToolCallContext
-from xcode.agent.messages import AssistantMessage
-from xcode.agent.types import (
-    AgentToolResult,
-    ApprovalRequest,
-    TextContent,
-    ToolCallContent,
-    ToolSpec,
-    SubagentRenderIntent,
-)
+from xcode.ai.events import FinalMessage, Message, ProviderEvent, TextDelta
+from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.agent.request import DefaultRequestAssembler
 from xcode.coding_agent.tools.subagent import (
-    _SubagentRun,
+    BUILD_SUBAGENT_PROMPTS,
+    _bounded_prompt,
     _max_concurrent,
     _parse_tasks,
-    _run_one,
-    build_subagent_tool,
 )
-from xcode.harness.session.subagent_runs import SubagentRunEvent
+from xcode.harness.agent_runtime.composition import AgentComposition
+from xcode.harness.agent_runtime.config import GateConfig
+from xcode.harness.agent_runtime.subagents import SubagentSessionManager
 from xcode.harness.agent_runtime.tool_gate import ToolGate
-from xcode.harness.observability import AuditRecord
-from xcode.harness.security import HITLResult
-from xcode.harness.security.permission_model import InMemoryGrantStore, Rule
+from xcode.harness.config import AgentConfig
+from xcode.harness.session import SessionStore
+
+
+class _Provider:
+    model = "child-model"
+    base_url = "https://child.invalid"
+    transport = "test"
+    thinking = False
+    reasoning_effort = None
+
+    def __init__(self) -> None:
+        self.requests: list[list[Message]] = []
+
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **kwargs: object,
+    ):
+        del tools, options, kwargs
+        self.requests.append(deepcopy(messages))
+        answer = f"child-answer-{len(self.requests)}"
+        yield cast(ProviderEvent, TextDelta(answer))
+        yield cast(
+            ProviderEvent,
+            FinalMessage(content=answer, stop_reason="end_turn"),
+        )
 
 
 class _AllowMode:
@@ -38,387 +59,162 @@ class _AllowMode:
         return "allow"
 
 
-def _tool(name: str) -> ToolSpec:
-    return ToolSpec(
-        name=name,
-        description=name,
-        input_hint="JSON",
-        handler=lambda _data, _update=None: "executed",
-        schema={"type": "object"},
-    )
-
-
-def _gate(**kwargs: Any) -> ToolGate:
+def _gate() -> ToolGate:
     return ToolGate(
         mode_state=cast(Any, _AllowMode()),
-        approval_callback=kwargs.get("approval_callback"),
+        approval_callback=None,
         permission_policy=None,
         hook_manager=None,
-        audit_logger=kwargs.get("audit_logger"),
-        session_id="test-session",
-        project_root=kwargs.get("project_root"),
-        session_grant_store=kwargs.get("session_grant_store"),
-        user_ruleset=kwargs.get("user_ruleset", ()),
+        audit_logger=None,
+        session_id="parent",
         mode_fallbacks={"act": "allow"},
     )
 
 
-def _run(task: dict[str, str], index: int = 1) -> _SubagentRun:
-    return _SubagentRun(
-        run_id=f"run-{index}",
-        batch_id="batch-1",
-        task_index=index,
-        task=task,
+def _manager(tmp_path: Path, provider: _Provider) -> SubagentSessionManager:
+    store = SessionStore(tmp_path / "sessions", project_root=tmp_path)
+    store.ensure_metadata("parent task")
+    store.append("event", {"type": "parent/test"})
+    manager = SubagentSessionManager(
+        provider=cast(Any, provider),
+        coding_tools=(),
+        research_tools=(),
+        system_prompts=BUILD_SUBAGENT_PROMPTS,
+        parent_store=store,
     )
+    composition = AgentComposition.create(
+        primary_provider=cast(Any, provider),
+        fallback_provider=None,
+        registry=(),
+        config=AgentConfig(),
+        gate=GateConfig(),
+        request_assembler=DefaultRequestAssembler(),
+        runtime_context_provider=None,
+    )
+    manager.bind_parent(lambda: composition, _gate())
+    return manager
 
 
-def test_parse_single_prompt() -> None:
-    parsed = _parse_tasks({"description": "scan auth", "prompt": "Inspect auth"})
-    assert not isinstance(parsed, str)
-    assert parsed == [
+def test_parse_single_requires_explicit_mode() -> None:
+    assert _parse_tasks({"prompt": "Inspect auth"}) == (
+        "Error: mode must be one_shot or continuable"
+    )
+    assert _parse_tasks(
+        {
+            "description": "scan auth",
+            "prompt": "Inspect auth",
+            "mode": "continuable",
+        }
+    ) == [
         {
             "description": "scan auth",
             "prompt": "Inspect auth",
             "subagent_type": "coding",
+            "mode": "continuable",
         }
     ]
 
 
-def test_parse_parallel_tasks() -> None:
+def test_parallel_tasks_are_always_one_shot() -> None:
     parsed = _parse_tasks(
         {
             "subagent_type": "research",
             "tasks": [
                 {"description": "auth", "prompt": "Inspect auth"},
-                {
-                    "description": "db",
-                    "prompt": "Inspect db",
-                    "subagent_type": "coding",
-                },
+                {"description": "db", "prompt": "Inspect db"},
             ],
         }
     )
     assert not isinstance(parsed, str)
-    assert [task["subagent_type"] for task in parsed] == ["research", "coding"]
+    assert [task["mode"] for task in parsed] == ["one_shot", "one_shot"]
+    assert [task["subagent_type"] for task in parsed] == ["research", "research"]
 
 
-def test_parse_tasks_requires_prompt() -> None:
-    assert (
-        _parse_tasks({"tasks": [{"description": "missing"}]})
-        == "Error: task 1 prompt is required"
-    )
-
-
-def test_max_concurrent_clamps() -> None:
+def test_batch_limit_and_bounded_prompt() -> None:
     assert _max_concurrent(0) == 1
     assert _max_concurrent(99) == 16
-    assert _max_concurrent("nope") == 4
-
-
-def test_bounded_prompt_adds_summary_constraint() -> None:
-    from xcode.coding_agent.tools.subagent import _bounded_prompt
-
-    prompt = _bounded_prompt("Inspect auth")
-    assert "Inspect auth" in prompt
-    assert "return a concise summary" in prompt
-
-
-def test_subagent_fails_closed_without_permission_gate() -> None:
-    tool = build_subagent_tool(
-        model=cast(Any, object()),
-        coding_tools=[],
-        research_tools=[],
-        lifecycle_sink=lambda _event: None,
-    )
-
-    result = tool.handler({"prompt": "inspect"}, None)
-
-    assert result == "Error: subagent permission gate is not configured"
+    assert "return a concise summary" in _bounded_prompt("Inspect auth")
 
 
 @pytest.mark.asyncio
-async def test_subagent_edit_obeys_parent_deny(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
-) -> None:
-    edit_tool = _tool("edit_file")
-    gate = _gate(
-        project_root=tmp_path,
-        user_ruleset=(Rule(action="edit_file", effect="deny"),),
+async def test_one_shot_child_has_independent_durable_session(tmp_path: Path) -> None:
+    provider = _Provider()
+    manager = _manager(tmp_path, provider)
+
+    result = await manager.execute(
+        description="inspect runtime",
+        prompt="child task only",
+        subagent_type="coding",
+        mode="one_shot",
+        run_id="run-1",
+        batch_id="batch-1",
+        task_index=1,
     )
 
-    async def fake_prompt(_self: Agent, _text: str, **kwargs: object) -> str:
-        config = kwargs["loop_config"]
-        before = cast(Any, config).before_tool_call
-        assert before is not None
-        tool_call = ToolCallContent(
-            id="edit-1",
-            name="edit_file",
-            arguments={"path": str(tmp_path / "blocked.py")},
-        )
-        result = before(
-            BeforeToolCallContext(
-                assistant_message=AssistantMessage(content=[tool_call]),
-                tool_call=tool_call,
-                args=tool_call.arguments or {},
-                context=AgentContext(),
-            ),
-            None,
-        )
-        assert result is not None and result.block
-        return "blocked"
-
-    monkeypatch.setattr(Agent, "prompt", fake_prompt)
-
-    result = await _run_one(
-        _run(
-            {
-                "description": "edit",
-                "prompt": "edit file",
-                "subagent_type": "coding",
-            }
-        ),
-        cast(Any, object()),
-        [edit_tool],
-        [],
-        None,
-        None,
-        gate,
-        lambda _event: None,
+    assert result.status == "completed"
+    assert result.answer == "child-answer-1"
+    descriptors = manager.list_children()
+    assert [item.child_session_id for item in descriptors] == [result.child_session_id]
+    child_info = manager._parent_store.find_by_id(result.child_session_id)
+    assert child_info is not None
+    assert child_info.parent_id == manager._parent_store.session_id
+    child_events = _event_types(child_info.path)
+    assert child_events[:3] == [
+        "subagent/descriptor",
+        "inbox/inserted",
+        "inbox/claimed",
+    ]
+    assert "provider_request" in child_events
+    assert "final" in child_events
+    assert any(
+        message.get("role") == "user" and "child task only" in str(message)
+        for message in provider.requests[0]
     )
-
-    assert result == "blocked"
 
 
 @pytest.mark.asyncio
-async def test_subagent_reuses_session_grant_and_audits_child_calls(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
-) -> None:
-    approvals: list[dict[str, Any]] = []
-    audits: list[AuditRecord] = []
-    store = InMemoryGrantStore()
-
-    def approve(request: ApprovalRequest) -> HITLResult:
-        approvals.append(request.action_input)
-        return HITLResult("allow", "session")
-
-    gate = _gate(
-        project_root=tmp_path,
-        approval_callback=approve,
-        audit_logger=audits.append,
-        session_grant_store=store,
-        user_ruleset=(Rule(action="bash", effect="ask"),),
-    )
-    bash_tool = _tool("bash")
-    call_index = 0
-    tool_results: list[AgentToolResult] = []
-
-    async def fake_prompt(_self: Agent, _text: str, **kwargs: object) -> str:
-        nonlocal call_index
-        call_index += 1
-        config = cast(Any, kwargs["loop_config"])
-        tool_call = ToolCallContent(
-            id=f"bash-{call_index}",
-            name="bash",
-            arguments={"command": "git status"},
-        )
-        assistant = AssistantMessage(content=[tool_call])
-        before_ctx = BeforeToolCallContext(
-            assistant_message=assistant,
-            tool_call=tool_call,
-            args=tool_call.arguments or {},
-            context=AgentContext(),
-        )
-        assert config.before_tool_call(before_ctx, None) is None
-        tool_result = AgentToolResult(content=[TextContent(text="ok")])
-        config.after_tool_call(
-            AfterToolCallContext(
-                assistant_message=assistant,
-                tool_call=tool_call,
-                args=before_ctx.args,
-                result=tool_result,
-                is_error=False,
-                context=AgentContext(),
-            ),
-            None,
-        )
-        tool_results.append(tool_result)
-        return "ok"
-
-    monkeypatch.setattr(Agent, "prompt", fake_prompt)
-    task = {"description": "status", "prompt": "run status", "subagent_type": "coding"}
-
-    await _run_one(
-        _run(task, 1),
-        cast(Any, object()),
-        [bash_tool],
-        [],
-        None,
-        None,
-        gate,
-        lambda _event: None,
-    )
-    await _run_one(
-        _run(task, 2),
-        cast(Any, object()),
-        [bash_tool],
-        [],
-        None,
-        None,
-        gate,
-        lambda _event: None,
+async def test_continuable_child_cold_resumes_same_session(tmp_path: Path) -> None:
+    provider = _Provider()
+    first_manager = _manager(tmp_path, provider)
+    created = await first_manager.execute(
+        description="continue parser",
+        prompt="first child turn",
+        subagent_type="coding",
+        mode="continuable",
+        run_id="run-1",
+        batch_id="batch-1",
+        task_index=1,
     )
 
-    assert len(approvals) == 1
-    assert [record.tool for record in audits] == ["bash", "bash"]
-    assert audits[0].approval_scope == "session"
-    assert audits[1].matched_rule == "session_grant"
-    assert audits[1].approval_grant_id is not None
-    assert tool_results[1].details == {"permission_notice": "Allowed by session grant"}
-
-
-@pytest.mark.asyncio
-async def test_subagent_persists_started_and_completed_lifecycle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[SubagentRunEvent] = []
-
-    async def fake_prompt(_self: Agent, _text: str, **_kwargs: object) -> str:
-        return "implemented and verified"
-
-    monkeypatch.setattr(Agent, "prompt", fake_prompt)
-    run = _run(
-        {
-            "description": "implement parser",
-            "prompt": "Implement parser",
-            "subagent_type": "coding",
-        }
+    recovered_manager = SubagentSessionManager(
+        provider=cast(Any, provider),
+        coding_tools=(),
+        research_tools=(),
+        system_prompts=BUILD_SUBAGENT_PROMPTS,
+        parent_store=first_manager._parent_store,
     )
-
-    result = await _run_one(
-        run,
-        cast(Any, object()),
-        [],
-        [],
-        None,
-        None,
+    recovered_manager.bind_parent(
+        first_manager._composition_provider or cast(Any, lambda: None),
         _gate(),
-        events.append,
+    )
+    continued = await recovered_manager.send(
+        created.child_session_id,
+        "second child turn",
     )
 
-    assert result == "implemented and verified"
-    assert [event.status for event in events] == ["started", "completed"]
-    assert {event.run_id for event in events} == {"run-1"}
-    assert events[-1].summary == "implemented and verified"
+    assert continued.child_session_id == created.child_session_id
+    assert continued.answer == "child-answer-2"
+    second_request = provider.requests[1]
+    assert any("first child turn" in str(message) for message in second_request)
+    assert any("child-answer-1" in str(message) for message in second_request)
+    assert any("second child turn" in str(message) for message in second_request)
 
 
-@pytest.mark.asyncio
-async def test_subagent_persists_failed_lifecycle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[SubagentRunEvent] = []
-
-    async def fake_prompt(_self: Agent, _text: str, **_kwargs: object) -> str:
-        raise ValueError("child failed")
-
-    monkeypatch.setattr(Agent, "prompt", fake_prompt)
-    run = _run(
-        {
-            "description": "broken child",
-            "prompt": "Fail",
-            "subagent_type": "coding",
-        }
-    )
-
-    result = await _run_one(
-        run,
-        cast(Any, object()),
-        [],
-        [],
-        None,
-        None,
-        _gate(),
-        events.append,
-    )
-
-    assert result == "Error: ValueError: child failed"
-    assert [event.status for event in events] == ["started", "failed"]
-    assert events[-1].error == "ValueError: child failed"
-
-
-def test_subagent_result_links_parent_tool_to_child_runs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[SubagentRunEvent] = []
-
-    async def fake_prompt(_self: Agent, _text: str, **_kwargs: object) -> str:
-        return "done"
-
-    monkeypatch.setattr(Agent, "prompt", fake_prompt)
-    tool = build_subagent_tool(
-        model=cast(Any, object()),
-        coding_tools=[],
-        research_tools=[],
-        lifecycle_sink=events.append,
-    )
-    from xcode.coding_agent.tools.subagent import bind_subagent_permission_gate
-
-    bind_subagent_permission_gate((tool,), _gate())
-
-    result = tool.handler(
-        {
-            "description": "inspect runtime",
-            "prompt": "Inspect runtime",
-            "subagent_type": "coding",
-        },
-        None,
-    )
-
-    assert isinstance(result.render_intent, SubagentRenderIntent)
-    assert result.render_intent.batch_id == events[0].batch_id
-    assert result.render_intent.run_ids == (events[0].run_id,)
-
-
-def test_subagent_updates_keep_numbered_slots() -> None:
-    import io
-
-    from rich.console import Console
-
-    from xcode.cli.commands import ReplState
-    from xcode.cli.repl_turn_handler import ToolCallHandler
-    from xcode.harness.agent_runtime.events import ToolUpdateData
-
-    output = io.StringIO()
-    handler = ToolCallHandler(
-        ReplState(), Console(file=output, force_terminal=False, width=120)
-    )
-
-    handler.handle_tool_update(
-        ToolUpdateData(
-            tool_call_id="sub-1",
-            tool_name="subagent",
-            partial_result="[1] → tools\n[2] → runtime\n[3] → cli",
-        )
-    )
-    handler.handle_tool_update(
-        ToolUpdateData(
-            tool_call_id="sub-1",
-            tool_name="subagent",
-            partial_result="[2]   → read src/xcode/coding_agent/tools/subagent.py",
-        )
-    )
-    assert (
-        handler._subagent_slots[2]["tool"]
-        == "→ read src/xcode/coding_agent/tools/subagent.py"
-    )
-    handler.handle_tool_update(
-        ToolUpdateData(
-            tool_call_id="sub-1",
-            tool_name="subagent",
-            partial_result="[2] ✓ runtime",
-        )
-    )
-    assert handler._subagent_slots == {
-        1: {"task": "→ tools", "tool": ""},
-        2: {"task": "✓ runtime", "tool": ""},
-        3: {"task": "→ cli", "tool": ""},
-    }
+def _event_types(path: Path) -> list[str]:
+    store = SessionStore(path.parent, project_root=path.parent.parent)
+    store.resume(path)
+    return [
+        str(entry.content.get("type"))
+        for entry in store.build_branch()
+        if entry.type == "event" and isinstance(entry.content, dict)
+    ]

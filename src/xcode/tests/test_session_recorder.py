@@ -236,10 +236,12 @@ def test_subagent_lifecycle_records_parent_session_lineage(tmp_path: Path) -> No
     recorder.record_subagent_run(
         SubagentRunEvent(
             run_id="run-1",
+            child_session_id="child-1",
             batch_id="batch-1",
             task_index=1,
             description="inspect runtime",
             subagent_type="coding",
+            mode="one_shot",
             status="started",
         )
     )
@@ -249,3 +251,4 @@ def test_subagent_lifecycle_records_parent_session_lineage(tmp_path: Path) -> No
     assert event["type"] == "subagent_run"
     assert event["data"]["parent_session_id"] == recorder.store.session_id
     assert event["data"]["run_id"] == "run-1"
+    assert event["data"]["child_session_id"] == "child-1"

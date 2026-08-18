@@ -179,6 +179,33 @@ class TreeSessionRepo:
         fork.artifacts_dir = self.artifacts_dir
         return fork
 
+    def spawn_child(self, title: str, summary: str = "") -> TreeSessionRepo:
+        """创建空的直接子会话，并在索引中持久化 lineage。"""
+        parent = self.ensure_metadata()
+        with self._lock:
+            child_path = self._new_path()
+            child_path.touch(exist_ok=False)
+            now = datetime.now(UTC).isoformat(timespec="seconds")
+            metadata = TreeMetadata(
+                id=self._session_id(child_path),
+                title=title,
+                summary=summary or "Subagent session started.",
+                project_path=parent.project_path,
+                transcript_path=str(child_path),
+                created_at=now,
+                updated_at=now,
+                parent_id=parent.id,
+            )
+            self._upsert_metadata(metadata)
+        child = TreeSessionRepo.__new__(TreeSessionRepo)
+        child.sessions_dir = self.sessions_dir
+        child.project_root = self.project_root
+        child.index_path = self.index_path
+        child._lock = self._lock
+        child.current_path = child_path
+        child.artifacts_dir = self.artifacts_dir
+        return child
+
     def clear(self) -> None:
         with self._lock:
             self.current_path = self._new_path()
