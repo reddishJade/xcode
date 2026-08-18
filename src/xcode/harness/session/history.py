@@ -179,7 +179,7 @@ def build_history_tools(history: SessionHistory) -> tuple[ToolSpec, ...]:
             },
             prompt_snippet=(
                 "Use history search/around when a detail predates the current "
-                "checkpoint or compacted context."
+                "durable surface replacement or compacted context."
             ),
         ),
     )

@@ -147,6 +147,7 @@ class CompactionData:
     messages_after: int
     summary_token_estimate: int
     trigger: str
+    replacement: tuple[AgentMessage, ...]
 
 
 @dataclass(frozen=True)
@@ -382,6 +383,7 @@ def _translate_compaction(
             messages_after=event.messages_after,
             summary_token_estimate=event.summary_token_estimate,
             trigger=event.trigger,
+            replacement=tuple(event.replacement),
         ),
         state.correlation.snapshot(),
     )

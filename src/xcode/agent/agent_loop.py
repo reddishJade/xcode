@@ -109,6 +109,7 @@ async def run_agent_loop(
     new_messages: list[AgentMessage] = list(prompts)
     current_context = AgentContext(
         system_prompt=context.system_prompt,
+        request_prefix=list(context.request_prefix),
         messages=list(context.messages) + list(prompts),
         tools=list(context.tools) if context.tools else [],
     )
@@ -160,6 +161,7 @@ async def _run_loop(
         if is_cancelled(signal):
             return _finish_loop(
                 new_messages,
+                current_context.messages,
                 step,
                 metrics,
                 state.active_provider,
@@ -196,6 +198,7 @@ async def _run_loop(
                         summary_token_estimate=0,
                         trigger="token_limit",
                         archive=archive,
+                        replacement=list(current_context.messages),
                     )
                 )
 
@@ -214,6 +217,7 @@ async def _run_loop(
         if inner_result is None:
             return _finish_loop(
                 new_messages,
+                current_context.messages,
                 step,
                 metrics,
                 state.active_provider,
@@ -235,6 +239,7 @@ async def _run_loop(
             emit(_turn_end_event(message, []))
             result = AgentLoopResult(
                 messages=new_messages,
+                surface=list(current_context.messages),
                 steps=step,
                 termination_reason=(
                     TerminationReason.PROVIDER_ERROR
@@ -279,6 +284,7 @@ async def _run_loop(
 
             return _finish_loop(
                 new_messages,
+                current_context.messages,
                 step,
                 metrics,
                 state.active_provider,
@@ -303,6 +309,7 @@ async def _run_loop(
         if repeated_watchdog_reason:
             return _finish_loop(
                 new_messages,
+                current_context.messages,
                 step,
                 metrics,
                 state.active_provider,
@@ -318,6 +325,7 @@ async def _run_loop(
         if idle_watchdog_reason:
             return _finish_loop(
                 new_messages,
+                current_context.messages,
                 step,
                 metrics,
                 state.active_provider,
@@ -343,6 +351,7 @@ async def _run_loop(
             if config.should_stop_after_turn(ctx):
                 return _finish_loop(
                     new_messages,
+                    current_context.messages,
                     step,
                     metrics,
                     state.active_provider,
@@ -356,6 +365,7 @@ async def _run_loop(
     # 步骤耗尽
     result = AgentLoopResult(
         messages=new_messages,
+        surface=list(current_context.messages),
         steps=step,
         termination_reason=TerminationReason.STEP_LIMIT,
         metrics=metrics,
@@ -367,6 +377,7 @@ async def _run_loop(
 
 def _finish_loop(
     new_messages: list[AgentMessage],
+    surface: list[AgentMessage],
     step: int,
     metrics: AgentLoopMetrics,
     active_provider: StreamProvider | None,
@@ -378,6 +389,7 @@ def _finish_loop(
 ) -> AgentLoopResult:
     result = AgentLoopResult(
         messages=new_messages,
+        surface=list(surface),
         steps=step,
         termination_reason=termination_reason,
         watchdog_reason=watchdog_reason,

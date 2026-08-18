@@ -25,7 +25,7 @@ agent
    参数必须先形成 `provider_request` envelope，能够审计和比对。
 2. session transcript 是事实账本。用户消息、稳定运行事件、压缩 epoch、
    子代理生命周期和最终回答只能追加，不能原地改写历史。
-3. 内存状态是日志投影。resume、fork 和 restart 从 transcript 与 checkpoint
+3. 内存状态是日志投影。resume、fork 和 restart 从 transcript surface
    重建，不把 CLI/TUI 对象当成事实来源。
 4. 工具呈现属于协议。terminal、diff、location、subagent 等语义由工具产生
    类型化 intent，宿主只负责投影，不从输出字符串猜测。
@@ -77,8 +77,8 @@ message history、run metadata、Goal 和 contextual state。
 - `compaction`：追加式压缩 epoch，原 transcript 保持不变；
 - `subagent_run`：子运行的 started/completed/failed/cancelled 生命周期。
 
-checkpoint 是长会话的重建加速层，不替代 transcript。边界失配时，replayer
-使用完整 branch，而不是猜测或修改历史。
+`compaction` 保存完整、类型化的 surface replacement、来源 entry IDs、generation
+和指纹。replayer 只按日志顺序应用 replacement，不读取第二份 checkpoint 状态。
 
 ## 本地执行边界
 

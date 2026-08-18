@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Protocol
 
+from xcode.agent.messages import AgentMessage
 from xcode.harness.agent_runtime.events import AgentHarnessEvent, FinalStructuredEvent
 
 from .event_codec import SESSION_EVENT_SCHEMA_VERSION, encode_session_event
 from .tree_store import TreeSessionRepo
 from .types import JsonValue
 from .subagent_runs import SubagentRunEvent
+from .surface import encode_surface_messages, surface_digest
 
 
 _DURABLE_EVENT_TYPES = frozenset(
@@ -32,8 +34,6 @@ class SessionBoundAgent(Protocol):
     def session_id(self, value: str) -> None: ...
 
     def set_history_session_id(self, session_id: str) -> None: ...
-
-    def set_compaction_source_message_id(self, message_id: str | None) -> None: ...
 
 
 class ProviderRequestRecord(Protocol):
@@ -65,23 +65,28 @@ class SessionRecorder:
         display_question: str,
     ) -> str:
         message_id = self.store.append("user", display_question)
-        self.bind_agent(agent, message_id)
+        self.bind_agent(agent)
         return message_id
 
     def bind_agent(
         self,
         agent: SessionBoundAgent,
-        message_id: str | None = None,
     ) -> None:
         session_id = self.store.session_id
         agent.session_id = session_id
         agent.set_history_session_id(session_id)
-        agent.set_compaction_source_message_id(message_id)
 
     def record_event(self, event: AgentHarnessEvent) -> None:
         if event.type not in _DURABLE_EVENT_TYPES:
             return
-        self.store.append("event", encode_session_event(event))
+        encoded = encode_session_event(event)
+        if event.type == "compaction":
+            data = encoded.get("data")
+            if not isinstance(data, dict):
+                raise TypeError("compaction event data must be an object")
+            replacement = list(event.data.replacement)
+            data.update(self._surface_metadata(replacement))
+        self.store.append("event", encoded)
         if isinstance(event, FinalStructuredEvent) and event.data.answer:
             self.record_assistant(event.data.answer)
 
@@ -99,8 +104,10 @@ class SessionRecorder:
         messages_after: int,
         tokens_before: int,
         tokens_after: int,
+        replacement: list[AgentMessage],
     ) -> str:
-        """追加一次 compaction epoch，不修改既有 transcript。"""
+        """追加一次完整 surface replacement，不修改既有 transcript。"""
+        metadata = self._surface_metadata(replacement)
         return self.store.append(
             "event",
             {
@@ -114,10 +121,30 @@ class SessionRecorder:
                     "messages_after": messages_after,
                     "tokens_before": tokens_before,
                     "tokens_after": tokens_after,
+                    "replacement": encode_surface_messages(replacement),
+                    **metadata,
                 },
                 "correlation": {},
             },
         )
+
+    def _surface_metadata(
+        self,
+        replacement: list[AgentMessage],
+    ) -> dict[str, JsonValue]:
+        branch = self.store.build_branch()
+        generation = 1 + sum(
+            1
+            for entry in branch
+            if entry.type == "event"
+            and isinstance(entry.content, dict)
+            and entry.content.get("type") == "compaction"
+        )
+        return {
+            "generation": generation,
+            "source_entry_ids": [entry.id for entry in branch],
+            "surface_sha256": surface_digest(replacement),
+        }
 
     def record_provider_request(self, record: ProviderRequestRecord) -> None:
         """保存 provider 实际收到的消息、工具和运行参数。"""

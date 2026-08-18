@@ -307,12 +307,12 @@ def render_memory_protocol(manager: MemoryManager) -> str:
     return "\n".join(
         (
             "<long-horizon-memory>",
-            "Session continuity is maintained by automatic checkpoints.",
+            "Session continuity is maintained by durable surface replacements.",
             f"Project memory: {manager.memory_file}",
             f"User memory: {manager.user_memory_file}",
             "Use search_memory before asking the user to repeat prior decisions.",
-            "Use history search/around for exact details older than the current "
-            "checkpoint.",
+            "Use history search/around for exact details shadowed by the current "
+            "surface.",
             "Only persist durable user rules, architecture decisions, and verified "
             "cross-session facts. Do not store current task progress here.",
             "</long-horizon-memory>",

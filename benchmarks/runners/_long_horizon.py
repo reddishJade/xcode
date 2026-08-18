@@ -26,7 +26,7 @@ from xcode.ai.events import (
 from xcode.ai.models import get_models, get_providers
 from xcode.ai.providers.base import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
-from xcode.agent.messages import AgentMessage, UserMessage
+from xcode.agent.messages import AgentMessage
 from xcode.coding_agent.app import XcodeApp, build_app
 from xcode.harness.agent_runtime.compaction import (
     LayeredCompactor,
@@ -38,7 +38,7 @@ from xcode.harness.config import (
     InlineInstructionSource,
     XcodeRuntimeConfig,
 )
-from xcode.harness.memory import load_session_checkpoint
+from xcode.harness.session.surface import project_session_surface
 
 from benchmarks.evaluators.state_retention import (
     capture_initial_state,
@@ -427,9 +427,7 @@ def run_task(
     terminations: list[str] = []
     compactions = 0
     restarts = 0
-    checkpoint_resumes = 0
-    boundary_indices: dict[str, int] = {}
-    session_id = f"bench-{task.id}-{variant}-r{options.repeat}-a{options.attempt}"
+    surface_resumes = 0
     runtime_dir = output_dir / "runtime" / run_id
     configured = _benchmark_runtime_config(
         runtime_config,
@@ -444,7 +442,6 @@ def run_task(
         variant,
         options,
         calls,
-        session_id,
         progress_callback=lambda stage, detail: emit_progress(
             stage,
             detail,
@@ -456,9 +453,6 @@ def run_task(
         for turn_index, turn in enumerate(task.turns, 1):
             current_turn = turn_index
             emit_progress("turn_started", turn.prompt, turn=turn_index)
-            boundary_id = f"turn-{turn_index:04d}"
-            boundary_indices[boundary_id] = len(app.agent.history_messages())
-            app.agent.set_compaction_source_message_id(boundary_id)
             if turn.compact_before and variant == "xcode":
                 app.agent.request_compaction()
 
@@ -516,16 +510,9 @@ def run_task(
 
             if turn.restart_after:
                 emit_progress(
-                    "restart", "checkpoint + transcript tail", turn=turn_index
+                    "restart", "surface replacement + transcript tail", turn=turn_index
                 )
-                history = app.agent.history_messages()
-                rebuilt, used_checkpoint = _rebuild_history(
-                    app,
-                    variant,
-                    session_id,
-                    history,
-                    boundary_indices,
-                )
+                rebuilt, used_surface = _rebuild_history(app, variant)
                 app.close()
                 app = _build_benchmark_app(
                     workspace,
@@ -533,7 +520,6 @@ def run_task(
                     variant,
                     options,
                     calls,
-                    session_id,
                     progress_callback=lambda stage, detail: emit_progress(
                         stage,
                         detail,
@@ -548,8 +534,7 @@ def run_task(
                     "without repeating completed work."
                 )
                 restarts += 1
-                checkpoint_resumes += int(used_checkpoint)
-                boundary_indices = {}
+                surface_resumes += int(used_surface)
     finally:
         app.close()
 
@@ -629,7 +614,7 @@ def run_task(
         "termination_reasons": terminations,
         "compactions": compactions,
         "restarts": restarts,
-        "checkpoint_resumes": checkpoint_resumes,
+        "surface_resumes": surface_resumes,
         "provider_calls": [call.to_dict() for call in calls],
         "tool_calls_total": len(tool_calls),
         "repeated_read_calls": _repeated_read_calls(tool_calls),
@@ -700,7 +685,6 @@ def _build_benchmark_app(
     variant: Variant,
     options: RunOptions,
     calls: list[ProviderCallRecord],
-    session_id: str,
     progress_callback: Callable[[ProgressStage, str], None] | None = None,
 ) -> XcodeApp:
     app = build_app(
@@ -723,8 +707,6 @@ def _build_benchmark_app(
             if options.summary_mode == "model"
             else None
         )
-    app.agent.session_id = session_id
-    app.agent.set_history_session_id(session_id)
     return app
 
 
@@ -737,7 +719,7 @@ def _run_turn(
     compactions = 0
     # Benchmark 不提供交互审批；固定 Build 模式让工作区内写入和验证命令
     # 在两个消融分组中以相同策略自动执行。
-    for event in app.agent.run_stream(prompt, mode="build"):
+    for event in app.ask_stream(prompt, mode="build"):
         if event.type == "compaction":
             compactions += 1
             if progress_callback is not None:
@@ -772,26 +754,11 @@ def _tool_call_detail(call: object) -> str:
 def _rebuild_history(
     app: XcodeApp,
     variant: Variant,
-    session_id: str,
-    history: list[AgentMessage],
-    boundary_indices: dict[str, int],
 ) -> tuple[list[AgentMessage], bool]:
     if variant == "baseline" or not isinstance(app.agent.compactor, LayeredCompactor):
-        return history, False
-    checkpoint_dir = app.agent.compactor.checkpoint_dir
-    if not isinstance(checkpoint_dir, Path):
-        return history, False
-    checkpoint = load_session_checkpoint(checkpoint_dir, session_id)
-    if checkpoint is None:
-        return history, False
-    boundary = boundary_indices.get(checkpoint.boundary_message_id)
-    if boundary is None:
-        return history, False
-    rebuilt: list[AgentMessage] = [
-        UserMessage(content=checkpoint.render_rebuild_prompt()),
-        *history[boundary:],
-    ]
-    return rebuilt, True
+        return app.agent.history_messages(), False
+    surface = project_session_surface(app.session_store.build_branch())
+    return list(surface.messages), surface.generation > 0
 
 
 def _build_phase_metrics(

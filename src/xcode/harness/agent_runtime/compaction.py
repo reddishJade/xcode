@@ -14,7 +14,6 @@ from uuid import uuid4
 from xcode.agent._compaction import estimate_tokens
 from xcode.agent._codec import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
 from xcode.agent.config import CompactInstructions
-from xcode.harness.memory.checkpoint import write_session_checkpoint
 from ..skill_activation import is_skill_activation_content
 
 """分层上下文压缩工具。"""
@@ -103,7 +102,6 @@ class LayeredCompactor:
     def __init__(
         self,
         transcript_dir: Path | None = None,
-        checkpoint_dir: Path | None = None,
         keep_recent_tool_results: int = 2,
         max_tool_result_chars: int = 100,
         max_recent_messages: int = 8,
@@ -119,7 +117,6 @@ class LayeredCompactor:
         active_branch_id: str | None = None,
     ) -> None:
         self.transcript_dir = transcript_dir
-        self.checkpoint_dir = checkpoint_dir
         self.compact_instructions = compact_instructions
         self.summarize_fn = summarize_fn
         self.active_branch_id = active_branch_id
@@ -133,8 +130,6 @@ class LayeredCompactor:
         self.compact_token_threshold = compact_token_threshold
         self.budget_trigger_token_ratio = budget_trigger_token_ratio
         self.on_compact = on_compact
-        self.source_session_id: str | None = None
-        self.source_message_id: str | None = None
         self.last_transcript_path: Path | None = None
         # 累积文件跟踪（跨压缩轮次）
         self._cumulative_read_files: set[str] = set()
@@ -143,39 +138,11 @@ class LayeredCompactor:
         self.entries: list[CompactionEntry] = []
         self._last_entry_id: str | None = None
 
-    def set_source_session_id(self, session_id: str | None) -> None:
-        """设置产生压缩内容的真实会话 ID。"""
-        normalized = session_id.strip() if session_id else None
-        if normalized != self.source_session_id:
-            self.source_message_id = None
-        self.source_session_id = normalized
-
-    def set_source_message_id(self, message_id: str | None) -> None:
-        """设置触发当前压缩回合的真实原消息 ID。"""
-        self.source_message_id = message_id.strip() if message_id else None
-
     def _accumulate_file_ops(self, messages: list[dict[str, Any]]) -> None:
         """从消息中提取文件操作，合并到累积跟踪状态。"""
         reads, modifies = _extract_file_ops_from_messages(messages)
         self._cumulative_read_files.update(reads)
         self._cumulative_modified_files.update(modifies)
-
-    def _write_checkpoint(self, summary: str) -> None:
-        """将 compact 状态写入按 session 隔离的 checkpoint。"""
-        if (
-            self.checkpoint_dir is None
-            or self.source_session_id is None
-            or self.source_message_id is None
-        ):
-            return
-        write_session_checkpoint(
-            self.checkpoint_dir,
-            session_id=self.source_session_id,
-            boundary_message_id=self.source_message_id,
-            summary=summary,
-            read_files=self._cumulative_read_files,
-            modified_files=self._cumulative_modified_files,
-        )
 
     def __call__(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         compacted = stale_snip_file_reads(messages)
@@ -259,9 +226,6 @@ class LayeredCompactor:
                 second_msg["content"] = cleaned_content
                 if self.on_compact is not None:
                     self.on_compact(cleaned_content)
-
-                # 写入 checkpoint.md
-                self._write_checkpoint(cleaned_content)
 
         return final_messages
 

@@ -346,15 +346,15 @@ def test_benchmark_turn_forces_non_interactive_build_mode() -> None:
     modes: list[str | None] = []
     result = AgentHarnessResult(answer="done", messages=[], steps=1, tool_calls=[])
 
-    class _Agent:
-        def run_stream(
+    class _App:
+        def ask_stream(
             self, prompt: str, mode: str | None = None
         ) -> Iterator[FinalStructuredEvent]:
             assert prompt == "fix it"
             modes.append(mode)
             yield FinalStructuredEvent("final", 1, result)
 
-    app = cast(Any, SimpleNamespace(agent=_Agent()))
+    app = cast(Any, _App())
 
     actual, compactions = _run_turn(app, "fix it")
 

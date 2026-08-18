@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from xcode.coding_agent.app import XcodeApp
+from xcode.agent.messages import UserMessage
 from xcode.harness.agent_runtime.events import (
     AgentHarnessEvent,
     FinalStructuredEvent,
@@ -25,7 +26,6 @@ class _Agent:
     def __init__(self) -> None:
         self._session_id = "local"
         self.history_session_id = ""
-        self.source_message_id: str | None = None
         self.questions: list[str] = []
 
     @property
@@ -38,9 +38,6 @@ class _Agent:
 
     def set_history_session_id(self, session_id: str) -> None:
         self.history_session_id = session_id
-
-    def set_compaction_source_message_id(self, message_id: str | None) -> None:
-        self.source_message_id = message_id
 
     def run_stream(
         self,
@@ -63,20 +60,17 @@ class _Agent:
 
 
 def _recorder(tmp_path: Path) -> SessionRecorder:
-    return SessionRecorder(
-        SessionStore(tmp_path / "sessions", project_root=tmp_path)
-    )
+    return SessionRecorder(SessionStore(tmp_path / "sessions", project_root=tmp_path))
 
 
 def test_begin_turn_binds_agent_to_real_session(tmp_path: Path) -> None:
     recorder = _recorder(tmp_path)
     agent = _Agent()
 
-    message_id = recorder.begin_turn(agent, "visible question")
+    recorder.begin_turn(agent, "visible question")
 
     assert agent.session_id == recorder.store.session_id
     assert agent.history_session_id == recorder.store.session_id
-    assert agent.source_message_id == message_id
     assert recorder.store.build_branch()[0].content == "visible question"
 
 
@@ -117,6 +111,7 @@ def test_compaction_appends_epoch_without_rewriting_history(tmp_path: Path) -> N
         messages_after=4,
         tokens_before=9000,
         tokens_after=2000,
+        replacement=[UserMessage(content="current state")],
     )
 
     updated = transcript.read_bytes()
@@ -126,6 +121,8 @@ def test_compaction_appends_epoch_without_rewriting_history(tmp_path: Path) -> N
     assert isinstance(event, dict)
     assert event["type"] == "compaction"
     assert event["data"]["summary"] == "current state"
+    assert event["data"]["generation"] == 1
+    assert len(event["data"]["surface_sha256"]) == 64
 
 
 def test_provider_request_records_exact_model_visible_envelope(tmp_path: Path) -> None:
@@ -151,9 +148,7 @@ def test_provider_request_records_exact_model_visible_envelope(tmp_path: Path) -
     event = recorder.store.build_branch()[-1].content
     assert isinstance(event, dict)
     assert event["type"] == "provider_request"
-    assert event["data"]["messages"] == [
-        {"role": "system", "content": "rules"}
-    ]
+    assert event["data"]["messages"] == [{"role": "system", "content": "rules"}]
     assert event["correlation"]["request_id"] == "request-1"
 
 

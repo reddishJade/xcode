@@ -294,15 +294,6 @@ class AgentHarness:
         self._gate.session_id = value
         self._correlation.session_id = value
         self._run_controller.session_id = value
-        setter = getattr(self.compactor, "set_source_session_id", None)
-        if callable(setter):
-            setter(value)
-
-    def set_compaction_source_message_id(self, message_id: str | None) -> None:
-        """把会话存储层生成的真实消息 ID 传给 compactor。"""
-        setter = getattr(self.compactor, "set_source_message_id", None)
-        if callable(setter):
-            setter(message_id)
 
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history = deepcopy(messages)
@@ -357,7 +348,7 @@ class AgentHarness:
         active_registry = self._build_active_registry(registry_snapshot)
         context_messages = self._build_context_messages(question, snapshot)
         self._resumed_notice = None
-        history_messages = context_messages + self.history_messages()
+        history_messages = self.history_messages()
         turn_messages: list[AgentMessage] = [UserMessage(content=question)]
 
         turn_agent = Agent(self._gate.adapt_tools(active_registry))
@@ -405,6 +396,7 @@ class AgentHarness:
                 loop_config,
                 signal=self.cancellation_token,
                 history=history_messages,
+                request_prefix=context_messages,
             ):
                 translated = _translate_event(event, translation_state)
                 if translated is not None:
@@ -416,8 +408,8 @@ class AgentHarness:
             result = turn_agent.last_result
             assert result is not None
 
-            self._history.extend(result.messages)
-            self._last_prompt_tokens = record_last_prompt_tokens(result.messages)
+            self._history = list(result.surface)
+            self._last_prompt_tokens = record_last_prompt_tokens(result.surface)
 
             visible_result = (
                 result.model_copy(

@@ -41,12 +41,8 @@ class _ResumeAgent:
     def __init__(self) -> None:
         self.goal = GoalState()
         self.session_id = ""
-        self.compactor = SimpleNamespace(checkpoint_dir=None)
 
     def set_history_session_id(self, _session_id: str) -> None:
-        return
-
-    def set_compaction_source_message_id(self, _message_id: str | None) -> None:
         return
 
     def load_history(self, _messages: object) -> None:

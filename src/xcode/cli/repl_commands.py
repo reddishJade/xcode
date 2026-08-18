@@ -584,8 +584,7 @@ def cmd_steer(cmd: str, ctx: CommandContext) -> bool:
     from xcode.agent.messages import UserMessage
 
     if ctx.app.agent.try_steer(UserMessage(content=msg)):
-        message_id = ctx.store.append("user", msg)
-        ctx.app.bind_session_input(message_id)
+        ctx.store.append("user", msg)
         print("[steer] injected into the active run")
     else:
         ctx.state.pending_inject = msg
@@ -674,6 +673,7 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
         messages_after=len(after_msgs),
         tokens_before=before_tokens,
         tokens_after=after_tokens,
+        replacement=after_msgs,
     )
 
     # 7) 打印结构化摘要——类似 pi 的格式

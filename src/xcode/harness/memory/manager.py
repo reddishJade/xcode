@@ -1,7 +1,7 @@
 """面向长任务的最小持久记忆。
 
 MEMORY.md 是唯一事实源。检索只使用确定性的 BM25；会话连续性由
-session checkpoint 负责，不在长期记忆中维护反馈、效用或生命周期状态。
+session surface 负责，不在长期记忆中维护反馈、效用或生命周期状态。
 """
 
 from __future__ import annotations

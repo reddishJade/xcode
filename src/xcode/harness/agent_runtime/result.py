@@ -113,7 +113,7 @@ def _build_structured_result(result: AgentLoopResult) -> AgentHarnessResult:
         watchdog_reason=result.watchdog_reason,
         error_detail=result.error_detail,
         run_state=RunState(
-            messages=messages,
+            messages=[to_dict(message) for message in result.surface],
         ),
     )
 

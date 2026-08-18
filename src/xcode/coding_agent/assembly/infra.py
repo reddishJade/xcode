@@ -38,7 +38,6 @@ def build_shared_infra(
     configured_sessions_dir = runtime_config.paths.sessions_dir
     if sessions_dir is not None:
         transcript_dir = sessions_dir.resolve()
-        checkpoint_dir = transcript_dir / "checkpoints"
     elif configured_sessions_dir:
         resolved_sessions_dir = resolve_config_path(
             project_root,
@@ -46,14 +45,11 @@ def build_shared_infra(
         )
         assert resolved_sessions_dir is not None
         transcript_dir = resolved_sessions_dir
-        checkpoint_dir = transcript_dir / "checkpoints"
     else:
         transcript_dir = project_root / ".local" / "sessions"
-        checkpoint_dir = project_root / ".xcode" / "checkpoints"
 
     compactor = LayeredCompactor(
         transcript_dir=transcript_dir,
-        checkpoint_dir=checkpoint_dir,
         max_recent_messages=runtime_config.agent.max_recent_messages,
         keep_recent_tokens=runtime_config.agent.keep_recent_tokens,
     )

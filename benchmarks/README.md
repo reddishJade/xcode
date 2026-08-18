@@ -10,8 +10,8 @@ without lowering test-defined task success.
 
 - **Baseline** sets the runtime compactor to `None`. It keeps full logical
   history and restores full history after a simulated process restart.
-- **Xcode** enables `LayeredCompactor`, session checkpoint writes, and
-  checkpoint-plus-tail restoration.
+- **Xcode** enables `LayeredCompactor`, durable session surface writes, and
+  surface-plus-tail restoration.
 
 All other runtime configuration is shared. Request hygiene remains enabled in
 both groups, so the ablation isolates persistent layered compaction instead of
@@ -90,7 +90,7 @@ uv run python -m benchmarks.reports.generate_report \
 ```
 
 Use `--summary-mode deterministic` only for offline smoke runs. Resume and
-checkpoint behavior stays enabled, but summaries use the compactor's
+surface replacement stays enabled, but summaries use the compactor's
 deterministic fallback rather than the production model summarizer.
 
 ### Task contract
@@ -105,7 +105,7 @@ Each `task.json` declares:
 - the recent-message and recent-token budgets used by the Xcode group.
 
 The included parser task is a wiring example, not enough evidence for a resume
-claim. A resume run counts only when `checkpoint_resumes` is nonzero. Before
+claim. A resume run counts only when `surface_resumes` is nonzero. Before
 publishing results, add 20–30 tasks with at least 10 turns, run multiple repeats,
 and inspect per-task pairs instead of reporting only a pooled mean.
 

@@ -10,15 +10,15 @@ behavioral scores to individual notes.
 
 1. **Transcript** is the lossless history. Session JSONL keeps user messages,
    assistant messages, and tool events.
-2. **Session checkpoint** is the current task state. Each compact cycle writes
-   `.xcode/checkpoints/<session-id>/checkpoint.md`.
+2. **Session surface** is the current task state. Each compact cycle appends a
+   typed replacement event to the session transcript.
 3. **Project memory** is `MEMORY.md`. It contains only durable project rules,
    architecture decisions, and verified cross-session facts.
 4. **User memory** is `~/.xcode/memory/MEMORY.md`. It contains durable
    cross-project preferences.
 
 The layers have different jobs. Current progress and next actions belong in the
-checkpoint, never in project or user memory.
+session surface, never in project or user memory.
 
 ## Runtime flow
 
@@ -33,30 +33,27 @@ read-only `search_memory` tool when prior project knowledge may matter.
 For models with a known context window, Xcode starts a new compact cycle at
 roughly 70% utilization instead of waiting for the window reserve boundary.
 The compactor keeps a verbatim recent tail and writes its full structured
-summary to the current session checkpoint. The checkpoint boundary is the real
-session message ID supplied by the transcript store.
+summary as a new session surface. The event records the complete replacement,
+the source entry IDs, a monotonic generation, and a stable fingerprint.
 
 ### Resume
 
-If the checkpoint boundary exists on the selected session branch, Xcode restores:
+Xcode restores:
 
 ```text
-latest session checkpoint
-+ transcript entries from the boundary onward
+latest durable surface replacement
++ transcript entries appended after the replacement
 + budgeted project and user memory
 ```
 
-If the checkpoint is absent, corrupt, or belongs to another branch, Xcode falls
-back to the complete transcript.
-
 The latest final event already contains the structured coding run state. Resume
 restores its execution mode and todo list after rebuilding message history, so
-unfinished work does not depend on the checkpoint summary mentioning every todo.
+unfinished work does not depend on the compacted summary mentioning every todo.
 
 ## Invariants
 
 - Markdown is the source of truth for durable memory.
-- Checkpoints are isolated by session ID.
+- Surface replacements are isolated by session branch.
 - Resume never drops the verbatim transcript tail.
 - Memory search is deterministic BM25 over project and user files.
 - Writes are explicit and atomically replace the target file.
@@ -76,11 +73,11 @@ Do not add these without evidence from real long-running task failures:
 
 ## Stop point
 
-The implemented checkpoint/history cycle is the product boundary:
+The implemented surface/history cycle is the product boundary:
 
 - compact updates the previous structured state instead of repeatedly
   summarizing it as ordinary conversation;
-- degenerate summaries cannot replace a usable checkpoint;
+- malformed or tool-unbalanced replacements are rejected;
 - `history search/around` retrieves exact details older than the rebuild
   boundary.
 

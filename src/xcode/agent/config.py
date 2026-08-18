@@ -43,6 +43,7 @@ class _LoopRunState(BaseModel):
 
 class AgentContext(BaseModel):
     system_prompt: str = ""
+    request_prefix: list[AgentMessage] = Field(default_factory=list)
     messages: list[AgentMessage] = Field(default_factory=list)
     tools: list[Annotated[AgentTool, SkipValidation]] = Field(default_factory=list)
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)

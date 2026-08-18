@@ -65,7 +65,7 @@ async def call_provider(
     provider: StreamProvider,
     current_step: int = 0,
 ) -> _ProviderResponse:
-    messages = context.messages
+    messages = [*context.request_prefix, *context.messages]
     blocks: list[ContextBlock] = []
 
     # 1. 收集阶段：仅当有 assembler 消费时才运行 collector

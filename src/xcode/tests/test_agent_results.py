@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from xcode.agent.messages import UserMessage
 from xcode.agent.results import AgentLoopResult, TerminationReason
 
 
@@ -15,25 +16,11 @@ class TestTerminationReason:
 
 
 class TestAgentLoopResult:
-    def test_defaults(self) -> None:
-        result = AgentLoopResult()
+    def test_surface_is_explicit(self) -> None:
+        result = AgentLoopResult(
+            messages=[],
+            surface=[UserMessage(content="current")],
+        )
         assert result.steps == 0
         assert result.termination_reason == TerminationReason.COMPLETED
-
-    def test_stopped_by_limit(self) -> None:
-        result = AgentLoopResult(termination_reason=TerminationReason.STEP_LIMIT)
-        assert result.stopped_by_limit
-
-    def test_stopped_by_watchdog(self) -> None:
-        result = AgentLoopResult(termination_reason=TerminationReason.WATCHDOG)
-        assert result.stopped_by_watchdog
-
-    def test_stopped_by_error(self) -> None:
-        result = AgentLoopResult(termination_reason=TerminationReason.PROVIDER_ERROR)
-        assert result.stopped_by_error
-
-    def test_completed_not_stopped(self) -> None:
-        result = AgentLoopResult(termination_reason=TerminationReason.COMPLETED)
-        assert not result.stopped_by_limit
-        assert not result.stopped_by_watchdog
-        assert not result.stopped_by_error
+        assert result.surface == [UserMessage(content="current")]

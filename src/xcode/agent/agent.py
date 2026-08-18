@@ -140,7 +140,7 @@ class Agent:
         if model is None:
             raise ValueError("model is required for prompt()")
         sp = system_prompt if system_prompt is not None else self._system_prompt
-        history: list[AgentMessage] = [SystemMessage(content=sp)] if sp else []
+        request_prefix: list[AgentMessage] = [SystemMessage(content=sp)] if sp else []
         config = loop_config or AgentLoopConfig(
             provider=model, convert_to_llm=convert_to_llm
         )
@@ -165,7 +165,7 @@ class Agent:
             [UserMessage(content=text)],
             config,
             signal=signal,
-            history=history,
+            request_prefix=request_prefix,
             emit=_emit if on_update else None,
         )
         self._last_messages = result.messages
@@ -188,12 +188,14 @@ class Agent:
         signal: CancellationSignal | None = None,
         emit: Callable[[AgentEvent], None] | None = None,
         history: list[AgentMessage] | None = None,
+        request_prefix: list[AgentMessage] | None = None,
     ) -> AgentLoopResult:
         """执行 agent 循环，返回结果。
 
         config 和队列引用每次调用传入，不缓存。
         """
         context = AgentContext(
+            request_prefix=list(request_prefix or []),
             messages=list(history or []),
             tools=list(self._tools),
         )
@@ -218,6 +220,7 @@ class Agent:
         *,
         signal: CancellationSignal | None = None,
         history: list[AgentMessage] | None = None,
+        request_prefix: list[AgentMessage] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """执行 agent 循环，以异步迭代器实时产出事件。
 
@@ -225,6 +228,7 @@ class Agent:
         消费方可边跑边 yield。run_agent_loop 抛出的异常会传播给消费方。
         """
         context = AgentContext(
+            request_prefix=list(request_prefix or []),
             messages=list(history or []),
             tools=list(self._tools),
         )

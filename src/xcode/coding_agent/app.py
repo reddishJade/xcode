@@ -17,6 +17,7 @@ from xcode.harness.agent_runtime import (
     AgentHarnessEvent,
 )
 from xcode.coding_agent.harness import CodingAgentHarness
+from xcode.agent.messages import AgentMessage
 from xcode.agent.types import ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from xcode.harness.session_todo import SessionTodoState
@@ -197,6 +198,7 @@ class XcodeApp:
         messages_after: int,
         tokens_before: int,
         tokens_after: int,
+        replacement: list[AgentMessage],
     ) -> str:
         recorder = self.session_recorder
         if recorder is None:
@@ -207,14 +209,8 @@ class XcodeApp:
             messages_after=messages_after,
             tokens_before=tokens_before,
             tokens_after=tokens_after,
+            replacement=replacement,
         )
-
-    def bind_session_input(self, message_id: str | None) -> None:
-        """把非普通回合输入绑定到当前 session 的压缩边界。"""
-        recorder = self.session_recorder
-        if recorder is None:
-            raise RuntimeError("session recorder is not configured")
-        recorder.bind_agent(self.agent, message_id)
 
     def restore_session(self) -> None:
         """从当前 session branch 恢复完整 agent 运行状态。"""

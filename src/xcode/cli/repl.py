@@ -453,8 +453,7 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
                 inject_text = ""
             if inject_text:
                 ctx.state.pending_inject = inject_text
-                message_id = ctx.store.append("user", inject_text)
-                ctx.app.bind_session_input(message_id)
+                ctx.store.append("user", inject_text)
             else:
                 ctx.state.pending_partial = None
                 print("[interrupt cancelled]")

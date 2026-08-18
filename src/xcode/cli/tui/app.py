@@ -510,8 +510,7 @@ class _XcodeTui:
         if references:
             self._store.append("event", file_reference_event(references))
         if outcome.status is SubmitStatus.STEER_ACCEPTED:
-            message_id = self._store.append("user", text)
-            self._agent_app.bind_session_input(message_id)
+            self._store.append("user", text)
             self._state.log.append(
                 _LogEntry("system", f"[steer] accepted by {outcome.run_id}")
             )

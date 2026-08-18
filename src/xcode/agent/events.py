@@ -114,7 +114,7 @@ class CompactionArchive(BaseModel):
 
 
 class CompactionEvent(BaseModel):
-    """上下文压缩事件，包含压缩统计和归档路径。"""
+    """上下文压缩事件，携带新的完整 current surface。"""
 
     type: str = "compaction"
     messages_removed: int = 0
@@ -122,6 +122,7 @@ class CompactionEvent(BaseModel):
     summary_token_estimate: int = 0
     trigger: str = "token_limit"
     archive: CompactionArchive | None = None
+    replacement: list[AgentMessage]
     model_config = ConfigDict(extra="forbid")
 
 

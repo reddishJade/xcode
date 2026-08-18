@@ -1,4 +1,4 @@
-"""运行保留完整历史、关闭压缩与 checkpoint 的基线组。"""
+"""运行保留完整历史、关闭压缩与 surface replacement 的基线组。"""
 
 from benchmarks.runners._cli import run_variant_main
 

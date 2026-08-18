@@ -1,10 +1,5 @@
 """面向长任务连续性的文件式记忆。"""
 
-from .checkpoint import (
-    SessionCheckpoint,
-    load_session_checkpoint,
-    write_session_checkpoint,
-)
 from .manager import (
     MemoryLayer,
     MemoryLayerFilter,
@@ -19,9 +14,6 @@ __all__ = [
     "MemoryLayerFilter",
     "MemoryManager",
     "MemoryRecord",
-    "SessionCheckpoint",
     "build_memory_block",
     "build_memory_tools",
-    "load_session_checkpoint",
-    "write_session_checkpoint",
 ]

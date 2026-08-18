@@ -18,6 +18,7 @@
 
 - ToolOutput -> AgentToolResult -> ToolResultMessage；
 - runtime event -> session codec -> replay；
+- compaction replacement -> current surface -> restart；
 - provider 实际请求 -> `provider_request` envelope；
 - subagent lifecycle -> parent session ledger；
 - render intent -> CLI/TUI projection。

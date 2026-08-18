@@ -38,6 +38,7 @@ class AgentLoopMetrics(BaseModel):
 
 class AgentLoopResult(BaseModel):
     messages: list[AgentMessage] = Field(default_factory=list)
+    surface: list[AgentMessage]
     steps: int = 0
     termination_reason: TerminationReason = TerminationReason.COMPLETED
     watchdog_reason: str | None = None
@@ -45,18 +46,3 @@ class AgentLoopResult(BaseModel):
     metrics: AgentLoopMetrics | None = None
     active_provider: Annotated[StreamProvider | None, SkipValidation] = None
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
-
-    @property
-    def stopped_by_limit(self) -> bool:
-        """兼容旧调用方；停止状态以 termination_reason 为准。"""
-        return self.termination_reason is TerminationReason.STEP_LIMIT
-
-    @property
-    def stopped_by_watchdog(self) -> bool:
-        """兼容旧调用方；停止状态以 termination_reason 为准。"""
-        return self.termination_reason is TerminationReason.WATCHDOG
-
-    @property
-    def stopped_by_error(self) -> bool:
-        """兼容旧调用方；停止状态以 termination_reason 为准。"""
-        return self.termination_reason is TerminationReason.PROVIDER_ERROR

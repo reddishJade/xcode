@@ -21,7 +21,7 @@ CLI/TUI 只选择和展示 session。任何新模型可见内容都需要对应�
 ## Validation
 
 `test_app_composition.py` 验证真实 build、落盘、restart、resume 和第二轮请求；
-session codec、recorder、checkpoint 测试验证逐层契约。
+session codec、recorder、surface projector 测试验证逐层契约。
 
 ## Supersedes
 

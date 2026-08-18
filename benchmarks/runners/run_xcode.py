@@ -1,4 +1,4 @@
-"""运行启用分层压缩、checkpoint 与恢复的 Xcode 组。"""
+"""运行启用分层压缩、durable surface 与恢复的 Xcode 组。"""
 
 from benchmarks.runners._cli import run_variant_main
 

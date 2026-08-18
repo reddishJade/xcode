@@ -21,9 +21,10 @@ from xcode.harness.agent_runtime.events import (
     ToolUseStructuredEvent,
     TurnEndStructuredEvent,
 )
+from xcode.harness.session.surface import encode_surface_messages
 
 
-SESSION_EVENT_SCHEMA_VERSION = 1
+SESSION_EVENT_SCHEMA_VERSION = 2
 
 
 def encode_session_event(event: AgentHarnessEvent) -> dict[str, Any]:
@@ -84,6 +85,7 @@ def _event_payload(event: AgentHarnessEvent) -> object:
             "messages_after": event.data.messages_after,
             "summary_token_estimate": event.data.summary_token_estimate,
             "trigger": event.data.trigger,
+            "replacement": encode_surface_messages(list(event.data.replacement)),
         }
     return {
         "answer": event.data.answer,
@@ -99,9 +101,7 @@ def _event_payload(event: AgentHarnessEvent) -> object:
         "needs_follow_up": event.data.needs_follow_up,
         "last_agent": event.data.last_agent,
         "run_state": (
-            event.data.run_state.to_dict()
-            if event.data.run_state is not None
-            else None
+            event.data.run_state.to_dict() if event.data.run_state is not None else None
         ),
     }
 
