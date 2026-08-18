@@ -13,7 +13,6 @@ from xcode.ai.providers.base import ModelProvider
 
 from .agent_loop import run_agent_loop
 from .config import AgentContext, AgentLoopConfig
-from ._codec import convert_to_llm
 from .results import AgentLoopResult
 from .events import (
     AgentEvent,
@@ -103,14 +102,10 @@ class Agent:
             raise ValueError("model is required for prompt()")
         sp = system_prompt if system_prompt is not None else self._system_prompt
         request_prefix: list[AgentMessage] = [SystemMessage(content=sp)] if sp else []
-        config = loop_config or AgentLoopConfig(
-            provider=model, convert_to_llm=convert_to_llm
-        )
+        config = loop_config or AgentLoopConfig(provider=model)
         config_updates: dict[str, object] = {}
         if config.provider is None:
             config_updates["provider"] = model
-        if config.convert_to_llm is None:
-            config_updates["convert_to_llm"] = convert_to_llm
         if config_updates:
             config = config.model_copy(update=config_updates)
 

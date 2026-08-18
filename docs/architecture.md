@@ -55,7 +55,11 @@ user input
   -> active run claims next_step / next_turn
   -> SessionInbox.inbox/claimed
   -> CodingAgentHarness / Agent loop
-  -> context assembly and request hygiene
+  -> RequestAssembly
+       - scoped prefix + session surface
+       - context collection and injection
+       - request hygiene
+       - wire messages + tool schemas + options
   -> provider_request envelope
   -> provider stream
   -> typed assistant/tool events
@@ -69,6 +73,11 @@ user input
 编程式 `ask()`、REPL 和 TUI 必须经过同一条路径。`harness/session/replay.py`
 负责从当前 branch 恢复 message history、run metadata、Goal 和 contextual
 state；未 claim 的输入由 inbox 自身恢复。
+
+普通 agent 请求只有一个 `RequestAssembler` 入口。provider stream 与审计 hook
+消费同一个 `RequestAssembly`，其中包含最终 wire messages、tool schemas、options、
+step 和动态 context provenance。禁止在发送前通过通用 transformer 隐式改写
+messages；请求卫生是 assembly 内的显式确定性阶段，且不修改 session surface。
 
 ## Session 事实模型
 

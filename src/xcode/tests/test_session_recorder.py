@@ -16,6 +16,9 @@ from xcode.harness.agent_runtime.events import (
 )
 from xcode.harness.agent_runtime.config import _build_before_provider_request_closure
 from xcode.harness.agent_runtime.result import AgentHarnessResult
+from xcode.agent.config import AgentContext
+from xcode.agent.messages import SystemMessage
+from xcode.agent.request import DefaultRequestAssembler
 from xcode.harness.observability import RuntimeCorrelation
 from xcode.harness.session import InboxLane, SessionInbox, SessionStore
 from xcode.harness.session.recorder import SessionRecorder
@@ -201,7 +204,12 @@ def test_provider_request_hook_adds_provider_and_request_fingerprint() -> None:
         cast(Any, provider),
     )
 
-    closure([{"role": "system", "content": "rules"}], [])
+    assembly = DefaultRequestAssembler().assemble(
+        AgentContext(messages=[SystemMessage(content="rules")]),
+        current_step=1,
+        options=None,
+    )
+    closure(assembly)
 
     record = cast(Any, records[0])
     assert record.metadata["provider"] == {
@@ -211,6 +219,12 @@ def test_provider_request_hook_adds_provider_and_request_fingerprint() -> None:
         "thinking": False,
         "reasoning_effort": "low",
     }
+    assert record.metadata["assembly"] == {
+        "current_step": 1,
+        "hygiene_applied": True,
+        "context_trace": [],
+    }
+    assert record.metadata["options"] == {}
     assert len(record.metadata["request_sha256"]) == 64
     assert record.request_id == "session-1:request:1"
 

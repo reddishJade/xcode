@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.functional_validators import SkipValidation
 
 from xcode.ai.providers.base import StreamProvider
-from xcode.ai.types import StreamOptions, ThinkingLevel, ToolDefinition
+from xcode.ai.types import StreamOptions, ThinkingLevel
 from xcode.agent.types import (
     AgentTool,
     AgentToolResult,
@@ -22,7 +22,7 @@ from xcode.agent.types import (
 )
 
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage
-from .context import ContextAssembler, ContextCollectorRegistry
+from .request import DefaultRequestAssembler, RequestAssembler, RequestAssembly
 
 
 class _LoopRunState(BaseModel):
@@ -141,19 +141,13 @@ type CompletionVerifier = Callable[[list[AgentMessage]], Awaitable[str | None]]
 
 # ── Callable type aliases（原 hooks.py）──
 
-type MessageConverter = Callable[[list[AgentMessage]], list[dict[str, object]]]
-type ContextTransformer = Callable[
-    [list[AgentMessage], CancellationSignal | None], list[AgentMessage]
-]
 type ArchiveWriter = Callable[[list[AgentMessage]], str | None]
 type ShouldCompactHook = Callable[[list[AgentMessage]], bool]
 type CompactHook = Callable[[list[AgentMessage]], list[AgentMessage]]
 type IsToolProductiveHook = Callable[
     [list[ToolCallContent], list[ToolResultMessage]], bool
 ]
-type BeforeProviderRequestHook = Callable[
-    [list[dict[str, object]], list[ToolDefinition]], None
-]
+type BeforeProviderRequestHook = Callable[[RequestAssembly], None]
 
 
 # ── 循环配置 ──
@@ -166,8 +160,9 @@ class AgentLoopConfig(BaseModel):
     tool_workers: int = 4
     tool_timeout_seconds: float = 120.0
 
-    convert_to_llm: MessageConverter | None = None
-    transform_context: ContextTransformer | None = None
+    request_assembler: Annotated[RequestAssembler, SkipValidation] = Field(
+        default_factory=DefaultRequestAssembler
+    )
 
     before_tool_call: BeforeToolCallHook | None = None
     after_tool_call: AfterToolCallHook | None = None
@@ -199,20 +194,5 @@ class AgentLoopConfig(BaseModel):
 
     is_tool_productive: IsToolProductiveHook | None = None
     before_provider_request: BeforeProviderRequestHook | None = None
-
-    context_collectors: ContextCollectorRegistry | None = None
-    """上下文收集器注册表。配置后在 context_assembler 之前执行。
-
-    所有注册的 collector 按顺序运行，输出合并为 context_blocks
-    传递给 context_assembler。未配置时收集阶段返回空列表。
-    """
-
-    context_assembler: Annotated[ContextAssembler | None, SkipValidation] = None
-    """结构化上下文组装器。配置后替代/增强 transform_context 的功能。
-
-    未配置时消息流完全不变。配置后每轮 provider 调用前执行，
-    按优先级注入 context_blocks，支持 budget 裁剪和过期过滤。
-    与 transform_context 兼容：先执行 context_assembler，再执行 transform_context。
-    """
 
     options: StreamOptions | None = None

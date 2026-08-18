@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
@@ -26,15 +25,8 @@ from xcode.ai.events import (
     UsageUpdate,
 )
 from xcode.ai.providers.base import StreamProvider
-from xcode.ai.providers._codec import provider_function_name
-from xcode.ai.types import ToolDefinition
-from xcode.agent.context import (
-    ContextAssemblyInput,
-    ContextBlock,
-    ContextCollectionInput,
-)
+from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.agent.types import (
-    AgentTool,
     CancellationSignal,
     ContentBlock,
     TextContent,
@@ -65,47 +57,21 @@ async def call_provider(
     provider: StreamProvider,
     current_step: int = 0,
 ) -> _ProviderResponse:
-    messages = [*context.request_prefix, *context.messages]
-    blocks: list[ContextBlock] = []
-
-    # 1. 收集阶段：仅当有 assembler 消费时才运行 collector
-    if config.context_collectors and config.context_assembler:
-        collect_input = ContextCollectionInput(
-            system_prompt=context.system_prompt,
-            messages=messages,
-            tools=list(context.tools or []),
-            current_step=current_step,
-        )
-        blocks = config.context_collectors.collect(collect_input)
-
-    # 2. 组装阶段：将 blocks 注入消息列表
-    if config.context_assembler:
-        assembly_input = ContextAssemblyInput(
-            system_prompt=context.system_prompt,
-            messages=messages,
-            tools=list(context.tools or []),
-            context_blocks=blocks,
-            current_step=current_step,
-        )
-        assembly_result = config.context_assembler.assemble(assembly_input)
-        messages = assembly_result.messages
-
-    # 3. 旧版 transform_context 仍保留
-    if config.transform_context:
-        messages = config.transform_context(messages, signal)
-
-    convert_fn = config.convert_to_llm or (lambda msgs: [])
-    llm_messages = convert_fn(messages)
-    tool_definitions = _tools_to_definitions(context.tools)
+    del signal
+    assembly = config.request_assembler.assemble(
+        context,
+        current_step=current_step,
+        options=config.options,
+    )
     if config.before_provider_request:
-        config.before_provider_request(llm_messages, tool_definitions)
+        config.before_provider_request(assembly)
 
     started = perf_counter()
     events = await _collect_provider_events(
         provider,
-        llm_messages,
-        tool_definitions,
-        config,
+        list(assembly.wire_messages),
+        list(assembly.tools),
+        assembly.options,
         emit,
     )
     elapsed = round((perf_counter() - started) * 1000, 3)
@@ -117,15 +83,15 @@ async def _collect_provider_events(
     provider: StreamProvider,
     llm_messages: list[Message],
     tool_definitions: list[ToolDefinition],
-    config: AgentLoopConfig,
+    options: StreamOptions | None,
     emit: Callable[[AgentEvent], None],
 ) -> list[ProviderEvent]:
     events: list[ProviderEvent] = []
     text_parts: list[str] = []
     try:
         kwargs = {}
-        if config.options is not None:
-            kwargs["options"] = config.options
+        if options is not None:
+            kwargs["options"] = options
         async for event in provider.stream(llm_messages, tool_definitions, **kwargs):
             events.append(event)
             if isinstance(event, TextDelta):
@@ -225,32 +191,3 @@ def _tool_call_content_blocks(event: ToolCallEvent) -> list[ToolCallContent]:
         )
         for call in event.calls
     ]
-
-
-def _tools_to_definitions(tools: list[AgentTool] | None) -> list[ToolDefinition]:
-    if not tools:
-        return []
-    result: list[ToolDefinition] = []
-    for t in tools:
-        desc = t.description
-        examples = getattr(t, "examples", [])
-        if examples:
-            example_lines = ["\n", "Examples:"]
-            for ex in examples:
-                example_lines.append(
-                    f"  - {ex.get('name', '')}: "
-                    f"input={json.dumps(ex.get('input', {}), ensure_ascii=False)}, "
-                    f'output="{ex.get("output", "")}"'
-                )
-            desc += "\n".join(example_lines)
-        builtin = getattr(t, "builtin", None)
-        provider_name = provider_function_name(t.name)
-        result.append(
-            ToolDefinition(
-                name=provider_name,
-                description=desc,
-                parameters=dict(t.parameters),
-                builtin=builtin if isinstance(builtin, dict) else None,
-            )
-        )
-    return result

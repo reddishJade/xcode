@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +17,12 @@ from ...agent.config import (
     CompletionVerifier,
 )
 from ...agent.context import ContextCollectorRegistry, DefaultContextAssembler
-from ...agent._hygiene import apply_request_hygiene
 from ...agent._codec import convert_to_llm as _convert_to_llm
+from ...agent.request import (
+    DefaultRequestAssembler,
+    RequestAssembly,
+    RequestHygiene,
+)
 from .prompting.citations import decorate_citable_messages
 from ...agent.messages import (
     AgentMessage,
@@ -189,15 +193,16 @@ def _build_before_provider_request_closure(
     get_prompt_version: Callable[[], str],
     correlation: RuntimeCorrelation,
     provider: ModelProvider,
-) -> Callable[[list[dict[str, Any]], list[Any]], None]:
+) -> Callable[[RequestAssembly], None]:
     """构建 provider 请求前的 hook 发射回调。"""
 
-    def closure(msgs: list[dict[str, Any]], tools: list[Any]) -> None:
+    def closure(assembly: RequestAssembly) -> None:
         correlation.begin_turn()
         current = correlation.begin_request()
+        messages = list(assembly.wire_messages)
         system_prompt = "\n\n".join(
             str(message.get("content", ""))
-            for message in msgs
+            for message in messages
             if message.get("role") == "system"
         )
         prompt_bytes = len(system_prompt.encode("utf-8"))
@@ -209,12 +214,14 @@ def _build_before_provider_request_closure(
             "thinking": provider.thinking,
             "reasoning_effort": provider.reasoning_effort,
         }
-        tool_payload = [tool_definition_to_dict(tool) for tool in tools]
+        tool_payload = [tool_definition_to_dict(tool) for tool in assembly.tools]
+        options_payload = _request_options_payload(assembly.options)
         request_bytes = json.dumps(
             {
-                "messages": msgs,
+                "messages": messages,
                 "tools": tool_payload,
                 "provider": provider_info,
+                "options": options_payload,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -225,9 +232,25 @@ def _build_before_provider_request_closure(
             HookRecord(
                 "before_provider_request",
                 metadata={
-                    "messages": msgs,
+                    "messages": messages,
                     "tools": tool_payload,
                     "provider": provider_info,
+                    "options": options_payload,
+                    "assembly": {
+                        "current_step": assembly.current_step,
+                        "hygiene_applied": assembly.hygiene_applied,
+                        "context_trace": [
+                            {
+                                "source": trace.source,
+                                "target": trace.target,
+                                "block_id": trace.block_id,
+                                "included": trace.included,
+                                "token_count": trace.token_count,
+                                "content_sha256": trace.content_sha256,
+                            }
+                            for trace in assembly.context_trace
+                        ],
+                    },
                     "prompt_version": get_prompt_version(),
                     "prompt_sha256": prompt_sha,
                     "request_sha256": hashlib.sha256(request_bytes).hexdigest(),
@@ -238,6 +261,32 @@ def _build_before_provider_request_closure(
         )
 
     return closure
+
+
+def _request_options_payload(options: object) -> dict[str, object]:
+    if options is None or not is_dataclass(options):
+        return {}
+    payload: dict[str, object] = {}
+    for option in fields(options):
+        value = getattr(options, option.name)
+        if value is not None:
+            payload[option.name] = _request_option_value(value)
+    return payload
+
+
+def _request_option_value(value: object) -> object:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _request_option_value(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_request_option_value(item) for item in value]
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            item.name: _request_option_value(getattr(value, item.name))
+            for item in fields(value)
+        }
+    return f"<{type(value).__module__}.{type(value).__qualname__}>"
 
 
 def build_loop_config(
@@ -281,19 +330,18 @@ def build_loop_config(
             active_correlation,
         )
 
-    def transform_fn(
-        messages: list[AgentMessage],
-        _signal: object,
-    ) -> list[AgentMessage]:
-        if not request_hygiene.enabled:
-            return messages
-        return apply_request_hygiene(
-            messages,
+    request_assembler = DefaultRequestAssembler(
+        converter=_convert_to_llm_with_citations,
+        context_collectors=context_collectors,
+        context_assembler=context_assembler or DefaultContextAssembler(),
+        hygiene=RequestHygiene(
+            enabled=request_hygiene.enabled,
             max_tool_result_bytes=request_hygiene.max_tool_result_bytes,
             max_tool_arg_length=request_hygiene.max_tool_arg_length,
             keep_head_lines=request_hygiene.keep_head_lines,
             keep_tail_lines=request_hygiene.keep_tail_lines,
-        )
+        ),
+    )
 
     def prepare_next_turn_fn() -> AgentLoopTurnUpdate | None:
         if gate.check_progress_reminder():
@@ -321,9 +369,7 @@ def build_loop_config(
 
     return AgentLoopConfig(
         provider=snapshot.provider,
-        convert_to_llm=_convert_to_llm_with_citations,
-        context_collectors=context_collectors,
-        context_assembler=context_assembler,
+        request_assembler=request_assembler,
         max_steps=snapshot.config.max_steps,
         tool_workers=snapshot.config.tool_workers,
         tool_timeout_seconds=float(snapshot.config.tool_timeout_seconds),
@@ -338,7 +384,6 @@ def build_loop_config(
         should_compact=should_compact_fn,
         compact=compact_fn,
         completion_verifier=completion_verifier,
-        transform_context=transform_fn,
         is_tool_productive=gate.build_is_tool_productive_hook(gate_snapshot),
         before_tool_call=gate.build_before_tool_hook(gate_snapshot),
         after_tool_call=gate.build_after_tool_hook(gate_snapshot),
