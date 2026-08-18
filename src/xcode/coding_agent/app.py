@@ -20,6 +20,8 @@ from xcode.coding_agent.harness import CodingAgentHarness
 from xcode.agent.types import ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from xcode.harness.session_todo import SessionTodoState
+from xcode.harness.session import SessionStore
+from xcode.harness.session.recorder import SessionRecorder
 from xcode.ai.providers.registry import ProviderSettings, build_provider_bundle
 from . import assembly as _assembly
 from .assembly import (
@@ -43,6 +45,7 @@ class XcodeApp:
 
     memory_manager: MemoryManager | None = None
     mcp_runtime: McpRuntimeRegistry | None = None
+    session_recorder: SessionRecorder | None = None
     _model_profiles: dict[str, Any] | None = None
     _env_files: tuple[Path, ...] = ()
     _closers: tuple[Callable[[], None], ...] = ()
@@ -129,20 +132,54 @@ class XcodeApp:
         return info
 
     def ask(self, question: str) -> str:
-        return self.agent.run(question).answer
+        answer = ""
+        for event in self.ask_stream(question):
+            if event.type == "final":
+                answer = event.data.answer
+        return answer
 
     async def aask(self, question: str) -> str:
-        return (await self.agent.run_async(question)).answer
+        answer = ""
+        async for event in self.aask_stream(question):
+            if event.type == "final":
+                answer = event.data.answer
+        return answer
+
+    @property
+    def session_store(self) -> SessionStore:
+        recorder = self.session_recorder
+        if recorder is None:
+            raise RuntimeError("session recorder is not configured")
+        return recorder.store
 
     def ask_stream(
-        self, question: str, mode: ExecutionMode | None = None
+        self,
+        question: str,
+        mode: ExecutionMode | None = None,
+        *,
+        display_question: str | None = None,
     ) -> Iterator[AgentHarnessEvent]:
-        yield from self.agent.run_stream(question, mode=mode)
+        recorder = self.session_recorder
+        if recorder is None:
+            raise RuntimeError("session recorder is not configured")
+        recorder.begin_turn(self.agent, display_question or question)
+        for event in self.agent.run_stream(question, mode=mode):
+            recorder.record_event(event)
+            yield event
 
     async def aask_stream(
-        self, question: str, mode: ExecutionMode | None = None
+        self,
+        question: str,
+        mode: ExecutionMode | None = None,
+        *,
+        display_question: str | None = None,
     ) -> AsyncIterator[AgentHarnessEvent]:
+        recorder = self.session_recorder
+        if recorder is None:
+            raise RuntimeError("session recorder is not configured")
+        recorder.begin_turn(self.agent, display_question or question)
         async for event in self.agent.arun_stream(question, mode=mode):
+            recorder.record_event(event)
             yield event
 
     def hook_diagnostics(self) -> tuple[ExternalHookDiagnostic, ...]:
@@ -178,12 +215,17 @@ def build_app(
     skills_dir: Path | None = None,
     audit_path: Path | None = None,
     runtime_config: XcodeRuntimeConfig | None = None,
+    sessions_dir: Path | None = None,
 ) -> XcodeApp:
     """装配完整的 Xcode 应用。"""
     cfg = _assembly.resolve_config(
         project_root, env_files, agent_config, skills_dir, audit_path, runtime_config
     )
-    infra = build_shared_infra(project_root, cfg.runtime_config)
+    infra = build_shared_infra(
+        project_root,
+        cfg.runtime_config,
+        sessions_dir=sessions_dir,
+    )
 
     # 使用共享的 MemoryManager 实例，确保 compactor 和 agent 使用同一实例
     memory_manager = infra.memory_manager
@@ -251,6 +293,7 @@ def build_app(
         external_hook_runner=external_hook_runner,
         memory_manager=memory_manager,
         mcp_runtime=mcp_runtime_registry,
+        session_recorder=infra.session_recorder,
         _env_files=cfg.env_files,
         _model_profiles=cfg.runtime_config.provider.model_profiles,
         _closers=closers,

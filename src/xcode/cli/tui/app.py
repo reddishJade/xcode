@@ -65,7 +65,6 @@ from ..repl_tools import (
     file_reference_event,
     run_shell_shortcut,
 )
-from xcode.harness.session.event_codec import encode_session_event
 from xcode.agent.messages import UserMessage
 from xcode.harness.agent_runtime import AgentHarnessEvent, SubmitStatus
 from .state import (
@@ -76,7 +75,6 @@ from .state import (
     _QuestionChoiceRequest,
     _TuiState,
 )
-from xcode.harness.session import SessionStore
 from xcode.harness.snapshot import SnapshotStore, SnapshotUnsupportedError
 from .widgets import (
     TuiInputLexer,
@@ -113,13 +111,9 @@ if TYPE_CHECKING:
     from xcode.harness.security.permission_model import (
         SessionGrantStoreManager,
     )
-    from xcode.harness.session import SessionStore
-
-
 def run_tui(
     app: ReplApp,
     project_root: Path,
-    sessions_dir: Path,
     *,
     resume_latest: bool = False,
     auto_continue: bool = False,
@@ -129,7 +123,6 @@ def run_tui(
         return _XcodeTui(
             app,
             project_root,
-            sessions_dir,
             resume_latest=resume_latest,
             auto_continue=auto_continue,
             session_id=session_id,
@@ -147,7 +140,6 @@ class _XcodeTui:
         self,
         app: ReplApp,
         project_root: Path,
-        sessions_dir: Path | None = None,
         input: Input | None = None,
         output: Output | None = None,
         *,
@@ -157,10 +149,7 @@ class _XcodeTui:
     ) -> None:
         self._agent_app = app
         self._project_root = project_root
-        self._store: SessionStore = SessionStore(
-            sessions_dir or project_root / ".local" / "sessions",
-            project_root=project_root,
-        )
+        self._store = app.session_store
         self._repl_state = ReplState()
         self._snapshot_store = _init_snapshot_store(project_root)
         self._state = _TuiState(mode=self._repl_state.mode, project_root=project_root)
@@ -669,8 +658,6 @@ class _XcodeTui:
             self._refresh()
             return
 
-        message_id = self._store.append("user", text)
-        sync_compaction_source(self._agent_app, self._store, message_id)
         expanded_text, references = expand_file_references(text, self._project_root)
         if references:
             self._store.append("event", file_reference_event(references))
@@ -684,7 +671,7 @@ class _XcodeTui:
         self._refresh()
         thread = threading.Thread(
             target=self._run_turn,
-            args=(expanded_text,),
+            args=(expanded_text, text),
             daemon=True,
         )
         thread.start()
@@ -1269,54 +1256,20 @@ class _XcodeTui:
 
     # ── Turn 执行 ──
 
-    def _run_turn(self, text: str) -> None:
+    def _run_turn(self, text: str, display_text: str) -> None:
         snapshot = self._snapshot_store
         _snapshot_ctx = _enter_snapshot_ctx(snapshot, self._store.session_id)
         turn_log_start = len(self._state.log)
 
         answer = ""
         tool_names: list[str] = []
-        thinking_parts: list[str] = []
-        thinking_started_at: float | None = None
-
-        def flush_thinking() -> None:
-            nonlocal thinking_started_at
-            if not thinking_parts:
-                return
-            duration_ms = int(
-                (perf_counter() - thinking_started_at) * 1000
-                if thinking_started_at is not None
-                else 0
-            )
-            self._store.append(
-                "event",
-                {
-                    "type": "thinking",
-                    "data": {
-                        "content": "".join(thinking_parts),
-                        "duration_ms": duration_ms,
-                    },
-                },
-            )
-            thinking_parts.clear()
-            thinking_started_at = None
-
         try:
             self._last_stream_refresh = 0.0
-            for event in self._agent_app.ask_stream(text, mode=self._repl_state.mode):
-                if event.type == "reasoning_delta":
-                    thinking_parts.append(event.data)
-                    if thinking_started_at is None:
-                        thinking_started_at = perf_counter()
-                else:
-                    flush_thinking()
-                if event.type not in {
-                    "message_start",
-                    "message_stop",
-                    "reasoning_delta",
-                    "text_delta",
-                }:
-                    self._store.append("event", encode_session_event(event))
+            for event in self._agent_app.ask_stream(
+                text,
+                mode=self._repl_state.mode,
+                display_question=display_text,
+            ):
                 if isinstance(event, (FinalStructuredEvent,)):
                     answer = event.data.answer
                 if isinstance(event, (ToolUseStructuredEvent,)):
@@ -1324,7 +1277,6 @@ class _XcodeTui:
                 self._dispatch_agent_event(event)
         except Exception as exc:
             self._wait_for_agent_events()
-            flush_thinking()
             self._save_partial_answer(turn_log_start)
             detail = str(exc) or repr(exc)
             self._state.log.append(
@@ -1336,12 +1288,8 @@ class _XcodeTui:
             return
 
         self._wait_for_agent_events()
-        flush_thinking()
 
-        if answer:
-            self._store.append("assistant", answer)
-            self._store.update_summary()
-        else:
+        if not answer:
             self._save_partial_answer(turn_log_start)
 
         self._refresh()
@@ -1374,8 +1322,10 @@ class _XcodeTui:
         if self._state.streaming_answer is not None:
             partial = (partial + self._state.streaming_answer.content()).strip()
         if partial:
-            self._store.append("assistant", partial)
-            self._store.update_summary()
+            recorder = getattr(self._agent_app, "session_recorder", None)
+            if recorder is None:
+                raise RuntimeError("session recorder is not configured")
+            recorder.record_assistant(partial)
 
     def _dispatch_agent_event(self, event: AgentHarnessEvent) -> None:
         """将 agent 事件放入队列，由 UI loop 批量更新显示状态。"""

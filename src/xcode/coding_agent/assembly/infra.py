@@ -9,7 +9,8 @@ from xcode.harness.config import XcodeRuntimeConfig, resolve_config_path
 from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.harness.memory import MemoryManager
-from xcode.harness.session import SessionHistory
+from xcode.harness.session import SessionHistory, SessionStore
+from xcode.harness.session.recorder import SessionRecorder
 
 
 @dataclass(frozen=True)
@@ -20,11 +21,13 @@ class SharedInfra:
     compactor: LayeredCompactor
     memory_manager: MemoryManager
     session_history: SessionHistory
+    session_recorder: SessionRecorder
 
 
 def build_shared_infra(
     project_root: Path,
     runtime_config: XcodeRuntimeConfig,
+    sessions_dir: Path | None = None,
 ) -> SharedInfra:
     contextual_state = ContextualRetrievalState(project_root)
     cancellation_token = CancellationToken()
@@ -33,7 +36,10 @@ def build_shared_infra(
     memory_manager = MemoryManager(project_root)
 
     configured_sessions_dir = runtime_config.paths.sessions_dir
-    if configured_sessions_dir:
+    if sessions_dir is not None:
+        transcript_dir = sessions_dir.resolve()
+        checkpoint_dir = transcript_dir / "checkpoints"
+    elif configured_sessions_dir:
         resolved_sessions_dir = resolve_config_path(
             project_root,
             configured_sessions_dir,
@@ -52,6 +58,9 @@ def build_shared_infra(
         keep_recent_tokens=runtime_config.agent.keep_recent_tokens,
     )
     session_history = SessionHistory(transcript_dir)
+    session_recorder = SessionRecorder(
+        SessionStore(transcript_dir, project_root=project_root)
+    )
     return SharedInfra(
         contextual_state=contextual_state,
         cancellation_token=cancellation_token,
@@ -59,4 +68,5 @@ def build_shared_infra(
         compactor=compactor,
         memory_manager=memory_manager,
         session_history=session_history,
+        session_recorder=session_recorder,
     )

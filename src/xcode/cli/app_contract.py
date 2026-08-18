@@ -14,6 +14,7 @@ from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.observability import ExternalHookDiagnostic
 from xcode.harness.skill_activation import ExplicitSkillActivationResult
 from xcode.agent.types import ApprovalCallback, ToolSpec
+from xcode.harness.session import SessionStore
 
 
 class ToolRegistryApp(Protocol):
@@ -97,8 +98,15 @@ class ReplApp(ModelControlApp, ToolRegistryApp, Protocol):
     @property
     def registry(self) -> tuple[ToolSpec, ...]: ...
 
+    @property
+    def session_store(self) -> SessionStore: ...
+
     def ask_stream(
-        self, question: str, mode: ExecutionMode | None = None
+        self,
+        question: str,
+        mode: ExecutionMode | None = None,
+        *,
+        display_question: str | None = None,
     ) -> Iterator[AgentHarnessEvent]: ...
 
     def hook_diagnostics(self) -> tuple[ExternalHookDiagnostic, ...]: ...

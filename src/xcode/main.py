@@ -180,20 +180,19 @@ def main() -> int:
 
 
 def _run(args, runtime_config) -> int:
-    app = _build_app_from_config(args.project_root, runtime_config)
-    if args.prompt:
-        _print_stream(app.ask_stream(args.prompt))
-        return 0
     sessions_dir = (
         args.sessions_dir
         or resolve_config_path(args.project_root, runtime_config.paths.sessions_dir)
         or (args.project_root / ".local" / "sessions")
     )
+    app = _build_app_from_config(args.project_root, runtime_config, sessions_dir)
+    if args.prompt:
+        _print_stream(app.ask_stream(args.prompt))
+        return 0
     if args.command == "tui":
         return run_tui(
             app,
             args.project_root,
-            sessions_dir,
             session_id=args.session,
             auto_continue=args.continue_,
             resume_latest=args.resume,
@@ -202,34 +201,37 @@ def _run(args, runtime_config) -> int:
         if args.session:
             return run_repl(
                 app,
-                sessions_dir,
                 session_id=args.session,
                 project_root=args.project_root,
             )
         if args.continue_:
             return run_repl(
-                app, sessions_dir, auto_continue=True, project_root=args.project_root
+                app, auto_continue=True, project_root=args.project_root
             )
         if args.resume:
             return run_repl(
-                app, sessions_dir, resume_latest=True, project_root=args.project_root
+                app, resume_latest=True, project_root=args.project_root
             )
-        return run_repl(app, sessions_dir, project_root=args.project_root)
+        return run_repl(app, project_root=args.project_root)
 
     return run_tui(
         app,
         args.project_root,
-        sessions_dir,
         session_id=args.session,
         auto_continue=args.continue_,
         resume_latest=args.resume,
     )
 
 
-def _build_app_from_config(project_root: Path, runtime_config):
+def _build_app_from_config(
+    project_root: Path,
+    runtime_config,
+    sessions_dir: Path,
+):
     return build_app(
         project_root=project_root,
         runtime_config=runtime_config,
+        sessions_dir=sessions_dir,
     )
 
 

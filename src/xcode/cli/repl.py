@@ -42,7 +42,6 @@ from .repl_tools import (
     final_stop_reason,
     run_shell_shortcut,
 )
-from xcode.harness.session.event_codec import encode_session_event
 from xcode.harness.agent_runtime.events import (
     AssistantEventBlock,
     AssistantStructuredEvent,
@@ -153,7 +152,6 @@ def current_model_options(app: object) -> tuple[str, ...]:
 
 def run_repl(
     app: ReplApp,
-    sessions_dir: Path,
     prompt_session: PromptLike | None = None,
     resume_latest: bool = False,
     auto_continue: bool = False,
@@ -162,8 +160,8 @@ def run_repl(
     project_root: Path | None = None,
 ) -> int:
     _suppress_windows_ptk_shutdown_noise()
-    root = (project_root or sessions_dir).resolve()
-    store = SessionStore(sessions_dir, project_root=root)
+    root = (project_root or Path.cwd()).resolve()
+    store = app.session_store
     markdown_renderer = renderer or TerminalMarkdownRenderer()
     registry = tuple(getattr(app, "registry", ()) or ())
 
@@ -290,9 +288,6 @@ def run_repl(
             _print_raw_output(output)
             continue
 
-        message_id = store.append("user", text)
-        sync_compaction_source(app, store, message_id)
-
         expanded_text, references = expand_file_references(text, root)
         if references:
             store.append("event", file_reference_event(references))
@@ -303,6 +298,7 @@ def run_repl(
             state=state,
             session=session,
             text=expanded_text,
+            display_text=text,
         )
         _run_snapshotted_turn(ctx, snapshot_store)
         follow_up = app.agent.take_follow_up()
@@ -393,6 +389,7 @@ class _AgentTurnContext:
     state: ReplState
     session: PromptLike
     text: str
+    display_text: str
 
 
 def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
@@ -432,15 +429,11 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
         if not callable(ask_stream):
             raise TypeError("app does not support ask_stream")
         typed_ask_stream = cast(Callable[..., Iterator[AgentHarnessEvent]], ask_stream)
-        for event in typed_ask_stream(text, mode=ctx.state.mode):
-            # ponytail: 只记录有意义的事件，不存流式碎片
-            if event.type not in {
-                "message_start",
-                "message_stop",
-                "reasoning_delta",
-                "text_delta",
-            }:
-                ctx.store.append("event", encode_session_event(event))
+        for event in typed_ask_stream(
+            text,
+            mode=ctx.state.mode,
+            display_question=ctx.display_text,
+        ):
             turn.handle_event(event)
     except KeyboardInterrupt:
         turn.interrupted = True
@@ -475,10 +468,6 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
 
     if turn.stopped_reason:
         print(turn.stopped_reason)
-    if turn.step_answers:
-        answer = "\n\n".join(turn.step_answers)
-        ctx.store.append("assistant", answer)
-        ctx.store.update_summary()
     return turn.tool_names_in_turn
 
 
