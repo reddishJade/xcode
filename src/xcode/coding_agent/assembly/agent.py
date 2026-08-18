@@ -41,6 +41,7 @@ from xcode.harness.observability import (
     SignalHookManager,
 )
 from xcode.harness.security.permission_model import PolicyEvaluator
+from xcode.harness.session.recorder import SessionRecorder
 
 from .security import (
     external_directories_from_security,
@@ -58,13 +59,16 @@ if TYPE_CHECKING:
 def build_hook_manager(
     contextual_state: ContextualRetrievalState | None,
     external_hook_runner: ExternalHookRunner | None,
+    session_recorder: SessionRecorder,
     project_root: Path,
     *,
     subagent: bool,
-) -> HookManager | None:
-    if contextual_state is None and external_hook_runner is None:
-        return None
+) -> HookManager:
     manager = SignalHookManager()
+    manager.register(
+        "before_provider_request",
+        session_recorder.record_provider_request,
+    )
     if contextual_state is not None:
 
         def record_post_tool(record: object) -> None:
@@ -105,6 +109,7 @@ def build_agent(
     config: AgentConfig,
     audit_path: Path | None,
     runtime_config: XcodeRuntimeConfig,
+    session_recorder: SessionRecorder,
     contextual_state: ContextualRetrievalState | None = None,
     shell_spec: ShellSpec | None = None,
     compact_controller: CompactController | None = None,
@@ -121,10 +126,10 @@ def build_agent(
     from xcode.harness.memory import MemoryManager
 
     memory_manager = memory_manager or MemoryManager(project_root)
-
     hook_manager = build_hook_manager(
         contextual_state,
         external_hook_runner,
+        session_recorder,
         project_root,
         subagent=False,
     )

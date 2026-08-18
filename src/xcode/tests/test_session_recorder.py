@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 from xcode.coding_agent.app import XcodeApp
@@ -12,7 +13,9 @@ from xcode.harness.agent_runtime.events import (
     FinalStructuredEvent,
     TextDeltaStructuredEvent,
 )
+from xcode.harness.agent_runtime.config import _build_before_provider_request_closure
 from xcode.harness.agent_runtime.result import AgentHarnessResult
+from xcode.harness.observability import RuntimeCorrelation
 from xcode.harness.session import SessionStore
 from xcode.harness.session.recorder import SessionRecorder
 
@@ -122,3 +125,64 @@ def test_compaction_appends_epoch_without_rewriting_history(tmp_path: Path) -> N
     assert isinstance(event, dict)
     assert event["type"] == "compaction"
     assert event["data"]["summary"] == "current state"
+
+
+def test_provider_request_records_exact_model_visible_envelope(tmp_path: Path) -> None:
+    recorder = _recorder(tmp_path)
+    agent = _Agent()
+    recorder.begin_turn(agent, "question")
+    recorder.record_provider_request(
+        SimpleNamespace(
+            metadata={
+                "messages": [{"role": "system", "content": "rules"}],
+                "tools": [{"name": "read_file", "parameters": {}}],
+                "provider": {"model": "test-model", "transport": "test"},
+                "prompt_sha256": "prompt-hash",
+                "request_sha256": "request-hash",
+            },
+            timestamp="2026-01-01T00:00:00+00:00",
+            session_id=recorder.store.session_id,
+            turn_id="turn-1",
+            request_id="request-1",
+        )
+    )
+
+    event = recorder.store.build_branch()[-1].content
+    assert isinstance(event, dict)
+    assert event["type"] == "provider_request"
+    assert event["data"]["messages"] == [
+        {"role": "system", "content": "rules"}
+    ]
+    assert event["correlation"]["request_id"] == "request-1"
+
+
+def test_provider_request_hook_adds_provider_and_request_fingerprint() -> None:
+    records: list[object] = []
+    provider = SimpleNamespace(
+        model="test-model",
+        base_url="https://provider.invalid",
+        transport="test",
+        thinking=False,
+        reasoning_effort="low",
+    )
+    correlation = RuntimeCorrelation("session-1")
+    correlation.begin_turn()
+    closure = _build_before_provider_request_closure(
+        cast(Any, records.append),
+        lambda: "prompt-v1",
+        correlation,
+        cast(Any, provider),
+    )
+
+    closure([{"role": "system", "content": "rules"}], [])
+
+    record = cast(Any, records[0])
+    assert record.metadata["provider"] == {
+        "model": "test-model",
+        "base_url": "https://provider.invalid",
+        "transport": "test",
+        "thinking": False,
+        "reasoning_effort": "low",
+    }
+    assert len(record.metadata["request_sha256"]) == 64
+    assert record.request_id == "session-1:request:1"

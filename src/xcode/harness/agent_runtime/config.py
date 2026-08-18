@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -185,6 +186,7 @@ def _build_before_provider_request_closure(
     emit_hook: Callable[[HookRecord], None],
     get_prompt_version: Callable[[], str],
     correlation: RuntimeCorrelation,
+    provider: ModelProvider,
 ) -> Callable[[list[dict[str, Any]], list[Any]], None]:
     """构建 provider 请求前的 hook 发射回调。"""
 
@@ -198,14 +200,35 @@ def _build_before_provider_request_closure(
         )
         prompt_bytes = len(system_prompt.encode("utf-8"))
         prompt_sha = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+        provider_info = {
+            "model": provider.model,
+            "base_url": provider.base_url,
+            "transport": provider.transport,
+            "thinking": provider.thinking,
+            "reasoning_effort": provider.reasoning_effort,
+        }
+        tool_payload = [tool_definition_to_dict(tool) for tool in tools]
+        request_bytes = json.dumps(
+            {
+                "messages": msgs,
+                "tools": tool_payload,
+                "provider": provider_info,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
         emit_hook(
             HookRecord(
                 "before_provider_request",
                 metadata={
                     "messages": msgs,
-                    "tools": [tool_definition_to_dict(tool) for tool in tools],
+                    "tools": tool_payload,
+                    "provider": provider_info,
                     "prompt_version": get_prompt_version(),
                     "prompt_sha256": prompt_sha,
+                    "request_sha256": hashlib.sha256(request_bytes).hexdigest(),
                     "system_prompt_bytes": prompt_bytes,
                 },
                 **hook_correlation_fields(current),
@@ -321,6 +344,7 @@ def build_loop_config(
             emit_hook,
             get_prompt_version,
             active_correlation,
+            snapshot.provider,
         ),
         prepare_next_turn=prepare_next_turn_fn,
     )

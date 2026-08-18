@@ -293,6 +293,7 @@ def build_app(
         config=cfg.agent_config,
         audit_path=cfg.audit_path,
         runtime_config=cfg.runtime_config,
+        session_recorder=infra.session_recorder,
         contextual_state=infra.contextual_state,
         shell_spec=shell_spec,
         compactor=infra.compactor,

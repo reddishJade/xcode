@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Protocol
 
 from xcode.harness.agent_runtime.events import AgentHarnessEvent, FinalStructuredEvent
 
 from .event_codec import SESSION_EVENT_SCHEMA_VERSION, encode_session_event
 from .tree_store import TreeSessionRepo
+from .types import JsonValue
 
 
 _DURABLE_EVENT_TYPES = frozenset(
@@ -31,6 +33,23 @@ class SessionBoundAgent(Protocol):
     def set_history_session_id(self, session_id: str) -> None: ...
 
     def set_compaction_source_message_id(self, message_id: str | None) -> None: ...
+
+
+class ProviderRequestRecord(Protocol):
+    @property
+    def metadata(self) -> Mapping[str, object] | None: ...
+
+    @property
+    def timestamp(self) -> str: ...
+
+    @property
+    def session_id(self) -> str: ...
+
+    @property
+    def turn_id(self) -> str: ...
+
+    @property
+    def request_id(self) -> str: ...
 
 
 class SessionRecorder:
@@ -98,3 +117,33 @@ class SessionRecorder:
                 "correlation": {},
             },
         )
+
+    def record_provider_request(self, record: ProviderRequestRecord) -> None:
+        """保存 provider 实际收到的消息、工具和运行参数。"""
+        metadata = record.metadata or {}
+        self.store.append(
+            "event",
+            {
+                "schema_version": SESSION_EVENT_SCHEMA_VERSION,
+                "type": "provider_request",
+                "step": 0,
+                "data": _json_value(metadata),
+                "correlation": {
+                    "timestamp": record.timestamp,
+                    "session_id": record.session_id,
+                    "turn_id": record.turn_id,
+                    "request_id": record.request_id,
+                    "tool_call_id": "",
+                },
+            },
+        )
+
+
+def _json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_value(item) for item in value]
+    raise TypeError(f"provider request contains non-JSON value: {type(value).__name__}")
