@@ -1,0 +1,132 @@
+# Xcode 架构
+
+## 定位
+
+Xcode 是本地运行的 Python coding-agent harness。它不是一组工具的薄包装，
+而是负责模型输入、运行状态、工具权限、会话事实、生命周期和终端交互的
+软件运行时。
+
+当前架构可以概括为：
+
+```text
+agent
+= model provider
++ append-only session ledger
++ local capability graph
++ execution and permission policy
++ lifecycle control
++ typed interaction surface
++ product composition
+```
+
+## 核心不变量
+
+1. 模型可见即已记录。实际发给 provider 的 messages、tools 和 provider
+   参数必须先形成 `provider_request` envelope，能够审计和比对。
+2. session transcript 是事实账本。用户消息、稳定运行事件、压缩 epoch、
+   子代理生命周期和最终回答只能追加，不能原地改写历史。
+3. 内存状态是日志投影。resume、fork 和 restart 从 transcript 与 checkpoint
+   重建，不把 CLI/TUI 对象当成事实来源。
+4. 工具呈现属于协议。terminal、diff、location、subagent 等语义由工具产生
+   类型化 intent，宿主只负责投影，不从输出字符串猜测。
+5. 正确性以组装后的产品为准。局部单测不能替代真实 `build_app()`、真实
+   registry、session 落盘和重建路径。
+6. 迁移直接完成。当前预发布阶段不保留旧签名、双写、别名适配器或旧 schema
+   分支；调用方、测试和文档在同一提交中一次迁移。
+
+## 分层
+
+| 层 | 路径 | 所有权 |
+|---|---|---|
+| Provider | `src/xcode/ai/` | provider 协议、流式事件和厂商适配 |
+| Agent | `src/xcode/agent/` | 消息模型、loop、工具执行和 provider 请求 |
+| Harness | `src/xcode/harness/` | session、权限、观测、MCP、记忆和运行策略 |
+| Coding product | `src/xcode/coding_agent/` | coding 工具、产品 registry 和应用装配 |
+| Host | `src/xcode/cli/` | REPL/TUI 输入输出与交互控制 |
+
+依赖应朝更低层稳定协议流动。CLI/TUI 不拥有 session 语义；工具不直接拥有
+provider；provider 不感知产品工具。
+
+## 一次回合的数据流
+
+```text
+user input
+  -> SessionRecorder.begin_turn
+  -> CodingAgentHarness / Agent loop
+  -> context assembly and request hygiene
+  -> provider_request envelope
+  -> provider stream
+  -> typed assistant/tool events
+  -> local Shell or local FileSystem
+  -> permission and audit hooks
+  -> append-only session events
+  -> REPL/TUI projection
+```
+
+`SessionRecorder` 是所有入口的统一记录边界。编程式 `ask()`、REPL 和 TUI
+必须经过同一条路径。`harness/session/replay.py` 负责从当前 branch 恢复
+message history、run metadata、Goal 和 contextual state。
+
+## Session 事实模型
+
+稳定记录包括：
+
+- `user`、`assistant`：用户可见对话边界；
+- `provider_request`：provider 实际收到的输入和请求指纹；
+- `assistant`、`tool_use`、`tool_result`、`final`：运行语义；
+- `compaction`：追加式压缩 epoch，原 transcript 保持不变；
+- `subagent_run`：子运行的 started/completed/failed/cancelled 生命周期。
+
+checkpoint 是长会话的重建加速层，不替代 transcript。边界失配时，replayer
+使用完整 branch，而不是猜测或修改历史。
+
+## 本地执行边界
+
+Xcode 只支持本地执行，不提供容器、远程 workspace 或远程 shell 抽象。
+`bash` 直接依赖 `Shell`，文件工具直接依赖 `FileSystem`；生产实现分别是
+`SubprocessShell` 和 `LocalFileSystem`。这些窄协议用于测试本地行为，不代表
+可切换的远程执行世界。
+
+Xcode 的权限引擎、审批和 shell 效果分析不是 OS sandbox。需要进程级隔离时，
+应由运行 Xcode 的外部环境提供，Xcode 自身不负责创建或管理该环境。
+
+## 工具呈现
+
+`ToolRenderIntent` 当前包含：
+
+- `terminal`：命令与本地工作目录；
+- `diff`：patch、文件集合和首个变更行；
+- `location`：文件或目录及行范围；
+- `subagent`：batch ID 与 child run IDs。
+
+intent 随 `ToolResultMessage` 进入 runtime event 和 session log。新增呈现类型时，
+必须同时更新事件编码、回放解码、CLI/TUI 投影和契约测试。
+
+## 子代理
+
+每次委派创建 batch ID，每项任务创建 run ID。`subagent_run` 事件记录父 session、
+任务索引、描述、类型、状态、摘要或错误；父 `tool_result` 的 subagent intent
+保存同一批 ID。子代理继承父权限门控，但不继承隐式对话历史，任务 prompt
+必须自包含。
+
+## 组合根
+
+`build_app()` 是产品组合根，按顺序构造：
+
+1. 已解析配置；
+2. session recorder、memory、compactor 和 cancellation；
+3. provider bundle；
+4. 本地工具、MCP、memory/history 和 subagent registry；
+5. permission gate、hooks 和 `CodingAgentHarness`；
+6. `XcodeApp` 生命周期句柄。
+
+任何新能力都应进入拥有该行为的层，并在真实组合测试中证明最小应用仍可
+启动、请求、落盘和恢复。
+
+## 明确非目标
+
+- 容器执行、远程 shell、远程 filesystem 或远程 workspace；
+- 为未发布调用面保留兼容包装、双写或旧格式解析；
+- CLI/TUI 各自维护一套运行或 session 语义；
+- 未写入 session event 的隐式模型上下文；
+- 仅靠单元覆盖率声明真实产品路径正确。

@@ -1,5 +1,7 @@
 # --- 开发工具缓存 ---
-.agents/
+.agents/*
+!.agents/notes/
+!.agents/notes/**
 .antigravitycli/
 .claude/
 .codex/
