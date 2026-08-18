@@ -23,6 +23,7 @@
 - composition generation -> run snapshot -> `provider_request.composition_id`；
 - subagent lifecycle -> parent session ledger；
 - child descriptor/index lineage -> 独立 session surface -> cold continuation；
+- child activation ownership -> authority non-expansion -> child-first teardown；
 - render intent -> CLI/TUI projection。
 
 ### 真实组合测试
@@ -60,6 +61,8 @@ uv run pytest src/xcode/tests -q --tb=short
 - 新工具呈现必须使用类型化 intent，并覆盖两个宿主的共享投影；
 - 新组合参数必须由 `build_app()` 的真实测试覆盖；
 - composition 输入必须测试发布后隔离，运行时替换必须产生新 generation；
+- child 冷恢复必须测试工具能力不扩张，控制必须验证 direct-parent ownership；
+- parent 关闭必须测试 child 先取消和释放，且 durable session 不被删除；
 - 删除或更改接口时，同一提交直接更新所有调用方与测试，不添加兼容分支；
 - 文件和终端依赖使用窄本地协议注入，不能引入远程执行假设。
 

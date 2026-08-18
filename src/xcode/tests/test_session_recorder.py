@@ -236,6 +236,7 @@ def test_subagent_lifecycle_records_parent_session_lineage(tmp_path: Path) -> No
     recorder.record_subagent_run(
         SubagentRunEvent(
             run_id="run-1",
+            activation_id="activation-1",
             child_session_id="child-1",
             batch_id="batch-1",
             task_index=1,

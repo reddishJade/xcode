@@ -11,7 +11,11 @@ from xcode.harness.agent_runtime.events import AgentHarnessEvent, FinalStructure
 from .event_codec import SESSION_EVENT_SCHEMA_VERSION, encode_session_event
 from .tree_store import TreeSessionRepo
 from .types import JsonValue
-from .subagent_runs import SubagentDescriptor, SubagentRunEvent
+from .subagent_runs import (
+    SubagentActivationEvent,
+    SubagentDescriptor,
+    SubagentRunEvent,
+)
 from .surface import encode_surface_messages, surface_digest
 
 
@@ -181,6 +185,19 @@ class SessionRecorder:
                 "type": "subagent/descriptor",
                 "step": 0,
                 "data": descriptor.model_dump(),
+                "correlation": {},
+            },
+        )
+
+    def record_subagent_activation(self, event: SubagentActivationEvent) -> str:
+        """在 child session 记录一次 process-local activation epoch。"""
+        return self.store.append(
+            "event",
+            {
+                "schema_version": SESSION_EVENT_SCHEMA_VERSION,
+                "type": "subagent/activation",
+                "step": 0,
+                "data": event.model_dump(),
                 "correlation": {},
             },
         )

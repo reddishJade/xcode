@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from xcode.agent.types import SubagentRenderIntent, ToolOutput, ToolSpec
 from xcode.harness.agent_runtime.composition import AgentComposition
+from xcode.harness.agent_runtime.cancellation import CancellationToken
 from xcode.harness.agent_runtime.subagents import (
     SubagentSessionManager,
     SubagentTaskResult,
@@ -149,10 +150,33 @@ class _SubagentListHandler:
         )
 
 
+class _SubagentControlHandler:
+    def __init__(self, manager: SubagentSessionManager) -> None:
+        self.manager = manager
+
+    def __call__(
+        self,
+        data: dict[str, Any],
+        _on_update: Callable[[str], None] | None = None,
+    ) -> str:
+        session_id = str(data.get("session_id", "")).strip()
+        action = str(data.get("action", "")).strip()
+        if not session_id or action not in {"interrupt", "release"}:
+            return "Error: session_id and action=interrupt|release are required"
+        if action == "interrupt":
+            interrupted = self.manager.interrupt(session_id)
+            return (
+                "Child turn interrupted." if interrupted else "Child is already idle."
+            )
+        self.manager.release(session_id)
+        return "Child activation released; its durable session remains resumable."
+
+
 def bind_subagent_runtime(
     registry: tuple[ToolSpec, ...],
     composition_provider: Callable[[], AgentComposition],
     gate: ToolGate,
+    cancellation_token: CancellationToken,
 ) -> None:
     """把父 composition 与权限域绑定到 registry 中的唯一 manager。"""
     managers = {
@@ -160,21 +184,25 @@ def bind_subagent_runtime(
         for spec in registry
         if isinstance(
             spec.handler,
-            _SubagentHandler | _SubagentContinueHandler | _SubagentListHandler,
+            _SubagentHandler
+            | _SubagentContinueHandler
+            | _SubagentListHandler
+            | _SubagentControlHandler,
         )
     }
     for manager in managers:
-        manager.bind_parent(composition_provider, gate)
+        manager.bind_parent(composition_provider, gate, cancellation_token)
 
 
 def build_subagent_tools(
     manager: SubagentSessionManager,
-) -> tuple[ToolSpec, ToolSpec, ToolSpec]:
-    """构建创建、续接与枚举 child session 的三个明确工具。"""
+) -> tuple[ToolSpec, ToolSpec, ToolSpec, ToolSpec]:
+    """构建创建、续接、枚举与控制 child session 的明确工具。"""
     return (
         _build_subagent_tool(manager),
         _build_subagent_continue_tool(manager),
         _build_subagent_list_tool(manager),
+        _build_subagent_control_tool(manager),
     )
 
 
@@ -266,6 +294,30 @@ def _build_subagent_list_tool(manager: SubagentSessionManager) -> ToolSpec:
         input_hint="JSON: {}",
         handler=_SubagentListHandler(manager),
         schema={"type": "object", "properties": {}, "additionalProperties": False},
+    )
+
+
+def _build_subagent_control_tool(manager: SubagentSessionManager) -> ToolSpec:
+    return ToolSpec(
+        name="subagent_control",
+        description=(
+            "Interrupt a direct child turn or release an idle child activation. "
+            "Release never deletes the durable child session."
+        ),
+        input_hint=('JSON: {"session_id":"...","action":"interrupt|release"}'),
+        handler=_SubagentControlHandler(manager),
+        schema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "action": {
+                    "type": "string",
+                    "enum": ["interrupt", "release"],
+                },
+            },
+            "required": ["session_id", "action"],
+            "additionalProperties": False,
+        },
     )
 
 

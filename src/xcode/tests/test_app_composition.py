@@ -105,6 +105,9 @@ def test_real_build_app_minimal_run_and_replay_contract(
         "read_file",
         "bash",
         "subagent",
+        "subagent_continue",
+        "subagent_list",
+        "subagent_control",
     }
     first_request = providers[0].requests[0]
     first_envelope = _provider_request_events(first)[0]["data"]

@@ -11,6 +11,7 @@ import pytest
 from xcode.ai.events import FinalMessage, Message, ProviderEvent, TextDelta
 from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.agent.request import DefaultRequestAssembler
+from xcode.agent.types import ToolOutput, ToolSpec
 from xcode.coding_agent.tools.subagent import (
     BUILD_SUBAGENT_PROMPTS,
     _bounded_prompt,
@@ -18,8 +19,10 @@ from xcode.coding_agent.tools.subagent import (
     _parse_tasks,
 )
 from xcode.harness.agent_runtime.composition import AgentComposition
+from xcode.harness.agent_runtime.cancellation import CancellationToken
 from xcode.harness.agent_runtime.config import GateConfig
 from xcode.harness.agent_runtime.subagents import SubagentSessionManager
+from xcode.harness.agent_runtime.subagents import _ChildCancellationToken
 from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.harness.config import AgentConfig
 from xcode.harness.session import SessionStore
@@ -34,6 +37,7 @@ class _Provider:
 
     def __init__(self) -> None:
         self.requests: list[list[Message]] = []
+        self.tool_requests: list[list[str]] = []
 
     async def stream(
         self,
@@ -42,8 +46,9 @@ class _Provider:
         options: StreamOptions | None = None,
         **kwargs: object,
     ):
-        del tools, options, kwargs
+        del options, kwargs
         self.requests.append(deepcopy(messages))
+        self.tool_requests.append([tool.name for tool in tools])
         answer = f"child-answer-{len(self.requests)}"
         yield cast(ProviderEvent, TextDelta(answer))
         yield cast(
@@ -71,14 +76,18 @@ def _gate() -> ToolGate:
     )
 
 
-def _manager(tmp_path: Path, provider: _Provider) -> SubagentSessionManager:
+def _manager(
+    tmp_path: Path,
+    provider: _Provider,
+    tools: tuple[ToolSpec, ...] = (),
+) -> SubagentSessionManager:
     store = SessionStore(tmp_path / "sessions", project_root=tmp_path)
     store.ensure_metadata("parent task")
     store.append("event", {"type": "parent/test"})
     manager = SubagentSessionManager(
         provider=cast(Any, provider),
-        coding_tools=(),
-        research_tools=(),
+        coding_tools=tools,
+        research_tools=tools,
         system_prompts=BUILD_SUBAGENT_PROMPTS,
         parent_store=store,
     )
@@ -91,8 +100,18 @@ def _manager(tmp_path: Path, provider: _Provider) -> SubagentSessionManager:
         request_assembler=DefaultRequestAssembler(),
         runtime_context_provider=None,
     )
-    manager.bind_parent(lambda: composition, _gate())
+    manager.bind_parent(lambda: composition, _gate(), CancellationToken())
     return manager
+
+
+def _tool(name: str) -> ToolSpec:
+    return ToolSpec(
+        name=name,
+        description=name,
+        input_hint="JSON",
+        handler=lambda _data, _update: ToolOutput("ok"),
+        schema={"type": "object", "properties": {}},
+    )
 
 
 def test_parse_single_requires_explicit_mode() -> None:
@@ -161,11 +180,13 @@ async def test_one_shot_child_has_independent_durable_session(tmp_path: Path) ->
     child_events = _event_types(child_info.path)
     assert child_events[:3] == [
         "subagent/descriptor",
+        "subagent/activation",
         "inbox/inserted",
-        "inbox/claimed",
     ]
     assert "provider_request" in child_events
     assert "final" in child_events
+    assert child_events[-1] == "subagent/activation"
+    assert descriptors[0].tool_names == ()
     assert any(
         message.get("role") == "user" and "child task only" in str(message)
         for message in provider.requests[0]
@@ -185,6 +206,7 @@ async def test_continuable_child_cold_resumes_same_session(tmp_path: Path) -> No
         batch_id="batch-1",
         task_index=1,
     )
+    first_manager.release(created.child_session_id)
 
     recovered_manager = SubagentSessionManager(
         provider=cast(Any, provider),
@@ -196,6 +218,7 @@ async def test_continuable_child_cold_resumes_same_session(tmp_path: Path) -> No
     recovered_manager.bind_parent(
         first_manager._composition_provider or cast(Any, lambda: None),
         _gate(),
+        CancellationToken(),
     )
     continued = await recovered_manager.send(
         created.child_session_id,
@@ -208,6 +231,115 @@ async def test_continuable_child_cold_resumes_same_session(tmp_path: Path) -> No
     assert any("first child turn" in str(message) for message in second_request)
     assert any("child-answer-1" in str(message) for message in second_request)
     assert any("second child turn" in str(message) for message in second_request)
+    child_info = recovered_manager._parent_store.find_by_id(created.child_session_id)
+    assert child_info is not None
+    store = SessionStore(child_info.path.parent, project_root=tmp_path)
+    store.resume(child_info.path)
+    activation_states = [
+        entry.content["data"]["status"]
+        for entry in store.build_branch()
+        if entry.type == "event"
+        and isinstance(entry.content, dict)
+        and entry.content.get("type") == "subagent/activation"
+    ]
+    assert activation_states == ["materialized", "released", "materialized"]
+
+
+def test_child_cancellation_observes_parent_without_resetting_it() -> None:
+    parent = CancellationToken()
+    child = _ChildCancellationToken(parent)
+
+    parent.cancel("parent stopped")
+    child.reset()
+
+    assert child.is_cancelled()
+    assert child.reason == "parent stopped"
+
+
+@pytest.mark.asyncio
+async def test_control_requires_current_direct_parent(tmp_path: Path) -> None:
+    provider = _Provider()
+    manager = _manager(tmp_path, provider)
+    created = await manager.execute(
+        description="owned child",
+        prompt="first turn",
+        subagent_type="coding",
+        mode="continuable",
+        run_id="run-1",
+        batch_id="batch-1",
+        task_index=1,
+    )
+    manager._parent_store.clear()
+
+    with pytest.raises(PermissionError):
+        manager.release(created.child_session_id)
+
+
+@pytest.mark.asyncio
+async def test_cold_activation_cannot_gain_new_tools(tmp_path: Path) -> None:
+    provider = _Provider()
+    read_tool = _tool("read_file")
+    created_manager = _manager(tmp_path, provider, (read_tool,))
+    created = await created_manager.execute(
+        description="bounded authority",
+        prompt="first turn",
+        subagent_type="coding",
+        mode="continuable",
+        run_id="run-1",
+        batch_id="batch-1",
+        task_index=1,
+    )
+    created_manager.release(created.child_session_id)
+
+    expanded_manager = SubagentSessionManager(
+        provider=cast(Any, provider),
+        coding_tools=(read_tool, _tool("bash")),
+        research_tools=(),
+        system_prompts=BUILD_SUBAGENT_PROMPTS,
+        parent_store=created_manager._parent_store,
+    )
+    expanded_manager.bind_parent(
+        created_manager._composition_provider or cast(Any, lambda: None),
+        _gate(),
+        CancellationToken(),
+    )
+    await expanded_manager.send(created.child_session_id, "second turn")
+
+    assert provider.tool_requests == [["read_file"], ["read_file"]]
+
+
+@pytest.mark.asyncio
+async def test_close_releases_children_without_deleting_sessions(
+    tmp_path: Path,
+) -> None:
+    provider = _Provider()
+    manager = _manager(tmp_path, provider)
+    created = await manager.execute(
+        description="durable after close",
+        prompt="first turn",
+        subagent_type="coding",
+        mode="continuable",
+        run_id="run-1",
+        batch_id="batch-1",
+        task_index=1,
+    )
+
+    manager.close(timeout_seconds=0.1)
+
+    child_info = manager._parent_store.find_by_id(created.child_session_id)
+    assert child_info is not None
+    store = SessionStore(child_info.path.parent, project_root=tmp_path)
+    store.resume(child_info.path)
+    activation_states = [
+        entry.content["data"]["status"]
+        for entry in store.build_branch()
+        if entry.type == "event"
+        and isinstance(entry.content, dict)
+        and entry.content.get("type") == "subagent/activation"
+    ]
+    assert activation_states == ["materialized", "released"]
+    with pytest.raises(RuntimeError, match="closed"):
+        await manager.send(created.child_session_id, "must not run")
 
 
 def _event_types(path: Path) -> list[str]:

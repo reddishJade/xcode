@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Lock
+from threading import Lock, RLock
 from uuid import uuid4
 
 from xcode.ai.providers.base import ModelProvider
@@ -16,6 +17,7 @@ from xcode.harness.session.inbox import SessionInbox
 from xcode.harness.session.recorder import SessionRecorder
 from xcode.harness.session.subagent_runs import (
     SubagentDescriptor,
+    SubagentActivationEvent,
     SubagentMode,
     SubagentRunEvent,
     SubagentRunStatus,
@@ -43,10 +45,32 @@ class SubagentTaskResult:
 
 @dataclass
 class _ChildActivation:
+    activation_id: str
     descriptor: SubagentDescriptor
     harness: AgentHarness
     recorder: SessionRecorder
+    cancellation_token: CancellationToken
     turn_lock: Lock
+    active_turns: int = 0
+
+
+class _ChildCancellationToken(CancellationToken):
+    """保留 child 局部 interrupt，同时观察父 run 的取消状态。"""
+
+    def __init__(self, parent: CancellationToken | None) -> None:
+        super().__init__()
+        self._parent = parent
+
+    def is_cancelled(self) -> bool:
+        return super().is_cancelled() or bool(
+            self._parent is not None and self._parent.is_cancelled()
+        )
+
+    @property
+    def reason(self) -> str:
+        if super().is_cancelled() or self._parent is None:
+            return super().reason
+        return self._parent.reason
 
 
 class SubagentSessionManager:
@@ -68,17 +92,23 @@ class SubagentSessionManager:
         self._parent_store = parent_store
         self._composition_provider: Callable[[], AgentComposition] | None = None
         self._parent_gate: ToolGate | None = None
+        self._parent_cancellation: CancellationToken | None = None
         self._activations: dict[str, _ChildActivation] = {}
-        self._lock = Lock()
+        self._owned_children: dict[str, set[str]] = {}
+        self._lock = RLock()
+        self._closed = False
+        self._closing = False
 
     def bind_parent(
         self,
         composition_provider: Callable[[], AgentComposition],
         permission_gate: ToolGate,
+        cancellation_token: CancellationToken,
     ) -> None:
         """在父 harness 发布后绑定其 composition 与权限门控。"""
         self._composition_provider = composition_provider
         self._parent_gate = permission_gate
+        self._parent_cancellation = cancellation_token
 
     def replace_provider(self, provider: ModelProvider) -> None:
         """让新 child activation 使用新的 provider。"""
@@ -98,6 +128,7 @@ class SubagentSessionManager:
         on_update: Callable[[str], None] | None = None,
     ) -> SubagentTaskResult:
         """创建 child session 并执行其首个 turn。"""
+        self._require_open()
         parent_recorder = self._current_parent_recorder()
         child_store = parent_recorder.store.spawn_child(
             title=description,
@@ -111,18 +142,20 @@ class SubagentSessionManager:
             mode=mode,
         )
         activation.recorder.record_subagent_descriptor(activation.descriptor)
-        if mode == "continuable":
-            with self._lock:
-                self._activations[child_store.session_id] = activation
-        return await self._run_turn(
-            activation,
-            parent_recorder,
-            prompt=prompt,
-            run_id=run_id,
-            batch_id=batch_id,
-            task_index=task_index,
-            on_update=on_update,
-        )
+        self._register_activation(activation)
+        try:
+            return await self._run_turn(
+                activation,
+                parent_recorder,
+                prompt=prompt,
+                run_id=run_id,
+                batch_id=batch_id,
+                task_index=task_index,
+                on_update=on_update,
+            )
+        finally:
+            if mode == "one_shot":
+                self._release_activation(activation, "one-shot settled")
 
     async def send(
         self,
@@ -132,6 +165,7 @@ class SubagentSessionManager:
         on_update: Callable[[str], None] | None = None,
     ) -> SubagentTaskResult:
         """向 direct continuable child 的 durable inbox 提交下一 turn。"""
+        self._require_open()
         parent_recorder = self._current_parent_recorder()
         activation = self._activation_for(
             child_session_id,
@@ -146,6 +180,49 @@ class SubagentSessionManager:
             task_index=1,
             on_update=on_update,
         )
+
+    def interrupt(self, child_session_id: str) -> bool:
+        """中断 direct child 的当前 turn，但保留 session 与未 claim inbox。"""
+        activation = self._authorized_live_activation(child_session_id)
+        return activation.harness.interrupt("interrupted by parent session")
+
+    def release(self, child_session_id: str) -> None:
+        """释放 idle activation；durable child session 保持可冷恢复。"""
+        activation = self._authorized_live_activation(child_session_id)
+        if activation.active_turns or activation.harness.active_run() is not None:
+            raise RuntimeError("cannot release an active child turn")
+        self._release_activation(activation, "released by parent session")
+
+    def close(self, timeout_seconds: float = 5.0) -> None:
+        """父 app 关闭时先 cancel children，再有界等待并释放 activation。"""
+        with self._lock:
+            if self._closed:
+                return
+            self._closing = True
+            activations = tuple(self._activations.values())
+        for activation in activations:
+            activation.harness.interrupt("parent runtime is closing")
+            activation.cancellation_token.cancel("parent runtime is closing")
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        while time.monotonic() < deadline:
+            if all(
+                item.active_turns == 0 and item.harness.active_run() is None
+                for item in activations
+            ):
+                break
+            time.sleep(0.01)
+        if any(
+            item.active_turns > 0 or item.harness.active_run() is not None
+            for item in activations
+        ):
+            with self._lock:
+                self._closing = False
+            raise RuntimeError("child activations did not settle before close timeout")
+        for activation in reversed(activations):
+            self._release_activation(activation, "parent runtime closed")
+        with self._lock:
+            self._closed = True
+            self._closing = False
 
     def list_children(self) -> tuple[SubagentDescriptor, ...]:
         """不激活 child，直接从持久化 descriptor 枚举直接子会话。"""
@@ -186,7 +263,10 @@ class SubagentSessionManager:
             descriptor=descriptor,
         )
         with self._lock:
-            current = self._activations.setdefault(child_session_id, activation)
+            current = self._activations.get(child_session_id)
+            if current is None:
+                self._register_activation(activation)
+                current = activation
         return current
 
     def _materialize(
@@ -206,7 +286,10 @@ class SubagentSessionManager:
         parent_composition = composition_provider()
         with self._lock:
             provider = self._provider
-        registry = self._registry_for(subagent_type)
+        registry = self._registry_for(
+            subagent_type,
+            allowed_names=(descriptor.tool_names if descriptor is not None else None),
+        )
         system_prompt = self._system_prompts.get(
             subagent_type,
             self._system_prompts["default"],
@@ -227,6 +310,7 @@ class SubagentSessionManager:
             child_store.session_id,
             hook_manager=hooks,
         )
+        cancellation_token = _ChildCancellationToken(self._parent_cancellation)
         harness = AgentHarness(
             composition=composition,
             runtime=AgentRuntimeConfig(
@@ -236,7 +320,7 @@ class SubagentSessionManager:
                     session_id=child_store.session_id,
                 ),
                 gate_instance=child_gate,
-                cancellation_token=CancellationToken(),
+                cancellation_token=cancellation_token,
                 project_root=child_store.project_root,
             ),
         )
@@ -251,11 +335,14 @@ class SubagentSessionManager:
             subagent_type=subagent_type,
             provider_model=str(provider.model),
             composition_id=composition.generation_id,
+            tool_names=tuple(tool.name for tool in registry),
         )
         return _ChildActivation(
+            activation_id=uuid4().hex,
             descriptor=active_descriptor,
             harness=harness,
             recorder=recorder,
+            cancellation_token=cancellation_token,
             turn_lock=Lock(),
         )
 
@@ -271,12 +358,16 @@ class SubagentSessionManager:
         on_update: Callable[[str], None] | None,
     ) -> SubagentTaskResult:
         descriptor = activation.descriptor
-        parent_recorder.record_subagent_run(
-            _run_event(descriptor, run_id, batch_id, task_index, "started")
-        )
-        while not activation.turn_lock.acquire(blocking=False):
-            await asyncio.sleep(0.01)
+        with self._lock:
+            activation.active_turns += 1
+        acquired = False
         try:
+            parent_recorder.record_subagent_run(
+                _run_event(activation, run_id, batch_id, task_index, "started")
+            )
+            while not activation.turn_lock.acquire(blocking=False):
+                await asyncio.sleep(0.01)
+            acquired = True
             answer = ""
             async for event in activation.harness.arun_stream(prompt):
                 activation.recorder.record_event(event)
@@ -286,7 +377,7 @@ class SubagentSessionManager:
                     answer = event.data.answer
         except asyncio.CancelledError:
             parent_recorder.record_subagent_run(
-                _run_event(descriptor, run_id, batch_id, task_index, "cancelled")
+                _run_event(activation, run_id, batch_id, task_index, "cancelled")
             )
             return SubagentTaskResult(
                 child_session_id=descriptor.child_session_id,
@@ -297,7 +388,7 @@ class SubagentSessionManager:
             error = f"{type(exc).__name__}: {exc}"
             parent_recorder.record_subagent_run(
                 _run_event(
-                    descriptor,
+                    activation,
                     run_id,
                     batch_id,
                     task_index,
@@ -312,10 +403,13 @@ class SubagentSessionManager:
                 error=error,
             )
         finally:
-            activation.turn_lock.release()
+            with self._lock:
+                activation.active_turns -= 1
+            if acquired:
+                activation.turn_lock.release()
         parent_recorder.record_subagent_run(
             _run_event(
-                descriptor,
+                activation,
                 run_id,
                 batch_id,
                 task_index,
@@ -330,10 +424,80 @@ class SubagentSessionManager:
             answer=answer,
         )
 
-    def _registry_for(self, subagent_type: str) -> tuple[ToolSpec, ...]:
-        if subagent_type == "coding":
-            return self._coding_tools
-        return self._research_tools
+    def _registry_for(
+        self,
+        subagent_type: str,
+        allowed_names: tuple[str, ...] | None = None,
+    ) -> tuple[ToolSpec, ...]:
+        registry = (
+            self._coding_tools if subagent_type == "coding" else self._research_tools
+        )
+        if allowed_names is None:
+            return registry
+        allowed = frozenset(allowed_names)
+        return tuple(tool for tool in registry if tool.name in allowed)
+
+    def _register_activation(self, activation: _ChildActivation) -> None:
+        descriptor = activation.descriptor
+        with self._lock:
+            self._activations[descriptor.child_session_id] = activation
+            self._owned_children.setdefault(
+                descriptor.parent_session_id,
+                set(),
+            ).add(descriptor.child_session_id)
+        activation.recorder.record_subagent_activation(
+            SubagentActivationEvent(
+                child_session_id=descriptor.child_session_id,
+                parent_session_id=descriptor.parent_session_id,
+                activation_id=activation.activation_id,
+                status="materialized",
+            )
+        )
+
+    def _release_activation(
+        self,
+        activation: _ChildActivation,
+        reason: str,
+    ) -> None:
+        descriptor = activation.descriptor
+        with self._lock:
+            current = self._activations.get(descriptor.child_session_id)
+            if current is not activation:
+                return
+            self._activations.pop(descriptor.child_session_id, None)
+            owned = self._owned_children.get(descriptor.parent_session_id)
+            if owned is not None:
+                owned.discard(descriptor.child_session_id)
+                if not owned:
+                    self._owned_children.pop(descriptor.parent_session_id, None)
+        activation.recorder.record_subagent_activation(
+            SubagentActivationEvent(
+                child_session_id=descriptor.child_session_id,
+                parent_session_id=descriptor.parent_session_id,
+                activation_id=activation.activation_id,
+                status="released",
+                reason=reason,
+            )
+        )
+
+    def _authorized_live_activation(
+        self,
+        child_session_id: str,
+    ) -> _ChildActivation:
+        parent_session_id = self._parent_store.session_id
+        with self._lock:
+            activation = self._activations.get(child_session_id)
+        if (
+            activation is None
+            or activation.descriptor.parent_session_id != parent_session_id
+        ):
+            raise PermissionError("child is not a live direct child of this session")
+        return activation
+
+    def _require_open(self) -> None:
+        with self._lock:
+            if self._closed or self._closing:
+                raise RuntimeError("subagent manager is closed")
 
     def _current_parent_recorder(self) -> SessionRecorder:
         return SessionRecorder(self._repo_at(self._parent_store.current_path))
@@ -348,7 +512,7 @@ class SubagentSessionManager:
 
 
 def _run_event(
-    descriptor: SubagentDescriptor,
+    activation: _ChildActivation,
     run_id: str,
     batch_id: str,
     task_index: int,
@@ -357,8 +521,10 @@ def _run_event(
     summary: str = "",
     error: str = "",
 ) -> SubagentRunEvent:
+    descriptor = activation.descriptor
     return SubagentRunEvent(
         run_id=run_id,
+        activation_id=activation.activation_id,
         child_session_id=descriptor.child_session_id,
         batch_id=batch_id,
         task_index=task_index,

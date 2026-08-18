@@ -39,8 +39,8 @@ activation，不修改已经发布的 child composition。
   turn/run。
 - one-shot 完成后不保留 live activation，但 session 及 lineage 继续存在。
 - 当前 creation 语义只有 spawn；不暗示继承父 conversation history。
-- activation ownership、权限收窄、interrupt 与 teardown 顺序由下一项运行时决策
-  在同一 session identity 之上实现。
+- activation ownership、权限收窄、interrupt 与 teardown 顺序由
+  `0011-subagent-activation-ownership.md` 在同一 session identity 之上规定。
 
 ## Validation
 

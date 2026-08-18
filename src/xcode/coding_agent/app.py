@@ -238,9 +238,9 @@ class XcodeApp:
     def close(self) -> None:
         if self._closed:
             return
-        self._closed = True
         for closer in self._closers:
             closer()
+        self._closed = True
 
 
 def build_app(

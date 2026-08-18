@@ -148,10 +148,26 @@ continuable child，再用 `subagent_continue` 按 child session ID 提交 FIFO 
 session。`subagent_list` 只读取 descriptor，不启动模型。Xcode 当前只实现 spawn，
 不会复制父 transcript；任务 prompt 必须自包含。
 
+durable session ID、进程内 `activation_id` 和单次 run ID 是三个不同层级。每次
+物化和释放都会在 child log 写入 `subagent/activation`；只有当前 direct parent
+session 能 continuation、interrupt 或 release。interrupt 只终止当前 turn，release
+只回收 idle activation，二者都不删除 durable session。one-shot settle 后自动
+release；continuable child 可在 release 后冷物化。
+
+descriptor 冻结首次发布的工具名。冷物化只取 descriptor 工具集合与当前产品
+registry 的交集，因此能力可以因工具退役而收缩，不能因产品后来新增工具而静默
+扩大。child gate 具有独立 session correlation，并从明确绑定的父权限域派生；父
+cancellation 会传播到 child，而 child 局部 interrupt 不会取消父运行。当前 child
+registry 不含 delegation 工具，最大 delegation depth 为一层。
+
+父 app 按 child-first 顺序关闭：先取消 live child，在有界时间内等待 turn settle，
+再按逆物化顺序 release activation，最后才关闭 MCP 等共享资源。若 child 未能按时
+settle，关闭直接失败，不继续销毁其依赖。
+
 每次 child turn 仍创建 batch/run ID，父 session 的 `subagent_run` 事件记录 child
-session ID、模式、状态、摘要或错误；父 tool result 的 subagent intent 保存 run
-关联。child 模型失败被解析为 completed/failed/cancelled 结果，基础设施不会通过
-共享 `messages[]` 假装成普通父对话。
+session ID、activation ID、模式、状态、摘要或错误；父 tool result 的 subagent
+intent 保存 run 关联。child 模型失败被解析为 completed/failed/cancelled 结果，
+基础设施不会通过共享 `messages[]` 假装成普通父对话。
 
 ## 组合根
 

@@ -21,6 +21,19 @@ class SubagentDescriptor(BaseModel):
     subagent_type: str
     provider_model: str
     composition_id: str
+    tool_names: tuple[str, ...]
+    delegation_depth: int = 1
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class SubagentActivationEvent(BaseModel):
+    """child session 在本进程中的一次物化 epoch。"""
+
+    child_session_id: str
+    parent_session_id: str
+    activation_id: str
+    status: Literal["materialized", "released"]
+    reason: str = ""
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
@@ -28,6 +41,7 @@ class SubagentRunEvent(BaseModel):
     """一条子代理运行状态变化。"""
 
     run_id: str
+    activation_id: str
     child_session_id: str
     batch_id: str
     task_index: int

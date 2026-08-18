@@ -226,6 +226,7 @@ def build_tool_registry(
     )
     registry += build_subagent_tools(subagents)
 
+    closers.append(subagents.close)
     closers.append(mcp_runtime_registry.close)
 
     return (
