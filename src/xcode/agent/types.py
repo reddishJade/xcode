@@ -114,8 +114,20 @@ class LocationRenderIntent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class SubagentRenderIntent(BaseModel):
+    """将工具结果关联到一批可追踪的子代理运行。"""
+
+    kind: Literal["subagent"] = "subagent"
+    batch_id: str
+    run_ids: tuple[str, ...]
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
 type ToolRenderIntent = Annotated[
-    TerminalRenderIntent | DiffRenderIntent | LocationRenderIntent,
+    TerminalRenderIntent
+    | DiffRenderIntent
+    | LocationRenderIntent
+    | SubagentRenderIntent,
     Field(discriminator="kind"),
 ]
 

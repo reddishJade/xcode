@@ -3,6 +3,7 @@
 from xcode.agent.types import (
     DiffRenderIntent,
     LocationRenderIntent,
+    SubagentRenderIntent,
     TerminalRenderIntent,
 )
 from xcode.cli.tool_rendering import render_intent_summary
@@ -35,3 +36,14 @@ def test_location_summary_uses_line_range() -> None:
     )
 
     assert summary == "src/app.py:10-20"
+
+
+def test_subagent_summary_uses_batch_identity() -> None:
+    summary = render_intent_summary(
+        SubagentRenderIntent(
+            batch_id="batch-1",
+            run_ids=("run-1", "run-2"),
+        )
+    )
+
+    assert summary == "Subagents batch-1: 2 run(s)"

@@ -3,13 +3,21 @@ from __future__ import annotations
 import asyncio
 from asyncio import run as async_run
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from xcode.agent.agent import Agent
 from xcode.agent.config import AgentLoopConfig
 from xcode.ai.providers.base import ModelProvider
-from xcode.agent.types import CancellationSignal, ToolSpec
+from xcode.agent.types import (
+    CancellationSignal,
+    SubagentRenderIntent,
+    ToolOutput,
+    ToolSpec,
+)
 from xcode.harness.agent_runtime.tool_gate import ToolGate
+from xcode.harness.session.subagent_runs import SubagentRunEvent, SubagentRunStatus
 
 
 BUILD_SUBAGENT_PROMPTS: dict[str, str] = {
@@ -38,6 +46,15 @@ BUILD_SUBAGENT_PROMPTS: dict[str, str] = {
 
 MAX_BATCH_TASKS = 16
 DEFAULT_MAX_CONCURRENT = 4
+SubagentLifecycleSink = Callable[[SubagentRunEvent], object]
+
+
+@dataclass(frozen=True)
+class _SubagentRun:
+    run_id: str
+    batch_id: str
+    task_index: int
+    task: dict[str, str]
 
 
 class _SubagentHandler:
@@ -49,11 +66,13 @@ class _SubagentHandler:
         coding_tools: list[ToolSpec],
         research_tools: list[ToolSpec],
         cancellation_token: CancellationSignal | None,
+        lifecycle_sink: SubagentLifecycleSink,
     ) -> None:
         self._model = model
         self._coding_tools = coding_tools
         self._research_tools = research_tools
         self._cancellation_token = cancellation_token
+        self._lifecycle_sink = lifecycle_sink
         self._permission_gate: ToolGate | None = None
 
     def bind_permission_gate(self, gate: ToolGate) -> None:
@@ -73,20 +92,31 @@ class _SubagentHandler:
             return tasks_or_error
         tasks = tasks_or_error
         max_concurrent = _max_concurrent(data.get("max_concurrent"))
+        batch_id = uuid4().hex
+        runs = [
+            _SubagentRun(
+                run_id=uuid4().hex,
+                batch_id=batch_id,
+                task_index=index,
+                task=task,
+            )
+            for index, task in enumerate(tasks, start=1)
+        ]
 
         async def _run() -> str:
             if len(tasks) == 1:
                 return await _run_one(
-                    tasks[0],
+                    runs[0],
                     self._model,
                     self._coding_tools,
                     self._research_tools,
                     self._cancellation_token,
                     on_update,
                     gate,
+                    self._lifecycle_sink,
                 )
             return await _run_batch(
-                tasks,
+                runs,
                 max_concurrent,
                 self._model,
                 self._coding_tools,
@@ -94,9 +124,17 @@ class _SubagentHandler:
                 self._cancellation_token,
                 on_update,
                 gate,
+                self._lifecycle_sink,
             )
 
-        return async_run(_run())
+        result = async_run(_run())
+        return ToolOutput(
+            result,
+            render_intent=SubagentRenderIntent(
+                batch_id=batch_id,
+                run_ids=tuple(run.run_id for run in runs),
+            ),
+        )
 
 
 def bind_subagent_permission_gate(
@@ -112,9 +150,16 @@ def build_subagent_tool(
     model: ModelProvider,
     coding_tools: list[ToolSpec],
     research_tools: list[ToolSpec],
+    lifecycle_sink: SubagentLifecycleSink,
     cancellation_token: CancellationSignal | None = None,
 ) -> ToolSpec:
-    handler = _SubagentHandler(model, coding_tools, research_tools, cancellation_token)
+    handler = _SubagentHandler(
+        model,
+        coding_tools,
+        research_tools,
+        cancellation_token,
+        lifecycle_sink,
+    )
 
     return ToolSpec(
         name="subagent",
@@ -233,7 +278,7 @@ def _max_concurrent(raw: object) -> int:
 
 
 async def _run_batch(
-    tasks: list[dict[str, str]],
+    runs: list[_SubagentRun],
     max_concurrent: int,
     model: ModelProvider,
     coding_tools: list[ToolSpec],
@@ -241,35 +286,34 @@ async def _run_batch(
     cancellation_token: CancellationSignal | None,
     on_update: Callable[[str], None] | None,
     permission_gate: ToolGate,
+    lifecycle_sink: SubagentLifecycleSink,
 ) -> str:
     semaphore = asyncio.Semaphore(max_concurrent)
 
-    async def limited(index: int, task: dict[str, str]) -> tuple[int, str, str]:
+    async def limited(run: _SubagentRun) -> tuple[int, str, str]:
         async with semaphore:
+            index = run.task_index
+            task = run.task
             label = task["description"]
             task_update = _task_update(index, on_update)
             if on_update is not None:
                 on_update(f"[{index}] → {label}")
-            try:
-                result = await _run_one(
-                    task,
-                    model,
-                    coding_tools,
-                    research_tools,
-                    cancellation_token,
-                    task_update,
-                    permission_gate,
-                )
-            except Exception as exc:
-                if on_update is not None:
-                    on_update(f"[{index}] ✗ {label}: {exc}")
-                return index, label, f"Error: {exc}"
+            result = await _run_one(
+                run,
+                model,
+                coding_tools,
+                research_tools,
+                cancellation_token,
+                task_update,
+                permission_gate,
+                lifecycle_sink,
+            )
             if on_update is not None:
                 on_update(f"[{index}] ✓ {label}")
             return index, label, result
 
     results = await asyncio.gather(
-        *(limited(index, task) for index, task in enumerate(tasks, start=1))
+        *(limited(run) for run in runs)
     )
     lines = [f"Subagent batch completed: {len(results)} task(s)"]
     for index, label, result in sorted(results):
@@ -291,14 +335,17 @@ def _task_update(
 
 
 async def _run_one(
-    task: dict[str, str],
+    run: _SubagentRun,
     model: ModelProvider,
     coding_tools: list[ToolSpec],
     research_tools: list[ToolSpec],
     cancellation_token: CancellationSignal | None,
     on_update: Callable[[str], None] | None,
     permission_gate: ToolGate,
+    lifecycle_sink: SubagentLifecycleSink,
 ) -> str:
+    task = run.task
+    lifecycle_sink(_lifecycle_event(run, "started"))
     subagent_type = task["subagent_type"]
     system_prompt = BUILD_SUBAGENT_PROMPTS.get(
         subagent_type, BUILD_SUBAGENT_PROMPTS["default"]
@@ -315,11 +362,46 @@ async def _run_one(
         is_tool_productive=child_gate.build_is_tool_productive_hook(gate_snapshot),
     )
     agent = Agent(tools=adapted, model=model, system_prompt=system_prompt)
-    return await agent.prompt(
-        _bounded_prompt(task["prompt"]),
-        loop_config=loop_config,
-        signal=cancellation_token,
-        on_update=on_update,
+    outcomes = await asyncio.gather(
+        agent.prompt(
+            _bounded_prompt(task["prompt"]),
+            loop_config=loop_config,
+            signal=cancellation_token,
+            on_update=on_update,
+        ),
+        return_exceptions=True,
+    )
+    outcome = outcomes[0]
+    if isinstance(outcome, BaseException):
+        status: SubagentRunStatus = (
+            "cancelled" if isinstance(outcome, asyncio.CancelledError) else "failed"
+        )
+        error = f"{type(outcome).__name__}: {outcome}"
+        lifecycle_sink(_lifecycle_event(run, status, error=error))
+        return f"Error: {error}"
+    if cancellation_token is not None and cancellation_token.is_cancelled():
+        lifecycle_sink(_lifecycle_event(run, "cancelled", summary=outcome))
+        return outcome
+    lifecycle_sink(_lifecycle_event(run, "completed", summary=outcome))
+    return outcome
+
+
+def _lifecycle_event(
+    run: _SubagentRun,
+    status: SubagentRunStatus,
+    *,
+    summary: str = "",
+    error: str = "",
+) -> SubagentRunEvent:
+    return SubagentRunEvent(
+        run_id=run.run_id,
+        batch_id=run.batch_id,
+        task_index=run.task_index,
+        description=run.task["description"],
+        subagent_type=run.task["subagent_type"],
+        status=status,
+        summary=summary.strip()[:4000],
+        error=error.strip()[:1000],
     )
 
 

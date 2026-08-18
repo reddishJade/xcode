@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from xcode.agent.types import (
     DiffRenderIntent,
+    SubagentRenderIntent,
     TerminalRenderIntent,
     ToolRenderIntent,
 )
@@ -27,6 +28,8 @@ def render_intent_summary(
             else ""
         )
         return f"Changed {targets}{line}"
+    if isinstance(intent, SubagentRenderIntent):
+        return f"Subagents {intent.batch_id}: {len(intent.run_ids)} run(s)"
     if intent.line_start is None:
         return intent.path
     if intent.line_end is None or intent.line_end == intent.line_start:

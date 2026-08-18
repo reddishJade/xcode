@@ -10,6 +10,7 @@ from xcode.harness.agent_runtime.events import AgentHarnessEvent, FinalStructure
 from .event_codec import SESSION_EVENT_SCHEMA_VERSION, encode_session_event
 from .tree_store import TreeSessionRepo
 from .types import JsonValue
+from .subagent_runs import SubagentRunEvent
 
 
 _DURABLE_EVENT_TYPES = frozenset(
@@ -135,6 +136,21 @@ class SessionRecorder:
                     "request_id": record.request_id,
                     "tool_call_id": "",
                 },
+            },
+        )
+
+    def record_subagent_run(self, event: SubagentRunEvent) -> str:
+        """追加子代理生命周期事件，并记录父 session 归属。"""
+        data = event.model_dump()
+        data["parent_session_id"] = self.store.session_id
+        return self.store.append(
+            "event",
+            {
+                "schema_version": SESSION_EVENT_SCHEMA_VERSION,
+                "type": "subagent_run",
+                "step": 0,
+                "data": data,
+                "correlation": {},
             },
         )
 

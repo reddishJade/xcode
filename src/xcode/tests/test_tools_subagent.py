@@ -15,13 +15,16 @@ from xcode.agent.types import (
     TextContent,
     ToolCallContent,
     ToolSpec,
+    SubagentRenderIntent,
 )
 from xcode.coding_agent.tools.subagent import (
+    _SubagentRun,
     _max_concurrent,
     _parse_tasks,
     _run_one,
     build_subagent_tool,
 )
+from xcode.harness.session.subagent_runs import SubagentRunEvent
 from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.harness.observability import AuditRecord
 from xcode.harness.security import HITLResult
@@ -57,6 +60,15 @@ def _gate(**kwargs: Any) -> ToolGate:
         session_grant_store=kwargs.get("session_grant_store"),
         user_ruleset=kwargs.get("user_ruleset", ()),
         mode_fallbacks={"act": "allow"},
+    )
+
+
+def _run(task: dict[str, str], index: int = 1) -> _SubagentRun:
+    return _SubagentRun(
+        run_id=f"run-{index}",
+        batch_id="batch-1",
+        task_index=index,
+        task=task,
     )
 
 
@@ -116,6 +128,7 @@ def test_subagent_fails_closed_without_permission_gate() -> None:
         model=cast(Any, object()),
         coding_tools=[],
         research_tools=[],
+        lifecycle_sink=lambda _event: None,
     )
 
     result = tool.handler({"prompt": "inspect"}, None)
@@ -157,13 +170,20 @@ async def test_subagent_edit_obeys_parent_deny(
     monkeypatch.setattr(Agent, "prompt", fake_prompt)
 
     result = await _run_one(
-        {"description": "edit", "prompt": "edit file", "subagent_type": "coding"},
+        _run(
+            {
+                "description": "edit",
+                "prompt": "edit file",
+                "subagent_type": "coding",
+            }
+        ),
         cast(Any, object()),
         [edit_tool],
         [],
         None,
         None,
         gate,
+        lambda _event: None,
     )
 
     assert result == "blocked"
@@ -227,8 +247,26 @@ async def test_subagent_reuses_session_grant_and_audits_child_calls(
     monkeypatch.setattr(Agent, "prompt", fake_prompt)
     task = {"description": "status", "prompt": "run status", "subagent_type": "coding"}
 
-    await _run_one(task, cast(Any, object()), [bash_tool], [], None, None, gate)
-    await _run_one(task, cast(Any, object()), [bash_tool], [], None, None, gate)
+    await _run_one(
+        _run(task, 1),
+        cast(Any, object()),
+        [bash_tool],
+        [],
+        None,
+        None,
+        gate,
+        lambda _event: None,
+    )
+    await _run_one(
+        _run(task, 2),
+        cast(Any, object()),
+        [bash_tool],
+        [],
+        None,
+        None,
+        gate,
+        lambda _event: None,
+    )
 
     assert len(approvals) == 1
     assert [record.tool for record in audits] == ["bash", "bash"]
@@ -236,6 +274,108 @@ async def test_subagent_reuses_session_grant_and_audits_child_calls(
     assert audits[1].matched_rule == "session_grant"
     assert audits[1].approval_grant_id is not None
     assert tool_results[1].details == {"permission_notice": "Allowed by session grant"}
+
+
+@pytest.mark.asyncio
+async def test_subagent_persists_started_and_completed_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[SubagentRunEvent] = []
+
+    async def fake_prompt(_self: Agent, _text: str, **_kwargs: object) -> str:
+        return "implemented and verified"
+
+    monkeypatch.setattr(Agent, "prompt", fake_prompt)
+    run = _run(
+        {
+            "description": "implement parser",
+            "prompt": "Implement parser",
+            "subagent_type": "coding",
+        }
+    )
+
+    result = await _run_one(
+        run,
+        cast(Any, object()),
+        [],
+        [],
+        None,
+        None,
+        _gate(),
+        events.append,
+    )
+
+    assert result == "implemented and verified"
+    assert [event.status for event in events] == ["started", "completed"]
+    assert {event.run_id for event in events} == {"run-1"}
+    assert events[-1].summary == "implemented and verified"
+
+
+@pytest.mark.asyncio
+async def test_subagent_persists_failed_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[SubagentRunEvent] = []
+
+    async def fake_prompt(_self: Agent, _text: str, **_kwargs: object) -> str:
+        raise ValueError("child failed")
+
+    monkeypatch.setattr(Agent, "prompt", fake_prompt)
+    run = _run(
+        {
+            "description": "broken child",
+            "prompt": "Fail",
+            "subagent_type": "coding",
+        }
+    )
+
+    result = await _run_one(
+        run,
+        cast(Any, object()),
+        [],
+        [],
+        None,
+        None,
+        _gate(),
+        events.append,
+    )
+
+    assert result == "Error: ValueError: child failed"
+    assert [event.status for event in events] == ["started", "failed"]
+    assert events[-1].error == "ValueError: child failed"
+
+
+def test_subagent_result_links_parent_tool_to_child_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[SubagentRunEvent] = []
+
+    async def fake_prompt(_self: Agent, _text: str, **_kwargs: object) -> str:
+        return "done"
+
+    monkeypatch.setattr(Agent, "prompt", fake_prompt)
+    tool = build_subagent_tool(
+        model=cast(Any, object()),
+        coding_tools=[],
+        research_tools=[],
+        lifecycle_sink=events.append,
+    )
+    from xcode.coding_agent.tools.subagent import bind_subagent_permission_gate
+
+    bind_subagent_permission_gate((tool,), _gate())
+
+    result = tool.handler(
+        {
+            "description": "inspect runtime",
+            "prompt": "Inspect runtime",
+            "subagent_type": "coding",
+        },
+        None,
+    )
+
+    assert isinstance(result.render_intent, SubagentRenderIntent)
+    assert result.render_intent.batch_id == events[0].batch_id
+    assert result.render_intent.run_ids == (events[0].run_id,)
 
 
 def test_subagent_updates_keep_numbered_slots() -> None:

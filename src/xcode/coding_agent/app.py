@@ -284,6 +284,7 @@ def build_app(
         project_root=project_root,
         llm=providers.llm,
         runtime_config=cfg.runtime_config,
+        session_recorder=infra.session_recorder,
         contextual_state=infra.contextual_state,
         cancel_event=infra.cancellation_token,
         skills_dir=cfg.skills_dir,

@@ -18,6 +18,7 @@ from xcode.harness.agent_runtime.result import AgentHarnessResult
 from xcode.harness.observability import RuntimeCorrelation
 from xcode.harness.session import SessionStore
 from xcode.harness.session.recorder import SessionRecorder
+from xcode.harness.session.subagent_runs import SubagentRunEvent
 
 
 class _Agent:
@@ -186,3 +187,23 @@ def test_provider_request_hook_adds_provider_and_request_fingerprint() -> None:
     }
     assert len(record.metadata["request_sha256"]) == 64
     assert record.request_id == "session-1:request:1"
+
+
+def test_subagent_lifecycle_records_parent_session_lineage(tmp_path: Path) -> None:
+    recorder = _recorder(tmp_path)
+    recorder.record_subagent_run(
+        SubagentRunEvent(
+            run_id="run-1",
+            batch_id="batch-1",
+            task_index=1,
+            description="inspect runtime",
+            subagent_type="coding",
+            status="started",
+        )
+    )
+
+    event = recorder.store.build_branch()[-1].content
+    assert isinstance(event, dict)
+    assert event["type"] == "subagent_run"
+    assert event["data"]["parent_session_id"] == recorder.store.session_id
+    assert event["data"]["run_id"] == "run-1"

@@ -22,6 +22,7 @@ from xcode.harness.session_todo import SessionTodoState
 if TYPE_CHECKING:
     from xcode.harness.skills import SkillRegistry
     from xcode.harness.mcp import McpRuntimeRegistry
+    from xcode.harness.session.recorder import SessionRecorder
 
 
 def build_search_tools_tool(
@@ -160,6 +161,7 @@ def build_tool_registry(
     project_root: Path,
     llm: ModelProvider,
     runtime_config: XcodeRuntimeConfig,
+    session_recorder: SessionRecorder,
     contextual_state: ContextualRetrievalState | None = None,
     cancel_event: CancellationToken | None = None,
     shell: Shell | None = None,
@@ -215,6 +217,7 @@ def build_tool_registry(
             model=llm,
             coding_tools=list(child_registry),
             research_tools=list(child_registry),
+            lifecycle_sink=session_recorder.record_subagent_run,
             cancellation_token=cancel_event,
         ),
     )
