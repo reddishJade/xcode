@@ -62,10 +62,10 @@ from ..repl_sessions import (
 )
 from ..repl_skills import activate_skill, available_skill_names, parse_skill_invocation
 from ..repl_tools import (
-    event_to_dict,
     file_reference_event,
     run_shell_shortcut,
 )
+from xcode.harness.session.event_codec import encode_session_event
 from xcode.agent.messages import UserMessage
 from xcode.harness.agent_runtime import AgentHarnessEvent, SubmitStatus
 from .state import (
@@ -1316,7 +1316,7 @@ class _XcodeTui:
                     "reasoning_delta",
                     "text_delta",
                 }:
-                    self._store.append("event", event_to_dict(event))
+                    self._store.append("event", encode_session_event(event))
                 if isinstance(event, (FinalStructuredEvent,)):
                     answer = event.data.answer
                 if isinstance(event, (ToolUseStructuredEvent,)):

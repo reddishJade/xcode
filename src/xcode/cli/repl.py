@@ -38,11 +38,11 @@ from .repl_skills import (
     parse_skill_invocation,
 )
 from .repl_tools import (
-    event_to_dict,
     file_reference_event,
     final_stop_reason,
     run_shell_shortcut,
 )
+from xcode.harness.session.event_codec import encode_session_event
 from xcode.harness.agent_runtime.events import (
     AssistantEventBlock,
     AssistantStructuredEvent,
@@ -440,7 +440,7 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
                 "reasoning_delta",
                 "text_delta",
             }:
-                ctx.store.append("event", event_to_dict(event))
+                ctx.store.append("event", encode_session_event(event))
             turn.handle_event(event)
     except KeyboardInterrupt:
         turn.interrupted = True

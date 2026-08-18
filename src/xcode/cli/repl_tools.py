@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from typing import Any
-
-from pydantic import BaseModel
 
 from rich.console import Console
 from rich.text import Text
@@ -25,21 +22,7 @@ from .repl_rendering import (
 )
 from .shared.thinking import single_line_preview
 
-from xcode.harness.agent_runtime.events import (
-    AssistantEventBlock,
-    AssistantStructuredEvent,
-    AssistantTextBlock,
-    CompactionStructuredEvent,
-    MessageStartStructuredEvent,
-    ReasoningDeltaStructuredEvent,
-    AgentHarnessEvent,
-    TextDeltaStructuredEvent,
-    ToolResultBlock,
-    ToolResultStructuredEvent,
-    ToolUpdateStructuredEvent,
-    ToolUseStructuredEvent,
-    TurnEndStructuredEvent,
-)
+from xcode.harness.agent_runtime.events import ToolResultBlock
 from xcode.harness.agent_runtime.result import AgentHarnessResult
 from xcode.coding_agent.execution_modes import ExecutionModeState
 from xcode.harness.agent_runtime.tool_gate import ToolGate
@@ -394,85 +377,6 @@ def summarize_intents(intents: list[str]) -> str:
         return intents[0]
     first = intents[0]
     return single_line_preview(f"{first} and {len(intents) - 1} more")
-
-
-def event_to_dict(event: AgentHarnessEvent) -> dict[str, Any]:
-    return {
-        "type": event.type,
-        "step": event.step,
-        "data": _event_payload(event),
-        "correlation": asdict(event.correlation),
-    }
-
-
-def _event_payload(event: AgentHarnessEvent) -> object:
-    if isinstance(event, (TextDeltaStructuredEvent, ReasoningDeltaStructuredEvent)):
-        return event.data
-    if isinstance(event, MessageStartStructuredEvent):
-        if isinstance(event.data, BaseModel):
-            return event.data.model_dump()
-        return None
-    if isinstance(event, TurnEndStructuredEvent):
-        return {
-            "tool_results": [
-                {"tool_call_id": r.tool_call_id, "content": r.content}
-                for r in event.data.tool_results
-            ]
-        }
-    if isinstance(event, AssistantStructuredEvent):
-        return [_assistant_block_payload(block) for block in event.data]
-    if isinstance(event, ToolUseStructuredEvent):
-        return {"id": event.data.id, "name": event.data.name, "input": event.data.input}
-    if isinstance(event, ToolUpdateStructuredEvent):
-        return {
-            "tool_call_id": event.data.tool_call_id,
-            "tool_name": event.data.tool_name,
-            "partial_result": event.data.partial_result,
-        }
-    if isinstance(event, ToolResultStructuredEvent):
-        return {
-            "tool_use_id": event.data.tool_use_id,
-            "content": event.data.content,
-            "status": event.data.status,
-            "permission_notice": event.data.permission_notice,
-            "type": "tool_result",
-        }
-
-    if isinstance(event, CompactionStructuredEvent):
-        return {
-            "messages_removed": event.data.messages_removed,
-            "messages_after": event.data.messages_after,
-            "summary_token_estimate": event.data.summary_token_estimate,
-            "trigger": event.data.trigger,
-        }
-    return {
-        "answer": event.data.answer,
-        "steps": event.data.steps,
-        "tool_calls": [
-            {"id": c.id, "name": c.name, "input": c.input}
-            for c in event.data.tool_calls
-        ],
-        "termination_reason": event.data.termination_reason.value,
-        "metrics": event.data.metrics,
-        "watchdog_reason": event.data.watchdog_reason,
-        "error_detail": event.data.error_detail,
-        "needs_follow_up": event.data.needs_follow_up,
-        "last_agent": event.data.last_agent,
-        "run_state": event.data.run_state.to_dict()
-        if event.data.run_state is not None
-        else None,
-    }
-
-
-def _assistant_block_payload(block: AssistantEventBlock) -> dict[str, object]:
-    if isinstance(block, AssistantTextBlock):
-        return {"type": "text", "text": block.text}
-    return {
-        "type": "tool_use",
-        "id": block.id,
-        "name": block.name,
-        "input": block.input,
-    }
 
 
 def print_tool_call_rich(label: str, console: Console) -> None:
