@@ -6,7 +6,6 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from ._process import POLL_INTERVAL, close_pipes, kill_process, start_process
-from .filesystem import LocalFileSystem
 from .result import ExecutionResult
 
 
@@ -84,36 +83,4 @@ class SubprocessShell:
             returncode=proc.returncode,
             timed_out=timed_out,
             cancelled=cancelled,
-        )
-
-
-class SubprocessExecutionEnv:
-    def __init__(self) -> None:
-        self._fs = LocalFileSystem()
-        self._shell = SubprocessShell()
-
-    @property
-    def fs(self) -> LocalFileSystem:
-        return self._fs
-
-    @property
-    def shell(self) -> SubprocessShell:
-        return self._shell
-
-    def run(
-        self,
-        argv: list[str],
-        cwd: Path,
-        timeout: int = 30_000,
-        cancel_event: threading.Event | None = None,
-        on_progress: Callable[[str], None] | None = None,
-        env: dict[str, str] | None = None,
-    ) -> ExecutionResult:
-        return self._shell.run(
-            argv,
-            cwd=cwd,
-            timeout=timeout,
-            cancel_event=cancel_event,
-            on_progress=on_progress,
-            env=env,
         )

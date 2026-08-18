@@ -15,7 +15,7 @@ from xcode.coding_agent.tools import ShellSpec, detect_shell
 from xcode.coding_agent.registry import build_project_scoped_registry
 
 from xcode.harness.config import XcodeRuntimeConfig
-from xcode.harness.execution_env import ExecutionEnv
+from xcode.harness.execution_env import Shell
 from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
 from xcode.harness.session_todo import SessionTodoState
 
@@ -92,7 +92,7 @@ def _build_base_project_registry(
     project_root: Path,
     shell_spec: ShellSpec,
     cancel_event: threading.Event | None,
-    env: ExecutionEnv | None,
+    shell: Shell | None,
     skill_registry: SkillRegistry | None,
     contextual_state: ContextualRetrievalState | None = None,
     todo_state: SessionTodoState | None = None,
@@ -102,7 +102,7 @@ def _build_base_project_registry(
         contextual_state=contextual_state,
         shell_spec=shell_spec,
         cancel_event=cancel_event,
-        env=env,
+        shell=shell,
         skill_registry=skill_registry,
         todo_state=todo_state,
     )
@@ -162,7 +162,7 @@ def build_tool_registry(
     runtime_config: XcodeRuntimeConfig,
     contextual_state: ContextualRetrievalState | None = None,
     cancel_event: CancellationToken | None = None,
-    env: ExecutionEnv | None = None,
+    shell: Shell | None = None,
     skills_dir: Path | None = None,
     memory_manager: Any | None = None,
     session_history: Any | None = None,
@@ -185,7 +185,7 @@ def build_tool_registry(
         project_root,
         shell_spec,
         cancel_event,
-        env,
+        shell,
         skill_registry,
         contextual_state=contextual_state,
         todo_state=todo_state,

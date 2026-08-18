@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from xcode.harness.execution_env import ExecutionEnv
+from xcode.harness.execution_env import Shell
 from xcode.harness.session_todo import SessionTodoState
 from xcode.agent.types import ToolSpec
 from xcode.coding_agent.tools import (
@@ -37,7 +37,7 @@ def build_project_scoped_registry(
     contextual_state: ContextualRetrievalState | None,
     shell_spec: ShellSpec,
     cancel_event: threading.Event | None = None,
-    env: ExecutionEnv | None = None,
+    shell: Shell | None = None,
     skill_registry: SkillRegistry | None = None,
     todo_state: SessionTodoState | None = None,
 ) -> tuple[ToolSpec, ...]:
@@ -69,7 +69,7 @@ def build_project_scoped_registry(
             project_root,
             shell_spec=shell_spec,
             cancel_event=cancel_event,
-            env=env,
+            shell=shell,
         ),
     )
     registry += (build_todowrite_tool(todo_state),)

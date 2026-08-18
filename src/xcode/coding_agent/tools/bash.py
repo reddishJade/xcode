@@ -11,17 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from xcode.harness.execution_env import (
-    ExecutionEnv,
     ExecutionResult,
-    SubprocessExecutionEnv,
+    Shell,
+    SubprocessShell,
 )
 from xcode.agent.types import ToolInput, ToolSpec
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
-from ._constants import (
-    DEFAULT_TIMEOUT_SECONDS,
-    MAX_TIMEOUT_SECONDS,
-)
+from ._constants import DEFAULT_TIMEOUT_SECONDS
 
 logger = logging.getLogger("xcode.coding_agent.tools.bash")
 
@@ -55,7 +52,7 @@ def build_bash_tool(
     project_root: Path,
     cancel_event: threading.Event | None = None,
     shell_spec: ShellSpec | None = None,
-    env: ExecutionEnv | None = None,
+    shell: Shell | None = None,
     command_prefix: str | None = None,
     spawn_hook: SpawnHook | None = None,
     env_hook: SpawnEnvHook | None = None,
@@ -63,7 +60,7 @@ def build_bash_tool(
 ) -> ToolSpec:
     root = project_root.resolve()
     spec = shell_spec or detect_shell()
-    env = env or SubprocessExecutionEnv()
+    shell = shell or SubprocessShell()
     shell_syntax = spec.syntax
 
     def bash(data: ToolInput, _on_update: Callable[[str], None] | None = None) -> str:
@@ -81,7 +78,7 @@ def build_bash_tool(
 
         acc = OutputAccumulator(on_progress=on_progress)
         try:
-            result = env.run(
+            result = shell.run(
                 build_shell_argv(spec, plan.command),
                 cwd=plan.cwd,
                 timeout=plan.timeout,
@@ -124,12 +121,6 @@ def _build_schema(shell_syntax: str) -> dict[str, Any]:
         "command": {
             "type": "string",
             "description": "Shell command to run.",
-        },
-        "timeout": {
-            "type": "integer",
-            "description": "Timeout in seconds. Default 30. (deprecated, use timeout_ms)",
-            "minimum": 1,
-            "maximum": MAX_TIMEOUT_SECONDS,
         },
         "timeout_ms": {
             "type": "integer",
@@ -248,7 +239,7 @@ def _build_prompt_guidelines(
 
 
 def _parse_bash_request(data: ToolInput) -> BashRequest:
-    command = str(data.get("command") or data.get("input") or "").strip()
+    command = str(data.get("command") or "").strip()
     if not command:
         raise ValueError("command is required")
     return BashRequest(
@@ -267,31 +258,19 @@ def _parse_workdir(data: ToolInput) -> str | None:
 
 
 def _parse_timeout(data: ToolInput) -> int:
-    """解析 timeout（秒级向下兼容）和 timeout_ms（毫秒级，优先）。
-
-    优先级：timeout_ms > timeout > DEFAULT_TIMEOUT_SECONDS
-    """
-    timeout_ms = data.get("timeout_ms")
-    if timeout_ms is not None:
-        try:
-            value = int(timeout_ms)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("timeout_ms must be an integer") from exc
-        if value <= 0:
-            raise ValueError("timeout_ms must be positive")
-        if value > _MAX_TIMEOUT_MS:
-            raise ValueError(f"timeout_ms must be <= {_MAX_TIMEOUT_MS}")
-        return value
-
-    timeout = data.get("timeout", DEFAULT_TIMEOUT_SECONDS)
+    """解析唯一受支持的毫秒级超时参数。"""
+    if "timeout" in data:
+        raise ValueError("unsupported bash parameter: timeout")
+    timeout_ms = data.get("timeout_ms", DEFAULT_TIMEOUT_SECONDS * 1000)
     try:
-        value = int(timeout)
+        value = int(timeout_ms)
     except (TypeError, ValueError) as exc:
-        raise ValueError("timeout must be an integer") from exc
+        raise ValueError("timeout_ms must be an integer") from exc
     if value <= 0:
-        raise ValueError("timeout must be positive")
-    # 秒 → 毫秒转换
-    return value * 1000
+        raise ValueError("timeout_ms must be positive")
+    if value > _MAX_TIMEOUT_MS:
+        raise ValueError(f"timeout_ms must be <= {_MAX_TIMEOUT_MS}")
+    return value
 
 
 # ── 执行计划 ──

@@ -2,12 +2,10 @@ from .agent_runtime import AgentHarnessEvent
 from .agent_runtime.cancellation import CancellationToken
 from .config import AgentConfig
 from .execution_env import (
-    ExecutionEnv,
     ExecutionResult,
     FileSystem,
     LocalFileSystem,
     Shell,
-    SubprocessExecutionEnv,
     SubprocessShell,
 )
 from .observability import HookManager
@@ -18,14 +16,12 @@ __all__ = [
     "AgentConfig",
     "CancellationToken",
     "AgentHarnessEvent",
-    "ExecutionEnv",
     "ExecutionResult",
     "FileSystem",
     "HookManager",
     "LocalFileSystem",
     "PermissionPolicy",
     "Shell",
-    "SubprocessExecutionEnv",
     "SubprocessShell",
     "ToolOutput",
     "ToolSpec",
