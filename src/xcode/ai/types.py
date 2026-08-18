@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 import orjson
@@ -59,13 +60,37 @@ class ProviderConfig:
 
 @dataclass(frozen=True)
 class Cost:
-    """LLM 调用成本（美元/百万 token）。"""
+    """LLM 调用成本（美元/百万 token）。
+
+    支持分时计价：peak_hours 声明高峰时段（UTC 小时，含头不含尾），
+    为空表示全天固定费率；off_peak_factor 为高峰以外的费率系数。
+    """
 
     input: float = 0.0
     output: float = 0.0
     cache_read: float = 0.0
     cache_write: float = 0.0
     total: float = 0.0
+    peak_hours: tuple[tuple[int, int], ...] = ()
+    off_peak_factor: float = 1.0
+
+    def effective(self, now: datetime | None = None) -> Cost:
+        """按调用时刻返回有效费率：高峰时段用全价，否则按 off_peak_factor 折算。"""
+        if not self.peak_hours or self._is_peak_hour(now or datetime.now(timezone.utc)):
+            return self
+        return Cost(
+            input=self.input * self.off_peak_factor,
+            output=self.output * self.off_peak_factor,
+            cache_read=self.cache_read * self.off_peak_factor,
+            cache_write=self.cache_write * self.off_peak_factor,
+            total=self.total * self.off_peak_factor,
+            peak_hours=self.peak_hours,
+            off_peak_factor=self.off_peak_factor,
+        )
+
+    def _is_peak_hour(self, now: datetime) -> bool:
+        hour = now.hour
+        return any(start <= hour < end for start, end in self.peak_hours)
 
 
 @dataclass(frozen=True)
