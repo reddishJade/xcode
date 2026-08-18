@@ -134,6 +134,10 @@ class ContextCollector(Protocol):
     def collect(self, input: ContextCollectionInput) -> list[ContextBlock]: ...
 
 
+class ContextCollectorSource(Protocol):
+    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]: ...
+
+
 # ── 收集器注册表 ──
 
 
@@ -162,6 +166,35 @@ class ContextCollectorRegistry:
 
     def __bool__(self) -> bool:
         return len(self._collectors) > 0
+
+    def freeze(self) -> FrozenContextCollectorRegistry:
+        """发布不可再注册 collector 的组合快照。"""
+        return FrozenContextCollectorRegistry(tuple(self._collectors))
+
+
+@dataclass(frozen=True)
+class FrozenContextCollectorRegistry:
+    """请求组装使用的不可变 collector generation。"""
+
+    collectors: tuple[ContextCollector, ...] = ()
+
+    def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
+        all_blocks: list[ContextBlock] = []
+        for collector in self.collectors:
+            try:
+                all_blocks.extend(collector.collect(input))
+            except Exception:
+                logger.exception(
+                    "ContextCollector %s raised; skipping",
+                    type(collector).__name__,
+                )
+        return all_blocks
+
+    def __len__(self) -> int:
+        return len(self.collectors)
+
+    def __bool__(self) -> bool:
+        return bool(self.collectors)
 
 
 # ── 组装器协议 ──

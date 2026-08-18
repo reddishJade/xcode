@@ -442,11 +442,9 @@ def _apply_runtime_permission_policy(
     if agent is None:
         return
     policy = _policy_from_config(config)
-    if hasattr(agent, "permission_policy"):
-        agent.permission_policy = policy
-    gate = getattr(agent, "_gate", None)
-    if gate is not None and hasattr(gate, "_permission_policy"):
-        gate._permission_policy = policy
+    replace_policy = getattr(agent, "replace_permission_policy", None)
+    if callable(replace_policy):
+        replace_policy(policy)
 
 
 def _policy_from_config(config: dict[str, Any]) -> PermissionPolicy | None:

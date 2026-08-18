@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
@@ -156,11 +156,11 @@ class ToolGate:
         session_grant_store_provider: Callable[[], GrantStore | None] | None = None,
         permanent_grant_store: GrantStore | None = None,
         user_ruleset: tuple[Rule, ...] = (),
-        user_rulesets: dict[str, tuple[Rule, ...]] | None = None,
-        default_mode_rulesets: dict[str, tuple[Rule, ...]] | None = None,
-        mode_fallbacks: dict[str, PermissionDecision] | None = None,
-        shell_unresolved_policies: dict[str, PermissionDecision] | None = None,
-        tool_path_extractors: dict[str, PathExtractor] | None = None,
+        user_rulesets: Mapping[str, tuple[Rule, ...]] | None = None,
+        default_mode_rulesets: Mapping[str, tuple[Rule, ...]] | None = None,
+        mode_fallbacks: Mapping[str, PermissionDecision] | None = None,
+        shell_unresolved_policies: Mapping[str, PermissionDecision] | None = None,
+        tool_path_extractors: Mapping[str, PathExtractor] | None = None,
     ) -> None:
         self._mode = mode_state
         self._user_ruleset = user_ruleset
@@ -229,7 +229,7 @@ class ToolGate:
             mode_ruleset=default_rules,
             mode_fallback=fallback,
             shell_unresolved_policy=shell_unresolved_policy,
-            tool_path_extractors=self._tool_path_extractors,
+            tool_path_extractors=dict(self._tool_path_extractors),
         )
 
     def snapshot_for(self, registry: tuple[ToolSpec, ...]) -> ToolGateSnapshot:
@@ -253,7 +253,7 @@ class ToolGate:
             mode_ruleset=default_rules,
             mode_fallback=fallback,
             shell_unresolved_policy=shell_unresolved_policy,
-            tool_path_extractors=self._tool_path_extractors,
+            tool_path_extractors=dict(self._tool_path_extractors),
         )
 
     def adapt_tools(self, registry: tuple[ToolSpec, ...]) -> list[AgentTool]:
@@ -271,6 +271,10 @@ class ToolGate:
     def set_approval_callback(self, approval_callback: ApprovalCallback | None) -> None:
         """更新后续工具适配与前置检查使用的 HITL 回调。"""
         self._approval_callback = approval_callback
+
+    def set_permission_policy(self, policy: PermissionPolicy | None) -> None:
+        """应用新 composition generation 的静态权限策略。"""
+        self._permission_policy = policy
 
     def set_session_grant_store_provider(
         self, provider: Callable[[], GrantStore | None] | None

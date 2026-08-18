@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from xcode.ai.providers.base import ModelProvider
 
@@ -30,7 +30,7 @@ from ...agent.messages import (
     SystemMessage,
     UserMessage,
 )
-from ..config import AgentConfig, RequestHygieneConfig
+from ..config import RequestHygieneConfig
 from ..security import PermissionDecision, PermissionPolicy
 from ..observability import (
     AuditLogger,
@@ -58,6 +58,9 @@ from ._mode_protocol import RuntimeModeState
 from .message_codec import messages_from_compacted_dicts
 from .tool_gate import ToolGate
 
+if TYPE_CHECKING:
+    from .composition import AgentComposition
+
 
 def _convert_to_llm_with_citations(
     messages: list[AgentMessage],
@@ -72,83 +75,62 @@ RuntimeContextProvider = Callable[[str], list[str]]
 
 @dataclass(frozen=True)
 class GateConfig:
-    """ToolGate 配置：审批、权限、审计、Hook。"""
+    """随 composition 发布的静态工具策略。"""
 
-    approval_callback: ApprovalCallback | None = None
     permission_policy: PermissionPolicy | None = None
     restricted_dirs: tuple[str, ...] = ()
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
+    external_directories: tuple[ExternalDirectory, ...] = ()
+    sensitive_path_overrides: tuple[SensitivePathOverride, ...] = ()
+    user_rulesets: Mapping[str, tuple[Rule, ...]] = field(default_factory=dict)
+    default_mode_rulesets: Mapping[str, tuple[Rule, ...]] = field(default_factory=dict)
+    mode_fallbacks: Mapping[str, PermissionDecision] = field(default_factory=dict)
+    shell_unresolved_policies: Mapping[str, PermissionDecision] = field(
+        default_factory=dict
+    )
+    tool_path_extractors: Mapping[str, PathExtractor] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class GateRuntimeConfig:
+    """不进入 composition 的会话级门控服务。"""
+
+    approval_callback: ApprovalCallback | None = None
     hook_manager: HookManager | None = None
     external_hook_runner: ExternalHookRunner | None = None
     external_hooks_subagent: bool = False
     external_hooks_cwd: Path | None = None
     audit_logger: AuditLogger | None = None
     session_id: str = "local"
-    external_directories: tuple[ExternalDirectory, ...] = ()
-    sensitive_path_overrides: tuple[SensitivePathOverride, ...] = ()
     session_grant_store: GrantStore | None = None
     session_grant_store_provider: Callable[[], GrantStore | None] | None = None
     permanent_grant_store: GrantStore | None = None
-    user_rulesets: dict[str, tuple[Rule, ...]] = field(default_factory=dict)
-    default_mode_rulesets: dict[str, tuple[Rule, ...]] = field(default_factory=dict)
-    mode_fallbacks: dict[str, PermissionDecision] = field(default_factory=dict)
-    shell_unresolved_policies: dict[str, PermissionDecision] = field(
-        default_factory=dict
-    )
-    tool_path_extractors: dict[str, PathExtractor] = field(default_factory=dict)
     correlation: RuntimeCorrelation | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class AgentRuntimeConfig:
     """CodingAgentHarness 运行时基础设施配置。"""
 
     session_inbox: SessionInbox
-    config: AgentConfig = field(default_factory=AgentConfig)
+    gate: GateRuntimeConfig = field(default_factory=GateRuntimeConfig)
     compactor: StructuredCompactor | None = None
     compact_controller: CompactController | None = None
     cancellation_token: CancellationToken | None = None
-    runtime_context_provider: RuntimeContextProvider | None = None
-    fallback_provider: ModelProvider | None = None
     project_root: Path | None = None
-    request_hygiene: RequestHygieneConfig | None = None
-    context_collectors: ContextCollectorRegistry | None = None
-    context_assembler: DefaultContextAssembler | None = None
-
-
-@dataclass(frozen=True)
-class TurnSnapshot:
-    config: AgentConfig
-    registry: tuple[ToolSpec, ...]
-    provider: ModelProvider
-    runtime_context_provider: RuntimeContextProvider | None
-
-
-def build_turn_snapshot(
-    config: AgentConfig,
-    registry: tuple[ToolSpec, ...],
-    provider: ModelProvider,
-    runtime_context_provider: RuntimeContextProvider | None,
-) -> TurnSnapshot:
-    return TurnSnapshot(
-        config=config,
-        registry=registry,
-        provider=provider,
-        runtime_context_provider=runtime_context_provider,
-    )
 
 
 def build_turn_context_messages(
     question: str,
-    snapshot: TurnSnapshot,
+    composition: AgentComposition,
     resumed_notice: str | None,
     mode_notice: str | None = None,
     memory_overview: str | None = None,
 ) -> list[AgentMessage]:
     typed: list[AgentMessage] = []
     parts: list[str] = []
-    if snapshot.runtime_context_provider is not None:
-        parts = list(snapshot.runtime_context_provider(question))
+    if composition.runtime_context_provider is not None:
+        parts = list(composition.runtime_context_provider(question))
     if resumed_notice is not None:
         parts.append(f"<session-notices>\n{resumed_notice}\n</session-notices>")
     if memory_overview:
@@ -193,6 +175,7 @@ def _build_before_provider_request_closure(
     get_prompt_version: Callable[[], str],
     correlation: RuntimeCorrelation,
     provider: ModelProvider,
+    composition_id: str,
 ) -> Callable[[RequestAssembly], None]:
     """构建 provider 请求前的 hook 发射回调。"""
 
@@ -222,6 +205,7 @@ def _build_before_provider_request_closure(
                 "tools": tool_payload,
                 "provider": provider_info,
                 "options": options_payload,
+                "composition_id": composition_id,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -236,6 +220,7 @@ def _build_before_provider_request_closure(
                     "tools": tool_payload,
                     "provider": provider_info,
                     "options": options_payload,
+                    "composition_id": composition_id,
                     "assembly": {
                         "current_step": assembly.current_step,
                         "hygiene_applied": assembly.hygiene_applied,
@@ -289,21 +274,41 @@ def _request_option_value(value: object) -> object:
     return f"<{type(value).__module__}.{type(value).__qualname__}>"
 
 
+def build_request_assembler(
+    request_hygiene: RequestHygieneConfig,
+    context_collectors: ContextCollectorRegistry | None,
+    context_assembler: DefaultContextAssembler | None,
+) -> DefaultRequestAssembler:
+    """在 composition 发布前冻结请求组装贡献。"""
+    return DefaultRequestAssembler(
+        converter=_convert_to_llm_with_citations,
+        context_collectors=(
+            context_collectors.freeze() if context_collectors is not None else None
+        ),
+        context_assembler=context_assembler or DefaultContextAssembler(),
+        hygiene=RequestHygiene(
+            enabled=request_hygiene.enabled,
+            max_tool_result_bytes=request_hygiene.max_tool_result_bytes,
+            max_tool_arg_length=request_hygiene.max_tool_arg_length,
+            keep_head_lines=request_hygiene.keep_head_lines,
+            keep_tail_lines=request_hygiene.keep_tail_lines,
+        ),
+    )
+
+
 def build_loop_config(
     *,
-    snapshot: TurnSnapshot,
+    composition: AgentComposition,
+    provider: ModelProvider,
     gate: ToolGate,
     registry: tuple[ToolSpec, ...],
     compactor: StructuredCompactor | None,
     manual_compact_requested: Callable[[], bool] | None,
-    request_hygiene: RequestHygieneConfig,
     compact_controller: CompactController | None,
     last_prompt_tokens: int | None,
     steer: Callable[[AgentMessage], None],
     emit_hook: Callable[[HookRecord], None],
     get_prompt_version: Callable[[], str],
-    context_collectors: ContextCollectorRegistry | None = None,
-    context_assembler: DefaultContextAssembler | None = None,
     correlation: RuntimeCorrelation | None = None,
     # 领域扩展参数由上层装配后注入。
     mode_state: RuntimeModeState | None = None,
@@ -319,7 +324,8 @@ def build_loop_config(
             compactor,
             manual_compact_requested,
             last_prompt_tokens,
-            snapshot,
+            composition,
+            provider,
         )
 
     def compact_fn(loop_messages: list[AgentMessage]) -> list[AgentMessage]:
@@ -329,19 +335,6 @@ def build_loop_config(
             emit_hook,
             active_correlation,
         )
-
-    request_assembler = DefaultRequestAssembler(
-        converter=_convert_to_llm_with_citations,
-        context_collectors=context_collectors,
-        context_assembler=context_assembler or DefaultContextAssembler(),
-        hygiene=RequestHygiene(
-            enabled=request_hygiene.enabled,
-            max_tool_result_bytes=request_hygiene.max_tool_result_bytes,
-            max_tool_arg_length=request_hygiene.max_tool_arg_length,
-            keep_head_lines=request_hygiene.keep_head_lines,
-            keep_tail_lines=request_hygiene.keep_tail_lines,
-        ),
-    )
 
     def prepare_next_turn_fn() -> AgentLoopTurnUpdate | None:
         if gate.check_progress_reminder():
@@ -368,17 +361,17 @@ def build_loop_config(
         return None
 
     return AgentLoopConfig(
-        provider=snapshot.provider,
-        request_assembler=request_assembler,
-        max_steps=snapshot.config.max_steps,
-        tool_workers=snapshot.config.tool_workers,
-        tool_timeout_seconds=float(snapshot.config.tool_timeout_seconds),
+        provider=provider,
+        request_assembler=composition.request_assembler,
+        max_steps=composition.config.max_steps,
+        tool_workers=composition.config.tool_workers,
+        tool_timeout_seconds=float(composition.config.tool_timeout_seconds),
         max_step_retries=3,
         retry_backoff_base=0.5,
         max_tokens_continuation=True,
         max_consecutive_continuations=3,
         min_continuation_tokens=500,
-        watchdog_repeated_tool_limit=snapshot.config.watchdog_repeated_tool_limit,
+        watchdog_repeated_tool_limit=composition.config.watchdog_repeated_tool_limit,
         watchdog_repeated_tool_skip=watchdog_repeated_tool_skip or frozenset(),
         max_consecutive_idle_steps=4,
         should_compact=should_compact_fn,
@@ -391,7 +384,8 @@ def build_loop_config(
             emit_hook,
             get_prompt_version,
             active_correlation,
-            snapshot.provider,
+            provider,
+            composition.generation_id,
         ),
         prepare_next_turn=prepare_next_turn_fn,
     )
@@ -402,32 +396,33 @@ def _should_compact(
     compactor: StructuredCompactor | None,
     manual_compact_requested: Callable[[], bool] | None,
     last_prompt_tokens: int | None,
-    snapshot: TurnSnapshot,
+    composition: AgentComposition,
+    provider: ModelProvider,
 ) -> bool:
     if compactor is None:
         return False
     if manual_compact_requested and manual_compact_requested():
         return True
     if last_prompt_tokens is not None:
-        provider = snapshot.provider
-        model_name = provider.model if isinstance(provider, ModelProvider) else None
+        model_name = provider.model
         model_str = str(model_name) if model_name is not None else None
         # 使用 context_window - reserve_tokens 作为精确触发线
         trigger = effective_compact_threshold(
             model_str,
-            reserve_tokens=snapshot.config.reserve_tokens,
-            trigger_ratio=snapshot.config.compact_trigger_ratio,
+            reserve_tokens=composition.config.reserve_tokens,
+            trigger_ratio=composition.config.compact_trigger_ratio,
         )
         return last_prompt_tokens >= trigger
     from .agent_helpers import to_dict
 
     msg_dicts = [to_dict(m) for m in messages]
     return (
-        snapshot.config.compact_threshold > 0
-        and len(messages) > snapshot.config.compact_threshold
+        composition.config.compact_threshold > 0
+        and len(messages) > composition.config.compact_threshold
     ) or (
-        snapshot.config.compact_token_threshold > 0
-        and estimate_message_tokens(msg_dicts) > snapshot.config.compact_token_threshold
+        composition.config.compact_token_threshold > 0
+        and estimate_message_tokens(msg_dicts)
+        > composition.config.compact_token_threshold
     )
 
 

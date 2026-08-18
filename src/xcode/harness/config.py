@@ -53,7 +53,7 @@ DEFAULT_PROMPT_MODULES: tuple[str, ...] = (
 
 
 class AgentConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     max_steps: Annotated[StrictInt, Field(gt=0)] | None = None
     compact_threshold: StrictInt = 0
     compact_token_threshold: StrictInt = 0

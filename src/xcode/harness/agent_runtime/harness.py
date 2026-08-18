@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
+from threading import Lock
 
 from xcode.ai.providers.base import ModelProvider
 
@@ -23,13 +24,10 @@ from .agent_helpers import aiter_to_sync_iter, run_coro_sync
 from .cancellation import CancellationToken
 from .config import (
     AgentRuntimeConfig,
-    TurnSnapshot,
-    build_turn_snapshot,
     build_loop_config,
     record_last_prompt_tokens,
-    resolve_permission_policy,
-    GateConfig,
 )
+from .composition import AgentComposition
 from .events import (
     _StreamTranslationState,
     _translate_event,
@@ -51,9 +49,8 @@ from .run_control import (
 )
 from .tool_gate import ToolGate
 from ._mode_protocol import ToolGateMode
-from ..config import AgentConfig, RequestHygieneConfig
 from xcode.ai.events import ToolCall
-from ..security.permissions import PermissionDecision
+from ..security.permissions import PermissionDecision, PermissionPolicy
 from ..observability import HookRecord, RuntimeCorrelation
 from ..security.permission_model import GrantStore
 from ...agent.types import ApprovalCallback
@@ -93,67 +90,54 @@ class AgentHarness:
 
     def __init__(
         self,
-        provider: ModelProvider,
-        registry: tuple[ToolSpec, ...],
+        composition: AgentComposition,
         runtime: AgentRuntimeConfig,
-        config: AgentConfig | None = None,
-        gate: GateConfig | None = None,
     ) -> None:
-        gate = gate or GateConfig()
-        config = config or runtime.config
-
-        self.provider: ModelProvider = provider
-        if runtime.fallback_provider is not None:
-            self.provider = _FallbackWithRetryPrimary(
-                provider, runtime.fallback_provider
-            )
+        self._composition_lock = Lock()
+        self._composition = composition
+        self._provider = _provider_for(composition)
+        gate = composition.gate
+        gate_runtime = runtime.gate
         self.project_root = runtime.project_root
         self._runtime = runtime
-        self._registry = registry
-        self.config = config
         self.compactor = runtime.compactor
         self._compact_controller = runtime.compact_controller
-        self.runtime_context_provider = runtime.runtime_context_provider
         self.cancellation_token = runtime.cancellation_token or CancellationToken()
-        self.request_hygiene = runtime.request_hygiene or RequestHygieneConfig()
-        self._correlation = gate.correlation or RuntimeCorrelation(gate.session_id)
+        self._correlation = gate_runtime.correlation or RuntimeCorrelation(
+            gate_runtime.session_id
+        )
         self._last_prompt_tokens: int | None = None
 
-        self._hook_manager = gate.hook_manager
-        resolved_permission_policy = resolve_permission_policy(
-            runtime.project_root, gate.permission_policy
-        )
-        self.permission_policy = resolved_permission_policy
-        self.restricted_dirs = gate.restricted_dirs
+        self._hook_manager = gate_runtime.hook_manager
         self.external_directories = gate.external_directories
         self.sensitive_path_overrides = gate.sensitive_path_overrides
         self.hook_constraint_providers = gate.hook_constraint_providers
         self._gate = ToolGate(
             mode_state=self._build_gate_mode(),
-            approval_callback=gate.approval_callback,
-            permission_policy=resolved_permission_policy,
-            hook_manager=gate.hook_manager,
-            external_hook_runner=gate.external_hook_runner,
-            external_hooks_subagent=gate.external_hooks_subagent,
-            external_hooks_cwd=gate.external_hooks_cwd,
+            approval_callback=gate_runtime.approval_callback,
+            permission_policy=gate.permission_policy,
+            hook_manager=gate_runtime.hook_manager,
+            external_hook_runner=gate_runtime.external_hook_runner,
+            external_hooks_subagent=gate_runtime.external_hooks_subagent,
+            external_hooks_cwd=gate_runtime.external_hooks_cwd,
             correlation=self._correlation,
-            audit_logger=gate.audit_logger,
-            session_id=gate.session_id,
+            audit_logger=gate_runtime.audit_logger,
+            session_id=gate_runtime.session_id,
             restricted_dirs=gate.restricted_dirs,
             hook_constraint_providers=gate.hook_constraint_providers,
             project_root=runtime.project_root,
             external_directories=gate.external_directories,
             sensitive_path_overrides=gate.sensitive_path_overrides,
-            session_grant_store=gate.session_grant_store,
-            session_grant_store_provider=gate.session_grant_store_provider,
-            permanent_grant_store=gate.permanent_grant_store,
+            session_grant_store=gate_runtime.session_grant_store,
+            session_grant_store_provider=gate_runtime.session_grant_store_provider,
+            permanent_grant_store=gate_runtime.permanent_grant_store,
             user_rulesets=gate.user_rulesets,
             default_mode_rulesets=gate.default_mode_rulesets,
             mode_fallbacks=gate.mode_fallbacks,
             shell_unresolved_policies=gate.shell_unresolved_policies,
             tool_path_extractors=gate.tool_path_extractors,
         )
-        self.audit_logger = gate.audit_logger
+        self.audit_logger = gate_runtime.audit_logger
         self._history: list[AgentMessage] = []
         self._resumed_notice: str | None = None
         self._run_controller = SessionRunController(runtime.session_inbox)
@@ -177,12 +161,12 @@ class AgentHarness:
     def _build_context_messages(
         self,
         question: str,
-        snapshot: TurnSnapshot,
+        composition: AgentComposition,
     ) -> list[AgentMessage]:
         """构建 turn 上下文消息。子类可添加模式通知、记忆概览等。"""
         parts: list[str] = []
-        if snapshot.runtime_context_provider is not None:
-            parts = list(snapshot.runtime_context_provider(question))
+        if composition.runtime_context_provider is not None:
+            parts = list(composition.runtime_context_provider(question))
         if self._resumed_notice is not None:
             parts.append(
                 f"<session-notices>\n{self._resumed_notice}\n</session-notices>"
@@ -206,14 +190,54 @@ class AgentHarness:
     # ── 公共 API ──
 
     @property
+    def composition(self) -> AgentComposition:
+        """返回当前已发布的不可变 composition generation。"""
+        with self._composition_lock:
+            return self._composition
+
+    @property
+    def provider(self) -> ModelProvider:
+        """返回当前 composition 对应的有效 provider。"""
+        with self._composition_lock:
+            return self._provider
+
+    @property
     def registry(self) -> tuple[ToolSpec, ...]:
         """返回当前工具注册表快照。"""
-        return self._registry
+        return self.composition.registry
+
+    @property
+    def permission_policy(self) -> PermissionPolicy | None:
+        return self.composition.gate.permission_policy
+
+    @property
+    def restricted_dirs(self) -> tuple[str, ...]:
+        return self.composition.gate.restricted_dirs
 
     @property
     def tool_map(self) -> dict[str, ToolSpec]:
         """按名称返回当前工具映射。"""
         return {tool.name: tool for tool in self.registry}
+
+    def replace_primary_provider(self, provider: ModelProvider) -> str:
+        """原子发布使用新主 provider 的 composition generation。"""
+        with self._composition_lock:
+            if self.active_run() is not None:
+                raise RuntimeError("cannot replace composition during an active run")
+            composition = self._composition.with_primary_provider(provider)
+            self._composition = composition
+            self._provider = _provider_for(composition)
+        return composition.generation_id
+
+    def replace_permission_policy(self, policy: PermissionPolicy | None) -> str:
+        """原子发布使用新静态权限策略的 composition generation。"""
+        with self._composition_lock:
+            if self.active_run() is not None:
+                raise RuntimeError("cannot replace composition during an active run")
+            composition = self._composition.with_permission_policy(policy)
+            self._composition = composition
+            self._gate.set_permission_policy(composition.gate.permission_policy)
+        return composition.generation_id
 
     def inject(self, msg: AgentMessage) -> SubmitOutcome:
         """注入运行时内部消息，包括 reminder 和 SystemMessage。"""
@@ -365,7 +389,8 @@ class AgentHarness:
 
         if not self._run_controller.has_waking_input():
             return
-        run_handle = self._run_controller.begin_run(self.cancellation_token)
+        with self._composition_lock:
+            run_handle = self._run_controller.begin_run(self.cancellation_token)
         try:
             turn_messages = self._run_controller.claim_initial(run_handle)
             if not turn_messages:
@@ -390,15 +415,12 @@ class AgentHarness:
     ) -> AsyncIterator[AgentHarnessEvent]:
         from .tool_hooks import emit_hook as _emit_hook
 
-        snapshot = build_turn_snapshot(
-            self.config,
-            tuple(self.registry),
-            self.provider,
-            self.runtime_context_provider,
-        )
-        registry_snapshot = snapshot.registry
+        with self._composition_lock:
+            composition = self._composition
+            provider = self._provider
+        registry_snapshot = composition.registry
         active_registry = self._build_active_registry(registry_snapshot)
-        context_messages = self._build_context_messages(question, snapshot)
+        context_messages = self._build_context_messages(question, composition)
         self._resumed_notice = None
         history_messages = self.history_messages()
         turn_agent = Agent(self._gate.adapt_tools(active_registry))
@@ -407,21 +429,19 @@ class AgentHarness:
             self.inject(message)
 
         loop_config = build_loop_config(
-            snapshot=snapshot,
+            composition=composition,
+            provider=provider,
             gate=self._gate,
             registry=active_registry,
             compactor=self.compactor,
             manual_compact_requested=(
                 self._compact_controller.consume if self._compact_controller else None
             ),
-            request_hygiene=self.request_hygiene,
             compact_controller=self._compact_controller,
             last_prompt_tokens=self._last_prompt_tokens,
             steer=inject_runtime,
             emit_hook=lambda rec: _emit_hook(self._hook_manager, rec),
             get_prompt_version=_get_prompt_version,
-            context_collectors=self._runtime.context_collectors,
-            context_assembler=self._runtime.context_assembler,
             correlation=self._correlation,
             **self._build_loop_config_extras(),
         )
@@ -509,3 +529,10 @@ def _turn_text(messages: list[AgentMessage]) -> str:
             if isinstance(block, TextContent) and block.text
         )
     return "\n\n".join(parts)
+
+
+def _provider_for(composition: AgentComposition) -> ModelProvider:
+    fallback = composition.fallback_provider
+    if fallback is None:
+        return composition.primary_provider
+    return _FallbackWithRetryPrimary(composition.primary_provider, fallback)

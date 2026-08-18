@@ -202,6 +202,7 @@ def test_provider_request_hook_adds_provider_and_request_fingerprint() -> None:
         lambda: "prompt-v1",
         correlation,
         cast(Any, provider),
+        "generation-1",
     )
 
     assembly = DefaultRequestAssembler().assemble(
@@ -225,6 +226,7 @@ def test_provider_request_hook_adds_provider_and_request_fingerprint() -> None:
         "context_trace": [],
     }
     assert record.metadata["options"] == {}
+    assert record.metadata["composition_id"] == "generation-1"
     assert len(record.metadata["request_sha256"]) == 64
     assert record.request_id == "session-1:request:1"
 

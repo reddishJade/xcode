@@ -67,6 +67,8 @@ class XcodeApp:
         from xcode.ai.providers.registry import ModelProfileConfig
         from xcode.ai.providers.registry import ModelProfileProto
 
+        if profile != "main":
+            raise ValueError("only the main composition can be replaced at runtime")
         if not self._model_profiles:
             return self.agent.provider.model
         profile_config = self._model_profiles.get(profile)
@@ -91,30 +93,10 @@ class XcodeApp:
                 model_profiles={profile: new_cfg},
             )
         )
-        new_provider = (
-            bundle.llm if profile == "main" else bundle.llms.get("subagent", bundle.llm)
-        )
-        if profile == "main":
-            self._refresh_main_provider(new_provider)
-        else:
-            self.agent.provider = new_provider
+        new_provider = bundle.llm
+        self.agent.replace_primary_provider(new_provider)
         self._model_profiles[profile] = new_cfg
         return model
-
-    def _refresh_main_provider(self, new_provider: Any) -> None:
-        """热替换主 provider，保留 fallback 容灾包装层。
-
-        agent.provider 已被 _FallbackWithRetryPrimary 包装时（启动时按
-        fallback profile 配置包装）调用 replace_primary 原地换主并重置容灾
-        计数；否则直接赋值。
-        """
-        from xcode.harness.agent_runtime.fallback import _FallbackSwitchingProvider
-
-        current = self.agent.provider
-        if isinstance(current, _FallbackSwitchingProvider):
-            current.replace_primary(new_provider)
-        else:
-            self.agent.provider = new_provider
 
     def get_model_info(self) -> dict[str, str]:
         provider = self.agent.provider

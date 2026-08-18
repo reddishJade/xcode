@@ -2,6 +2,7 @@
 
 from .cancellation import CancellationToken
 from .compaction import estimate_message_tokens
+from .composition import AgentComposition
 from .contextual import ContextualRetrievalState
 from .events import AgentHarnessEvent
 from .result import AgentHarnessResult, RunState
@@ -16,6 +17,7 @@ from .run_control import (
 
 __all__ = [
     "CancellationToken",
+    "AgentComposition",
     "ActiveRunHandle",
     "ActiveRunState",
     "BusyMessageMode",

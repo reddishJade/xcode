@@ -59,6 +59,7 @@ PermissionToolSpec = Any
 PermissionApprovalCallback = Callable[[ApprovalRequest], HITLResult]
 
 
+@dataclass(frozen=True)
 class PermissionPolicy:
     """不可变的静态权限规则容器。
 
@@ -66,13 +67,8 @@ class PermissionPolicy:
     规则匹配由 StaticPolicyEvaluator 以 last-match-wins 完成。
     """
 
-    def __init__(
-        self,
-        rules: tuple[StaticPermission, ...] = (),
-        global_default: PermissionDecision | None = None,
-    ) -> None:
-        self.rules: tuple[StaticPermission, ...] = rules
-        self.global_default: PermissionDecision | None = global_default
+    rules: tuple[StaticPermission, ...] = ()
+    global_default: PermissionDecision | None = None
 
 
 def _approval_metadata(

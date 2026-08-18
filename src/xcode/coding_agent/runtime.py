@@ -11,7 +11,7 @@ from xcode.harness.session_todo import SessionTodoState
 from xcode.harness.skills import SkillRegistry
 
 
-@dataclass
+@dataclass(frozen=True)
 class CodingAgentRuntimeConfig(AgentRuntimeConfig):
     """编码技能、记忆和任务状态的运行时配置。"""
 

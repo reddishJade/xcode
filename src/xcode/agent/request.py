@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Protocol, TYPE_CHECKING
 
@@ -19,7 +19,7 @@ from .context import (
     ContextAssemblyInput,
     ContextBlock,
     ContextCollectionInput,
-    ContextCollectorRegistry,
+    ContextCollectorSource,
     DefaultContextAssembler,
 )
 from .messages import AgentMessage
@@ -95,7 +95,7 @@ class DefaultRequestAssembler:
     """按固定阶段收集、注入、裁剪并编码模型输入。"""
 
     converter: MessageConverter = convert_to_llm
-    context_collectors: ContextCollectorRegistry | None = None
+    context_collectors: ContextCollectorSource | None = None
     context_assembler: ContextAssembler = field(default_factory=DefaultContextAssembler)
     hygiene: RequestHygiene = field(default_factory=RequestHygiene)
 
@@ -188,8 +188,23 @@ def _tools_to_definitions(tools: list[AgentTool]) -> list[ToolDefinition]:
             ToolDefinition(
                 name=provider_function_name(tool.name),
                 description=description,
-                parameters=dict(tool.parameters),
+                parameters=_mutable_mapping(tool.parameters),
                 builtin=builtin if isinstance(builtin, dict) else None,
             )
         )
     return result
+
+
+def _mutable_mapping(value: object) -> dict[str, object]:
+    """把冻结的 JSON 映射转换为 provider 可序列化的新对象。"""
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): _mutable_json(item) for key, item in value.items()}
+
+
+def _mutable_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _mutable_mapping(value)
+    if isinstance(value, list | tuple):
+        return [_mutable_json(item) for item in value]
+    return value

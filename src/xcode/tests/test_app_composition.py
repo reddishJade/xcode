@@ -108,6 +108,7 @@ def test_real_build_app_minimal_run_and_replay_contract(
     }
     first_request = providers[0].requests[0]
     first_envelope = _provider_request_events(first)[0]["data"]
+    assert first_envelope["composition_id"] == first.agent.composition.generation_id
     assert first_envelope["messages"] == first_request[0]
     assert first_envelope["tools"] == [
         {

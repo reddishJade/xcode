@@ -24,11 +24,17 @@ from xcode.coding_agent.execution_modes import (
 )
 
 from xcode.harness.agent_runtime import (
+    AgentComposition,
     CancellationToken,
     ContextualRetrievalState,
 )
 from xcode.coding_agent.harness import CodingAgentHarness
-from xcode.harness.agent_runtime.config import GateConfig
+from xcode.harness.agent_runtime.config import (
+    GateConfig,
+    GateRuntimeConfig,
+    build_request_assembler,
+    resolve_permission_policy,
+)
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.harness.agent_runtime.prompting import build_runtime_context_provider
 from xcode.harness.config import AgentConfig, XcodeRuntimeConfig
@@ -155,50 +161,65 @@ def build_agent(
 
         context_collectors.register(SkillIndexCollector(skill_registry))
 
-    return CodingAgentHarness(
-        provider=llm,
+    runtime_context_provider = build_runtime_context_provider(
+        project_root,
+        registry,
+        shell_spec=shell_spec,
+        contextual_state=contextual_state,
+        modules=runtime_config.prompt.modules,
+        memory_manager=memory_manager,
+        todo_context_provider=(
+            todo_state.render_context if todo_state is not None else None
+        ),
+        identity=CORE_IDENTITY,
+    )
+    gate = GateConfig(
+        permission_policy=resolve_permission_policy(
+            project_root,
+            permission_policy_from_security(sec),
+        ),
+        restricted_dirs=sec.restricted_dirs,
+        hook_constraint_providers=hook_constraint_providers,
+        external_directories=external_directories_from_security(sec),
+        sensitive_path_overrides=sensitive_path_overrides_from_security(
+            sec, project_root
+        ),
+        user_rulesets=mode_rulesets_from_runtime_config(runtime_config),
+        default_mode_rulesets=build_default_mode_rulesets(project_root),
+        mode_fallbacks=DEFAULT_MODE_FALLBACKS,
+        shell_unresolved_policies=DEFAULT_SHELL_UNRESOLVED_POLICIES,
+        tool_path_extractors={"apply_patch": extract_patch_paths},
+    )
+    composition = AgentComposition.create(
+        primary_provider=llm,
+        fallback_provider=fallback_provider,
         registry=registry,
         config=config,
-        gate=GateConfig(
-            permission_policy=permission_policy_from_security(sec),
-            restricted_dirs=sec.restricted_dirs,
-            hook_constraint_providers=hook_constraint_providers,
-            hook_manager=hook_manager,
-            external_hook_runner=external_hook_runner,
-            external_hooks_cwd=project_root,
-            audit_logger=JsonlAuditLogger(audit_path).write if audit_path else None,
-            external_directories=external_directories_from_security(sec),
-            sensitive_path_overrides=sensitive_path_overrides_from_security(
-                sec, project_root
-            ),
-            user_rulesets=mode_rulesets_from_runtime_config(runtime_config),
-            default_mode_rulesets=build_default_mode_rulesets(project_root),
-            mode_fallbacks=DEFAULT_MODE_FALLBACKS,
-            shell_unresolved_policies=DEFAULT_SHELL_UNRESOLVED_POLICIES,
-            tool_path_extractors={"apply_patch": extract_patch_paths},
+        gate=gate,
+        request_assembler=build_request_assembler(
+            runtime_config.request_hygiene,
+            context_collectors,
+            DefaultContextAssembler(),
         ),
+        runtime_context_provider=runtime_context_provider,
+    )
+
+    return CodingAgentHarness(
+        composition=composition,
         runtime=CodingAgentRuntimeConfig(
             session_inbox=session_inbox,
+            gate=GateRuntimeConfig(
+                hook_manager=hook_manager,
+                external_hook_runner=external_hook_runner,
+                external_hooks_cwd=project_root,
+                audit_logger=(
+                    JsonlAuditLogger(audit_path).write if audit_path else None
+                ),
+            ),
             compactor=compactor,
             compact_controller=compact_controller,
             cancellation_token=cancellation_token,
-            runtime_context_provider=build_runtime_context_provider(
-                project_root,
-                registry,
-                shell_spec=shell_spec,
-                contextual_state=contextual_state,
-                modules=runtime_config.prompt.modules,
-                memory_manager=memory_manager,
-                todo_context_provider=(
-                    todo_state.render_context if todo_state is not None else None
-                ),
-                identity=CORE_IDENTITY,
-            ),
-            fallback_provider=fallback_provider,
             project_root=project_root,
-            request_hygiene=runtime_config.request_hygiene,
-            context_collectors=context_collectors,
-            context_assembler=DefaultContextAssembler(),
             skill_registry=skill_registry,
             memory_manager=memory_manager,
             session_history=session_history,

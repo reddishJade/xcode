@@ -143,6 +143,7 @@ def parse_tool_render_intent(value: object) -> ToolRenderIntent | None:
     except ValidationError:
         return None
 
+
 type ContentBlock = (
     TextContent | ImageContent | FileContent | ToolCallContent | ThinkingContent
 )
@@ -239,7 +240,7 @@ class ToolSpec:
     description: str
     input_hint: str
     handler: ActionHandler
-    schema: dict[str, Any] | None = None
+    schema: Mapping[str, Any] | None = None
     prompt_snippet: str | None = None
     prompt_guidelines: tuple[str, ...] = ()
 

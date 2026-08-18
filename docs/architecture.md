@@ -33,6 +33,9 @@ agent
    registry、session 落盘和重建路径。
 6. 迁移直接完成。当前预发布阶段不保留旧签名、双写、别名适配器或旧 schema
    分支；调用方、测试和文档在同一提交中一次迁移。
+7. 一个 run 只使用一个 composition generation。provider、工具表、agent 配置、
+   静态权限策略、请求组装器和上下文入口必须在 run 开始前一起发布，运行中
+   不得从多个可变对象分别读取。
 
 ## 分层
 
@@ -78,6 +81,19 @@ state；未 claim 的输入由 inbox 自身恢复。
 消费同一个 `RequestAssembly`，其中包含最终 wire messages、tool schemas、options、
 step 和动态 context provenance。禁止在发送前通过通用 transformer 隐式改写
 messages；请求卫生是 assembly 内的显式确定性阶段，且不修改 session surface。
+
+## Agent composition
+
+`AgentComposition` 是发布 agent 行为的不可变 generation，包含主/备 provider、
+冻结工具 schema、`AgentConfig`、静态 gate 策略、`RequestAssembler` 和 runtime
+context 入口。`AgentRuntimeConfig` 只保存 session inbox、取消、压缩器、hook、
+审计和 grant store 等有生命周期的服务；这些对象不伪装成产品配置。
+
+每个 run 在取得 active-run 所有权后原子捕获一次 composition 与有效 provider，
+后续 step 不再重新读取产品装配。`/model` 和静态 permission policy 变更必须发布
+新的 generation；active run 存在时拒绝替换。旧的 provider setter、fallback
+包装器原地换主和私有 gate 字段写入均不存在。`provider_request` 保存
+`composition_id`，因此一次实际请求可以回溯到完整装配代际。
 
 ## Session 事实模型
 
@@ -133,7 +149,8 @@ intent 随 `ToolResultMessage` 进入 runtime event 和 session log。新增呈�
 2. 共享同一 store 的 session recorder/inbox、memory、compactor 和 cancellation；
 3. provider bundle；
 4. 本地工具、MCP、memory/history 和 subagent registry；
-5. permission gate、hooks 和 `CodingAgentHarness`；
+5. 冻结的 `AgentComposition`、会话级 runtime services 和
+   `CodingAgentHarness`；
 6. `XcodeApp` 生命周期句柄。
 
 任何新能力都应进入拥有该行为的层，并在真实组合测试中证明最小应用仍可
