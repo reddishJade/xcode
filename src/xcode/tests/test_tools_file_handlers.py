@@ -7,7 +7,6 @@ import pytest
 from xcode.coding_agent.tools.file_handlers import (
     _parse_offset,
     _parse_limit,
-    _prepare_edit_arguments,
     _truncate_line,
     _ensure_write_size,
     _prepare_edits,
@@ -49,35 +48,6 @@ class TestParseLimit:
             _parse_limit({"limit": "abc"})
 
 
-class TestPrepareEditArguments:
-    def test_normal_passthrough(self) -> None:
-        data = {"edits": [{"old_text": "a", "new_text": "b"}]}
-        result = _prepare_edit_arguments(data)
-        assert result["edits"] == [{"old_text": "a", "new_text": "b"}]
-
-    def test_parses_json_edits(self) -> None:
-        data = {"edits": '[{"old_text": "a", "new_text": "b"}]'}
-        result = _prepare_edit_arguments(data)
-        assert result["edits"] == [{"old_text": "a", "new_text": "b"}]
-
-    def test_merges_top_level_old_new_text(self) -> None:
-        data = {"old_text": "old", "new_text": "new"}
-        result = _prepare_edit_arguments(data)
-        assert len(result["edits"]) == 1
-        assert result["edits"][0] == {"old_text": "old", "new_text": "new"}
-        assert "old_text" not in result
-        assert "new_text" not in result
-
-    def test_merges_with_existing_edits(self) -> None:
-        data = {
-            "edits": [{"old_text": "a", "new_text": "b"}],
-            "old_text": "c",
-            "new_text": "d",
-        }
-        result = _prepare_edit_arguments(data)
-        assert len(result["edits"]) == 2
-
-
 class TestTruncateLine:
     def test_short_line(self) -> None:
         assert _truncate_line("hello") == "hello"
@@ -99,27 +69,20 @@ class TestEnsureWriteSize:
 
 
 class TestPrepareEdits:
-    def test_from_edits_array(self) -> None:
-        data = {"edits": [{"old_text": "a", "new_text": "b"}]}
-        edits = _prepare_edits(data)
-        assert len(edits) == 1
-        assert edits[0].old_text == "a"
-        assert edits[0].new_text == "b"
-
-    def test_from_top_level(self) -> None:
+    def test_from_schema_fields(self) -> None:
         data = {"old_text": "old", "new_text": "new"}
         edits = _prepare_edits(data)
         assert len(edits) == 1
         assert edits[0].old_text == "old"
 
     def test_empty_old_text_raises(self) -> None:
-        data = {"edits": [{"old_text": "", "new_text": "b"}]}
+        data = {"old_text": "", "new_text": "b"}
         with pytest.raises(ValueError, match="must not be empty"):
             _prepare_edits(data)
 
-    def test_not_a_dict_in_edits_raises(self) -> None:
-        data = {"edits": ["not a dict"]}
-        with pytest.raises(ValueError, match="must be an object"):
+    def test_edits_array_is_not_accepted(self) -> None:
+        data = {"edits": [{"old_text": "a", "new_text": "b"}]}
+        with pytest.raises(ValueError, match="old_text"):
             _prepare_edits(data)
 
 

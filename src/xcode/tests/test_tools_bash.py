@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from xcode.agent.types import TerminalRenderIntent
 from xcode.coding_agent.tools.bash import (
     build_bash_tool,
     _parse_bash_request,
@@ -109,3 +110,7 @@ def test_bash_tool_depends_directly_on_local_shell(tmp_path: Path) -> None:
     assert shell.cwd == tmp_path.resolve()
     assert shell.timeout == 1234
     assert "timeout" not in (tool.schema or {})["properties"]
+    assert output.render_intent == TerminalRenderIntent(
+        command="printf local",
+        cwd=tmp_path.resolve().as_posix(),
+    )

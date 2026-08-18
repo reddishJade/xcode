@@ -26,6 +26,7 @@ from xcode.agent.types import (
     TextContent,
     ToolArguments,
     ToolCallContent,
+    ToolRenderIntent,
 )
 from ..observability import EventCorrelation, RuntimeCorrelation
 
@@ -128,6 +129,7 @@ class ToolResultBlock:
     content: str
     status: Literal["ok", "error"] = "ok"
     permission_notice: str | None = None
+    render_intent: ToolRenderIntent | None = None
     type: str = "tool_result"
 
 
@@ -361,6 +363,7 @@ def _translate_tool_execution_end(
             content=str(event.result.content) if event.result else "",
             status="error" if event.is_error else "ok",
             permission_notice=permission_notice,
+            render_intent=(event.result.render_intent if event.result else None),
         ),
         state.correlation.snapshot(event.tool_call_id),
     )

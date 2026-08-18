@@ -36,6 +36,7 @@ from xcode.agent.types import (
     TextContent,
     ToolArguments,
     ToolCallContent,
+    ToolRenderIntent,
     ToolResultContentBlock,
 )
 
@@ -321,7 +322,13 @@ async def _execute_one_impl(
         signal,
     )
 
-    result_msg = _tool_result_message(tool_call, content, is_error, tool_result.details)
+    result_msg = _tool_result_message(
+        tool_call,
+        content,
+        is_error,
+        tool_result.details,
+        tool_result.render_intent,
+    )
     return result_msg, terminate
 
 
@@ -443,6 +450,7 @@ def _tool_result_message(
     content: list[ToolResultContentBlock],
     is_error: bool,
     metadata: object = None,
+    render_intent: ToolRenderIntent | None = None,
 ) -> ToolResultMessage:
     result_content: ToolResultMessageContent
     if not content:
@@ -459,6 +467,7 @@ def _tool_result_message(
         content=result_content,
         is_error=is_error,
         metadata=metadata if isinstance(metadata, dict) else None,
+        render_intent=render_intent,
     )
 
 

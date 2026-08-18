@@ -7,6 +7,7 @@ from rich.console import Console
 from rich.text import Text
 
 from xcode.agent.types import ToolInput
+from .tool_rendering import render_intent_summary
 
 from .file_refs import FileReference
 from .repl_rendering import (
@@ -404,7 +405,11 @@ def print_tool_result_rich(
         "debug": DEBUG_TOOL_RESULT_PREVIEW_LIMIT,
         "verbose": VERBOSE_TOOL_RESULT_PREVIEW_LIMIT,
     }.get(verbosity, NORMAL_TOOL_RESULT_PREVIEW_LIMIT)
-    summary = single_line_preview(str(data.content), width=limit)
+    summary = (
+        render_intent_summary(data.render_intent, str(data.content))
+        if data.render_intent is not None
+        else single_line_preview(str(data.content), width=limit)
+    )
     console.print(Text(f"  ← {mark} {summary}", style=border))
 
 

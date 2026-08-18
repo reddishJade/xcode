@@ -100,10 +100,12 @@ class _RedactingAdapter(ToolSpecAdapter):
             self._spec.handler, dict(params), _redacted_update
         )
         metadata = getattr(content, "metadata", None)
+        render_intent = getattr(content, "render_intent", None)
         return AgentToolResult(
             content=[TextContent(text=redact_text(str(content)))],
             details=metadata if isinstance(metadata, dict) else None,
             is_error=bool(getattr(content, "is_error", False)),
+            render_intent=render_intent,
         )
 
 

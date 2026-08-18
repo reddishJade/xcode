@@ -15,7 +15,8 @@ from prompt_toolkit.utils import get_cwidth
 from ..shared.thinking import ReasoningCore, format_elapsed, single_line_preview
 from ..repl_tools import brief_input, final_stop_reason, tool_call_text
 from ..repl_rendering import _render_citations
-from xcode.agent.types import ToolInput
+from ..tool_rendering import render_intent_summary
+from xcode.agent.types import ToolInput, ToolRenderIntent, parse_tool_render_intent
 from .rendering import (
     markdown_ansi_lines,
     rendered_markdown_lines,
@@ -260,6 +261,7 @@ class _TuiState:
                 str(data.get("status", "ok")),
                 str(data.get("content", "")),
                 str(data.get("permission_notice") or ""),
+                parse_tool_render_intent(data.get("render_intent")),
             )
 
     def _restore_thinking(self, data: object) -> None:
@@ -293,6 +295,7 @@ class _TuiState:
                 event.data.status,
                 event.data.content,
                 event.data.permission_notice or "",
+                event.data.render_intent,
             )
         elif event.type == "final":
             self._finish_answer(event)
@@ -691,14 +694,19 @@ class _TuiState:
         return label
 
     def _record_tool_result(
-        self, tool_id: str, status: str, content: str, permission_notice: str = ""
+        self,
+        tool_id: str,
+        status: str,
+        content: str,
+        permission_notice: str = "",
+        render_intent: ToolRenderIntent | None = None,
     ) -> None:
         exploration = self._find_exploration_call(tool_id)
         if exploration is not None:
             exploration.complete = True
             exploration.failed = status != "ok"
             detail = (
-                _successful_tool_detail(exploration.name, content)
+                _successful_tool_detail(exploration.name, content, render_intent)
                 if status == "ok"
                 else f"✗ {single_line_preview(content)}"
             )
@@ -706,7 +714,7 @@ class _TuiState:
             return
         name = self.tool_names.pop(tool_id, "")
         if status == "ok":
-            detail = _successful_tool_detail(name, content)
+            detail = _successful_tool_detail(name, content, render_intent)
             detail = _append_permission_notice(detail, permission_notice)
             self.log.append(_LogEntry("tool-detail", f"  ⎿  {detail}"))
             return
@@ -789,8 +797,14 @@ class _TuiState:
         self.thinking_core.reset()
 
 
-def _successful_tool_detail(name: str, content: str) -> str:
+def _successful_tool_detail(
+    name: str,
+    content: str,
+    render_intent: ToolRenderIntent | None = None,
+) -> str:
     """为成功工具调用生成紧凑详情，shell 保留可见输出。"""
+    if render_intent is not None:
+        return render_intent_summary(render_intent, content)
     text = content.rstrip()
     if name in {"bash", "hypa_shell", "shell"}:
         return _tool_output_preview(text) if text else "done"

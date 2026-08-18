@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
-from xcode.agent.types import ToolInput, ToolOutput, ToolSpec
+from xcode.agent.types import DiffRenderIntent, ToolInput, ToolOutput, ToolSpec
 
 from .text_edit import (
     detect_line_ending,
@@ -463,6 +463,13 @@ def _apply_changes(
                 "patch": diff,
                 "files": [_file_metadata(change) for change in changes],
             },
+            render_intent=DiffRenderIntent(
+                patch=diff,
+                files=tuple(
+                    change.move_display_path or change.display_path
+                    for change in changes
+                ),
+            ),
         )
 
     return with_file_mutation(root, mutate)

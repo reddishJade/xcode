@@ -15,7 +15,7 @@ from xcode.harness.execution_env import (
     Shell,
     SubprocessShell,
 )
-from xcode.agent.types import ToolInput, ToolSpec
+from xcode.agent.types import TerminalRenderIntent, ToolInput, ToolOutput, ToolSpec
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
 from ._constants import DEFAULT_TIMEOUT_SECONDS
@@ -99,7 +99,13 @@ def build_bash_tool(
                     acc.append(raw)
 
         output = _render_bash_output(result, acc, plan.timeout)
-        return output
+        return ToolOutput(
+            output,
+            render_intent=TerminalRenderIntent(
+                command=plan.command,
+                cwd=plan.cwd.as_posix(),
+            ),
+        )
 
     return ToolSpec(
         name="bash",

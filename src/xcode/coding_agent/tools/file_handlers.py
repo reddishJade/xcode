@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from difflib import unified_diff
-import json
 from pathlib import Path
 import subprocess
-from typing import Any
 
 from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
-from xcode.agent.types import ToolInput, ToolOutput
+from xcode.agent.types import (
+    DiffRenderIntent,
+    LocationRenderIntent,
+    ToolInput,
+    ToolOutput,
+)
 from xcode.harness.execution_env import FileSystem, LocalFileSystem
 from xcode.coding_agent.tools.path_utils import resolve_project_path
 from .text_edit import (
@@ -240,6 +243,11 @@ def _read_text_file(
                 "truncated": more or cut,
             },
         },
+        render_intent=LocationRenderIntent(
+            path=display,
+            line_start=offset,
+            line_end=last_line,
+        ),
     )
 
 
@@ -288,6 +296,7 @@ def _read_directory(
                 "truncated": truncated,
             },
         },
+        render_intent=LocationRenderIntent(path=display),
     )
 
 
@@ -386,6 +395,7 @@ def _write_file_impl(
     return ToolOutput(
         f"wrote file: {display}\n{diff}",
         metadata={"patch": diff},
+        render_intent=DiffRenderIntent(patch=diff, files=(display,)),
     )
 
 
@@ -407,8 +417,7 @@ def _parse_edit_file_request(
     operations: FileSystem,
     data: ToolInput,
 ) -> EditFileRequest:
-    prepared = _prepare_edit_arguments(data)
-    path_str = str(prepared.get("path", "")).strip()
+    path_str = str(data.get("path", "")).strip()
     if not path_str:
         raise ValueError("path is required")
     path = _write_safe_path(root, path_str)
@@ -417,14 +426,14 @@ def _parse_edit_file_request(
     if not operations.is_file(path):
         raise ValueError(f"not a file: {_display(root, path)}")
 
-    edits = _prepare_edits(prepared)
+    edits = _prepare_edits(data)
     if not edits:
         raise ValueError("no edits provided")
 
     return EditFileRequest(
         path=path,
         edits=edits,
-        replace_all=bool(prepared.get("replace_all", False)),
+        replace_all=bool(data.get("replace_all", False)),
     )
 
 
@@ -481,40 +490,12 @@ def _edit_file_impl(
             "patch": diff,
             "first_changed_line": _first_changed_line(content, final),
         },
+        render_intent=DiffRenderIntent(
+            patch=diff,
+            files=(display,),
+            first_changed_line=_first_changed_line(content, final),
+        ),
     )
-
-
-def _prepare_edit_arguments(data: dict[str, Any]) -> dict[str, Any]:
-    """归一化 LLM 可能输出的不规范 JSON 结构。
-
-    LLM 有时会生成不符合 JSON schema 的 edit_file 输入，此函数处理已知偏差：
-
-    1. edits 字段被序列化为字符串 → 尝试 JSON 解析并还原为数组
-    2. old_text/new_text 被放在顶层而非 edits 数组中 → 自动合并到 edits 内
-
-    移除条件：升级到足够可靠的模型版本后，可移除此归一化层，改用严格 schema 校验。
-    """
-    result = dict(data)
-
-    raw_edits = result.get("edits")
-    if isinstance(raw_edits, str):
-        try:
-            parsed = json.loads(raw_edits)
-            if isinstance(parsed, list):
-                result["edits"] = parsed
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    old_text = result.get("old_text")
-    new_text = result.get("new_text")
-    if old_text is not None and new_text is not None:
-        edits = list(result.get("edits") or [])
-        edits.append({"old_text": str(old_text), "new_text": str(new_text)})
-        result["edits"] = edits
-        result.pop("old_text", None)
-        result.pop("new_text", None)
-
-    return result
 
 
 def read_project_text_file(project_root: Path, raw_path: str) -> str:
@@ -594,25 +575,9 @@ def _display(root: Path, path: Path) -> str:
 
 
 def _prepare_edits(data: ToolInput) -> list[FileEdit]:
-    edits: list[FileEdit] = []
-
-    raw_edits = data.get("edits")
-    if isinstance(raw_edits, list):
-        for i, edit in enumerate(raw_edits):
-            if not isinstance(edit, dict):
-                raise ValueError(f"edits[{i}]: must be an object")
-            old = str(edit.get("old_text", ""))
-            new = str(edit.get("new_text", ""))
-            if not old:
-                raise ValueError(f"edits[{i}].old_text must not be empty")
-            edits.append(FileEdit(old_text=old, new_text=new))
-
     old_text = str(data.get("old_text", "")).strip()
-    if old_text:
-        if "new_text" not in data:
-            raise ValueError("new_text is required")
-        edits.append(
-            FileEdit(old_text=old_text, new_text=str(data.get("new_text", "")))
-        )
-
-    return edits
+    if not old_text:
+        raise ValueError("old_text must not be empty")
+    if "new_text" not in data:
+        raise ValueError("new_text is required")
+    return [FileEdit(old_text=old_text, new_text=str(data.get("new_text", "")))]

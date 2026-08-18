@@ -17,6 +17,7 @@ from xcode.agent.types import (
     TextContent,
     ToolArguments,
     ToolCallContent,
+    parse_tool_render_intent,
 )
 from xcode.harness.memory import load_session_checkpoint
 
@@ -298,6 +299,7 @@ def _tool_result_event_from_data(
             tool_call_id=tool_use_id,
             content=str(event_data.get("content", "")),
             is_error=status not in {"ok", "interrupted"},
+            render_intent=parse_tool_render_intent(event_data.get("render_intent")),
         )
     )
 

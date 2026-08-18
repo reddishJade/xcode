@@ -71,6 +71,11 @@ def _event_payload(event: AgentHarnessEvent) -> object:
             "content": event.data.content,
             "status": event.data.status,
             "permission_notice": event.data.permission_notice,
+            "render_intent": (
+                event.data.render_intent.model_dump()
+                if event.data.render_intent is not None
+                else None
+            ),
             "type": "tool_result",
         }
     if isinstance(event, CompactionStructuredEvent):

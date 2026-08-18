@@ -11,6 +11,7 @@ from xcode.agent.types import (
     ImageContent,
     ShellCallOutputContent,
     TextContent,
+    ToolRenderIntent,
     ToolResultContent,
 )
 
@@ -64,6 +65,7 @@ class ToolResultMessage(BaseModel):
     content: ToolResultMessageContent = ""
     is_error: bool = False
     metadata: dict[str, object] | None = None
+    render_intent: ToolRenderIntent | None = None
     timestamp: int = 0
     model_config = ConfigDict(extra="forbid")
 
