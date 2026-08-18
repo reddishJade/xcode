@@ -57,8 +57,6 @@ from ..repl import current_effort_options, current_model_options
 from ..repl_sessions import (
     print_saved_conversation,
     select_session_interactively,
-    sync_agent_history,
-    sync_compaction_source,
 )
 from ..repl_skills import activate_skill, available_skill_names, parse_skill_invocation
 from ..repl_tools import (
@@ -111,6 +109,8 @@ if TYPE_CHECKING:
     from xcode.harness.security.permission_model import (
         SessionGrantStoreManager,
     )
+
+
 def run_tui(
     app: ReplApp,
     project_root: Path,
@@ -511,7 +511,7 @@ class _XcodeTui:
             self._store.append("event", file_reference_event(references))
         if outcome.status is SubmitStatus.STEER_ACCEPTED:
             message_id = self._store.append("user", text)
-            sync_compaction_source(self._agent_app, self._store, message_id)
+            self._agent_app.bind_session_input(message_id)
             self._state.log.append(
                 _LogEntry("system", f"[steer] accepted by {outcome.run_id}")
             )
@@ -797,7 +797,7 @@ class _XcodeTui:
                     cast(SnapshotStore, self._snapshot_store).fork_session(
                         parent_session_id, meta.id
                     )
-                sync_agent_history(self._agent_app, self._store)
+                self._agent_app.restore_session()
                 self._state.restore_history(self._store.build_branch())
                 self._state.log.append(
                     _LogEntry("system", f'Forked at: "{meta.title if meta else ""}"')
@@ -816,7 +816,7 @@ class _XcodeTui:
 
             def resume(session: object) -> None:
                 self._store.resume(getattr(session, "id", ""))
-                sync_agent_history(self._agent_app, self._store)
+                self._agent_app.restore_session()
                 self._restore_session_history()
 
             self._open_command_choices(
@@ -837,7 +837,7 @@ class _XcodeTui:
                 if not self._store.jump_to_entry(node_id):
                     self._state.log.append(_LogEntry("error", "Failed to set entry."))
                     return
-                sync_agent_history(self._agent_app, self._store)
+                self._agent_app.restore_session()
                 self._state.restore_history(self._store.build_branch())
 
             self._open_command_choices(
@@ -979,7 +979,7 @@ class _XcodeTui:
     def _clear_session(self) -> None:
         """在 inline TUI 内创建空会话，不切换到终端清屏输出。"""
         self._store.clear()
-        sync_agent_history(self._agent_app, self._store)
+        self._agent_app.restore_session()
         self._state.restore_history([])
         self._state.log.append(_LogEntry("system", self._header_text()))
         self._scrollback = 0
@@ -1054,7 +1054,7 @@ class _XcodeTui:
         if selected is None:
             return
         self._store.resume(selected.id)
-        sync_agent_history(self._agent_app, self._store)
+        self._agent_app.restore_session()
         self._state.restore_history(self._store.build_branch())
 
     # ── HITL ──

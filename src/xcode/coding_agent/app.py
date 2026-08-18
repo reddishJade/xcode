@@ -22,6 +22,7 @@ from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunn
 from xcode.harness.session_todo import SessionTodoState
 from xcode.harness.session import SessionStore
 from xcode.harness.session.recorder import SessionRecorder
+from xcode.harness.session.replay import replay_session
 from xcode.ai.providers.registry import ProviderSettings, build_provider_bundle
 from . import assembly as _assembly
 from .assembly import (
@@ -207,6 +208,17 @@ class XcodeApp:
             tokens_before=tokens_before,
             tokens_after=tokens_after,
         )
+
+    def bind_session_input(self, message_id: str | None) -> None:
+        """把非普通回合输入绑定到当前 session 的压缩边界。"""
+        recorder = self.session_recorder
+        if recorder is None:
+            raise RuntimeError("session recorder is not configured")
+        recorder.bind_agent(self.agent, message_id)
+
+    def restore_session(self) -> None:
+        """从当前 session branch 恢复完整 agent 运行状态。"""
+        replay_session(self.agent, self.session_store, self.contextual_state)
 
     def mcp_status(self) -> tuple[dict[str, object], ...]:
         """返回 MCP server 运行时状态快照。"""

@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from xcode.agent.messages import UserMessage
-from xcode.cli.repl_sessions import _resume_messages, sync_agent_history
+from xcode.harness.session.replay import replay_session, resume_messages
 from xcode.harness.agent_runtime.compaction import LayeredCompactor
 from xcode.harness.memory import (
     load_session_checkpoint,
@@ -43,12 +43,6 @@ class _ResumeAgent(_Agent):
 
     def set_resumed_notice(self, notice: str) -> None:
         self.notice = notice
-
-
-class _App:
-    def __init__(self, agent: _ResumeAgent) -> None:
-        self.agent = agent
-        self.contextual_state = None
 
 
 class _Store:
@@ -137,7 +131,7 @@ def test_resume_uses_checkpoint_plus_verbatim_tail(tmp_path: Path) -> None:
         _entry("a2", "assistant", "current answer", "u2"),
     ]
 
-    messages, rebuilt = _resume_messages(
+    messages, rebuilt = resume_messages(
         _Agent(tmp_path),
         "session-a",
         records,
@@ -161,7 +155,7 @@ def test_resume_falls_back_when_boundary_is_not_on_branch(tmp_path: Path) -> Non
     )
     records = [_entry("u1", "user", "full history", None)]
 
-    messages, rebuilt = _resume_messages(
+    messages, rebuilt = resume_messages(
         _Agent(tmp_path),
         "session-a",
         records,
@@ -324,16 +318,12 @@ def test_three_cycles_restart_restores_checkpoint_tail_and_todos(
     ]
     restarted = _ResumeAgent(tmp_path)
 
-    sync_agent_history(
-        cast(Any, _App(restarted)),
-        cast(Any, _Store(records)),
-    )
+    replay_session(restarted, cast(Any, _Store(records)))
 
     assert len(seen) == 3
     assert "Completed context cycle 3" in str(restarted.loaded_messages[0].content)
     assert any(
-        isinstance(message, UserMessage)
-        and message.content == "keep API v1 exact"
+        isinstance(message, UserMessage) and message.content == "keep API v1 exact"
         for message in restarted.loaded_messages
     )
     assert isinstance(restarted.restored_state, dict)

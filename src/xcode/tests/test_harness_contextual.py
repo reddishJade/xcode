@@ -57,6 +57,18 @@ class TestContextualRetrievalState:
         second = state.render()
         assert first != second
 
+    def test_clear_removes_previous_session_projection(self) -> None:
+        state = ContextualRetrievalState(Path("/project"))
+        state.record_file(Path("src/main.py"))
+        state.record_tool_result("read_file", "loaded content")
+
+        state.clear()
+
+        rendered = state.render()
+        assert "src/main.py" not in rendered
+        assert "loaded content" not in rendered
+        assert state.active_file is None
+
     @property
     def active_file(self) -> str | None:
         state = ContextualRetrievalState(Path("/project"))

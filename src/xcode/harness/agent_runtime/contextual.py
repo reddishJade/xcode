@@ -99,6 +99,16 @@ class ContextualRetrievalState:
         )
         self._dirty = True
 
+    def clear(self) -> None:
+        """清空当前 session 投影，供切换或重建会话时使用。"""
+        self._files.clear()
+        self._file_set.clear()
+        self._active_file = None
+        self._tool_results.clear()
+        self._tool_calls.clear()
+        self._render_cache = None
+        self._dirty = True
+
     def render(self) -> str:
         """渲染为 system prompt 的 contextual-retrieval 块。"""
         if not self._dirty and self._render_cache is not None:

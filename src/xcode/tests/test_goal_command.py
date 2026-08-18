@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
 from xcode.ai.providers.base import ModelProvider
 from xcode.cli.commands import CommandContext, ReplState
 from xcode.cli.repl_commands import cmd_goal
-from xcode.cli.repl_sessions import _latest_goal_state, sync_agent_history
+from xcode.harness.session.replay import latest_goal_state, replay_session
 from xcode.cli.tui.app import _is_live_command
 from xcode.coding_agent.state import CodingRunState
 from xcode.harness.agent_runtime.goal import GoalController, GoalState
@@ -40,12 +40,26 @@ class _ResumeStore:
 class _ResumeAgent:
     def __init__(self) -> None:
         self.goal = GoalState()
+        self.session_id = ""
+        self.compactor = SimpleNamespace(checkpoint_dir=None)
+
+    def set_history_session_id(self, _session_id: str) -> None:
+        return
+
+    def set_compaction_source_message_id(self, _message_id: str | None) -> None:
+        return
 
     def load_history(self, _messages: object) -> None:
         return
 
     def restore_goal_state(self, payload: object) -> None:
         self.goal = GoalState.from_dict(payload)
+
+    def restore_run_state_metadata(self, _payload: object) -> None:
+        return
+
+    def set_resumed_notice(self, _notice: str) -> None:
+        return
 
 
 class _GoalAgent:
@@ -211,7 +225,7 @@ def test_latest_goal_state_prefers_newer_pause_command_over_final_state() -> Non
         ),
     ]
 
-    assert _latest_goal_state(records) == {
+    assert latest_goal_state(records) == {
         "condition": "Finish the migration",
         "paused": True,
         "reacts": 1,
@@ -253,10 +267,9 @@ def test_session_resume_restores_paused_goal() -> None:
         created_at="2026-07-24T00:00:00Z",
     )
     agent = _ResumeAgent()
-    app = SimpleNamespace(agent=agent)
     store = cast(SessionStore, _ResumeStore([record]))
 
-    sync_agent_history(app, store)
+    replay_session(cast(Any, agent), store)
 
     assert agent.goal == GoalState(
         condition="Finish the migration",

@@ -29,8 +29,6 @@ from xcode.ai.models import get_models, get_providers
 from .repl_sessions import (
     print_saved_conversation,
     resume_interactively,
-    sync_agent_history,
-    sync_compaction_source,
 )
 from .repl_skills import (
     activate_skill,
@@ -232,14 +230,14 @@ def run_repl(
 
     elif resume_latest:
         resume_interactively(store, session)
-        sync_agent_history(app, store)
+        app.restore_session()
 
     if selected_view is not None:
         from .repl_sessions import resumed_message, print_loaded_history
 
         print(resumed_message(selected_view))
         print_loaded_history(store)
-        sync_agent_history(app, store)
+        app.restore_session()
 
     while True:
         text, should_exit = _read_repl_text(state, session, store)
@@ -456,7 +454,7 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
             if inject_text:
                 ctx.state.pending_inject = inject_text
                 message_id = ctx.store.append("user", inject_text)
-                sync_compaction_source(ctx.app, ctx.store, message_id)
+                ctx.app.bind_session_input(message_id)
             else:
                 ctx.state.pending_partial = None
                 print("[interrupt cancelled]")

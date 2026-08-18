@@ -38,7 +38,6 @@ from .repl_sessions import (
     resume_latest,
     resumed_message,
     select_session_interactively,
-    sync_agent_history,
 )
 from .repl_settings import (
     handle_effort_command,
@@ -79,7 +78,7 @@ def cmd_help(cmd: str, ctx: CommandContext) -> bool:
 def cmd_clear(cmd: str, ctx: CommandContext) -> bool:
     """清空当前会话记录并开始新会话。"""
     ctx.store.clear()
-    sync_agent_history(ctx.app, ctx.store)
+    ctx.app.restore_session()
     clear_terminal_display()
     print_startup_banner(ctx.app, ctx.project_root)
     return False
@@ -118,7 +117,7 @@ def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
     meta = ctx.store.current_metadata()
     if ctx.snapshot_store is not None and meta is not None:
         ctx.snapshot_store.fork_session(parent_session_id, meta.id)
-    sync_agent_history(ctx.app, ctx.store)
+    ctx.app.restore_session()
     print(f'Forked at: "{meta.title if meta else selected.id[:8]}"')
     return False
 
@@ -130,7 +129,7 @@ def cmd_clone(cmd: str, ctx: CommandContext) -> bool:
     fork_meta = ctx.store.current_metadata()
     if ctx.snapshot_store is not None and fork_meta is not None:
         ctx.snapshot_store.fork_session(parent_session_id, fork_meta.id)
-    sync_agent_history(ctx.app, ctx.store)
+    ctx.app.restore_session()
     if fork_meta is not None:
         print(f'Cloned: "{fork_meta.title}"')
     return False
@@ -146,7 +145,7 @@ def cmd_rewind(cmd: str, ctx: CommandContext) -> bool:
             ctx.store.session_id,
             ctx.store.user_turn_count(),
         )
-    sync_agent_history(ctx.app, ctx.store)
+    ctx.app.restore_session()
     turn_label = "turn" if turns == 1 else "turns"
     print(f"Rewound {turns} user {turn_label} ({removed} transcript records removed).")
     return False
@@ -161,18 +160,18 @@ def cmd_resume(cmd: str, ctx: CommandContext) -> bool:
             view = resume_latest(ctx.store)
             if view:
                 _print_resumed_session(view, ctx)
-                sync_agent_history(ctx.app, ctx.store)
+                ctx.app.restore_session()
             else:
                 print("No conversations found.")
             return False
         ctx.store.resume(target)
         _print_resumed_session(current_view(ctx.store), ctx)
-        sync_agent_history(ctx.app, ctx.store)
+        ctx.app.restore_session()
         return False
     resume_interactively(
         ctx.store, ctx.prompt_session, show_history=ctx.show_session_history
     )
-    sync_agent_history(ctx.app, ctx.store)
+    ctx.app.restore_session()
     return False
 
 
@@ -198,7 +197,7 @@ def cmd_tree(cmd: str, ctx: CommandContext) -> bool:
         print("Failed to set entry.")
         return False
 
-    sync_agent_history(ctx.app, ctx.store)
+    ctx.app.restore_session()
     print(f"Moved to: {selected.title}")
     return False
 
@@ -214,7 +213,7 @@ def cmd_continue(cmd: str, ctx: CommandContext) -> bool:
         return False
     ctx.store.resume(view.id)
     _print_resumed_session(view, ctx)
-    sync_agent_history(ctx.app, ctx.store)
+    ctx.app.restore_session()
     return False
 
 
@@ -230,7 +229,7 @@ def cmd_sessions(cmd: str, ctx: CommandContext) -> bool:
         return False
 
     ctx.store.resume(selected.id)
-    sync_agent_history(ctx.app, ctx.store)
+    ctx.app.restore_session()
     _print_resumed_session(selected, ctx)
     return False
 
@@ -583,11 +582,10 @@ def cmd_steer(cmd: str, ctx: CommandContext) -> bool:
         return False
     msg = parts[1].strip()
     from xcode.agent.messages import UserMessage
-    from .repl_sessions import sync_compaction_source
 
     if ctx.app.agent.try_steer(UserMessage(content=msg)):
         message_id = ctx.store.append("user", msg)
-        sync_compaction_source(ctx.app, ctx.store, message_id)
+        ctx.app.bind_session_input(message_id)
         print("[steer] injected into the active run")
     else:
         ctx.state.pending_inject = msg
@@ -1346,7 +1344,7 @@ def cmd_btw(cmd: str, ctx: CommandContext) -> bool:
 
     print()
 
-    sync_agent_history(ctx.app, ctx.store)
+    ctx.app.restore_session()
 
     return False
 
