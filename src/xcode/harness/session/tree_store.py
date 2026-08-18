@@ -21,7 +21,6 @@ from uuid import uuid4
 import filelock
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ..skill_activation import is_skill_activation_content
 from .types import (
     JsonValue,
     SessionEntry,
@@ -219,46 +218,6 @@ class TreeSessionRepo:
 
     def user_turn_count(self) -> int:
         return sum(1 for e in self.read_entries() if e.type == "user")
-
-    def compact_current_session(self, max_tool_result_chars: int = 200) -> int:
-        """压缩当前会话，截断过长工具结果。"""
-        with self._lock:
-            entries = self.read_entries()
-            if not entries:
-                return 0
-            compacted = 0
-            new_data: list[dict] = []
-            for e in entries:
-                row = {
-                    "id": e.id,
-                    "parent_id": e.parent_id,
-                    "type": e.type,
-                    "content": e.content,
-                    "created_at": e.created_at,
-                }
-                if (
-                    e.type == "event"
-                    and isinstance(e.content, dict)
-                    and e.content.get("type") == "tool_result"
-                ):
-                    data = e.content.get("data")
-                    if isinstance(data, dict) and "content" in data:
-                        content_str = str(data["content"])
-                        if is_skill_activation_content(content_str):
-                            new_data.append(row)
-                            continue
-                        if len(content_str) > max_tool_result_chars:
-                            data["content"] = (
-                                "[Previous tool_result compacted; "
-                                f"{len(content_str)} chars removed]"
-                            )
-                            compacted += 1
-                new_data.append(row)
-            if compacted > 0:
-                with self.current_path.open("w", encoding="utf-8") as f:
-                    for row in new_data:
-                        f.write(json.dumps(row, ensure_ascii=False) + "\n")
-            return compacted
 
     def list_sessions(self, limit: int = 10) -> list[Path]:
         return [item.path for item in self.list_infos(limit=limit)]

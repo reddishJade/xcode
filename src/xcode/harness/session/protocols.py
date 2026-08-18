@@ -81,7 +81,3 @@ class SessionRepo(Protocol):
     def clear(self) -> None:
         """清空当前会话。"""
         ...
-
-    def compact(self, max_tool_result_chars: int = 200) -> int:
-        """压缩当前会话。"""
-        ...

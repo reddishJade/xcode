@@ -188,6 +188,26 @@ class XcodeApp:
             return ()
         return self.external_hook_runner.diagnostics()
 
+    def record_compaction(
+        self,
+        *,
+        summary: str,
+        messages_before: int,
+        messages_after: int,
+        tokens_before: int,
+        tokens_after: int,
+    ) -> str:
+        recorder = self.session_recorder
+        if recorder is None:
+            raise RuntimeError("session recorder is not configured")
+        return recorder.record_compaction(
+            summary=summary,
+            messages_before=messages_before,
+            messages_after=messages_after,
+            tokens_before=tokens_before,
+            tokens_after=tokens_after,
+        )
+
     def mcp_status(self) -> tuple[dict[str, object], ...]:
         """返回 MCP server 运行时状态快照。"""
         if self.mcp_runtime is None:

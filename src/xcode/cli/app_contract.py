@@ -110,3 +110,13 @@ class ReplApp(ModelControlApp, ToolRegistryApp, Protocol):
     ) -> Iterator[AgentHarnessEvent]: ...
 
     def hook_diagnostics(self) -> tuple[ExternalHookDiagnostic, ...]: ...
+
+    def record_compaction(
+        self,
+        *,
+        summary: str,
+        messages_before: int,
+        messages_after: int,
+        tokens_before: int,
+        tokens_after: int,
+    ) -> str: ...

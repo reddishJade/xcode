@@ -669,8 +669,14 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
     # 5) 替换 agent 历史
     cast(Callable, load_history)(after_msgs)
 
-    # 6) 也裁剪会话日志
-    ctx.store.compact_current_session(max_tool_result_chars=200)
+    # 6) 追加新的上下文 epoch，原始 transcript 保持不变
+    ctx.app.record_compaction(
+        summary=summary_text or "",
+        messages_before=len(before_msgs),
+        messages_after=len(after_msgs),
+        tokens_before=before_tokens,
+        tokens_after=after_tokens,
+    )
 
     # 7) 打印结构化摘要——类似 pi 的格式
     saved = before_tokens - after_tokens

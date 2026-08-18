@@ -98,3 +98,27 @@ def test_app_records_programmatic_turn_without_stream_fragments(tmp_path: Path) 
     assert branch[0].content == "visible question"
     assert branch[1].content["type"] == "final"
     assert branch[2].content == "done"
+
+
+def test_compaction_appends_epoch_without_rewriting_history(tmp_path: Path) -> None:
+    recorder = _recorder(tmp_path)
+    agent = _Agent()
+    recorder.begin_turn(agent, "keep this verbatim")
+    transcript = recorder.store.current_path
+    original = transcript.read_bytes()
+
+    recorder.record_compaction(
+        summary="current state",
+        messages_before=12,
+        messages_after=4,
+        tokens_before=9000,
+        tokens_after=2000,
+    )
+
+    updated = transcript.read_bytes()
+    assert updated.startswith(original)
+    assert len(updated) > len(original)
+    event = recorder.store.build_branch()[-1].content
+    assert isinstance(event, dict)
+    assert event["type"] == "compaction"
+    assert event["data"]["summary"] == "current state"

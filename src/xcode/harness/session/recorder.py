@@ -6,7 +6,7 @@ from typing import Protocol
 
 from xcode.harness.agent_runtime.events import AgentHarnessEvent, FinalStructuredEvent
 
-from .event_codec import encode_session_event
+from .event_codec import SESSION_EVENT_SCHEMA_VERSION, encode_session_event
 from .tree_store import TreeSessionRepo
 
 
@@ -70,3 +70,31 @@ class SessionRecorder:
             return
         self.store.append("assistant", text)
         self.store.update_summary()
+
+    def record_compaction(
+        self,
+        *,
+        summary: str,
+        messages_before: int,
+        messages_after: int,
+        tokens_before: int,
+        tokens_after: int,
+    ) -> str:
+        """追加一次 compaction epoch，不修改既有 transcript。"""
+        return self.store.append(
+            "event",
+            {
+                "schema_version": SESSION_EVENT_SCHEMA_VERSION,
+                "type": "compaction",
+                "step": 0,
+                "data": {
+                    "trigger": "manual",
+                    "summary": summary,
+                    "messages_before": messages_before,
+                    "messages_after": messages_after,
+                    "tokens_before": tokens_before,
+                    "tokens_after": tokens_after,
+                },
+                "correlation": {},
+            },
+        )
