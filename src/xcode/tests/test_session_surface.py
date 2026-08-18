@@ -66,6 +66,34 @@ def _replacement_event(
     )
 
 
+def _claimed_entry(
+    entry_id: str,
+    parent_id: str | None,
+    message: UserMessage,
+) -> SessionEntry:
+    return _entry(
+        entry_id,
+        "event",
+        {
+            "schema_version": 2,
+            "type": "inbox/claimed",
+            "step": 0,
+            "data": {
+                "inbox_id": f"inbox-{entry_id}",
+                "message": encode_surface_messages([message]),
+                "display_text": str(message.content),
+                "lane": "next_turn",
+                "source": "user",
+                "wake": True,
+                "run_id": "run-1",
+                "reason": "",
+            },
+            "correlation": {},
+        },
+        parent_id,
+    )
+
+
 def test_surface_message_codec_round_trips_tool_pairs() -> None:
     messages: list[AgentMessage] = [
         UserMessage(content="inspect"),
@@ -96,10 +124,10 @@ def test_projection_applies_latest_replacement_then_verbatim_tail() -> None:
         UserMessage(content="keep this exact constraint"),
     ]
     records = [
-        _entry("u1", "user", "old request", None),
+        _claimed_entry("u1", None, UserMessage(content="old request")),
         _entry("a1", "assistant", "old answer", "u1"),
         _replacement_event("c1", "a1", replacement, 1, ["u1", "a1"]),
-        _entry("u2", "user", "next action", "c1"),
+        _claimed_entry("u2", "c1", UserMessage(content="next action")),
         _entry("a2", "assistant", "done", "u2"),
     ]
 
@@ -118,6 +146,9 @@ def test_projection_applies_latest_replacement_then_verbatim_tail() -> None:
 
 
 def test_projection_rejects_untyped_or_unbalanced_replacement() -> None:
+    with pytest.raises(InvalidSessionSurfaceError, match="legacy user entries"):
+        project_session_surface([_entry("u1", "user", "legacy", None)])
+
     with pytest.raises(InvalidSessionSurfaceError, match="typed surface"):
         project_session_surface(
             [
@@ -177,7 +208,7 @@ def test_replay_uses_durable_surface_without_external_checkpoint() -> None:
         UserMessage(content="continue migration"),
     ]
     records = [
-        _entry("u1", "user", "old", None),
+        _claimed_entry("u1", None, UserMessage(content="old")),
         _replacement_event("c1", "u1", replacement, 1, ["u1"]),
     ]
     agent = _ReplayAgent()

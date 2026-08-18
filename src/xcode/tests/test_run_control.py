@@ -1,10 +1,11 @@
-"""Active run 生命周期与 session 调度测试。"""
+"""Active run 生命周期与 durable inbox 调度测试。"""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from xcode.agent.agent import Agent
 from xcode.agent.messages import SystemMessage, UserMessage
 from xcode.harness.agent_runtime.cancellation import CancellationToken
 from xcode.harness.agent_runtime.run_control import (
@@ -13,23 +14,26 @@ from xcode.harness.agent_runtime.run_control import (
     SessionRunController,
     SubmitStatus,
 )
+from xcode.harness.session import SessionInbox, SessionStore
 
 
-def _begin() -> tuple[SessionRunController, Agent, CancellationToken]:
-    controller = SessionRunController("session-a")
-    agent = Agent([])
+def _begin(
+    tmp_path: Path,
+) -> tuple[SessionRunController, CancellationToken]:
+    store = SessionStore(tmp_path / "sessions", project_root=tmp_path)
+    controller = SessionRunController(SessionInbox(store))
     token = CancellationToken()
-    controller.begin_run(agent, token)
-    return controller, agent, token
+    controller.begin_run(token)
+    return controller, token
 
 
-def test_active_run_has_identity_and_lifecycle() -> None:
-    controller, _, _ = _begin()
+def test_active_run_has_identity_and_lifecycle(tmp_path: Path) -> None:
+    controller, _ = _begin(tmp_path)
     handle = controller.active_run()
 
     assert handle is not None
-    assert handle.run_id == "session-a:run:1"
-    assert handle.session_id == "session-a"
+    assert handle.run_id
+    assert handle.session_id == controller.session_id
     assert handle.state() is ActiveRunState.RUNNING
 
     handle.begin_finishing()
@@ -41,40 +45,47 @@ def test_active_run_has_identity_and_lifecycle() -> None:
     assert controller.active_run() is None
 
 
-def test_steer_is_bound_to_active_run() -> None:
-    controller, agent, _ = _begin()
+def test_steer_is_claimed_at_active_run_boundary(tmp_path: Path) -> None:
+    controller, _ = _begin(tmp_path)
+    handle = controller.active_run()
+    assert handle is not None
+
     outcome = controller.submit(UserMessage(content="change direction"))
 
     assert outcome.status is SubmitStatus.STEER_ACCEPTED
-    assert agent._drain_steer_queue() == [UserMessage(content="change direction")]
+    assert handle.claim_step_input() == [UserMessage(content="change direction")]
 
 
-def test_internal_system_steer_is_preserved() -> None:
-    controller, agent, _ = _begin()
+def test_internal_system_injection_is_durable(tmp_path: Path) -> None:
+    controller, _ = _begin(tmp_path)
     handle = controller.active_run()
     assert handle is not None
 
-    outcome = handle.steer(SystemMessage(content="runtime reminder"))
+    outcome = controller.inject_runtime(SystemMessage(content="runtime reminder"))
 
     assert outcome.status is SubmitStatus.STEER_ACCEPTED
-    assert agent._drain_steer_queue() == [SystemMessage(content="runtime reminder")]
+    assert handle.claim_step_input() == [SystemMessage(content="runtime reminder")]
 
 
-def test_late_steer_falls_back_to_next_run() -> None:
-    controller, agent, _ = _begin()
+def test_late_steer_falls_back_to_waking_next_run(tmp_path: Path) -> None:
+    controller, token = _begin(tmp_path)
     handle = controller.active_run()
     assert handle is not None
-    agent.close_steering()
+    handle.finish_step_input()
 
     outcome = controller.submit(UserMessage(content="do this next"))
 
-    assert outcome.status is SubmitStatus.FOLLOW_UP_QUEUED
+    assert outcome.status is SubmitStatus.INJECT_QUEUED
     controller.complete_run(handle)
-    assert controller.take_follow_up() == UserMessage(content="do this next")
+    assert controller.has_waking_input()
+    next_handle = controller.begin_run(token)
+    assert controller.claim_initial(next_handle) == [
+        UserMessage(content="do this next")
+    ]
 
 
-def test_follow_up_waits_until_run_is_finished() -> None:
-    controller, _, _ = _begin()
+def test_followup_waits_for_a_new_run(tmp_path: Path) -> None:
+    controller, token = _begin(tmp_path)
     handle = controller.active_run()
     assert handle is not None
 
@@ -83,13 +94,14 @@ def test_follow_up_waits_until_run_is_finished() -> None:
     )
 
     assert outcome.status is SubmitStatus.FOLLOW_UP_QUEUED
-    assert controller.take_follow_up() is None
+    assert handle.claim_step_input() == []
     controller.complete_run(handle)
-    assert controller.take_follow_up() == UserMessage(content="next task")
+    next_handle = controller.begin_run(token)
+    assert controller.claim_initial(next_handle) == [UserMessage(content="next task")]
 
 
-def test_interrupt_keeps_run_active_until_completion() -> None:
-    controller, _, token = _begin()
+def test_interrupt_keeps_run_active_and_queues_replacement(tmp_path: Path) -> None:
+    controller, token = _begin(tmp_path)
     handle = controller.active_run()
     assert handle is not None
 
@@ -101,37 +113,28 @@ def test_interrupt_keeps_run_active_until_completion() -> None:
     assert token.is_cancelled()
     assert handle.state() is ActiveRunState.CANCELLING
     assert controller.active_run() is handle
-    assert controller.take_follow_up() is None
 
     handle.begin_finishing()
     controller.complete_run(handle)
-    assert controller.take_follow_up() == UserMessage(content="replacement")
+    next_handle = controller.begin_run(token)
+    assert controller.claim_initial(next_handle) == [UserMessage(content="replacement")]
 
 
-def test_collect_merges_messages_after_current_run() -> None:
-    controller, _, _ = _begin()
-    handle = controller.active_run()
-    assert handle is not None
-    controller.submit(UserMessage(content="first"), BusyMessageMode.COLLECT)
-    controller.submit(UserMessage(content="second"), BusyMessageMode.COLLECT)
+def test_inbox_survives_controller_reconstruction(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions", project_root=tmp_path)
+    first = SessionRunController(SessionInbox(store))
+    first.submit(UserMessage(content="persist me"), BusyMessageMode.FOLLOW_UP)
 
-    controller.complete_run(handle)
+    restored = SessionRunController(SessionInbox(store))
+    handle = restored.begin_run(CancellationToken())
 
-    assert controller.take_follow_up() == UserMessage(content="first\n\nsecond")
-
-
-def test_unconsumed_steer_is_not_lost() -> None:
-    controller, _, _ = _begin()
-    handle = controller.active_run()
-    assert handle is not None
-
-    controller.complete_run(handle, [UserMessage(content="late")])
-
-    assert controller.take_follow_up() == UserMessage(content="late")
+    assert restored.claim_initial(handle) == [UserMessage(content="persist me")]
+    event_types = [entry.content["type"] for entry in store.build_branch()]
+    assert event_types == ["inbox/inserted", "inbox/claimed"]
 
 
-def test_overlapping_runs_are_rejected() -> None:
-    controller, _, token = _begin()
+def test_overlapping_runs_are_rejected(tmp_path: Path) -> None:
+    controller, token = _begin(tmp_path)
 
     with pytest.raises(RuntimeError, match="active run"):
-        controller.begin_run(Agent([]), token)
+        controller.begin_run(token)

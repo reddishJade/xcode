@@ -42,6 +42,7 @@ from xcode.harness.observability import (
 )
 from xcode.harness.security.permission_model import PolicyEvaluator
 from xcode.harness.session.recorder import SessionRecorder
+from xcode.harness.session.inbox import SessionInbox
 
 from .security import (
     external_directories_from_security,
@@ -110,6 +111,7 @@ def build_agent(
     audit_path: Path | None,
     runtime_config: XcodeRuntimeConfig,
     session_recorder: SessionRecorder,
+    session_inbox: SessionInbox,
     contextual_state: ContextualRetrievalState | None = None,
     shell_spec: ShellSpec | None = None,
     compact_controller: CompactController | None = None,
@@ -176,6 +178,7 @@ def build_agent(
             tool_path_extractors={"apply_patch": extract_patch_paths},
         ),
         runtime=CodingAgentRuntimeConfig(
+            session_inbox=session_inbox,
             compactor=compactor,
             compact_controller=compact_controller,
             cancellation_token=cancellation_token,

@@ -51,7 +51,9 @@ provider；provider 不感知产品工具。
 
 ```text
 user input
-  -> SessionRecorder.begin_turn
+  -> SessionInbox.inbox/inserted
+  -> active run claims next_step / next_turn
+  -> SessionInbox.inbox/claimed
   -> CodingAgentHarness / Agent loop
   -> context assembly and request hygiene
   -> provider_request envelope
@@ -63,15 +65,18 @@ user input
   -> REPL/TUI projection
 ```
 
-`SessionRecorder` 是所有入口的统一记录边界。编程式 `ask()`、REPL 和 TUI
-必须经过同一条路径。`harness/session/replay.py` 负责从当前 branch 恢复
-message history、run metadata、Goal 和 contextual state。
+`SessionInbox` 是所有模型输入的统一所有者，`SessionRecorder` 记录运行输出。
+编程式 `ask()`、REPL 和 TUI 必须经过同一条路径。`harness/session/replay.py`
+负责从当前 branch 恢复 message history、run metadata、Goal 和 contextual
+state；未 claim 的输入由 inbox 自身恢复。
 
 ## Session 事实模型
 
 稳定记录包括：
 
-- `user`、`assistant`：用户可见对话边界；
+- `inbox/inserted`、`inbox/claimed`、`inbox/discarded`：输入内容、lane、来源和
+  消费生命周期；
+- `assistant`：最终用户可见回答；
 - `provider_request`：provider 实际收到的输入和请求指纹；
 - `assistant`、`tool_use`、`tool_result`、`final`：运行语义；
 - `compaction`：追加式压缩 epoch，原 transcript 保持不变；
@@ -79,6 +84,8 @@ message history、run metadata、Goal 和 contextual state。
 
 `compaction` 保存完整、类型化的 surface replacement、来源 entry IDs、generation
 和指纹。replayer 只按日志顺序应用 replacement，不读取第二份 checkpoint 状态。
+只有 `inbox/claimed` 中的 typed message 会进入模型 surface；普通命令记录为
+`command` event，不会伪装成用户消息。
 
 ## 本地执行边界
 
@@ -114,7 +121,7 @@ intent 随 `ToolResultMessage` 进入 runtime event 和 session log。新增呈�
 `build_app()` 是产品组合根，按顺序构造：
 
 1. 已解析配置；
-2. session recorder、memory、compactor 和 cancellation；
+2. 共享同一 store 的 session recorder/inbox、memory、compactor 和 cancellation；
 3. provider bundle；
 4. 本地工具、MCP、memory/history 和 subagent registry；
 5. permission gate、hooks 和 `CodingAgentHarness`；

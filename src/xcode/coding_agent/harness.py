@@ -27,9 +27,8 @@ from xcode.harness.skill_activation import (
     is_skill_activation_content,
 )
 from xcode.harness.agent_runtime._mode_protocol import ToolGateMode
-from xcode.harness.agent_runtime.agent_helpers import run_coro_sync
+from xcode.harness.agent_runtime.agent_helpers import aiter_to_sync_iter, run_coro_sync
 from xcode.harness.agent_runtime.config import (
-    AgentRuntimeConfig,
     GateConfig,
     TurnSnapshot,
     build_turn_context_messages,
@@ -56,21 +55,18 @@ class CodingAgentHarness(AgentHarness):
         self,
         provider: ModelProvider,
         registry: tuple[ToolSpec, ...],
+        runtime: CodingAgentRuntimeConfig,
         config: AgentConfig | None = None,
         gate: GateConfig | None = None,
-        runtime: AgentRuntimeConfig | None = None,
     ) -> None:
         gate = gate or GateConfig()
-        runtime = runtime or CodingAgentRuntimeConfig()
-        if not isinstance(runtime, CodingAgentRuntimeConfig):
-            raise TypeError("CodingAgentHarness requires CodingAgentRuntimeConfig")
         self._coding_runtime = runtime
         self._mode = ExecutionModeState()
         self._memory_manager = runtime.memory_manager
         self._session_history = runtime.session_history
         self._todo_state = runtime.todo_state
         self._goal_session_id = gate.session_id
-        super().__init__(provider, registry, config, gate, runtime)
+        super().__init__(provider, registry, runtime, config, gate)
         self._goal = GoalController(lambda: self.provider)
         if self._session_history is not None:
             self._session_history.set_session_id(self.session_id)
@@ -268,18 +264,35 @@ class CodingAgentHarness(AgentHarness):
         return result
 
     def run_stream(
-        self, question: str, mode: ExecutionMode | None = None
+        self,
+        question: str | None,
+        mode: ExecutionMode | None = None,
+        *,
+        display_question: str | None = None,
     ) -> Iterator[AgentHarnessEvent]:
         if mode is not None:
             self._mode.set_mode(mode)
-        yield from super().run_stream(question)
+        yield from aiter_to_sync_iter(
+            self.arun_stream(
+                question,
+                display_question=display_question,
+            ),
+            self.cancellation_token,
+        )
 
     async def arun_stream(
-        self, question: str, mode: ExecutionMode | None = None
+        self,
+        question: str | None,
+        mode: ExecutionMode | None = None,
+        *,
+        display_question: str | None = None,
     ) -> AsyncIterator[AgentHarnessEvent]:
         if mode is not None:
             self._mode.set_mode(mode)
-        async for event in super().arun_stream(question):
+        async for event in super().arun_stream(
+            question,
+            display_question=display_question,
+        ):
             yield event
 
     # ── 技能激活内部 ──

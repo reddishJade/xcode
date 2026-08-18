@@ -19,6 +19,7 @@ from xcode.agent.messages import (
 from xcode.agent.types import ToolCallContent
 
 from .types import JsonValue, SessionEntry
+from .schema import SESSION_EVENT_SCHEMA_VERSION
 
 
 class InvalidSessionSurfaceError(ValueError):
@@ -108,9 +109,9 @@ def project_session_surface(records: list[SessionEntry]) -> SessionSurface:
 
     for record_index, record in enumerate(records):
         if record.type == "user":
-            messages.append(UserMessage(content=str(record.content)))
-            event_assistant_texts.clear()
-            continue
+            raise InvalidSessionSurfaceError(
+                "legacy user entries are not part of the session schema"
+            )
         if record.type == "assistant":
             _append_plain_assistant(messages, record, event_assistant_texts)
             event_assistant_texts.clear()
@@ -120,6 +121,21 @@ def project_session_surface(records: list[SessionEntry]) -> SessionSurface:
 
         event_type = record.content.get("type")
         data = record.content.get("data")
+        if event_type == "inbox/claimed":
+            if record.content.get("schema_version") != SESSION_EVENT_SCHEMA_VERSION:
+                raise InvalidSessionSurfaceError("unsupported inbox claim event schema")
+            if not isinstance(data, dict):
+                raise InvalidSessionSurfaceError(
+                    "inbox claim event data must be an object"
+                )
+            claimed = decode_surface_messages(data.get("message"))
+            if len(claimed) != 1:
+                raise InvalidSessionSurfaceError(
+                    "inbox claim event must contain exactly one message"
+                )
+            messages.append(claimed[0])
+            event_assistant_texts.clear()
+            continue
         if event_type == "compaction":
             if not isinstance(data, dict) or "replacement" not in data:
                 raise InvalidSessionSurfaceError(

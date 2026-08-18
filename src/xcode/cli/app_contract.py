@@ -30,19 +30,33 @@ class ReplAgent(Protocol):
 
     cancellation_token: CancellationToken
 
-    def try_steer(self, msg: UserMessage) -> bool: ...
+    def steer(
+        self,
+        msg: UserMessage,
+        *,
+        display_text: str | None = None,
+    ) -> SubmitOutcome: ...
 
-    def follow_up(self, msg: UserMessage) -> bool: ...
+    def followup(
+        self,
+        msg: UserMessage,
+        *,
+        display_text: str | None = None,
+    ) -> SubmitOutcome: ...
+
+    def inject(self, msg: AgentMessage) -> SubmitOutcome: ...
 
     def submit_busy_message(
         self,
         msg: UserMessage,
         mode: BusyMessageMode = BusyMessageMode.STEER,
+        *,
+        display_text: str | None = None,
     ) -> SubmitOutcome: ...
 
     def interrupt(self, reason: str = "interrupted by user") -> bool: ...
 
-    def take_follow_up(self) -> UserMessage | None: ...
+    def has_pending_input(self) -> bool: ...
 
     def load_history(self, messages: list[AgentMessage]) -> None: ...
 
@@ -103,7 +117,7 @@ class ReplApp(ModelControlApp, ToolRegistryApp, Protocol):
 
     def ask_stream(
         self,
-        question: str,
+        question: str | None,
         mode: ExecutionMode | None = None,
         *,
         display_question: str | None = None,

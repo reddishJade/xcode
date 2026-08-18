@@ -9,7 +9,7 @@ from xcode.harness.config import XcodeRuntimeConfig, resolve_config_path
 from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
 from xcode.harness.agent_runtime.compaction import CompactController, LayeredCompactor
 from xcode.harness.memory import MemoryManager
-from xcode.harness.session import SessionHistory, SessionStore
+from xcode.harness.session import SessionHistory, SessionInbox, SessionStore
 from xcode.harness.session.recorder import SessionRecorder
 
 
@@ -21,6 +21,7 @@ class SharedInfra:
     compactor: LayeredCompactor
     memory_manager: MemoryManager
     session_history: SessionHistory
+    session_inbox: SessionInbox
     session_recorder: SessionRecorder
 
 
@@ -57,6 +58,7 @@ def build_shared_infra(
     session_recorder = SessionRecorder(
         SessionStore(transcript_dir, project_root=project_root)
     )
+    session_inbox = SessionInbox(session_recorder.store)
     return SharedInfra(
         contextual_state=contextual_state,
         cancellation_token=cancellation_token,
@@ -64,5 +66,6 @@ def build_shared_infra(
         compactor=compactor,
         memory_manager=memory_manager,
         session_history=session_history,
+        session_inbox=session_inbox,
         session_recorder=session_recorder,
     )

@@ -232,9 +232,7 @@ class _TuiState:
         self.pending_hitl = None
         self.running = False
         for record in records:
-            if record.type == "user":
-                self.add_user(str(record.content))
-            elif record.type == "assistant":
+            if record.type == "assistant":
                 text = str(record.content).strip()
                 if text:
                     self.log.append(_LogEntry("xcode", text, markdown=True))
@@ -244,7 +242,20 @@ class _TuiState:
     def _restore_event(self, content: Mapping[str, object]) -> None:
         event_type = content.get("type")
         data = content.get("data")
-        if event_type == "thinking":
+        if event_type == "inbox/claimed" and isinstance(data, dict):
+            display_text = data.get("display_text")
+            message = data.get("message")
+            if (
+                isinstance(display_text, str)
+                and isinstance(message, list)
+                and message
+                and isinstance(message[0], dict)
+                and message[0].get("kind") == "user"
+            ):
+                self.add_user(display_text)
+        elif event_type == "command" and isinstance(data, str):
+            self.add_command(data)
+        elif event_type == "thinking":
             self._restore_thinking(data)
         elif event_type == "tool_use" and isinstance(data, dict):
             self._record_tool_use(

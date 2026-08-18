@@ -23,8 +23,7 @@ from xcode.harness.agent_runtime.events import (
 )
 from xcode.harness.session.surface import encode_surface_messages
 
-
-SESSION_EVENT_SCHEMA_VERSION = 2
+from .schema import SESSION_EVENT_SCHEMA_VERSION
 
 
 def encode_session_event(event: AgentHarnessEvent) -> dict[str, Any]:

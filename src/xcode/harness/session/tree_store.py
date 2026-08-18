@@ -1,8 +1,8 @@
 """树结构会话存储：每条 entry 带 id/parent_id，支持会话内分支。
 
 文件格式：每个会话一个 .jsonl 文件，每行是一个树 entry：
-  {"id":"e1","parent_id":null,"type":"user","content":"...","created_at":"..."}
-  {"id":"e2","parent_id":"e1","type":"assistant","content":"...","created_at":"..."}
+  {"id":"e1","parent_id":null,"type":"event","content":{"type":"inbox/inserted",...}}
+  {"id":"e2","parent_id":"e1","type":"event","content":{"type":"inbox/claimed",...}}
 
 head_id 记录在 session_index.json 的 metadata 中。
 分支只需在同文件中追加不同 parent_id 的 entry。
@@ -27,6 +27,7 @@ from .types import (
     SessionInfoView,
     TreeNode,
 )
+from .schema import SESSION_EVENT_SCHEMA_VERSION
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 SUMMARY_USER_CHARS = 120
@@ -105,8 +106,6 @@ class TreeSessionRepo:
             )
             with self.current_path.open("a", encoding="utf-8") as f:
                 f.write(entry.model_dump_json() + "\n")
-            if record_type == "user":
-                self.ensure_metadata(str(content))
             self._save_head_id(entry_id)
             return entry_id
 
@@ -208,7 +207,11 @@ class TreeSessionRepo:
         """回退指定轮次：将 head_id 往回移动。"""
         with self._lock:
             branch = self.build_branch()
-            user_indices = [i for i, e in enumerate(branch) if e.type == "user"]
+            user_indices = [
+                i
+                for i, entry in enumerate(branch)
+                if _claimed_user_text(entry) is not None
+            ]
             if not user_indices:
                 return 0
             target_idx = max(0, len(user_indices) - turns)
@@ -217,7 +220,9 @@ class TreeSessionRepo:
             return len(user_indices) - target_idx
 
     def user_turn_count(self) -> int:
-        return sum(1 for e in self.read_entries() if e.type == "user")
+        return sum(
+            1 for entry in self.read_entries() if _claimed_user_text(entry) is not None
+        )
 
     def list_sessions(self, limit: int = 10) -> list[Path]:
         return [item.path for item in self.list_infos(limit=limit)]
@@ -266,8 +271,9 @@ class TreeSessionRepo:
             user_text = ""
             assistant_text: str | None = None
             for e in entries:
-                if e.type == "user" and not user_text:
-                    user_text = _collapse_text(str(e.content))
+                claimed_text = _claimed_user_text(e)
+                if claimed_text is not None and not user_text:
+                    user_text = _collapse_text(claimed_text)
                 elif e.type == "assistant" and assistant_text is None:
                     assistant_text = _collapse_text(str(e.content))
             summary = (
@@ -321,24 +327,13 @@ class TreeSessionRepo:
         }
 
     def get_user_messages(self) -> list[SessionEntry]:
-        """当前会话所有 user 消息，去重。"""
+        """当前会话所有已 claim 的用户输入，去重。"""
         raw = self.read_entries()
         seen: set[str] = set()
         out: list[SessionEntry] = []
         for e in raw:
-            if e.type == "user":
-                text = str(e.content)
-            elif e.type == "event" and isinstance(e.content, dict):
-                data = e.content.get("data")
-                if (
-                    e.content.get("type") == "message_start"
-                    and isinstance(data, dict)
-                    and data.get("role") == "user"
-                ):
-                    text = str(data.get("content", ""))
-                else:
-                    continue
-            else:
+            text = _claimed_user_text(e)
+            if text is None:
                 continue
             if text not in seen:
                 seen.add(text)
@@ -347,7 +342,11 @@ class TreeSessionRepo:
 
     def get_forkable_user_messages(self) -> list[SessionEntry]:
         """返回当前分支中可被 fork_from_entry 接受的用户消息。"""
-        return [entry for entry in self.build_branch() if entry.type == "user"]
+        return [
+            entry
+            for entry in self.build_branch()
+            if _claimed_user_text(entry) is not None
+        ]
 
     def jump_to_entry(self, entry_id: str) -> bool:
         """将 head_id 指向指定 entry，实现树内导航。"""
@@ -725,6 +724,8 @@ _NOISY_EVENT_TYPES = frozenset(
         "tool_update",  # 进度更新，无意义
         "tool_use",  # 树只看 user/assistant 消息
         "tool_result",
+        "inbox/inserted",
+        "inbox/discarded",
     }
 )
 
@@ -776,8 +777,9 @@ def _filter_tree_entries(
 
 def _node_label(e: SessionEntry, child_count: int) -> str:
     """生成树节点展示文本。"""
-    if e.type == "user":
-        text = _collapse_text(str(e.content))
+    claimed_text = _claimed_user_text(e)
+    if claimed_text is not None:
+        text = _collapse_text(claimed_text)
         return f"user: {_truncate(text, 60)}"
     if e.type == "assistant":
         text = _collapse_text(str(e.content))
@@ -811,3 +813,24 @@ def _node_label(e: SessionEntry, child_count: int) -> str:
             return f"{sub}: {_truncate(data_str, 50)}"
         return sub or "event"
     return e.type[:20]
+
+
+def _claimed_user_text(entry: SessionEntry) -> str | None:
+    """从严格 inbox claim schema 读取用户展示文本。"""
+    if entry.type != "event" or not isinstance(entry.content, dict):
+        return None
+    if entry.content.get("type") != "inbox/claimed":
+        return None
+    if entry.content.get("schema_version") != SESSION_EVENT_SCHEMA_VERSION:
+        return None
+    data = entry.content.get("data")
+    if not isinstance(data, dict):
+        return None
+    message = data.get("message")
+    if not isinstance(message, list) or len(message) != 1:
+        return None
+    encoded = message[0]
+    if not isinstance(encoded, dict) or encoded.get("kind") != "user":
+        return None
+    display = data.get("display_text")
+    return display if isinstance(display, str) else None

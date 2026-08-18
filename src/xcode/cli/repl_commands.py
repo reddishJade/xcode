@@ -69,6 +69,13 @@ from xcode.harness.session import SessionStore
 from xcode.harness.snapshot import SnapshotStore, TurnSnapshotRecord
 
 
+def _queue_followup(ctx: CommandContext, text: str) -> None:
+    """把斜杠命令产生的模型输入写入 durable inbox。"""
+    from xcode.agent.messages import UserMessage
+
+    ctx.app.agent.followup(UserMessage(content=text), display_text=text)
+
+
 def cmd_help(cmd: str, ctx: CommandContext) -> bool:
     """打印帮助信息。"""
     print(HELP_TEXT)
@@ -92,12 +99,10 @@ def cmd_fork(cmd: str, ctx: CommandContext) -> bool:
         return False
 
     def _fork_title(e: SessionEntry) -> str:
-        if e.type == "user":
-            return str(e.content)
         if isinstance(e.content, dict):
             data = e.content.get("data")
             if isinstance(data, dict):
-                return str(data.get("content", ""))
+                return str(data.get("display_text", ""))
         return ""
 
     choices = [
@@ -513,7 +518,7 @@ def cmd_plan(cmd: str, ctx: CommandContext) -> bool:
     )
     parts = cmd.split(maxsplit=1)
     if len(parts) == 2 and parts[1].strip():
-        ctx.state.pending_inject = parts[1].strip()
+        _queue_followup(ctx, parts[1].strip())
     return False
 
 
@@ -583,12 +588,11 @@ def cmd_steer(cmd: str, ctx: CommandContext) -> bool:
     msg = parts[1].strip()
     from xcode.agent.messages import UserMessage
 
-    if ctx.app.agent.try_steer(UserMessage(content=msg)):
-        ctx.store.append("user", msg)
+    outcome = ctx.app.agent.steer(UserMessage(content=msg))
+    if not outcome.wake_required:
         print("[steer] injected into the active run")
     else:
-        ctx.state.pending_inject = msg
-        print("[steer] no active run; sending as a normal message")
+        print("[steer] queued for the next run")
     return False
 
 
@@ -597,7 +601,7 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
     parts = cmd.split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
         print(f"Current busy-message mode: {ctx.state.busy_mode.value}")
-        print("Usage: /queue steer|followup|collect|interrupt|<message>")
+        print("Usage: /queue steer|followup|interrupt|<message>")
         return False
     msg = parts[1].strip()
     from xcode.harness.agent_runtime import BusyMessageMode
@@ -609,12 +613,8 @@ def cmd_queue(cmd: str, ctx: CommandContext) -> bool:
 
     from xcode.agent.messages import UserMessage
 
-    queued = ctx.app.agent.follow_up(UserMessage(content=msg))
-    if queued is False:
-        ctx.state.pending_inject = msg
-        print("[queued] no active run; sending as a normal message")
-    else:
-        print("[queued] will start a new run after the current run finishes")
+    ctx.app.agent.followup(UserMessage(content=msg))
+    print("[queued] will start a new run after the current run finishes")
     return False
 
 
@@ -759,14 +759,15 @@ def cmd_goal(cmd: str, ctx: CommandContext) -> bool:
         else:
             agent.resume_goal()
             _persist_goal_state(ctx)
-            ctx.state.pending_inject = (
-                "Continue working toward the active goal:\n\n" + active
+            _queue_followup(
+                ctx,
+                "Continue working toward the active goal:\n\n" + active,
             )
             print(f"Goal resumed: {active}")
         return False
     agent.set_goal(condition)
     _persist_goal_state(ctx)
-    ctx.state.pending_inject = condition
+    _queue_followup(ctx, condition)
     print(f"Goal set: {condition}")
     return False
 
@@ -891,7 +892,7 @@ def cmd_skill(cmd: str, ctx: CommandContext) -> bool:
     if result.status in {"activated", "already_active"} and len(parts) == 3:
         prompt = parts[2].strip()
         if prompt:
-            ctx.state.pending_inject = prompt
+            _queue_followup(ctx, prompt)
     return False
 
 

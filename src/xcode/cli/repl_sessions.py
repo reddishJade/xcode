@@ -129,12 +129,16 @@ def resumed_message(view: SessionMetadataView) -> str:
 
 
 def print_loaded_history(store: SessionStore) -> None:
+    from xcode.harness.session.inbox import inbox_display_text
+
     console = Console(file=sys.stdout)
-    records = [
-        record
-        for record in store.build_branch()
-        if record.type in {"user", "assistant"} and str(record.content).strip()
-    ]
+    records = []
+    for record in store.build_branch():
+        user_text = inbox_display_text(record.content)
+        if record.type == "assistant" and str(record.content).strip():
+            records.append(("assistant", str(record.content)))
+        elif user_text:
+            records.append(("user", user_text))
     if not records:
         return
     console.print(
@@ -143,12 +147,12 @@ def print_loaded_history(store: SessionStore) -> None:
             style=CLI_COLOR_INFO,
         )
     )
-    for record in records:
-        if record.type == "assistant":
+    for role, content in records:
+        if role == "assistant":
             console.print(Text("assistant:", style=CLI_COLOR_ASSISTANT))
-            console.print(Markdown(str(record.content)))
+            console.print(Markdown(content))
         else:
-            console.print(Text(f"user: {record.content}", style=CLI_COLOR_USER))
+            console.print(Text(f"user: {content}", style=CLI_COLOR_USER))
 
 
 def print_saved_conversation(store: SessionStore) -> None:

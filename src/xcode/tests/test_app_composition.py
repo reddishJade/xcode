@@ -91,8 +91,15 @@ def test_real_build_app_minimal_run_and_replay_contract(
     )
     first_answer = first.ask("first question")
     session_id = first.session_store.session_id
+    first_branch = first.session_store.build_branch()
 
     assert first_answer == "answer-1"
+    assert all(entry.type != "user" for entry in first_branch)
+    assert [
+        entry.content.get("type")
+        for entry in first_branch
+        if entry.type == "event" and isinstance(entry.content, dict)
+    ][:2] == ["inbox/inserted", "inbox/claimed"]
     assert first.registry
     assert {tool.name for tool in first.registry} >= {
         "read_file",

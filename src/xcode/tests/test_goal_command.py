@@ -61,6 +61,10 @@ class _ResumeAgent:
 class _GoalAgent:
     def __init__(self) -> None:
         self._goal = GoalController(cast(ModelProvider, object()))
+        self.queued: list[str] = []
+
+    def followup(self, message: object, **_kwargs: object) -> None:
+        self.queued.append(str(getattr(message, "content", "")))
 
     def set_goal(self, condition: str) -> None:
         self._goal.set(condition)
@@ -108,7 +112,6 @@ def test_goal_pause_and_resume_preserve_objective_and_continue(
     state = ReplState()
     ctx = _context(agent, state)
     cmd_goal("/goal Finish the migration", ctx)
-    state.pending_inject = None
 
     cmd_goal("/goal pause", ctx)
 
@@ -122,9 +125,10 @@ def test_goal_pause_and_resume_preserve_objective_and_continue(
 
     assert agent.goal_condition == "Finish the migration"
     assert agent.goal_paused is False
-    assert state.pending_inject == (
-        "Continue working toward the active goal:\n\nFinish the migration"
-    )
+    assert agent.queued == [
+        "Finish the migration",
+        "Continue working toward the active goal:\n\nFinish the migration",
+    ]
     assert capsys.readouterr().out == "Goal resumed: Finish the migration\n"
     assert cast(_Store, ctx.store).events == [
         (

@@ -17,14 +17,15 @@ from xcode.harness.agent_runtime.events import (
 from xcode.harness.agent_runtime.config import _build_before_provider_request_closure
 from xcode.harness.agent_runtime.result import AgentHarnessResult
 from xcode.harness.observability import RuntimeCorrelation
-from xcode.harness.session import SessionStore
+from xcode.harness.session import InboxLane, SessionInbox, SessionStore
 from xcode.harness.session.recorder import SessionRecorder
 from xcode.harness.session.subagent_runs import SubagentRunEvent
 
 
 class _Agent:
-    def __init__(self) -> None:
+    def __init__(self, inbox: SessionInbox) -> None:
         self._session_id = "local"
+        self.inbox = inbox
         self.history_session_id = ""
         self.questions: list[str] = []
 
@@ -39,13 +40,33 @@ class _Agent:
     def set_history_session_id(self, session_id: str) -> None:
         self.history_session_id = session_id
 
+    def followup(
+        self,
+        message: UserMessage,
+        *,
+        display_text: str | None = None,
+    ) -> None:
+        self.inbox.insert(
+            message,
+            InboxLane.NEXT_TURN,
+            display_text=display_text,
+            wake=True,
+        )
+
     def run_stream(
         self,
-        question: str,
+        question: str | None,
         mode: object = None,
+        *,
+        display_question: str | None = None,
     ) -> Iterator[AgentHarnessEvent]:
-        del mode
-        self.questions.append(question)
+        del mode, display_question
+        assert question is None
+        claimed = self.inbox.claim_initial("fake-run")
+        assert len(claimed) == 1
+        content = claimed[0].content
+        assert isinstance(content, str)
+        self.questions.append(content)
         yield TextDeltaStructuredEvent("text_delta", 1, "done")
         yield FinalStructuredEvent(
             "final",
@@ -63,20 +84,19 @@ def _recorder(tmp_path: Path) -> SessionRecorder:
     return SessionRecorder(SessionStore(tmp_path / "sessions", project_root=tmp_path))
 
 
-def test_begin_turn_binds_agent_to_real_session(tmp_path: Path) -> None:
+def test_bind_agent_uses_real_session_identity(tmp_path: Path) -> None:
     recorder = _recorder(tmp_path)
-    agent = _Agent()
+    agent = _Agent(SessionInbox(recorder.store))
 
-    recorder.begin_turn(agent, "visible question")
+    recorder.bind_agent(agent)
 
     assert agent.session_id == recorder.store.session_id
     assert agent.history_session_id == recorder.store.session_id
-    assert recorder.store.build_branch()[0].content == "visible question"
 
 
 def test_app_records_programmatic_turn_without_stream_fragments(tmp_path: Path) -> None:
     recorder = _recorder(tmp_path)
-    agent = _Agent()
+    agent = _Agent(SessionInbox(recorder.store))
     app = XcodeApp(
         agent=cast(Any, agent),
         session_recorder=recorder,
@@ -92,16 +112,26 @@ def test_app_records_programmatic_turn_without_stream_fragments(tmp_path: Path) 
     assert [event.type for event in events] == ["text_delta", "final"]
     assert agent.questions == ["expanded question"]
     branch = recorder.store.build_branch()
-    assert [entry.type for entry in branch] == ["user", "event", "assistant"]
-    assert branch[0].content == "visible question"
-    assert branch[1].content["type"] == "final"
-    assert branch[2].content == "done"
+    assert [entry.type for entry in branch] == [
+        "event",
+        "event",
+        "event",
+        "assistant",
+    ]
+    assert branch[0].content["type"] == "inbox/inserted"
+    assert branch[0].content["data"]["display_text"] == "visible question"
+    assert branch[1].content["type"] == "inbox/claimed"
+    assert branch[2].content["type"] == "final"
+    assert branch[3].content == "done"
 
 
 def test_compaction_appends_epoch_without_rewriting_history(tmp_path: Path) -> None:
     recorder = _recorder(tmp_path)
-    agent = _Agent()
-    recorder.begin_turn(agent, "keep this verbatim")
+    inbox = SessionInbox(recorder.store)
+    inbox.insert(
+        UserMessage(content="keep this verbatim"), InboxLane.NEXT_TURN, wake=True
+    )
+    inbox.claim_initial("run-1")
     transcript = recorder.store.current_path
     original = transcript.read_bytes()
 
@@ -127,8 +157,9 @@ def test_compaction_appends_epoch_without_rewriting_history(tmp_path: Path) -> N
 
 def test_provider_request_records_exact_model_visible_envelope(tmp_path: Path) -> None:
     recorder = _recorder(tmp_path)
-    agent = _Agent()
-    recorder.begin_turn(agent, "question")
+    inbox = SessionInbox(recorder.store)
+    inbox.insert(UserMessage(content="question"), InboxLane.NEXT_TURN, wake=True)
+    inbox.claim_initial("run-1")
     recorder.record_provider_request(
         SimpleNamespace(
             metadata={

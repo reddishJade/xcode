@@ -95,12 +95,11 @@ class AgentHarness:
         self,
         provider: ModelProvider,
         registry: tuple[ToolSpec, ...],
+        runtime: AgentRuntimeConfig,
         config: AgentConfig | None = None,
         gate: GateConfig | None = None,
-        runtime: AgentRuntimeConfig | None = None,
     ) -> None:
         gate = gate or GateConfig()
-        runtime = runtime or AgentRuntimeConfig()
         config = config or runtime.config
 
         self.provider: ModelProvider = provider
@@ -157,7 +156,7 @@ class AgentHarness:
         self.audit_logger = gate.audit_logger
         self._history: list[AgentMessage] = []
         self._resumed_notice: str | None = None
-        self._run_controller = SessionRunController(gate.session_id)
+        self._run_controller = SessionRunController(runtime.session_inbox)
 
     # ── 可被子类覆盖的扩展点 ──
 
@@ -216,31 +215,45 @@ class AgentHarness:
         """按名称返回当前工具映射。"""
         return {tool.name: tool for tool in self.registry}
 
-    def steer(self, msg: AgentMessage) -> None:
-        self._try_runtime_steer(msg)
-
-    def _try_runtime_steer(self, msg: AgentMessage) -> bool:
+    def inject(self, msg: AgentMessage) -> SubmitOutcome:
         """注入运行时内部消息，包括 reminder 和 SystemMessage。"""
-        handle = self.active_run()
-        return bool(handle and handle.steer(msg).accepted)
+        return self._run_controller.inject_runtime(msg)
 
-    def try_steer(self, msg: AgentMessage) -> bool:
-        """尝试向当前活跃 run 注入外部用户消息。"""
-        if not isinstance(msg, UserMessage):
-            return False
-        return self._try_runtime_steer(msg)
+    def steer(
+        self,
+        msg: UserMessage,
+        *,
+        display_text: str | None = None,
+    ) -> SubmitOutcome:
+        """把用户输入调度到当前 run 的下一模型边界。"""
+        return self._run_controller.submit(
+            msg,
+            BusyMessageMode.STEER,
+            display_text=display_text,
+        )
 
-    def follow_up(self, msg: UserMessage) -> bool:
-        """把用户消息排入当前 run 结束后的新 run。"""
-        return self._run_controller.submit(msg, BusyMessageMode.FOLLOW_UP).accepted
+    def followup(
+        self,
+        msg: UserMessage,
+        *,
+        display_text: str | None = None,
+    ) -> SubmitOutcome:
+        """把用户输入排入独立的后续 turn。"""
+        return self._run_controller.submit(
+            msg,
+            BusyMessageMode.FOLLOW_UP,
+            display_text=display_text,
+        )
 
     def submit_busy_message(
         self,
         msg: UserMessage,
         mode: BusyMessageMode = BusyMessageMode.STEER,
+        *,
+        display_text: str | None = None,
     ) -> SubmitOutcome:
         """按照指定 busy policy 提交运行时用户消息。"""
-        return self._run_controller.submit(msg, mode)
+        return self._run_controller.submit(msg, mode, display_text=display_text)
 
     def active_run(self) -> ActiveRunHandle | None:
         """返回当前 session 的 active run handle。"""
@@ -249,11 +262,14 @@ class AgentHarness:
     def interrupt(self, reason: str = "interrupted by user") -> bool:
         """请求取消当前 run，但在其完整退出前保留 active identity。"""
         handle = self.active_run()
-        return bool(handle and handle.interrupt(reason).accepted)
+        if handle is None:
+            return False
+        outcome = handle.interrupt(reason)
+        return outcome is not None
 
-    def take_follow_up(self) -> UserMessage | None:
-        """当前 run 完成后取出下一条 session-level follow-up。"""
-        return self._run_controller.take_follow_up()
+    def has_pending_input(self) -> bool:
+        """返回 durable inbox 是否存在需要启动的新输入。"""
+        return self._run_controller.has_waking_input()
 
     def request_compaction(self) -> None:
         if self._compact_controller is not None:
@@ -293,7 +309,7 @@ class AgentHarness:
     def session_id(self, value: str) -> None:
         self._gate.session_id = value
         self._correlation.session_id = value
-        self._run_controller.session_id = value
+        self._run_controller.reload()
 
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history = deepcopy(messages)
@@ -335,7 +351,43 @@ class AgentHarness:
             self.arun_stream(question), self.cancellation_token
         )
 
-    async def arun_stream(self, question: str) -> AsyncIterator[AgentHarnessEvent]:
+    async def arun_stream(
+        self,
+        question: str | None,
+        *,
+        display_question: str | None = None,
+    ) -> AsyncIterator[AgentHarnessEvent]:
+        if question is not None:
+            self.followup(
+                UserMessage(content=question),
+                display_text=display_question,
+            )
+
+        if not self._run_controller.has_waking_input():
+            return
+        run_handle = self._run_controller.begin_run(self.cancellation_token)
+        try:
+            turn_messages = self._run_controller.claim_initial(run_handle)
+            if not turn_messages:
+                return
+            question_text = _turn_text(turn_messages)
+            async for event in self._arun_claimed_turn(
+                question_text,
+                turn_messages,
+                run_handle,
+            ):
+                yield event
+        finally:
+            if self._run_controller.active_run() is run_handle:
+                run_handle.begin_finishing()
+                self._run_controller.complete_run(run_handle)
+
+    async def _arun_claimed_turn(
+        self,
+        question: str,
+        turn_messages: list[AgentMessage],
+        run_handle: ActiveRunHandle,
+    ) -> AsyncIterator[AgentHarnessEvent]:
         from .tool_hooks import emit_hook as _emit_hook
 
         snapshot = build_turn_snapshot(
@@ -349,9 +401,11 @@ class AgentHarness:
         context_messages = self._build_context_messages(question, snapshot)
         self._resumed_notice = None
         history_messages = self.history_messages()
-        turn_messages: list[AgentMessage] = [UserMessage(content=question)]
-
         turn_agent = Agent(self._gate.adapt_tools(active_registry))
+
+        def inject_runtime(message: AgentMessage) -> None:
+            self.inject(message)
+
         loop_config = build_loop_config(
             snapshot=snapshot,
             gate=self._gate,
@@ -363,7 +417,7 @@ class AgentHarness:
             request_hygiene=self.request_hygiene,
             compact_controller=self._compact_controller,
             last_prompt_tokens=self._last_prompt_tokens,
-            steer=self.steer,
+            steer=inject_runtime,
             emit_hook=lambda rec: _emit_hook(self._hook_manager, rec),
             get_prompt_version=_get_prompt_version,
             context_collectors=self._runtime.context_collectors,
@@ -372,7 +426,6 @@ class AgentHarness:
             **self._build_loop_config_extras(),
         )
 
-        run_handle = self._run_controller.begin_run(turn_agent, self.cancellation_token)
         try:
             self.cancellation_token.reset()
             self._correlation.reset(self.session_id)
@@ -397,6 +450,9 @@ class AgentHarness:
                 signal=self.cancellation_token,
                 history=history_messages,
                 request_prefix=context_messages,
+                step_input=run_handle.claim_step_input,
+                finish_step_input=run_handle.finish_step_input,
+                reopen_step_input=run_handle.reopen_step_input,
             ):
                 translated = _translate_event(event, translation_state)
                 if translated is not None:
@@ -427,8 +483,7 @@ class AgentHarness:
             )
         finally:
             run_handle.begin_finishing()
-            unconsumed_steers = turn_agent.close_steering()
-            self._run_controller.complete_run(run_handle, unconsumed_steers)
+            self._run_controller.complete_run(run_handle)
 
     # ── 内部 ──
 
@@ -436,3 +491,21 @@ class AgentHarness:
         reset = getattr(self.provider, "reset_conversation_state", None)
         if callable(reset):
             reset()
+
+
+def _turn_text(messages: list[AgentMessage]) -> str:
+    """为上下文收集器提取本次 claim 的文本查询。"""
+    from ...agent.types import TextContent
+
+    parts: list[str] = []
+    for message in messages:
+        content = getattr(message, "content", None)
+        if isinstance(content, str):
+            parts.append(content)
+            continue
+        parts.extend(
+            block.text
+            for block in content or []
+            if isinstance(block, TextContent) and block.text
+        )
+    return "\n\n".join(parts)

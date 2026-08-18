@@ -240,6 +240,20 @@ def run_repl(
         app.restore_session()
 
     while True:
+        if app.agent.has_pending_input():
+            _run_snapshotted_turn(
+                _AgentTurnContext(
+                    app=app,
+                    store=store,
+                    renderer=markdown_renderer,
+                    state=state,
+                    session=session,
+                    text=None,
+                    display_text=None,
+                ),
+                snapshot_store,
+            )
+            continue
         text, should_exit = _read_repl_text(state, session, store)
         if should_exit:
             return 0
@@ -299,9 +313,6 @@ def run_repl(
             display_text=text,
         )
         _run_snapshotted_turn(ctx, snapshot_store)
-        follow_up = app.agent.take_follow_up()
-        if follow_up is not None:
-            state.pending_inject = str(follow_up.content)
 
 
 def _read_repl_text(
@@ -310,11 +321,6 @@ def _read_repl_text(
     store: SessionStore,
 ) -> tuple[str | None, bool]:
     """读取下一条输入，并统一处理双击 Ctrl+C 退出。"""
-    if state.pending_inject is not None:
-        text = state.pending_inject
-        state.pending_inject = None
-        return text or None, False
-
     try:
         prompt_text: PromptText = (
             ""
@@ -386,8 +392,8 @@ class _AgentTurnContext:
     renderer: MarkdownRenderer
     state: ReplState
     session: PromptLike
-    text: str
-    display_text: str
+    text: str | None
+    display_text: str | None
 
 
 def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
@@ -399,12 +405,12 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
         ctx.state.pending_partial = None
         if partial_text:
             agent = getattr(ctx.app, "agent", None)
-            steer = getattr(agent, "steer", None)
-            if callable(steer):
+            inject = getattr(agent, "inject", None)
+            if callable(inject):
                 from xcode.agent.messages import AssistantMessage
                 from xcode.agent.types import TextContent
 
-                steer(
+                inject(
                     AssistantMessage(
                         content=[
                             TextContent(
@@ -419,7 +425,7 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
                     f"[Context: assistant was interrupted mid-response]\n"
                     f"{partial_text}\n"
                     f"[end of partial response]\n"
-                    f"{text}"
+                    f"{text or ''}"
                 )
 
     try:
@@ -452,8 +458,12 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
             except (EOFError, KeyboardInterrupt):
                 inject_text = ""
             if inject_text:
-                ctx.state.pending_inject = inject_text
-                ctx.store.append("user", inject_text)
+                from xcode.agent.messages import UserMessage
+
+                ctx.app.agent.followup(
+                    UserMessage(content=inject_text),
+                    display_text=inject_text,
+                )
             else:
                 ctx.state.pending_partial = None
                 print("[interrupt cancelled]")

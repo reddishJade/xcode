@@ -17,7 +17,7 @@ from xcode.harness.agent_runtime import (
     AgentHarnessEvent,
 )
 from xcode.coding_agent.harness import CodingAgentHarness
-from xcode.agent.messages import AgentMessage
+from xcode.agent.messages import AgentMessage, UserMessage
 from xcode.agent.types import ToolSpec
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
 from xcode.harness.session_todo import SessionTodoState
@@ -156,7 +156,7 @@ class XcodeApp:
 
     def ask_stream(
         self,
-        question: str,
+        question: str | None,
         mode: ExecutionMode | None = None,
         *,
         display_question: str | None = None,
@@ -164,14 +164,23 @@ class XcodeApp:
         recorder = self.session_recorder
         if recorder is None:
             raise RuntimeError("session recorder is not configured")
-        recorder.begin_turn(self.agent, display_question or question)
-        for event in self.agent.run_stream(question, mode=mode):
+        recorder.bind_agent(self.agent)
+        if question is not None:
+            self.agent.followup(
+                UserMessage(content=question),
+                display_text=display_question,
+            )
+        for event in self.agent.run_stream(
+            None,
+            mode=mode,
+            display_question=display_question,
+        ):
             recorder.record_event(event)
             yield event
 
     async def aask_stream(
         self,
-        question: str,
+        question: str | None,
         mode: ExecutionMode | None = None,
         *,
         display_question: str | None = None,
@@ -179,8 +188,17 @@ class XcodeApp:
         recorder = self.session_recorder
         if recorder is None:
             raise RuntimeError("session recorder is not configured")
-        recorder.begin_turn(self.agent, display_question or question)
-        async for event in self.agent.arun_stream(question, mode=mode):
+        recorder.bind_agent(self.agent)
+        if question is not None:
+            self.agent.followup(
+                UserMessage(content=question),
+                display_text=display_question,
+            )
+        async for event in self.agent.arun_stream(
+            None,
+            mode=mode,
+            display_question=display_question,
+        ):
             recorder.record_event(event)
             yield event
 
@@ -303,6 +321,7 @@ def build_app(
         audit_path=cfg.audit_path,
         runtime_config=cfg.runtime_config,
         session_recorder=infra.session_recorder,
+        session_inbox=infra.session_inbox,
         contextual_state=infra.contextual_state,
         shell_spec=shell_spec,
         compactor=infra.compactor,

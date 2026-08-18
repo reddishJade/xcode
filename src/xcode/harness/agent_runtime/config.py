@@ -46,6 +46,7 @@ from ..security.permission_model import (
 )
 from ...agent.types import ApprovalCallback, ToolSpec
 from .cancellation import CancellationToken
+from ..session.inbox import SessionInbox
 
 
 from .compaction import CompactController, estimate_message_tokens
@@ -98,6 +99,7 @@ class GateConfig:
 class AgentRuntimeConfig:
     """CodingAgentHarness 运行时基础设施配置。"""
 
+    session_inbox: SessionInbox
     config: AgentConfig = field(default_factory=AgentConfig)
     compactor: StructuredCompactor | None = None
     compact_controller: CompactController | None = None

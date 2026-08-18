@@ -6,14 +6,38 @@ import pytest
 from xcode.harness.session import SessionHistory, build_history_tools
 
 
+def _claim(text: str) -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "type": "inbox/claimed",
+        "step": 0,
+        "data": {
+            "inbox_id": f"inbox-{len(text)}",
+            "lane": "next_turn",
+            "message": [
+                {
+                    "kind": "user",
+                    "payload": {"content": text},
+                }
+            ],
+            "source": "user",
+            "display_text": text,
+            "wake": True,
+            "run_id": "run-1",
+            "reason": "",
+        },
+        "correlation": {},
+    }
+
+
 def _write_session(sessions_dir: Path) -> None:
     sessions_dir.mkdir(parents=True)
     rows = [
         {
             "id": "u1",
             "parent_id": None,
-            "type": "user",
-            "content": "The exact migration constraint is keep API v1.",
+            "type": "event",
+            "content": _claim("The exact migration constraint is keep API v1."),
             "created_at": "2026-01-01T00:00:00+00:00",
         },
         {
@@ -33,8 +57,8 @@ def _write_session(sessions_dir: Path) -> None:
         {
             "id": "u2",
             "parent_id": "a1",
-            "type": "user",
-            "content": {"request": "Continue migration", "file": "src/api.py"},
+            "type": "event",
+            "content": _claim("Continue migration in src/api.py"),
             "created_at": "2026-01-01T00:03:00+00:00",
         },
     ]
@@ -80,7 +104,7 @@ def test_history_around_returns_verbatim_neighbors(tmp_path: Path) -> None:
 
     assert [entry.id for entry in around] == ["u1", "a1", "u2"]
     assert around[0].text == "The exact migration constraint is keep API v1."
-    assert '"file": "src/api.py"' in around[2].text
+    assert "src/api.py" in around[2].text
 
 
 def test_history_tool_exposes_search_and_around(tmp_path: Path) -> None:

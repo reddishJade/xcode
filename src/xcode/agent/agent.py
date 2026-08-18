@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
-from threading import Lock
 
 from xcode.ai.providers.base import ModelProvider
 
@@ -50,7 +49,7 @@ def _tool_update_label(tool_name: str, args: dict[str, object]) -> str:
 class Agent:
     """纯 agent 运行时薄封装。
 
-    持有工具列表和 steer 队列。
+    持有工具列表；step 输入的所有权由调用方注入。
     不感知 ToolSpec、权限、审计、hook — 这些由调用方通过
     AgentLoopConfig 的钩子注入。
 
@@ -67,45 +66,8 @@ class Agent:
         self._tools = tools
         self._model = model
         self._system_prompt = system_prompt
-        self._steer_queue: list[AgentMessage] = []
-        self._steer_lock = Lock()
-        self._accepting_steer = True
         self._last_result: AgentLoopResult | None = None
         self._last_messages: list[AgentMessage] = []
-
-    # ── 队列 API ──
-
-    def try_steer(self, msg: AgentMessage) -> bool:
-        """仅在当前 run 仍有消费边界时接受 steer 消息。"""
-        with self._steer_lock:
-            if not self._accepting_steer:
-                return False
-            self._steer_queue.append(msg)
-            return True
-
-    def _drain_steer_queue(self) -> list[AgentMessage]:
-        """原子地取出等待在下一个循环边界消费的 steer 消息。"""
-        with self._steer_lock:
-            messages = self._steer_queue
-            self._steer_queue = []
-        return messages
-
-    def _finish_steering(self) -> list[AgentMessage]:
-        """关闭 steer 入口并原子取出末轮消息。"""
-        with self._steer_lock:
-            self._accepting_steer = False
-            messages = self._steer_queue
-            self._steer_queue = []
-        return messages
-
-    def _reopen_steering(self) -> None:
-        """末轮收到 steer 后重新开放下一模型边界。"""
-        with self._steer_lock:
-            self._accepting_steer = True
-
-    def close_steering(self) -> list[AgentMessage]:
-        """结束 run 时关闭入口并返回尚未消费的消息。"""
-        return self._finish_steering()
 
     def update_tools(self, tools: list[AgentTool]) -> None:
         """替换当前工具列表。
@@ -189,6 +151,9 @@ class Agent:
         emit: Callable[[AgentEvent], None] | None = None,
         history: list[AgentMessage] | None = None,
         request_prefix: list[AgentMessage] | None = None,
+        step_input: Callable[[], list[AgentMessage]] | None = None,
+        finish_step_input: Callable[[], list[AgentMessage]] | None = None,
+        reopen_step_input: Callable[[], None] | None = None,
     ) -> AgentLoopResult:
         """执行 agent 循环，返回结果。
 
@@ -206,9 +171,9 @@ class Agent:
             config,
             sink,
             signal,
-            steer_queue=self._drain_steer_queue,
-            finish_steering=self._finish_steering,
-            reopen_steering=self._reopen_steering,
+            steer_queue=step_input,
+            finish_steering=finish_step_input,
+            reopen_steering=reopen_step_input,
         )
         self._last_result = result
         return result
@@ -221,6 +186,9 @@ class Agent:
         signal: CancellationSignal | None = None,
         history: list[AgentMessage] | None = None,
         request_prefix: list[AgentMessage] | None = None,
+        step_input: Callable[[], list[AgentMessage]] | None = None,
+        finish_step_input: Callable[[], list[AgentMessage]] | None = None,
+        reopen_step_input: Callable[[], None] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """执行 agent 循环，以异步迭代器实时产出事件。
 
@@ -247,9 +215,9 @@ class Agent:
                     config,
                     _emit,
                     signal,
-                    steer_queue=self._drain_steer_queue,
-                    finish_steering=self._finish_steering,
-                    reopen_steering=self._reopen_steering,
+                    steer_queue=step_input,
+                    finish_steering=finish_step_input,
+                    reopen_steering=reopen_step_input,
                 )
                 self._last_result = result
             except BaseException as exc:

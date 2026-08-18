@@ -505,12 +505,12 @@ class _XcodeTui:
         outcome = self._agent_app.agent.submit_busy_message(
             UserMessage(content=expanded_text),
             self._repl_state.busy_mode,
+            display_text=text,
         )
         self._state.add_user(text)
         if references:
             self._store.append("event", file_reference_event(references))
         if outcome.status is SubmitStatus.STEER_ACCEPTED:
-            self._store.append("user", text)
             self._state.log.append(
                 _LogEntry("system", f"[steer] accepted by {outcome.run_id}")
             )
@@ -525,10 +525,9 @@ class _XcodeTui:
             self._state.log.append(
                 _LogEntry("system", "[interrupt] cancelling before replacement run")
             )
-        else:
-            self._repl_state.pending_inject = expanded_text
+        elif outcome.status is SubmitStatus.INJECT_QUEUED:
             self._state.log.append(
-                _LogEntry("system", "[followup] active run already finished")
+                _LogEntry("system", "[steer] queued for the next run")
             )
         self._refresh()
 
@@ -724,11 +723,7 @@ class _XcodeTui:
                 self._state.log.append(_LogEntry("system", output.rstrip()))
             if preserve_running:
                 self._refresh()
-                if (
-                    self._repl_state.pending_inject is not None
-                    and not self._state.running
-                ):
-                    self._submit_pending_inject()
+                self._submit_pending_input()
             else:
                 self._finish_command(text, should_exit)
 
@@ -739,7 +734,7 @@ class _XcodeTui:
 
     def _record_command(self, text: str) -> None:
         """记录用户输入的命令，命令本身不进入 agent 回合。"""
-        self._store.append("user", text)
+        self._store.append("event", {"type": "command", "data": text})
         self._state.add_command(text)
 
     def _show_native_command_choice(self, text: str) -> bool:
@@ -973,7 +968,7 @@ class _XcodeTui:
         if should_exit:
             print_saved_conversation(self._store)
             self._application.exit()
-        self._submit_pending_inject()
+        self._submit_pending_input()
 
     def _clear_session(self) -> None:
         """在 inline TUI 内创建空会话，不切换到终端清屏输出。"""
@@ -1219,12 +1214,17 @@ class _XcodeTui:
             self._state.pending_hitl = None
         return result
 
-    def _submit_pending_inject(self) -> None:
-        """在命令设置注入内容后，以普通用户回合继续执行。"""
-        text = self._repl_state.pending_inject
-        self._repl_state.pending_inject = None
-        if text:
-            self._submit(text)
+    def _submit_pending_input(self) -> None:
+        """宿主只根据 durable inbox 的 wake 状态启动运行。"""
+        if self._state.running or not self._agent_app.agent.has_pending_input():
+            return
+        self._state.running = True
+        self._refresh()
+        threading.Thread(
+            target=self._run_turn,
+            args=(None, None),
+            daemon=True,
+        ).start()
 
     def _accept_approval_choice(self) -> None:
         choice = self._approval_choices.current_value
@@ -1255,7 +1255,7 @@ class _XcodeTui:
 
     # ── Turn 执行 ──
 
-    def _run_turn(self, text: str, display_text: str) -> None:
+    def _run_turn(self, text: str | None, display_text: str | None) -> None:
         snapshot = self._snapshot_store
         _snapshot_ctx = _enter_snapshot_ctx(snapshot, self._store.session_id)
         turn_log_start = len(self._state.log)
@@ -1305,11 +1305,7 @@ class _XcodeTui:
         """保留回合内容，允许完成后继续折叠和滚动查看。"""
         self._committing = False
         self._refresh()
-        follow_up = self._agent_app.agent.take_follow_up()
-        if isinstance(follow_up, UserMessage):
-            self._submit(str(follow_up.content))
-            return
-        self._submit_pending_inject()
+        self._submit_pending_input()
 
     def _save_partial_answer(self, turn_log_start: int) -> None:
         """将中断前已经流式显示的回答写入会话，供恢复和后续注入使用。"""

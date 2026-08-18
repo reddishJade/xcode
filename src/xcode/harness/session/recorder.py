@@ -59,15 +59,6 @@ class SessionRecorder:
     def __init__(self, store: TreeSessionRepo) -> None:
         self.store = store
 
-    def begin_turn(
-        self,
-        agent: SessionBoundAgent,
-        display_question: str,
-    ) -> str:
-        message_id = self.store.append("user", display_question)
-        self.bind_agent(agent)
-        return message_id
-
     def bind_agent(
         self,
         agent: SessionBoundAgent,

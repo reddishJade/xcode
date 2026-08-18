@@ -10,6 +10,8 @@ import re
 
 from xcode.agent.types import ToolInput, ToolSpec
 
+from .schema import SESSION_EVENT_SCHEMA_VERSION
+
 _SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
@@ -25,6 +27,9 @@ class HistoryEntry:
 
     @property
     def text(self) -> str:
+        claimed = _claimed_display_text(self.content)
+        if claimed is not None:
+            return claimed
         if isinstance(self.content, str):
             return self.content
         return json.dumps(self.content, ensure_ascii=False, sort_keys=True)
@@ -237,3 +242,16 @@ def _bounded(value: object, default: int) -> int:
         return min(max(int(value), 0), 20)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return default
+
+
+def _claimed_display_text(content: object) -> str | None:
+    """从 inbox claim 提取适合召回和展示的用户原文。"""
+    if not isinstance(content, dict) or content.get("type") != "inbox/claimed":
+        return None
+    if content.get("schema_version") != SESSION_EVENT_SCHEMA_VERSION:
+        return None
+    data = content.get("data")
+    if not isinstance(data, dict):
+        return None
+    display_text = data.get("display_text")
+    return display_text if isinstance(display_text, str) else None

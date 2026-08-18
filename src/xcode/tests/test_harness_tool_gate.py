@@ -14,6 +14,15 @@ from xcode.harness.security.permission_model import (
     ExternalDirectory,
     SensitivePathOverride,
 )
+from xcode.harness.session import SessionInbox, SessionStore
+
+
+def _runtime(tmp_path: Path) -> AgentRuntimeConfig:
+    store = SessionStore(tmp_path / "sessions", project_root=tmp_path)
+    return AgentRuntimeConfig(
+        session_inbox=SessionInbox(store),
+        project_root=tmp_path,
+    )
 
 
 class TestStricterDecision:
@@ -52,7 +61,7 @@ def test_agent_harness_propagates_external_directories(tmp_path: Path) -> None:
         provider=cast(Any, object()),
         registry=(),
         gate=GateConfig(external_directories=(external,)),
-        runtime=AgentRuntimeConfig(project_root=tmp_path),
+        runtime=_runtime(tmp_path),
     )
 
     assert harness.external_directories == (external,)
@@ -66,7 +75,7 @@ def test_agent_harness_propagates_sensitive_path_overrides(tmp_path: Path) -> No
         provider=cast(Any, object()),
         registry=(),
         gate=GateConfig(sensitive_path_overrides=(override,)),
-        runtime=AgentRuntimeConfig(project_root=tmp_path),
+        runtime=_runtime(tmp_path),
     )
 
     assert harness.sensitive_path_overrides == (override,)
