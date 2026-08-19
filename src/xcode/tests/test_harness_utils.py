@@ -87,9 +87,6 @@ class TestIsBlockedWorkspacePath:
     def test_pycache(self) -> None:
         assert _is_blocked_workspace_path("src/__pycache__/foo.pyc")
 
-    def test_chroma_db(self) -> None:
-        assert _is_blocked_workspace_path(".local/chroma_db/data")
-
     def test_normal_path(self) -> None:
         assert not _is_blocked_workspace_path("src/main.py")
 

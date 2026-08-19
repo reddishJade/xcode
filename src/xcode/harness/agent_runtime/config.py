@@ -445,7 +445,7 @@ def resolve_permission_policy(
     """返回静态权限策略，直接使用已通过 discover_runtime_config 合并的结果。
 
     各配置源的合并已在 config.discover_runtime_config() 中完成，
-    无需在此处再次加载 .local/settings.json。
+    无需在此处再次加载 .xcode/settings.json。
     """
     return base
 

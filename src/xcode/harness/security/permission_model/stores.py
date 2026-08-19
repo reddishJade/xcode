@@ -176,7 +176,7 @@ class SessionGrantStoreManager:
 
 
 class FileGrantStore:
-    DEFAULT_RELATIVE_PATH = Path(".local") / "approval_grants.json"
+    DEFAULT_RELATIVE_PATH = Path(".xcode") / "approval_grants.json"
 
     def __init__(self, path: Path) -> None:
         self.path = path

@@ -557,9 +557,4 @@ def _is_blocked(root: Path, path: Path) -> bool:
         return True
     if ".env" in relative.parts or relative.name == ".env":
         return True
-    return (
-        len(relative.parts) >= 3
-        and relative.parts[0] == "xcode"
-        and relative.parts[1] == ".local"
-        and relative.parts[2] == "chroma_db"
-    )
+    return False

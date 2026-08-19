@@ -47,7 +47,7 @@ def build_shared_infra(
         assert resolved_sessions_dir is not None
         transcript_dir = resolved_sessions_dir
     else:
-        transcript_dir = project_root / ".local" / "sessions"
+        transcript_dir = project_root / ".xcode" / "sessions"
 
     compactor = LayeredCompactor(
         transcript_dir=transcript_dir,

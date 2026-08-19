@@ -27,7 +27,7 @@ def test_markdown_is_the_only_source_of_truth(tmp_path: Path) -> None:
         "Provider retry rule",
         "Architecture",
     ]
-    assert not (manager.root / ".local" / "memory_lru.json").exists()
+    assert not (manager.root / ".xcode" / "memory_lru.json").exists()
 
 
 def test_bm25_search_supports_code_and_chinese(tmp_path: Path) -> None:

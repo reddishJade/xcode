@@ -382,7 +382,7 @@ def _warn_unknown_overrides(
 # ── 配置与缓存路径 ──
 
 
-CANONICAL_CONFIG_PATH = ".local" / Path("mcp_config.json")
+CANONICAL_CONFIG_PATH = Path(".xcode") / "mcp_config.json"
 
 
 def _mcp_config_path(project_root: Path) -> Path | None:
@@ -393,7 +393,7 @@ def _mcp_config_path(project_root: Path) -> Path | None:
 
 
 def _cache_path(project_root: Path) -> Path:
-    return project_root / ".local" / "mcp_cache.json"
+    return project_root / ".xcode" / "mcp_cache.json"
 
 
 # ── 缓存工具 ──

@@ -1717,7 +1717,7 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     ),
     "/mcp": CommandEntry(
         handler=cmd_mcp,
-        desc="Show MCP server status or reload .local/mcp_config.json.",
+        desc="Show MCP server status or reload .xcode/mcp_config.json.",
         args_desc="status|reload",
         accepts_args=True,
         group=COMMAND_GROUP_INFO,

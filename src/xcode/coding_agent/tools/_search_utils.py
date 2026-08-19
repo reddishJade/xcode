@@ -177,7 +177,6 @@ def _rg_exclusion_args() -> list[str]:
         "!**/.git/**",
         "!**/.venv/**",
         "!**/__pycache__/**",
-        "!**/.local/chroma_db/**",
         "!**/.env",
         "!**/.env.*",
     )

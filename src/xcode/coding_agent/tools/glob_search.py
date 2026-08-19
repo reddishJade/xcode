@@ -195,7 +195,6 @@ def _glob_with_rg(
         "!**/.git/**",
         "!**/.venv/**",
         "!**/__pycache__/**",
-        "!**/.local/chroma_db/**",
         "!**/.env",
         "!**/.env.*",
         "!**/.*",

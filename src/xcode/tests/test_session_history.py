@@ -83,7 +83,7 @@ def _write_session(sessions_dir: Path) -> None:
 
 
 def test_history_search_only_reads_current_branch(tmp_path: Path) -> None:
-    sessions_dir = tmp_path / ".local" / "sessions"
+    sessions_dir = tmp_path / ".xcode" / "sessions"
     _write_session(sessions_dir)
     history = SessionHistory(sessions_dir)
     history.set_session_id("session-a")
@@ -95,7 +95,7 @@ def test_history_search_only_reads_current_branch(tmp_path: Path) -> None:
 
 
 def test_history_around_returns_verbatim_neighbors(tmp_path: Path) -> None:
-    sessions_dir = tmp_path / ".local" / "sessions"
+    sessions_dir = tmp_path / ".xcode" / "sessions"
     _write_session(sessions_dir)
     history = SessionHistory(sessions_dir)
     history.set_session_id("session-a")
@@ -108,7 +108,7 @@ def test_history_around_returns_verbatim_neighbors(tmp_path: Path) -> None:
 
 
 def test_history_tool_exposes_search_and_around(tmp_path: Path) -> None:
-    sessions_dir = tmp_path / ".local" / "sessions"
+    sessions_dir = tmp_path / ".xcode" / "sessions"
     _write_session(sessions_dir)
     history = SessionHistory(sessions_dir)
     history.set_session_id("session-a")

@@ -16,7 +16,7 @@ MAX_SNAPSHOT_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 SNAPSHOT_EXCLUDES: list[str] = [
     ".git/",
-    ".local/",
+    ".xcode/",
     "node_modules/",
     "vendor/",
     "__pycache__/",
@@ -95,7 +95,7 @@ class SnapshotService:
     def __init__(self, project_root: Path, session_id: str) -> None:
         self._project_root = project_root.resolve()
         self._git_dir = (
-            project_root / ".local" / "snapshots" / session_id / ".git"
+            project_root / ".xcode" / "snapshots" / session_id / ".git"
         ).resolve()
         self._lock = threading.Lock()
         self._skipped: list[SkippedFileInfo] = []
@@ -312,10 +312,10 @@ class SnapshotStore:
         return self._services[session_id]
 
     def _index_path(self, session_id: str) -> Path:
-        return self._project_root / ".local" / "snapshots" / session_id / "index.json"
+        return self._project_root / ".xcode" / "snapshots" / session_id / "index.json"
 
     def _lock_path(self, session_id: str) -> Path:
-        return self._project_root / ".local" / "snapshots" / session_id / "index.lock"
+        return self._project_root / ".xcode" / "snapshots" / session_id / "index.lock"
 
     def next_turn_id(self, session_id: str) -> str:
         records = self._load_index(session_id)

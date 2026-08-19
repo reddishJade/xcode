@@ -338,7 +338,7 @@ def create_prompt_session(
     try:
         from prompt_toolkit.history import FileHistory
 
-        history_dir = (project_root or Path.cwd()) / ".local"
+        history_dir = (project_root or Path.cwd()) / ".xcode"
         history_dir.mkdir(parents=True, exist_ok=True)
         history = FileHistory(str(history_dir / "repl_history"))
     except OSError:

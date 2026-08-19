@@ -1551,7 +1551,7 @@ def _tui_history(project_root: Path) -> History | None:
     try:
         from prompt_toolkit.history import FileHistory
 
-        history_dir = project_root / ".local"
+        history_dir = project_root / ".xcode"
         history_dir.mkdir(parents=True, exist_ok=True)
         return FileHistory(str(history_dir / "repl_history"))
     except OSError:

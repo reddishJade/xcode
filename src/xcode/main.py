@@ -185,7 +185,7 @@ def _run(args, runtime_config) -> int:
     sessions_dir = (
         args.sessions_dir
         or resolve_config_path(args.project_root, runtime_config.paths.sessions_dir)
-        or (args.project_root / ".local" / "sessions")
+        or (args.project_root / ".xcode" / "sessions")
     )
     app = _build_app_from_config(args.project_root, runtime_config, sessions_dir)
     if args.prompt:

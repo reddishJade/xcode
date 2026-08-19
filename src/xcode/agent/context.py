@@ -800,7 +800,7 @@ class NotesCollector:
         root = input.project_root or self._project_root
         if root is None:
             return []
-        notes_dir = root / ".local" / "notes"
+        notes_dir = root / ".xcode" / "notes"
         if not notes_dir.is_dir():
             return []
         try:

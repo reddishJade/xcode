@@ -165,7 +165,7 @@ def approval_scope_lines(
     if "permanent" in allowed_scopes:
         lines.append(
             "[yellow]Always allow: save this rule for this project in "
-            ".local/approval_grants.json.[/yellow]"
+            ".xcode/approval_grants.json.[/yellow]"
         )
     return lines
 

@@ -3,7 +3,7 @@
 `xcode.config.json` 位于项目根目录。`python -m xcode.main` 和 `build_app()` 自动读取它；`--config` 用于显式指定其他路径。相对路径按 `--project-root` 解析。
 
 配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目
-`xcode.config.json` → 本地 `.local/settings.json` → 环境变量
+`xcode.config.json` → 本地 `.xcode/settings.json` → 环境变量
 `XCODE_APPROVAL_POLICY`。
 
 **没有配置文件时**启用正式内置能力（`core`、`subagent`、`memory`，以及存在
@@ -194,9 +194,9 @@ REPL 可在运行时切换，切换不会丢失会话上下文。
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `sessions_dir` | string/null | `null` | REPL 会话目录；未配置时 CLI 使用 `.local/sessions` |
+| `sessions_dir` | string/null | `null` | REPL 会话目录；未配置时 CLI 使用 `.xcode/sessions` |
 | `skills_dir` | string/null | `null` | 最高优先级 Skill 扫描目录；相对路径按项目根目录解析 |
-固定本地路径：`.local/session_index.json`、`.local/session_artifacts/`、`.local/mcp_cache.json`、`.local/mcp_config.json`。
+固定本地路径：`.xcode/session_index.json`、`.xcode/session_artifacts/`、`.xcode/mcp_cache.json`、`.xcode/mcp_config.json`。
 
 ---
 
@@ -381,7 +381,7 @@ Skill discovery 按 first-wins 处理同名技能，覆盖顺序为：
 `glob_files`、`find_files`、`list_dir`、`grep_search`、`websearch`、
 `webfetch`、`question`、`bash`、`search_tools`、`subagent`、`todowrite`、
 `history`、`search_memory`。发现 skill 时注册 `load_skill`；存在
-`.local/mcp_config.json` 时注册 `mcp__{server}__{tool}` 动态工具。
+`.xcode/mcp_config.json` 时注册 `mcp__{server}__{tool}` 动态工具。
 
 `search_tools` 工具按关键字搜索当前已注册工具。
 `websearch` 通过 Exa / Parallel MCP provider 搜索网络，默认 Exa；支持 `query`、

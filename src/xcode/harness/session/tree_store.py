@@ -83,7 +83,7 @@ class TreeSessionRepo:
             timeout=lock_timeout_seconds,
         )
         self.current_path = self._new_path()
-        self.artifacts_dir = self.project_root / ".local" / "session_artifacts"
+        self.artifacts_dir = self.project_root / ".xcode" / "session_artifacts"
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     # ── 公共 API ──

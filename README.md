@@ -98,7 +98,7 @@ xcode config set main chat_model deepseek-v4-flash
 xcode setup
 
 # 自定义配置
-xcode --config .local/settings.json
+xcode --config .xcode/settings.json
 
 # 恢复最近会话
 xcode --resume
@@ -160,7 +160,7 @@ xcode --resume
 - **TUI 全屏终端** — 基于 `prompt-toolkit` 的类 VSCode 全屏交互界面。
 - **Subagent 委托** — `subagent` 单入口委派子任务，持久化 batch/run 谱系与终态；子 agent 共享项目目录，并继承父 agent 的权限门控。
 - **类型化工具呈现** — terminal、diff、location 和 subagent 由工具产生结构化 intent，REPL/TUI 共享投影逻辑。
-- **MCP 协议** — 基于官方 Python SDK 连接本地 stdio server，自动发现 `.local/mcp_config.json` 并注册 `mcp__{server}__{tool}` 动态工具。
+- **MCP 协议** — 基于官方 Python SDK 连接本地 stdio server，自动发现 `.xcode/mcp_config.json` 并注册 `mcp__{server}__{tool}` 动态工具。
 - **记忆系统** — 项目根 `MEMORY.md` + 用户级 `~/.xcode/memory/` 是可审查的长期事实源；Agent 通过 BM25 工具按需检索。
 - **外部 Hook** — 可配置事件驱动的外部命令 hooks（git 前置检查、自定义通知等）。
 
@@ -194,7 +194,7 @@ xcode --resume
      ↓
 xcode.config.json               ← 项目级
      ↓
-.local/settings.json            ← 本地覆盖
+.xcode/settings.json            ← 本地覆盖
      ↓
 环境变量                          ← 最高优先级
 ```

@@ -349,7 +349,7 @@ def discover_runtime_config(
 ) -> XcodeRuntimeConfig:
     global_path = Path.home() / ".xcode" / "settings.json"
     project_path = explicit_path or project_root / "xcode.config.json"
-    local_path = project_root / ".local" / "settings.json"
+    local_path = project_root / ".xcode" / "settings.json"
     global_raw = _load_raw_config(global_path)
     project_raw = _load_raw_config(project_path)
     local_raw = _load_raw_config(local_path)
