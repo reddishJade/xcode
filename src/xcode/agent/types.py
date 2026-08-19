@@ -195,6 +195,9 @@ class ApprovalRequest:
     action_input: ToolInput
     allowed_scopes: tuple[ApprovalScope, ...]
     reason: str
+    transcript: str = ""
+    working_directory: str = ""
+    turn_id: str = ""
 
 
 ApprovalCallback = Callable[[ApprovalRequest], HITLResult]

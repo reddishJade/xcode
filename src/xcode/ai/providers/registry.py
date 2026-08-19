@@ -130,6 +130,7 @@ def _build_llm_profiles(
     profile_settings = dict(settings.model_profiles)
     profile_settings.setdefault("main", ModelProfileConfig())
     profile_settings.setdefault("subagent", profile_settings["main"])
+    profile_settings.setdefault("reviewer", profile_settings["main"])
     profile_settings.setdefault("judge", profile_settings["main"])
     profile_settings.setdefault("refiner", profile_settings["main"])
     return {

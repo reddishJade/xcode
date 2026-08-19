@@ -99,8 +99,10 @@ def _execute_tool_via_gate(
     mode_state = ExecutionModeState(initial_mode=getattr(agent, "current_mode", "act"))
     gate = ToolGate(
         mode_state=mode_state,
-        approval_callback=getattr(agent, "approval_callback", None),
+        user_approval_callback=getattr(agent, "user_approval_callback", None),
+        auto_approval_callback=getattr(agent, "auto_approval_callback", None),
         permission_policy=getattr(agent, "permission_policy", None),
+        approval_policy=getattr(agent, "approval_policy", "on-request"),
         hook_manager=None,
         audit_logger=None,
         session_id="repl",

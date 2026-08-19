@@ -10,20 +10,21 @@ from pydantic import ValidationError
 from xcode.agent.types import ApprovalRequest, ToolSpec
 from xcode.coding_agent.assembly.security import sensitive_path_overrides_from_security
 from xcode.harness.config import SecurityRuntimeConfig
-from xcode.harness.security.permissions import (
-    HITLResult,
-    PermissionEngine,
-    PermissionEngineConfig,
+from xcode.harness.security import HITLResult
+from xcode.harness.security.permissions import PermissionEngine, PermissionEngineConfig
+from xcode.harness.security.permission_model import (
+    Action,
+    Constraint,
+    Rule,
+    SensitivePathOverride,
 )
-from xcode.harness.security.permission_model import SensitivePathOverride
-from xcode.harness.security.permission_model import Rule
 
 
 def _bash_tool() -> ToolSpec:
     return ToolSpec("bash", "", "", lambda _data, _update: "")
 
 
-def test_build_allows_unknown_shell_command_without_approval() -> None:
+def test_build_routes_unknown_shell_command_to_approval() -> None:
     requests: list[ApprovalRequest] = []
 
     def approve(request: ApprovalRequest) -> HITLResult:
@@ -32,9 +33,9 @@ def test_build_allows_unknown_shell_command_without_approval() -> None:
 
     engine = PermissionEngine(
         PermissionEngineConfig(
-            mode_ruleset=(Rule(action="bash", effect="allow"),),
-            mode_fallback="allow",
-            shell_unresolved_policy="allow",
+            mode_ruleset=(Rule(action="bash", effect="ask"),),
+            mode_fallback="ask",
+            shell_unresolved_policy="ask",
         )
     )
 
@@ -47,7 +48,7 @@ def test_build_allows_unknown_shell_command_without_approval() -> None:
 
     assert result.decision == "allow"
     assert result.blocked is False
-    assert requests == []
+    assert len(requests) == 1
 
 
 def test_act_still_asks_for_unknown_shell_command() -> None:
@@ -74,6 +75,71 @@ def test_act_still_asks_for_unknown_shell_command() -> None:
 
     assert result.decision == "allow"
     assert len(requests) == 1
+
+
+def test_never_policy_rejects_ask_without_calling_reviewer() -> None:
+    requests: list[ApprovalRequest] = []
+
+    def approve(request: ApprovalRequest) -> HITLResult:
+        requests.append(request)
+        return HITLResult("allow", "once")
+
+    engine = PermissionEngine(
+        PermissionEngineConfig(
+            mode_ruleset=(Rule(action="bash", effect="ask"),),
+            mode_fallback="ask",
+            approval_policy="never",
+        )
+    )
+
+    result = engine.decide(
+        "bash",
+        {"command": "pytest -q"},
+        tool_spec=_bash_tool(),
+        approval_callback=approve,
+    )
+
+    assert result.decision == "deny"
+    assert result.reason_code == "approval_policy_never"
+    assert requests == []
+
+
+def test_auto_review_metadata_is_preserved() -> None:
+    def approve(_request: ApprovalRequest) -> HITLResult:
+        return HITLResult(
+            "allow",
+            "once",
+            rationale="Focused local test command.",
+            risk="low",
+            authorization="high",
+        )
+
+    engine = PermissionEngine(
+        PermissionEngineConfig(
+            mode_ruleset=(Rule(action="bash", effect="ask"),),
+            mode_fallback="ask",
+        )
+    )
+
+    result = engine.decide(
+        "bash",
+        {"command": "pytest -q"},
+        tool_spec=_bash_tool(),
+        approval_callback=approve,
+        approvals_reviewer="auto_review",
+    )
+
+    assert result.decision == "allow"
+    assert result.source == "auto_review"
+    assert result.metadata == {
+        "approval_decision": "allow",
+        "approval_scope": "once",
+        "approval_reviewer": "auto_review",
+        "approval_review_status": "completed",
+        "approval_rationale": "Focused local test command.",
+        "approval_risk": "low",
+        "approval_authorization": "high",
+    }
 
 
 def test_build_respects_explicit_user_shell_ask() -> None:
@@ -119,7 +185,37 @@ def test_build_respects_explicit_user_shell_deny() -> None:
     assert result.blocked is True
 
 
+def test_hook_constraint_uses_the_canonical_resolver() -> None:
+    class DenyProvider:
+        def evaluate(self, action: Action) -> tuple[Constraint, ...]:
+            return (
+                Constraint(
+                    decision="deny",
+                    source="hook",
+                    reason=f"hook denied {action.tool}",
+                ),
+            )
+
+    engine = PermissionEngine(
+        PermissionEngineConfig(
+            hook_constraint_providers=(DenyProvider(),),
+            mode_fallback="allow",
+        )
+    )
+
+    result = engine.decide("read_file", {"path": "README.md"})
+
+    assert result.decision == "deny"
+    assert result.source == "hook"
+
+
 def test_build_keeps_dangerous_shell_command_denied() -> None:
+    requests: list[ApprovalRequest] = []
+
+    def approve(request: ApprovalRequest) -> HITLResult:
+        requests.append(request)
+        return HITLResult("allow", "once")
+
     engine = PermissionEngine(
         PermissionEngineConfig(
             mode_ruleset=(Rule(action="bash", effect="allow"),),
@@ -128,10 +224,39 @@ def test_build_keeps_dangerous_shell_command_denied() -> None:
         )
     )
 
-    result = engine.decide("bash", {"command": "rm -rf /"})
+    result = engine.decide(
+        "bash",
+        {"command": "rm -rf /"},
+        tool_spec=_bash_tool(),
+        approval_callback=approve,
+    )
 
     assert result.decision == "deny"
     assert result.blocked is True
+    assert requests == []
+
+
+def test_auto_review_cannot_create_session_grant() -> None:
+    def approve(_request: ApprovalRequest) -> HITLResult:
+        return HITLResult("allow", "session")
+
+    engine = PermissionEngine(
+        PermissionEngineConfig(
+            mode_ruleset=(Rule(action="bash", effect="ask"),),
+            mode_fallback="ask",
+        )
+    )
+
+    result = engine.decide(
+        "bash",
+        {"command": "pytest -q"},
+        tool_spec=_bash_tool(),
+        approval_callback=approve,
+        approvals_reviewer="auto_review",
+    )
+
+    assert result.decision == "deny"
+    assert result.reason_code == "invalid_auto_review_scope"
 
 
 def test_unresolved_restricted_path_is_explicit_deny() -> None:

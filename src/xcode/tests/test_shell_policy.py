@@ -28,7 +28,7 @@ def test_unknown_command_requires_approval_without_guessing_side_effects() -> No
     assert not any(target.kind == "path" for target in action.targets)
 
 
-def test_build_policy_allows_unknown_command_without_a_constraint() -> None:
+def test_explicit_unresolved_allow_skips_unknown_command_constraint() -> None:
     action = ActionExtractor().extract(
         "bash",
         {"command": "pytest -q"},
@@ -65,7 +65,7 @@ def test_git_clean_is_denied_even_with_alternate_working_directory() -> None:
     assert "git clean" in constraints[0].reason
 
 
-def test_build_policy_does_not_override_dangerous_command_denial() -> None:
+def test_unresolved_allow_does_not_override_dangerous_command_denial() -> None:
     action = ActionExtractor().extract(
         "bash",
         {"command": "git -C /tmp/repo clean -fdx"},

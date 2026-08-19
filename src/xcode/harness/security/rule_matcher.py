@@ -5,10 +5,7 @@
   对 shell 命令额外支持 command / subcommand / flags 级结构化匹配
 - 非 shell 工具退化为 resource_pattern 通配符匹配
 
-三个消费者复用此模块：
-1. PermissionEngine._shadow_verdict() — 规则评估
-2. GrantStore._grant_matches_target()  — grant 查找
-3. execution_modes filter_tools()      — 工具可见性推导
+权限引擎与 grant 匹配复用此模块；它不持有运行时上下文。
 
 RuleMatcher 是无状态纯函数集合，不持有任何上下文。
 """
@@ -219,7 +216,7 @@ def evaluate(
     """在 ruleset 中评估 action，返回 allow / ask / deny。
 
     规则按顺序遍历，findLast 匹配。全部不匹配则返回 fallback。
-    fallback 按模式分别为 plan="deny"、build="allow"、act="ask"。
+    fallback 按模式分别为 plan="deny"、build="ask"、act="ask"。
     """
     matched = first_match(
         action,

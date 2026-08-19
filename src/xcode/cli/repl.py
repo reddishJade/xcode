@@ -196,7 +196,8 @@ def run_repl(
         pass
     agent = getattr(app, "agent", None)
     if agent is not None:
-        agent.approval_callback = hitl_handler
+        if getattr(agent, "approval_policy", "on-request") == "on-request":
+            agent.user_approval_callback = hitl_handler
         agent.session_id = store.session_id
         if hasattr(agent, "set_session_grant_store_provider"):
             agent.set_session_grant_store_provider(

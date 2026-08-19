@@ -90,7 +90,7 @@ def _compute_would_resolve(
     return "would_call_approval"
 
 
-def compute_shadow_approval_candidate(
+def compute_approval_candidate(
     action: Action,
     *,
     session_grant_store: GrantStore | None = None,

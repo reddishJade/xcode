@@ -16,7 +16,9 @@ from xcode.coding_agent.execution_modes import (
     ExecutionModeState,
 )
 from xcode.ai.events import ToolCall
+from xcode.agent.types import ApprovalRequest
 from xcode.harness.agent_runtime.tool_gate import ToolGate
+from xcode.harness.security import HITLResult
 
 
 class TestParseExecutionMode:
@@ -61,13 +63,15 @@ class TestDefaultModeRulesets:
         assert set(rulesets) == {"plan", "build", "act"}
         assert DEFAULT_MODE_FALLBACKS == {
             "plan": "deny",
-            "build": "allow",
+            "build": "ask",
             "act": "ask",
         }
         assert DEFAULT_SHELL_UNRESOLVED_POLICIES == {
-            "build": "allow",
+            "build": "ask",
             "act": "ask",
         }
+        build_shell = next(rule for rule in rulesets["build"] if rule.action == "bash")
+        assert build_shell.effect == "ask"
         plan_patterns = {
             rule.resource_pattern
             for rule in rulesets["plan"]
@@ -163,9 +167,17 @@ class TestExecutionModeState:
 
     def test_tool_gate_freezes_shell_policy_for_current_mode(self) -> None:
         state = ExecutionModeState()
+
+        def user(_request: ApprovalRequest) -> HITLResult:
+            return HITLResult("allow", "once")
+
+        def auto(_request: ApprovalRequest) -> HITLResult:
+            return HITLResult("allow", "once")
+
         gate = ToolGate(
             mode_state=state,
-            approval_callback=None,
+            user_approval_callback=user,
+            auto_approval_callback=auto,
             permission_policy=None,
             hook_manager=None,
             audit_logger=None,
@@ -178,5 +190,9 @@ class TestExecutionModeState:
         state.set_mode("act")
         act_snapshot = gate.snapshot()
 
-        assert build_snapshot.shell_unresolved_policy == "allow"
+        assert build_snapshot.shell_unresolved_policy == "ask"
+        assert build_snapshot.approvals_reviewer == "auto_review"
+        assert build_snapshot.approval_callback is auto
         assert act_snapshot.shell_unresolved_policy == "ask"
+        assert act_snapshot.approvals_reviewer == "user"
+        assert act_snapshot.approval_callback is user

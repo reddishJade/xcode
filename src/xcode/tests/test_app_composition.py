@@ -165,6 +165,9 @@ def test_build_app_starts_in_configured_default_mode(
         sessions_dir=sessions_dir,
     )
     assert app.agent.current_mode == "build"
+    assert app.agent.approvals_reviewer == "auto_review"
+    assert app.agent.auto_approval_callback is not None
+    assert app.agent.current_approval_callback is app.agent.auto_approval_callback
 
     app.ask("first question")
     first_request = providers[0].requests[0]

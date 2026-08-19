@@ -1,5 +1,18 @@
 """权限、规则与 shell 语义安全能力。"""
 
+from .approval import (
+    ApprovalPolicy,
+    ApprovalsReviewer,
+    HITLDecision,
+    HITLResult,
+    HITLScope,
+    PermissionApprovalCallback,
+    ReviewAuthorization,
+    ReviewRisk,
+    ReviewStatus,
+)
+from .approval_reviewer import AutoApprovalReviewer, AutoReviewVerdict
+
 from .permission_model import (
     Action,
     ActionExtractor,
@@ -23,7 +36,7 @@ from .permission_model import (
     Target,
     UnresolvedEffect,
     Verdict,
-    compute_shadow_approval_candidate,
+    compute_approval_candidate,
     create_grant_record,
     evaluate_policy_constraints,
     GrantStore,
@@ -39,10 +52,6 @@ from .shell_analyzer import (
     analyze_shell_command,
 )
 from .permissions import (
-    HITLDecision,
-    HITLResult,
-    HITLScope,
-    PermissionApprovalCallback,
     PermissionCheckResult,
     PermissionDecision,
     PermissionEngine,
@@ -55,7 +64,14 @@ __all__ = [
     "Action",
     "ActionExtractor",
     "ApprovalCandidate",
+    "ApprovalPolicy",
     "ApprovalResult",
+    "ApprovalsReviewer",
+    "ReviewAuthorization",
+    "ReviewRisk",
+    "ReviewStatus",
+    "AutoApprovalReviewer",
+    "AutoReviewVerdict",
     "BoundaryContext",
     "CmdAnalyzer",
     "Constraint",
@@ -93,7 +109,7 @@ __all__ = [
     "UnresolvedEffect",
     "Verdict",
     "analyze_shell_command",
-    "compute_shadow_approval_candidate",
+    "compute_approval_candidate",
     "create_grant_record",
     "evaluate_policy_constraints",
 ]

@@ -370,7 +370,8 @@ class _XcodeTui:
         # ── Wire agent hooks ──
         agent = getattr(self._agent_app, "agent", None)
         if agent is not None:
-            agent.approval_callback = self._approval_callback
+            if getattr(agent, "approval_policy", "on-request") == "on-request":
+                agent.user_approval_callback = self._approval_callback
             agent.session_id = self._store.session_id
             if hasattr(agent, "set_session_grant_store_provider"):
                 agent.set_session_grant_store_provider(

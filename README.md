@@ -151,10 +151,10 @@ xcode --resume
 
 - **结构化 Agent 循环** — `CodingAgentHarness` 消费 provider 流式事件，统一处理 text、reasoning、tool_use、tool_result 和 final answer。
 - **可回放事实账本** — session 以 append-only 事件记录用户输入、provider 实际请求、工具语义、compaction epoch、子代理生命周期和最终回答。
-- **三执行模式** — `plan`（只读）、`build`（允许写入）、`act`（每次询问），规则引擎按 findLast 覆盖权限。
+- **三执行模式** — `plan`（只读）、`build`（自动执行并由独立 reviewer 审批边界动作）、`act`（边界动作询问用户），规则引擎按 findLast 覆盖权限。
 - **核心工具闭环** — 内置文件读写编辑、glob/grep/bash/subagent/webfetch/websearch/question/todowrite 等工具。`edit_file` 依赖 read-before-edit SHA256 指纹校验。
 - **工具并发分区** — 只读且并发安全的工具并行执行；写操作、高风险命令保持串行。
-- **权限与审计** — `PermissionEngine` 统一执行工具权限判定、HITL 审批和输出脱敏；`JsonlAuditLogger` 记录审计日志；shell 效果分析器对无法保守解析的命令请求确认。
+- **权限与审计** — `PermissionEngine` 统一执行工具权限判定、自动/人工审批和输出脱敏；`JsonlAuditLogger` 记录审计日志；Build 中需要 review 的 shell 动作不会暂停询问用户。
 - **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果；compact 后按 session 写入 checkpoint，resume 使用 checkpoint + 原文 tail 重建上下文。
 - **REPL 会话管理** — `/slash` 命令支持 plan/build/act、会话分支、回退、undo（快照恢复）、模型切换、config 管理、session transcript 落盘。
 - **TUI 全屏终端** — 基于 `prompt-toolkit` 的类 VSCode 全屏交互界面。

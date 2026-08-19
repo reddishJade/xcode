@@ -408,13 +408,13 @@ def evaluate_policy_constraints(
             global_default = cast("PermissionDecisionV2", gd)
 
     evaluators: list[Any] = [
+        PathBoundaryPolicyEvaluator(boundary_context),
         ModePolicyEvaluator(execution_decision),
         StaticPolicyEvaluator(
             rules,
             global_default=global_default,
             action_input=action_input,
         ),
-        PathBoundaryPolicyEvaluator(boundary_context),
     ]
     evaluators.extend(hook_constraint_providers)
     constraints: list[Constraint] = []

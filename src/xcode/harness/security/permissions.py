@@ -1,11 +1,10 @@
-"""工具执行的 allow/deny/ask 权限策略与 HITL 授权模型。
+"""工具执行的 allow/deny/ask 权限策略与审批模型。
 
-权限架构：静态策略（规则 + global_default）+ 动态策略（执行模式）+ HITL 授权（会话/持久）
+权限架构：静态策略、执行模式、已有授权与当前 mode 的 reviewer。
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 import os
 from pathlib import Path
@@ -14,6 +13,16 @@ from typing import Any, Literal
 from xcode.agent.types import ApprovalRequest, ApprovalScope
 
 from ..session import JsonValue
+from .approval import (
+    ApprovalPolicy,
+    ApprovalsReviewer,
+    HITLDecision,
+    HITLScope,
+    PermissionApprovalCallback,
+    ReviewAuthorization,
+    ReviewRisk,
+    ReviewStatus,
+)
 from .permission_model import (
     Action,
     ActionExtractor,
@@ -22,7 +31,9 @@ from .permission_model import (
     BoundaryContext,
     Constraint,
     ExternalDirectory,
+    GrantDecision as _GrantDecision,
     GrantRecord,
+    GrantScope as _GrantScope,
     GrantStore,
     PolicyEvaluator,
     PermissionResolver,
@@ -31,32 +42,17 @@ from .permission_model import (
     SensitivePathOverride,
     StaticPermission,
     Verdict,
-    compute_shadow_approval_candidate,
+    compute_approval_candidate,
     create_grant_record,
+    evaluate_policy_constraints,
 )
 from .rule_matcher import first_match as rule_first_match, merge_rulesets as rule_merge
-from .permission_model import GrantDecision as _GrantDecision
-from .permission_model import GrantScope as _GrantScope
 
 
 PermissionDecision = Literal["allow", "deny", "ask"]
 ShellUnresolvedPolicy = Literal["allow", "deny", "ask"]
-HITLDecision = Literal["allow", "deny"]
-HITLScope = Literal["once", "session", "permanent"]
 type PermissionMetadata = dict[str, JsonValue]
-
-
-@dataclass(frozen=True)
-class HITLResult:
-    """用户对工具授权的结构化结果。"""
-
-    decision: HITLDecision
-    scope: HITLScope
-    suggestion: str = ""
-
-
 PermissionToolSpec = Any
-PermissionApprovalCallback = Callable[[ApprovalRequest], HITLResult]
 
 
 @dataclass(frozen=True)
@@ -72,12 +68,29 @@ class PermissionPolicy:
 
 
 def _approval_metadata(
-    user_decision: HITLDecision, approval_scope: HITLScope
+    approval_decision: HITLDecision,
+    approval_scope: HITLScope,
+    *,
+    reviewer: str | None = None,
+    status: ReviewStatus = "completed",
+    rationale: str = "",
+    risk: ReviewRisk | None = None,
+    authorization: ReviewAuthorization | None = None,
 ) -> PermissionMetadata:
-    return {
-        "user_decision": user_decision,
+    metadata: PermissionMetadata = {
+        "approval_decision": approval_decision,
         "approval_scope": approval_scope,
     }
+    if reviewer is not None:
+        metadata["approval_reviewer"] = reviewer
+        metadata["approval_review_status"] = status
+    if rationale:
+        metadata["approval_rationale"] = rationale
+    if risk is not None:
+        metadata["approval_risk"] = risk
+    if authorization is not None:
+        metadata["approval_authorization"] = authorization
+    return metadata
 
 
 # ── PermissionEngine — 统一决策引擎 ──
@@ -88,21 +101,16 @@ DENIED_BY_USER_GUIDANCE = (
 
 # 匹配规则来源标识
 MATCHED_RESTRICTED_DIRS = "restricted_dirs"
-MATCHED_STATIC_DENY = "static_deny"
 MATCHED_EXECUTION_MODE = "execution_mode"
 MATCHED_STATIC_ASK = "static_ask"
 MATCHED_SESSION_GRANT = "session_grant"
 MATCHED_PERSISTENT_GRANT = "persistent_grant"
-MATCHED_STATIC_ALLOW = "static_allow"
 
 MATCHED_DEFAULT = "default"
 
 SOURCE_CONFIG = "config"
 SOURCE_SESSION = "session"
 SOURCE_PERSISTENT = "persistent"
-
-SOURCE_EXECUTION_MODE = "execution_mode"
-SOURCE_DEFAULT = "default"
 
 
 @dataclass(frozen=True)
@@ -118,10 +126,6 @@ class PermissionEngineResult:
     matched_rule: str | None = None
     source: str | None = None
     metadata: PermissionMetadata | None = None
-    shadow_action: Action | None = None
-    shadow_verdict: Verdict | None = None
-    shadow_diff: str | None = None
-    shadow_approval_candidate: ApprovalCandidate | None = None
     approval_result: ApprovalResult | None = None
     action: Action | None = None
 
@@ -143,7 +147,6 @@ class PermissionEngineConfig:
 
     static_policy: PermissionPolicy | None = None
     restricted_dirs: tuple[str, ...] = ()
-    shadow_model_enabled: bool = False
     project_root: Path | None = None
     external_directories: tuple[ExternalDirectory, ...] = ()
     sensitive_path_overrides: tuple[SensitivePathOverride, ...] = ()
@@ -159,23 +162,22 @@ class PermissionEngineConfig:
     user_ruleset: tuple[Rule, ...] = ()
     """用户配置中当前模式的规则 override。从 xcode.config.json 加载。"""
     mode_fallback: PermissionDecision = "ask"
-    """未匹配任何规则时的默认决策。plan='deny', build='allow', act='ask'。"""
+    """未匹配任何规则时的默认决策。plan='deny'，build/act='ask'。"""
     shell_unresolved_policy: ShellUnresolvedPolicy = "ask"
     """Shell 效果无法静态确认时的模式级决策；危险命令始终拒绝。"""
+    approval_policy: ApprovalPolicy = "on-request"
+    """ask 是否可以交给 reviewer；never 在授权未命中时确定性拒绝。"""
 
 
 class PermissionEngine:
     """统一权限决策引擎。
 
     决策优先级（从高到低）：
-    0. restricted_dirs 硬阻断
-    1. 静态 deny > 执行模式 deny
-    2. 静态 ask
-    3. HITL 授权（session/persistent 满足前面的 ask）
-    4. 静态 allow
-    5. <removed: risk_evaluator / high_risk 见 section 8>
-    6. 高风险审批
-    7. 默认放行
+    0. restricted_dirs、路径边界和危险命令硬阻断
+    1. mode、静态策略和 ruleset 取更严格结果
+    2. 已保存的 session/permanent grant 处理 ask
+    3. approval policy 决定 ask 是否可进入 reviewer
+    4. user 或 auto-reviewer 给出最终裁决
     """
 
     def __init__(self, config: PermissionEngineConfig) -> None:
@@ -189,6 +191,9 @@ class PermissionEngine:
         execution_decision: PermissionDecision | None = None,
         tool_spec: PermissionToolSpec | None = None,
         approval_callback: PermissionApprovalCallback | None = None,
+        approvals_reviewer: ApprovalsReviewer = "user",
+        approval_transcript: str = "",
+        approval_turn_id: str = "",
     ) -> PermissionEngineResult:
         profile = self._config.tool_action_profiles.get(tool_name)
         path_extractor = self._config.tool_path_extractors.get(tool_name)
@@ -211,30 +216,15 @@ class PermissionEngine:
             tool_spec=tool_spec,
             tool_input=tool_input,
             approval_callback=approval_callback,
+            approvals_reviewer=approvals_reviewer,
+            approval_transcript=approval_transcript,
+            approval_turn_id=approval_turn_id,
         )
 
         # 附加 action 信息到结果
         result = replace(result, action=action)
 
-        # Shadow 模式：附加 shadow 信息到结果
-        if not self._config.shadow_model_enabled:
-            return result
-
-        shadow_verdict = self._shadow_verdict(
-            action,
-            execution_decision=execution_decision,
-        )
-        shadow_approval_candidate = self._compute_shadow_approval(
-            action,
-            shadow_verdict,
-        )
-        return replace(
-            result,
-            shadow_action=action,
-            shadow_verdict=shadow_verdict,
-            shadow_diff=self._shadow_diff(result, shadow_verdict),
-            shadow_approval_candidate=shadow_approval_candidate,
-        )
+        return result
 
     def _has_approval_mechanism(
         self,
@@ -245,7 +235,7 @@ class PermissionEngine:
         如果存在 session grant store、permanent grant store 或 approval_callback
         中的任意一个，则有能力处理 ask。
         """
-        return (
+        return self._config.approval_policy == "never" or (
             self._config.session_grant_store is not None
             or self._config.permanent_grant_store is not None
             or approval_callback is not None
@@ -259,9 +249,12 @@ class PermissionEngine:
         tool_spec: PermissionToolSpec | None = None,
         tool_input: dict[str, Any],
         approval_callback: PermissionApprovalCallback | None = None,
+        approvals_reviewer: ApprovalsReviewer = "user",
+        approval_transcript: str = "",
+        approval_turn_id: str = "",
     ) -> PermissionEngineResult:
         """通过约束求值与 PermissionResolver 生成权限裁决。"""
-        verdict = self._shadow_verdict(
+        verdict = self._policy_verdict(
             action,
             execution_decision=execution_decision,
         )
@@ -304,8 +297,11 @@ class PermissionEngine:
             action,
             verdict,
             approval_callback=approval_callback,
+            approvals_reviewer=approvals_reviewer,
             tool_spec=tool_spec,
             tool_input=tool_input,
+            approval_transcript=approval_transcript,
+            approval_turn_id=approval_turn_id,
         )
 
     def _resolve_ask(
@@ -314,76 +310,39 @@ class PermissionEngine:
         verdict: Verdict,
         *,
         approval_callback: PermissionApprovalCallback | None = None,
+        approvals_reviewer: ApprovalsReviewer = "user",
         tool_spec: PermissionToolSpec | None = None,
         tool_input: dict[str, Any],
+        approval_transcript: str = "",
+        approval_turn_id: str = "",
     ) -> PermissionEngineResult:
         """统一的 ask 处理：grant 查找 + 回调。"""
-        # 统一路径：所有工具通过 _execute_cutover_ask 处理 grant 查找、回调、写入
-        return self._execute_cutover_ask(
+        return self._resolve_approval_request(
             action,
             verdict,
             approval_callback=approval_callback,
+            approvals_reviewer=approvals_reviewer,
             tool_spec=tool_spec,
             tool_input=tool_input,
+            approval_transcript=approval_transcript,
+            approval_turn_id=approval_turn_id,
         )
 
-    def _shadow_verdict(
+    def _policy_verdict(
         self,
         action: Action,
         *,
         execution_decision: PermissionDecision | None,
     ) -> Verdict:
-        """通过规则匹配生成权限裁决。
+        """把全部策略层转换为约束，再由唯一 resolver 取最严格结果。"""
+        policy_constraints = evaluate_policy_constraints(
+            action,
+            execution_decision=execution_decision,
+            static_policy=self._config.static_policy,
+            boundary_context=self._boundary_context(),
+            hook_constraint_providers=self._config.hook_constraint_providers,
+        )
 
-        使用 RuleMatcher 对 action 做规则匹配。
-        PathBoundary 安全网和 ModePolicy 仍然保留。
-        """
-        # Step 1: PathBoundary 安全网
-        from .permission_model import PathBoundaryPolicyEvaluator
-
-        ctx = self._boundary_context()
-        boundary_constraints: tuple[Constraint, ...] = PathBoundaryPolicyEvaluator(
-            ctx
-        ).evaluate(action)
-        for c in boundary_constraints:
-            if c.decision == "deny":
-                return Verdict(
-                    decision="deny",
-                    source="boundary",
-                    reason=c.reason,
-                    winning_constraint=c,
-                    constraints=(c,),
-                    metadata=c.metadata,
-                )
-
-        # Step 2: ModePolicy 仍保留（execution_decision 来自 check_call）
-        mode_constraints: tuple[Constraint, ...] = ()
-        if execution_decision is not None:
-            from .permission_model import ModePolicyEvaluator
-
-            mode_constraints = ModePolicyEvaluator(execution_decision).evaluate(action)
-            for c in mode_constraints:
-                if c.decision == "deny":
-                    return Verdict(
-                        decision="deny",
-                        source="mode",
-                        reason=c.reason,
-                        winning_constraint=c,
-                        constraints=(c,),
-                        metadata=c.metadata,
-                    )
-
-        # Step 3: StaticPolicy（用户配置的静态规则）
-        static_constraints: tuple[Constraint, ...] = ()
-        if self._config.static_policy is not None:
-            from .permission_model import StaticPolicyEvaluator
-
-            static_constraints = StaticPolicyEvaluator(
-                self._config.static_policy.rules,
-                global_default=self._config.static_policy.global_default,
-            ).evaluate(action)
-
-        # Step 4: ShellAnalysis 不可解析效果按当前执行模式处理
         shell_constraints: tuple[Constraint, ...] = ()
         if action.capability == "shell" and action.unresolved_effects:
             from .shell_analyzer import ShellAnalysisPolicyEvaluator
@@ -393,7 +352,6 @@ class PermissionEngine:
                 self._config.shell_unresolved_policy,
             )
 
-        # Step 5: RuleMatcher 三态 ruleset 匹配
         rules = rule_merge(
             self._config.user_ruleset,
             self._config.mode_ruleset,
@@ -404,69 +362,30 @@ class PermissionEngine:
             rules,
             shell_command=shell_command,
         )
-
-        # Step 6: 合并约束
-        all_constraints = (
-            mode_constraints
-            + static_constraints
-            + boundary_constraints
-            + shell_constraints
+        rule_decision = (
+            matched_rule.effect
+            if matched_rule is not None
+            else self._config.mode_fallback
         )
-        resolver_verdict = PermissionResolver().resolve(all_constraints)
-
-        # 合并 RuleMatcher 与 resolver：
-        #   RuleMatcher 提供 mode/user 规则决策（主决策源）
-        #   Resolver 处理 PathBoundary/Mode/Static 约束（安全网 + 静态规则）
-        #   两者冲突时，较严格的一方获胜
-        if matched_rule is not None:
-            rule_decision = matched_rule.effect
-        else:
-            rule_decision = self._config.mode_fallback
-
-        # 取较严格的决策：deny > ask > allow
-        decision_priority = {"allow": 0, "ask": 1, "deny": 2}
-        final_decision = resolver_verdict.decision
-        if decision_priority[rule_decision] > decision_priority[final_decision]:
-            final_decision = rule_decision
-
-        if final_decision != resolver_verdict.decision:
-            metadata: dict[str, object] = {}
-            if final_decision == "deny":
-                metadata = {
-                    "reason_code": "rule_denied",
-                    "overrideable": False,
-                    "remediation": "Update the configured permission rule.",
-                }
-            return Verdict(
-                decision=final_decision,
-                source="rule_matcher",
-                reason=(
-                    f"rule={rule_decision}, resolver={resolver_verdict.decision} "
-                    f"({'matched rule' if matched_rule else 'fallback'})"
-                ),
-                winning_constraint=None,
-                constraints=all_constraints,
-                metadata=metadata,
-            )
-
-        return resolver_verdict
-
-    def _compute_shadow_approval(
-        self,
-        action: Action,
-        verdict: Verdict,
-    ) -> ApprovalCandidate | None:
-        """当 shadow verdict 为 ask 时，预测 engine-level grant/callback 结果。"""
-        if not action.targets:
-            return None
-        if verdict.decision != "ask":
-            return None
-
-        return compute_shadow_approval_candidate(
-            action,
-            session_grant_store=self._config.session_grant_store,
-            permanent_grant_store=self._config.permanent_grant_store,
-            boundary_context=self._boundary_context(),
+        rule_metadata: dict[str, object] = {}
+        if rule_decision == "deny":
+            rule_metadata = {
+                "reason_code": "rule_denied",
+                "overrideable": False,
+                "remediation": "Update the configured permission rule.",
+            }
+        rule_constraint = Constraint(
+            decision=rule_decision,
+            source="rule_matcher",
+            reason=(
+                f"ruleset returned {rule_decision} "
+                f"({'matched rule' if matched_rule is not None else 'mode fallback'})"
+            ),
+            operation=action.operation,
+            metadata=rule_metadata,
+        )
+        return PermissionResolver().resolve(
+            policy_constraints + shell_constraints + (rule_constraint,)
         )
 
     def _extract_shell_command(self, action: Action) -> str | None:
@@ -485,19 +404,6 @@ class PermissionEngine:
             project_root=self._config.project_root,
             external_directories=self._config.external_directories,
             sensitive_path_overrides=self._config.sensitive_path_overrides,
-        )
-
-    def _shadow_diff(
-        self,
-        current_result: PermissionEngineResult,
-        shadow_verdict: Verdict,
-    ) -> str | None:
-        if current_result.decision == shadow_verdict.decision:
-            return None
-        return (
-            "current decision "
-            f"{current_result.decision} differs from shadow decision "
-            f"{shadow_verdict.decision}"
         )
 
     # ── 内部检查方法 ──
@@ -618,17 +524,20 @@ class PermissionEngine:
 
     # ── 统一 ask 处理 ──
 
-    def _execute_cutover_ask(
+    def _resolve_approval_request(
         self,
         action: Action,
         verdict: Verdict,
         *,
         approval_callback: PermissionApprovalCallback | None = None,
+        approvals_reviewer: ApprovalsReviewer = "user",
         tool_spec: PermissionToolSpec | None = None,
         tool_input: dict[str, Any] | None = None,
+        approval_transcript: str = "",
+        approval_turn_id: str = "",
     ) -> PermissionEngineResult:
         """执行 ask 后的授权查找、回调调用和授权写入。"""
-        candidate = compute_shadow_approval_candidate(
+        candidate = compute_approval_candidate(
             action,
             session_grant_store=self._config.session_grant_store,
             permanent_grant_store=self._config.permanent_grant_store,
@@ -637,18 +546,37 @@ class PermissionEngine:
 
         # 存在匹配授权 → 直接使用，不回调
         if candidate is not None and candidate.would_resolve != "would_call_approval":
-            return self._cutover_grant_result(action, candidate)
+            return self._grant_result(action, candidate)
+
+        # never 不允许交互或模型 reviewer 扩大权限；已存在的显式 grant 仍在上面生效。
+        if self._config.approval_policy == "never":
+            return PermissionEngineResult(
+                decision="deny",
+                blocked=True,
+                reason=f"approval policy is never for tool: {action.tool}",
+                reason_code="approval_policy_never",
+                overrideable=False,
+                remediation=(
+                    "Change security.approval_policy to on-request or add an "
+                    "explicit allow rule."
+                ),
+                matched_rule=MATCHED_STATIC_ASK,
+                source=SOURCE_CONFIG,
+            )
 
         # 无匹配授权 → 调用 approval_callback
-        return self._cutover_callback_result(
+        return self._review_result(
             action,
             verdict,
             approval_callback=approval_callback,
+            approvals_reviewer=approvals_reviewer,
             tool_spec=tool_spec,
             tool_input=tool_input,
+            approval_transcript=approval_transcript,
+            approval_turn_id=approval_turn_id,
         )
 
-    def _cutover_grant_result(
+    def _grant_result(
         self,
         action: Action,
         candidate: ApprovalCandidate,
@@ -714,14 +642,17 @@ class PermissionEngine:
             ),
         )
 
-    def _cutover_callback_result(
+    def _review_result(
         self,
         action: Action,
         verdict: Verdict,
         *,
         approval_callback: PermissionApprovalCallback | None = None,
+        approvals_reviewer: ApprovalsReviewer = "user",
         tool_spec: PermissionToolSpec | None = None,
         tool_input: dict[str, Any] | None = None,
+        approval_transcript: str = "",
+        approval_turn_id: str = "",
     ) -> PermissionEngineResult:
         """无匹配授权时调用 approval_callback 并写入新授权存储。"""
 
@@ -738,20 +669,47 @@ class PermissionEngine:
             action_input=tool_input or {},
             allowed_scopes=_allowed_approval_scopes(action),
             reason=verdict.reason,
+            transcript=approval_transcript,
+            working_directory=(
+                str(self._config.project_root)
+                if self._config.project_root is not None
+                else ""
+            ),
+            turn_id=approval_turn_id,
         )
         hitl = approval_callback(request)
+        approval_source = (
+            "auto_review" if approvals_reviewer == "auto_review" else SOURCE_SESSION
+        )
 
         if hitl.decision == "deny":
-            metadata = _approval_metadata("deny", hitl.scope)
+            metadata = _approval_metadata(
+                "deny",
+                hitl.scope,
+                reviewer=approvals_reviewer,
+                status=hitl.status,
+                rationale=hitl.rationale,
+                risk=hitl.risk,
+                authorization=hitl.authorization,
+            )
             if hitl.suggestion:
                 metadata = dict(metadata)
                 metadata["suggestion"] = hitl.suggestion
+            if approvals_reviewer == "auto_review":
+                if hitl.status == "timed_out":
+                    reason = "automatic approval review timed out"
+                elif hitl.status == "failed":
+                    reason = "automatic approval review failed closed"
+                else:
+                    reason = "action rejected by automatic approval review"
+            else:
+                reason = f"tool {action.tool} denied by user{DENIED_BY_USER_GUIDANCE}"
             return PermissionEngineResult(
                 decision="deny",
                 blocked=True,
-                reason=(f"tool {action.tool} denied by user{DENIED_BY_USER_GUIDANCE}"),
+                reason=reason,
                 matched_rule=MATCHED_STATIC_ASK,
-                source=SOURCE_SESSION,
+                source=approval_source,
                 metadata=metadata,
                 approval_result=ApprovalResult(decision="deny", scope=hitl.scope),
             )
@@ -770,8 +728,28 @@ class PermissionEngine:
                 source=SOURCE_CONFIG,
             )
 
+        if approvals_reviewer == "auto_review" and hitl.scope != "once":
+            return PermissionEngineResult(
+                decision="deny",
+                blocked=True,
+                reason="auto-review may only approve a single execution",
+                reason_code="invalid_auto_review_scope",
+                overrideable=False,
+                remediation="Retry auto-review with once scope or ask the user.",
+                matched_rule=MATCHED_STATIC_ASK,
+                source=SOURCE_CONFIG,
+            )
+
         # 允许 — 根据实际展示并选择的 scope 写入授权
-        metadata: PermissionMetadata = _approval_metadata("allow", hitl.scope)
+        metadata: PermissionMetadata = _approval_metadata(
+            "allow",
+            hitl.scope,
+            reviewer=approvals_reviewer,
+            status=hitl.status,
+            rationale=hitl.rationale,
+            risk=hitl.risk,
+            authorization=hitl.authorization,
+        )
         write_scope = hitl.scope
         if write_scope == "session":
             self._write_grants(action, decision="allow", scope="session")
@@ -782,7 +760,7 @@ class PermissionEngine:
             decision="allow",
             blocked=False,
             matched_rule=MATCHED_STATIC_ASK,
-            source=SOURCE_SESSION,
+            source=approval_source,
             metadata=metadata,
             approval_result=ApprovalResult(
                 decision="allow",

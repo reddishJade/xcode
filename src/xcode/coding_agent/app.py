@@ -298,6 +298,19 @@ def build_app(
         todo_state=todo_state,
     )
 
+    auto_approval_callback = None
+    security = cfg.runtime_config.security
+    if security.approval_policy == "on-request":
+        from xcode.harness.security import AutoApprovalReviewer
+
+        auto_reviewer = AutoApprovalReviewer(
+            providers.llms.get("reviewer", providers.llm),
+            timeout_seconds=float(security.auto_review_timeout_seconds),
+            max_workers=cfg.agent_config.tool_workers,
+        )
+        auto_approval_callback = auto_reviewer
+        closers = (*closers, auto_reviewer.close)
+
     fallback_provider = providers.llms.get("fallback")
     # 为 LayeredCompactor 接入 LLM 驱动的摘要生成，替代纯规则 fallback
     from xcode.harness.agent_runtime.compaction import build_compact_summarize_fn
@@ -324,6 +337,7 @@ def build_app(
         memory_manager=memory_manager,
         session_history=infra.session_history,
         todo_state=todo_state,
+        auto_approval_callback=auto_approval_callback,
     )
 
     return XcodeApp(

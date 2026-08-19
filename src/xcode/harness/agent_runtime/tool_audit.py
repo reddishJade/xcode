@@ -75,9 +75,9 @@ def build_audit_record(
                 else None
             )
         ),
-        user_decision=(
-            str(metadata.get("user_decision"))
-            if metadata.get("user_decision")
+        approval_decision=(
+            str(metadata.get("approval_decision"))
+            if metadata.get("approval_decision")
             else None
         ),
         capability=action.capability if action is not None else None,
@@ -85,6 +85,31 @@ def build_audit_record(
         target_value=str(target.value) if target is not None else None,
         matched_rule=perm_result.matched_rule if perm_result is not None else None,
         approval_source=perm_result.source if perm_result is not None else None,
+        approval_reviewer=(
+            str(metadata.get("approval_reviewer"))
+            if metadata.get("approval_reviewer")
+            else None
+        ),
+        approval_review_status=(
+            str(metadata.get("approval_review_status"))
+            if metadata.get("approval_review_status")
+            else None
+        ),
+        approval_rationale=(
+            str(metadata.get("approval_rationale"))
+            if metadata.get("approval_rationale")
+            else None
+        ),
+        approval_risk=(
+            str(metadata.get("approval_risk"))
+            if metadata.get("approval_risk")
+            else None
+        ),
+        approval_authorization=(
+            str(metadata.get("approval_authorization"))
+            if metadata.get("approval_authorization")
+            else None
+        ),
         approval_grant_id=(
             approval_result.grant_id if approval_result is not None else None
         ),

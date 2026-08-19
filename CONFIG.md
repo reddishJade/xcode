@@ -2,7 +2,9 @@
 
 `xcode.config.json` 位于项目根目录。`python -m xcode.main` 和 `build_app()` 自动读取它；`--config` 用于显式指定其他路径。相对路径按 `--project-root` 解析。
 
-配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目 `xcode.config.json` → 本地 `.local/settings.json` → 环境变量 `XCODE_APPROVAL_POLICY`。
+配置发现栈（优先级从低到高）：全局 `~/.xcode/settings.json` → 项目
+`xcode.config.json` → 本地 `.local/settings.json` → 环境变量
+`XCODE_APPROVAL_POLICY`。
 
 **没有配置文件时**启用正式内置能力（`core`、`subagent`、`memory`，以及存在
 可见 skill 时的 `skills`）。零配置可用。
@@ -13,7 +15,9 @@
 
 ### model_profiles
 
-支持 `main`、`subagent`、`fallback` 三个 profile。未配置的 profile 由 `_resolve_model_profiles` 按 main 配置补齐：字符串视为 model 名称，字典与 main 配置合并。
+支持 `main`、`subagent`、`fallback`、`reviewer` 四个 profile。未配置的
+profile 由 `_resolve_model_profiles` 按 main 配置补齐：字符串视为 model 名称，
+字典与 main 配置合并。`reviewer` 仅供自动审批使用，不作为主 agent。
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -126,7 +130,7 @@ REPL 可在运行时切换，切换不会丢失会话上下文。
 | mode | 工具可见性 | 内置规则与 fallback |
 |---|---|---|
 | `plan` | 只读工具，以及 `write_file` / `edit_file` | 只读允许；仅允许写入或编辑 `.xcode/plans/*.md`；fallback=`deny`，不进入 HITL |
-| `build` | 全部工具 | 读、写和 shell 允许；fallback=`allow` |
+| `build` | 全部工具 | 项目内结构化读写允许；shell 和未匹配动作自动 review；fallback=`ask`（内部 review，不是人工询问） |
 | `act` | 全部工具 | 只读允许，写和 shell 询问；fallback=`ask` |
 
 每个 mode 可配置 `rules` 数组。用户规则追加到内置规则之后，匹配采用 findLast
@@ -249,7 +253,8 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `approval_policy` | string | `"never"` | `always`、`never` |
+| `approval_policy` | string | `"on-request"` | `on-request`：处理规则产生的 `ask`；`never`：未命中已有 grant 时拒绝 |
+| `auto_review_timeout_seconds` | number | `90` | 自动 reviewer 的总 deadline，范围 0–300 秒（不含 0） |
 | `restricted_dirs` | array | `[]` | 禁止访问目录列表 |
 | `permissions` | object | `{}` | 权限组到决策的映射；支持 `read`、`edit`、`shell`、`web`、`subagent`、`skill` |
 | `tools` | object | `{}` | 具体工具名到决策的映射；覆盖同名权限组展开结果 |
@@ -275,13 +280,49 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 }
 ```
 
-权限组先展开为具体工具，`tools` 中的具体工具配置随后覆盖。未匹配项使用
-`global_default`；未设置 `global_default` 且 `approval_policy` 为 `always` 时，
-默认请求确认。路径边界、mode policy、静态策略、shell 可解析性与 mode ruleset
-共同参与裁决，`deny` 和 `ask` 不能被更宽松的静态配置绕过。
+权限组先展开为具体工具，`tools` 中的具体工具配置随后覆盖。静态规则未匹配时
+由 `global_default` 产出静态约束；mode ruleset 未匹配时由当前 mode 的 fallback
+产出模式约束。路径边界、mode policy、静态策略、shell 可解析性与 mode ruleset
+共同进入同一个 resolver，较严格的结果优先。
 
-权限提示与 shell 效果分析不是 OS sandbox。Xcode 不隔离 agent 进程；需要真实
-隔离时，应在容器或虚拟机中运行。
+规则产生的 `ask` 是内部 approval request，不等于询问用户。默认配置下，Build
+使用 `on-request + auto_review`，approval request 交给独立的 `reviewer` profile；
+Act 使用 `on-request + user`；Plan 不进入审批。reviewer 路由由 mode 固定，不能由
+回调结果或配置改写。`approval_policy=never` 禁止提交新的 approval request。这里
+只接受 `on-request` 和 `never`，没有旧值迁移或别名。
+
+自动 reviewer 接收带角色和信任标记的有界会话 transcript，以及本次动作的完整
+参数；review 会话没有工具，因此不能修改本地状态。输出 contract 为
+`outcome / risk_level / user_authorization / rationale`：低风险和有界可逆的中风险
+动作可自动放行；高风险动作要求至少中等授权且范围明确；critical 风险拒绝。
+它只能批准单次执行，最多尝试三次，并受一个 90 秒总 deadline 约束。超时、
+provider 错误或无效输出都会 fail closed；它不能覆盖 restricted directories、
+路径边界、危险命令或显式 `deny`。
+
+批准后会显示风险、授权程度和理由，例如：
+
+```text
+Automatic approval review approved (risk: low, authorization: high):
+运行指定的本地聚焦测试是用户授权实现的常规验证，不涉及网络、敏感数据或破坏性操作。
+```
+
+```json
+{
+  "provider": {
+    "model_profiles": {
+      "reviewer": "deepseek-v4-flash"
+    }
+  },
+  "security": {
+    "approval_policy": "on-request",
+    "auto_review_timeout_seconds": 90
+  }
+}
+```
+
+权限提示、自动 reviewer 与 shell 效果分析都不是 OS sandbox。Xcode 不隔离
+agent 进程，因此 Build 默认也不会直接放行任意 shell 命令；需要真实隔离时，
+应在容器或虚拟机中运行。
 
 ### external_directories 示例
 

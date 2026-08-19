@@ -10,13 +10,17 @@ from typing import Protocol
 
 from xcode.ai.events import ToolCall
 from ..security.permissions import PermissionDecision
+from ..security.approval import ApprovalsReviewer
 
 
 class ToolGateMode(Protocol):
-    """ToolGate 对执行模式的唯二需求：当前模式名称 + 准入检查。"""
+    """ToolGate 对执行模式的最小依赖。"""
 
     @property
     def current_mode(self) -> str: ...
+
+    @property
+    def approvals_reviewer(self) -> ApprovalsReviewer: ...
 
     def check_call(self, call: ToolCall) -> PermissionDecision: ...
 

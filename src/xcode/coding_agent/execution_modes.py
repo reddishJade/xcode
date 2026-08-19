@@ -1,7 +1,7 @@
 """Plan / Build / Act 的工具可见性策略与三态 ruleset 初始化。
 
 PlanPolicy.filter_tools() 暴露 _PLAN_TOOLS，外加 write_file/edit_file（限 .xcode/plans/*.md）。
-提供默认 ruleset，build 默认规则为透明的工具级 profile。
+提供默认 ruleset；Build 的结构化项目读写直接执行，shell 与未知动作自动审批。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from typing import Literal, Protocol
 from xcode.ai.events import ToolCall
 from xcode.harness.security.permission_model import Rule
 from xcode.harness.security.permissions import PermissionDecision
+from xcode.harness.security.approval import ApprovalsReviewer
 from xcode.agent.types import ToolSpec
 
 
@@ -39,6 +40,11 @@ class ExecutionModeState:
     @property
     def current_mode(self) -> ExecutionMode:
         return self._current_mode
+
+    @property
+    def approvals_reviewer(self) -> ApprovalsReviewer:
+        """Build 使用自动 reviewer；其他模式不隐式替用户授权。"""
+        return "auto_review" if self._current_mode == "build" else "user"
 
     def set_mode(self, mode: ExecutionMode) -> None:
         """设置当前执行模式。"""
@@ -95,7 +101,7 @@ class PlanPolicy:
 
 
 class BuildPolicy:
-    """build: 读写工具和 shell 默认放行。"""
+    """build: 项目内结构化读写直接执行，shell 与未知动作进入审批。"""
 
     def filter_tools(self, tools: tuple[ToolSpec, ...]) -> tuple[ToolSpec, ...]:
         return tools
@@ -160,16 +166,17 @@ def mode_notice(mode: str) -> str:
     if mode == "build":
         return (
             '<execution-mode name="build">\n'
-            "Build Mode is active. All tools are enabled; file writes and "
-            "shell commands run automatically unless explicit permission rules "
-            "or hard safety boundaries apply.\n"
+            "Build Mode is active. All tools are enabled. Structured project "
+            "file writes run directly; shell and unmatched actions are reviewed "
+            "automatically without pausing for user approval. Hard safety "
+            "boundaries always apply.\n"
             "</execution-mode>"
         )
     if mode == "act":
         return (
             '<execution-mode name="act">\n'
             "Act Mode is active. Read tools run directly; writes and shell "
-            "commands require HITL approval unless configured otherwise.\n"
+            "commands require user approval.\n"
             "</execution-mode>"
         )
     return ""
@@ -201,16 +208,11 @@ def build_default_mode_rulesets(
         Rule(action="edit_file", effect="allow"),
         Rule(action="apply_patch", effect="allow"),
     )
-    shell_rules = (
-        Rule(action="bash", effect="allow"),
-        Rule(action="shell", effect="allow"),
-    )
-
     ask_write_rules = tuple(
         Rule(action=rule.action, effect="ask") for rule in write_rules
     )
     ask_shell_rules = tuple(
-        Rule(action=rule.action, effect="ask") for rule in shell_rules
+        Rule(action=action, effect="ask") for action in ("bash", "shell")
     )
 
     plan_rules = read_rules + (
@@ -241,20 +243,21 @@ def build_default_mode_rulesets(
         )
     return {
         "plan": plan_rules,
-        "build": read_rules + write_rules + shell_rules,
-        # Act 以 ask 为兜底；显式放行只读工具，其他工具需 HITL。
+        # Xcode 尚无 OS 级 shell sandbox，因此 Build 不能默认放行任意命令。
+        "build": read_rules + write_rules + ask_shell_rules,
+        # Act 以 ask 为兜底；显式放行只读工具，其他工具需用户审批。
         "act": read_rules + ask_write_rules + ask_shell_rules,
     }
 
 
 DEFAULT_MODE_FALLBACKS: dict[str, PermissionDecision] = {
     "plan": "deny",
-    "build": "allow",
+    "build": "ask",
     "act": "ask",
 }
 
 
 DEFAULT_SHELL_UNRESOLVED_POLICIES: dict[str, PermissionDecision] = {
-    "build": "allow",
+    "build": "ask",
     "act": "ask",
 }

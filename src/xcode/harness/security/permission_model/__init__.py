@@ -36,7 +36,7 @@ from .evaluators import (
 )
 from .action import ActionExtractor, PathExtractor
 from .utils import (
-    compute_shadow_approval_candidate,
+    compute_approval_candidate,
     create_grant_record,
 )
 
@@ -77,7 +77,7 @@ __all__ = [
     "UnresolvedEffect",
     "UnresolvedReason",
     "Verdict",
-    "compute_shadow_approval_candidate",
+    "compute_approval_candidate",
     "create_grant_record",
     "evaluate_policy_constraints",
 ]

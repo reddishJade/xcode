@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from xcode.ai.providers.base import ModelProvider
-from xcode.agent.types import ToolSpec
+from xcode.agent.types import ApprovalCallback, ToolSpec
 from xcode.agent.context import (
     ActiveDiffCollector,
     ContextCollectorRegistry,
@@ -130,6 +130,7 @@ def build_agent(
     memory_manager: Any | None = None,
     session_history: Any | None = None,
     todo_state: SessionTodoState | None = None,
+    auto_approval_callback: ApprovalCallback | None = None,
 ) -> CodingAgentHarness:
     from xcode.harness.memory import MemoryManager
 
@@ -178,6 +179,7 @@ def build_agent(
             project_root,
             permission_policy_from_security(sec),
         ),
+        approval_policy=sec.approval_policy,
         restricted_dirs=sec.restricted_dirs,
         hook_constraint_providers=hook_constraint_providers,
         external_directories=external_directories_from_security(sec),
@@ -210,6 +212,7 @@ def build_agent(
             initial_mode=runtime_config.execution_modes.default_mode,
             session_inbox=session_inbox,
             gate=GateRuntimeConfig(
+                auto_approval_callback=auto_approval_callback,
                 hook_manager=hook_manager,
                 external_hook_runner=external_hook_runner,
                 external_hooks_cwd=project_root,

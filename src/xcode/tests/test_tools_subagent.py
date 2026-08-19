@@ -59,6 +59,7 @@ class _Provider:
 
 class _AllowMode:
     current_mode = "act"
+    approvals_reviewer = "user"
 
     def check_call(self, _call: object) -> str:
         return "allow"
@@ -67,7 +68,8 @@ class _AllowMode:
 def _gate() -> ToolGate:
     return ToolGate(
         mode_state=cast(Any, _AllowMode()),
-        approval_callback=None,
+        user_approval_callback=None,
+        auto_approval_callback=None,
         permission_policy=None,
         hook_manager=None,
         audit_logger=None,

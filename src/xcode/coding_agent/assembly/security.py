@@ -115,9 +115,8 @@ def permission_policy_from_security(
     for tool, decision in security.tools.items():
         rules.append(StaticPermission(tool=tool, decision=decision))
 
+    # approval_policy 只决定 ask 是否进入审批。
     global_default: str | None = security.global_default
-    if global_default is None and security.resolve_approval_policy() == "always":
-        global_default = "ask"
     if not rules and global_default is None:
         return None
     return PermissionPolicy(

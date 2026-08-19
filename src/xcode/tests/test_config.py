@@ -70,3 +70,22 @@ class TestExecutionModesDefaultMode:
             XcodeRuntimeConfig.model_validate(
                 {"execution_modes": {"initial_mode": "build"}}
             )
+
+
+class TestApprovalConfiguration:
+    def test_defaults_to_on_request(self) -> None:
+        cfg = XcodeRuntimeConfig()
+
+        assert cfg.security.approval_policy == "on-request"
+
+    def test_removed_always_value_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            XcodeRuntimeConfig.model_validate(
+                {"security": {"approval_policy": "always"}}
+            )
+
+    def test_global_reviewer_switch_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            XcodeRuntimeConfig.model_validate(
+                {"security": {"approvals_reviewer": "user"}}
+            )

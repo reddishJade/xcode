@@ -33,12 +33,17 @@ class AuditRecord:
     request_id: str = ""
     tool_call_id: str = ""
     approval_scope: str | None = None
-    user_decision: str | None = None
+    approval_decision: str | None = None
     capability: str | None = None
     target_kind: str | None = None
     target_value: str | None = None
     matched_rule: str | None = None
     approval_source: str | None = None
+    approval_reviewer: str | None = None
+    approval_review_status: str | None = None
+    approval_rationale: str | None = None
+    approval_risk: str | None = None
+    approval_authorization: str | None = None
     approval_grant_id: str | None = None
 
     def to_dict(self, timestamp: str | None = None) -> dict[str, str | bool | None]:
@@ -57,12 +62,17 @@ class AuditRecord:
             "request_id": self.request_id,
             "tool_call_id": self.tool_call_id,
             "approval_scope": self.approval_scope,
-            "user_decision": self.user_decision,
+            "approval_decision": self.approval_decision,
             "capability": self.capability,
             "target_kind": self.target_kind,
             "target_value": self.target_value,
             "matched_rule": self.matched_rule,
             "approval_source": self.approval_source,
+            "approval_reviewer": self.approval_reviewer,
+            "approval_review_status": self.approval_review_status,
+            "approval_rationale": self.approval_rationale,
+            "approval_risk": self.approval_risk,
+            "approval_authorization": self.approval_authorization,
             "approval_grant_id": self.approval_grant_id,
         }
 

@@ -32,6 +32,7 @@ from ...agent.messages import (
 )
 from ..config import RequestHygieneConfig
 from ..security import PermissionDecision, PermissionPolicy
+from ..security.approval import ApprovalPolicy
 from ..observability import (
     AuditLogger,
     ExternalHookRunner,
@@ -78,6 +79,7 @@ class GateConfig:
     """随 composition 发布的静态工具策略。"""
 
     permission_policy: PermissionPolicy | None = None
+    approval_policy: ApprovalPolicy = "on-request"
     restricted_dirs: tuple[str, ...] = ()
     hook_constraint_providers: tuple[PolicyEvaluator, ...] = ()
     external_directories: tuple[ExternalDirectory, ...] = ()
@@ -95,7 +97,8 @@ class GateConfig:
 class GateRuntimeConfig:
     """不进入 composition 的会话级门控服务。"""
 
-    approval_callback: ApprovalCallback | None = None
+    user_approval_callback: ApprovalCallback | None = None
+    auto_approval_callback: ApprovalCallback | None = None
     hook_manager: HookManager | None = None
     external_hook_runner: ExternalHookRunner | None = None
     external_hooks_subagent: bool = False

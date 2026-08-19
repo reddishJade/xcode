@@ -526,16 +526,16 @@ def cmd_build(cmd: str, ctx: CommandContext) -> bool:
     """进入 Build Mode（自动执行工作区变更，保留显式规则和硬边界）。"""
     ctx.state.mode = "build"
     print(
-        "Build Mode enabled. Workspace mutations and shell commands run "
-        "automatically; explicit permission rules and hard safety boundaries apply."
+        "Build Mode enabled. Workspace mutations run automatically; boundary "
+        "actions use automatic approval review without pausing for user input."
     )
     return False
 
 
 def cmd_act(cmd: str, ctx: CommandContext) -> bool:
-    """进入 Act Mode，恢复全部工具使用权限。"""
+    """进入 Act Mode，边界动作恢复人工审批。"""
     ctx.state.mode = "act"
-    print("Act Mode enabled. Normal tool use restored within policy.")
+    print("Act Mode enabled. Boundary actions require user approval.")
     return False
 
 
@@ -1415,7 +1415,7 @@ def cmd_undo(cmd: str, ctx: CommandContext) -> bool:
     agent = getattr(ctx.app, "agent", None)
     approval_callback = cast(
         "PermissionApprovalCallback | None",
-        getattr(agent, "approval_callback", None) if agent else None,
+        getattr(agent, "current_approval_callback", None) if agent else None,
     )
 
     for record in reversed(records):
@@ -1653,14 +1653,14 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     "/build": CommandEntry(
         handler=cmd_build,
         desc=(
-            "Enter Build Mode: workspace mutations and shell commands run "
-            "automatically within configured safety boundaries."
+            "Enter Build Mode: automatic execution with model-reviewed "
+            "boundary actions."
         ),
         group=COMMAND_GROUP_MODE,
     ),
     "/act": CommandEntry(
         handler=cmd_act,
-        desc="Enter Act Mode and allow normal tool use within policy.",
+        desc="Enter Act Mode with user approval for boundary actions.",
         accepts_args=True,
         group=COMMAND_GROUP_MODE,
     ),

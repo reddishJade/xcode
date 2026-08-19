@@ -24,9 +24,16 @@ class ToolRegistryApp(Protocol):
 
 class ReplAgent(Protocol):
     @property
-    def approval_callback(self) -> ApprovalCallback | None: ...
-    @approval_callback.setter
-    def approval_callback(self, value: ApprovalCallback | None) -> None: ...
+    def current_approval_callback(self) -> ApprovalCallback | None: ...
+
+    @property
+    def user_approval_callback(self) -> ApprovalCallback | None: ...
+
+    @user_approval_callback.setter
+    def user_approval_callback(self, value: ApprovalCallback | None) -> None: ...
+
+    @property
+    def auto_approval_callback(self) -> ApprovalCallback | None: ...
 
     cancellation_token: CancellationToken
 

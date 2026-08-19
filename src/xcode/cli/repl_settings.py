@@ -48,10 +48,17 @@ def _model_info(app: object) -> dict[str, str]:
     return app.get_model_info() if _is_model_control_app(app) else {}
 
 
+def _approval_info(app: object | None) -> tuple[str, str]:
+    agent = getattr(app, "agent", None)
+    policy = str(getattr(agent, "approval_policy", "on-request"))
+    reviewer = str(getattr(agent, "approvals_reviewer", "user"))
+    return policy, reviewer
+
+
 PERMISSION_TABS = (
     "Recently denied",
     "Allow",
-    "Ask",
+    "Review",
     "Deny",
     "Workspace",
 )
@@ -92,6 +99,7 @@ def handle_permissions(
         permanent_grant_store,
         static_policy,
         restricted_dirs,
+        approval_info=_approval_info(app),
     )
 
 
@@ -100,9 +108,8 @@ def _format_rules(rules: tuple) -> list[str]:
     for rule in rules:
         input_part = _format_rule_input(rule)
         target_part = _format_rule_target(rule)
-        lines.append(
-            f"  - tool `{rule.tool}` -> {rule.decision}{input_part}{target_part}"
-        )
+        decision = "review" if rule.decision == "ask" else rule.decision
+        lines.append(f"  - tool `{rule.tool}` -> {decision}{input_part}{target_part}")
     return lines
 
 
@@ -137,12 +144,16 @@ def list_permissions(
     permanent_grant_store: FileGrantStore | None,
     static_policy: PermissionPolicy | None = None,
     restricted_dirs: tuple[str, ...] = (),
+    approval_info: tuple[str, str] = ("on-request", "user"),
 ) -> None:
+    approval_policy, approvals_reviewer = approval_info
     lines = [
         "Permission Status",
         "",
-        "Decision order: restricted directories -> static deny/ask rules -> "
-        "saved grants -> static allow/default -> execution-mode and safety checks.",
+        "Decision order: hard boundaries -> mode/static rules -> saved grants -> "
+        "approval policy -> reviewer.",
+        f"Approval policy: {approval_policy}",
+        f"Approval reviewer: {approvals_reviewer}",
         "",
     ]
 
@@ -160,7 +171,7 @@ def list_permissions(
     else:
         lines.append("Static rules: none")
         lines.append("Default from config: not set")
-    lines.append("Implicit fallback: allow unless another policy layer blocks the tool")
+    lines.append("Implicit fallback: selected by the active execution mode")
     lines.append("")
 
     if restricted_dirs:
@@ -211,7 +222,13 @@ def manage_permissions(
     """交互式管理权限规则。"""
     config_path = project_root / CONFIG_FILENAME
     config = _load_existing_config(config_path)
-    print_permission_overview(config, session_grant_store, permanent_grant_store, store)
+    print_permission_overview(
+        config,
+        session_grant_store,
+        permanent_grant_store,
+        store,
+        approval_info=_approval_info(app),
+    )
 
     while True:
         tab = questionary.select(
@@ -232,7 +249,7 @@ def manage_permissions(
                     f"Saved to {config_path.name}. Restart Xcode to reload workspace roots."
                 )
             continue
-        decision = str(tab).lower()
+        decision = "ask" if tab == "Review" else str(tab).lower()
         changed = _handle_rule_tab(config, config_path, decision)
         if changed:
             _apply_runtime_permission_policy(app, config)
@@ -246,6 +263,8 @@ def print_permission_overview(
     session_grant_store: InMemoryGrantStore | None,
     permanent_grant_store: FileGrantStore | None,
     store: object | None,
+    *,
+    approval_info: tuple[str, str] = ("on-request", "user"),
 ) -> None:
     """打印类似权限面板的简短概览。"""
     rules = _security_rules(config)
@@ -263,11 +282,13 @@ def print_permission_overview(
         "  "
         f"Recently denied {len(recent_denied)}   "
         f"Allow {counts['allow']}   "
-        f"Ask {counts['ask']}   "
+        f"Review {counts['ask']}   "
         f"Deny {counts['deny']}   "
         "Workspace"
     )
     print()
+    approval_policy, approvals_reviewer = approval_info
+    print(f"  Approval: {approval_policy} via {approvals_reviewer}.")
     print("  Xcode will not ask before using tools matched by Allow rules.")
     print(f"  Saved grants: session {session_count}, persistent {permanent_count}.")
     print()
@@ -283,9 +304,7 @@ def _render_recently_denied_tab(store: object | None) -> None:
     print()
     denied = _recently_denied(store)
     if not denied:
-        print(
-            "   No recent denials. Commands denied by the auto mode classifier will appear here."
-        )
+        print("   No recent denials. Policy and reviewer denials will appear here.")
         print()
         return
     for index, item in enumerate(denied, start=1):
@@ -318,12 +337,12 @@ def _handle_rule_tab(
 
 
 def _render_rule_tab(decision: str, rules: list[dict[str, Any]]) -> None:
-    active = decision.capitalize()
+    active = "Review" if decision == "ask" else decision.capitalize()
     print(_permission_header(active))
     print()
     guidance = {
-        "allow": "   Xcode won't ask before using allowed tools.",
-        "ask": "   Xcode will always ask for confirmation before using these tools.",
+        "allow": "   Xcode runs allowed tools without approval review.",
+        "ask": "   Xcode sends these tools to the active mode reviewer.",
         "deny": "   Xcode will always reject requests to use denied tools.",
     }[decision]
     print(guidance)

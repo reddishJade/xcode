@@ -51,6 +51,7 @@ from .tool_gate import ToolGate
 from ._mode_protocol import ToolGateMode
 from xcode.ai.events import ToolCall
 from ..security.permissions import PermissionDecision, PermissionPolicy
+from ..security.approval import ApprovalPolicy, ApprovalsReviewer
 from ..observability import HookRecord, RuntimeCorrelation
 from ..security.permission_model import GrantStore
 from ...agent.types import ApprovalCallback
@@ -76,6 +77,10 @@ class _DefaultToolGateMode:
     @property
     def current_mode(self) -> str:
         return "act"
+
+    @property
+    def approvals_reviewer(self) -> ApprovalsReviewer:
+        return "user"
 
     def check_call(self, call: ToolCall) -> PermissionDecision:
         return "ask"
@@ -117,8 +122,10 @@ class AgentHarness:
         self.hook_constraint_providers = gate.hook_constraint_providers
         self._gate = supplied_gate or ToolGate(
             mode_state=self._build_gate_mode(),
-            approval_callback=gate_runtime.approval_callback,
+            user_approval_callback=gate_runtime.user_approval_callback,
+            auto_approval_callback=gate_runtime.auto_approval_callback,
             permission_policy=gate.permission_policy,
+            approval_policy=gate.approval_policy,
             hook_manager=gate_runtime.hook_manager,
             external_hook_runner=gate_runtime.external_hook_runner,
             external_hooks_subagent=gate_runtime.external_hooks_subagent,
@@ -212,6 +219,16 @@ class AgentHarness:
     @property
     def permission_policy(self) -> PermissionPolicy | None:
         return self.composition.gate.permission_policy
+
+    @property
+    def approval_policy(self) -> ApprovalPolicy:
+        """返回 ask 是否可提交审批。"""
+        return self._gate.approval_policy
+
+    @property
+    def approvals_reviewer(self) -> ApprovalsReviewer:
+        """返回 ask 当前交给人还是独立 reviewer。"""
+        return self._gate.approvals_reviewer
 
     @property
     def restricted_dirs(self) -> tuple[str, ...]:
@@ -308,14 +325,22 @@ class AgentHarness:
         self._reset_provider_conversation_state()
 
     @property
-    def approval_callback(self) -> ApprovalCallback | None:
-        """返回当前 HITL 审批回调。"""
-        return self._gate.approval_callback
+    def current_approval_callback(self) -> ApprovalCallback | None:
+        """返回当前 execution mode 实际使用的审批回调。"""
+        return self._gate.current_approval_callback
 
-    @approval_callback.setter
-    def approval_callback(self, value: ApprovalCallback | None) -> None:
-        """更新后续工具执行使用的 HITL 审批回调。"""
-        self._gate.set_approval_callback(value)
+    @property
+    def user_approval_callback(self) -> ApprovalCallback | None:
+        return self._gate.user_approval_callback
+
+    @user_approval_callback.setter
+    def user_approval_callback(self, value: ApprovalCallback | None) -> None:
+        """更新 Act 等人工审批模式使用的回调。"""
+        self._gate.set_user_approval_callback(value)
+
+    @property
+    def auto_approval_callback(self) -> ApprovalCallback | None:
+        return self._gate.auto_approval_callback
 
     def set_session_grant_store_provider(
         self,
