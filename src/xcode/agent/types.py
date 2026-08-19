@@ -248,6 +248,21 @@ class ToolSpec:
     prompt_guidelines: tuple[str, ...] = ()
 
 
+def materialize_json_mapping(value: object) -> dict[str, object]:
+    """把只读 JSON 映射递归转换为库可识别的普通容器。"""
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): _materialize_json_value(item) for key, item in value.items()}
+
+
+def _materialize_json_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return materialize_json_mapping(value)
+    if isinstance(value, list | tuple):
+        return [_materialize_json_value(item) for item in value]
+    return value
+
+
 AGENT_CONTENT_BLOCKS_METADATA_KEY = "agent_content_blocks"
 CITATION_SOURCES_METADATA_KEY = "citation_sources"
 

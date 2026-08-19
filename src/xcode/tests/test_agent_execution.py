@@ -2,33 +2,39 @@
 
 from __future__ import annotations
 
-from xcode.agent.config import _LoopRunState, AgentLoopConfig
+from collections.abc import Mapping
+from types import MappingProxyType
+
 from xcode.agent._execution import (
-    partition_tool_calls_for_execution,
-    tool_call_signature,
-    tool_calls_signature,
     is_file_mutation_tool,
     is_file_read_tool,
-    should_clear_read_history,
     is_tool_productive_default,
-    update_repeated_tool_watchdog,
+    partition_tool_calls_for_execution,
+    should_clear_read_history,
+    tool_call_signature,
+    tool_calls_signature,
     update_idle_tool_watchdog,
+    update_repeated_tool_watchdog,
+    validate_tool_arguments,
 )
+from xcode.agent.config import AgentContext, AgentLoopConfig, _LoopRunState
 from xcode.agent.messages import ToolResultMessage
-from xcode.agent.types import (
-    AgentTool,
-    ToolCallContent,
-)
-from xcode.agent.config import AgentContext
+from xcode.agent.types import AgentTool, ToolCallContent
 
 
 # ── mock AgentTool ──
 
 
 class _MockTool(AgentTool):
-    def __init__(self, name: str, mode: str | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        mode: str | None = None,
+        parameters: Mapping[str, object] | None = None,
+    ) -> None:
         self._name = name
         self._mode = mode
+        self._parameters = parameters or {}
 
     @property
     def name(self) -> str:
@@ -43,8 +49,8 @@ class _MockTool(AgentTool):
         return ""
 
     @property
-    def parameters(self) -> dict[str, object]:
-        return {}
+    def parameters(self) -> Mapping[str, object]:
+        return self._parameters
 
     @property
     def execution_mode(self) -> str | None:
@@ -102,6 +108,34 @@ class TestPartitionToolCalls:
         batches = partition_tool_calls_for_execution(ctx, calls)
         assert len(batches) == 1
         assert len(batches[0]) == 1
+
+
+def test_validate_tool_arguments_materializes_frozen_schema() -> None:
+    properties: Mapping[str, object] = MappingProxyType(
+        {"command": MappingProxyType({"type": "string"})}
+    )
+    schema: Mapping[str, object] = MappingProxyType(
+        {
+            "type": "object",
+            "properties": properties,
+            "required": ("command",),
+            "additionalProperties": False,
+        }
+    )
+    tool = _MockTool("bash", parameters=schema)
+    call = ToolCallContent(id="1", name="bash", arguments={"command": "pwd"})
+
+    assert validate_tool_arguments(tool, call, {"command": "pwd"}) is None
+
+
+def test_validate_tool_arguments_reports_invalid_schema() -> None:
+    tool = _MockTool("broken", parameters={"type": "not-a-json-schema-type"})
+    call = ToolCallContent(id="1", name="broken", arguments={})
+
+    error = validate_tool_arguments(tool, call, {})
+
+    assert error is not None
+    assert error.startswith("tool schema error for broken:")
 
 
 class TestToolCallSignature:

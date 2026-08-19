@@ -38,6 +38,7 @@ from xcode.agent.types import (
     ToolCallContent,
     ToolRenderIntent,
     ToolResultContentBlock,
+    materialize_json_mapping,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,12 +100,11 @@ def validate_tool_arguments(
     tool_call: ToolCallContent,
     args: ToolArguments,
 ) -> str | None:
-    try:
-        schema = dict(tool.parameters)
-    except Exception as exc:
-        return f"tool schema error for {tool_call.name}: {exc}"
+    schema = materialize_json_mapping(tool.parameters)
     try:
         jsonschema.validate(instance=args, schema=schema)
+    except jsonschema.SchemaError as exc:
+        return f"tool schema error for {tool_call.name}: {exc.message}"
     except jsonschema.ValidationError as exc:
         path = (
             ".".join(str(part) for part in exc.absolute_path)
