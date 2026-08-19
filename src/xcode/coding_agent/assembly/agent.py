@@ -207,6 +207,7 @@ def build_agent(
     return CodingAgentHarness(
         composition=composition,
         runtime=CodingAgentRuntimeConfig(
+            initial_mode=runtime_config.execution_modes.default_mode,
             session_inbox=session_inbox,
             gate=GateRuntimeConfig(
                 hook_manager=hook_manager,

@@ -52,7 +52,7 @@ class CodingAgentHarness(AgentHarness):
         runtime: CodingAgentRuntimeConfig,
     ) -> None:
         self._coding_runtime = runtime
-        self._mode = ExecutionModeState()
+        self._mode = ExecutionModeState(initial_mode=runtime.initial_mode)
         self._memory_manager = runtime.memory_manager
         self._session_history = runtime.session_history
         self._todo_state = runtime.todo_state
@@ -159,6 +159,11 @@ class CodingAgentHarness(AgentHarness):
             self._todo_state.replace([])
 
     # ── 编码特定公共 API ──
+
+    @property
+    def current_mode(self) -> ExecutionMode:
+        """返回当前执行模式（新会话为配置的默认模式）。"""
+        return self._mode.current_mode
 
     def available_skill_names(self) -> tuple[str, ...]:
         """返回当前运行时允许显式激活的技能名称。"""

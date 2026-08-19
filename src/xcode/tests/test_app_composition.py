@@ -12,7 +12,7 @@ from xcode.ai.events import FinalMessage, Message, ProviderEvent, TextDelta
 from xcode.ai.providers.registry import ProviderBundle
 from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.coding_agent.app import build_app
-from xcode.harness.config import XcodeRuntimeConfig
+from xcode.harness.config import ExecutionModesRuntimeConfig, XcodeRuntimeConfig
 
 
 class _ContractProvider:
@@ -94,6 +94,7 @@ def test_real_build_app_minimal_run_and_replay_contract(
     first_branch = first.session_store.build_branch()
 
     assert first_answer == "answer-1"
+    assert first.agent.current_mode == "act"
     assert all(entry.type != "user" for entry in first_branch)
     assert [
         entry.content.get("type")
@@ -145,3 +146,30 @@ def test_real_build_app_minimal_run_and_replay_contract(
     second_envelope = _provider_request_events(resumed)[-1]["data"]
     assert second_envelope["messages"] == second_messages
     resumed.close()
+
+
+def test_build_app_starts_in_configured_default_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    providers: list[_ContractProvider] = []
+    _install_contract_provider(monkeypatch, providers)
+    sessions_dir = tmp_path / "sessions"
+    runtime_config = XcodeRuntimeConfig(
+        execution_modes=ExecutionModesRuntimeConfig(default_mode="build")
+    )
+
+    app = build_app(
+        tmp_path,
+        runtime_config=runtime_config,
+        sessions_dir=sessions_dir,
+    )
+    assert app.agent.current_mode == "build"
+
+    app.ask("first question")
+    first_request = providers[0].requests[0]
+    assert any(
+        "Build Mode is active" in str(message.get("content"))
+        for message in first_request[0]
+    )
+    app.close()

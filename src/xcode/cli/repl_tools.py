@@ -96,7 +96,7 @@ def _execute_tool_via_gate(
     if agent is None:
         return str(tool.handler(tool_input, None))
 
-    mode_state = ExecutionModeState()
+    mode_state = ExecutionModeState(initial_mode=getattr(agent, "current_mode", "act"))
     gate = ToolGate(
         mode_state=mode_state,
         approval_callback=getattr(agent, "approval_callback", None),

@@ -138,6 +138,7 @@ class ModeRulesetRuntimeConfig(BaseModel):
 
 class ExecutionModesRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    default_mode: Literal["plan", "build", "act"] = "act"
     plan: ModeRulesetRuntimeConfig = Field(default_factory=ModeRulesetRuntimeConfig)
     build: ModeRulesetRuntimeConfig = Field(default_factory=ModeRulesetRuntimeConfig)
     act: ModeRulesetRuntimeConfig = Field(default_factory=ModeRulesetRuntimeConfig)

@@ -114,8 +114,13 @@ xcode config delete subagent                          # 删除 subagent profile
 
 ## execution_modes
 
-执行模式是同一 agent 上可切换的权限 profile。新会话从 `act` 启动，恢复会话时
-恢复已保存的模式；REPL 可在运行时切换，切换不会丢失会话上下文。
+执行模式是同一 agent 上可切换的权限 profile。新会话从
+`execution_modes.default_mode` 启动（默认 `act`），恢复会话时恢复已保存的模式；
+REPL 可在运行时切换，切换不会丢失会话上下文。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `default_mode` | string | `act` | 新会话的默认执行模式：`plan`、`build` 或 `act`；恢复会话时以持久化的模式为准 |
 
 | mode | 工具可见性 | 内置规则与 fallback |
 |---|---|---|
@@ -130,6 +135,7 @@ xcode config delete subagent                          # 删除 subagent profile
 ```json
 {
   "execution_modes": {
+    "default_mode": "build",
     "build": {
       "rules": [
         {"action": "bash", "effect": "ask", "command": "git", "subcommand": "push"},

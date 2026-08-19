@@ -27,8 +27,12 @@ class ExecutionPolicy(Protocol):
 class ExecutionModeState:
     """管理当前执行模式和 plan 模式超时状态。实现 ToolGateMode 协议。"""
 
-    def __init__(self, max_plan_turns: int = 8) -> None:
-        self._current_mode: ExecutionMode = "act"
+    def __init__(
+        self,
+        max_plan_turns: int = 8,
+        initial_mode: ExecutionMode = "act",
+    ) -> None:
+        self._current_mode: ExecutionMode = initial_mode
         self._plan_enter_step = 0
         self._max_plan_turns = max_plan_turns
 

@@ -129,6 +129,14 @@ class TestExecutionModeState:
         state = ExecutionModeState()
         assert state.current_mode == "act"
 
+    def test_initial_mode_overrides_default(self) -> None:
+        state = ExecutionModeState(initial_mode="build")
+        assert state.current_mode == "build"
+
+    def test_initial_mode_plan(self) -> None:
+        state = ExecutionModeState(initial_mode="plan")
+        assert state.current_mode == "plan"
+
     def test_set_mode(self) -> None:
         state = ExecutionModeState()
         state.set_mode("plan")

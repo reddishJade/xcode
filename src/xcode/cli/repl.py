@@ -148,6 +148,17 @@ def current_model_options(app: object) -> tuple[str, ...]:
     return tuple(all_models)
 
 
+def _sync_mode_from_agent(app: ReplApp, state: ReplState) -> None:
+    """让 CLI 侧模式与 agent harness 保持一致。
+
+    新会话取配置的默认模式，恢复会话取 transcript 中持久化的模式。
+    """
+    agent = getattr(app, "agent", None)
+    mode = getattr(agent, "current_mode", None)
+    if mode in {"plan", "build", "act"}:
+        state.mode = mode
+
+
 def run_repl(
     app: ReplApp,
     prompt_session: PromptLike | None = None,
@@ -238,6 +249,8 @@ def run_repl(
         print(resumed_message(selected_view))
         print_loaded_history(store)
         app.restore_session()
+
+    _sync_mode_from_agent(app, state)
 
     while True:
         if app.agent.has_pending_input():

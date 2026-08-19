@@ -10,11 +10,14 @@ from xcode.harness.session import SessionHistory
 from xcode.harness.session_todo import SessionTodoState
 from xcode.harness.skills import SkillRegistry
 
+from .execution_modes import ExecutionMode
+
 
 @dataclass(frozen=True)
 class CodingAgentRuntimeConfig(AgentRuntimeConfig):
     """编码技能、记忆和任务状态的运行时配置。"""
 
+    initial_mode: ExecutionMode = "act"
     skill_registry: SkillRegistry | None = None
     memory_manager: MemoryManager | None = None
     session_history: SessionHistory | None = None

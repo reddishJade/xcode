@@ -157,6 +157,7 @@ class _XcodeTui:
 
         self._permanent_grant_store = FileGrantStore.for_project_root(project_root)
         self._restore_startup_session(resume_latest, auto_continue, session_id)
+        self._sync_mode_from_agent()
         self._scrollback = 0
         self._committing = False
         self._grant_store_manager: SessionGrantStoreManager | None = None
@@ -793,6 +794,7 @@ class _XcodeTui:
                     )
                 self._agent_app.restore_session()
                 self._state.restore_history(self._store.build_branch())
+                self._sync_mode_from_agent()
                 self._state.log.append(
                     _LogEntry("system", f'Forked at: "{meta.title if meta else ""}"')
                 )
@@ -833,6 +835,7 @@ class _XcodeTui:
                     return
                 self._agent_app.restore_session()
                 self._state.restore_history(self._store.build_branch())
+                self._sync_mode_from_agent()
 
             self._open_command_choices(
                 [
@@ -1019,6 +1022,18 @@ class _XcodeTui:
         agent = getattr(self._agent_app, "agent", None)
         if agent is not None:
             agent.session_id = self._store.session_id
+        self._sync_mode_from_agent()
+
+    def _sync_mode_from_agent(self) -> None:
+        """让 TUI 与 REPL 状态中的模式与 agent harness 保持一致。
+
+        新会话取配置的默认模式，恢复会话取 transcript 中持久化的模式。
+        """
+        agent = getattr(self._agent_app, "agent", None)
+        mode = getattr(agent, "current_mode", None)
+        if mode in {"plan", "build", "act"}:
+            self._repl_state.mode = mode
+            self._state.mode = mode
 
     def _restore_startup_session(
         self,
