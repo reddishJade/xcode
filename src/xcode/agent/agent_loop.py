@@ -478,6 +478,9 @@ async def _run_inner_loop(
             provider,
             current_step=step,
         )
+        if response is None:
+            # 模型流式生成期间被打断：中止在途请求并退出本轮。
+            return _cancelled_message(signal), "aborted", provider
         message = response.message
         stop_reason = response.stop_reason
 

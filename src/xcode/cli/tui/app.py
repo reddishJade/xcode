@@ -611,11 +611,12 @@ class _XcodeTui:
             self._refresh()
             return
         if self._state.running:
-            self._agent_app.agent.interrupt("interrupted by user")
-            self._store.append(
-                "event", {"type": "interrupted", "data": "interrupted by user"}
-            )
-            self._state.log.append(_LogEntry("stop", "[interrupt requested]"))
+            accepted = self._agent_app.agent.interrupt("interrupted by user")
+            if accepted:
+                self._store.append(
+                    "event", {"type": "interrupted", "data": "interrupted by user"}
+                )
+                self._state.log.append(_LogEntry("stop", "[interrupt] stopping run"))
             self._refresh()
             return
         now = perf_counter()

@@ -120,6 +120,21 @@ def test_interrupt_keeps_run_active_and_queues_replacement(tmp_path: Path) -> No
     assert controller.claim_initial(next_handle) == [UserMessage(content="replacement")]
 
 
+def test_repeated_interrupt_is_rejected(tmp_path: Path) -> None:
+    """已处于取消中的 run 重复打断返回 None，供上层幂等处理。"""
+    controller, _ = _begin(tmp_path)
+    handle = controller.active_run()
+    assert handle is not None
+
+    first = handle.interrupt("interrupted by user")
+    assert first is not None
+    assert first.status is SubmitStatus.INTERRUPT_REQUESTED
+
+    second = handle.interrupt("interrupted by user")
+    assert second is None
+    assert handle.state() is ActiveRunState.CANCELLING
+
+
 def test_inbox_survives_controller_reconstruction(tmp_path: Path) -> None:
     store = SessionStore(tmp_path / "sessions", project_root=tmp_path)
     first = SessionRunController(SessionInbox(store))

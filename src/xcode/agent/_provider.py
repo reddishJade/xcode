@@ -10,9 +10,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from time import perf_counter
+from typing import Awaitable, cast
 
 from xcode.ai.events import (
     FinalMessage,
@@ -56,8 +57,8 @@ async def call_provider(
     metrics: AgentLoopMetrics,
     provider: StreamProvider,
     current_step: int = 0,
-) -> _ProviderResponse:
-    del signal
+) -> _ProviderResponse | None:
+    """调用 provider；若流式生成期间被打断则返回 None。"""
     assembly = config.request_assembler.assemble(
         context,
         current_step=current_step,
@@ -73,10 +74,39 @@ async def call_provider(
         list(assembly.tools),
         assembly.options,
         emit,
+        signal,
     )
     elapsed = round((perf_counter() - started) * 1000, 3)
     metrics.model_latencies_ms.append(elapsed)
+    if events is None:
+        return None
     return _provider_events_to_response(events, metrics, lambda _event: None)
+
+
+def _is_cancelled(signal: CancellationSignal | None) -> bool:
+    return signal is not None and signal.is_cancelled()
+
+
+def _abort_inflight_stream(provider: StreamProvider) -> None:
+    """尽力中止在途 HTTP 流：关闭底层连接使阻塞读取立刻失败。"""
+    abort = getattr(provider, "abort_active_stream", None)
+    if not callable(abort):
+        return
+    try:
+        abort()
+    except Exception:
+        pass
+
+
+async def _aclose_stream(stream_iter: AsyncIterator[ProviderEvent]) -> None:
+    """尽快关闭异步流迭代器，让底层生成器的清理逻辑及时执行。"""
+    aclose = getattr(stream_iter, "aclose", None)
+    if not callable(aclose):
+        return
+    try:
+        await cast(Awaitable[None], aclose())
+    except Exception:
+        pass
 
 
 async def _collect_provider_events(
@@ -85,14 +115,21 @@ async def _collect_provider_events(
     tool_definitions: list[ToolDefinition],
     options: StreamOptions | None,
     emit: Callable[[AgentEvent], None],
-) -> list[ProviderEvent]:
+    signal: CancellationSignal | None = None,
+) -> list[ProviderEvent] | None:
+    """逐事件收集 provider 流；取消时中止在途请求并返回 None。"""
     events: list[ProviderEvent] = []
     text_parts: list[str] = []
     try:
         kwargs = {}
         if options is not None:
             kwargs["options"] = options
-        async for event in provider.stream(llm_messages, tool_definitions, **kwargs):
+        stream_iter = provider.stream(llm_messages, tool_definitions, **kwargs)
+        async for event in stream_iter:
+            if _is_cancelled(signal):
+                _abort_inflight_stream(provider)
+                await _aclose_stream(stream_iter)
+                return None
             events.append(event)
             if isinstance(event, TextDelta):
                 _append_text_delta(text_parts, event, emit)
@@ -102,6 +139,9 @@ async def _collect_provider_events(
                 await asyncio.sleep(0)
         return events
     except Exception as e:
+        if _is_cancelled(signal):
+            # 打断触发的连接关闭会使阻塞读取抛出异常，属预期路径。
+            return None
         events.append(FinalMessage(content=f"Provider error: {e}", stop_reason="error"))
         return events
 

@@ -70,6 +70,8 @@ class OpenAICompatProvider:
         self.transport = transport
         self._current_options: StreamOptions | None = None
         self._metrics: dict[str, object] = self._init_metrics()
+        self._active_stream: Any | None = None
+        self._abort_pending = False
 
     @property
     def model(self) -> str:
@@ -195,9 +197,39 @@ class OpenAICompatProvider:
             if extra_headers:
                 params["extra_headers"] = extra_headers
 
+        self._abort_pending = False
         stream = self.runtime.run(lambda: self.client.chat.completions.create(**params))
-        intercepted = self._intercept_usage(stream, message_count)
-        return chat_stream_to_events(intercepted)
+        self._active_stream = stream
+        if self._abort_pending:
+            # 请求建立期间收到打断：立即关闭，避免阻塞读取。
+            self._close_stream(stream)
+        try:
+            intercepted = self._intercept_usage(stream, message_count)
+            yield from chat_stream_to_events(intercepted)
+        finally:
+            if self._active_stream is stream:
+                self._active_stream = None
+
+    def abort_active_stream(self) -> None:
+        """从任意线程中止在途流式请求，使阻塞的 chunk 读取立即失败。
+
+        interrupt 路径调用此方法以在模型生成期间真正停止响应；
+        底层连接被关闭后，读取会抛出异常，由消费端识别为取消。
+        """
+        self._abort_pending = True
+        self._close_stream(self._active_stream)
+
+    def _close_stream(self, stream: Any | None) -> None:
+        """尽力关闭流句柄；句柄缺失或不可关闭时静默忽略。"""
+        if stream is None:
+            return
+        close = getattr(stream, "close", None)
+        if not callable(close):
+            return
+        try:
+            close()
+        except Exception:
+            pass
 
     # ── metrics 拦截 ──
 

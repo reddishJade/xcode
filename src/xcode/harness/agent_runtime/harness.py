@@ -304,12 +304,21 @@ class AgentHarness:
         return self._run_controller.active_run()
 
     def interrupt(self, reason: str = "interrupted by user") -> bool:
-        """请求取消当前 run，但在其完整退出前保留 active identity。"""
+        """请求取消当前 run，并尽力中止在途模型流。
+
+        返回 True 表示本次打断被接受（run 进入取消流程）；
+        对已处于取消中的 run 重复打断返回 False。
+        """
         handle = self.active_run()
         if handle is None:
             return False
         outcome = handle.interrupt(reason)
-        return outcome is not None
+        if outcome is None:
+            return False
+        abort = getattr(self._provider, "abort_active_stream", None)
+        if callable(abort):
+            abort()
+        return True
 
     def has_pending_input(self) -> bool:
         """返回 durable inbox 是否存在需要启动的新输入。"""

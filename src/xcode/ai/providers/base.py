@@ -23,6 +23,12 @@ class StreamProvider(Protocol):
     ) -> AsyncIterator[ProviderEvent]: ...
 
 
+class InterruptibleStreamProvider(Protocol):
+    """支持在生成期间外部中止在途流的 provider 协议。"""
+
+    def abort_active_stream(self) -> None: ...
+
+
 @runtime_checkable
 class ModelProvider(StreamProvider, Protocol):
     """带运行时元数据的 provider 协议。"""
