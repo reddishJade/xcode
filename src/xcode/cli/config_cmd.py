@@ -33,6 +33,7 @@ TRANSPORT_TO_PROVIDER_KEY: dict[str, str] = {
 }
 
 BOOL_FIELDS = frozenset({"thinking", "clear_thinking", "tool_stream"})
+INT_FIELDS = frozenset({"context_window"})
 
 
 def handle_config_command(args: Any, project_root: Path) -> None:
@@ -315,6 +316,11 @@ def _coerce_value(field: str, value: str) -> Any:
         if value.lower() in ("false", "0", "no"):
             return False
         raise ValueError(f"Invalid bool value for '{field}': {value}")
+    if field in INT_FIELDS:
+        try:
+            return int(value)
+        except ValueError:
+            raise ValueError(f"Invalid int value for '{field}': {value}") from None
     if value.lower() == "null":
         return None
     return value

@@ -86,6 +86,11 @@ class OpenAICompatProvider:
         return self.config.reasoning_effort
 
     @property
+    def context_window(self) -> int | None:
+        """配置覆盖的上下文窗口；None 表示使用模型注册表默认值。"""
+        return self.config.context_window
+
+    @property
     def metrics(self) -> dict[str, object]:
         return self._metrics
 

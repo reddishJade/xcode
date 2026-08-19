@@ -81,6 +81,7 @@ class XcodeApp:
             chat_model=model,
             base_url=base_url or profile_config.base_url,
             api_key=api_key or profile_config.api_key,
+            context_window=getattr(profile_config, "context_window", None),
             thinking=thinking if thinking is not None else profile_config.thinking,
             reasoning_effort=reasoning_effort
             if reasoning_effort is not None

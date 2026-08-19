@@ -41,6 +41,9 @@ class ModelProvider(StreamProvider, Protocol):
     @property
     def reasoning_effort(self) -> str | None: ...
 
+    @property
+    def context_window(self) -> int | None: ...
+
 
 class Provider(ABC):
     """所有 provider 应继承的抽象基类。
@@ -55,6 +58,7 @@ class Provider(ABC):
         self._transport: str = ""
         self._thinking: bool = True
         self._reasoning_effort: str | None = None
+        self._context_window: int | None = None
 
     @property
     def model(self) -> str:
@@ -75,6 +79,11 @@ class Provider(ABC):
     @property
     def reasoning_effort(self) -> str | None:
         return self._reasoning_effort
+
+    @property
+    def context_window(self) -> int | None:
+        """配置覆盖的上下文窗口；None 表示使用模型注册表默认值。"""
+        return self._context_window
 
     @abstractmethod
     async def stream(

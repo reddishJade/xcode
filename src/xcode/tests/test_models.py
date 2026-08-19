@@ -96,6 +96,35 @@ class TestCompactThreshold:
 
         assert threshold == 32_000
 
+    def test_context_window_override_wins(self) -> None:
+        threshold = effective_compact_threshold(
+            "gpt-5.5",
+            reserve_tokens=16_384,
+            trigger_ratio=0.7,
+            context_window_override=262_144,
+        )
+
+        assert threshold == 183_500
+
+    def test_context_window_override_respects_reserve(self) -> None:
+        threshold = effective_compact_threshold(
+            "gpt-5.5",
+            reserve_tokens=200_000,
+            context_window_override=262_144,
+        )
+
+        assert threshold == 62_144
+
+    def test_non_positive_override_falls_back_to_registry(self) -> None:
+        threshold = effective_compact_threshold(
+            "gpt-5.5",
+            reserve_tokens=16_384,
+            trigger_ratio=0.7,
+            context_window_override=0,
+        )
+
+        assert threshold == 735_000
+
 
 class TestResolveModel:
     def test_exact_match(self) -> None:

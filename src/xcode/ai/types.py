@@ -52,6 +52,7 @@ class ProviderConfig:
     api_key: str
     model: str
     base_url: str = ""
+    context_window: int | None = None
     thinking: bool = True
     reasoning_effort: str | None = None
     response_format: dict[str, Any] | None = None

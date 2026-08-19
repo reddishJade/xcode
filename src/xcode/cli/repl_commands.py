@@ -1089,7 +1089,12 @@ def _count_tokens_by_message_role(messages: list[object]) -> dict[str, int]:
     return result
 
 
-def _get_context_window(model_name: str) -> int:
+def _get_context_window(
+    model_name: str, context_window_override: int | None = None
+) -> int:
+    """返回模型上下文窗口；优先使用 provider profile 的覆盖值。"""
+    if context_window_override is not None and context_window_override > 0:
+        return context_window_override
     from xcode.ai.models import get_providers, get_models
 
     for provider in get_providers():
@@ -1210,7 +1215,9 @@ def _compute_context_summary(
     provider = getattr(agent, "provider", None)
     inner = getattr(provider, "active_provider", provider)
     model_name = getattr(inner, "model", "unknown") if inner else "unknown"
-    context_window = _get_context_window(model_name)
+    context_window = _get_context_window(
+        model_name, getattr(inner, "context_window", None)
+    )
     cost = _get_model_cost(model_name)
 
     total = sum(t for _, t in categories)

@@ -412,6 +412,7 @@ def _should_compact(
             model_str,
             reserve_tokens=composition.config.reserve_tokens,
             trigger_ratio=composition.config.compact_trigger_ratio,
+            context_window_override=getattr(provider, "context_window", None),
         )
         return last_prompt_tokens >= trigger
     from .agent_helpers import to_dict

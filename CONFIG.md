@@ -21,6 +21,7 @@
 | `chat_model` | string | `"deepseek-v4-flash"` | 聊天模型名 |
 | `base_url` | string | `"https://api.deepseek.com"` | OpenAI-compatible API 地址 |
 | `api_key` | string | `""` | 显式 API key；留空按环境变量查找 |
+| `context_window` | int/null | `null` | 上下文窗口覆盖（token 数）。覆盖模型注册表默认值，影响压缩触发线与 `/context` 显示。例如 1M 窗口的模型只用 256K：`"context_window": 262144` |
 | `thinking` | bool | `true` | 传给支持 thinking 的 provider |
 | `reasoning_effort` | string/null | `"high"` | DeepSeek 等支持 effort 的 provider。值：`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max` |
 | `clear_thinking` | bool | `false` | ChatGLM 保留式思考 |

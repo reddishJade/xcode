@@ -81,6 +81,7 @@ class ModelProfileRuntimeConfig(BaseModel):
     chat_model: str = "deepseek-v4-flash"
     base_url: str = "https://api.deepseek.com"
     api_key: str = ""
+    context_window: StrictInt | None = Field(default=None, gt=0)
     thinking: StrictBool = True
     reasoning_effort: str | None = "high"
     clear_thinking: StrictBool = False

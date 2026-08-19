@@ -49,6 +49,8 @@ class ModelProfileProto(Protocol):
     @property
     def api_key(self) -> str: ...
     @property
+    def context_window(self) -> int | None: ...
+    @property
     def thinking(self) -> bool: ...
     @property
     def reasoning_effort(self) -> str | None: ...
@@ -66,6 +68,7 @@ class ModelProfileConfig:
     chat_model: str = ""
     base_url: str = ""
     api_key: str = ""
+    context_window: int | None = None
     thinking: bool = True
     reasoning_effort: str | None = None
     clear_thinking: bool = False
@@ -189,6 +192,7 @@ def _build_llm_profile(
         api_key=api_key,
         model=profile.chat_model,
         base_url=profile.base_url,
+        context_window=profile.context_window,
         thinking=profile.thinking,
         reasoning_effort=profile.reasoning_effort,
         response_format=profile.response_format,

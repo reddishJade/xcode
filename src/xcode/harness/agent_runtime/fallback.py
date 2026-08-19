@@ -55,6 +55,10 @@ class _FallbackSwitchingProvider:
     def reasoning_effort(self) -> str | None:
         return self.active_provider.reasoning_effort
 
+    @property
+    def context_window(self) -> int | None:
+        return self.active_provider.context_window
+
     def reset_conversation_state(self) -> None:
         """清理主备 provider 的服务端会话状态。"""
         for provider in (self._primary, self._fallback):
