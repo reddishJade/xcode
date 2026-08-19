@@ -676,7 +676,7 @@ def cmd_compact(cmd: str, ctx: CommandContext) -> bool:
         replacement=after_msgs,
     )
 
-    # 7) 打印结构化摘要——类似 pi 的格式
+    # 7) 打印结构化摘要
     saved = before_tokens - after_tokens
     print("\n [compaction]\n")
     print(f" Compacted from {before_tokens:,} tokens")
@@ -1110,6 +1110,18 @@ def _get_model_cost(model_name: str) -> object | None:
     return _resolve_model_cost(model_name)
 
 
+def _usage_stats_for_agent(agent: object) -> str:
+    """从 provider 累计用量生成底栏摘要；无 usage 记录时返回空串。"""
+    from xcode.ai.usage import format_usage_stats
+
+    provider = getattr(agent, "provider", None)
+    totals = getattr(provider, "usage_totals", None)
+    if totals is None or totals.requests == 0:
+        return ""
+    hit_rate = getattr(provider, "cache_hit_rate", None)
+    return format_usage_stats(totals, hit_rate)
+
+
 def _compute_context_summary(
     agent: object, project_root: Path, state: ReplState
 ) -> _ContextSummary:
@@ -1245,6 +1257,7 @@ def _compute_context_summary(
     state.model_name = model_name
     state.context_usage = context_str
     state.context_cost = cost_str
+    state.usage_stats = _usage_stats_for_agent(agent)
 
     return _ContextSummary(
         categories=categories,
@@ -1270,8 +1283,10 @@ def cmd_context(cmd: str, ctx: CommandContext) -> bool:
     summary = _compute_context_summary(agent, ctx.project_root, ctx.state)
 
     cost_str = f" · ${summary.spent:.2f}" if summary.spent > 0 else ""
+    usage_str = f" · {ctx.state.usage_stats}" if ctx.state.usage_stats else ""
     print(
-        f" Context Usage · {summary.model_name} · {ctx.state.context_usage}{cost_str}"
+        f" Context Usage · {summary.model_name} · "
+        f"{ctx.state.context_usage}{usage_str}{cost_str}"
     )
     print()
 

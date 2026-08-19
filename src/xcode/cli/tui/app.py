@@ -1516,8 +1516,8 @@ class _XcodeTui:
         parts: list[str] = []
         if self._repl_state.context_usage:
             parts.append(f"context: {self._repl_state.context_usage}")
-        if self._repl_state.context_cost:
-            parts.append(f"cost: {self._repl_state.context_cost}")
+        if self._repl_state.usage_stats:
+            parts.append(f"usage: {self._repl_state.usage_stats}")
         if not parts:
             return left
         right = "  ".join(parts)

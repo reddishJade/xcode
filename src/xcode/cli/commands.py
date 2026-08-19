@@ -34,6 +34,7 @@ class ReplState:
     pending_partial: tuple[str, str] | None = None
     context_usage: str = ""
     context_cost: str = ""
+    usage_stats: str = ""
     last_dir: str = ""
     model_name: str = ""
     thinking_collapsed: bool = False

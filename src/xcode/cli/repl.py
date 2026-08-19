@@ -261,6 +261,7 @@ def run_repl(
                     renderer=markdown_renderer,
                     state=state,
                     session=session,
+                    project_root=root,
                     text=None,
                     display_text=None,
                 ),
@@ -322,6 +323,7 @@ def run_repl(
             renderer=markdown_renderer,
             state=state,
             session=session,
+            project_root=root,
             text=expanded_text,
             display_text=text,
         )
@@ -405,6 +407,7 @@ class _AgentTurnContext:
     renderer: MarkdownRenderer
     state: ReplState
     session: PromptLike
+    project_root: Path
     text: str | None
     display_text: str | None
 
@@ -488,7 +491,17 @@ def _run_agent_turn(ctx: _AgentTurnContext) -> list[str]:
 
     if turn.stopped_reason:
         print(turn.stopped_reason)
+    _refresh_context_summary(ctx)
     return turn.tool_names_in_turn
+
+
+def _refresh_context_summary(ctx: _AgentTurnContext) -> None:
+    """回合结束后更新底栏的上下文与用量统计。"""
+    from .repl_commands import _compute_context_summary
+
+    agent = getattr(ctx.app, "agent", None)
+    if agent is not None:
+        _compute_context_summary(agent, ctx.project_root, ctx.state)
 
 
 class _ReplTurnRenderer:

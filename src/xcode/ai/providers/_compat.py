@@ -18,6 +18,7 @@ from xcode.ai.types import (
     ThinkingBudgets,
     ToolDefinition,
 )
+from xcode.ai.usage import UsageAccumulator, UsageTotals
 
 from ._codec import normalize_cross_provider_messages, to_chat_messages, to_chat_tools
 from ._runtime import ProviderRuntime
@@ -64,6 +65,7 @@ class OpenAICompatProvider:
             client = _OpenAIClient(api_key=config.api_key, base_url=config.base_url)
         self.client = client
         self.config = config
+        self._usage = UsageAccumulator(config.model)
         self.runtime = ProviderRuntime()
         self.transport = transport
         self._current_options: StreamOptions | None = None
@@ -93,6 +95,16 @@ class OpenAICompatProvider:
     @property
     def metrics(self) -> dict[str, object]:
         return self._metrics
+
+    @property
+    def usage_totals(self) -> UsageTotals:
+        """本 provider 实例的累计用量与成本。"""
+        return self._usage.totals
+
+    @property
+    def cache_hit_rate(self) -> float | None:
+        """最近一次请求的缓存命中率；尚无 usage 记录时为 None。"""
+        return self._usage.cache_hit_rate
 
     def _init_metrics(self) -> dict[str, object]:
         return {
@@ -211,6 +223,12 @@ class OpenAICompatProvider:
             self._metrics["cache_hit_rate"] = cache_usage.hit_rate
             self._metrics["prompt_cache_hit_tokens"] = cache_usage.hit_tokens
             self._metrics["prompt_cache_miss_tokens"] = cache_usage.miss_tokens
+
+            self._usage.record(
+                prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+                cache_usage=cache_usage,
+            )
 
             completion_details = getattr(usage, "completion_tokens_details", None)
             reasoning = (

@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from xcode.ai.events import Message, ProviderEvent
 from xcode.ai.providers.base import ModelProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.ai.usage import UsageTotals
 
 
 class _FallbackSwitchingProvider:
@@ -58,6 +59,15 @@ class _FallbackSwitchingProvider:
     @property
     def context_window(self) -> int | None:
         return self.active_provider.context_window
+
+    @property
+    def usage_totals(self) -> UsageTotals:
+        """主备 provider 的累计用量之和。"""
+        return self._primary.usage_totals.add(self._fallback.usage_totals)
+
+    @property
+    def cache_hit_rate(self) -> float | None:
+        return self.active_provider.cache_hit_rate
 
     def reset_conversation_state(self) -> None:
         """清理主备 provider 的服务端会话状态。"""

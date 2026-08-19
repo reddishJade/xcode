@@ -8,6 +8,7 @@ from typing import Protocol, runtime_checkable
 
 from xcode.ai.events import Message, ProviderEvent
 from xcode.ai.types import StreamOptions, ToolDefinition
+from xcode.ai.usage import UsageTotals
 
 
 class StreamProvider(Protocol):
@@ -43,6 +44,12 @@ class ModelProvider(StreamProvider, Protocol):
 
     @property
     def context_window(self) -> int | None: ...
+
+    @property
+    def usage_totals(self) -> UsageTotals: ...
+
+    @property
+    def cache_hit_rate(self) -> float | None: ...
 
 
 class Provider(ABC):
