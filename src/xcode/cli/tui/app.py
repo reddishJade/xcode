@@ -51,6 +51,7 @@ from xcode.harness.snapshot import SnapshotStore, SnapshotUnsupportedError
 from ..app_contract import ReplApp
 from ..commands import ReplState
 from ..completion import CommandArgsSuggester, ReplCompleter
+from ..config_registry import SettingSpec
 from ..file_refs import expand_file_references
 from ..git import git_branch_name
 from ..markdown import TerminalMarkdownRenderer
@@ -109,8 +110,6 @@ if TYPE_CHECKING:
         SessionGrantStoreManager,
     )
     from xcode.harness.snapshot import SnapshotResult, SnapshotService
-
-    from ..config_registry import SettingSpec
 
 
 def run_tui(
@@ -266,7 +265,14 @@ class _XcodeTui:
             ),
         )
         self._command_container = ConditionalContainer(
-            self._command_choices,
+            HSplit(
+                [
+                    self._command_choices,
+                    Window(
+                        FormattedTextControl(text=self._command_choice_hint_text)
+                    ),
+                ]
+            ),
             filter=Condition(lambda: self._state.pending_command_choice is not None),
         )
         self._question_container = ConditionalContainer(
@@ -360,6 +366,7 @@ class _XcodeTui:
                         "bg:default fg:default bold underline"
                     ),
                     "radio-selected": "ansicyan bold",
+                    "choice-desc": "#808080",
                     "status": "ansibrightblack",
                     "input-border": "ansibrightblack",
                     "prompt-marker": "ansiyellow bold",
@@ -844,18 +851,31 @@ class _XcodeTui:
             return True
         return False
 
+    def _command_choice_hint_text(self) -> str:
+        """选择菜单底部的灰色说明：跟随高亮项，否则显示操作提示。"""
+        request = self._state.pending_command_choice
+        if request is None:
+            return ""
+        if request.describe is not None:
+            description = request.describe(self._command_choices.current_value)
+            if description:
+                return f"\n  {description}"
+        return "\n  ↑/↓ move · enter select · esc back/cancel"
+
     def _open_command_choices(
         self,
         choices: list[tuple[str, object]],
         on_select: Callable[[object], None],
         on_cancel: Callable[[], None] | None = None,
+        describe: Callable[[object], str] | None = None,
     ) -> None:
         """打开可复用的 TUI 命令选择菜单。
 
-        on_cancel 提供时，esc 触发它而不是直接关闭（用于二级菜单返回上级）。
+        on_cancel 提供时，esc 触发它而不是直接关闭（用于二级菜单返回上级）；
+        describe 提供时，底部灰色说明跟随高亮项。
         """
         self._state.pending_command_choice = _CommandChoiceRequest(
-            choices, on_select, on_cancel
+            choices, on_select, on_cancel, describe
         )
         self._command_choices.values = [(value, label) for label, value in choices]
         self._command_choices._selected_index = 0
@@ -924,7 +944,13 @@ class _XcodeTui:
             for item in SETTING_SPECS
         ]
         choices.append(("Exit", None))
-        self._open_command_choices(choices, choose)
+
+        def describe(item: object) -> str:
+            if isinstance(item, SettingSpec):
+                return f"{item.key} — {item.description}"
+            return ""
+
+        self._open_command_choices(choices, choose, describe=describe)
 
     def _edit_config_setting(self, config_path: Path, spec: SettingSpec) -> None:
         """编辑单个设置项：枚举走选择菜单，标量走文本输入。"""
@@ -969,8 +995,15 @@ class _XcodeTui:
                 ok, message = save_setting_text(config_path, spec, text)
                 report_and_reopen(ok, message)
 
+            def describe_token(token: object) -> str:
+                text = str(token).removesuffix(" (current)")
+                return spec.describe_choice(text)
+
             self._open_command_choices(
-                [(title, title) for title in titles], pick, on_cancel=reopen
+                [(title, title) for title in titles],
+                pick,
+                on_cancel=reopen,
+                describe=describe_token,
             )
             return
 

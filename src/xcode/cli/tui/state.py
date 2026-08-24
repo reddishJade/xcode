@@ -59,6 +59,7 @@ class _CommandChoiceRequest:
     choices: list[tuple[str, object]]
     on_select: Callable[[object], None]
     on_cancel: Callable[[], None] | None = None
+    describe: Callable[[object], str] | None = None
 
 
 @dataclass

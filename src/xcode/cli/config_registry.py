@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import field as dataclasses_field
 from enum import StrEnum
 from operator import attrgetter
 from pathlib import Path
@@ -49,12 +50,17 @@ class SettingSpec:
     none_choice: str | None = None
     getter: Callable[[XcodeRuntimeConfig], Any] | None = None
     formatter: Callable[[Any], str] | None = None
+    choice_descriptions: dict[str, str] = dataclasses_field(default_factory=dict)
 
     def read(self, config: XcodeRuntimeConfig) -> Any:
         """从生效配置中读取当前值；INFO 行必须提供自定义 getter。"""
         if self.getter is not None:
             return self.getter(config)
         return attrgetter(self.key)(config)
+
+    def describe_choice(self, token: str) -> str:
+        """返回枚举选项的灰色说明文本；未声明时回退到整体说明。"""
+        return self.choice_descriptions.get(token) or self.description
 
 
 _TRUE_TOKENS = frozenset({"1", "true", "yes", "on"})
@@ -74,45 +80,17 @@ def _fmt_seconds(value: Any) -> str:
     return f"{float(value):g}s"
 
 
-def _fmt_bytes(value: Any) -> str:
-    return f"{int(value):,}B"
-
-
 def _fmt_str_list(value: Any) -> str:
     items = list(value) if value is not None else []
     return ", ".join(items) if items else "(none)"
-
-
-def _fmt_unlimited(value: Any) -> str:
-    return "unlimited" if value is None else str(value)
 
 
 def _fmt_default(value: Any) -> str:
     return "default" if value is None else str(value)
 
 
-def _fmt_optional_path(fallback: str) -> Callable[[Any], str]:
-    def _format(value: Any) -> str:
-        return fallback if value is None else str(value)
-
-    return _format
-
-
 def _count_getter(section: str) -> Callable[[XcodeRuntimeConfig], int]:
     return lambda config: len(attrgetter(section)(config))
-
-
-def _hooks_detail(config: XcodeRuntimeConfig) -> list[str]:
-    lines: list[str] = []
-    for index, entry in enumerate(config.hooks.entries):
-        state = "enabled" if entry.enabled else "disabled"
-        command = " ".join(entry.command)
-        matcher = f" matcher={entry.matcher}" if entry.matcher else ""
-        lines.append(
-            f"  [{index}] {entry.event}: {command}{matcher} ({state}, "
-            f"{entry.failure_policy})"
-        )
-    return lines or ["  (none)"]
 
 
 def _external_dirs_detail(config: XcodeRuntimeConfig) -> list[str]:
@@ -122,32 +100,6 @@ def _external_dirs_detail(config: XcodeRuntimeConfig) -> list[str]:
     return [f"  {item.path} ({item.access})" for item in entries]
 
 
-def _sensitive_overrides_detail(config: XcodeRuntimeConfig) -> list[str]:
-    entries = config.security.sensitive_path_overrides
-    if not entries:
-        return ["  (none)"]
-    return [f"  {item.path} ({item.access})" for item in entries]
-
-
-def _instructions_detail(config: XcodeRuntimeConfig) -> list[str]:
-    sources = config.prompt.instructions
-    if not sources:
-        return ["  AGENTS.md (fallback)"]
-    lines: list[str] = []
-    for source in sources:
-        if source.type == "file":
-            priority = f", {source.priority}" if source.priority else ""
-            lines.append(f"  file: {source.path}{priority}")
-        else:
-            preview = " ".join(source.content.split())[:60]
-            lines.append(f"  inline: {preview}")
-    return lines
-
-
-def _modules_detail(config: XcodeRuntimeConfig) -> list[str]:
-    return ["  " + ", ".join(config.prompt.modules)]
-
-
 SETTING_SPECS: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="execution_modes.default_mode",
@@ -155,10 +107,19 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         kind=SettingKind.ENUM,
         choices=("act", "build", "plan"),
         description=(
-            "'act': read allowed; writes and shell ask the user. "
-            "'build': workspace mutations auto-run, boundary actions reviewed. "
-            "'plan': research and plan without making changes."
+            "Behavior for writes and shell commands in new sessions. "
+            "'act': read allowed, writes and shell ask the user. "
+            "'build': workspace mutations auto-run, boundary actions "
+            "auto-reviewed. 'plan': research and plan without making changes."
         ),
+        choice_descriptions={
+            "act": "Maximizes interactivity: every write or shell command asks.",
+            "build": (
+                "Maximizes autonomy inside the workspace; risky actions are "
+                "reviewed by a reviewer model."
+            ),
+            "plan": "Read-only research mode; nothing is written to disk.",
+        },
     ),
     SettingSpec(
         key="security.approval_policy",
@@ -166,15 +127,26 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         kind=SettingKind.ENUM,
         choices=("on-request", "never"),
         description=(
-            "'on-request': rule-generated asks enter the approval flow. "
-            "'never': actions without an existing grant are denied."
+            "How rule-generated approval requests are handled. "
+            "'on-request': asks enter the approval flow (auto reviewer or "
+            "user). 'never': actions without an existing grant are denied."
         ),
+        choice_descriptions={
+            "on-request": "Approval requests are processed normally.",
+            "never": (
+                "Never prompts: ungranted boundary actions fail closed "
+                "(maximizes autonomy, risk of blocked work)."
+            ),
+        },
     ),
     SettingSpec(
         key="security.auto_review_timeout_seconds",
         label="Auto Review Timeout",
         kind=SettingKind.FLOAT,
-        description="Total deadline for the automatic reviewer, 0-300 seconds.",
+        description=(
+            "Total deadline for the automatic reviewer per action, "
+            "0-300 seconds. On timeout the action fails closed."
+        ),
         formatter=_fmt_seconds,
     ),
     SettingSpec(
@@ -184,120 +156,49 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         choices=("allow", "ask", "deny", "default"),
         none_choice="default",
         description=(
-            "Decision when no static rule matches. 'default' clears the "
-            "override and defers to mode fallback."
+            "Decision applied when no static rule matches. 'allow' maximizes "
+            "autonomy; 'deny' fails closed. 'default' clears the override "
+            "and defers to the current mode fallback."
         ),
         formatter=_fmt_default,
+        choice_descriptions={
+            "allow": "Unmatched actions proceed without prompting.",
+            "ask": "Unmatched actions require a decision first.",
+            "deny": "Unmatched actions are always rejected.",
+            "default": "No global override; the mode fallback decides.",
+        },
     ),
     SettingSpec(
         key="security.restricted_dirs",
         label="Restricted Dirs",
         kind=SettingKind.STR_LIST,
         nullable=True,
-        description="Directories the agent must never access. Comma separated.",
+        description=(
+            "Directories the agent must never access, even when other rules "
+            "allow them. Comma separated; 'none' clears the list."
+        ),
         formatter=_fmt_str_list,
     ),
     SettingSpec(
-        key="agent.max_steps",
-        label="Agent Max Steps",
-        kind=SettingKind.INT,
-        nullable=True,
-        description="Max loop turns per task. 'unlimited' removes the cap.",
-        formatter=_fmt_unlimited,
-    ),
-    SettingSpec(
-        key="agent.compact_threshold",
-        label="Compact Msg Threshold",
-        kind=SettingKind.INT,
-        description="Message-count trigger for compaction; 0 disables.",
-    ),
-    SettingSpec(
-        key="agent.compact_token_threshold",
-        label="Compact Token Threshold",
-        kind=SettingKind.INT,
-        description="Token trigger for compaction; 0 disables.",
-    ),
-    SettingSpec(
-        key="agent.max_recent_messages",
-        label="Max Recent Messages",
-        kind=SettingKind.INT,
-        description="Recent messages kept verbatim when compacting.",
-    ),
-    SettingSpec(
-        key="agent.keep_recent_tokens",
-        label="Keep Recent Tokens",
-        kind=SettingKind.INT,
-        description="Token budget preserved for recent raw messages.",
-    ),
-    SettingSpec(
-        key="agent.reserve_tokens",
-        label="Reserve Tokens",
-        kind=SettingKind.INT,
-        description="Token budget reserved for output and tool interaction.",
-    ),
-    SettingSpec(
-        key="agent.compact_trigger_ratio",
-        label="Compact Trigger Ratio",
-        kind=SettingKind.FLOAT,
-        description="Auto-compact trigger as a ratio of the context window.",
-    ),
-    SettingSpec(
-        key="agent.tool_workers",
-        label="Tool Workers",
-        kind=SettingKind.INT,
-        description="Max active tools inside one parallel batch.",
-    ),
-    SettingSpec(
-        key="agent.tool_timeout_seconds",
-        label="Tool Timeout",
-        kind=SettingKind.FLOAT,
-        description="Per-tool-call timeout in seconds.",
-        formatter=_fmt_seconds,
-    ),
-    SettingSpec(
-        key="agent.watchdog_repeated_tool_limit",
-        label="Watchdog Repeat Limit",
-        kind=SettingKind.INT,
-        description="Consecutive identical tool calls before the watchdog fires.",
-    ),
-    SettingSpec(
-        key="request_hygiene.enabled",
-        label="Request Hygiene",
-        kind=SettingKind.BOOL,
-        description="Compress message history sent to the model.",
-        formatter=_fmt_bool,
-    ),
-    SettingSpec(
-        key="request_hygiene.max_tool_result_bytes",
-        label="Tool Result Limit",
-        kind=SettingKind.INT,
-        description="Maximum tool_result size in bytes.",
-        formatter=_fmt_bytes,
-    ),
-    SettingSpec(
-        key="request_hygiene.max_tool_arg_length",
-        label="Tool Arg Limit",
-        kind=SettingKind.INT,
-        description="Maximum completed tool-call argument length.",
-    ),
-    SettingSpec(
-        key="request_hygiene.keep_head_lines",
-        label="Hygiene Head Lines",
-        kind=SettingKind.INT,
-        description="Head lines kept when compressing a tool_result.",
-    ),
-    SettingSpec(
-        key="request_hygiene.keep_tail_lines",
-        label="Hygiene Tail Lines",
-        kind=SettingKind.INT,
-        description="Tail lines kept when compressing a tool_result.",
+        key="security.external_directories",
+        label="External Dirs",
+        kind=SettingKind.INFO,
+        description=(
+            "Workspace-external directories whitelisted for access; each "
+            "entry grants read, write, or read_write. Edit JSON to change."
+        ),
+        getter=_count_getter("security.external_directories"),
+        formatter=lambda v: f"{v} allowed",
     ),
     SettingSpec(
         key="tools.shell",
         label="Shell",
         kind=SettingKind.ENUM,
         choices=("auto", "bash", "zsh", "sh", "fish", "pwsh", "powershell", "cmd"),
-        description="Shell used by the bash tool. 'auto' detects at runtime.",
+        description=(
+            "Shell used by the bash tool. 'auto' detects the login shell at "
+            "runtime; pick an explicit value to pin behavior across machines."
+        ),
     ),
     SettingSpec(
         key="tools.subagent_extra_tools",
@@ -305,8 +206,8 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         kind=SettingKind.STR_LIST,
         nullable=True,
         description=(
-            "Main-agent tools additionally granted to subagents. "
-            "'todowrite' is not inherited by default. Comma separated."
+            "Main-agent tools additionally granted to subagents; most useful "
+            "for sharing 'todowrite'. Comma separated; 'none' clears."
         ),
         formatter=_fmt_str_list,
     ),
@@ -314,72 +215,15 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         key="skills.trust_project_skills",
         label="Trust Project Skills",
         kind=SettingKind.BOOL,
-        description="Discover and expose project-local skill directories.",
+        description=(
+            "Whether project-local .xcode/skills/ and .agents/skills/ "
+            "directories are discovered and exposed to the agent."
+        ),
         formatter=_fmt_bool,
-    ),
-    SettingSpec(
-        key="paths.sessions_dir",
-        label="Sessions Dir",
-        kind=SettingKind.PATH,
-        nullable=True,
-        description="Session transcript directory. 'none' uses .xcode/sessions.",
-        formatter=_fmt_optional_path(".xcode/sessions"),
-    ),
-    SettingSpec(
-        key="paths.skills_dir",
-        label="Skills Dir",
-        kind=SettingKind.PATH,
-        nullable=True,
-        description="Highest-priority skill scan directory. 'none' for defaults.",
-        formatter=_fmt_optional_path("user defaults"),
-    ),
-    SettingSpec(
-        key="observability.audit_path",
-        label="Audit Log",
-        kind=SettingKind.PATH,
-        nullable=True,
-        description="Audit log path. 'none' disables audit logging.",
-        formatter=_fmt_optional_path("off"),
-    ),
-    SettingSpec(
-        key="security.external_directories",
-        label="External Dirs",
-        kind=SettingKind.INFO,
-        description="Workspace-external directories whitelisted for access.",
-        getter=_count_getter("security.external_directories"),
-        formatter=lambda v: f"{v} allowed",
-    ),
-    SettingSpec(
-        key="security.sensitive_path_overrides",
-        label="Sensitive Overrides",
-        kind=SettingKind.INFO,
-        description="Exact-path exceptions for sensitive files.",
-        getter=_count_getter("security.sensitive_path_overrides"),
-        formatter=lambda v: f"{v} entries",
-    ),
-    SettingSpec(
-        key="prompt.instructions",
-        label="Instructions",
-        kind=SettingKind.INFO,
-        description="Instruction sources injected into the system prompt.",
-        getter=_count_getter("prompt.instructions"),
-        formatter=lambda v: f"{v} sources",
-    ),
-    SettingSpec(
-        key="prompt.modules",
-        label="Prompt Modules",
-        kind=SettingKind.INFO,
-        description="Modules joined into the system prompt, in order.",
-        getter=_count_getter("prompt.modules"),
-        formatter=lambda v: f"{v} modules",
-    ),
-    SettingSpec(
-        key="hooks.entries",
-        label="Hooks",
-        kind=SettingKind.INFO,
-        description="Trusted external-command hooks. Edit JSON to change.",
-        getter=_count_getter("hooks.entries"),
-        formatter=lambda v: f"{v} entries",
+        choice_descriptions={
+            "on": "Project skills load on demand like user skills.",
+            "off": "Only user-level skills (~/.xcode/skills) are visible.",
+        },
     ),
 )
 
@@ -417,11 +261,7 @@ def matching_settings(query: str) -> list[SettingSpec]:
 def setting_detail(spec: SettingSpec, config: XcodeRuntimeConfig) -> list[str]:
     """INFO 行展开的多行详情。"""
     detail_getters: dict[str, Callable[[XcodeRuntimeConfig], list[str]]] = {
-        "hooks.entries": _hooks_detail,
         "security.external_directories": _external_dirs_detail,
-        "security.sensitive_path_overrides": _sensitive_overrides_detail,
-        "prompt.instructions": _instructions_detail,
-        "prompt.modules": _modules_detail,
     }
     getter = detail_getters.get(spec.key)
     if getter is None:
