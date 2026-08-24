@@ -485,6 +485,8 @@ class _XcodeTui:
         bindings.add("c-o", eager=True)(self._toggle_tools_key)
         bindings.add("c-q")(self._quit_key)
         bindings.add("c-c")(self._cancel_key)
+        # 单独的 Esc 关闭挂起的菜单/表单；不用 eager 以保留 esc,enter 换行序列。
+        bindings.add("escape")(self._escape_key)
         return bindings
 
     def _submit_key(self, _event: object) -> None:
@@ -582,6 +584,18 @@ class _XcodeTui:
         self._update_preserving_viewport(self._state.toggle_tools)
         self._repl_state.tool_collapsed = self._state.tool_collapsed
         self._refresh()
+
+    def _escape_key(self, _event: object) -> None:
+        """单独 Esc：关闭挂起的菜单/表单；菜单链经 on_cancel 返回上级。"""
+        if self._state.pending_command_choice is not None:
+            self._cancel_key(_event)
+            return
+        if self._state.pending_command_text is not None:
+            request = self._state.pending_command_text
+            self._state.pending_command_text = None
+            if request.on_cancel is not None:
+                request.on_cancel()
+            self._refresh()
 
     def _quit_key(self, _event: object) -> None:
         if self._state.pending_question_choice is not None:
