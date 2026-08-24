@@ -114,6 +114,8 @@ def build_apply_patch_tool(
             "Each apply_patch hunk must start with *** Begin Patch and end with *** End Patch.",
             "Patch paths must be project-relative and may not escape the project sandbox.",
         ),
+        action_profile=("patch", "path"),
+        path_extractor=extract_patch_paths,
     )
 
 

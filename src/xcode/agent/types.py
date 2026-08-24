@@ -182,6 +182,7 @@ type ToolUpdateCallback = Callable[[AgentToolResult], None]
 
 
 ToolInput = dict[str, Any]
+ToolPathExtractor = Callable[[Mapping[str, object]], tuple[str, ...]]
 ActionHandler = Callable[[ToolInput, Callable[[str], None] | None], str]
 HITLResult = Any
 ApprovalScope = Literal["once", "session", "permanent"]
@@ -246,6 +247,8 @@ class ToolSpec:
     schema: Mapping[str, Any] | None = None
     prompt_snippet: str | None = None
     prompt_guidelines: tuple[str, ...] = ()
+    action_profile: tuple[str, str] | None = None
+    path_extractor: ToolPathExtractor | None = None
 
 
 def materialize_json_mapping(value: object) -> dict[str, object]:

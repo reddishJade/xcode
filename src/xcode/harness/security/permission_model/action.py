@@ -21,16 +21,48 @@ class ActionExtractor:
     ) -> Action:
         action = self._extract_inner(tool_name, tool_input, path_extractor)
         if action_profile is not None:
-            capability_name, _ = action_profile
+            capability_name, target_kind = action_profile
+            targets = action.targets or self._profile_targets(
+                tool_input,
+                capability_name,
+                target_kind,
+                path_extractor,
+            )
             action = Action(
                 tool=action.tool,
                 capability=capability_name,
                 operation=action.operation,
-                targets=action.targets,
+                targets=targets,
                 input=action.input,
                 unresolved_effects=action.unresolved_effects,
             )
         return action
+
+    @staticmethod
+    def _profile_targets(
+        tool_input: Mapping[str, object],
+        capability: str,
+        target_kind: str,
+        path_extractor: PathExtractor | None,
+    ) -> tuple[Target, ...]:
+        """按工具声明为未知工具补充结构化 target。"""
+        if target_kind != "path":
+            return ()
+        if path_extractor is not None:
+            paths = path_extractor(tool_input)
+        else:
+            raw_path = tool_input.get("path")
+            paths = (raw_path,) if isinstance(raw_path, str) else ()
+        access: PermissionAccess = "read" if capability == "read" else "write"
+        return tuple(
+            Target(
+                kind="path",
+                value=_normalize_path_text(path),
+                access=access,
+            )
+            for path in paths
+            if path.strip()
+        )
 
     def _extract_inner(
         self,
