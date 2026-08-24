@@ -163,6 +163,32 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         },
     ),
     SettingSpec(
+        key="security.sandbox.mode",
+        label="Sandbox Mode",
+        kind=SettingKind.ENUM,
+        choices=("workspace-write", "read-only", "danger-full-access"),
+        description="Linux OS sandbox policy used by Agent shell commands.",
+        choice_descriptions={
+            "workspace-write": (
+                "Project and approved writable roots can change; other host paths "
+                "are read-only."
+            ),
+            "read-only": "The shell cannot write to host filesystem paths.",
+            "danger-full-access": "The shell can write anywhere as the current user.",
+        },
+    ),
+    SettingSpec(
+        key="security.sandbox.network_access",
+        label="Sandbox Network",
+        kind=SettingKind.ENUM,
+        choices=("deny", "allow"),
+        description="Whether Linux sandboxed shell commands can use host networking.",
+        choice_descriptions={
+            "deny": "Create an isolated network namespace with no external access.",
+            "allow": "Keep the host network namespace.",
+        },
+    ),
+    SettingSpec(
         key="tools.shell",
         label="Shell",
         kind=SettingKind.ENUM,

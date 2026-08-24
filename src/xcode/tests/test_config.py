@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from xcode.harness.config import XcodeRuntimeConfig, _config_from_dict
+from xcode.harness.execution_env import NetworkAccess, SandboxMode
 
 
 class TestProviderContextWindow:
@@ -88,4 +89,33 @@ class TestApprovalConfiguration:
         with pytest.raises(ValidationError):
             XcodeRuntimeConfig.model_validate(
                 {"security": {"approvals_reviewer": "user"}}
+            )
+
+
+class TestSandboxConfiguration:
+    def test_defaults_to_workspace_write_without_network(self) -> None:
+        cfg = XcodeRuntimeConfig()
+
+        assert cfg.security.sandbox.mode is SandboxMode.WORKSPACE_WRITE
+        assert cfg.security.sandbox.network_access is NetworkAccess.DENY
+
+    def test_parses_explicit_full_access(self) -> None:
+        cfg = XcodeRuntimeConfig.model_validate(
+            {
+                "security": {
+                    "sandbox": {
+                        "mode": "danger-full-access",
+                        "network_access": "allow",
+                    }
+                }
+            }
+        )
+
+        assert cfg.security.sandbox.mode is SandboxMode.DANGER_FULL_ACCESS
+        assert cfg.security.sandbox.network_access is NetworkAccess.ALLOW
+
+    def test_rejects_unknown_sandbox_mode(self) -> None:
+        with pytest.raises(ValidationError):
+            XcodeRuntimeConfig.model_validate(
+                {"security": {"sandbox": {"mode": "directory-check"}}}
             )

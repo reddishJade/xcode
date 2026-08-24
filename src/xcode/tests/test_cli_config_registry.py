@@ -51,6 +51,8 @@ class TestRegistryIntegrity:
             "execution_modes.default_mode",
             "security.approval_policy",
             "security.non_workspace_access",
+            "security.sandbox.mode",
+            "security.sandbox.network_access",
             "tools.shell",
         }
 
@@ -65,6 +67,12 @@ class TestFormatSetting:
             == "asks for review"
         )
         assert format_setting(_spec("security.non_workspace_access"), config) == "on"
+        assert format_setting(_spec("security.sandbox.mode"), config) == (
+            "workspace-write"
+        )
+        assert format_setting(_spec("security.sandbox.network_access"), config) == (
+            "deny"
+        )
         assert format_setting(_spec("tools.shell"), config) == "auto"
 
 
@@ -136,6 +144,14 @@ class TestApprovalChoiceMapping:
         parsed = XcodeRuntimeConfig.model_validate(raw)
         assert parsed.security.non_workspace_access is False
         assert format_setting(spec, parsed) == "off"
+
+    def test_sandbox_mode_roundtrip(self) -> None:
+        spec = _spec("security.sandbox.mode")
+        raw: dict = {}
+        apply_setting(raw, spec, "read-only")
+        parsed = XcodeRuntimeConfig.model_validate(raw)
+        assert parsed.security.sandbox.mode == "read-only"
+        assert format_setting(spec, parsed) == "read-only"
 
 
 class TestDescribeChoice:

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -16,6 +17,7 @@ from pydantic import (
     field_validator,
 )
 
+from .execution_env.sandbox import NetworkAccess, SandboxMode
 from .security.approval import ApprovalPolicy
 
 DirAccess = Literal["read", "write", "read_write"]
@@ -148,6 +150,14 @@ class ExecutionModesRuntimeConfig(BaseModel):
     act: ModeRulesetRuntimeConfig = Field(default_factory=ModeRulesetRuntimeConfig)
 
 
+class SandboxRuntimeConfig(BaseModel):
+    """Linux Agent shell 的 OS sandbox 配置。"""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: SandboxMode = SandboxMode.WORKSPACE_WRITE
+    network_access: NetworkAccess = NetworkAccess.DENY
+
+
 class SecurityRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     approval_policy: ApprovalPolicy = "on-request"
@@ -158,6 +168,7 @@ class SecurityRuntimeConfig(BaseModel):
         gt=0,
         le=300,
     )
+    sandbox: SandboxRuntimeConfig = Field(default_factory=SandboxRuntimeConfig)
     restricted_dirs: tuple[str, ...] = ()
     permissions: dict[str, Literal["allow", "ask", "deny"]] = Field(
         default_factory=dict,

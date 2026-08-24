@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+import tempfile
 from pathlib import Path
 from typing import cast
 
@@ -9,6 +11,14 @@ from xcode.harness.config import (
     ModeRuleRuntimeConfig,
     SecurityRuntimeConfig,
     XcodeRuntimeConfig,
+)
+from xcode.harness.execution_env import (
+    LinuxBubblewrapSandbox,
+    NetworkAccess,
+    SandboxMode,
+    SandboxPolicy,
+    Shell,
+    SubprocessShell,
 )
 from xcode.harness.security import (
     PermissionDecision,
@@ -37,6 +47,50 @@ _PERMISSION_TOOLS: dict[str, tuple[str, ...]] = {
     "subagent": ("subagent",),
     "skill": ("load_skill",),
 }
+
+
+def build_shell_from_security(
+    project_root: Path,
+    security: SecurityRuntimeConfig,
+) -> Shell:
+    """按运行时安全配置构造 Agent shell。"""
+    sandbox = security.sandbox
+    if sys.platform != "linux":
+        return SubprocessShell()
+    if (
+        sandbox.mode is SandboxMode.DANGER_FULL_ACCESS
+        and sandbox.network_access is NetworkAccess.ALLOW
+    ):
+        return SubprocessShell()
+    policy = sandbox_policy_from_security(project_root, security)
+    return SubprocessShell(sandbox=LinuxBubblewrapSandbox(policy))
+
+
+def sandbox_policy_from_security(
+    project_root: Path,
+    security: SecurityRuntimeConfig,
+) -> SandboxPolicy:
+    """把用户配置转换为 Linux bubblewrap 文件和网络策略。"""
+    writable_roots: list[Path] = []
+    if security.sandbox.mode is SandboxMode.WORKSPACE_WRITE:
+        temp_root = Path(tempfile.gettempdir())
+        if temp_root.is_dir():
+            writable_roots.append(temp_root)
+        if security.non_workspace_access:
+            for item in security.external_directories:
+                if item.access not in {"write", "read_write"}:
+                    continue
+                path = Path(item.path).expanduser()
+                if not path.is_absolute():
+                    path = project_root / path
+                if path.is_dir():
+                    writable_roots.append(path)
+    return SandboxPolicy(
+        project_root=project_root,
+        mode=security.sandbox.mode,
+        network_access=security.sandbox.network_access,
+        writable_roots=tuple(writable_roots),
+    )
 
 
 def _rule_from_runtime_config(rule: ModeRuleRuntimeConfig) -> Rule:

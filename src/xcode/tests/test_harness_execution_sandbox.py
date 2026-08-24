@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from xcode.coding_agent.assembly.security import sandbox_policy_from_security
+from xcode.harness.config import SecurityRuntimeConfig
 from xcode.harness.execution_env import (
     LinuxBubblewrapSandbox,
     NetworkAccess,
@@ -153,3 +155,25 @@ def _mounts(argv: tuple[str, ...], flag: str) -> set[tuple[str, str]]:
         if token == flag:
             mounts.add((argv[index + 1], argv[index + 2]))
     return mounts
+
+
+def test_runtime_security_maps_writable_external_directories(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    writable = tmp_path / "writable"
+    writable.mkdir()
+    readable = tmp_path / "readable"
+    readable.mkdir()
+    security = SecurityRuntimeConfig.model_validate(
+        {
+            "external_directories": [
+                {"path": str(writable), "access": "read_write"},
+                {"path": str(readable), "access": "read"},
+            ]
+        }
+    )
+
+    policy = sandbox_policy_from_security(project, security)
+
+    assert writable in policy.writable_roots
+    assert readable not in policy.writable_roots

@@ -6,27 +6,28 @@ import json
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from xcode.ai.providers.base import ModelProvider
 from xcode.agent.types import ToolSpec
+from xcode.ai.providers.base import ModelProvider
+from xcode.coding_agent.registry import build_project_scoped_registry
+from xcode.coding_agent.tools import ShellSpec, detect_shell
 from xcode.coding_agent.tools.subagent import (
     BUILD_SUBAGENT_PROMPTS,
     build_subagent_tools,
 )
-from xcode.coding_agent.tools import ShellSpec, detect_shell
-from xcode.coding_agent.registry import build_project_scoped_registry
-
-from xcode.harness.config import XcodeRuntimeConfig
-from xcode.harness.execution_env import Shell
 from xcode.harness.agent_runtime import CancellationToken, ContextualRetrievalState
 from xcode.harness.agent_runtime.subagents import SubagentSessionManager
+from xcode.harness.config import XcodeRuntimeConfig
+from xcode.harness.execution_env import Shell
 from xcode.harness.session_todo import SessionTodoState
 
+from .security import build_shell_from_security
+
 if TYPE_CHECKING:
-    from xcode.harness.skills import SkillRegistry
     from xcode.harness.mcp import McpRuntimeRegistry
     from xcode.harness.session.recorder import SessionRecorder
+    from xcode.harness.skills import SkillRegistry
 
 
 def build_search_tools_tool(
@@ -185,6 +186,7 @@ def build_tool_registry(
 
     closers: list[Callable[[], None]] = []
     shell_spec = detect_shell(runtime_config.tools.shell)
+    shell = shell or build_shell_from_security(project_root, runtime_config.security)
 
     skill_registry = _discover_skills(project_root, runtime_config, skills_dir)
 

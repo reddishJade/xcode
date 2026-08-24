@@ -8,14 +8,15 @@
   security.py — 安全策略与 ruleset 辅助函数
 """
 
+from .agent import build_agent, build_hook_manager
 from .config import ResolvedConfig, resolve_config
 from .infra import SharedInfra, build_shared_infra
 from .registry import (
     build_search_tools_tool,
     build_tool_registry,
 )
-from .agent import build_agent, build_hook_manager
 from .security import (
+    build_shell_from_security,
     external_directories_from_security,
     mode_rulesets_from_runtime_config,
     permission_policy_from_security,
@@ -29,10 +30,11 @@ __all__ = [
     "build_hook_manager",
     "build_search_tools_tool",
     "build_shared_infra",
+    "build_shell_from_security",
     "build_tool_registry",
     "external_directories_from_security",
     "mode_rulesets_from_runtime_config",
     "permission_policy_from_security",
-    "sensitive_path_overrides_from_security",
     "resolve_config",
+    "sensitive_path_overrides_from_security",
 ]
