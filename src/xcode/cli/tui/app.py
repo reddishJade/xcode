@@ -594,8 +594,11 @@ class _XcodeTui:
             self._complete_question_choice([])
             return
         if self._state.pending_command_choice is not None:
+            request = self._state.pending_command_choice
             self._state.pending_command_choice = None
             self._application.layout.focus(self._input)
+            if request.on_cancel is not None:
+                request.on_cancel()
             self._refresh()
             return
         if self._state.pending_command_text is not None:
@@ -845,9 +848,15 @@ class _XcodeTui:
         self,
         choices: list[tuple[str, object]],
         on_select: Callable[[object], None],
+        on_cancel: Callable[[], None] | None = None,
     ) -> None:
-        """打开可复用的 TUI 命令选择菜单。"""
-        self._state.pending_command_choice = _CommandChoiceRequest(choices, on_select)
+        """打开可复用的 TUI 命令选择菜单。
+
+        on_cancel 提供时，esc 触发它而不是直接关闭（用于二级菜单返回上级）。
+        """
+        self._state.pending_command_choice = _CommandChoiceRequest(
+            choices, on_select, on_cancel
+        )
         self._command_choices.values = [(value, label) for label, value in choices]
         self._command_choices._selected_index = 0
         self._command_choices.current_value = choices[0][1]
@@ -960,7 +969,9 @@ class _XcodeTui:
                 ok, message = save_setting_text(config_path, spec, text)
                 report_and_reopen(ok, message)
 
-            self._open_command_choices([(title, title) for title in titles], pick)
+            self._open_command_choices(
+                [(title, title) for title in titles], pick, on_cancel=reopen
+            )
             return
 
         hint = "Type value, enter to save, esc to cancel"
