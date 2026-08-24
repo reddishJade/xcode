@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,8 @@ from xcode.harness.security.permissions import PermissionEngine, PermissionEngin
 from xcode.harness.security.permission_model import (
     Action,
     Constraint,
+    FileGrantStore,
+    GrantRecord,
     Rule,
     SensitivePathOverride,
 )
@@ -410,3 +413,29 @@ def test_sensitive_override_runtime_config_rejects_globs() -> None:
         SecurityRuntimeConfig.model_validate(
             {"sensitive_path_overrides": [{"path": "**/.env", "access": "read"}]}
         )
+
+
+def test_file_grant_store_preserves_concurrent_updates(tmp_path: Path) -> None:
+    store = FileGrantStore(tmp_path / "grants.json")
+    records = [
+        GrantRecord(
+            capability="read",
+            operation="read_file",
+            target_kind="path",
+            target_pattern=f"src/file_{index}.py",
+            access="read",
+            decision="allow",
+            scope="permanent",
+            grant_id=f"grant-{index}",
+        )
+        for index in range(20)
+    ]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        tuple(executor.map(store.add, records))
+
+    stored = store.records()
+    assert {record.grant_id for record in stored} == {
+        record.grant_id for record in records
+    }
+    assert store.path.read_text(encoding="utf-8").endswith("\n")

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterable, Sequence
 from pathlib import Path
+import tempfile
 
+import filelock
 from pydantic import ValidationError
 
 from .action import _normalize_path_text
@@ -180,21 +183,27 @@ class FileGrantStore:
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._lock = filelock.FileLock(f"{path}.lock", timeout=10)
 
     @classmethod
     def for_project_root(cls, project_root: Path) -> FileGrantStore:
         return cls(project_root / cls.DEFAULT_RELATIVE_PATH)
 
     def add(self, record: GrantRecord) -> GrantRecord:
-        updated = tuple(
-            existing
-            for existing in self.records()
-            if existing.grant_id != record.grant_id
-        ) + (record,)
-        self._write(updated)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            updated = tuple(
+                existing
+                for existing in self._read_records()
+                if existing.grant_id != record.grant_id
+            ) + (record,)
+            self._write(updated)
         return record
 
     def records(self) -> tuple[GrantRecord, ...]:
+        return self._read_records()
+
+    def _read_records(self) -> tuple[GrantRecord, ...]:
         if not self.path.exists():
             return ()
         try:
@@ -226,4 +235,22 @@ class FileGrantStore:
     def _write(self, records: tuple[GrantRecord, ...]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = [_grant_record_to_data(record) for record in records]
-        self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{self.path.name}.",
+            suffix=".tmp",
+            dir=self.path.parent,
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+            temporary = ""
+        finally:
+            if temporary:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass

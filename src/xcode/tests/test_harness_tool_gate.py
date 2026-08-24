@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+from xcode.agent.messages import ToolResultMessage
+from xcode.ai.events import ToolCall
 from xcode.agent.config import AgentContext, BeforeToolCallContext
 from xcode.agent.messages import AssistantMessage, UserMessage
 from xcode.agent.request import DefaultRequestAssembler
@@ -17,6 +19,7 @@ from xcode.harness.agent_runtime.tool_gate import (
     _approval_transcript,
     _permission_notice,
     _stricter_decision,
+    _tool_results_count_as_progress,
 )
 from xcode.harness.security import PermissionEngineResult
 from xcode.harness.security.permission_model import (
@@ -62,6 +65,46 @@ class TestStricterDecision:
     def test_same_level(self) -> None:
         assert _stricter_decision("allow", "allow") == "allow"
         assert _stricter_decision("ask", "ask") == "ask"
+
+
+def test_failed_tool_results_do_not_count_as_progress() -> None:
+    calls = [ToolCall(id="call-1", name="read_file", input={})]
+    results = [
+        ToolResultMessage(
+            tool_call_id="call-1",
+            tool_name="read_file",
+            content="failed",
+            is_error=True,
+        )
+    ]
+
+    assert not _tool_results_count_as_progress(calls, results, {})
+
+
+def test_any_successful_tool_result_counts_as_progress() -> None:
+    calls = [
+        ToolCall(id="call-1", name="read_file", input={}),
+        ToolCall(id="call-2", name="read_file", input={}),
+    ]
+    results = [
+        ToolResultMessage(
+            tool_call_id="call-1",
+            tool_name="read_file",
+            content="failed",
+            is_error=True,
+        ),
+        ToolResultMessage(
+            tool_call_id="call-2",
+            tool_name="read_file",
+            content="ok",
+        ),
+    ]
+
+    assert _tool_results_count_as_progress(calls, results, {})
+
+
+def test_empty_tool_batch_does_not_count_as_progress() -> None:
+    assert not _tool_results_count_as_progress([], [], {})
 
 
 def test_permission_notice_describes_automatic_session_grant() -> None:

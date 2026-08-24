@@ -591,10 +591,13 @@ class ToolGate:
         approval_turn_id: str = "",
     ) -> BeforeToolCallResult | None:
         action_profiles: dict[str, tuple[str, str]] = {}
+        path_extractors = dict(snapshot.tool_path_extractors)
         for spec in snapshot.tool_map.values():
-            profile = _TOOL_ACTION_PROFILES.get(spec.name)
+            profile = spec.action_profile or _TOOL_ACTION_PROFILES.get(spec.name)
             if profile is not None:
                 action_profiles[spec.name] = profile
+            if spec.path_extractor is not None:
+                path_extractors.setdefault(spec.name, spec.path_extractor)
         engine = PermissionEngine(
             PermissionEngineConfig(
                 static_policy=snapshot.permission_policy,
@@ -606,7 +609,7 @@ class ToolGate:
                 session_grant_store=snapshot.session_grant_store,
                 permanent_grant_store=snapshot.permanent_grant_store,
                 tool_action_profiles=action_profiles,
-                tool_path_extractors=snapshot.tool_path_extractors,
+                tool_path_extractors=path_extractors,
                 mode_ruleset=snapshot.mode_ruleset,
                 user_ruleset=snapshot.user_ruleset,
                 mode_fallback=snapshot.mode_fallback,
@@ -709,13 +712,20 @@ def _tool_results_count_as_progress(
     tool_results: list[Any],
     tool_map: dict[str, ToolSpec],
 ) -> bool:
-    for _, tool_result in zip(tool_uses, tool_results, strict=True):
-        is_ok = (hasattr(tool_result, "is_error") and not tool_result.is_error) or (
-            hasattr(tool_result, "status") and tool_result.status == "ok"
-        )
-        if not is_ok:
-            continue
-    return True
+    del tool_map
+    if not tool_uses or not tool_results:
+        return False
+    results_by_id = {
+        str(getattr(result, "tool_call_id", "")): result for result in tool_results
+    }
+    for tool_use, positional_result in zip(tool_uses, tool_results):
+        result = results_by_id.get(tool_use.id, positional_result)
+        is_error = getattr(result, "is_error", None)
+        if isinstance(is_error, bool) and not is_error:
+            return True
+        if is_error is None and getattr(result, "status", None) == "ok":
+            return True
+    return False
 
 
 def _stricter_decision(
