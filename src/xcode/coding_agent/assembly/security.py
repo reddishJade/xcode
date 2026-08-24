@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -30,6 +31,7 @@ from xcode.harness.security.permission_model import (
     Rule,
     SensitivePathOverride,
 )
+from xcode.harness.security.permission_model.types import CREDENTIAL_PATH_PARTS
 
 # 用户配置中的权限名。这里刻意不复用内部 capability，避免把 webfetch 等
 # 网络工具意外包含到文件读取权限中。
@@ -90,7 +92,58 @@ def sandbox_policy_from_security(
         mode=security.sandbox.mode,
         network_access=security.sandbox.network_access,
         writable_roots=tuple(writable_roots),
+        unreadable_roots=_sensitive_roots(project_root, security),
     )
+
+
+def _sensitive_roots(
+    project_root: Path,
+    security: SecurityRuntimeConfig,
+) -> tuple[Path, ...]:
+    """收集 shell sandbox 中需要遮蔽的现有凭据和环境文件。"""
+    readable_environment_paths = {
+        _resolve_config_path(project_root, item.path)
+        for item in security.sensitive_path_overrides
+        if item.access in {"read", "read_write"}
+        and _is_environment_name(Path(item.path).name)
+    }
+    candidates: list[Path] = []
+    home = Path.home()
+    for name in CREDENTIAL_PATH_PARTS:
+        path = home / name
+        if path.exists():
+            candidates.append(path)
+    candidates.extend(
+        path
+        for path in home.glob(".env*")
+        if path.name != ".env.example" and path.exists()
+    )
+
+    for current, directories, files in os.walk(project_root, followlinks=False):
+        root = Path(current)
+        blocked_directories = [
+            name for name in directories if name in CREDENTIAL_PATH_PARTS
+        ]
+        for name in blocked_directories:
+            candidates.append(root / name)
+            directories.remove(name)
+        for name in files:
+            if name in CREDENTIAL_PATH_PARTS or _is_environment_name(name):
+                path = (root / name).resolve()
+                if path not in readable_environment_paths:
+                    candidates.append(path)
+    return tuple(candidates)
+
+
+def _resolve_config_path(project_root: Path, raw_path: str) -> Path:
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = project_root / path
+    return path.resolve()
+
+
+def _is_environment_name(name: str) -> bool:
+    return name != ".env.example" and (name == ".env" or name.startswith(".env."))
 
 
 def _rule_from_runtime_config(rule: ModeRuleRuntimeConfig) -> Rule:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .sandbox import (
@@ -44,16 +46,35 @@ class LinuxBubblewrapSandbox(CommandSandbox):
         if not _is_relative_to(command_cwd, self._policy.project_root):
             raise ValueError("sandbox command cwd must stay inside the project root")
 
-        args = [str(self._bwrap_path), "--new-session", "--die-with-parent"]
-        args.extend(self._filesystem_args())
-        args.extend(("--unshare-user", "--unshare-pid", "--unshare-ipc"))
-        if self._policy.network_access is NetworkAccess.DENY:
-            args.append("--unshare-net")
-        args.extend(("--proc", "/proc"))
-        args.extend(("--chdir", str(command_cwd)))
-        args.extend(("--cap-drop", "ALL", "--"))
-        args.extend(argv)
-        return SandboxedCommand(argv=tuple(args), cwd=command_cwd)
+        placeholders = _prepare_protected_placeholders(self._policy)
+        try:
+            args = [str(self._bwrap_path), "--new-session", "--die-with-parent"]
+            args.extend(self._filesystem_args())
+            args.extend(
+                (
+                    "--unshare-user",
+                    "--disable-userns",
+                    "--unshare-pid",
+                    "--unshare-ipc",
+                    "--unshare-uts",
+                )
+            )
+            if self._policy.network_access is NetworkAccess.DENY:
+                args.append("--unshare-net")
+            args.extend(("--proc", "/proc"))
+            args.extend(("--chdir", str(command_cwd)))
+            args.extend(("--cap-drop", "ALL", "--"))
+            args.extend(argv)
+        except (OSError, ValueError):
+            _protected_placeholder_finalizer(placeholders)()
+            raise
+        return SandboxedCommand(
+            argv=tuple(args),
+            cwd=command_cwd,
+            finalize=(
+                _protected_placeholder_finalizer(placeholders) if placeholders else None
+            ),
+        )
 
     def _filesystem_args(self) -> list[str]:
         policy = self._policy
@@ -69,6 +90,11 @@ class LinuxBubblewrapSandbox(CommandSandbox):
                 args.extend(("--bind", str(root), str(root)))
             for protected in _existing_protected_paths(policy):
                 args.extend(("--ro-bind", str(protected), str(protected)))
+        for unreadable in policy.unreadable_roots:
+            if unreadable.is_dir():
+                args.extend(("--tmpfs", str(unreadable)))
+            else:
+                args.extend(("--ro-bind", "/dev/null", str(unreadable)))
         return args
 
 
@@ -97,6 +123,11 @@ def _normalize_policy(policy: SandboxPolicy) -> SandboxPolicy:
             raise ValueError(f"sandbox writable root must be a directory: {root}")
         writable_roots.append(root)
 
+    unreadable_roots: list[Path] = []
+    for raw_root in policy.unreadable_roots:
+        root = raw_root.resolve(strict=True)
+        unreadable_roots.append(root)
+
     for relative in policy.protected_workspace_paths:
         protected = Path(relative)
         if protected.is_absolute() or ".." in protected.parts:
@@ -109,6 +140,7 @@ def _normalize_policy(policy: SandboxPolicy) -> SandboxPolicy:
         mode=policy.mode,
         network_access=policy.network_access,
         writable_roots=tuple(writable_roots),
+        unreadable_roots=tuple(_minimal_roots(unreadable_roots)),
         protected_workspace_paths=policy.protected_workspace_paths,
     )
 
@@ -116,10 +148,99 @@ def _normalize_policy(policy: SandboxPolicy) -> SandboxPolicy:
 def _existing_protected_paths(policy: SandboxPolicy) -> tuple[Path, ...]:
     paths: list[Path] = []
     for relative in policy.protected_workspace_paths:
-        path = (policy.project_root / relative).resolve()
-        if path.exists() and _is_relative_to(path, policy.project_root):
+        path = policy.project_root / relative
+        if path.is_symlink():
+            raise ValueError(f"protected workspace path must not be a symlink: {path}")
+        if path.exists():
             paths.append(path)
     return tuple(paths)
+
+
+@dataclass(frozen=True)
+class _ProtectedPlaceholder:
+    path: Path
+    device: int
+    inode: int
+    descriptor: int
+
+
+def _prepare_protected_placeholders(
+    policy: SandboxPolicy,
+) -> tuple[_ProtectedPlaceholder, ...]:
+    if policy.mode is not SandboxMode.WORKSPACE_WRITE:
+        return ()
+    placeholders: list[_ProtectedPlaceholder] = []
+    try:
+        for relative in policy.protected_workspace_paths:
+            path = policy.project_root / relative
+            try:
+                path.mkdir(mode=0o700)
+            except FileExistsError:
+                if path.is_symlink():
+                    raise ValueError(
+                        f"protected workspace path must not be a symlink: {path}"
+                    ) from None
+                continue
+            try:
+                descriptor = os.open(
+                    path,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                )
+            except OSError:
+                path.rmdir()
+                raise
+            metadata = os.fstat(descriptor)
+            placeholders.append(
+                _ProtectedPlaceholder(
+                    path=path,
+                    device=metadata.st_dev,
+                    inode=metadata.st_ino,
+                    descriptor=descriptor,
+                )
+            )
+    except (OSError, ValueError):
+        _protected_placeholder_finalizer(tuple(placeholders))()
+        raise
+    return tuple(placeholders)
+
+
+def _protected_placeholder_finalizer(
+    placeholders: tuple[_ProtectedPlaceholder, ...],
+) -> Callable[[], str | None]:
+    completed = False
+
+    def finalize() -> str | None:
+        nonlocal completed
+        if completed:
+            return None
+        completed = True
+        violations: list[str] = []
+        for placeholder in reversed(placeholders):
+            path = placeholder.path
+            try:
+                try:
+                    metadata = path.lstat()
+                except FileNotFoundError:
+                    continue
+                if (
+                    metadata.st_dev != placeholder.device
+                    or metadata.st_ino != placeholder.inode
+                ):
+                    violations.append(f"{path} (placeholder identity changed)")
+                    continue
+                try:
+                    path.rmdir()
+                except OSError as exc:
+                    violations.append(f"{path} (cleanup failed: {exc})")
+            finally:
+                os.close(placeholder.descriptor)
+        if not violations:
+            return None
+        return "sandbox failed to clean protected path placeholder: " + ", ".join(
+            violations
+        )
+
+    return finalize
 
 
 def _deduplicate_roots(roots: tuple[Path, ...]) -> tuple[Path, ...]:
@@ -128,6 +249,15 @@ def _deduplicate_roots(roots: tuple[Path, ...]) -> tuple[Path, ...]:
         if not any(root == existing for existing in unique):
             unique.append(root)
     return tuple(unique)
+
+
+def _minimal_roots(roots: list[Path]) -> tuple[Path, ...]:
+    minimal: list[Path] = []
+    for root in sorted(set(roots), key=lambda path: (len(path.parts), str(path))):
+        if any(_is_relative_to(root, parent) for parent in minimal):
+            continue
+        minimal.append(root)
+    return tuple(minimal)
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:

@@ -248,7 +248,7 @@ def build_default_mode_rulesets(
         )
     return {
         "plan": plan_rules,
-        # Xcode 尚无 OS 级 shell sandbox，因此 Build 不能默认放行任意命令。
+        # Sandbox 不消除项目内破坏和语义风险，Build 仍审查任意 shell 命令。
         "build": read_rules + write_rules + ask_shell_rules,
         # Act 以 ask 为兜底；显式放行只读工具，其他工具需用户审批。
         "act": read_rules + ask_write_rules + ask_shell_rules,

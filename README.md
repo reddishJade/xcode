@@ -30,6 +30,7 @@
 
 - Python **3.12** 或更高
 - [uv](https://docs.astral.sh/uv/)（推荐）或 pip
+- Linux 默认 shell sandbox 需要 `bubblewrap`（可执行文件名 `bwrap`）
 
 ### 从源码安装（开发模式）
 
@@ -160,6 +161,7 @@ xcode --resume
 - **核心工具闭环** — 内置文件读写编辑、glob/grep/bash/subagent/webfetch/websearch/question/todowrite 等工具。`edit_file` 依赖 read-before-edit SHA256 指纹校验。
 - **工具并发分区** — 只读且并发安全的工具并行执行；写操作、高风险命令保持串行。
 - **权限与审计** — `PermissionEngine` 统一执行工具权限判定、自动/人工审批和输出脱敏；`JsonlAuditLogger` 记录审计日志；Build 中需要 review 的 shell 动作不会暂停询问用户。
+- **Linux shell sandbox** — Agent 的 `bash` 默认在 bubblewrap 中运行：项目与 `/tmp` 可写、宿主其余路径只读、凭据路径不可读、网络隔离；审批策略与隔离策略彼此独立。
 - **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果；compact 后按 session 写入 checkpoint，resume 使用 checkpoint + 原文 tail 重建上下文。
 - **REPL 会话管理** — `/slash` 命令支持 plan/build/act、会话分支、回退、undo（快照恢复）、模型切换、config 管理、session transcript 落盘。
 - **TUI 全屏终端** — 基于 `prompt-toolkit` 的类 VSCode 全屏交互界面。

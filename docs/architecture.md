@@ -115,12 +115,21 @@ context 入口。`AgentRuntimeConfig` 只保存 session inbox、取消、压缩�
 ## 本地执行边界
 
 Xcode 只支持本地执行，不提供容器、远程 workspace 或远程 shell 抽象。
-`bash` 直接依赖 `Shell`，文件工具直接依赖 `FileSystem`；生产实现分别是
+`bash` 依赖 `Shell`，文件工具依赖 `FileSystem`；生产实现分别是
 `SubprocessShell` 和 `LocalFileSystem`。这些窄协议用于测试本地行为，不代表
 可切换的远程执行世界。
 
-Xcode 的权限引擎、审批和 shell 效果分析不是 OS sandbox。需要进程级隔离时，
-应由运行 Xcode 的外部环境提供，Xcode 自身不负责创建或管理该环境。
+Linux 上，应用装配层默认为 `SubprocessShell` 注入 `LinuxBubblewrapSandbox`。
+`workspace-write` 使用只读宿主根并重新挂载项目、`/tmp` 和批准的外部写目录；
+`.git`、`.agents`、`.xcode` 保持只读，凭据与环境文件被遮蔽，网络进入独立
+namespace。所有后代进程继承同一 mount/network/PID namespace。找不到 `bwrap`
+时启动 shell 会 fail closed，不会静默退回宿主权限。
+
+审批与 sandbox 是两个独立边界：审批决定某次工具调用能否开始，sandbox 决定
+获准命令在 OS 中实际能做什么。当前 OS sandbox 只覆盖 Linux Agent `bash`；
+结构化文件工具继续使用路径边界，受信任 hooks 与 MCP server 不经过此 shell
+sandbox。bubblewrap 提供 namespace、mount 与 capability 隔离，但它不是容器、
+虚拟机或 syscall seccomp 边界。
 
 ## 工具呈现
 

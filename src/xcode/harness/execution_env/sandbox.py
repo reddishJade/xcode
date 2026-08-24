@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -29,6 +30,7 @@ class SandboxPolicy:
     mode: SandboxMode = SandboxMode.WORKSPACE_WRITE
     network_access: NetworkAccess = NetworkAccess.DENY
     writable_roots: tuple[Path, ...] = ()
+    unreadable_roots: tuple[Path, ...] = ()
     protected_workspace_paths: tuple[str, ...] = (
         ".git",
         ".agents",
@@ -42,6 +44,7 @@ class SandboxedCommand:
 
     argv: tuple[str, ...]
     cwd: Path
+    finalize: Callable[[], str | None] | None = None
 
 
 class CommandSandbox(Protocol):

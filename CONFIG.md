@@ -266,12 +266,41 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 | `approval_router` | string | `"mode"` | `ask` 的审批路由：`mode` 按模式（build→自动 reviewer，act→用户）；`user` 强制用户；`auto` 强制自动 reviewer |
 | `non_workspace_access` | bool | `true` | `false` 时忽略外部目录白名单，工作区外一律拒绝 |
 | `auto_review_timeout_seconds` | number | `90` | 自动 reviewer 的总 deadline，范围 0–300 秒（不含 0） |
+| `sandbox` | object | 见下文 | Linux Agent shell 的文件系统与网络隔离策略 |
 | `restricted_dirs` | array | `[]` | 禁止访问目录列表 |
 | `permissions` | object | `{}` | 权限组到决策的映射；支持 `read`、`edit`、`shell`、`web`、`subagent`、`skill` |
 | `tools` | object | `{}` | 具体工具名到决策的映射；覆盖同名权限组展开结果 |
 | `global_default` | string/null | `null` | 无规则匹配时的默认决策：`allow`、`ask`、`deny` |
 | `external_directories` | array | `[]` | 外部目录白名单，每条包含 `path`（必填）和 `access`（可选，默认 `"read"`；可选值 `read`/`write`/`read_write`） |
 | `sensitive_path_overrides` | array | `[]` | 敏感路径的精确例外；不接受通配符 |
+
+### Linux shell sandbox
+
+```json
+{
+  "security": {
+    "sandbox": {
+      "mode": "workspace-write",
+      "network_access": "deny"
+    }
+  }
+}
+```
+
+| 字段 | 可选值 | 默认值 | 说明 |
+|---|---|---|---|
+| `sandbox.mode` | `workspace-write` / `read-only` / `danger-full-access` | `workspace-write` | 项目写边界；`danger-full-access` 允许以当前用户权限写宿主路径 |
+| `sandbox.network_access` | `deny` / `allow` | `deny` | `deny` 创建独立 network namespace；`allow` 保留宿主网络 |
+
+`workspace-write` 将宿主根挂为只读，并允许写项目根、`/tmp`，以及
+`external_directories` 中现有的 `write`/`read_write` 目录。项目内已有的
+`.git`、`.agents`、`.xcode` 会重新挂为只读；缺失的名称通过仅在命令期间存在的
+只读空占位目录阻止首次创建。已知凭据目录、密钥文件和未获
+`sensitive_path_overrides` 读取授权的 `.env*` 文件会被遮蔽。
+
+Linux 默认配置要求 PATH 中存在 `bwrap`；缺失时 fail closed。只有
+`danger-full-access + allow` 同时启用时才完全绕过 bubblewrap。其他组合仍保留
+文件系统或网络边界。当前非 Linux 平台保持宿主 shell 行为。
 
 ### 静态权限示例
 
@@ -331,9 +360,10 @@ Automatic approval review approved (risk: low, authorization: high):
 }
 ```
 
-权限提示、自动 reviewer 与 shell 效果分析都不是 OS sandbox。Xcode 不隔离
-agent 进程，因此 Build 默认也不会直接放行任意 shell 命令；需要真实隔离时，
-应在容器或虚拟机中运行。
+权限提示、自动 reviewer 与 shell 效果分析不是 OS sandbox；它们决定工具调用
+是否获准。Linux Agent shell 另由 bubblewrap 强制文件与网络边界。Build 仍不会
+仅因为存在 sandbox 就默认放行任意命令，因为破坏项目内数据、资源耗尽和语义
+风险仍需要规则或 reviewer 处理。
 
 ### external_directories 示例
 

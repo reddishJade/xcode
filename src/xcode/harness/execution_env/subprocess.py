@@ -24,16 +24,24 @@ class SubprocessShell:
         env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         logger = __import__("logging").getLogger(__name__)
+        finalize_sandbox: Callable[[], str | None] | None = None
         if self._sandbox is not None:
             command = self._sandbox.wrap(argv, cwd)
             argv = list(command.argv)
             cwd = command.cwd
-        proc = start_process(argv, cwd, env=env)
+            finalize_sandbox = command.finalize
+        try:
+            proc = start_process(argv, cwd, env=env)
+        except OSError:
+            if finalize_sandbox is not None:
+                finalize_sandbox()
+            raise
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
         lock = threading.Lock()
         cancelled = False
         timed_out = False
+        sandbox_violation: str | None = None
 
         def _drain(
             src: Iterable[bytes] | None,
@@ -80,15 +88,26 @@ class SubprocessShell:
             raise
         finally:
             close_pipes(proc)
+            if finalize_sandbox is not None:
+                sandbox_violation = finalize_sandbox()
 
         with lock:
             stdout_text = b"".join(stdout_chunks).decode(errors="replace")
             stderr_text = b"".join(stderr_chunks).decode(errors="replace")
+        returncode = proc.returncode
+        if sandbox_violation is not None:
+            if on_progress is not None:
+                on_progress(f"\n{sandbox_violation}\n")
+            if stderr_text and not stderr_text.endswith("\n"):
+                stderr_text += "\n"
+            stderr_text += sandbox_violation
+            if returncode == 0:
+                returncode = 126
 
         return ExecutionResult(
             stdout=stdout_text,
             stderr=stderr_text,
-            returncode=proc.returncode,
+            returncode=returncode,
             timed_out=timed_out,
             cancelled=cancelled,
         )
