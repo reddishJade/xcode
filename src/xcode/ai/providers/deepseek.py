@@ -10,6 +10,7 @@ from xcode.ai.types import ProviderConfig, ToolDefinition
 
 from ._codec import to_chat_messages, to_chat_tools
 from ._compat import OpenAICompatProvider
+from ._runtime import ProviderRuntime
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
@@ -22,11 +23,13 @@ class DeepSeekProvider(OpenAICompatProvider):
         config: ProviderConfig,
         *,
         client: Any | None = None,
+        runtime: ProviderRuntime | None = None,
     ) -> None:
         super().__init__(
             config,
             transport="deepseek_chat",
             client=client,
+            runtime=runtime,
         )
         self._metrics["prompt_cache_hit_tokens"] = 0
         self._metrics["prompt_cache_miss_tokens"] = 0

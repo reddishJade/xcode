@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from inspect import Parameter, signature
 
 from xcode.ai.events import Message, ProviderEvent
 from xcode.ai.providers.base import ModelProvider
@@ -31,6 +32,18 @@ class _FallbackSwitchingProvider:
         self._consecutive_errors: int = 0
         self._fallback_successes: int = 0
         self._using_fallback: bool = False
+
+    def replace_primary(self, primary: ModelProvider) -> None:
+        """热替换主 provider 并重置容灾计数。
+
+        /model、/thinking、/effort 等命令重建主 provider 后调用此方法，
+        原地换主以保留 fallback 容灾包装层。新主 provider 视为全新实例，
+        下一轮 stream 优先尝试新主而非沿用 fallback 状态。
+        """
+        self._primary = primary
+        self._consecutive_errors = 0
+        self._fallback_successes = 0
+        self._using_fallback = False
 
     @property
     def active_provider(self) -> ModelProvider:
@@ -62,7 +75,7 @@ class _FallbackSwitchingProvider:
 
     @property
     def usage_totals(self) -> UsageTotals:
-        """主备 provider 的累计用量之和。"""
+        """返回主备 provider 的累计用量之和。"""
         return self._primary.usage_totals.add(self._fallback.usage_totals)
 
     @property
@@ -87,26 +100,57 @@ class _FallbackSwitchingProvider:
         **kwargs: object,
     ) -> AsyncIterator[ProviderEvent]:
         provider = self._fallback if self._using_fallback else self._primary
+        emitted = False
         try:
             async for event in self._stream_with(
                 provider, messages, tools, options, kwargs
             ):
-                self._consecutive_errors = 0
+                emitted = True
                 yield event
         except Exception:
-            self._consecutive_errors += 1
+            self._record_failure(provider)
             if (
-                not self._using_fallback
+                provider is self._primary
                 and self._consecutive_errors >= self._error_threshold
             ):
                 self._using_fallback = True
                 self._fallback_successes = 0
-                async for event in self._stream_with(
-                    self._fallback, messages, tools, options, kwargs
-                ):
-                    yield event
-            else:
-                raise
+                if not emitted:
+                    async for event in self._stream_fallback_after_failure(
+                        messages, tools, options, kwargs
+                    ):
+                        yield event
+                    return
+            raise
+        else:
+            self._record_success(provider)
+
+    async def _stream_fallback_after_failure(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None,
+        kwargs: dict[str, object],
+    ) -> AsyncIterator[ProviderEvent]:
+        """主 provider 在输出前失败时，流式执行并记录 fallback 结果。"""
+        try:
+            async for event in self._stream_with(
+                self._fallback, messages, tools, options, kwargs
+            ):
+                yield event
+        except Exception:
+            self._record_failure(self._fallback)
+            raise
+        else:
+            self._record_success(self._fallback)
+
+    def _record_failure(self, provider: ModelProvider) -> None:
+        self._consecutive_errors += 1
+        if provider is self._fallback:
+            self._fallback_successes = 0
+
+    def _record_success(self, _provider: ModelProvider) -> None:
+        self._consecutive_errors = 0
 
     @staticmethod
     async def _stream_with(
@@ -116,49 +160,37 @@ class _FallbackSwitchingProvider:
         options: StreamOptions | None,
         kwargs: dict[str, object],
     ) -> AsyncIterator[ProviderEvent]:
-        try:
+        if _accepts_stream_options(provider):
             async for event in provider.stream(
                 messages, tools, options=options, **kwargs
             ):
                 yield event
-        except TypeError:
-            async for event in provider.stream(messages, tools):
-                yield event
+            return
+        async for event in provider.stream(messages, tools):
+            yield event
 
 
 class _FallbackWithRetryPrimary(_FallbackSwitchingProvider):
     """扩展 _FallbackSwitchingProvider，在回退成功达到阈值后重试主 provider。"""
 
-    async def stream(
-        self,
-        messages: list[Message],
-        tools: list[ToolDefinition],
-        options: StreamOptions | None = None,
-        **kwargs: object,
-    ) -> AsyncIterator[ProviderEvent]:
-        provider = self._fallback if self._using_fallback else self._primary
-        try:
-            async for event in self._stream_with(
-                provider, messages, tools, options, kwargs
-            ):
-                if self._using_fallback:
-                    self._fallback_successes += 1
-                    if self._fallback_successes >= self._fallback_success_threshold:
-                        self._using_fallback = False
-                        self._fallback_successes = 0
-                self._consecutive_errors = 0
-                yield event
-        except Exception:
-            self._consecutive_errors += 1
-            if (
-                not self._using_fallback
-                and self._consecutive_errors >= self._error_threshold
-            ):
-                self._using_fallback = True
-                self._fallback_successes = 0
-                async for event in self._stream_with(
-                    self._fallback, messages, tools, options, kwargs
-                ):
-                    yield event
-            else:
-                raise
+    def _record_success(self, provider: ModelProvider) -> None:
+        super()._record_success(provider)
+        if provider is not self._fallback:
+            self._fallback_successes = 0
+            return
+        self._fallback_successes += 1
+        if self._fallback_successes >= self._fallback_success_threshold:
+            self._using_fallback = False
+            self._fallback_successes = 0
+
+
+def _accepts_stream_options(provider: ModelProvider) -> bool:
+    """判断 provider.stream 是否支持标准 options/关键字参数。"""
+    try:
+        parameters = signature(provider.stream).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.name == "options" or parameter.kind is Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )

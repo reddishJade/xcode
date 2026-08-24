@@ -11,6 +11,7 @@ from xcode.ai.types import ProviderConfig, ToolDefinition
 
 from ._codec import to_chat_messages, to_chat_tools
 from ._compat import OpenAICompatProvider
+from ._runtime import ProviderRuntime
 
 CHATGLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 
@@ -23,8 +24,14 @@ class ChatGLMProvider(OpenAICompatProvider):
         config: ProviderConfig,
         *,
         client: Any | None = None,
+        runtime: ProviderRuntime | None = None,
     ) -> None:
-        super().__init__(config, transport="chatglm_chat", client=client)
+        super().__init__(
+            config,
+            transport="chatglm_chat",
+            client=client,
+            runtime=runtime,
+        )
         self._metrics["prompt_tokens"] = 0
         self._metrics["completion_tokens"] = 0
         self._metrics["total_tokens"] = 0

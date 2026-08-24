@@ -58,6 +58,7 @@ class OpenAICompatProvider:
         *,
         transport: str = "openai_chat",
         client: Any | None = None,
+        runtime: ProviderRuntime | None = None,
     ) -> None:
         if client is None:
             from openai import OpenAI as _OpenAIClient
@@ -66,7 +67,7 @@ class OpenAICompatProvider:
         self.client = client
         self.config = config
         self._usage = UsageAccumulator(config.model)
-        self.runtime = ProviderRuntime()
+        self.runtime = runtime or ProviderRuntime()
         self.transport = transport
         self._current_options: StreamOptions | None = None
         self._metrics: dict[str, object] = self._init_metrics()

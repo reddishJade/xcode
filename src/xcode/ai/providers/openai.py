@@ -8,6 +8,7 @@ from typing import Any
 from xcode.ai.types import ProviderConfig, ToolDefinition
 
 from ._compat import OpenAICompatProvider
+from ._runtime import ProviderRuntime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,8 +21,14 @@ class OpenAIChatProvider(OpenAICompatProvider):
         config: ProviderConfig,
         *,
         client: Any | None = None,
+        runtime: ProviderRuntime | None = None,
     ) -> None:
-        super().__init__(config, transport="openai_chat", client=client)
+        super().__init__(
+            config,
+            transport="openai_chat",
+            client=client,
+            runtime=runtime,
+        )
 
     def _build_thinking_params(
         self,

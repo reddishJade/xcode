@@ -7,6 +7,7 @@ from typing import Any
 from xcode.ai.types import ProviderConfig
 
 from ._compat import OpenAICompatProvider
+from ._runtime import ProviderRuntime
 
 MIMO_BASE_URL = "https://api.xiaomimimo.com/v1"
 
@@ -19,8 +20,14 @@ class MiMoProvider(OpenAICompatProvider):
         config: ProviderConfig,
         *,
         client: Any | None = None,
+        runtime: ProviderRuntime | None = None,
     ) -> None:
-        super().__init__(config, transport="mimo_chat", client=client)
+        super().__init__(
+            config,
+            transport="mimo_chat",
+            client=client,
+            runtime=runtime,
+        )
 
     def _record_usage(self, response, sent_messages: int) -> None:
         super()._record_usage(response, sent_messages)
