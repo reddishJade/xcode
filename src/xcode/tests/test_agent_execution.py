@@ -35,7 +35,6 @@ from xcode.agent.types import (
 from xcode.coding_agent.tools.bash import build_bash_tool
 from xcode.harness.agent_runtime.cancellation import CancellationToken
 
-
 # ── mock AgentTool ──
 
 
@@ -300,7 +299,7 @@ class TestUpdateIdleToolWatchdog:
 
 
 class _BlockingTool(AgentTool):
-    """execute 阻塞直到外部释放，模拟无法自行取消的工具。"""
+    """忽略协作式 token，直到外部释放或 task 被强制取消。"""
 
     def __init__(
         self,
@@ -337,7 +336,8 @@ class _BlockingTool(AgentTool):
         return []
 
     async def execute(self, *args: object, **kwargs: object) -> AgentToolResult:
-        await asyncio.to_thread(self._release.wait)
+        while not self._release.is_set():
+            await asyncio.sleep(0.01)
         return AgentToolResult(content=[TextContent(text="blocked done")])
 
 
@@ -498,6 +498,6 @@ async def test_interrupt_kills_long_running_bash(tmp_path: Path) -> None:
     elapsed = time.monotonic() - started
     await canceller
 
-    assert elapsed < 8.0
+    assert elapsed < 2.0
     assert len(batch.results) == 1
     assert "cancelled" in str(batch.results[0].content).lower()

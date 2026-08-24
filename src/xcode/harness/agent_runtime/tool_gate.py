@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-import json
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
@@ -18,42 +17,46 @@ from ...agent.config import (
     BeforeToolCallResult,
     IsToolProductiveHook,
 )
-from ...agent.types import AgentTool, AgentToolResult, CancellationSignal
-from ...agent.types import TextContent, ToolCallContent, ToolSpecAdapter
-from ._mode_protocol import ToolGateMode
-from .tool_audit import build_audit_record, emit_audit
-from .tool_hooks import emit_hook, emit_tool_hook, tool_result_text
-from ..security import (
-    PermissionEngine,
-    PermissionEngineConfig,
-    PermissionDecision,
-    PermissionEngineResult,
-    PermissionPolicy,
+from ...agent.types import (
+    AgentTool,
+    AgentToolResult,
+    ApprovalCallback,
+    CancellationSignal,
+    TextContent,
+    ToolCallContent,
+    ToolSpec,
+    ToolSpecAdapter,
+    stringify_tool_input,
 )
 from ..observability import (
     AuditLogger,
     ExternalHookRunner,
+    HookCorrelationFields,
     HookManager,
     HookRecord,
     RuntimeCorrelation,
     hook_correlation_fields,
-    HookCorrelationFields,
+    redact_text,
 )
+from ..security import (
+    PermissionDecision,
+    PermissionEngine,
+    PermissionEngineConfig,
+    PermissionEngineResult,
+    PermissionPolicy,
+)
+from ..security.approval import ApprovalPolicy, ApprovalsReviewer
 from ..security.permission_model import (
     ExternalDirectory,
     GrantStore,
-    PolicyEvaluator,
     PathExtractor,
+    PolicyEvaluator,
     Rule,
     SensitivePathOverride,
 )
-from ..security.approval import ApprovalPolicy, ApprovalsReviewer
-from ...agent.types import (
-    ApprovalCallback,
-    ToolSpec,
-    stringify_tool_input,
-)
-from ..observability import redact_text
+from ._mode_protocol import ToolGateMode
+from .tool_audit import build_audit_record, emit_audit
+from .tool_hooks import emit_hook, emit_tool_hook, tool_result_text
 
 
 @runtime_checkable
@@ -98,9 +101,7 @@ class _RedactingAdapter(ToolSpecAdapter):
                     AgentToolResult(content=[TextContent(text=redact_text(text))])
                 )
 
-        content = await asyncio.to_thread(
-            self._spec.handler, dict(params), _redacted_update
-        )
+        content = await self._execute_handler(dict(params), _redacted_update)
         metadata = getattr(content, "metadata", None)
         render_intent = getattr(content, "render_intent", None)
         return AgentToolResult(

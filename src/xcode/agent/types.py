@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import json
+import queue
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-import json
 from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
@@ -350,9 +353,7 @@ class ToolSpecAdapter:
             if on_update is not None:
                 on_update(AgentToolResult(content=[TextContent(text=text)]))
 
-        content = await asyncio.to_thread(
-            self._spec.handler, dict(params), _text_update
-        )
+        content = await self._execute_handler(dict(params), _text_update)
         metadata = getattr(content, "metadata", None)
         render_intent = getattr(content, "render_intent", None)
         return AgentToolResult(
@@ -361,3 +362,35 @@ class ToolSpecAdapter:
             is_error=bool(getattr(content, "is_error", False)),
             render_intent=render_intent,
         )
+
+    async def _execute_handler(
+        self,
+        params: ToolInput,
+        on_update: Callable[[str], None] | None,
+    ) -> str:
+        """在独立 daemon 线程中执行同步 handler，并轮询收取结果。"""
+        outcomes: queue.SimpleQueue[str | Exception] = queue.SimpleQueue()
+        context = contextvars.copy_context()
+
+        def run_handler() -> None:
+            try:
+                result = context.run(self._spec.handler, params, on_update)
+            except Exception as exc:
+                outcomes.put(exc)
+            else:
+                outcomes.put(result)
+
+        threading.Thread(
+            target=run_handler,
+            name=f"xcode-tool-{self.name}",
+            daemon=True,
+        ).start()
+        while True:
+            try:
+                outcome = outcomes.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.01)
+                continue
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
