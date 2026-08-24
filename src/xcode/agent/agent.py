@@ -196,13 +196,12 @@ class Agent:
             tools=list(self._tools),
         )
         queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
-        error_slot: BaseException | None = None
+        error_slot: list[Exception] = []
 
         def _emit(event: AgentEvent) -> None:
             queue.put_nowait(event)
 
         async def _run() -> None:
-            nonlocal error_slot
             try:
                 result = await run_agent_loop(
                     messages,
@@ -215,8 +214,8 @@ class Agent:
                     reopen_steering=reopen_step_input,
                 )
                 self._last_result = result
-            except BaseException as exc:
-                error_slot = exc
+            except Exception as exc:
+                error_slot.append(exc)
             finally:
                 queue.put_nowait(None)
 
@@ -235,5 +234,5 @@ class Agent:
                 except asyncio.CancelledError:
                     pass
             # error_slot 在此处抛出，因为 finally 是生成器退出前最后执行的代码
-            if error_slot is not None:
-                raise error_slot
+            if error_slot:
+                raise error_slot[0]
