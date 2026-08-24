@@ -151,6 +151,8 @@ class ExecutionModesRuntimeConfig(BaseModel):
 class SecurityRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     approval_policy: ApprovalPolicy = "on-request"
+    approval_router: Literal["mode", "user", "auto"] = "mode"
+    non_workspace_access: StrictBool = True
     auto_review_timeout_seconds: StrictFloat | StrictInt = Field(
         default=90.0,
         gt=0,

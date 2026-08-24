@@ -12,15 +12,16 @@ from xcode.agent.types import ApprovalRequest, ToolSpec
 from xcode.coding_agent.assembly.security import sensitive_path_overrides_from_security
 from xcode.harness.config import SecurityRuntimeConfig
 from xcode.harness.security import HITLResult
-from xcode.harness.security.permissions import PermissionEngine, PermissionEngineConfig
 from xcode.harness.security.permission_model import (
     Action,
     Constraint,
+    ExternalDirectory,
     FileGrantStore,
     GrantRecord,
     Rule,
     SensitivePathOverride,
 )
+from xcode.harness.security.permissions import PermissionEngine, PermissionEngineConfig
 
 
 def _bash_tool() -> ToolSpec:
@@ -413,6 +414,35 @@ def test_sensitive_override_runtime_config_rejects_globs() -> None:
         SecurityRuntimeConfig.model_validate(
             {"sensitive_path_overrides": [{"path": "**/.env", "access": "read"}]}
         )
+
+
+def test_external_dirs_gate_drops_user_entries_when_disabled() -> None:
+    from xcode.coding_agent.assembly.security import external_directories_from_security
+
+    security = SecurityRuntimeConfig.model_validate(
+        {
+            "non_workspace_access": False,
+            "external_directories": [{"path": "/tmp/reference", "access": "read"}],
+        }
+    )
+
+    dirs = external_directories_from_security(security)
+
+    assert all(d.path != Path("/tmp/reference") for d in dirs)
+
+
+def test_external_dirs_gate_keeps_user_entries_when_enabled() -> None:
+    from xcode.coding_agent.assembly.security import external_directories_from_security
+
+    security = SecurityRuntimeConfig.model_validate(
+        {
+            "external_directories": [{"path": "/tmp/reference", "access": "read"}],
+        }
+    )
+
+    dirs = external_directories_from_security(security)
+
+    assert ExternalDirectory(path=Path("/tmp/reference"), access="read") in dirs
 
 
 def test_file_grant_store_preserves_concurrent_updates(tmp_path: Path) -> None:

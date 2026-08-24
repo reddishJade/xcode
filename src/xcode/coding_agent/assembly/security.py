@@ -21,7 +21,6 @@ from xcode.harness.security.permission_model import (
     SensitivePathOverride,
 )
 
-
 # 用户配置中的权限名。这里刻意不复用内部 capability，避免把 webfetch 等
 # 网络工具意外包含到文件读取权限中。
 _PERMISSION_TOOLS: dict[str, tuple[str, ...]] = {
@@ -75,10 +74,19 @@ def mode_rulesets_from_runtime_config(
 def external_directories_from_security(
     security: SecurityRuntimeConfig,
 ) -> tuple[ExternalDirectory, ...]:
-    dirs: list[ExternalDirectory] = [
-        ExternalDirectory(path=Path(ed.path), access=ed.access)
-        for ed in security.external_directories
-    ]
+    """装配外部目录白名单；non_workspace_access 关闭时忽略用户白名单。
+
+    ~/.xcode 与 ~/.agents 属于 xcode 自身基础设施（记忆、技能），不受该
+    开关影响，始终保留只读授权。
+    """
+    dirs: list[ExternalDirectory] = (
+        [
+            ExternalDirectory(path=Path(ed.path), access=ed.access)
+            for ed in security.external_directories
+        ]
+        if security.non_workspace_access
+        else []
+    )
     home = Path.home()
     for p in (home / ".xcode", home / ".agents"):
         if p.is_dir():

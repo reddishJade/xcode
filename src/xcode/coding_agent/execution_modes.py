@@ -9,12 +9,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Protocol
 
+from xcode.agent.types import ToolSpec
 from xcode.ai.events import ToolCall
+from xcode.harness.security.approval import ApprovalsReviewer
 from xcode.harness.security.permission_model import Rule
 from xcode.harness.security.permissions import PermissionDecision
-from xcode.harness.security.approval import ApprovalsReviewer
-from xcode.agent.types import ToolSpec
-
 
 ExecutionMode = Literal["plan", "build", "act"]
 
@@ -32,10 +31,12 @@ class ExecutionModeState:
         self,
         max_plan_turns: int = 8,
         initial_mode: ExecutionMode = "act",
+        approval_router: Literal["mode", "user", "auto"] = "mode",
     ) -> None:
         self._current_mode: ExecutionMode = initial_mode
         self._plan_enter_step = 0
         self._max_plan_turns = max_plan_turns
+        self._approval_router = approval_router
 
     @property
     def current_mode(self) -> ExecutionMode:
@@ -43,7 +44,11 @@ class ExecutionModeState:
 
     @property
     def approvals_reviewer(self) -> ApprovalsReviewer:
-        """Build 使用自动 reviewer；其他模式不隐式替用户授权。"""
+        """Build 使用自动 reviewer；approval_router 可强制固定路由。"""
+        if self._approval_router == "auto":
+            return "auto_review"
+        if self._approval_router == "user":
+            return "user"
         return "auto_review" if self._current_mode == "build" else "user"
 
     def set_mode(self, mode: ExecutionMode) -> None:

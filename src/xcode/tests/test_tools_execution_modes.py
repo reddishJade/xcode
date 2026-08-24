@@ -4,19 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from xcode.agent.types import ApprovalRequest
+from xcode.ai.events import ToolCall
 from xcode.coding_agent.execution_modes import (
     DEFAULT_MODE_FALLBACKS,
     DEFAULT_SHELL_UNRESOLVED_POLICIES,
-    build_default_mode_rulesets,
-    parse_execution_mode,
-    mode_notice,
-    PlanPolicy,
-    BuildPolicy,
     ActPolicy,
+    BuildPolicy,
     ExecutionModeState,
+    PlanPolicy,
+    build_default_mode_rulesets,
+    mode_notice,
+    parse_execution_mode,
 )
-from xcode.ai.events import ToolCall
-from xcode.agent.types import ApprovalRequest
 from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.harness.security import HITLResult
 
@@ -158,6 +158,23 @@ class TestExecutionModeState:
         state = ExecutionModeState()
         assert not state.check_plan_timeout()
         assert state.current_mode == "act"
+
+    def test_router_mode_keeps_default_routing(self) -> None:
+        assert ExecutionModeState().approvals_reviewer == "user"
+        assert (
+            ExecutionModeState(initial_mode="build").approvals_reviewer
+            == "auto_review"
+        )
+
+    def test_router_auto_forces_auto_review(self) -> None:
+        state = ExecutionModeState(approval_router="auto")
+        assert state.approvals_reviewer == "auto_review"
+        state.set_mode("plan")
+        assert state.approvals_reviewer == "auto_review"
+
+    def test_router_user_forces_user_review(self) -> None:
+        state = ExecutionModeState(initial_mode="build", approval_router="user")
+        assert state.approvals_reviewer == "user"
 
     def test_check_call_delegates_to_policy(self) -> None:
         state = ExecutionModeState()

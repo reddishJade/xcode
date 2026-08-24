@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig
 from xcode.harness.memory import MemoryManager
@@ -18,6 +19,7 @@ class CodingAgentRuntimeConfig(AgentRuntimeConfig):
     """编码技能、记忆和任务状态的运行时配置。"""
 
     initial_mode: ExecutionMode = "act"
+    approval_router: Literal["mode", "user", "auto"] = "mode"
     skill_registry: SkillRegistry | None = None
     memory_manager: MemoryManager | None = None
     session_history: SessionHistory | None = None

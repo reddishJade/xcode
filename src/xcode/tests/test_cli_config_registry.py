@@ -50,6 +50,7 @@ class TestRegistryIntegrity:
         assert keys == {
             "execution_modes.default_mode",
             "security.approval_policy",
+            "security.non_workspace_access",
             "tools.shell",
         }
 
@@ -58,8 +59,83 @@ class TestFormatSetting:
     def test_defaults_on_empty_config(self) -> None:
         config = XcodeRuntimeConfig()
         assert format_setting(_spec("execution_modes.default_mode"), config) == "act"
-        assert format_setting(_spec("security.approval_policy"), config) == "on-request"
+        # 默认 act + mode 路由 => 边界动作询问用户。
+        assert (
+            format_setting(_spec("security.approval_policy"), config)
+            == "asks for review"
+        )
+        assert format_setting(_spec("security.non_workspace_access"), config) == "on"
         assert format_setting(_spec("tools.shell"), config) == "auto"
+
+
+class TestApprovalChoiceMapping:
+    def test_never_maps_to_always_proceeds(self) -> None:
+        config = XcodeRuntimeConfig.model_validate(
+            {"security": {"approval_policy": "never"}}
+        )
+        assert (
+            format_setting(_spec("security.approval_policy"), config)
+            == "always proceeds"
+        )
+
+    def test_router_auto_maps_to_agent_decides(self) -> None:
+        config = XcodeRuntimeConfig.model_validate(
+            {
+                "security": {
+                    "approval_policy": "on-request",
+                    "approval_router": "auto",
+                }
+            }
+        )
+        assert (
+            format_setting(_spec("security.approval_policy"), config) == "agent decides"
+        )
+
+    def test_router_user_overrides_build_mode(self) -> None:
+        config = XcodeRuntimeConfig.model_validate(
+            {
+                "execution_modes": {"default_mode": "build"},
+                "security": {
+                    "approval_policy": "on-request",
+                    "approval_router": "user",
+                },
+            }
+        )
+        assert (
+            format_setting(_spec("security.approval_policy"), config)
+            == "asks for review"
+        )
+
+    def test_writer_roundtrip_all_choices(self) -> None:
+        spec = _spec("security.approval_policy")
+        for token, policy, router in (
+            ("always proceeds", "never", None),
+            ("agent decides", "on-request", "auto"),
+            ("asks for review", "on-request", "user"),
+        ):
+            raw: dict = {}
+            apply_setting(raw, spec, token)
+            parsed = XcodeRuntimeConfig.model_validate(raw)
+            assert parsed.security.approval_policy == policy
+            if router is None:
+                assert "approval_router" not in raw["security"]
+            else:
+                assert parsed.security.approval_router == router
+            assert format_setting(spec, parsed) == token
+
+    def test_parse_rejects_unknown_tokens(self) -> None:
+        spec = _spec("security.approval_policy")
+        assert parse_setting(spec, "Agent Decides") == "agent decides"
+        with pytest.raises(ValueError):
+            parse_setting(spec, "sometimes")
+
+    def test_non_workspace_access_bool_roundtrip(self) -> None:
+        spec = _spec("security.non_workspace_access")
+        raw: dict = {}
+        apply_setting(raw, spec, False)
+        parsed = XcodeRuntimeConfig.model_validate(raw)
+        assert parsed.security.non_workspace_access is False
+        assert format_setting(spec, parsed) == "off"
 
 
 class TestDescribeChoice:
@@ -67,6 +143,11 @@ class TestDescribeChoice:
         spec = _spec("execution_modes.default_mode")
         text = spec.describe_choice("plan")
         assert "Read-only" in text or "read-only" in text
+
+    def test_approval_tokens_have_descriptions(self) -> None:
+        spec = _spec("security.approval_policy")
+        for token in ("always proceeds", "agent decides", "asks for review"):
+            assert spec.describe_choice(token), token
 
     def test_unknown_token_falls_back_to_description(self) -> None:
         spec = _spec("tools.shell")
@@ -79,12 +160,6 @@ class TestParseSetting:
         assert parse_setting(spec, "PLAN") == "plan"
         with pytest.raises(ValueError):
             parse_setting(spec, "yolo")
-
-    def test_approval_policy_enum(self) -> None:
-        spec = _spec("security.approval_policy")
-        assert parse_setting(spec, "never") == "never"
-        with pytest.raises(ValueError):
-            parse_setting(spec, "sometimes")
 
     def test_shell_enum_accepts_all_choices(self) -> None:
         spec = _spec("tools.shell")

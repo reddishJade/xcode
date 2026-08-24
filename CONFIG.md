@@ -84,12 +84,16 @@ REPL 中可通过 `/model` 命令动态切换模型而无需重启：
 
 ```
 > Default Mode           act
-  Approval Policy        on-request
+  Approval Policy        asks for review
+  Non-Workspace Access   on
   Shell                  auto
 
-  'act': read allowed, writes and shell ask the user. ...
+  'asks for review': always waits for explicit user approval.
 ```
 
+- Approval Policy 三选项映射：always proceeds → `never`；
+  agent decides → `on-request` + `approval_router=auto`；
+  asks for review → `on-request` + `approval_router=user`。
 - 高亮行底部显示灰色说明，枚举项逐值解释（含权衡说明）。
 - 回车进入编辑：菜单选值，当前值标注 `(current)`，esc 返回列表。
 - 写入前用 `XcodeRuntimeConfig` 校验，非法值不落盘。
@@ -258,7 +262,9 @@ deny。使用 `/hooks` 查看每项来源、启用状态、运行次数和最近
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `approval_policy` | string | `"on-request"` | `on-request`：处理规则产生的 `ask`；`never`：未命中已有 grant 时拒绝 |
+| `approval_policy` | string | `"on-request"` | `on-request`：处理规则产生的 `ask`；`never`：未匹配已有 grant 时拒绝 |
+| `approval_router` | string | `"mode"` | `ask` 的审批路由：`mode` 按模式（build→自动 reviewer，act→用户）；`user` 强制用户；`auto` 强制自动 reviewer |
+| `non_workspace_access` | bool | `true` | `false` 时忽略外部目录白名单，工作区外一律拒绝 |
 | `auto_review_timeout_seconds` | number | `90` | 自动 reviewer 的总 deadline，范围 0–300 秒（不含 0） |
 | `restricted_dirs` | array | `[]` | 禁止访问目录列表 |
 | `permissions` | object | `{}` | 权限组到决策的映射；支持 `read`、`edit`、`shell`、`web`、`subagent`、`skill` |

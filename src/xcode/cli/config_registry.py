@@ -51,9 +51,10 @@ class SettingSpec:
     getter: Callable[[XcodeRuntimeConfig], Any] | None = None
     formatter: Callable[[Any], str] | None = None
     choice_descriptions: dict[str, str] = dataclasses_field(default_factory=dict)
+    writer: Callable[[dict[str, Any], Any], None] | None = None
 
     def read(self, config: XcodeRuntimeConfig) -> Any:
-        """从生效配置中读取当前值；INFO 行必须提供自定义 getter。"""
+        """从生效配置中读取当前值；INFO/复合行必须提供自定义 getter。"""
         if self.getter is not None:
             return self.getter(config)
         return attrgetter(self.key)(config)
@@ -66,6 +67,39 @@ class SettingSpec:
 _TRUE_TOKENS = frozenset({"1", "true", "yes", "on"})
 _FALSE_TOKENS = frozenset({"0", "false", "no", "off"})
 _CLEAR_TOKENS = frozenset({"none", "unset", "default", "unlimited"})
+
+
+def _read_approval_choice(config: XcodeRuntimeConfig) -> str:
+    """把 approval_policy + approval_router 组合读回三选项 token。"""
+    if config.security.approval_policy == "never":
+        return "always proceeds"
+    router = config.security.approval_router
+    if router == "auto":
+        return "agent decides"
+    if router == "user":
+        return "asks for review"
+    return (
+        "agent decides"
+        if config.execution_modes.default_mode == "build"
+        else ("asks for review")
+    )
+
+
+def _write_approval_choice(raw: dict[str, Any], value: Any) -> None:
+    """把三选项 token 落到 approval_policy + approval_router 两个字段。"""
+    security = raw.setdefault("security", {})
+    if not isinstance(security, dict):
+        security = {}
+        raw["security"] = security
+    if value == "always proceeds":
+        security["approval_policy"] = "never"
+        security.pop("approval_router", None)
+    elif value == "agent decides":
+        security["approval_policy"] = "on-request"
+        security["approval_router"] = "auto"
+    else:
+        security["approval_policy"] = "on-request"
+        security["approval_router"] = "user"
 
 
 SETTING_SPECS: tuple[SettingSpec, ...] = (
@@ -93,18 +127,39 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         key="security.approval_policy",
         label="Approval Policy",
         kind=SettingKind.ENUM,
-        choices=("on-request", "never"),
+        choices=("always proceeds", "agent decides", "asks for review"),
         description=(
-            "How rule-generated approval requests are handled. "
-            "'on-request': asks enter the approval flow (auto reviewer or "
-            "user). 'never': actions without an existing grant are denied."
+            "What happens when the agent wants to edit files or run commands "
+            "beyond the current mode's free tier. 'always proceeds': never "
+            "asks (maximizes autonomy, risk of unsafe actions). "
+            "'agent decides': a reviewer model reviews based on complexity. "
+            "'asks for review': always asks for your confirmation."
         ),
         choice_descriptions={
-            "on-request": "Approval requests are processed normally.",
-            "never": (
-                "Never prompts: ungranted boundary actions fail closed "
-                "(maximizes autonomy, risk of blocked work)."
+            "always proceeds": (
+                "Agent never asks; boundary actions run without review."
             ),
+            "agent decides": (
+                "Reviewer model approves low-risk actions and escalates risky ones."
+            ),
+            "asks for review": (
+                "Every boundary action waits for explicit user approval."
+            ),
+        },
+        getter=_read_approval_choice,
+        writer=_write_approval_choice,
+    ),
+    SettingSpec(
+        key="security.non_workspace_access",
+        label="Non-Workspace Access",
+        kind=SettingKind.BOOL,
+        description=(
+            "Whether directories outside the workspace may be accessed at "
+            "all. When off, the external directory whitelist is ignored."
+        ),
+        choice_descriptions={
+            "on": "External paths follow the security.external_directories whitelist.",
+            "off": "Everything outside the workspace is denied.",
         },
     ),
     SettingSpec(
@@ -210,7 +265,13 @@ def parse_setting(spec: SettingSpec, text: str) -> Any:
 
 
 def apply_setting(raw: dict[str, Any], spec: SettingSpec, value: Any) -> None:
-    """把解析后的值写进原始 dict；None 表示清除该键以恢复默认。"""
+    """把解析后的值写进原始 dict；None 表示清除该键以恢复默认。
+
+    复合行（writer 非空）由 writer 决定写入哪些字段。
+    """
+    if spec.writer is not None:
+        spec.writer(raw, value)
+        return
     parts = spec.key.split(".")
     node = raw
     for part in parts[:-1]:
