@@ -57,13 +57,13 @@ class SessionTodoState:
 
 def _parse_items(raw_items: object) -> tuple[TodoItem, ...]:
     if not isinstance(raw_items, list):
-        raise ValueError("todos must be an array")
+        raise TypeError("todos must be an array")
     items: list[TodoItem] = []
     seen_ids: set[str] = set()
     in_progress_count = 0
     for index, raw_item in enumerate(raw_items, start=1):
         if not isinstance(raw_item, dict):
-            raise ValueError("todo items must be objects")
+            raise TypeError("todo items must be objects")
         content = str(raw_item.get("content", "")).strip()
         status = raw_item.get("status", "pending")
         priority = raw_item.get("priority")

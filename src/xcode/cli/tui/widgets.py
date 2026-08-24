@@ -7,8 +7,8 @@ from collections.abc import Callable
 from typing import cast
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples
-from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 
 from ..commands import PromptText

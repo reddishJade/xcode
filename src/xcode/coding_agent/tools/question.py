@@ -150,7 +150,7 @@ def _questions(value: object) -> list[dict[str, Any]]:
     questions: list[dict[str, Any]] = []
     for raw in value:
         if not isinstance(raw, dict):
-            raise ValueError("each question must be an object")
+            raise TypeError("each question must be an object")
         raw_header = raw.get("header")
         header = str(raw_header).strip() if raw_header is not None else None
         text = str(raw.get("question", "")).strip()
@@ -173,7 +173,7 @@ def _questions(value: object) -> list[dict[str, Any]]:
             parsed_options = []
             for option in options:
                 if not isinstance(option, dict):
-                    raise ValueError(f"question option must be an object: {text}")
+                    raise TypeError(f"question option must be an object: {text}")
                 label = str(option.get("label", "")).strip()
                 if not label:
                     raise ValueError(f"question option label is required: {text}")

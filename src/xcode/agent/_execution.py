@@ -483,7 +483,7 @@ async def _await_tool_execution(
             ]
         )
         return tool_result, tool_result.content, True, False
-    except Exception as e:
+    except (LookupError, OSError, RuntimeError, TypeError, ValueError) as e:
         tool_result = AgentToolResult(content=[TextContent(text=f"Tool error: {e}")])
         return tool_result, tool_result.content, True, False
 

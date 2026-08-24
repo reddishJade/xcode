@@ -119,11 +119,12 @@ def _run_git(project_root: Path, *args: str) -> str | None:
             ["git", *args],
             cwd=project_root,
             capture_output=True,
+            check=False,
             text=True,
             errors="replace",
             timeout=3,
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return None
     if completed.returncode != 0:
         return None

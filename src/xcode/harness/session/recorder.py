@@ -9,15 +9,14 @@ from xcode.agent.messages import AgentMessage
 from xcode.harness.agent_runtime.events import AgentHarnessEvent, FinalStructuredEvent
 
 from .event_codec import SESSION_EVENT_SCHEMA_VERSION, encode_session_event
-from .tree_store import TreeSessionRepo
-from .types import JsonValue
 from .subagent_runs import (
     SubagentActivationEvent,
     SubagentDescriptor,
     SubagentRunEvent,
 )
 from .surface import encode_surface_messages, surface_digest
-
+from .tree_store import TreeSessionRepo
+from .types import JsonValue
 
 _DURABLE_EVENT_TYPES = frozenset(
     {

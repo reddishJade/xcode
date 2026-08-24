@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from threading import Lock
-from typing import cast, Literal
+from typing import Literal, cast
 from uuid import uuid4
 
 from xcode.agent.messages import AgentMessage

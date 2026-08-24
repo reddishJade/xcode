@@ -16,29 +16,28 @@ from xcode.agent.messages import (
     AssistantMessage,
     ToolResultMessage,
 )
-from xcode.agent.types import AgentToolResult
-from xcode.agent.types import TextContent, ToolCallContent
-from xcode.agent.types import ToolSpec
 from xcode.agent.results import AgentLoopResult
-from xcode.harness.skill_activation import (
-    ExplicitSkillActivationResult,
-    is_skill_activation_content,
-)
+from xcode.agent.types import AgentToolResult, TextContent, ToolCallContent, ToolSpec
 from xcode.harness.agent_runtime._mode_protocol import ToolGateMode
 from xcode.harness.agent_runtime.agent_helpers import aiter_to_sync_iter, run_coro_sync
-from xcode.harness.agent_runtime.config import build_turn_context_messages
 from xcode.harness.agent_runtime.composition import AgentComposition
+from xcode.harness.agent_runtime.config import build_turn_context_messages
 from xcode.harness.agent_runtime.events import AgentHarnessEvent
 from xcode.harness.agent_runtime.goal import GoalController
 from xcode.harness.agent_runtime.harness import AgentHarness
 from xcode.harness.agent_runtime.result import AgentHarnessResult, RunState
+from xcode.harness.skill_activation import (
+    ExplicitSkillActivationResult,
+    is_skill_activation_content,
+)
+
 from .execution_modes import (
     ExecutionMode,
     ExecutionModeState,
     mode_notice,
 )
-from .state import CodingRunState
 from .runtime import CodingAgentRuntimeConfig
+from .state import CodingRunState
 
 __all__ = ["CodingAgentHarness"]
 

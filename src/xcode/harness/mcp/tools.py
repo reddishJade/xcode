@@ -314,7 +314,7 @@ def _validate_server_config(name: str, raw: object) -> McpServerConfig | None:
     filtered = {k: v for k, v in raw.items() if k in server_fields}
     try:
         return McpServerConfig.model_validate({"name": name, **filtered})
-    except Exception:
+    except ValueError:
         _warn(f"server {name!r} config is invalid; skipped")
         return None
 
@@ -328,9 +328,11 @@ def _parse_overrides(raw: object) -> dict[str, McpToolOverride]:
         if not isinstance(tool_name, str) or not isinstance(tool_override, dict):
             continue
         try:
-            overrides[tool_name] = McpToolOverride.model_validate(tool_override)
-        except Exception:
-            continue
+            override = McpToolOverride.model_validate(tool_override)
+        except ValueError:
+            _log.debug("invalid MCP tool override for %s", tool_name, exc_info=True)
+        else:
+            overrides[tool_name] = override
     return overrides
 
 
@@ -403,7 +405,7 @@ def _load_cache(cache_path: Path) -> dict[str, Any]:
     if cache_path.exists():
         try:
             return json.loads(cache_path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, TypeError, ValueError):
             _log.warning("failed to load MCP cache from %s", cache_path, exc_info=True)
     return {"servers": {}}
 
@@ -512,7 +514,14 @@ def build_fetch_tools_tool(
                 f"'{server_name}' and populated the cache. Please use "
                 f"mcp_tool_search to retrieve their schemas now!"
             )
-        except Exception as e:
+        except (
+            LookupError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+            TypeError,
+            ValueError,
+        ) as e:
             redacted = str(e)
             return f"Error fetching tools from server '{server_name}': {redacted}"
         finally:
@@ -915,7 +924,7 @@ def _read_mcp_config(project_root: Path) -> _McpConfigReadResult | None:
         return None
     try:
         config_data = json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (OSError, TypeError, ValueError) as exc:
         return _McpConfigReadResult(
             servers={},
             config_path=config_path,
@@ -1222,7 +1231,14 @@ def _query_server_tools(
         }
         _save_cache(cache_path, cache_data)
         return tools_list
-    except Exception as e:
+    except (
+        LookupError,
+        OSError,
+        RuntimeError,
+        TimeoutError,
+        TypeError,
+        ValueError,
+    ) as e:
         redacted = _redact_and_truncate(str(e), max_len=200)
         server_errors[server_name] = redacted
         _warn(f"error querying tools from MCP server {server_name!r}: {redacted}")

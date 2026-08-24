@@ -1016,11 +1016,13 @@ def _compute_context_summary(
         if summaries:
             skill_count = len(summaries)
             lines = [
-                "<skill-activation>\n"
-                "When the user task clearly matches a skill description below, "
-                "call load_skill with that exact name before performing the task. "
-                "Do not load a skill when no description clearly matches.\n"
-                "</skill-activation>",
+                (
+                    "<skill-activation>\n"
+                    "When the user task clearly matches a skill description below, "
+                    "call load_skill with that exact name before performing the task. "
+                    "Do not load a skill when no description clearly matches.\n"
+                    "</skill-activation>"
+                ),
                 "<available-skills>",
             ]
             for s in summaries:

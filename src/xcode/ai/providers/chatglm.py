@@ -120,4 +120,4 @@ class ChatGLMProvider(OpenAICompatProvider):
 
 
 def _supports_tool_stream(model: str) -> bool:
-    return model.startswith("glm-4.6") or model.startswith("glm-4.7")
+    return model.startswith(("glm-4.6", "glm-4.7"))

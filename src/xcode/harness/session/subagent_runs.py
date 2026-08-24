@@ -6,7 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-
 type SubagentRunStatus = Literal["started", "completed", "failed", "cancelled"]
 type SubagentMode = Literal["one_shot", "continuable"]
 

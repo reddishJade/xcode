@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from xcode.ai.events import ReasoningDelta, TextDelta, ToolCallEvent, UsageUpdate
 from xcode.ai.providers._stream import (
-    parse_tool_arguments,
     chat_stream_to_events,
+    parse_tool_arguments,
 )
-from xcode.ai.events import TextDelta, ToolCallEvent, UsageUpdate, ReasoningDelta
 
 
 class TestParseToolArguments:

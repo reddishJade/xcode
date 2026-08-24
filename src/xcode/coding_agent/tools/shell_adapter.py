@@ -11,7 +11,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
 SHELL_NAMES = frozenset(
     {
         "auto",

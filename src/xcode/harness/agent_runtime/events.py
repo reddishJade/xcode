@@ -5,6 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+from xcode.agent.types import (
+    TextContent,
+    ToolArguments,
+    ToolCallContent,
+    ToolRenderIntent,
+)
+from xcode.ai.events import ToolCall
+
 from ...agent.events import (
     AgentEvent,
     AgentStartEvent,
@@ -21,13 +29,6 @@ from ...agent.events import (
 )
 from ...agent.messages import AgentMessage, AssistantMessage
 from ...agent.types import AgentToolResult
-from xcode.ai.events import ToolCall
-from xcode.agent.types import (
-    TextContent,
-    ToolArguments,
-    ToolCallContent,
-    ToolRenderIntent,
-)
 from ..observability import EventCorrelation, RuntimeCorrelation
 
 if TYPE_CHECKING:

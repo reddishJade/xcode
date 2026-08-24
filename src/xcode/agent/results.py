@@ -5,14 +5,15 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.functional_validators import SkipValidation
-from enum import StrEnum
 
 from xcode.ai.events import ProviderFailure
 from xcode.ai.providers.base import StreamProvider
+
 from .messages import AgentMessage
 
 

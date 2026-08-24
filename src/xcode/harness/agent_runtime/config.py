@@ -5,11 +5,12 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
-
-from xcode.ai.providers.base import ModelProvider
+from typing import TYPE_CHECKING, Any
 
 from xcode.ai.models import effective_compact_threshold
+from xcode.ai.providers.base import ModelProvider
+
+from ...agent._codec import convert_to_llm as _convert_to_llm
 from ...agent._compaction import extract_prompt_tokens_from_usage
 from ...agent.config import (
     AgentLoopConfig,
@@ -17,22 +18,19 @@ from ...agent.config import (
     CompletionVerifier,
 )
 from ...agent.context import ContextCollectorRegistry, DefaultContextAssembler
-from ...agent._codec import convert_to_llm as _convert_to_llm
-from ...agent.request import (
-    DefaultRequestAssembler,
-    RequestAssembly,
-    RequestHygiene,
-)
-from .prompting.citations import decorate_citable_messages
 from ...agent.messages import (
     AgentMessage,
     AssistantMessage,
     SystemMessage,
     UserMessage,
 )
+from ...agent.request import (
+    DefaultRequestAssembler,
+    RequestAssembly,
+    RequestHygiene,
+)
+from ...agent.types import ApprovalCallback, ToolSpec
 from ..config import RequestHygieneConfig
-from ..security import PermissionDecision, PermissionPolicy
-from ..security.approval import ApprovalPolicy
 from ..observability import (
     AuditLogger,
     ExternalHookRunner,
@@ -41,22 +39,22 @@ from ..observability import (
     RuntimeCorrelation,
     hook_correlation_fields,
 )
+from ..security import PermissionDecision, PermissionPolicy
+from ..security.approval import ApprovalPolicy
 from ..security.permission_model import (
     ExternalDirectory,
     GrantStore,
-    PolicyEvaluator,
     PathExtractor,
+    PolicyEvaluator,
     Rule,
     SensitivePathOverride,
 )
-from ...agent.types import ApprovalCallback, ToolSpec
-from .cancellation import CancellationToken
 from ..session.inbox import SessionInbox
-
-
-from .compaction import CompactController, estimate_message_tokens
 from ._mode_protocol import RuntimeModeState
+from .cancellation import CancellationToken
+from .compaction import CompactController, estimate_message_tokens
 from .message_codec import messages_from_compacted_dicts
+from .prompting.citations import decorate_citable_messages
 from .tool_gate import ToolGate
 
 if TYPE_CHECKING:

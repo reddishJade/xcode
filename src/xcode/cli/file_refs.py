@@ -33,7 +33,7 @@ def expand_file_references(
             references.append(
                 FileReference(path=raw_path, status="ok", content=content)
             )
-        except Exception as exc:
+        except (OSError, UnicodeError, ValueError) as exc:
             references.append(
                 FileReference(path=raw_path, status="error", error=str(exc))
             )

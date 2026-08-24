@@ -18,8 +18,8 @@ from xcode.agent.messages import (
 )
 from xcode.agent.types import ToolCallContent
 
-from .types import JsonValue, SessionEntry
 from .schema import SESSION_EVENT_SCHEMA_VERSION
+from .types import JsonValue, SessionEntry
 
 
 class InvalidSessionSurfaceError(ValueError):

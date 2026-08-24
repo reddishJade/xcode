@@ -10,8 +10,6 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from xcode.harness.execution_env import Shell
-from xcode.harness.session_todo import SessionTodoState
 from xcode.agent.types import ToolSpec
 from xcode.coding_agent.tools import (
     build_apply_patch_tool,
@@ -25,11 +23,13 @@ from xcode.coding_agent.tools import (
     build_websearch_tool,
     build_write_file_tools,
 )
+from xcode.harness.execution_env import Shell
+from xcode.harness.session_todo import SessionTodoState
 
 if TYPE_CHECKING:
+    from xcode.coding_agent.tools import ShellSpec
     from xcode.harness.agent_runtime import ContextualRetrievalState
     from xcode.harness.skills import SkillRegistry
-    from xcode.coding_agent.tools import ShellSpec
 
 
 def build_project_scoped_registry(

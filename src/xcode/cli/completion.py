@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-import time
-from typing import Callable
 
 from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
 from prompt_toolkit.completion import Completer
@@ -555,6 +554,4 @@ def _is_blocked(root: Path, path: Path) -> bool:
     parts = set(relative.parts)
     if parts & BLOCKED_PARTS:
         return True
-    if ".env" in relative.parts or relative.name == ".env":
-        return True
-    return False
+    return bool(".env" in relative.parts or relative.name == ".env")

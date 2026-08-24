@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-import orjson
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Protocol
+
+import orjson
 
 from xcode.ai.events import (
     ReasoningDelta,
@@ -19,7 +20,6 @@ from xcode.ai.events import (
     UsageUpdate,
 )
 from xcode.ai.types import ToolArguments
-
 
 # ── OpenAI chunk 结构 Protocol ──
 

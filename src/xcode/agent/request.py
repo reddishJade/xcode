@@ -6,7 +6,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol, TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from xcode.ai.events import Message
 from xcode.ai.providers._codec import provider_function_name

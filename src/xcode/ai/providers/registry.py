@@ -19,12 +19,11 @@ from dotenv import dotenv_values
 from xcode.ai.providers.base import ModelProvider
 from xcode.ai.types import ProviderConfig
 
-from ._runtime import ProviderRuntime, RetryPolicy, RateLimitPolicy
+from ._runtime import ProviderRuntime, RateLimitPolicy, RetryPolicy
 from .chatglm import ChatGLMProvider
 from .deepseek import DeepSeekProvider
 from .mimo import MiMoProvider
 from .openai import OpenAIChatProvider
-
 
 # ── 注册表 ──
 

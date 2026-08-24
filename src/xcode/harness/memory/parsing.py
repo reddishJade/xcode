@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from hashlib import sha256
-import re
 
 _LEGACY_METADATA = {
     "memory-id",
@@ -71,7 +71,7 @@ def parse_memory_blocks(text: str, *, layer: str) -> list[MemoryRecord]:
         if not body:
             continue
         block = f"## {title}\n{body}"
-        digest = sha256(f"{layer}:{title.casefold()}".encode("utf-8")).hexdigest()[:12]
+        digest = sha256(f"{layer}:{title.casefold()}".encode()).hexdigest()[:12]
         records.append(
             MemoryRecord(
                 block=block,

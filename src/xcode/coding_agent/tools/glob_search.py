@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from xcode.agent.types import ToolInput, ToolOutput, ToolSpec
+
 from . import _search_utils
-from .path_utils import resolve_absolute_path, matches_blocked_pattern, display_path
+from .path_utils import display_path, matches_blocked_pattern, resolve_absolute_path
 
 MAX_GLOB_RESULTS = 200
 MAX_LS_ENTRIES = 500
@@ -341,7 +342,7 @@ def _validated_int(
 ) -> int:
     raw = data.get(key, default)
     if isinstance(raw, bool) or not isinstance(raw, int):
-        raise ValueError(f"{key} must be an integer")
+        raise TypeError(f"{key} must be an integer")
     if raw < minimum:
         raise ValueError(f"{key} must be at least {minimum}")
     return raw

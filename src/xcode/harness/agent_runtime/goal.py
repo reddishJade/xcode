@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from collections.abc import Mapping
+import json
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-import json
 
 from xcode.agent._codec import convert_to_llm
 from xcode.agent.messages import AgentMessage
@@ -264,7 +263,7 @@ def _parse_verdict(text: str) -> GoalVerdict:
         raise ValueError("judge returned multiple JSON verdicts")
     payload = payloads[0]
     if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
-        raise ValueError("judge verdict must contain boolean ok")
+        raise TypeError("judge verdict must contain boolean ok")
     reason = str(payload.get("reason", "")).strip()
     if not reason:
         raise ValueError("judge verdict must contain reason")

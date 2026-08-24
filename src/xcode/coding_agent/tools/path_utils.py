@@ -3,9 +3,9 @@ from __future__ import annotations
 import unicodedata
 from pathlib import Path
 
-from .truncate import truncate_tail
-
 import pathspec
+
+from .truncate import truncate_tail
 
 DEFAULT_MAX_LINES = 2000
 DEFAULT_MAX_BYTES = 50 * 1024

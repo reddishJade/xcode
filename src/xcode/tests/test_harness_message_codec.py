@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from xcode.harness.agent_runtime.message_codec import (
-    messages_from_compacted_dicts,
-    _tool_call_from_compacted,
-    _content_to_text,
-)
 from xcode.agent.messages import SystemMessage, UserMessage
+from xcode.harness.agent_runtime.message_codec import (
+    _content_to_text,
+    _tool_call_from_compacted,
+    messages_from_compacted_dicts,
+)
 
 
 class TestMessagesFromCompactedDicts:

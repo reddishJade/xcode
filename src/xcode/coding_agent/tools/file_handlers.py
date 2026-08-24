@@ -6,20 +6,32 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
-import subprocess
 
-from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.agent.types import (
     DiffRenderIntent,
     LocationRenderIntent,
     ToolInput,
     ToolOutput,
 )
-from xcode.harness.execution_env import FileSystem, LocalFileSystem
 from xcode.coding_agent.tools.path_utils import resolve_project_path
+from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
+from xcode.harness.execution_env import FileSystem, LocalFileSystem
+
+from .file_image import _detect_image, _read_image
+from .file_mutation_queue import with_file_mutation
+from .path_utils import (
+    SAMPLE_BYTES,
+    display_path,
+    is_binary_file,
+    is_path_blocked,
+    matches_blocked_pattern,
+    resolve_absolute_path,
+    truncate_output,
+)
 from .text_edit import (
     apply_text_replacement,
     detect_line_ending,
@@ -27,18 +39,6 @@ from .text_edit import (
     restore_line_endings,
     strip_bom,
 )
-from .file_image import _detect_image, _read_image
-from .file_mutation_queue import with_file_mutation
-from .path_utils import (
-    is_path_blocked,
-    truncate_output,
-    display_path,
-    resolve_absolute_path,
-    matches_blocked_pattern,
-    is_binary_file,
-    SAMPLE_BYTES,
-)
-
 
 MAX_READ_LIMIT = 2000
 MAX_LINE_LENGTH = 2000
@@ -308,6 +308,7 @@ def _format_file(path: Path) -> bool:
         result = subprocess.run(
             ["ruff", "format", str(path)],
             capture_output=True,
+            check=False,
             timeout=30,
         )
         return result.returncode == 0

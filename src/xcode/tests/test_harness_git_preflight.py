@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from xcode.harness.agent_runtime.git_preflight import _truncate, MAX_SECTION_CHARS
+from xcode.harness.agent_runtime.git_preflight import MAX_SECTION_CHARS, _truncate
 
 
 class TestTruncate:

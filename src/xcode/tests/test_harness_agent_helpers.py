@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from xcode.agent.messages import ToolResultMessage
+from xcode.agent.types import TextContent
 from xcode.harness.agent_runtime.agent_helpers import (
     _tool_result_status,
     _tool_result_text,
     text_from_blocks,
 )
-from xcode.agent.messages import ToolResultMessage
-from xcode.agent.types import TextContent
 
 
 class TestToolResultStatus:

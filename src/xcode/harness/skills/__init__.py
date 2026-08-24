@@ -1,3 +1,9 @@
+from xcode.harness.skills.discovery import (
+    SOURCE_EXPLICIT,
+    SOURCE_PROJECT,
+    SOURCE_USER,
+    build_skill_search_dirs,
+)
 from xcode.harness.skills.models import (
     SkillDef,
     SkillDiagnostic,
@@ -5,27 +11,21 @@ from xcode.harness.skills.models import (
     SkillResource,
     SkillSummary,
 )
-from xcode.harness.skills.discovery import (
-    SOURCE_EXPLICIT,
-    SOURCE_PROJECT,
-    SOURCE_USER,
-    build_skill_search_dirs,
-)
 from xcode.harness.skills.registry import SkillRegistry
 from xcode.harness.skills.rendering import SkillIndexCollector
 from xcode.harness.skills.tools import build_load_skill_tool
 
 __all__ = [
-    "SkillDef",
-    "SkillDiagnostic",
-    "SkillReference",
-    "SkillResource",
-    "SkillSummary",
     "SOURCE_EXPLICIT",
     "SOURCE_PROJECT",
     "SOURCE_USER",
-    "build_skill_search_dirs",
-    "SkillRegistry",
+    "SkillDef",
+    "SkillDiagnostic",
     "SkillIndexCollector",
+    "SkillReference",
+    "SkillRegistry",
+    "SkillResource",
+    "SkillSummary",
     "build_load_skill_tool",
+    "build_skill_search_dirs",
 ]

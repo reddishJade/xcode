@@ -16,7 +16,7 @@ def build_todowrite_tool(state: SessionTodoState | None = None) -> CoreToolSpec:
     ) -> str:
         try:
             items = todo_state.replace(data.get("todos"))
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             return f"Error: {exc}"
         return json.dumps(
             {"todos": [asdict(item) for item in items]},

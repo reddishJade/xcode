@@ -7,7 +7,6 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-
 SKILL_ACTIVATION_STATE_TAG = "skill-activation-state"
 _ACTIVATION_STATE_PATTERN = re.compile(
     rf"<{SKILL_ACTIVATION_STATE_TAG}>(.*?)</{SKILL_ACTIVATION_STATE_TAG}>"

@@ -10,16 +10,31 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Awaitable, cast
+from typing import cast
 
+from xcode.agent.config import AgentContext, AgentLoopConfig
+from xcode.agent.events import (
+    AgentEvent,
+    MessageUpdateEvent,
+    ThinkingUpdateEvent,
+)
+from xcode.agent.messages import AssistantMessage
+from xcode.agent.results import AgentLoopMetrics
+from xcode.agent.types import (
+    CancellationSignal,
+    ContentBlock,
+    TextContent,
+    ToolCallContent,
+)
 from xcode.ai.events import (
     FinalMessage,
     Message,
-    ProviderFailure,
     ProviderEvent,
+    ProviderFailure,
     ReasoningDelta,
     StopReason,
     TextDelta,
@@ -28,20 +43,8 @@ from xcode.ai.events import (
 )
 from xcode.ai.providers.base import StreamProvider
 from xcode.ai.types import StreamOptions, ToolDefinition
-from xcode.agent.types import (
-    CancellationSignal,
-    ContentBlock,
-    TextContent,
-    ToolCallContent,
-)
-from xcode.agent.config import AgentContext, AgentLoopConfig
-from xcode.agent.results import AgentLoopMetrics
-from xcode.agent.events import (
-    AgentEvent,
-    MessageUpdateEvent,
-    ThinkingUpdateEvent,
-)
-from xcode.agent.messages import AssistantMessage
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -95,8 +98,8 @@ def _abort_inflight_stream(provider: StreamProvider) -> None:
         return
     try:
         abort()
-    except Exception:
-        pass
+    except (OSError, RuntimeError, TypeError, ValueError):
+        logger.debug("failed to abort the active provider stream", exc_info=True)
 
 
 async def _aclose_stream(stream_iter: AsyncIterator[ProviderEvent]) -> None:
@@ -106,8 +109,8 @@ async def _aclose_stream(stream_iter: AsyncIterator[ProviderEvent]) -> None:
         return
     try:
         await cast(Awaitable[None], aclose())
-    except Exception:
-        pass
+    except (OSError, RuntimeError, TypeError, ValueError):
+        logger.debug("failed to close the provider stream", exc_info=True)
 
 
 async def _collect_provider_events(
@@ -139,7 +142,14 @@ async def _collect_provider_events(
                 emit(ThinkingUpdateEvent(reasoning_content=event.chunk))
                 await asyncio.sleep(0)
         return events
-    except Exception as e:
+    except (
+        LookupError,
+        OSError,
+        RuntimeError,
+        TimeoutError,
+        TypeError,
+        ValueError,
+    ) as e:
         if _is_cancelled(signal):
             # 打断触发的连接关闭会使阻塞读取抛出异常，属预期路径。
             return None

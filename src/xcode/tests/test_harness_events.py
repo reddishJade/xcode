@@ -2,32 +2,15 @@
 
 from __future__ import annotations
 
-from xcode.harness.agent_runtime.events import (
-    _translate_event,
-    _StreamTranslationState,
-    _translate_message_update,
-    _translate_turn_end,
-    _translate_thinking_update,
-    _translate_tool_execution_start,
-    _translate_tool_execution_end,
-    _translate_compaction,
-    _tool_update_text,
-    TextDeltaStructuredEvent,
-    ReasoningDeltaStructuredEvent,
-    ToolUseStructuredEvent,
-    ToolResultStructuredEvent,
-    CompactionStructuredEvent,
-    TurnEndStructuredEvent,
-)
 from xcode.agent.events import (
     AgentStartEvent,
-    TurnStartEvent,
-    TurnEndEvent,
+    CompactionEvent,
     MessageUpdateEvent,
     ThinkingUpdateEvent,
-    ToolExecutionStartEvent,
     ToolExecutionEndEvent,
-    CompactionEvent,
+    ToolExecutionStartEvent,
+    TurnEndEvent,
+    TurnStartEvent,
 )
 from xcode.agent.messages import AssistantMessage, UserMessage
 from xcode.agent.types import (
@@ -35,6 +18,23 @@ from xcode.agent.types import (
     TerminalRenderIntent,
     TextContent,
     ToolCallContent,
+)
+from xcode.harness.agent_runtime.events import (
+    CompactionStructuredEvent,
+    ReasoningDeltaStructuredEvent,
+    TextDeltaStructuredEvent,
+    ToolResultStructuredEvent,
+    ToolUseStructuredEvent,
+    TurnEndStructuredEvent,
+    _StreamTranslationState,
+    _tool_update_text,
+    _translate_compaction,
+    _translate_event,
+    _translate_message_update,
+    _translate_thinking_update,
+    _translate_tool_execution_end,
+    _translate_tool_execution_start,
+    _translate_turn_end,
 )
 
 

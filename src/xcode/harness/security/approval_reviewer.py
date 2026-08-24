@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
-from dataclasses import dataclass
 import json
+from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from dataclasses import dataclass
 from typing import Literal
 
 from xcode.agent.types import ApprovalRequest
@@ -284,7 +285,7 @@ def parse_auto_review_verdict(text: str) -> AutoReviewVerdict:
             ) from exc
 
     if not isinstance(payload, dict):
-        raise ValueError("automatic approval assessment must be a JSON object")
+        raise TypeError("automatic approval assessment must be a JSON object")
     expected = {"outcome", "risk_level", "user_authorization", "rationale"}
     unexpected = set(payload) - expected
     if unexpected:

@@ -9,10 +9,10 @@ from typing import Any, cast
 from .protocols import PolicyEvaluator
 from .types import (
     BLOCKED_PATH_PARTS,
+    CREDENTIAL_PATH_PARTS,
     Action,
     BoundaryContext,
     Constraint,
-    CREDENTIAL_PATH_PARTS,
     PermissionDecisionV2,
     StaticPermission,
     Target,
@@ -115,14 +115,14 @@ class StaticPolicyEvaluator:
                 rule.input_regex, action_input
             ):
                 continue
-            if rule.target is not None:
-                if not any(target.value == rule.target for target in action.targets):
-                    continue
-            if rule.target_type is not None:
-                if not any(
-                    target.kind == rule.target_type for target in action.targets
-                ):
-                    continue
+            if rule.target is not None and not any(
+                target.value == rule.target for target in action.targets
+            ):
+                continue
+            if rule.target_type is not None and not any(
+                target.kind == rule.target_type for target in action.targets
+            ):
+                continue
             last = rule.decision
         return last
 

@@ -14,7 +14,6 @@ from urllib.request import Request, urlopen
 
 from xcode.agent.types import ToolInput, ToolSpec
 
-
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -138,7 +137,7 @@ def _timeout(value: object) -> float:
     if value is None:
         return DEFAULT_TIMEOUT
     if not isinstance(value, str | int | float):
-        raise ValueError("timeout must be a number")
+        raise TypeError("timeout must be a number")
     timeout = float(value)
     if timeout <= 0 or timeout > MAX_TIMEOUT:
         raise ValueError("timeout must be between 0 and 120 seconds")
@@ -169,8 +168,7 @@ def _is_textual_mime(mime: str) -> bool:
         not mime
         or mime.startswith("text/")
         or mime in {"application/json", "application/xml", "application/javascript"}
-        or mime.endswith("+json")
-        or mime.endswith("+xml")
+        or mime.endswith(("+json", "+xml"))
     )
 
 

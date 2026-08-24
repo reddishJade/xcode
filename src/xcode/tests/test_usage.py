@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from xcode.ai.cache import CacheUsage
 from xcode.ai.usage import (
@@ -16,11 +16,11 @@ from xcode.ai.usage import (
 
 def _off_peak_now() -> datetime:
     """deepseek 高峰时段为 UTC 1-4、6-10，选 12 点为非高峰。"""
-    return datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+    return datetime(2025, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def _peak_now() -> datetime:
-    return datetime(2025, 1, 1, 3, 0, tzinfo=timezone.utc)
+    return datetime(2025, 1, 1, 3, 0, tzinfo=UTC)
 
 
 class TestUsageAccumulator:

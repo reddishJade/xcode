@@ -5,18 +5,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
-from .app_contract import ReplApp
-from .markdown import MarkdownRenderer
 from xcode.coding_agent.execution_modes import ExecutionMode
-from xcode.harness.session import SessionStore
+from xcode.harness.agent_runtime import BusyMessageMode
 from xcode.harness.security import (
     FileGrantStore,
     InMemoryGrantStore,
     PermissionPolicy,
 )
+from xcode.harness.session import SessionStore
 from xcode.harness.snapshot import SnapshotStore
-from xcode.harness.agent_runtime import BusyMessageMode
 
+from .app_contract import ReplApp
+from .markdown import MarkdownRenderer
 
 VerbosityLevel = Literal["normal", "verbose", "debug"]
 PromptText = str | list[tuple[str, str]] | Callable[[], list[tuple[str, str]]]

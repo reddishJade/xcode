@@ -4,17 +4,17 @@ from collections.abc import Iterator
 from typing import Protocol
 
 from xcode.agent.messages import AgentMessage, UserMessage
+from xcode.agent.types import ApprovalCallback, ToolSpec
+from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.agent_runtime import (
+    AgentHarnessEvent,
     BusyMessageMode,
     CancellationToken,
-    AgentHarnessEvent,
     SubmitOutcome,
 )
-from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.observability import ExternalHookDiagnostic
-from xcode.harness.skill_activation import ExplicitSkillActivationResult
-from xcode.agent.types import ApprovalCallback, ToolSpec
 from xcode.harness.session import SessionStore
+from xcode.harness.skill_activation import ExplicitSkillActivationResult
 
 
 class ToolRegistryApp(Protocol):

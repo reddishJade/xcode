@@ -14,14 +14,14 @@ from .registry import (
 )
 
 __all__ = [
+    "PROVIDER_REGISTRY",
     "ChatGLMProvider",
     "DeepSeekProvider",
     "MiMoProvider",
-    "OpenAIChatProvider",
-    "PROVIDER_REGISTRY",
-    "ProviderBundle",
-    "ProviderSettings",
     "ModelProfileConfig",
     "ModelProfileProto",
+    "OpenAIChatProvider",
+    "ProviderBundle",
+    "ProviderSettings",
     "build_provider_bundle",
 ]

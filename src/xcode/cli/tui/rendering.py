@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from io import StringIO
 import re
 import shutil
+from io import StringIO
 from typing import cast
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples, to_formatted_text
@@ -12,7 +12,6 @@ from prompt_toolkit.formatted_text.ansi import ANSI
 from prompt_toolkit.utils import get_cwidth
 from rich.console import Console
 from rich.markdown import Markdown
-
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
@@ -108,8 +107,9 @@ def render_line_fragments(line: str) -> StyleAndTextTuples:
     if "\x1b[" in line:
         try:
             return cast(StyleAndTextTuples, to_formatted_text(ANSI(line)))
-        except Exception:
-            pass
+        except (IndexError, TypeError, ValueError):
+            style = line_style(line)
+            return [(style, line)]
     style = line_style(line)
     return [(style, line)]
 

@@ -21,14 +21,14 @@
 
 from __future__ import annotations
 
+import platform
 from collections.abc import Callable
 from dataclasses import dataclass
-import platform
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from xcode.harness.config import DEFAULT_PROMPT_MODULES
 from xcode.agent.types import ToolSpec
+from xcode.harness.config import DEFAULT_PROMPT_MODULES
 
 from ..contextual import ContextualRetrievalState
 from ..git_preflight import build_git_preflight
@@ -311,10 +311,14 @@ def render_memory_protocol(manager: MemoryManager) -> str:
             f"Project memory: {manager.memory_file}",
             f"User memory: {manager.user_memory_file}",
             "Use search_memory before asking the user to repeat prior decisions.",
-            "Use history search/around for exact details shadowed by the current "
-            "surface.",
-            "Only persist durable user rules, architecture decisions, and verified "
-            "cross-session facts. Do not store current task progress here.",
+            (
+                "Use history search/around for exact details shadowed by the current "
+                "surface."
+            ),
+            (
+                "Only persist durable user rules, architecture decisions, and verified "
+                "cross-session facts. Do not store current task progress here."
+            ),
             "</long-horizon-memory>",
         )
     )

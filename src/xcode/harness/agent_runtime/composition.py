@@ -7,9 +7,9 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from uuid import uuid4
 
-from xcode.ai.providers.base import ModelProvider
 from xcode.agent.request import RequestAssembler
 from xcode.agent.types import ToolSpec
+from xcode.ai.providers.base import ModelProvider
 from xcode.harness.config import AgentConfig
 from xcode.harness.security import PermissionPolicy
 from xcode.harness.security.permission_model import Rule

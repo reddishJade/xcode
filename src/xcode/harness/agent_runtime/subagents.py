@@ -10,14 +10,14 @@ from pathlib import Path
 from threading import Lock, RLock
 from uuid import uuid4
 
-from xcode.ai.providers.base import ModelProvider
 from xcode.agent.types import ToolSpec
+from xcode.ai.providers.base import ModelProvider
 from xcode.harness.observability import SignalHookManager
 from xcode.harness.session.inbox import SessionInbox
 from xcode.harness.session.recorder import SessionRecorder
 from xcode.harness.session.subagent_runs import (
-    SubagentDescriptor,
     SubagentActivationEvent,
+    SubagentDescriptor,
     SubagentMode,
     SubagentRunEvent,
     SubagentRunStatus,
@@ -384,7 +384,14 @@ class SubagentSessionManager:
                 run_id=run_id,
                 status="cancelled",
             )
-        except Exception as exc:
+        except (
+            LookupError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+            TypeError,
+            ValueError,
+        ) as exc:
             error = f"{type(exc).__name__}: {exc}"
             parent_recorder.record_subagent_run(
                 _run_event(

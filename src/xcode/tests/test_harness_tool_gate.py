@@ -5,22 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-from xcode.agent.messages import ToolResultMessage
-from xcode.ai.events import ToolCall
 from xcode.agent.config import AgentContext, BeforeToolCallContext
-from xcode.agent.messages import AssistantMessage, UserMessage
+from xcode.agent.messages import AssistantMessage, ToolResultMessage, UserMessage
 from xcode.agent.request import DefaultRequestAssembler
 from xcode.agent.types import ToolCallContent
+from xcode.ai.events import ToolCall
 from xcode.harness.agent_runtime.composition import AgentComposition
 from xcode.harness.agent_runtime.config import AgentRuntimeConfig, GateConfig
 from xcode.harness.agent_runtime.harness import AgentHarness
-from xcode.harness.config import AgentConfig
 from xcode.harness.agent_runtime.tool_gate import (
     _approval_transcript,
     _permission_notice,
     _stricter_decision,
     _tool_results_count_as_progress,
 )
+from xcode.harness.config import AgentConfig
 from xcode.harness.security import PermissionEngineResult
 from xcode.harness.security.permission_model import (
     ApprovalResult,

@@ -5,15 +5,15 @@ from __future__ import annotations
 import pytest
 
 from xcode.coding_agent.tools.file_handlers import (
-    _parse_offset,
-    _parse_limit,
-    _truncate_line,
-    _ensure_write_size,
-    _prepare_edits,
-    _first_changed_line,
-    MAX_WRITE_BYTES,
     MAX_LINE_LENGTH,
     MAX_LINE_SUFFIX,
+    MAX_WRITE_BYTES,
+    _ensure_write_size,
+    _first_changed_line,
+    _parse_limit,
+    _parse_offset,
+    _prepare_edits,
+    _truncate_line,
 )
 
 

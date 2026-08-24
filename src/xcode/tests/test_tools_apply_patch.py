@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import pytest
+
 from xcode.coding_agent.tools.apply_patch import (
-    parse_patch,
+    _change_counts,
+    _find_anchor,
+    _find_sequence,
     _header_path,
     _patch_text,
-    _find_sequence,
-    _find_anchor,
-    _change_counts,
     extract_patch_paths,
+    parse_patch,
 )
 
 

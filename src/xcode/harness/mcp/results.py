@@ -11,8 +11,12 @@ from urllib.parse import urlparse
 import jsonschema
 from jsonschema.validators import validator_for
 
-from xcode.agent.types import FileContent, ImageContent
-from xcode.agent.types import AGENT_CONTENT_BLOCKS_METADATA_KEY, ToolOutput
+from xcode.agent.types import (
+    AGENT_CONTENT_BLOCKS_METADATA_KEY,
+    FileContent,
+    ImageContent,
+    ToolOutput,
+)
 from xcode.harness.session import JsonValue
 
 from .client import redact_mcp_text
@@ -140,8 +144,10 @@ def _validate_structured_content(
     except jsonschema.ValidationError as exc:
         return (
             "invalid",
-            f"MCP structuredContent violates outputSchema at "
-            f"{exc.json_path}: {exc.message}",
+            (
+                f"MCP structuredContent violates outputSchema at "
+                f"{exc.json_path}: {exc.message}"
+            ),
         )
     return "valid", None
 

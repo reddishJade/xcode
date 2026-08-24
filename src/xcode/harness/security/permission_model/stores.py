@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-import tempfile
 
 import filelock
 from pydantic import ValidationError

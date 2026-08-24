@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime
 
 """当前任务上下文的轻量记录与提示词渲染。"""
 
@@ -94,7 +94,7 @@ class ContextualRetrievalState:
                 status=status,
                 approval_scope=approval_scope,
                 target_path=target_path,
-                timestamp=datetime.now().isoformat(timespec="seconds"),
+                timestamp=datetime.now(UTC).isoformat(timespec="seconds"),
             )
         )
         self._dirty = True

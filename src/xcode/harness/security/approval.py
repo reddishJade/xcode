@@ -8,7 +8,6 @@ from typing import Literal
 
 from xcode.agent.types import ApprovalRequest
 
-
 ApprovalPolicy = Literal["on-request", "never"]
 ApprovalsReviewer = Literal["user", "auto_review"]
 ReviewRisk = Literal["low", "medium", "high", "critical"]

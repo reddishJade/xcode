@@ -319,12 +319,10 @@ def _is_expired(block: ContextBlock, turn: int, step: int) -> bool:
         and turn - block.created_turn >= block.expiry.max_turns
     ):
         return True
-    if (
+    return bool(
         block.expiry.max_steps > 0
         and step - block.created_step >= block.expiry.max_steps
-    ):
-        return True
-    return False
+    )
 
 
 def _block_to_text(block: ContextBlock) -> str:
@@ -567,7 +565,7 @@ def _extract_key_sections(text: str) -> list[str]:
             sections.append(section)
 
     for line in text.splitlines():
-        if line.startswith("## ") or line.startswith("### "):
+        if line.startswith(("## ", "### ")):
             flush()
             current_heading = line
             current_lines = [line]
@@ -615,11 +613,12 @@ def _run_git(root: Path, *args: str) -> str | None:
             ["git", *args],
             cwd=root,
             capture_output=True,
+            check=False,
             text=True,
             errors="replace",
             timeout=_DIFF_CMD_TIMEOUT,
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return None
     if completed.returncode != 0:
         return None
@@ -822,8 +821,9 @@ class NotesCollector:
         for f in files:
             try:
                 text = f.read_text(encoding="utf-8", errors="replace").strip()
-            except Exception:
-                continue
+            except OSError:
+                logger.debug("NotesCollector: failed to read %s", f, exc_info=True)
+                text = ""
             if not text:
                 continue
             header = f"--- {f.name} ---"

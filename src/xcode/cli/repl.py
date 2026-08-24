@@ -1,19 +1,43 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-import sys
-import time
 from typing import cast
 
 from rich.console import Console
+
+from xcode.ai.models import get_models, get_providers
+from xcode.harness.agent_runtime.events import (
+    AgentHarnessEvent,
+    AssistantEventBlock,
+    AssistantStructuredEvent,
+    AssistantToolUseBlock,
+    FinalStructuredEvent,
+    ReasoningDeltaStructuredEvent,
+    TextDeltaStructuredEvent,
+    ToolResultStructuredEvent,
+    ToolUpdateStructuredEvent,
+    ToolUseStructuredEvent,
+)
+from xcode.harness.agent_runtime.result import AgentHarnessResult
+from xcode.harness.security import FileGrantStore
+from xcode.harness.security.permission_model import SessionGrantStoreManager
+from xcode.harness.session import SessionInfoView as SessionMetadataView
+from xcode.harness.session import SessionStore
+from xcode.harness.snapshot import (
+    SnapshotStore,
+    SnapshotUnsupportedError,
+)
 
 from .app_contract import ReplApp
 from .commands import PromptLike, PromptText, ReplState
 from .file_refs import expand_file_references
 from .markdown import MarkdownRenderer, TerminalMarkdownRenderer
+from .reasoning_effort import reasoning_effort_levels_for_transport
 from .repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
 from .repl_hitl import ReplHITLHandler
 from .repl_rendering import (
@@ -23,9 +47,6 @@ from .repl_rendering import (
     input_prompt,
     print_startup_banner,
 )
-from .repl_turn_handler import ReasoningHandler, ToolCallHandler
-from .reasoning_effort import reasoning_effort_levels_for_transport
-from xcode.ai.models import get_models, get_providers
 from .repl_sessions import (
     print_saved_conversation,
     resume_interactively,
@@ -40,27 +61,7 @@ from .repl_tools import (
     final_stop_reason,
     run_shell_shortcut,
 )
-from xcode.harness.agent_runtime.events import (
-    AssistantEventBlock,
-    AssistantStructuredEvent,
-    AssistantToolUseBlock,
-    FinalStructuredEvent,
-    ReasoningDeltaStructuredEvent,
-    AgentHarnessEvent,
-    TextDeltaStructuredEvent,
-    ToolResultStructuredEvent,
-    ToolUpdateStructuredEvent,
-    ToolUseStructuredEvent,
-)
-from xcode.harness.agent_runtime.result import AgentHarnessResult
-from xcode.harness.security import FileGrantStore
-from xcode.harness.security.permission_model import SessionGrantStoreManager
-from xcode.harness.session import SessionInfoView as SessionMetadataView, SessionStore
-from xcode.harness.snapshot import (
-    SnapshotStore,
-    SnapshotUnsupportedError,
-)
-
+from .repl_turn_handler import ReasoningHandler, ToolCallHandler
 
 # ---------------------------------------------------------------------------
 # Windows prompt_toolkit shutdown noise suppression
@@ -245,7 +246,7 @@ def run_repl(
         app.restore_session()
 
     if selected_view is not None:
-        from .repl_sessions import resumed_message, print_loaded_history
+        from .repl_sessions import print_loaded_history, resumed_message
 
         print(resumed_message(selected_view))
         print_loaded_history(store)

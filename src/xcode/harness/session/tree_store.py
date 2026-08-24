@@ -14,22 +14,23 @@ import json
 import logging
 import re
 import shutil
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import filelock
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from .schema import SESSION_EVENT_SCHEMA_VERSION
 from .types import (
     JsonValue,
     SessionEntry,
     SessionInfoView,
     TreeNode,
 )
-from .schema import SESSION_EVENT_SCHEMA_VERSION
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+logger = logging.getLogger(__name__)
 SUMMARY_USER_CHARS = 120
 SUMMARY_ASSISTANT_CHARS = 180
 SUMMARY_TITLE_CHARS = 160
@@ -493,8 +494,8 @@ class TreeSessionRepo:
                 )
             )
             # push children in reverse so they process in created_at order
-            for child in reversed(
-                sorted(children.get(e.id, []), key=lambda x: x.created_at)
+            for child in sorted(
+                children.get(e.id, []), key=lambda x: x.created_at, reverse=True
             ):
                 stack.append((child, depth + 1))
 
@@ -630,7 +631,7 @@ class TreeSessionRepo:
             try:
                 metadata = TreeMetadata.model_validate(_migrate_metadata(raw))
             except ValidationError:
-                logging.warning("skipping malformed session metadata: %s", raw)
+                logger.warning("skipping malformed session metadata: %s", raw)
                 continue
             items.append(metadata)
         return items

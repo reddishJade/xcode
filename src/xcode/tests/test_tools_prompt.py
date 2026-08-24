@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from xcode.agent.types import ToolSpec
 from xcode.harness.agent_runtime.prompting.tools import (
+    build_tool_guidelines,
     build_tool_prompt,
     compact_tool_params,
-    build_tool_guidelines,
 )
 
 

@@ -10,12 +10,12 @@ import pytest
 from xcode.ai.providers.base import ModelProvider
 from xcode.cli.commands import CommandContext, ReplState
 from xcode.cli.repl_commands import cmd_goal
-from xcode.harness.session.replay import latest_goal_state, replay_session
 from xcode.cli.tui.app import _is_live_command
 from xcode.coding_agent.state import CodingRunState
 from xcode.harness.agent_runtime.goal import GoalController, GoalState
-from xcode.harness.session.types import JsonValue, SessionEntry
 from xcode.harness.session import SessionStore
+from xcode.harness.session.replay import latest_goal_state, replay_session
+from xcode.harness.session.types import JsonValue, SessionEntry
 
 
 class _Store:

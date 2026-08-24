@@ -11,6 +11,9 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
+from xcode.ai.events import ToolCall
+from xcode.harness.agent_runtime.events import ToolResultBlock, ToolUpdateData
+
 from .commands import ReplState
 from .repl_rendering import (
     CLI_COLOR_DIM,
@@ -20,12 +23,6 @@ from .repl_rendering import (
     CLI_COLOR_TOOL,
     LiveReasoningPreview,
 )
-from .shared.thinking import single_line_preview
-from .shared.thinking import (
-    ReasoningCore,
-    format_elapsed,
-    should_print_reasoning_summary,
-)
 from .repl_tools import (
     brief_input,
     print_tool_call_rich,
@@ -34,8 +31,12 @@ from .repl_tools import (
     tool_call_text,
     tool_intent,
 )
-from xcode.ai.events import ToolCall
-from xcode.harness.agent_runtime.events import ToolResultBlock, ToolUpdateData
+from .shared.thinking import (
+    ReasoningCore,
+    format_elapsed,
+    should_print_reasoning_summary,
+    single_line_preview,
+)
 
 
 def _safe_write(text: str) -> None:

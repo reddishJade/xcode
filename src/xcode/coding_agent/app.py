@@ -8,23 +8,24 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from xcode.coding_agent.execution_modes import ExecutionMode
-from xcode.harness.config import AgentConfig, XcodeRuntimeConfig
-from xcode.harness.agent_runtime import (
-    ContextualRetrievalState,
-    AgentHarnessEvent,
-)
-from xcode.coding_agent.harness import CodingAgentHarness
 from xcode.agent.messages import AgentMessage, UserMessage
 from xcode.agent.types import ToolSpec
+from xcode.ai.providers.registry import ProviderSettings, build_provider_bundle
+from xcode.coding_agent.execution_modes import ExecutionMode
+from xcode.coding_agent.harness import CodingAgentHarness
+from xcode.harness.agent_runtime import (
+    AgentHarnessEvent,
+    ContextualRetrievalState,
+)
+from xcode.harness.config import AgentConfig, XcodeRuntimeConfig
 from xcode.harness.observability import ExternalHookDiagnostic, ExternalHookRunner
-from xcode.harness.session_todo import SessionTodoState
 from xcode.harness.session import SessionStore
 from xcode.harness.session.recorder import SessionRecorder
 from xcode.harness.session.replay import replay_session
-from xcode.ai.providers.registry import ProviderSettings, build_provider_bundle
+from xcode.harness.session_todo import SessionTodoState
+
 from . import assembly as _assembly
 from .assembly import (
     build_agent,
@@ -33,8 +34,8 @@ from .assembly import (
 
 if TYPE_CHECKING:
     from xcode.harness.agent_runtime.subagents import SubagentSessionManager
-    from xcode.harness.memory import MemoryManager
     from xcode.harness.mcp import McpRuntimeRegistry
+    from xcode.harness.memory import MemoryManager
 
 
 @dataclass
@@ -65,9 +66,8 @@ class XcodeApp:
         thinking: bool | None = None,
         reasoning_effort: str | None = None,
     ) -> str:
-        from xcode.ai.providers import build_provider_bundle, ProviderSettings
-        from xcode.ai.providers.registry import ModelProfileConfig
-        from xcode.ai.providers.registry import ModelProfileProto
+        from xcode.ai.providers import ProviderSettings, build_provider_bundle
+        from xcode.ai.providers.registry import ModelProfileConfig, ModelProfileProto
 
         if profile not in {"main", "subagent"}:
             raise ValueError("profile must be main or subagent")

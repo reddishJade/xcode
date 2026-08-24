@@ -7,11 +7,11 @@ import pytest
 from xcode.ai.models import (
     ModelMode,
     effective_compact_threshold,
-    parse_model_mode,
-    resolve_model,
     get_model,
     get_models,
     get_providers,
+    parse_model_mode,
+    resolve_model,
 )
 
 

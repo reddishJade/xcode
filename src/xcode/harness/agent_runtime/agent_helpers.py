@@ -9,19 +9,17 @@ import asyncio
 import queue
 from collections.abc import AsyncIterator, Coroutine, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from ...agent._codec import convert_to_llm
 from ...agent.messages import AgentMessage, ToolResultMessage
 from ...agent.types import ShellCallOutputContent, TextContent
+from .async_worker import IsolatedAsyncWorker
 from .cancellation import CancellationToken
 from .compaction import (
     budget_large_tool_outputs,
     latest_read_file_tool_result_ids,
 )
-from .async_worker import IsolatedAsyncWorker
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .events import AgentHarnessEvent
@@ -130,7 +128,7 @@ def budget_messages_for_provider(
     )
 
 
-def run_coro_sync(coro: Coroutine[Any, Any, T]) -> T:
+def run_coro_sync[T](coro: Coroutine[Any, Any, T]) -> T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -171,7 +169,16 @@ def aiter_to_sync_iter(
         try:
             async for event in async_iter:
                 items.put(_StreamItem(event))
-        except BaseException as exc:
+        except (
+            asyncio.CancelledError,
+            EOFError,
+            KeyboardInterrupt,
+            OSError,
+            RuntimeError,
+            SystemExit,
+            TypeError,
+            ValueError,
+        ) as exc:
             items.put(_StreamError(exc))
         finally:
             items.put(_StreamDone())

@@ -13,22 +13,22 @@ from difflib import SequenceMatcher, unified_diff
 from pathlib import Path
 from typing import Literal, cast
 
-from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.agent.types import DiffRenderIntent, ToolInput, ToolOutput, ToolSpec
+from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
+from xcode.harness.execution_env import FileSystem, LocalFileSystem
 
+from .file_handlers import _ensure_write_size, _format_file, _read_text
+from .file_mutation_queue import with_file_mutation
+from .path_utils import (
+    display_path,
+    matches_blocked_pattern,
+    resolve_absolute_path,
+)
 from .text_edit import (
     detect_line_ending,
     normalize_to_lf,
     restore_line_endings,
     strip_bom,
-)
-from xcode.harness.execution_env import FileSystem, LocalFileSystem
-from .file_handlers import _ensure_write_size, _read_text, _format_file
-from .file_mutation_queue import with_file_mutation
-from .path_utils import (
-    display_path,
-    resolve_absolute_path,
-    matches_blocked_pattern,
 )
 
 PatchKind = Literal["add", "update", "delete", "move"]

@@ -10,15 +10,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from xcode.agent.types import TerminalRenderIntent, ToolInput, ToolOutput, ToolSpec
 from xcode.harness.execution_env import (
     ExecutionResult,
     Shell,
     SubprocessShell,
 )
-from xcode.agent.types import TerminalRenderIntent, ToolInput, ToolOutput, ToolSpec
+
+from ._constants import DEFAULT_TIMEOUT_SECONDS
 from .output_accumulator import OutputAccumulator
 from .shell_adapter import ShellSpec, build_shell_argv, detect_shell
-from ._constants import DEFAULT_TIMEOUT_SECONDS
 
 logger = logging.getLogger("xcode.coding_agent.tools.bash")
 
@@ -195,8 +196,10 @@ def _build_prompt_guidelines(
                 "Use `|` for pipelines (Out-File, Select-Object, etc.).",
                 "Quote paths with spaces using single quotes (').",
                 "Use `cd` to change directory before running commands.",
-                "Common file commands: Get-Content (read), Set-Content (write), "
-                "Remove-Item (del), Copy-Item, Move-Item, New-Item, Out-File",
+                (
+                    "Common file commands: Get-Content (read), Set-Content (write), "
+                    "Remove-Item (del), Copy-Item, Move-Item, New-Item, Out-File"
+                ),
             ]
         )
     elif syntax == "cmd":
@@ -205,8 +208,10 @@ def _build_prompt_guidelines(
                 "Use `&&` or `&` to chain commands in cmd.exe.",
                 "Example: `cd src && dir`",
                 "Use `cd /d` to change drives (e.g. `cd /d D:/projects`).",
-                "Common file commands: type (read), copy (read+write), "
-                "del/erase (delete), move/ren (write), mkdir (write), dir (list)",
+                (
+                    "Common file commands: type (read), copy (read+write), "
+                    "del/erase (delete), move/ren (write), mkdir (write), dir (list)"
+                ),
             ]
         )
     else:
@@ -216,8 +221,10 @@ def _build_prompt_guidelines(
                 "Example: `cd src && cat file.txt`",
                 "Use `cd` to change directory before running commands.",
                 "Use single quotes (') for paths with spaces in bash.",
-                "Common file commands: cat (read), cp (read+write), mv (write), "
-                "rm (delete), grep/rg (search), curl/wget (download), tar (archive)",
+                (
+                    "Common file commands: cat (read), cp (read+write), mv (write), "
+                    "rm (delete), grep/rg (search), curl/wget (download), tar (archive)"
+                ),
             ]
         )
 

@@ -12,19 +12,19 @@ from typing import TYPE_CHECKING, cast
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.utils import get_cwidth
 
-from ..shared.thinking import ReasoningCore, format_elapsed, single_line_preview
-from ..repl_tools import brief_input, final_stop_reason, tool_call_text
-from ..repl_rendering import _render_citations
-from ..tool_rendering import render_intent_summary
 from xcode.agent.types import ToolInput, ToolRenderIntent, parse_tool_render_intent
-from .rendering import (
-    markdown_ansi_lines,
-    rendered_markdown_lines,
-    render_line_fragments,
-    wrap_ansi_lines,
-)
 from xcode.harness.security.shell_analyzer import analyze_shell_command
 
+from ..repl_rendering import _render_citations
+from ..repl_tools import brief_input, final_stop_reason, tool_call_text
+from ..shared.thinking import ReasoningCore, format_elapsed, single_line_preview
+from ..tool_rendering import render_intent_summary
+from .rendering import (
+    markdown_ansi_lines,
+    render_line_fragments,
+    rendered_markdown_lines,
+    wrap_ansi_lines,
+)
 
 _THINKING_ANSI = "\x1b[38;2;128;128;128m"
 _ANSI_RESET = "\x1b[0m"

@@ -30,7 +30,7 @@ def estimate_tokens(text: str) -> int:
     try:
         encoding = _get_encoding()
         return max(1, len(encoding.encode(text)))
-    except BaseException:
+    except (KeyError, RuntimeError, TypeError, ValueError):
         return max(1, len(text.encode("utf-8")) // 3)
 
 

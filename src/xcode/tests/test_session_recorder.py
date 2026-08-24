@@ -7,18 +7,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+from xcode.agent.config import AgentContext
+from xcode.agent.messages import SystemMessage, UserMessage
+from xcode.agent.request import DefaultRequestAssembler
 from xcode.coding_agent.app import XcodeApp
-from xcode.agent.messages import UserMessage
+from xcode.harness.agent_runtime.config import _build_before_provider_request_closure
 from xcode.harness.agent_runtime.events import (
     AgentHarnessEvent,
     FinalStructuredEvent,
     TextDeltaStructuredEvent,
 )
-from xcode.harness.agent_runtime.config import _build_before_provider_request_closure
 from xcode.harness.agent_runtime.result import AgentHarnessResult
-from xcode.agent.config import AgentContext
-from xcode.agent.messages import SystemMessage
-from xcode.agent.request import DefaultRequestAssembler
 from xcode.harness.observability import RuntimeCorrelation
 from xcode.harness.session import InboxLane, SessionInbox, SessionStore
 from xcode.harness.session.recorder import SessionRecorder

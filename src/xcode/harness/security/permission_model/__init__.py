@@ -1,4 +1,16 @@
+from .action import ActionExtractor, PathExtractor
+from .evaluators import (
+    ModePolicyEvaluator,
+    PathBoundaryPolicyEvaluator,
+    StaticPolicyEvaluator,
+    StructuredBoundaryPolicyEvaluator,
+    evaluate_policy_constraints,
+)
+from .protocols import GrantStore, PolicyEvaluator
+from .resolver import PermissionResolver
+from .stores import FileGrantStore, InMemoryGrantStore, SessionGrantStoreManager
 from .types import (
+    Action,
     ApprovalCandidate,
     ApprovalResult,
     BoundaryContext,
@@ -22,19 +34,7 @@ from .types import (
     UnresolvedEffect,
     UnresolvedReason,
     Verdict,
-    Action,
 )
-from .protocols import GrantStore, PolicyEvaluator
-from .stores import FileGrantStore, InMemoryGrantStore, SessionGrantStoreManager
-from .resolver import PermissionResolver
-from .evaluators import (
-    ModePolicyEvaluator,
-    PathBoundaryPolicyEvaluator,
-    StaticPolicyEvaluator,
-    StructuredBoundaryPolicyEvaluator,
-    evaluate_policy_constraints,
-)
-from .action import ActionExtractor, PathExtractor
 from .utils import (
     compute_approval_candidate,
     create_grant_record,
@@ -43,7 +43,6 @@ from .utils import (
 __all__ = [
     "Action",
     "ActionExtractor",
-    "PathExtractor",
     "ApprovalCandidate",
     "ApprovalResult",
     "BoundaryContext",
@@ -60,6 +59,7 @@ __all__ = [
     "InMemoryGrantStore",
     "ModePolicyEvaluator",
     "PathBoundaryPolicyEvaluator",
+    "PathExtractor",
     "PermissionAccess",
     "PermissionDecisionV2",
     "PermissionResolver",

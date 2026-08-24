@@ -162,8 +162,7 @@ class TestExecutionModeState:
     def test_router_mode_keeps_default_routing(self) -> None:
         assert ExecutionModeState().approvals_reviewer == "user"
         assert (
-            ExecutionModeState(initial_mode="build").approvals_reviewer
-            == "auto_review"
+            ExecutionModeState(initial_mode="build").approvals_reviewer == "auto_review"
         )
 
     def test_router_auto_forces_auto_review(self) -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 import orjson
@@ -77,7 +77,7 @@ class Cost:
 
     def effective(self, now: datetime | None = None) -> Cost:
         """按调用时刻返回有效费率：高峰时段用全价，否则按 off_peak_factor 折算。"""
-        if not self.peak_hours or self._is_peak_hour(now or datetime.now(timezone.utc)):
+        if not self.peak_hours or self._is_peak_hour(now or datetime.now(UTC)):
             return self
         return Cost(
             input=self.input * self.off_peak_factor,

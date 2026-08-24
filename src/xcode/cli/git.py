@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 
 def git_branch_name(project_root: Path) -> str | None:

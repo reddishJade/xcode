@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-
 import asyncio
-from copy import deepcopy
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import re
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from xcode.agent._compaction import estimate_tokens
 from xcode.agent._codec import BRANCH_SUMMARY_PREFIX, SUMMARY_SUFFIX
+from xcode.agent._compaction import estimate_tokens
 from xcode.agent.config import CompactInstructions
+
 from ..skill_activation import is_skill_activation_content
 
 """分层上下文压缩工具。"""
@@ -42,7 +42,7 @@ class CompactionEntry:
         self.id: str = entry_id or uuid4().hex[:12]
         self.parent_id: str | None = parent_id
         self.type: str = "compaction"
-        self.timestamp: float = datetime.now(timezone.utc).timestamp()
+        self.timestamp: float = datetime.now(UTC).timestamp()
         self.summary: str = summary
         self.first_kept_entry_id: str = first_kept_entry_id
         self.tokens_before: int = tokens_before
@@ -845,7 +845,7 @@ def save_transcript(messages: list[dict[str, Any]], transcript_dir: Path) -> Pat
     transcript_dir.mkdir(parents=True, exist_ok=True)
     path = (
         transcript_dir
-        / f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jsonl"
+        / f"transcript_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')}.jsonl"
     )
     with path.open("w", encoding="utf-8") as file:
         for message in messages:

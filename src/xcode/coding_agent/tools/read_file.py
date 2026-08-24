@@ -5,10 +5,10 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.agent.types import ToolSpec
-
+from xcode.harness.agent_runtime.contextual import ContextualRetrievalState
 from xcode.harness.execution_env import FileSystem, LocalFileSystem
+
 from .file_handlers import _read_file
 
 READ_FILE_SCHEMA = {

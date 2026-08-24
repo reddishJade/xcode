@@ -9,7 +9,7 @@ import queue
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
@@ -195,7 +195,7 @@ ApprovalScope = Literal["once", "session", "permanent"]
 class ApprovalRequest:
     """权限引擎传给交互层的审批请求。"""
 
-    tool: "ToolSpec"
+    tool: ToolSpec
     action_input: ToolInput
     allowed_scopes: tuple[ApprovalScope, ...]
     reason: str
@@ -231,7 +231,7 @@ class ToolOutput(str):
         metadata: Mapping[str, object] | None = None,
         is_error: bool = False,
         render_intent: ToolRenderIntent | None = None,
-    ) -> "ToolOutput":
+    ) -> Self:
         output = str.__new__(cls, content)
         output.metadata = dict(metadata) if metadata else {}
         output.is_error = is_error
@@ -375,7 +375,7 @@ class ToolSpecAdapter:
         def run_handler() -> None:
             try:
                 result = context.run(self._spec.handler, params, on_update)
-            except Exception as exc:
+            except (LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
                 outcomes.put(exc)
             else:
                 outcomes.put(result)

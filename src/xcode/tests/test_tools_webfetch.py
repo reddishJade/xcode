@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import pytest
+
 from xcode.coding_agent.tools.webfetch import (
-    _valid_url,
-    _timeout,
-    _format,
     _charset,
-    _mime,
+    _format,
+    _html_to_markdown,
+    _is_html_mime,
     _is_image_mime,
     _is_textual_mime,
-    _is_html_mime,
-    _plain_text,
     _markdown_text,
+    _mime,
+    _plain_text,
+    _timeout,
+    _valid_url,
     _with_truncation_notice,
-    _html_to_markdown,
 )
 
 

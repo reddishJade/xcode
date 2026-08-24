@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pathspec
 
 from .tools_manager import get_tool_path
-
 
 _RG_PATH: str | None = None
 _RG_CHECKED = False

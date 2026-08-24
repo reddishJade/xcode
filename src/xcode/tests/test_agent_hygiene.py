@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from xcode.agent._hygiene import (
-    repair_tool_pairing,
-    apply_request_hygiene,
-    _truncate_tool_args,
-    _truncate_tool_result,
     _is_base64_payload,
     _is_signal_line,
+    _truncate_tool_args,
+    _truncate_tool_result,
+    apply_request_hygiene,
+    repair_tool_pairing,
 )
 from xcode.agent.messages import (
     AssistantMessage,

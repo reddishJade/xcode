@@ -1,15 +1,15 @@
 """持久化 session 事件编码测试。"""
 
+from xcode.agent.types import DiffRenderIntent
 from xcode.ai.events import ToolCall
 from xcode.harness.agent_runtime.events import (
     AssistantStructuredEvent,
     AssistantTextBlock,
     FinalStructuredEvent,
-    ToolUseStructuredEvent,
     ToolResultBlock,
     ToolResultStructuredEvent,
+    ToolUseStructuredEvent,
 )
-from xcode.agent.types import DiffRenderIntent
 from xcode.harness.agent_runtime.result import AgentHarnessResult
 from xcode.harness.session.event_codec import (
     SESSION_EVENT_SCHEMA_VERSION,

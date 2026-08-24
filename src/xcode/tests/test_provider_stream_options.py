@@ -75,7 +75,7 @@ async def test_provider_context_window_defaults_to_none() -> None:
 
 
 def test_build_provider_bundle_carries_context_window() -> None:
-    from xcode.ai.providers.registry import build_provider_bundle, ProviderSettings
+    from xcode.ai.providers.registry import ProviderSettings, build_provider_bundle
     from xcode.harness.config import ModelProfileRuntimeConfig
 
     bundle = build_provider_bundle(
@@ -104,8 +104,9 @@ def _chunk(text: str) -> Any:
         delta = Delta()
 
     class Chunk:
-        usage = None
-        choices = [Choice()]
+        def __init__(self) -> None:
+            self.usage = None
+            self.choices = [Choice()]
 
     return Chunk()
 

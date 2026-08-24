@@ -7,7 +7,6 @@ import json
 from xcode.coding_agent.tools.todowrite import build_todowrite_tool
 from xcode.harness.session_todo import SessionTodoState
 
-
 tool = build_todowrite_tool()
 
 

@@ -8,8 +8,6 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.functional_validators import SkipValidation
 
-from xcode.ai.providers.base import StreamProvider
-from xcode.ai.types import StreamOptions, ThinkingLevel
 from xcode.agent.types import (
     AgentTool,
     AgentToolResult,
@@ -20,6 +18,8 @@ from xcode.agent.types import (
     ToolResultContentBlock,
     ToolResultDetails,
 )
+from xcode.ai.providers.base import StreamProvider
+from xcode.ai.types import StreamOptions, ThinkingLevel
 
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage
 from .request import DefaultRequestAssembler, RequestAssembler, RequestAssembly

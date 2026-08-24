@@ -13,13 +13,13 @@ from xcode.ai.providers.base import ModelProvider
 
 from .agent_loop import run_agent_loop
 from .config import AgentContext, AgentLoopConfig
-from .results import AgentLoopResult
 from .events import (
     AgentEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
 from .messages import AgentMessage, AssistantMessage, SystemMessage, UserMessage
+from .results import AgentLoopResult
 from .types import AgentTool, CancellationSignal, TextContent
 
 
@@ -214,7 +214,7 @@ class Agent:
                     reopen_steering=reopen_step_input,
                 )
                 self._last_result = result
-            except Exception as exc:
+            except (LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
                 error_slot.append(exc)
             finally:
                 queue.put_nowait(None)

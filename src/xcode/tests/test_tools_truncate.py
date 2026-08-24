@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from xcode.coding_agent.tools.truncate import (
-    truncate_tail,
+    _split_lines,
+    format_size,
     truncate_head,
     truncate_line,
-    format_size,
-    _split_lines,
+    truncate_tail,
 )
 
 

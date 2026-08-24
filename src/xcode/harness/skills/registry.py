@@ -6,6 +6,13 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
+from xcode.harness.skill_activation import activated_skill_names
+from xcode.harness.skills.discovery import (
+    load_reference_text,
+    scan_skill_references,
+    scan_skill_resources,
+    source_for_priority,
+)
 from xcode.harness.skills.models import SkillDef, SkillDiagnostic, SkillSummary
 from xcode.harness.skills.parsing import (
     find_body_start,
@@ -13,13 +20,6 @@ from xcode.harness.skills.parsing import (
     frontmatter_optional_string,
     parse_frontmatter,
 )
-from xcode.harness.skills.discovery import (
-    load_reference_text,
-    scan_skill_references,
-    scan_skill_resources,
-    source_for_priority,
-)
-from xcode.harness.skill_activation import activated_skill_names
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ class SkillRegistry:
                 for file_path in sorted(search_dir.rglob("SKILL.md")):
                     try:
                         text = file_path.read_text(encoding="utf-8", errors="replace")
-                    except Exception:
+                    except OSError:
                         msg = f"Failed to read {file_path}; skipping"
                         logger.warning(msg)
                         diagnostics.append(

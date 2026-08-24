@@ -1,3 +1,5 @@
+from xcode.agent.types import ToolOutput, ToolSpec
+
 from .agent_runtime import AgentHarnessEvent
 from .agent_runtime.cancellation import CancellationToken
 from .config import AgentConfig
@@ -10,12 +12,11 @@ from .execution_env import (
 )
 from .observability import HookManager
 from .security import PermissionPolicy
-from xcode.agent.types import ToolOutput, ToolSpec
 
 __all__ = [
     "AgentConfig",
-    "CancellationToken",
     "AgentHarnessEvent",
+    "CancellationToken",
     "ExecutionResult",
     "FileSystem",
     "HookManager",

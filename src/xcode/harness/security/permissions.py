@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
 import os
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,13 +31,11 @@ from .permission_model import (
     BoundaryContext,
     Constraint,
     ExternalDirectory,
-    GrantDecision as _GrantDecision,
     GrantRecord,
-    GrantScope as _GrantScope,
     GrantStore,
-    PolicyEvaluator,
-    PermissionResolver,
     PathExtractor,
+    PermissionResolver,
+    PolicyEvaluator,
     Rule,
     SensitivePathOverride,
     StaticPermission,
@@ -46,8 +44,14 @@ from .permission_model import (
     create_grant_record,
     evaluate_policy_constraints,
 )
-from .rule_matcher import first_match as rule_first_match, merge_rulesets as rule_merge
-
+from .permission_model import (
+    GrantDecision as _GrantDecision,
+)
+from .permission_model import (
+    GrantScope as _GrantScope,
+)
+from .rule_matcher import first_match as rule_first_match
+from .rule_matcher import merge_rulesets as rule_merge
 
 PermissionDecision = Literal["allow", "deny", "ask"]
 ShellUnresolvedPolicy = Literal["allow", "deny", "ask"]

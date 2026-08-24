@@ -295,7 +295,7 @@ class ExternalHookRuntimeConfig(BaseModel):
 
     @field_validator("timeout")
     @classmethod
-    def _validate_timeout(cls, v: float | int) -> float | int:
+    def _validate_timeout(cls, v: float) -> float | int:
         if v <= 0:
             raise ValueError("timeout must be positive")
         return v
@@ -399,7 +399,7 @@ def _load_raw_config(path: Path | None) -> dict[str, Any]:
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError(f"runtime config must be a JSON object: {path}")
+        raise TypeError(f"runtime config must be a JSON object: {path}")
     return data
 
 

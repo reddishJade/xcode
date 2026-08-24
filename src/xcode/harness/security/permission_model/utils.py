@@ -8,11 +8,11 @@ from uuid import uuid4
 
 from .protocols import GrantStore
 from .types import (
+    BLOCKED_PATH_PARTS,
+    CREDENTIAL_PATH_PARTS,
     Action,
     ApprovalCandidate,
-    BLOCKED_PATH_PARTS,
     BoundaryContext,
-    CREDENTIAL_PATH_PARTS,
     DirAccess,
     FingerprintLookupResult,
     GrantDecision,

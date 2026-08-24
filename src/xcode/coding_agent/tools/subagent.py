@@ -8,15 +8,14 @@ from typing import Any, cast
 from uuid import uuid4
 
 from xcode.agent.types import SubagentRenderIntent, ToolOutput, ToolSpec
-from xcode.harness.agent_runtime.composition import AgentComposition
 from xcode.harness.agent_runtime.cancellation import CancellationToken
+from xcode.harness.agent_runtime.composition import AgentComposition
 from xcode.harness.agent_runtime.subagents import (
     SubagentSessionManager,
     SubagentTaskResult,
 )
 from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.harness.session.subagent_runs import SubagentMode
-
 
 BUILD_SUBAGENT_PROMPTS: dict[str, str] = {
     "coding": (

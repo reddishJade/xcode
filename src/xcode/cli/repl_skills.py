@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 
-from xcode.harness.skill_activation import ExplicitSkillActivationResult
 from xcode.coding_agent.execution_modes import ExecutionMode
 from xcode.harness.session import SessionStore
+from xcode.harness.skill_activation import ExplicitSkillActivationResult
 
 _SKILL_INVOCATION_PATTERN = re.compile(
     r"^\$([A-Za-z0-9][A-Za-z0-9._-]*)(?:\s+(.*))?$",

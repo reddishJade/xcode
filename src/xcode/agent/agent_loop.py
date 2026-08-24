@@ -22,15 +22,25 @@ import json
 import time
 from collections.abc import Callable
 
-from xcode.ai.providers.base import StreamProvider
 from xcode.agent.types import CancellationSignal, TextContent, ToolCallContent
+from xcode.ai.providers.base import StreamProvider
+
+from ._compaction import estimate_tokens
+from ._execution import (
+    ExecutedToolBatch,
+    cancel_reason,
+    execute_tool_calls,
+    is_cancelled,
+    update_idle_tool_watchdog,
+    update_repeated_tool_watchdog,
+)
+from ._provider import call_provider
 from .config import (
     AgentContext,
     AgentLoopConfig,
     ShouldStopAfterTurnContext,
     _LoopRunState,
 )
-from .results import AgentLoopMetrics, AgentLoopResult, TerminationReason
 from .events import (
     AgentEndEvent,
     AgentEvent,
@@ -43,17 +53,7 @@ from .events import (
     TurnStartEvent,
 )
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
-from ._compaction import estimate_tokens
-from ._execution import (
-    ExecutedToolBatch,
-    execute_tool_calls,
-    is_cancelled,
-    cancel_reason,
-    update_repeated_tool_watchdog,
-    update_idle_tool_watchdog,
-)
-from ._provider import call_provider
-
+from .results import AgentLoopMetrics, AgentLoopResult, TerminationReason
 
 # ── 事件辅助构造 ──
 
@@ -180,27 +180,30 @@ async def _run_loop(
             state.first_turn = False
 
         # ── 压缩检查 ──
-        if config.should_compact and config.compact:
-            if config.should_compact(current_context.messages):
-                messages_before = list(current_context.messages)
-                before = len(messages_before)
-                current_context.messages = config.compact(current_context.messages)
-                after = len(current_context.messages)
-                archive: CompactionArchive | None = None
-                if config.archive_writer:
-                    archive_path = config.archive_writer(messages_before)
-                    if archive_path:
-                        archive = CompactionArchive(path=archive_path, status="summary")
-                emit(
-                    CompactionEvent(
-                        messages_removed=before - after,
-                        messages_after=after,
-                        summary_token_estimate=0,
-                        trigger="token_limit",
-                        archive=archive,
-                        replacement=list(current_context.messages),
-                    )
+        if (
+            config.should_compact
+            and config.compact
+            and config.should_compact(current_context.messages)
+        ):
+            messages_before = list(current_context.messages)
+            before = len(messages_before)
+            current_context.messages = config.compact(current_context.messages)
+            after = len(current_context.messages)
+            archive: CompactionArchive | None = None
+            if config.archive_writer:
+                archive_path = config.archive_writer(messages_before)
+                if archive_path:
+                    archive = CompactionArchive(path=archive_path, status="summary")
+            emit(
+                CompactionEvent(
+                    messages_removed=before - after,
+                    messages_after=after,
+                    summary_token_estimate=0,
+                    trigger="token_limit",
+                    archive=archive,
+                    replacement=list(current_context.messages),
                 )
+            )
 
         # ── 内层循环：模型调用 + 重试 + max_tokens ──
         ctx_len_before = len(current_context.messages)
@@ -228,8 +231,7 @@ async def _run_loop(
         message, stop_reason, new_provider = inner_result
         state.active_provider = new_provider
 
-        for msg in current_context.messages[ctx_len_before:-1]:
-            new_messages.append(msg)
+        new_messages.extend(current_context.messages[ctx_len_before:-1])
 
         new_messages.append(message)
         metrics.llm_calls += 1

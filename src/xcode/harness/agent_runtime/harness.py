@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
 from threading import Lock
 
+from xcode.ai.events import ToolCall
 from xcode.ai.providers.base import ModelProvider
 
 from ...agent.agent import Agent
@@ -19,27 +20,32 @@ from ...agent.messages import (
     SystemMessage,
     UserMessage,
 )
-from ...agent.types import ToolSpec
+from ...agent.types import ApprovalCallback, ToolSpec
+from ..observability import HookRecord, RuntimeCorrelation
+from ..security.approval import ApprovalPolicy, ApprovalsReviewer
+from ..security.permission_model import GrantStore
+from ..security.permissions import PermissionDecision, PermissionPolicy
+from ._mode_protocol import ToolGateMode
 from .agent_helpers import aiter_to_sync_iter, run_coro_sync
 from .cancellation import CancellationToken
+from .composition import AgentComposition
 from .config import (
     AgentRuntimeConfig,
     build_loop_config,
     record_last_prompt_tokens,
 )
-from .composition import AgentComposition
 from .events import (
+    AgentHarnessEvent,
     _StreamTranslationState,
     _translate_event,
-    AgentHarnessEvent,
 )
 from .fallback import _FallbackWithRetryPrimary
 from .message_codec import messages_from_run_state
 from .result import (
+    AgentHarnessResult,
+    RunState,
     _build_structured_result,
     _final_event,
-    RunState,
-    AgentHarnessResult,
 )
 from .run_control import (
     ActiveRunHandle,
@@ -48,13 +54,6 @@ from .run_control import (
     SubmitOutcome,
 )
 from .tool_gate import ToolGate
-from ._mode_protocol import ToolGateMode
-from xcode.ai.events import ToolCall
-from ..security.permissions import PermissionDecision, PermissionPolicy
-from ..security.approval import ApprovalPolicy, ApprovalsReviewer
-from ..observability import HookRecord, RuntimeCorrelation
-from ..security.permission_model import GrantStore
-from ...agent.types import ApprovalCallback
 
 _PROMPT_VERSION_CACHE: str | None = None
 
@@ -195,7 +194,6 @@ class AgentHarness:
 
     def _post_run(self, final: AgentHarnessResult) -> None:
         """turn 完成后的子类钩子。例如记忆反馈。"""
-        pass
 
     # ── 公共 API ──
 
@@ -381,7 +379,6 @@ class AgentHarness:
 
     def _post_load_history(self, messages: list[AgentMessage]) -> None:
         """load_history 的子类钩子，例如恢复技能激活。"""
-        pass
 
     def set_resumed_notice(self, notice: str) -> None:
         self._resumed_notice = notice

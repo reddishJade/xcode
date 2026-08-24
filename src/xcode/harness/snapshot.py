@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, UTC
 import json
 import logging
-from pathlib import Path
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 import shutil
 import subprocess
 import threading
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -147,9 +148,7 @@ class SnapshotService:
         name = Path(rel_path).name
         if name == ".env.example":
             return False
-        if name == ".env" or name.startswith(".env."):
-            return True
-        return False
+        return bool(name == ".env" or name.startswith(".env."))
 
     def _enumerate_files(self) -> list[str]:
         output = self._git(
@@ -296,10 +295,11 @@ class SnapshotStore:
                 ["git", "rev-parse", "--is-inside-work-tree"],
                 cwd=project_root,
                 capture_output=True,
+                check=False,
                 timeout=2,
             )
             return result.returncode == 0
-        except Exception:
+        except (OSError, subprocess.SubprocessError, ValueError):
             return False
 
     @property

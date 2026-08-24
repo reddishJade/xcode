@@ -6,13 +6,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ...agent.results import AgentLoopResult, TerminationReason
-from ...agent.messages import AssistantMessage
-from xcode.ai.events import ProviderFailure, ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
+from xcode.ai.events import ProviderFailure, ToolCall
+
+from ...agent.messages import AssistantMessage
+from ...agent.results import AgentLoopResult, TerminationReason
+from ..observability import EventCorrelation
 from .agent_helpers import text_from_blocks, to_dict
 from .events import FinalStructuredEvent
-from ..observability import EventCorrelation
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ class RunState:
         return {"messages": self.messages}
 
     @classmethod
-    def from_dict(cls, payload: object) -> "RunState":
+    def from_dict(cls, payload: object) -> RunState:
         """从 JSON 字典恢复运行状态。"""
         if not isinstance(payload, Mapping):
             return cls(messages=[])

@@ -3,28 +3,27 @@
 from __future__ import annotations
 
 from xcode.agent.context import (
+    MANIFEST_MAX_BYTES,
+    ContextAssemblyInput,
     ContextBlock,
     ContextBlockSource,
-    ContextPriority,
-    ContextExpiry,
     ContextBlockTarget,
     ContextCollectionInput,
-    ContextAssemblyInput,
-    DefaultContextAssembler,
-    trim_to_budget,
-    _is_expired,
-    _block_to_text,
-    _apply_size_budget,
-    _utf8_prefix,
-    _condense_manifest,
-    _extract_key_sections,
-    _drop_fenced_blocks,
-    _prepare_manifest,
-    MANIFEST_MAX_BYTES,
     ContextCollectorRegistry,
+    ContextExpiry,
+    ContextPriority,
+    DefaultContextAssembler,
+    _apply_size_budget,
+    _block_to_text,
+    _condense_manifest,
+    _drop_fenced_blocks,
+    _extract_key_sections,
+    _is_expired,
+    _prepare_manifest,
+    _utf8_prefix,
+    trim_to_budget,
 )
 from xcode.agent.messages import SystemMessage, UserMessage
-
 
 # ── ContextBlock ──
 
@@ -155,7 +154,7 @@ class TestTrimToBudget:
                 token_count=20,
             ),
         ]
-        used, dropped = trim_to_budget(blocks, budget=30, base_tokens=0)
+        used, _dropped = trim_to_budget(blocks, budget=30, base_tokens=0)
         assert len(used) == 1
         assert used[0].priority == ContextPriority.CRITICAL
 

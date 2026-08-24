@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from xcode.ai.events import ProviderFailure, StopReason
 from xcode.agent.types import (
     ContentBlock,
     FileContent,
@@ -14,6 +13,7 @@ from xcode.agent.types import (
     ToolRenderIntent,
     ToolResultContent,
 )
+from xcode.ai.events import ProviderFailure, StopReason
 
 type UserContent = str | list[TextContent | ImageContent | FileContent]
 type ToolResultMessageContent = (

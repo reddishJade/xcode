@@ -107,7 +107,8 @@ def test_parse_verdict_rejects_invalid_contract(
     response: str,
     error: str,
 ) -> None:
-    with pytest.raises(ValueError, match=error):
+    expected_exception = TypeError if "boolean ok" in error else ValueError
+    with pytest.raises(expected_exception, match=error):
         _parse_verdict(response)
 
 

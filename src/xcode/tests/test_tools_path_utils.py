@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 
 from xcode.coding_agent.tools.path_utils import (
-    resolve_project_path,
-    is_path_blocked,
     display_path,
     is_binary_file,
-    resolve_absolute_path,
+    is_path_blocked,
     matches_blocked_pattern,
+    resolve_absolute_path,
+    resolve_project_path,
     truncate_output,
 )
 

@@ -45,9 +45,7 @@ def is_cygwin_env() -> bool:
     if os.environ.get("MSYSTEM"):
         return True
     # Cygwin: cygpath 可用
-    if _find_cygpath():
-        return True
-    return False
+    return bool(_find_cygpath())
 
 
 def to_windows(path: str) -> str:
@@ -70,6 +68,7 @@ def to_windows(path: str) -> str:
         result = subprocess.run(
             [cygpath, "-w", path],
             capture_output=True,
+            check=False,
             text=True,
             timeout=5,
         )
@@ -106,6 +105,7 @@ def to_unix(path: str) -> str:
         result = subprocess.run(
             [cygpath, "-u", normalized],
             capture_output=True,
+            check=False,
             text=True,
             timeout=5,
         )

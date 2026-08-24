@@ -8,21 +8,23 @@ from typing import Any, cast
 
 import pytest
 
-from xcode.ai.events import FinalMessage, Message, ProviderEvent, TextDelta
-from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.agent.request import DefaultRequestAssembler
 from xcode.agent.types import ToolOutput, ToolSpec
+from xcode.ai.events import FinalMessage, Message, ProviderEvent, TextDelta
+from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.coding_agent.tools.subagent import (
     BUILD_SUBAGENT_PROMPTS,
     _bounded_prompt,
     _max_concurrent,
     _parse_tasks,
 )
-from xcode.harness.agent_runtime.composition import AgentComposition
 from xcode.harness.agent_runtime.cancellation import CancellationToken
+from xcode.harness.agent_runtime.composition import AgentComposition
 from xcode.harness.agent_runtime.config import GateConfig
-from xcode.harness.agent_runtime.subagents import SubagentSessionManager
-from xcode.harness.agent_runtime.subagents import _ChildCancellationToken
+from xcode.harness.agent_runtime.subagents import (
+    SubagentSessionManager,
+    _ChildCancellationToken,
+)
 from xcode.harness.agent_runtime.tool_gate import ToolGate
 from xcode.harness.config import AgentConfig
 from xcode.harness.session import SessionStore

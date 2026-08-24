@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-from xcode.harness.security.permission_model.utils import (
-    command_grant_pattern,
-    _grant_target_pattern,
-    _looks_absolute,
-    _is_sensitive_path,
-    _is_blocked_workspace_path,
-    _is_git_path,
-    _access_satisfies,
-    create_grant_record,
-)
 from xcode.harness.security.permission_model.types import (
     Action,
-    Target,
     GrantRecord,
+    Target,
+)
+from xcode.harness.security.permission_model.utils import (
+    _access_satisfies,
+    _grant_target_pattern,
+    _is_blocked_workspace_path,
+    _is_git_path,
+    _is_sensitive_path,
+    _looks_absolute,
+    command_grant_pattern,
+    create_grant_record,
 )
 
 

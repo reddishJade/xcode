@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import sys
 import threading
@@ -87,6 +88,8 @@ from .widgets import (
     TuiPromptSession,
     tui_input_prompt,
 )
+
+logger = logging.getLogger(__name__)
 
 _SHORTCUT_HELP = """Shortcuts
   ?              show this help
@@ -865,8 +868,10 @@ class _XcodeTui:
             self._open_command_choices(
                 [
                     (
-                        f"{'  ' * n.depth}{'└─ ' if n.depth else ''}{n.title}"
-                        f"{' ← current' if n.is_current else ''}",
+                        (
+                            f"{'  ' * n.depth}{'└─ ' if n.depth else ''}{n.title}"
+                            f"{' ← current' if n.is_current else ''}"
+                        ),
                         n,
                     )
                     for n in nodes
@@ -1100,7 +1105,7 @@ class _XcodeTui:
                 self._store.append("event", {"type": "shell_shortcut", "data": text})
                 self._store.append("event", {"type": "tool_result", "data": output})
                 self._state.log.append(_LogEntry("shell", output, markdown=False))
-            except Exception as exc:
+            except (LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
                 detail = str(exc) or repr(exc)
                 self._state.log.append(
                     _LogEntry("error", f"[error] {type(exc).__name__}: {detail}")
@@ -1385,7 +1390,7 @@ class _XcodeTui:
                 if isinstance(event, (ToolUseStructuredEvent,)):
                     tool_names.append(event.data.name)
                 self._dispatch_agent_event(event)
-        except Exception as exc:
+        except (LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
             self._wait_for_agent_events()
             self._save_partial_answer(turn_log_start)
             detail = str(exc) or repr(exc)
@@ -1695,7 +1700,7 @@ def _enter_snapshot_ctx(
         service = store.service(session_id)
         pre_result = service.track()
         return (turn_id, service, pre_result)
-    except Exception:
+    except (LookupError, OSError, RuntimeError, TypeError, ValueError):
         return None
 
 
@@ -1729,5 +1734,5 @@ def _exit_snapshot_ctx(
             skipped_files=skipped_files,
             tool_names=tool_names,
         )
-    except Exception:
-        pass
+    except (LookupError, OSError, RuntimeError, TypeError, ValueError):
+        logger.debug("failed to record snapshot turn", exc_info=True)

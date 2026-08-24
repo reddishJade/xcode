@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-
-from xcode.ai.types import ToolDefinition
 from xcode.ai.providers._codec import (
+    canonical_tool_schema,
+    canonical_tools,
     make_schema_strict,
     normalize_cross_provider_messages,
+    provider_function_name,
     to_chat_messages,
     to_chat_tool,
     to_chat_tools,
-    canonical_tool_schema,
-    canonical_tools,
     tool_catalog_fingerprint,
-    provider_function_name,
 )
+from xcode.ai.types import ToolDefinition
 
 
 class TestMakeSchemaStrict:

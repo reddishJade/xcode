@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import logging
 import queue
+import threading
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-import logging
-import threading
 from typing import Literal, Protocol
 
 from blinker import Signal

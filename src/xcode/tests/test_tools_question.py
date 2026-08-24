@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import pytest
+
 from xcode.coding_agent.tools.question import (
-    _questions,
     _choice_label,
     _format_answers,
+    _questions,
 )
 
 

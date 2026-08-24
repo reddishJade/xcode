@@ -9,8 +9,7 @@ from dataclasses import asdict
 from typing import Any
 
 from xcode.agent.messages import AgentMessage, ToolResultMessage
-from xcode.agent.types import TextContent
-from xcode.agent.types import CITATION_SOURCES_METADATA_KEY, CitationSource
+from xcode.agent.types import CITATION_SOURCES_METADATA_KEY, CitationSource, TextContent
 
 
 def decorate_citable_messages(messages: list[AgentMessage]) -> list[AgentMessage]:

@@ -12,7 +12,6 @@ from .approval import (
     ReviewStatus,
 )
 from .approval_reviewer import AutoApprovalReviewer, AutoReviewVerdict
-
 from .permission_model import (
     Action,
     ActionExtractor,
@@ -24,32 +23,24 @@ from .permission_model import (
     FileGrantStore,
     FingerprintLookupResult,
     GrantRecord,
+    GrantStore,
     InMemoryGrantStore,
     PathBoundaryPolicyEvaluator,
-    PolicyEvaluator,
-    TargetFingerprint,
     PermissionResolver,
+    PolicyEvaluator,
+    Rule,
+    SensitivePathOverride,
     SessionGrantStoreManager,
     StaticPermission,
     StaticPolicyEvaluator,
     StructuredBoundaryPolicyEvaluator,
     Target,
+    TargetFingerprint,
     UnresolvedEffect,
     Verdict,
     compute_approval_candidate,
     create_grant_record,
     evaluate_policy_constraints,
-    GrantStore,
-    Rule,
-    SensitivePathOverride,
-)
-from .shell_analyzer import (
-    CmdAnalyzer,
-    PosixAnalyzer,
-    PowerShellAnalyzer,
-    ShellAnalysis,
-    ShellAnalysisPolicyEvaluator,
-    analyze_shell_command,
 )
 from .permissions import (
     PermissionCheckResult,
@@ -59,6 +50,14 @@ from .permissions import (
     PermissionEngineResult,
     PermissionPolicy,
 )
+from .shell_analyzer import (
+    CmdAnalyzer,
+    PosixAnalyzer,
+    PowerShellAnalyzer,
+    ShellAnalysis,
+    ShellAnalysisPolicyEvaluator,
+    analyze_shell_command,
+)
 
 __all__ = [
     "Action",
@@ -67,9 +66,6 @@ __all__ = [
     "ApprovalPolicy",
     "ApprovalResult",
     "ApprovalsReviewer",
-    "ReviewAuthorization",
-    "ReviewRisk",
-    "ReviewStatus",
     "AutoApprovalReviewer",
     "AutoReviewVerdict",
     "BoundaryContext",
@@ -96,6 +92,9 @@ __all__ = [
     "PolicyEvaluator",
     "PosixAnalyzer",
     "PowerShellAnalyzer",
+    "ReviewAuthorization",
+    "ReviewRisk",
+    "ReviewStatus",
     "Rule",
     "SensitivePathOverride",
     "SessionGrantStoreManager",

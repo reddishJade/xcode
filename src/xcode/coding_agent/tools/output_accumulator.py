@@ -9,6 +9,7 @@ OpenCode 风格的滚动缓冲区设计：
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ class SnapshotResult:
 class _ChunkEntry:
     """滚动缓冲区中的单个条目。"""
 
-    __slots__ = ("text", "size")
+    __slots__ = ("size", "text")
 
     def __init__(self, text: str, size: int) -> None:
         self.text = text
@@ -43,15 +44,12 @@ class _ChunkEntry:
 
 class PersistedOutputFile:
     def __init__(self, temp_prefix: str) -> None:
+        fd, path = tempfile.mkstemp(suffix=".log", prefix=temp_prefix)
         self._file = cast(
             BinaryIO,
-            tempfile.NamedTemporaryFile(
-                delete=False,
-                suffix=".log",
-                prefix=temp_prefix,
-            ),
+            os.fdopen(fd, "w+b"),
         )
-        self.path = str(self._file.name)
+        self.path = path
 
     def write_existing(self, chunks: list[bytes]) -> None:
         for chunk in chunks:

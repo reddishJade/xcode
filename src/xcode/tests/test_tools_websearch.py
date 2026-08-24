@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import pytest
+
 from xcode.coding_agent.tools.websearch import (
-    _timeout,
     _limit,
     _livecrawl,
-    _search_type,
     _parse_mcp_response,
+    _search_type,
+    _timeout,
 )
 
 

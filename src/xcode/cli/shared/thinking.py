@@ -6,7 +6,6 @@ import shutil
 import textwrap
 import time
 
-
 _MIN_REASONING_SUMMARY_SECONDS = 0.5
 _MIN_REASONING_SUMMARY_CHARS = 24
 

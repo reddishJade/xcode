@@ -111,7 +111,7 @@ class StaticPermission(BaseModel):
     tool: str
     decision: PermissionDecisionV2
     target: str | None = None
-    target_type: Literal["path", "command", "mcp", "subagent", "skill", None] = None
+    target_type: Literal["path", "command", "mcp", "subagent", "skill"] | None = None
     input_contains: str | None = None
     input_prefix: str | None = None
     input_regex: str | None = None
@@ -131,7 +131,7 @@ class Action(BaseModel):
     capability: str
     operation: str
     targets: tuple[Target, ...]
-    input: Mapping[str, object]  # noqa: F821
+    input: Mapping[str, object]
     unresolved_effects: tuple[UnresolvedEffect, ...] = ()
 
 
@@ -149,7 +149,7 @@ class Constraint(BaseModel):
     target_pattern: str | None = None
     operation: str | None = None
     access: PermissionAccess | None = None
-    metadata: Mapping[str, object] = Field(default_factory=dict)  # noqa: F821
+    metadata: Mapping[str, object] = Field(default_factory=dict)
 
 
 class BoundaryContext(BaseModel):
@@ -175,7 +175,7 @@ class Verdict(BaseModel):
     constraints: tuple[Constraint, ...]
     approval: ApprovalResult | None = None
     grant_id: str | None = None
-    metadata: Mapping[str, object] = Field(default_factory=dict)  # noqa: F821
+    metadata: Mapping[str, object] = Field(default_factory=dict)
 
 
 class GrantRecord(BaseModel):
@@ -189,7 +189,7 @@ class GrantRecord(BaseModel):
     decision: GrantDecision
     scope: GrantScope
     grant_id: str
-    metadata: Mapping[str, object] = Field(default_factory=dict)  # noqa: F821
+    metadata: Mapping[str, object] = Field(default_factory=dict)
 
 
 class TargetFingerprint(BaseModel):

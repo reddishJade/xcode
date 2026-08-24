@@ -657,7 +657,14 @@ def handle_model_command(command: str, app: object) -> None:
             reasoning_effort=reasoning_effort,
         )
         print(f"Switched to model: {new_model}")
-    except Exception as exc:
+    except (
+        AttributeError,
+        KeyError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ) as exc:
         print(f"Failed to switch model: {exc}")
 
 
@@ -685,7 +692,14 @@ def handle_effort_command(command: str, app: object) -> None:
         try:
             app.set_model(model=current_model, thinking=False, reasoning_effort=None)
             print("Reasoning effort disabled.")
-        except Exception as exc:
+        except (
+            AttributeError,
+            KeyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
             print(f"Failed to set reasoning effort: {exc}")
         return
 
@@ -709,7 +723,14 @@ def handle_effort_command(command: str, app: object) -> None:
     try:
         app.set_model(model=current_model, thinking=True, reasoning_effort=level)
         print(f"Reasoning effort set to: {level}")
-    except Exception as exc:
+    except (
+        AttributeError,
+        KeyError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ) as exc:
         print(f"Failed to set reasoning effort: {exc}")
 
 
@@ -746,5 +767,12 @@ def handle_thinking_command(command: str, app: object) -> None:
                 print(f"Thinking enabled (effort: {effort}).")
             else:
                 print("Thinking enabled.")
-    except Exception as exc:
+    except (
+        AttributeError,
+        KeyError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ) as exc:
         print(f"Failed to set thinking: {exc}")

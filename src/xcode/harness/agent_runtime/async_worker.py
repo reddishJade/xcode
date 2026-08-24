@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-from collections.abc import Coroutine
 import queue
 import sys
 import threading
+from collections.abc import Coroutine
 from typing import Any, TypeVar
 
 T = TypeVar("T")

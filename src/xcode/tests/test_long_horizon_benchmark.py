@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 import argparse
 import json
-from pathlib import Path
 import subprocess
+from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Self, cast
 
 import pytest
 
-from benchmarks.runners import _cli as benchmark_cli
 from benchmarks.evaluators.state_retention import (
     capture_initial_state,
     evaluate_state_retention,
@@ -20,6 +19,7 @@ from benchmarks.evaluators.state_retention import (
 )
 from benchmarks.models import CommandSpec, StateCheckSpec, load_task
 from benchmarks.reports.generate_report import render_markdown, summarize_records
+from benchmarks.runners import _cli as benchmark_cli
 from benchmarks.runners._cli import _retryable_attempt
 from benchmarks.runners._long_horizon import (
     _benchmark_runtime_config,
@@ -28,9 +28,9 @@ from benchmarks.runners._long_horizon import (
     _repeated_read_calls,
     _run_turn,
 )
-from xcode.harness.config import XcodeRuntimeConfig
 from xcode.harness.agent_runtime.events import FinalStructuredEvent
 from xcode.harness.agent_runtime.result import AgentHarnessResult
+from xcode.harness.config import XcodeRuntimeConfig
 
 
 def test_example_task_has_compaction_restart_and_ten_turns() -> None:
@@ -254,7 +254,7 @@ def test_cli_retries_the_whole_pair_and_preserves_attempts(
         _runtime_config: object,
         options: object,
     ) -> dict[str, object]:
-        attempt = int(getattr(options, "attempt"))
+        attempt = int(options.attempt)
         incomplete = variant == "xcode" and attempt == 1
         return {
             **_record(variant, 100, True, not incomplete, attempt=attempt),
@@ -471,7 +471,7 @@ class _Reporter:
     def __init__(self) -> None:
         self.added_runs = 0
 
-    def __enter__(self) -> _Reporter:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: object) -> None:

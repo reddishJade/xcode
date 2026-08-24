@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from xcode.coding_agent.tools.tools_manager import (
-    _resolve_tool_path,
     ExternalToolDefinition,
+    _resolve_tool_path,
 )
 
 

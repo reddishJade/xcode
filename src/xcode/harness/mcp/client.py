@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import timedelta
 import logging
 import os
-from pathlib import Path
 import re
 import tempfile
 import threading
 import time
-from typing import Any, IO, Literal, TextIO, TypeVar, cast
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import timedelta
+from pathlib import Path
+from typing import IO, Any, Literal, TextIO, TypeVar, cast
 
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.session import MessageHandlerFnT
@@ -68,10 +68,10 @@ class _ErrorLog:
     """使用真实文件描述符捕获 Windows 子进程 stderr。"""
 
     def __init__(self) -> None:
-        self.stream: IO[str] = tempfile.TemporaryFile(
-            mode="w+",
-            encoding="utf-8",
-            errors="replace",
+        fd, path = tempfile.mkstemp(suffix=".log", prefix="xcode-mcp-")
+        self._path = path
+        self.stream = cast(
+            IO[str], os.fdopen(fd, "w+", encoding="utf-8", errors="replace")
         )
 
     def snapshot(self) -> str:
@@ -86,6 +86,10 @@ class _ErrorLog:
     def close(self) -> None:
         """关闭临时文件。"""
         self.stream.close()
+        try:
+            os.unlink(self._path)
+        except FileNotFoundError:
+            return
 
 
 @dataclass(frozen=True)
@@ -257,7 +261,17 @@ class McpClient:
                         command.timeout,
                         command.progress_callback,
                     )
-            except BaseException as exc:
+            except (
+                asyncio.CancelledError,
+                EOFError,
+                KeyboardInterrupt,
+                LookupError,
+                OSError,
+                RuntimeError,
+                SystemExit,
+                TypeError,
+                ValueError,
+            ) as exc:
                 if not command.future.cancelled():
                     command.future.set_exception(self._normalize_error(exc))
             else:

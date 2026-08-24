@@ -352,9 +352,9 @@ def _dangerous_simple(primary: str, args: list[str]) -> bool:
     lowered = {arg.lower() for arg in args}
     if primary in {"format", "shutdown"}:
         return True
-    if primary == "remove-item" and "-recurse" in lowered and "-force" in lowered:
-        return True
-    return False
+    return bool(
+        primary == "remove-item" and "-recurse" in lowered and "-force" in lowered
+    )
 
 
 def _is_root_recursive_delete(args: list[str]) -> bool:

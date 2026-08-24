@@ -12,8 +12,7 @@ from ...agent.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from ...agent.types import ContentBlock
-from ...agent.types import TextContent, ToolCallContent
+from ...agent.types import ContentBlock, TextContent, ToolCallContent
 from .result import RunState
 
 

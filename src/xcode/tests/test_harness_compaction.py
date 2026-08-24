@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from xcode.harness.agent_runtime.compaction import (
-    context_collapse_clean,
-    _compute_recent_count_from_tokens,
-    _find_turn_boundary,
-    _inactive_branch_id,
     _branch_summary_should_run,
-    _protect_identifiers,
+    _compute_recent_count_from_tokens,
     _content_preview,
     _extract_file_ops_from_messages,
+    _find_turn_boundary,
+    _inactive_branch_id,
+    _protect_identifiers,
     _render_file_tracking,
+    context_collapse_clean,
 )
 
 
@@ -148,7 +148,7 @@ class TestExtractFileOpsFromMessages:
                 ],
             }
         ]
-        reads, modifies = _extract_file_ops_from_messages(msgs)
+        _reads, modifies = _extract_file_ops_from_messages(msgs)
         assert "src/new.py" in modifies
 
     def test_non_assistant_skipped(self) -> None:

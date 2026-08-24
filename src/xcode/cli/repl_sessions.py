@@ -7,12 +7,15 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.text import Text
 
-from .commands import PromptLike
-from .repl_rendering import CLI_COLOR_ASSISTANT, CLI_COLOR_INFO, CLI_COLOR_USER
 from xcode.harness.session import (
     SessionInfoView as SessionMetadataView,
+)
+from xcode.harness.session import (
     SessionStore,
 )
+
+from .commands import PromptLike
+from .repl_rendering import CLI_COLOR_ASSISTANT, CLI_COLOR_INFO, CLI_COLOR_USER
 
 
 def resume_interactively(

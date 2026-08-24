@@ -5,19 +5,18 @@
 
 from __future__ import annotations
 
-from queue import Empty, Queue
 import threading
+from queue import Empty, Queue
 
+import questionary
 from rich.console import Console
 from rich.panel import Panel
 
-import questionary
-
-from .repl_tools import brief_input
+from xcode.agent.types import ApprovalRequest, ApprovalScope, ToolInput, ToolSpec
 from xcode.harness.security import HITLDecision, HITLResult, HITLScope
 from xcode.harness.security.permission_model.utils import command_grant_pattern
-from xcode.agent.types import ApprovalRequest, ApprovalScope, ToolInput, ToolSpec
 
+from .repl_tools import brief_input
 
 _DEFAULT_HITL_TIMEOUT: float = 300.0
 _SCOPE_CHOICE = {
@@ -316,10 +315,7 @@ def _preview_search(tool_name: str, action_input: dict, lines: list[str]) -> Non
         path = action_input.get("path") or action_input.get("include", "workspace")
         lines.append(f"[bold]Pattern:[/bold] {pattern[:200]}")
         lines.append(f"[bold]Search in:[/bold] {path}")
-    elif tool_name == "glob_files":
-        pattern = action_input.get("pattern") or action_input.get("path", "")
-        lines.append(f"[bold]Pattern:[/bold] {pattern[:200]}")
-    elif tool_name == "find_files":
+    elif tool_name == "glob_files" or tool_name == "find_files":
         pattern = action_input.get("pattern") or action_input.get("path", "")
         lines.append(f"[bold]Pattern:[/bold] {pattern[:200]}")
 
@@ -339,7 +335,15 @@ def _ask_hitl_choice_with_timeout(
     def run_prompt() -> None:
         try:
             results.put(_show_select_prompt(tool, action_input, choices))
-        except BaseException as exc:
+        except (
+            EOFError,
+            KeyboardInterrupt,
+            OSError,
+            RuntimeError,
+            SystemExit,
+            TypeError,
+            ValueError,
+        ) as exc:
             results.put(exc)
 
     thread = threading.Thread(target=run_prompt, name="xcode-hitl-prompt", daemon=True)
@@ -381,7 +385,15 @@ def _ask_suggestion_with_timeout(timeout: float) -> str:
                 instruction="(press Enter to skip)",
             ).ask()
             results.put(result or "")
-        except BaseException as exc:
+        except (
+            EOFError,
+            KeyboardInterrupt,
+            OSError,
+            RuntimeError,
+            SystemExit,
+            TypeError,
+            ValueError,
+        ) as exc:
             results.put(exc)
 
     thread = threading.Thread(

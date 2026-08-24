@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+from xcode.agent.messages import ToolResultMessage, UserMessage
+from xcode.agent.types import CITATION_SOURCES_METADATA_KEY, CitationSource
 from xcode.harness.agent_runtime.prompting.citations import (
-    decorate_citable_messages,
     _get_citation_sources,
     _line_numbered_text,
     citation_sources_as_dicts,
+    decorate_citable_messages,
 )
-from xcode.agent.messages import ToolResultMessage, UserMessage
-from xcode.agent.types import CitationSource, CITATION_SOURCES_METADATA_KEY
 
 
 class TestDecorateCitableMessages:

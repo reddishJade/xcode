@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
-import json
 from pathlib import Path
-import re
 
 from xcode.agent.types import ToolInput, ToolSpec
 

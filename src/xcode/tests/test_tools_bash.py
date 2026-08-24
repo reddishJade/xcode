@@ -7,12 +7,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+
 from xcode.agent.types import TerminalRenderIntent
 from xcode.coding_agent.tools.bash import (
-    build_bash_tool,
     _parse_bash_request,
     _parse_timeout,
     _parse_workdir,
+    build_bash_tool,
 )
 from xcode.coding_agent.tools.shell_adapter import ShellSpec
 from xcode.harness.execution_env import ExecutionResult

@@ -25,7 +25,6 @@ from xcode.agent.types import (
     ToolResultContent,
 )
 
-
 COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
 BRANCH_SUMMARY_PREFIX = "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n"
 SUMMARY_SUFFIX = "\n</summary>"

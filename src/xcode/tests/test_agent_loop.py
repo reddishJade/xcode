@@ -6,12 +6,12 @@ import pytest
 from pydantic import ValidationError
 
 from xcode.agent.agent_loop import (
-    _should_continue_max_tokens,
-    _update_continuation_count,
-    _has_empty_text_response,
     _assistant_error_detail,
     _cancelled_message,
     _continuation_limit_message,
+    _has_empty_text_response,
+    _should_continue_max_tokens,
+    _update_continuation_count,
 )
 from xcode.agent.config import AgentLoopConfig
 from xcode.agent.messages import AssistantMessage

@@ -6,8 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from xcode.harness.agent_runtime.result import RunState
 from xcode.harness.agent_runtime.goal import GoalState
+from xcode.harness.agent_runtime.result import RunState
 
 type ExecutionModeName = Literal["plan", "build", "act"]
 

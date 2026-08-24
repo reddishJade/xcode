@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _FORBIDDEN_TARGETS = {
     "ai": frozenset({"agent", "harness", "coding_agent", "cli"}),

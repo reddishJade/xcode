@@ -7,6 +7,7 @@ ChatGLM、MiMo）共享此基类。子类只需覆写 _stream_sync 以定制 API
 from __future__ import annotations
 
 import copy
+import logging
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -23,6 +24,8 @@ from xcode.ai.usage import UsageAccumulator, UsageTotals
 from ._codec import normalize_cross_provider_messages, to_chat_messages, to_chat_tools
 from ._runtime import ProviderRuntime
 from ._stream import chat_stream_to_events
+
+logger = logging.getLogger(__name__)
 
 
 def _lookup_thinking_budget(budgets: ThinkingBudgets, level_name: str) -> int | None:
@@ -229,8 +232,8 @@ class OpenAICompatProvider:
             return
         try:
             close()
-        except Exception:
-            pass
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.debug("failed to close the provider stream", exc_info=True)
 
     # ── metrics 拦截 ──
 

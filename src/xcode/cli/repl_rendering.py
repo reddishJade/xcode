@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
 import sys
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any, cast
-
 
 from rich.console import Console
 from rich.live import Live
@@ -13,6 +12,8 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+from xcode.agent.types import ToolSpec
 
 from .commands import CommandEntry, PromptLike, PromptText, ReplState
 from .completion import CommandArgsSuggester, ReplCompleter
@@ -23,7 +24,6 @@ from .shared.thinking import (  # noqa: F401 — re-exported for back-compat
     should_print_reasoning_summary,
     single_line_preview,
 )
-from xcode.agent.types import ToolSpec
 
 CITE_START = "\ue200"
 CITE_SEP = "\ue202"

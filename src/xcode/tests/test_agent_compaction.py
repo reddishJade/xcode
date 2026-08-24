@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from xcode.agent._compaction import (
-    estimate_tokens,
     estimate_message_tokens,
-    should_compact_token_aware,
+    estimate_tokens,
     extract_prompt_tokens_from_usage,
+    should_compact_token_aware,
 )
 from xcode.agent.messages import (
     AssistantMessage,

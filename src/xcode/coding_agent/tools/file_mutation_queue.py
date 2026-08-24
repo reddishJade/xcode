@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -17,7 +18,7 @@ def _resolve_key(file_path: Path) -> Path:
         return file_path.absolute()
 
 
-def with_file_mutation(file_path: Path, fn: Callable[[], T]) -> T:
+def with_file_mutation[T](file_path: Path, fn: Callable[[], T]) -> T:
     key = _resolve_key(file_path)
     with _registry_lock:
         mutex = _file_locks.get(key)

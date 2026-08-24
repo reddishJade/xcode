@@ -142,29 +142,28 @@ def matches(
             flg = extracted_flg
 
     # 3a. command 匹配
-    if rule.command is not None:
-        if cmd is None or not _wildcard_match(cmd, rule.command):
-            return False
+    if rule.command is not None and (
+        cmd is None or not _wildcard_match(cmd, rule.command)
+    ):
+        return False
 
     # 3b. subcommand 匹配（精确）
-    if rule.subcommand is not None:
-        if sub is None or rule.subcommand != sub:
-            return False
+    if rule.subcommand is not None and (sub is None or rule.subcommand != sub):
+        return False
 
     # 3c. subcommand_in 匹配（集合）
-    if rule.subcommand_in is not None:
-        if sub is None or sub not in rule.subcommand_in:
-            return False
+    if rule.subcommand_in is not None and (
+        sub is None or sub not in rule.subcommand_in
+    ):
+        return False
 
     # 3d. flags_any 匹配（含任一即可）
-    if rule.flags_any is not None:
-        if not (flg & rule.flags_any):
-            return False
+    if rule.flags_any is not None and not (flg & rule.flags_any):
+        return False
 
     # 3e. flags_all 匹配（含全部才可）
-    if rule.flags_all is not None:
-        if not (rule.flags_all <= flg):
-            return False
+    if rule.flags_all is not None and not (rule.flags_all <= flg):
+        return False
 
     # 3f. resource_pattern 额外约束
     if rule.resource_pattern is not None:

@@ -6,8 +6,13 @@ from typing import Any
 from rich.console import Console
 from rich.text import Text
 
-from xcode.agent.types import ToolInput
-from .tool_rendering import render_intent_summary
+from xcode.agent.config import AgentContext, BeforeToolCallContext
+from xcode.agent.messages import AssistantMessage
+from xcode.agent.types import ToolCallContent, ToolInput, ToolSpec
+from xcode.coding_agent.execution_modes import ExecutionModeState
+from xcode.harness.agent_runtime.events import ToolResultBlock
+from xcode.harness.agent_runtime.result import AgentHarnessResult
+from xcode.harness.agent_runtime.tool_gate import ToolGate
 
 from .file_refs import FileReference
 from .repl_rendering import (
@@ -22,15 +27,7 @@ from .repl_rendering import (
     VERBOSE_TOOL_RESULT_PREVIEW_LIMIT,
 )
 from .shared.thinking import single_line_preview
-
-from xcode.harness.agent_runtime.events import ToolResultBlock
-from xcode.harness.agent_runtime.result import AgentHarnessResult
-from xcode.coding_agent.execution_modes import ExecutionModeState
-from xcode.harness.agent_runtime.tool_gate import ToolGate
-from xcode.agent.types import ToolSpec
-from xcode.agent.config import AgentContext, BeforeToolCallContext
-from xcode.agent.messages import AssistantMessage
-from xcode.agent.types import ToolCallContent
+from .tool_rendering import render_intent_summary
 
 
 def _registry(app: object) -> tuple[ToolSpec, ...]:

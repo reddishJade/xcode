@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import pytest
+
 from xcode.coding_agent.tools.text_edit import (
+    apply_text_replacement,
     detect_line_ending,
     normalize_to_lf,
     restore_line_endings,
     strip_bom,
-    apply_text_replacement,
 )
 
 

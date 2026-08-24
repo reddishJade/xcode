@@ -305,7 +305,7 @@ def _parse_hook_response(stdout: str) -> dict[str, JsonValue]:
     except json.JSONDecodeError as exc:
         raise ValueError(f"hook stdout is invalid JSON: {exc.msg}") from exc
     if not isinstance(decoded, dict):
-        raise ValueError("hook stdout must be a JSON object")
+        raise TypeError("hook stdout must be a JSON object")
     return {str(key): _json_value(item) for key, item in decoded.items()}
 
 
