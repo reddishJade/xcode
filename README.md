@@ -95,13 +95,12 @@ xcode tui
 # CLI / REPL 模式（多轮对话，支持 /slash 命令）
 xcode cli
 
-# 管理 provider API 配置
-xcode config list
-xcode config add main
-xcode config set main chat_model deepseek-v4-flash
-
-# 首次使用引导
+# 首次使用引导（配置 Provider 与 API key）
 xcode setup
+
+# 打开交互式配置浏览器（调整执行模式、审批策略、Shell 等）
+xcode config
+xcode config approval
 
 # 自定义配置
 xcode --config .xcode/settings.json
@@ -297,17 +296,22 @@ uv run pyright src/
 
 ---
 
-## 文档导航
+## 开发者文档导航
 
-| 文档 | 内容 |
-|---|---|
-| [项目主页](https://reddishjade.github.io/xcode/) | GitHub Pages 中英双语介绍站 |
-| [AGENTS.md](AGENTS.md) | Agent 开发入口、编码规范 |
-| [CONFIG.md](CONFIG.md) | 运行时配置参考 |
-| `src/xcode/main.py` | CLI 入口点与子命令 |
-| `src/xcode/coding_agent/assembly/` | Coding 产品装配与工具注册 |
-| [docs/memory-architecture.md](docs/memory-architecture.md) | 记忆系统架构 |
-| [docs/review-standards.md](docs/review-standards.md) | 代码审查标准 |
+### 核心设计与实战
+* [设计理念与核心实现机制](docs/design-philosophy.md)：可回放账本、执行模式分权、Bubblewrap 沙箱、并发分区与分层压缩
+* [实战场景与工作流指南](docs/examples.md)：从 Plan 规划到 Build 落地、分支探索、快照撤销与 MCP/Hooks 实战
+* [五层架构与执行模型](docs/architecture.md)：系统分层、单向数据流与执行协议不变量
+
+### 模块指南 (docs/guide/)
+* [安装与环境准备](docs/guide/install.md) · [模型与 Provider 配置](docs/guide/providers.md) · [快速上手与终端交互](docs/guide/quickstart.md)
+* [执行模式 (Plan/Build/Act)](docs/guide/modes.md) · [会话账本与分层压缩](docs/guide/sessions.md) · [权限引擎与 Linux 沙箱](docs/guide/security.md)
+* [核心工具箱与并发调度](docs/guide/tools.md) · [配置系统与设置浏览器](docs/guide/configuration.md) · [MCP 服务与工具扩展](docs/guide/mcp.md)
+* [Skills 技能系统](docs/guide/skills.md) · [Subagents 子代理架构](docs/guide/subagents.md) · [长期记忆系统](docs/guide/memory.md) · [外部事件 Hooks](docs/guide/hooks.md)
+* [Slash 命令完全手册](docs/guide/slash-commands.md) · [CLI 命令行参数速查](docs/guide/cli.md)
+
+### 参考与评测
+* [运行时配置参考 (CONFIG.md)](CONFIG.md) · [Benchmark 实验设计与评估](benchmarks/README.md) · [项目主页 (GitHub Pages)](https://reddishjade.github.io/xcode/)
 
 
 ---

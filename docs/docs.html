@@ -1,0 +1,1718 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Xcode 开发者文档 — Developer Documentation</title>
+  <meta name="description" content="Xcode 官方技术与开发者文档：设计哲学、五层架构、执行模式、Linux 沙箱、工具并发调度、会话压缩、MCP 扩展与 Slash 指令手册。">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101012'/%3E%3Cpath d='M20 22 L31 32 L20 42' stroke='%23e0854a' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='36' y='39' width='11' height='5' rx='2.5' fill='%23f0efe9'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+  <script>
+    (function() {
+      try {
+        var l = localStorage.getItem('xcode-lang');
+        if (!l) { l = (navigator.language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en'; }
+        if (l === 'zh' || l === 'en') { document.documentElement.dataset.lang = l; document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en'; }
+      } catch (e) {}
+      try {
+        var t = localStorage.getItem('xcode-theme');
+        if (t === 'light' || t === 'dark') { document.documentElement.dataset.theme = t; }
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    :root {
+      --bg: #0f1012;
+      --bg-elev: #16181c;
+      --bg-elev-2: #1d2026;
+      --bg-inset: #0b0c0e;
+      --border: rgba(255,255,255,0.08);
+      --border-strong: rgba(255,255,255,0.14);
+      --text: #eae9e4;
+      --text-2: #b3b4b2;
+      --text-3: #7d807e;
+      --accent: #e0854a;
+      --accent-2: #c76a2e;
+      --accent-soft: rgba(224,133,74,0.12);
+      --green: #6fbf8f;
+      --green-soft: rgba(111,191,143,0.12);
+      --blue: #7fa8d9;
+      --blue-soft: rgba(127,168,217,0.12);
+      --amber: #e0b060;
+      --amber-soft: rgba(224,176,96,0.12);
+      --red: #e2706a;
+      --red-soft: rgba(226,112,106,0.12);
+      --font-display: "Space Grotesk", "Noto Sans SC", sans-serif;
+      --font-body: "Inter", "Noto Sans SC", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, "Noto Sans SC", monospace;
+      --sidebar-w: 272px;
+      --toc-w: 220px;
+      --radius: 10px;
+      --radius-sm: 7px;
+    }
+    html[data-theme="light"] {
+      --bg: #f6f6f4;
+      --bg-elev: #ffffff;
+      --bg-elev-2: #eef0ee;
+      --bg-inset: #f0f1ef;
+      --border: rgba(15,16,18,0.08);
+      --border-strong: rgba(15,16,18,0.14);
+      --text: #1c1d21;
+      --text-2: #50535a;
+      --text-3: #83868d;
+      --accent: #c76a2e;
+      --accent-2: #a95420;
+      --accent-soft: rgba(199,106,46,0.1);
+      --green: #2f8f5b;
+      --green-soft: rgba(47,143,91,0.1);
+      --blue: #3f76b8;
+      --blue-soft: rgba(63,118,184,0.1);
+      --amber: #a86e15;
+      --amber-soft: rgba(168,110,21,0.1);
+      --red: #cf5a54;
+      --red-soft: rgba(207,90,84,0.1);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 15px;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    ::selection { background: var(--accent-soft); }
+    a { color: var(--accent); text-decoration: none; }
+
+    html[data-lang="zh"] .le { display: none !important; }
+    html[data-lang="en"] .lz { display: none !important; }
+
+    /* ---- Top Nav ---- */
+    .docs-nav {
+      position: sticky; top: 0; z-index: 100;
+      height: 60px;
+      background: color-mix(in srgb, var(--bg) 82%, transparent);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 22px;
+    }
+    .nav-brand {
+      display: flex; align-items: center; gap: 9px;
+      color: var(--text); font-family: var(--font-display); font-weight: 600; font-size: 16px;
+    }
+    .brand-mark { color: var(--accent); font-weight: 700; }
+    .brand-badge {
+      font-size: 11px; padding: 2px 9px; border-radius: 999px;
+      background: var(--accent-soft); color: var(--accent);
+      font-family: var(--font-mono); font-weight: 500;
+    }
+    .nav-actions { display: flex; align-items: center; gap: 8px; }
+    .search-box {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 12px; font-size: 13px;
+      color: var(--text-3); width: 220px;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .search-box input {
+      border: none; background: transparent; color: var(--text);
+      font-family: var(--font-body); font-size: 13px; outline: none; width: 100%;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 12px; border-radius: 8px; font-size: 13px; font-family: var(--font-body);
+      cursor: pointer; border: 1px solid var(--border); background: var(--bg-elev); color: var(--text-2);
+      transition: all .18s;
+    }
+    .btn:hover { border-color: var(--border-strong); color: var(--text); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #0f1012; font-weight: 600; }
+    .btn-primary:hover { background: var(--accent-2); border-color: var(--accent-2); color: #0f1012; }
+    .theme-toggle .theme-icon { display: none; width: 15px; height: 15px; }
+    .theme-toggle .theme-icon.active { display: block; }
+    .mobile-menu-btn { display: none; }
+
+    /* ---- Layout ---- */
+    .docs-layout { display: flex; min-height: calc(100vh - 60px); max-width: 1440px; margin: 0 auto; width: 100%; }
+
+    /* ---- Sidebar ---- */
+    .docs-sidebar {
+      width: var(--sidebar-w); flex-shrink: 0;
+      border-right: 1px solid var(--border);
+      height: calc(100vh - 60px); position: sticky; top: 60px;
+      overflow-y: auto; padding: 28px 16px 48px;
+    }
+    .sidebar-group { margin-bottom: 26px; }
+    .sidebar-title {
+      font-family: var(--font-mono); font-size: 11px; text-transform: uppercase;
+      letter-spacing: .09em; color: var(--text-3); margin: 0 0 10px 12px; font-weight: 500;
+    }
+    .sidebar-link {
+      display: block; padding: 7px 12px; border-radius: var(--radius-sm); font-size: 13.5px;
+      color: var(--text-2); text-decoration: none; margin-bottom: 2px;
+      transition: background .15s, color .15s; line-height: 1.45;
+    }
+    .sidebar-link:hover { background: var(--bg-elev); color: var(--text); }
+    .sidebar-link.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+
+    /* ---- Main ---- */
+    .docs-main {
+      flex: 1; min-width: 0; padding: 52px 56px 100px;
+      max-width: 780px; margin: 0 auto;
+    }
+    .doc-page { display: none; }
+    .doc-page.active { display: block; animation: fadeIn .25s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+    .breadcrumb {
+      font-family: var(--font-mono); font-size: 12px; color: var(--text-3);
+      margin-bottom: 24px; display: flex; align-items: center; gap: 7px;
+    }
+    .breadcrumb a { color: var(--text-3); }
+    .breadcrumb a:hover { color: var(--accent); }
+    .breadcrumb span { color: var(--accent); }
+    .docs-main h1 {
+      font-family: var(--font-display); font-weight: 600; font-size: 2.1rem;
+      line-height: 1.2; margin: 0 0 18px; color: var(--text); letter-spacing: -.015em;
+    }
+    .lead-text {
+      font-size: 1.04rem; color: var(--text-2); line-height: 1.7;
+      border-bottom: 1px solid var(--border); padding-bottom: 26px; margin-bottom: 8px;
+    }
+    .docs-main h2 {
+      font-family: var(--font-display); font-weight: 600; font-size: 1.4rem;
+      margin: 52px 0 16px; color: var(--text); letter-spacing: -.01em;
+    }
+    .docs-main h2::before { content: "# "; color: var(--accent); font-family: var(--font-mono); font-weight: 500; font-size: 1.1rem; }
+    .docs-main h3 {
+      font-family: var(--font-display); font-weight: 600; font-size: 1.14rem;
+      margin: 32px 0 12px; color: var(--text);
+    }
+    .docs-main h3::before { content: "## "; color: var(--accent); font-family: var(--font-mono); font-weight: 500; font-size: .95rem; }
+    .docs-main p, .docs-main li { color: var(--text-2); font-size: 14.5px; line-height: 1.75; }
+    .docs-main ul, .docs-main ol { padding-left: 22px; margin: 14px 0 22px; }
+    .docs-main li { margin-bottom: 7px; }
+    .docs-main li::marker { color: var(--accent); }
+    .docs-main strong { color: var(--text); font-weight: 600; }
+
+    /* ---- Badges ---- */
+    .badge {
+      display: inline-flex; align-items: center; padding: 2px 9px;
+      border-radius: 999px; font-family: var(--font-mono); font-size: 11px;
+      font-weight: 500; line-height: 1.35; white-space: nowrap;
+    }
+    .badge-green { background: var(--green-soft); color: var(--green); }
+    .badge-accent { background: var(--accent-soft); color: var(--accent); }
+    .badge-blue { background: var(--blue-soft); color: var(--blue); }
+    .badge-amber { background: var(--amber-soft); color: var(--amber); }
+    .type-tag {
+      font-family: var(--font-mono); font-size: 11px; padding: 1px 7px;
+      border-radius: 5px; background: var(--bg-elev-2); color: var(--text-3);
+    }
+
+    /* ---- Tables ---- */
+    .table-wrap { overflow-x: auto; margin: 22px 0 30px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-elev); }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th {
+      text-align: left; padding: 11px 16px; background: var(--bg-elev-2);
+      border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-weight: 500;
+      color: var(--text); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase;
+    }
+    td { padding: 11px 16px; border-bottom: 1px solid var(--border); color: var(--text-2); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr { transition: background .12s; }
+    tbody tr:hover { background: var(--bg-elev-2); }
+    .table-wrap code, td code { white-space: nowrap; }
+
+    /* ---- Cards ---- */
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin: 22px 0 30px; }
+    .card-box {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px 20px;
+      transition: border-color .18s, transform .18s;
+    }
+    .card-box:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+    .card-box h4 {
+      font-family: var(--font-display); font-size: 14.5px; font-weight: 600;
+      margin: 0 0 8px; color: var(--text); display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .card-box p { font-size: 13px; color: var(--text-2); margin: 0; line-height: 1.65; }
+
+    /* ---- Steps ---- */
+    .steps-list { margin: 22px 0; display: flex; flex-direction: column; gap: 0; }
+    .step-item { display: flex; gap: 18px; padding: 16px 0; border-left: 2px solid var(--border); margin-left: 9px; padding-left: 22px; position: relative; }
+    .step-item::before {
+      content: ""; position: absolute; left: -6px; top: 22px; width: 10px; height: 10px;
+      border-radius: 3px; background: var(--accent); transform: rotate(45deg);
+    }
+    .step-num {
+      font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--text-3);
+      flex-shrink: 0; padding-top: 2px;
+    }
+    .step-body h4 { margin: 0 0 6px; font-size: 14.5px; color: var(--text); }
+    .step-body p { margin: 0; font-size: 13.5px; color: var(--text-2); }
+
+    /* ---- Callouts ---- */
+    .callout {
+      border-radius: var(--radius); padding: 16px 18px; margin: 22px 0;
+      border: 1px solid var(--border); border-left: 3px solid var(--accent);
+      background: var(--bg-elev);
+    }
+    .callout-header {
+      font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; color: var(--accent);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .callout p { margin: 0; font-size: 14px; }
+    .callout.tip { border-left-color: var(--green); }
+    .callout.tip .callout-header { color: var(--green); }
+    .callout.warning { border-left-color: var(--amber); }
+    .callout.warning .callout-header { color: var(--amber); }
+    .callout.security { border-left-color: var(--blue); }
+    .callout.security .callout-header { color: var(--blue); }
+
+    /* ---- Code ---- */
+    .code-box { border-radius: var(--radius); background: var(--bg-inset); border: 1px solid var(--border); margin: 20px 0 28px; overflow: hidden; }
+    .code-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 16px; border-bottom: 1px solid var(--border);
+      font-family: var(--font-mono); font-size: 12px; color: var(--text-3);
+      background: var(--bg-elev);
+    }
+    .code-copy-btn {
+      background: transparent; border: none; color: var(--text-3); cursor: pointer;
+      font-family: var(--font-mono); font-size: 11px; padding: 3px 8px; border-radius: 5px;
+      transition: color .15s, background .15s;
+    }
+    .code-copy-btn:hover { color: var(--accent); background: var(--bg-elev-2); }
+    .code-box pre { margin: 0; padding: 18px 20px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.65; color: var(--text); }
+    .code-box code { font-family: var(--font-mono); }
+    .code-box pre .c { color: var(--text-3); }
+    .code-box pre .p { color: var(--accent); }
+    code:not(pre code) {
+      font-family: var(--font-mono); font-size: .87em; padding: 2px 6px;
+      border-radius: 5px; background: var(--bg-elev-2); border: 1px solid var(--border);
+      color: var(--accent);
+    }
+    .code-box pre code { color: inherit; }
+
+    /* ---- Architecture hero diagram ---- */
+    .arch-diagram {
+      border-radius: var(--radius); background: var(--bg-inset); border: 1px solid var(--border);
+      margin: 24px 0 8px; overflow: hidden;
+    }
+    .arch-diagram .code-header { border-bottom: none; }
+    .arch-diagram pre { margin: 0; padding: 16px 20px 20px; overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; color: var(--text); }
+    .arch-diagram pre .d { color: var(--accent); }
+
+    /* ---- Pager ---- */
+    .docs-pager {
+      display: flex; justify-content: space-between; align-items: stretch; gap: 16px;
+      margin-top: 60px; padding-top: 28px; border-top: 1px solid var(--border);
+    }
+    .pager-btn {
+      display: flex; flex-direction: column; gap: 4px; padding: 14px 18px;
+      border-radius: var(--radius); border: 1px solid var(--border); text-decoration: none;
+      background: var(--bg-elev); transition: border-color .18s, transform .18s; min-width: 200px;
+    }
+    .pager-btn:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .pager-label { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: .05em; }
+    .pager-title { font-family: var(--font-display); font-size: 14px; font-weight: 600; color: var(--text); }
+    .pager-btn:hover .pager-title { color: var(--accent); }
+
+    /* ---- TOC ---- */
+    .docs-toc {
+      width: var(--toc-w); flex-shrink: 0;
+      height: calc(100vh - 60px); position: sticky; top: 60px;
+      padding: 36px 12px; overflow-y: auto;
+    }
+    .toc-title {
+      font-family: var(--font-mono); font-size: 11px; text-transform: uppercase;
+      letter-spacing: .09em; color: var(--text-3); margin: 0 0 12px 12px; font-weight: 500;
+    }
+    .toc-list { list-style: none; padding: 0; margin: 0; }
+    .toc-link {
+      display: block; padding: 5px 12px; font-size: 12.5px; color: var(--text-3);
+      text-decoration: none; transition: color .15s; line-height: 1.4; border-radius: var(--radius-sm);
+    }
+    .toc-link:hover { color: var(--accent); background: var(--bg-elev); }
+    .toc-link.h3 { padding-left: 26px; font-size: 12px; }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 1240px) { .docs-toc { display: none; } }
+    @media (max-width: 900px) {
+      .mobile-menu-btn { display: inline-flex; }
+      .docs-nav { padding: 0 14px; }
+      .nav-actions { gap: 6px; }
+      .search-box { display: none; }
+      .nav-home { display: none; }
+      .docs-sidebar {
+        position: fixed; left: -100%; top: 60px; z-index: 90;
+        transition: left .25s cubic-bezier(.2,.6,.2,1); width: 280px;
+        box-shadow: 14px 0 40px rgba(0,0,0,.35); background: var(--bg); border-right: 1px solid var(--border);
+      }
+      .docs-sidebar.open { left: 0; }
+      .docs-main { padding: 32px 20px 70px; max-width: 100%; }
+      .docs-pager { flex-direction: column; }
+      .pager-btn { width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <header class="docs-nav">
+    <div style="display:flex; align-items:center; gap:12px">
+      <button class="btn mobile-menu-btn" id="sidebarToggle" aria-label="Toggle Navigation">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <a class="nav-brand" href="index.html">
+        <span class="brand-mark">&gt;_</span>
+        <span>xcode</span>
+        <span class="brand-badge"><span class="lz">开发者文档</span><span class="le">Docs Hub</span></span>
+      </a>
+    </div>
+
+    <div class="nav-actions">
+      <div class="search-box">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="docSearch" placeholder="搜索文档章节 / Search docs..." aria-label="Search">
+      </div>
+      <button class="btn theme-toggle" id="themeToggle" title="切换主题 / Toggle theme">
+        <svg class="theme-icon theme-auto active" data-mode="auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <svg class="theme-icon theme-light" data-mode="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <svg class="theme-icon theme-dark" data-mode="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <button class="btn" id="langToggle">
+        <span class="lz">EN</span><span class="le">中</span>
+      </button>
+      <a class="btn nav-home" href="index.html"><span class="lz">返回主页</span><span class="le">Home</span></a>
+      <a class="btn btn-primary" href="https://github.com/reddishJade/xcode" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </header>
+
+  <!-- Docs Layout -->
+  <div class="docs-layout">
+
+    <!-- Left Sidebar -->
+    <aside class="docs-sidebar" id="docsSidebar">
+      <div class="sidebar-group">
+        <div class="sidebar-title"><span class="lz">设计理念与架构</span><span class="le">Architecture & Philosophy</span></div>
+        <a class="sidebar-link active" href="#design-philosophy" data-page="design-philosophy"><span class="lz">设计理念与核心实现</span><span class="le">Design Philosophy</span></a>
+        <a class="sidebar-link" href="#architecture" data-page="architecture"><span class="lz">五层系统架构与单向流</span><span class="le">Five-Layer Architecture</span></a>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-title"><span class="lz">快速上手</span><span class="le">Get Started</span></div>
+        <a class="sidebar-link" href="#install" data-page="install"><span class="lz">安装与环境准备</span><span class="le">Install & Setup</span></a>
+        <a class="sidebar-link" href="#providers" data-page="providers"><span class="lz">模型与 Provider 配置</span><span class="le">Connect Models</span></a>
+        <a class="sidebar-link" href="#quickstart" data-page="quickstart"><span class="lz">快速上手与交互模式</span><span class="le">Interactive Use</span></a>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-title"><span class="lz">核心运行机制</span><span class="le">Core Operations</span></div>
+        <a class="sidebar-link" href="#modes" data-page="modes"><span class="lz">执行模式 (Plan/Build/Act)</span><span class="le">Work Modes</span></a>
+        <a class="sidebar-link" href="#sessions" data-page="sessions"><span class="lz">会话账本与分层压缩</span><span class="le">Sessions & Context</span></a>
+        <a class="sidebar-link" href="#tools" data-page="tools"><span class="lz">核心工具箱与并发调度</span><span class="le">Core Tools</span></a>
+        <a class="sidebar-link" href="#security" data-page="security"><span class="lz">权限引擎与 Linux 沙箱</span><span class="le">Security & Sandbox</span></a>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-title"><span class="lz">定制与扩展</span><span class="le">Customize & Extend</span></div>
+        <a class="sidebar-link" href="#configuration" data-page="configuration"><span class="lz">配置系统与设置浏览器</span><span class="le">Configuration</span></a>
+        <a class="sidebar-link" href="#mcp" data-page="mcp"><span class="lz">MCP 服务扩展</span><span class="le">MCP Servers</span></a>
+        <a class="sidebar-link" href="#skills" data-page="skills"><span class="lz">Skills 技能系统</span><span class="le">Skills System</span></a>
+        <a class="sidebar-link" href="#subagents" data-page="subagents"><span class="lz">Subagents 子代理架构</span><span class="le">Subagents</span></a>
+        <a class="sidebar-link" href="#memory" data-page="memory"><span class="lz">长期记忆系统 (Memory)</span><span class="le">Long-term Memory</span></a>
+        <a class="sidebar-link" href="#hooks" data-page="hooks"><span class="lz">外部事件 Hooks</span><span class="le">External Hooks</span></a>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-title"><span class="lz">实战与参考</span><span class="le">Reference & Guides</span></div>
+        <a class="sidebar-link" href="#examples" data-page="examples"><span class="lz">实战场景与工作流</span><span class="le">Workflows & Scenarios</span></a>
+        <a class="sidebar-link" href="#slash-commands" data-page="slash-commands"><span class="lz">Slash 命令完全手册</span><span class="le">Slash Commands</span></a>
+        <a class="sidebar-link" href="#cli" data-page="cli"><span class="lz">CLI 命令行参数速查</span><span class="le">CLI Options</span></a>
+      </div>
+    </aside>
+
+    <!-- Center Main Content -->
+    <main class="docs-main">
+
+      <!-- ================= 1. DESIGN PHILOSOPHY ================= -->
+      <article id="design-philosophy" class="doc-page active">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">架构</span><span class="le">Architecture</span> / <span>Design Philosophy</span></div>
+        <h1><span class="lz">Xcode 设计理念与核心实现</span><span class="le">Design Philosophy & Core Implementation</span></h1>
+        <p class="lead-text">
+          <span class="lz">Xcode 并不是一组大模型 API 与本地脚本的简单组合（薄包装），而是一个面向生产环境的 <strong>Python Coding Agent 运行时骨架（Runtime Harness）</strong>。核心围绕 <strong>可测试性（Testability）</strong>、<strong>可观测性（Observability）</strong> 与 <strong>纵深防御（Defense-in-depth）</strong> 进行架构设计。</span>
+          <span class="le">Xcode is not a thin API wrapper, but a production-grade <strong>Python Coding Agent Runtime Harness</strong> architected around testability, observability, and defense-in-depth.</span>
+        </p>
+
+        <h2 id="core-principles"><span class="lz">八大核心设计机制</span><span class="le">Eight Core Architectural Mechanisms</span></h2>
+
+        <div class="card-grid">
+          <div class="card-box">
+            <h4><span>1. 可回放事实账本</span> <span class="badge badge-green">Authoritative</span></h4>
+            <p><span class="lz">所有输入、模型 Envelope（<code>provider_request</code>）、工具调用与 Checkpoint 均以 Append-only JSONL 落盘。状态皆为日志投影。</span><span class="le">All prompts, provider envelopes, tool results, and checkpoints are appended to JSONL. All state is a log projection.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>2. 模式与分权管理</span> <span class="badge badge-accent">Plan / Build</span></h4>
+            <p><span class="lz">Plan 严格只读（仅写规划 Markdown）；Build 模式写入业务代码并通过独立 Reviewer 模型自动审查 Shell 命令。</span><span class="le">Plan is strictly read-only; Build allows project writes with automated Reviewer semantic policy checks.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>3. Linux Bubblewrap 沙箱</span> <span class="badge badge-blue">Hardened</span></h4>
+            <p><span class="lz">命名空间隔离；宿主只读；项目可写；<code>.git</code>/<code>.xcode</code> 重新只读保护；密钥目录与 <code>.env*</code> 全面遮蔽；网络隔离。</span><span class="le">Linux namespaces: host read-only, project write, read-only .git/.xcode, masked secrets (.env*), network isolation.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>4. 副作用感知并发分区</span> <span class="badge badge-amber">Concurrent</span></h4>
+            <p><span class="lz">并发安全的只读工具并行派发；写操作串行屏障；<code>edit_file</code> 强制基于读取时的 SHA256 指纹校验防脏写。</span><span class="le">Concurrent read worker pools, serial write barriers, and Read-before-edit SHA256 fingerprinting.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>5. 分层上下文压缩</span> <span class="badge badge-green">70% Threshold</span></h4>
+            <p><span class="lz">达到 70% 水位线触发；分层裁剪过期文件全文；保留滚动 Checkpoint；通过快照与增量尾部实现毫秒级恢复。</span><span class="le">70% trigger: prunes stale reads, maintains rolling checkpoints, and enables instant resume via Checkpoint + Tail.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>6. Durable 子代理谱系</span> <span class="badge badge-accent">Session-backed</span></h4>
+            <p><span class="lz">子代理是一等公民持久化 Session；谱系追溯；退出时采用 Child-first 逆序生命周期回收，杜绝孤儿进程。</span><span class="le">Subagents are durable sessions with lineage tracking and child-first reverse lifecycle cleanups.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>7. 中途可打断与取消安全</span> <span class="badge badge-blue">Interruptible</span></h4>
+            <p><span class="lz">中断时秒级 Cancel 底层 HTTP 流；安全终止后台工具与沙箱进程；记录 <code>run_aborted</code> 事件保持一致性。</span><span class="le">Mid-run stream cancellation, graceful sandbox termination, and run_aborted event recording.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>8. 类型化渲染意图</span> <span class="badge badge-amber">Typed Intents</span></h4>
+            <p><span class="lz">工具返回结构化 <code>DiffIntent</code>、<code>TerminalIntent</code> 等语义对象，彻底解耦计算、I/O 与终端展示层。</span><span class="le">Tools return structured DiffIntent and TerminalIntent, decoupling computation, I/O, and TUI presentation.</span></p>
+          </div>
+        </div>
+
+        <h2 id="system-invariants"><span class="lz">五大系统级核心不变量</span><span class="le">Five Core System Invariants</span></h2>
+        <div class="steps-list">
+          <div class="step-item">
+            <div class="step-num">01</div>
+            <div class="step-body">
+              <h4><span class="lz">不可丢弃历史 (No State Lost)</span><span class="le">No State Lost</span></h4>
+              <p><span class="lz">任何会话状态均可从 JSONL 事实账本完全重建，禁止任何原地修改或隐式状态丢失。</span><span class="le">All session states can be completely reconstructed from JSONL logs; in-place mutations are forbidden.</span></p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">02</div>
+            <div class="step-body">
+              <h4><span class="lz">不可越界执行 (No Boundary Bypass)</span><span class="le">No Boundary Bypass</span></h4>
+              <p><span class="lz">非只读操作与跨工作区写入必须经过权限引擎与沙箱边界校验，禁止任何绕过审批的副作用。</span><span class="le">Write operations outside the workspace must pass PermissionEngine and sandbox checks.</span></p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">03</div>
+            <div class="step-body">
+              <h4><span class="lz">可见即已记录 (Visible Equals Recorded)</span><span class="le">Visible Equals Recorded</span></h4>
+              <p><span class="lz">大模型接收到的每一条 Wire Message 必须与账本中落盘的 <code>provider_request</code> 记录完全一致。</span><span class="le">Every wire message delivered to the LLM must match the logged provider_request envelope.</span></p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">04</div>
+            <div class="step-body">
+              <h4><span class="lz">编辑幂等防脏写 (Read-before-edit Verification)</span><span class="le">Read-before-edit Verification</span></h4>
+              <p><span class="lz">所有文件修改必须基于读取时的 SHA256 指纹校验，杜绝多工具调用或外部修改导致的脏覆盖。</span><span class="le">All file edits must validate the SHA256 checksum at read-time to prevent race dirty writes.</span></p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">05</div>
+            <div class="step-body">
+              <h4><span class="lz">经验量化验证 (Empirical Gating)</span><span class="le">Empirical Gating</span></h4>
+              <p><span class="lz">所有关键架构决策（如分层压缩算法、并发调度优化）必须拥有对应的真实消融 Benchmark 支撑。</span><span class="le">All core architectural decisions must be grounded in ablation benchmarks.</span></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="docs-pager">
+          <div></div>
+          <a class="pager-btn" href="#architecture">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">五层系统架构与单向流 →</span><span class="le">Five-Layer Architecture →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 2. ARCHITECTURE ================= -->
+      <article id="architecture" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">架构</span><span class="le">Architecture</span> / <span>System Architecture</span></div>
+        <h1><span class="lz">五层系统架构与单向数据流</span><span class="le">Five-Layer Architecture & Unidirectional Flow</span></h1>
+        <p class="lead-text">
+          <span class="lz">Xcode 采用严格的五层分层架构，数据流向始终由高层向底层单向流动，每一层均可独立编写单元测试与契约测试。</span>
+          <span class="le">Xcode enforces a strict 5-layer design where dependencies flow unidirectionally from high-level interaction to low-level adapters.</span>
+        </p>
+
+        <div class="arch-diagram">
+          <div class="code-header"><span>src/xcode/ · 五层架构</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code><span class="d">┌─</span>────────────────────────────────────────────────────────<span class="d">─┐</span>
+<span class="d">│</span> CLI / TUI <span class="c">(src/xcode/cli/)</span>                    <span class="c">交互层</span> <span class="d">│</span>
+<span class="d">├─</span>────────────────────────────────────────────────────────<span class="d">─┤</span>
+<span class="d">│</span> Coding Agent <span class="c">(src/xcode/coding_agent/)</span>        <span class="c">产品装配</span> <span class="d">│</span>
+<span class="d">├─</span>────────────────────────────────────────────────────────<span class="d">─┤</span>
+<span class="d">│</span> Harness <span class="c">(src/xcode/harness/)</span>                  <span class="c">运行时</span> <span class="d">│</span>
+<span class="d">├─</span>────────────────────────────────────────────────────────<span class="d">─┤</span>
+<span class="d">│</span> Agent Loop <span class="c">(src/xcode/agent/)</span>                <span class="c">合约层</span> <span class="d">│</span>
+<span class="d">├─</span>────────────────────────────────────────────────────────<span class="d">─┤</span>
+<span class="d">│</span> AI Providers <span class="c">(src/xcode/ai/)</span>                 <span class="c">适配层</span> <span class="d">│</span>
+<span class="d">└─</span>────────────────────────────────────────────────────────<span class="d">─┘</span>
+<span class="c">数据流：高层 → 低层，单向依赖，逐层可测</span></code></pre>
+        </div>
+
+        <h2><span class="lz">各层职责分工</span><span class="le">Layer Responsibilities</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><span class="lz">层级</span><span class="le">Layer</span></th>
+                <th><span class="lz">包路径</span><span class="le">Package</span></th>
+                <th><span class="lz">核心职责</span><span class="le">Key Responsibilities</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>CLI / TUI</strong></td>
+                <td><code>src/xcode/cli/</code></td>
+                <td><span class="lz">全屏 TUI 渲染、标准 REPL、Slash 指令解析、键盘交互与配置浏览器</span><span class="le">Fullscreen TUI, REPL, slash parser, keybinds, settings browser</span></td>
+              </tr>
+              <tr>
+                <td><strong>Coding Agent</strong></td>
+                <td><code>src/xcode/coding_agent/</code></td>
+                <td><span class="lz">组装代码编辑工具箱、任务状态机 (Todo)、模式切换与子代理工具</span><span class="le">File tools, todo state machine, work mode switching & subagent tool</span></td>
+              </tr>
+              <tr>
+                <td><strong>Harness</strong></td>
+                <td><code>src/xcode/harness/</code></td>
+                <td><span class="lz">Session 事件账本、Linux Bubblewrap 沙箱、权限评估、MCP Client、长期记忆</span><span class="le">Session ledger, bwrap sandbox, policy engine, MCP client & memory</span></td>
+              </tr>
+              <tr>
+                <td><strong>Agent Loop</strong></td>
+                <td><code>src/xcode/agent/</code></td>
+                <td><span class="lz">主事件循环、请求组装、70% 压缩调度、工具并发读写分区调度</span><span class="le">Agent loop, request assembly, compaction scheduling & tool dispatcher</span></td>
+              </tr>
+              <tr>
+                <td><strong>AI Providers</strong></td>
+                <td><code>src/xcode/ai/</code></td>
+                <td><span class="lz">OpenAI / DeepSeek / Xiaomi MiMo / ChatGLM 协议适配与 Thinking 流式解析</span><span class="le">Provider adapters, streaming HTTP transport & thinking parsers</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#design-philosophy">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 设计理念与核心实现</span><span class="le">← Design Philosophy</span></span>
+          </a>
+          <a class="pager-btn" href="#install">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">安装与环境准备 →</span><span class="le">Install & Setup →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 3. INSTALL ================= -->
+      <article id="install" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">快速上手</span><span class="le">Get Started</span> / <span>Install</span></div>
+        <h1><span class="lz">安装与环境准备</span><span class="le">Install & Environment Setup</span></h1>
+        <p class="lead-text">
+          <span class="lz">Xcode 需要 Python 3.12+ 环境，推荐使用现代化的 <code>uv</code> 包管理器进行安装与依赖锁定。</span>
+          <span class="le">Xcode requires Python 3.12+ and recommends the modern <code>uv</code> package manager.</span>
+        </p>
+
+        <h2><span class="lz">Linux 沙箱依赖前置检查</span><span class="le">Linux Bubblewrap Sandbox Prerequisites</span></h2>
+        <p><span class="lz">为了在 Linux 环境下启用高安全性操作系统级隔离沙箱，请确保安装了 <code>bubblewrap</code>：</span><span class="le">To enable OS-level hardened sandboxing on Linux, install bubblewrap:</span></p>
+
+        <div class="code-box">
+          <div class="code-header"><span>Terminal</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code><span class="c"># Ubuntu / Debian</span>
+sudo apt-get update && sudo apt-get install -y bubblewrap
+
+<span class="c"># Fedora / RHEL / CentOS</span>
+sudo dnf install -y bubblewrap
+
+<span class="c"># Arch Linux</span>
+sudo pacman -S bubblewrap</code></pre>
+        </div>
+
+        <h2><span class="lz">安装 Xcode</span><span class="le">Installing Xcode</span></h2>
+        <div class="code-box">
+          <div class="code-header"><span>Terminal</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code><span class="c"># 克隆仓库</span>
+git clone https://github.com/reddishJade/xcode.git
+cd xcode
+
+<span class="c"># 推荐：通过 uv 创建虚拟环境并可编辑安装</span>
+uv venv
+source .venv/bin/activate
+uv pip install -e .
+
+<span class="c"># 安装开发与评测依赖</span>
+uv pip install -e ".[dev]"</code></pre>
+        </div>
+
+        <h2><span class="lz">首次配置向导</span><span class="le">First-run Configuration Wizard</span></h2>
+        <div class="code-box">
+          <div class="code-header"><span>Terminal</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code><span class="c"># 启动交互式引导，一键选择 Provider 并配置 API Key</span>
+xcode setup
+
+<span class="c"># 启动全屏终端 (TUI)</span>
+xcode</code></pre>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#architecture">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 五层系统架构与单向流</span><span class="le">← Five-Layer Architecture</span></span>
+          </a>
+          <a class="pager-btn" href="#providers">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">模型与 Provider 配置 →</span><span class="le">Connect Models →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 4. PROVIDERS ================= -->
+      <article id="providers" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">快速上手</span><span class="le">Get Started</span> / <span>Providers</span></div>
+        <h1><span class="lz">模型与 Provider 配置</span><span class="le">Connect Models & Providers</span></h1>
+        <p class="lead-text">
+          <span class="lz">Xcode 原生支持主流推理大模型，提供 Thinking 思考链解析、多 Profile 角色分工与会话内动态模型热切换。</span>
+          <span class="le">Xcode supports DeepSeek, MiMo, ChatGLM, and OpenAI with thinking chain parsing and dynamic profile routing.</span>
+        </p>
+
+        <h2><span class="lz">支持的 Provider 与环境变量</span><span class="le">Supported Providers & Environment Variables</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><span class="lz">Provider 名称</span><span class="le">Provider</span></th>
+                <th><span class="lz">API Key 环境变量</span><span class="le">API Key Env</span></th>
+                <th><span class="lz">默认 Base URL</span><span class="le">Default Base URL</span></th>
+                <th><span class="lz">思考链 (Thinking)</span><span class="le">Thinking Chain</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>deepseek_chat</code></td>
+                <td><code>DEEPSEEK_API_KEY</code></td>
+                <td><code>https://api.deepseek.com/v1</code></td>
+                <td><span class="badge badge-green">支持 / Supported</span></td>
+              </tr>
+              <tr>
+                <td><code>mimo_chat</code></td>
+                <td><code>MIMO_API_KEY</code></td>
+                <td><code>https://api.mimo.xiaomi.com/v1</code></td>
+                <td><span class="badge badge-green">支持 / Supported</span></td>
+              </tr>
+              <tr>
+                <td><code>chatglm_chat</code></td>
+                <td><code>CHATGLM_API_KEY</code> / <code>ZHIPUAI_API_KEY</code></td>
+                <td><code>https://open.bigmodel.cn/api/paas/v4</code></td>
+                <td><span class="badge badge-green">支持 / Supported</span></td>
+              </tr>
+              <tr>
+                <td><code>openai_chat</code></td>
+                <td><code>OPENAI_API_KEY</code></td>
+                <td><code>https://api.openai.com/v1</code></td>
+                <td><span class="badge badge-green">支持 / Supported</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2><span class="lz">多 Profile 角色分工架构</span><span class="le">Multi-Profile Role Allocation</span></h2>
+        <p><span class="lz">在 <code>xcode.config.json</code> 中可以为主会话 (main)、自动化审查器 (reviewer) 和子代理 (subagent) 分配不同的模型策略：</span><span class="le">Assign specialized models and reasoning efforts to main, reviewer, and subagent roles:</span></p>
+
+        <div class="code-box">
+          <div class="code-header"><span>xcode.config.json</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code>{
+  <span class="c">"provider"</span>: {
+    <span class="c">"default_transport"</span>: <span class="p">"deepseek_chat"</span>,
+    <span class="c">"model_profiles"</span>: {
+      <span class="c">"main"</span>: {
+        <span class="c">"transport"</span>: <span class="p">"deepseek_chat"</span>,
+        <span class="c">"chat_model"</span>: <span class="p">"deepseek-v4-flash"</span>,
+        <span class="c">"thinking"</span>: true,
+        <span class="c">"reasoning_effort"</span>: <span class="p">"high"</span>
+      },
+      <span class="c">"reviewer"</span>: {
+        <span class="c">"transport"</span>: <span class="p">"deepseek_chat"</span>,
+        <span class="c">"chat_model"</span>: <span class="p">"deepseek-v4-flash"</span>,
+        <span class="c">"thinking"</span>: false
+      },
+      <span class="c">"subagent"</span>: <span class="p">"deepseek-v4-flash"</span>
+    }
+  }
+}</code></pre>
+        </div>
+
+        <h2><span class="lz">运行时动态模型切换</span><span class="le">Dynamic Runtime Model Switching</span></h2>
+        <div class="code-box">
+          <div class="code-header"><span>REPL / TUI</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code><span class="c"># 查看当前模型及所有配置角色</span>
+/model
+
+<span class="c"># 切换为深度推理模型</span>
+/model deepseek_chat/deepseek-v4-pro:high
+
+<span class="c"># 切换为高速轻量模型</span>
+/model openai_chat/gpt-5.4-mini:low</code></pre>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#install">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 安装与环境准备</span><span class="le">← Install & Setup</span></span>
+          </a>
+          <a class="pager-btn" href="#quickstart">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">快速上手与交互模式 →</span><span class="le">Interactive Use →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 5. QUICKSTART ================= -->
+      <article id="quickstart" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">快速上手</span><span class="le">Get Started</span> / <span>Quickstart</span></div>
+        <h1><span class="lz">快速上手与交互模式</span><span class="le">Interactive Use & Quickstart</span></h1>
+        <p class="lead-text">
+          <span class="lz">Xcode 支持全屏终端 (TUI)、标准 REPL (CLI) 与单轮提问 (-p) 模式，并提供强大的 REPL 增强语法。</span>
+          <span class="le">Xcode offers Fullscreen TUI, standard REPL CLI, and single-turn prompt mode with rich prefix syntax.</span>
+        </p>
+
+        <h2><span class="lz">REPL 增强输入语法</span><span class="le">Enhanced REPL Prefix Syntax</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><span class="lz">前缀语法</span><span class="le">Prefix Syntax</span></th>
+                <th><span class="lz">功能说明</span><span class="le">Functionality</span></th>
+                <th><span class="lz">实战示例</span><span class="le">Example</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>@path/to/file</code></td>
+                <td><span class="lz">将本地文件内容自动读取并注入当前提问上下文</span><span class="le">Inject local file content into prompt context</span></td>
+                <td><code>@src/main.py 请分析此模块的性能瓶颈</code></td>
+              </tr>
+              <tr>
+                <td><code>!command</code></td>
+                <td><span class="lz">直接在本地终端执行 Shell 命令，不经过大模型</span><span class="le">Run shell command locally without invoking LLM</span></td>
+                <td><code>!git status -s</code></td>
+              </tr>
+              <tr>
+                <td><code>$skill_name ...</code></td>
+                <td><span class="lz">显式激活特定领域 Skill 并附带参数提问</span><span class="le">Explicitly invoke a domain skill with parameters</span></td>
+                <td><code>$refactor 重构基类接口</code></td>
+              </tr>
+              <tr>
+                <td><code>/command</code></td>
+                <td><span class="lz">执行 Xcode 内部 Slash 控制指令</span><span class="le">Execute internal Xcode slash command</span></td>
+                <td><code>/plan 规划登录模块重构</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#providers">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 模型与 Provider 配置</span><span class="le">← Connect Models</span></span>
+          </a>
+          <a class="pager-btn" href="#modes">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">执行模式 (Plan/Build/Act) →</span><span class="le">Work Modes →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 6. MODES ================= -->
+      <article id="modes" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">核心运行机制</span><span class="le">Core Operations</span> / <span>Work Modes</span></div>
+        <h1><span class="lz">执行模式：Plan / Build / Act</span><span class="le">Work Modes (Plan / Build / Act)</span></h1>
+        <p class="lead-text">
+          <span class="lz">Xcode 通过严格的执行模式定义工具权限边界、文件写权限与审批策略。</span>
+          <span class="le">Work modes define tool permission boundaries, file write rules, and automated approval routing.</span>
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><span class="lz">模式</span><span class="le">Mode</span></th>
+                <th><span class="lz">只读工具 (Read)</span><span class="le">Read Tools</span></th>
+                <th><span class="lz">文件修改 (Write)</span><span class="le">File Writes</span></th>
+                <th><span class="lz">Shell 命令 (Bash)</span><span class="le">Bash Shell</span></th>
+                <th><span class="lz">适用场景</span><span class="le">Use Case</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="badge badge-blue">Plan</span></td>
+                <td><span class="badge badge-green">允许 (Allow)</span></td>
+                <td><span class="badge badge-amber">仅限 .xcode/plans/*.md</span></td>
+                <td><span class="badge badge-accent">禁止 (Deny)</span></td>
+                <td><span class="lz">代码库调研、方案设计、零副作用探索</span><span class="le">Code exploration & architectural planning</span></td>
+              </tr>
+              <tr>
+                <td><span class="badge badge-green">Build</span></td>
+                <td><span class="badge badge-green">允许 (Allow)</span></td>
+                <td><span class="badge badge-green">允许 (Allow)</span></td>
+                <td><span class="badge badge-green">Reviewer 自动审批</span></td>
+                <td><span class="lz">特性开发、全自动沙箱构建与测试</span><span class="le">Autonomous development & sandboxed builds</span></td>
+              </tr>
+              <tr>
+                <td><span class="badge badge-amber">Act</span></td>
+                <td><span class="badge badge-green">允许 (Allow)</span></td>
+                <td><span class="badge badge-amber">人工确认 (Ask)</span></td>
+                <td><span class="badge badge-amber">人工确认 (Ask)</span></td>
+                <td><span class="lz">高危生产环境操作、人机精细协作</span><span class="le">High-risk changes & step-by-step HITL</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout tip">
+          <div class="callout-header">TIP · 两阶段开发最佳实践</div>
+          <p><span class="lz">1. 输入 <code>/plan 需求说明</code> 进入 Plan 模式，Agent 仅进行只读调研并在 <code>.xcode/plans/</code> 下生成详细设计文档；<br>2. 审阅方案后输入 <code>/build</code> 切换至 Build 模式，Agent 将在沙箱中全自动落地修改并运行测试。</span><span class="le">1. Use /plan to explore and write architecture docs to .xcode/plans/; 2. Review design, then type /build to execute autonomously under sandboxed guardrails.</span></p>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#quickstart">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 快速上手与交互模式</span><span class="le">← Interactive Use</span></span>
+          </a>
+          <a class="pager-btn" href="#sessions">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">会话账本与分层压缩 →</span><span class="le">Sessions & Context →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 7. SESSIONS ================= -->
+      <article id="sessions" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">核心运行机制</span><span class="le">Core Operations</span> / <span>Sessions & Compaction</span></div>
+        <h1><span class="lz">会话账本、分层压缩与快照撤销</span><span class="le">Sessions, Layered Compaction & Snapshot Undo</span></h1>
+        <p class="lead-text">
+          <span class="lz">全量事件流持久化；70% 上下文水位线分层裁剪；支持多分支分叉与文件级快照秒级撤销。</span>
+          <span class="le">Authoritative session event log, 70% threshold layered compaction, and instant file snapshot undo.</span>
+        </p>
+
+        <h2><span class="lz">70% 水位线分层压缩机制 (Layered Compactor)</span><span class="le">70% Threshold Layered Compactor</span></h2>
+        <p><span class="lz">当上下文累计达到模型预留窗口的 70% 时，系统自动触发非侵入式分层压缩：</span><span class="le">When prompt size exceeds 70% of context capacity, Xcode triggers layered pruning:</span></p>
+        <ul>
+          <li><strong>第一层：裁剪陈旧只读输出</strong> —— 移除早前轮次中大型 <code>read_file</code> 与 <code>grep_search</code> 的冗长全文；</li>
+          <li><strong>第二层：截断历史工具执行结果</strong> —— 压缩陈旧的命令标准输出，保留返回状态码与核心错误提示；</li>
+          <li><strong>第三层：生成状态 Checkpoint</strong> —— 归纳已完成的架构决策与待办任务列表并落盘快照；</li>
+          <li><strong>极速恢复</strong>：后续会话恢复直接加载 <code>Checkpoint 快照 + 原文尾部事件</code>，Token 消耗降低 60% 以上。</li>
+        </ul>
+
+        <h2><span class="lz">常用会话控制指令</span><span class="le">Session Management Commands</span></h2>
+        <div class="code-box">
+          <div class="code-header"><span>REPL / TUI</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code><span class="c"># 原子撤销最近一次工具执行所修改的所有文件</span>
+/undo
+
+<span class="c"># 撤销最近 3 轮交互上下文</span>
+/rewind 3
+
+<span class="c"># 从当前会话的第 5 条消息分支创建全新会话</span>
+/fork 5
+
+<span class="c"># 手动触发分层压缩与快照写入</span>
+/compact
+
+<span class="c"># 查看当前 Token 消耗与压缩状态</span>
+/context</code></pre>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#modes">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 执行模式 (Plan/Build/Act)</span><span class="le">← Work Modes</span></span>
+          </a>
+          <a class="pager-btn" href="#tools">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">核心工具箱与并发调度 →</span><span class="le">Core Tools →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 8. TOOLS ================= -->
+      <article id="tools" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">核心运行机制</span><span class="le">Core Operations</span> / <span>Tools</span></div>
+        <h1><span class="lz">核心工具箱与并发调度</span><span class="le">Core Tools & Concurrency Partitioning</span></h1>
+        <p class="lead-text">
+          <span class="lz">Xcode 内置 8 大核心工具，通过读写分区调度与 Read-before-edit SHA256 指纹校验杜绝竞态与脏写。</span>
+          <span class="le">Xcode provides 8 built-in core tools with read concurrency, serial write barriers, and SHA256 checksums.</span>
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><span class="lz">工具名称</span><span class="le">Tool</span></th>
+                <th><span class="lz">并发调度分类</span><span class="le">Concurrency</span></th>
+                <th><span class="lz">关键参数</span><span class="le">Key Parameters</span></th>
+                <th><span class="lz">功能说明</span><span class="le">Description</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>read_file</code></td>
+                <td><span class="badge badge-green">只读并发池</span></td>
+                <td><code>path, offset, limit</code></td>
+                <td><span class="lz">读取文件内容，支持大文件行号切片</span><span class="le">Read file content with slicing</span></td>
+              </tr>
+              <tr>
+                <td><code>edit_file</code></td>
+                <td><span class="badge badge-accent">串行屏障 (Serial)</span></td>
+                <td><code>path, old_str, new_str</code></td>
+                <td><span class="lz">基于 SHA256 指纹校验精确替换代码块</span><span class="le">Exact match replacement with SHA256 check</span></td>
+              </tr>
+              <tr>
+                <td><code>write_file</code></td>
+                <td><span class="badge badge-accent">串行屏障 (Serial)</span></td>
+                <td><code>path, content</code></td>
+                <td><span class="lz">新建或全量覆写文件</span><span class="le">Create or overwrite file</span></td>
+              </tr>
+              <tr>
+                <td><code>grep_search</code></td>
+                <td><span class="badge badge-green">只读并发池</span></td>
+                <td><code>query, path, regex</code></td>
+                <td><span class="lz">基于 ripgrep 执行极速全文或正则搜索</span><span class="le">Fast ripgrep text/regex search</span></td>
+              </tr>
+              <tr>
+                <td><code>glob_files</code></td>
+                <td><span class="badge badge-green">只读并发池</span></td>
+                <td><code>pattern, path</code></td>
+                <td><span class="lz">按 Glob 通配符快速检索项目文件路径</span><span class="le">Match filenames via glob patterns</span></td>
+              </tr>
+              <tr>
+                <td><code>bash</code></td>
+                <td><span class="badge badge-accent">串行屏障 (Serial)</span></td>
+                <td><code>command, timeout</code></td>
+                <td><span class="lz">在 Linux 沙箱或本地执行 Shell 命令</span><span class="le">Run shell in sandbox or host</span></td>
+              </tr>
+              <tr>
+                <td><code>todowrite</code></td>
+                <td><span class="badge badge-amber">状态串行</span></td>
+                <td><code>todos: [...]</code></td>
+                <td><span class="lz">更新任务状态机并在 TUI 与上下文中持久呈现</span><span class="le">Maintain structured todo progress</span></td>
+              </tr>
+              <tr>
+                <td><code>subagent</code></td>
+                <td><span class="badge badge-blue">独立 Session</span></td>
+                <td><code>prompt, role, model</code></td>
+                <td><span class="lz">启动独立事实账本的子代理执行复杂子任务</span><span class="le">Dispatch durable subagent</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#sessions">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 会话账本与分层压缩</span><span class="le">← Sessions & Context</span></span>
+          </a>
+          <a class="pager-btn" href="#security">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">权限引擎与 Linux 沙箱 →</span><span class="le">Security & Sandbox →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 9. SECURITY ================= -->
+      <article id="security" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">核心运行机制</span><span class="le">Core Operations</span> / <span>Security & Sandbox</span></div>
+        <h1><span class="lz">权限引擎与 Linux 沙箱</span><span class="le">Security, Permissions & Linux Sandbox</span></h1>
+        <p class="lead-text">
+          <span class="lz">PermissionEngine 规则鉴权、Reviewer 语义风控与 Linux Bubblewrap 命名空间进程硬化隔离。</span>
+          <span class="le">PermissionEngine, Reviewer model risk assessment, and Linux Bubblewrap namespace isolation.</span>
+        </p>
+
+        <h2><span class="lz">三层纵深防御架构</span><span class="le">Three-Tier Defense-in-depth Architecture</span></h2>
+        <div class="steps-list">
+          <div class="step-item">
+            <div class="step-num">01</div>
+            <div class="step-body">
+              <h4><span class="lz">决策层：PermissionEngine 静态规则判定</span><span class="le">Tier 1: PermissionEngine Static Gating</span></h4>
+              <p><span class="lz">通过 <code>findLast</code> 规则覆盖引擎，根据工具名称、Shell 命令前缀及路径通配符决定放行、拒绝或请求确认。</span><span class="le">Matches rules using findLast semantics based on tool name, shell command, and path globs.</span></p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">02</div>
+            <div class="step-body">
+              <h4><span class="lz">审查层：Reviewer Profile 动态语义风控</span><span class="le">Tier 2: Reviewer Profile Semantic Analysis</span></h4>
+              <p><span class="lz">在 Build 模式下，对于 Shell 命令和边界写操作，由轻量 Reviewer 模型分析其破坏性与依赖影响，低风险操作自动秒级放行。</span><span class="le">In Build mode, the Reviewer model evaluates commands semantically to auto-approve low-risk actions.</span></p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">03</div>
+            <div class="step-body">
+              <h4><span class="lz">隔离层：Linux Bubblewrap OS 命名空间沙箱</span><span class="le">Tier 3: Linux Bubblewrap Namespace Sandbox</span></h4>
+              <p><span class="lz">Linux 环境下所有 Shell 执行均放入 <code>bwrap</code> 沙箱中运行，提供不可穿透的操作系统级防御。</span><span class="le">All shell executions run inside a bwrap container with namespace-level isolation.</span></p>
+            </div>
+          </div>
+        </div>
+
+        <h2><span class="lz">沙箱挂载与凭据遮蔽清单</span><span class="le">Sandbox Mounts & Secret Masking Matrix</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><span class="lz">目标资源</span><span class="le">Target Resource</span></th>
+                <th><span class="lz">挂载模式</span><span class="le">Mount Mode</span></th>
+                <th><span class="lz">安全防护机制</span><span class="le">Security Guardrail</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>/usr, /bin, /lib, /etc</code></td>
+                <td><span class="badge badge-blue">只读 (ro-bind)</span></td>
+                <td><span class="lz">严禁篡改操作系统依赖与系统二进制文件</span><span class="le">Prevent host system corruption</span></td>
+              </tr>
+              <tr>
+                <td><code>项目工作区 / Workspace</code></td>
+                <td><span class="badge badge-green">读写 (bind)</span></td>
+                <td><span class="lz">允许正常源码读写与编译构建</span><span class="le">Allow normal development and builds</span></td>
+              </tr>
+              <tr>
+                <td><code>.git, .xcode, .agents</code></td>
+                <td><span class="badge badge-amber">强制重新挂载只读</span></td>
+                <td><span class="lz">严禁模型绕过版本控制篡改提交历史或破坏运行时状态</span><span class="le">Prevent history tampering or harness corruption</span></td>
+              </tr>
+              <tr>
+                <td><code>~/.ssh, ~/.aws, ~/.kube, ~/.gnupg</code></td>
+                <td><span class="badge badge-accent">全面遮蔽 (Masked)</span></td>
+                <td><span class="lz">挂载为空只读目录，杜绝私钥凭据泄露</span><span class="le">Masked with empty dirs to prevent credential leakage</span></td>
+              </tr>
+              <tr>
+                <td><code>.env, .env.*</code></td>
+                <td><span class="badge badge-accent">内容清空遮蔽</span></td>
+                <td><span class="lz">沙箱内部视角文件为空，防止敏感密钥被读取</span><span class="le">Masked as empty files inside sandbox</span></td>
+              </tr>
+              <tr>
+                <td><code>Network (网络)</code></td>
+                <td><span class="badge badge-accent">unshare-net 隔离</span></td>
+                <td><span class="lz">默认切断网络命名空间，阻止未授权数据外发</span><span class="le">Disabled by default via network namespace isolation</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#tools">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 核心工具箱与并发调度</span><span class="le">← Core Tools</span></span>
+          </a>
+          <a class="pager-btn" href="#configuration">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">配置系统与设置浏览器 →</span><span class="le">Configuration →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 10. CONFIGURATION ================= -->
+      <article id="configuration" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">定制与扩展</span><span class="le">Customize</span> / <span>Configuration</span></div>
+        <h1><span class="lz">配置系统与设置浏览器</span><span class="le">Configuration & Settings Browser</span></h1>
+        <p class="lead-text">
+          <span class="lz">四级配置覆盖发现栈；通过 <code>xcode config</code> 或 <code>/config</code> 启动交互式配置浏览器。</span>
+          <span class="le">4-level hierarchical configuration discovery stack with interactive settings browser.</span>
+        </p>
+
+        <h2><span class="lz">配置发现优先级栈 (从高到低)</span><span class="le">Configuration Precedence Stack</span></h2>
+        <div class="steps-list">
+          <div class="step-item">
+            <div class="step-num">01</div>
+            <div class="step-body">
+              <h4><span class="lz">命令行参数 (CLI Arguments)</span><span class="le">CLI Arguments</span></h4>
+              <p><code>xcode --mode plan --model deepseek_chat/deepseek-v4-flash</code></p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">02</div>
+            <div class="step-body">
+              <h4><span class="lz">环境变量 (Environment Variables)</span><span class="le">Environment Variables</span></h4>
+              <p><code>XCODE_MODE=build</code>, <code>DEEPSEEK_API_KEY=...</code></p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">03</div>
+            <div class="step-body">
+              <h4><span class="lz">项目级配置 (Project Configuration)</span><span class="le">Project Configuration</span></h4>
+              <p><code>./.xcode/xcode.config.json</code> 或 <code>./xcode.config.json</code></p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-num">04</div>
+            <div class="step-body">
+              <h4><span class="lz">用户全局配置 (Global Configuration)</span><span class="le">Global Configuration</span></h4>
+              <p><code>~/.xcode/xcode.config.json</code></p>
+            </div>
+          </div>
+        </div>
+
+        <h2><span class="lz">核心配置字段速查</span><span class="le">Core Configuration Fields</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><span class="lz">配置小节</span><span class="le">Section</span></th>
+                <th><span class="lz">字段名称</span><span class="le">Field</span></th>
+                <th><span class="lz">类型</span><span class="le">Type</span></th>
+                <th><span class="lz">说明与默认值</span><span class="le">Description & Default</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>provider</code></td>
+                <td><code>default_transport</code></td>
+                <td><span class="type-tag">string</span></td>
+                <td><span class="lz">默认 Provider，默认 <code>deepseek_chat</code></span><span class="le">Default provider, default: deepseek_chat</span></td>
+              </tr>
+              <tr>
+                <td><code>runtime</code></td>
+                <td><code>execution_mode</code></td>
+                <td><span class="type-tag">string</span></td>
+                <td><span class="lz">默认执行模式：<code>build</code> / <code>plan</code> / <code>act</code></span><span class="le">Execution mode: build / plan / act</span></td>
+              </tr>
+              <tr>
+                <td><code>execution</code></td>
+                <td><code>sandbox</code></td>
+                <td><span class="type-tag">boolean</span></td>
+                <td><span class="lz">是否启用 Linux Bubblewrap 沙箱，默认 <code>true</code></span><span class="le">Enable Linux bwrap sandbox, default: true</span></td>
+              </tr>
+              <tr>
+                <td><code>agent</code></td>
+                <td><code>compaction_threshold</code></td>
+                <td><span class="type-tag">float</span></td>
+                <td><span class="lz">上下文压缩水位线，默认 <code>0.70</code> (70%)</span><span class="le">Compaction trigger threshold, default: 0.70</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#security">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 权限引擎与 Linux 沙箱</span><span class="le">← Security & Sandbox</span></span>
+          </a>
+          <a class="pager-btn" href="#mcp">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">MCP 服务扩展 →</span><span class="le">MCP Servers →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 11. MCP ================= -->
+      <article id="mcp" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">定制与扩展</span><span class="le">Customize</span> / <span>MCP</span></div>
+        <h1><span class="lz">MCP (Model Context Protocol) 扩展</span><span class="le">MCP Server Integration</span></h1>
+        <p class="lead-text">
+          <span class="lz">通过标准 stdio 协议无缝接入 SQLite、GitLab、Sentry 等外部工具生态。</span>
+          <span class="le">Connect to external databases, dev tools, and APIs via Model Context Protocol stdio servers.</span>
+        </p>
+
+        <h2><span class="lz">配置 MCP 服务器</span><span class="le">Configuring MCP Servers</span></h2>
+        <p><span class="lz">在 <code>.xcode/mcp_config.json</code> 中添加服务定义：</span><span class="le">Define servers in .xcode/mcp_config.json:</span></p>
+
+        <div class="code-box">
+          <div class="code-header"><span>.xcode/mcp_config.json</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code>{
+  <span class="c">"mcpServers"</span>: {
+    <span class="c">"sqlite"</span>: {
+      <span class="c">"command"</span>: <span class="p">"uvx"</span>,
+      <span class="c">"args"</span>: [<span class="p">"mcp-server-sqlite"</span>, <span class="p">"--db-path"</span>, <span class="p">"./data.db"</span>]
+    },
+    <span class="c">"gitlab"</span>: {
+      <span class="c">"command"</span>: <span class="p">"npx"</span>,
+      <span class="c">"args"</span>: [<span class="p">"-y"</span>, <span class="p">"@modelcontextprotocol/server-gitlab"</span>],
+      <span class="c">"env"</span>: {
+        <span class="c">"GITLAB_PERSONAL_ACCESS_TOKEN"</span>: <span class="p">"glpat-..."</span>
+      }
+    }
+  }
+}</code></pre>
+        </div>
+
+        <h2><span class="lz">MCP 命令与状态调试</span><span class="le">MCP Inspection & Reloading</span></h2>
+        <div class="code-box">
+          <div class="code-header"><span>REPL / TUI</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code><span class="c"># 查看所有活跃的 MCP 连接与可用工具清单</span>
+/mcp status
+
+<span class="c"># 热重载 MCP 配置文件</span>
+/mcp reload</code></pre>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#configuration">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 配置系统与设置浏览器</span><span class="le">← Configuration</span></span>
+          </a>
+          <a class="pager-btn" href="#skills">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">Skills 技能系统 →</span><span class="le">Skills System →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 12. SKILLS ================= -->
+      <article id="skills" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">定制与扩展</span><span class="le">Customize</span> / <span>Skills</span></div>
+        <h1><span class="lz">Skills 技能系统</span><span class="le">Skills System</span></h1>
+        <p class="lead-text">
+          <span class="lz">模块化封装领域规范与 Standard Operating Procedures (SOP)，通过 Frontmatter 描述与渐进式按需加载。</span>
+          <span class="le">Modular SOP encapsulation with frontmatter metadata and progressive on-demand disclosure.</span>
+        </p>
+
+        <h2><span class="lz">Skill 目录结构规范</span><span class="le">Skill Structure Specification</span></h2>
+        <div class="code-box">
+          <div class="code-header"><span>File Structure</span></div>
+          <pre><code>.xcode/skills/refactor-helper/
+├── SKILL.md          <span class="c"># 必须：包含 YAML Frontmatter 与核心指导说明</span>
+├── scripts/          <span class="c"># 可选：辅助脚本</span>
+└── references/       <span class="c"># 可选：参考规范与示例</span></code></pre>
+        </div>
+
+        <h2><span class="lz">SKILL.md 编写示例</span><span class="le">SKILL.md Example</span></h2>
+        <div class="code-box">
+          <div class="code-header"><span>SKILL.md</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code><span class="c">---</span>
+name: refactor-helper
+description: 专门用于执行大型代码库重构的指导规范与架构检查单
+<span class="c">---</span>
+
+<span class="p"># 代码重构规范</span>
+
+进行代码重构时，请严格遵守以下步骤：
+1. 先编写重构前的基准测试；
+2. 提取新接口并保持向后兼容；
+3. 执行 `pytest` 校验未破坏任何既有行为。</code></pre>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#mcp">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← MCP 服务扩展</span><span class="le">← MCP Servers</span></span>
+          </a>
+          <a class="pager-btn" href="#subagents">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">Subagents 子代理架构 →</span><span class="le">Subagents →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 13. SUBAGENTS ================= -->
+      <article id="subagents" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">定制与扩展</span><span class="le">Customize</span> / <span>Subagents</span></div>
+        <h1><span class="lz">Subagents 子代理架构</span><span class="le">Subagents Architecture</span></h1>
+        <p class="lead-text">
+          <span class="lz">基于独立 Durable Session 的子代理委派，具备独立谱系追溯、Context 预算隔离与 Child-first 逆序回收。</span>
+          <span class="le">Durable session-backed subagents with lineage tracking, isolated context budgets, and child-first cleanup.</span>
+        </p>
+
+        <h2><span class="lz">子代理协作机制</span><span class="le">Subagent Collaboration Mechanisms</span></h2>
+        <div class="card-grid">
+          <div class="card-box">
+            <h4><span>1. 独立事实账本</span> <span class="badge badge-green">Isolated</span></h4>
+            <p><span class="lz">子代理拥有独立的 Session ID 与 JSONL 账本，避免子任务长篇输出污染主会话上下文。</span><span class="le">Subagents run on dedicated session logs, preventing prompt bloating in the main conversation.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>2. 谱系追溯与监控</span> <span class="badge badge-blue">Lineage</span></h4>
+            <p><span class="lz">账本记录 <code>subagent_run_created</code> 事件，明确父子调用关系与运行时上下文。</span><span class="le">Tracks subagent_run_created events for parent-child lineage auditing.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>3. Child-first 逆序回收</span> <span class="badge badge-accent">Safe Settle</span></h4>
+            <p><span class="lz">会话关闭或中断时，严格逆序等待子代理收敛，防止孤儿进程与文件损坏。</span><span class="le">Ensures graceful reverse teardown to prevent orphaned processes or disk corruption.</span></p>
+          </div>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#skills">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← Skills 技能系统</span><span class="le">← Skills System</span></span>
+          </a>
+          <a class="pager-btn" href="#memory">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">长期记忆系统 (Memory) →</span><span class="le">Long-term Memory →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 14. MEMORY ================= -->
+      <article id="memory" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">定制与扩展</span><span class="le">Customize</span> / <span>Memory</span></div>
+        <h1><span class="lz">长期记忆系统 (Memory)</span><span class="le">Long-term Memory System</span></h1>
+        <p class="lead-text">
+          <span class="lz">项目级 <code>MEMORY.md</code> 与用户偏好分离持久化存储；基于 BM25 的轻量级确定性按需检索。</span>
+          <span class="le">Separated project and user MEMORY.md storage with lightweight deterministic BM25 search.</span>
+        </p>
+
+        <h2><span class="lz">记忆管理指令</span><span class="le">Memory Commands</span></h2>
+        <div class="code-box">
+          <div class="code-header"><span>REPL / TUI</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code><span class="c"># 列出当前所有已记住的项目规范与偏好</span>
+/memory list
+
+<span class="c"># 手动追加一条长期项目记忆</span>
+/memory add "本项目所有新 API 必须遵循 RESTful 规范并返回统一 Result 格式"
+
+<span class="c"># 检索关于某主题的记忆</span>
+/memory search "数据库迁移"</code></pre>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#subagents">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← Subagents 子代理架构</span><span class="le">← Subagents</span></span>
+          </a>
+          <a class="pager-btn" href="#hooks">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">外部事件 Hooks →</span><span class="le">External Hooks →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 15. HOOKS ================= -->
+      <article id="hooks" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">定制与扩展</span><span class="le">Customize</span> / <span>Hooks</span></div>
+        <h1><span class="lz">外部事件 Hooks</span><span class="le">External Event Hooks</span></h1>
+        <p class="lead-text">
+          <span class="lz">在工具执行前后注入自定义命令，通过 JSON Stdin/Stdout 实现动态策略拦截与自动格式化联动。</span>
+          <span class="le">Attach external scripts before or after tool runs for dynamic policy gating and formatting.</span>
+        </p>
+
+        <h2><span class="lz">Hook 配置范例</span><span class="le">Hook Configuration</span></h2>
+        <div class="code-box">
+          <div class="code-header"><span>xcode.config.json</span><button class="code-copy-btn" onclick="copyCode(this)">Copy</button></div>
+          <pre><code>{
+  <span class="c">"hooks"</span>: {
+    <span class="c">"entries"</span>: [
+      {
+        <span class="c">"event"</span>: <span class="p">"pre_tool"</span>,
+        <span class="c">"tool"</span>: <span class="p">"bash"</span>,
+        <span class="c">"command"</span>: <span class="p">"./scripts/check_dangerous_commands.sh"</span>
+      },
+      {
+        <span class="c">"event"</span>: <span class="p">"post_tool"</span>,
+        <span class="c">"tool"</span>: <span class="p">"edit_file"</span>,
+        <span class="c">"command"</span>: <span class="p">"uv run ruff format src/"</span>
+      }
+    ]
+  }
+}</code></pre>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#memory">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 长期记忆系统 (Memory)</span><span class="le">← Long-term Memory</span></span>
+          </a>
+          <a class="pager-btn" href="#examples">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">实战场景与工作流 →</span><span class="le">Workflows & Scenarios →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 16. EXAMPLES ================= -->
+      <article id="examples" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">实战与参考</span><span class="le">Reference</span> / <span>Workflows</span></div>
+        <h1><span class="lz">实战场景与工作流指南</span><span class="le">Real-World Workflows & Scenarios</span></h1>
+        <p class="lead-text">
+          <span class="lz">覆盖日常特性开发、重构调研、分支探索、MCP 扩展与沙箱测试等典型实战场景。</span>
+          <span class="le">End-to-end practical walkthroughs for feature development, refactoring, and tool integrations.</span>
+        </p>
+
+        <div class="card-grid">
+          <div class="card-box">
+            <h4><span>场景 1：大型陌生项目代码理解</span></h4>
+            <p><span class="lz">启动 <code>xcode</code> 输入 <code>/plan 梳理系统架构与核心数据流</code>，Agent 并发读取关键模块并在 <code>.xcode/plans/</code> 下输出完备架构说明。</span><span class="le">Explore foreign codebases in Plan mode with concurrent reading and zero side effects.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>场景 2：Plan 到 Build 两阶段新特性</span></h4>
+            <p><span class="lz">先用 <code>/plan</code> 明确接口方案与测试用例，审阅无误后输入 <code>/build</code>，由沙箱与 Reviewer 自动化编写代码并运行测试。</span><span class="le">Two-stage development: design under Plan, then execute autonomously under Build.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>场景 3：架构重构与一键快照撤销</span></h4>
+            <p><span class="lz">尝试对核心基类进行重构，若重构后基准测试未通过，输入 <code>/undo</code> 毫秒级将所有文件回退至修改前状态。</span><span class="le">Safely refactor complex modules with instant file-level atomic /undo rollback.</span></p>
+          </div>
+          <div class="card-box">
+            <h4><span>场景 4：MCP 数据库分析联动</span></h4>
+            <p><span class="lz">配置 SQLite MCP 服务后，直接提问 <code>查询用户表结构并生成对应 Pydantic 模型</code>，Agent 自动调用 MCP 工具完成。</span><span class="le">Seamlessly query databases via MCP stdio servers to generate models and migrations.</span></p>
+          </div>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#hooks">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 外部事件 Hooks</span><span class="le">← External Hooks</span></span>
+          </a>
+          <a class="pager-btn" href="#slash-commands">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">Slash 命令完全手册 →</span><span class="le">Slash Commands →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 17. SLASH COMMANDS ================= -->
+      <article id="slash-commands" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">实战与参考</span><span class="le">Reference</span> / <span>Slash Commands</span></div>
+        <h1><span class="lz">Slash 命令完全参考手册</span><span class="le">Slash Commands Full Reference</span></h1>
+        <p class="lead-text">
+          <span class="lz">Xcode 提供了 30+ 条以斜杠 <code>/</code> 开头的交互指令，支持 Tab 自动补全。</span>
+          <span class="le">Complete categorized reference of 30+ slash commands across all functional areas.</span>
+        </p>
+
+        <h2><span class="lz">执行模式与流程控制</span><span class="le">Execution Modes</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th><span class="lz">命令</span><span class="le">Command</span></th><th><span class="lz">语法与参数</span><span class="le">Syntax</span></th><th><span class="lz">说明</span><span class="le">Description</span></th></tr></thead>
+            <tbody>
+              <tr><td><code>/plan</code></td><td><code>/plan [目标]</code></td><td><span class="lz">切换至只读 Plan 规划模式</span><span class="le">Switch to read-only planning mode</span></td></tr>
+              <tr><td><code>/build</code></td><td><code>/build</code></td><td><span class="lz">切换至 Build 自动构建模式</span><span class="le">Switch to build mode</span></td></tr>
+              <tr><td><code>/act</code></td><td><code>/act [需求]</code></td><td><span class="lz">切换至 Act 人工确认模式</span><span class="le">Switch to act mode</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2><span class="lz">会话与快照管理</span><span class="le">Session & Snapshot Controls</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th><span class="lz">命令</span><span class="le">Command</span></th><th><span class="lz">语法与参数</span><span class="le">Syntax</span></th><th><span class="lz">说明</span><span class="le">Description</span></th></tr></thead>
+            <tbody>
+              <tr><td><code>/undo</code></td><td><code>/undo [N]</code></td><td><span class="lz">原子回滚文件级快照修改</span><span class="le">Atomically undo file modifications</span></td></tr>
+              <tr><td><code>/fork</code></td><td><code>/fork [turn_id]</code></td><td><span class="lz">从指定消息序号分支全新会话</span><span class="le">Branch new session from turn N</span></td></tr>
+              <tr><td><code>/rewind</code></td><td><code>/rewind [N]</code></td><td><span class="lz">撤销最近 N 轮对话历史</span><span class="le">Rewind recent N conversational turns</span></td></tr>
+              <tr><td><code>/compact</code></td><td><code>/compact</code></td><td><span class="lz">手动触发分层上下文压缩</span><span class="le">Trigger layered context compaction</span></td></tr>
+              <tr><td><code>/context</code></td><td><code>/context</code></td><td><span class="lz">查看 Token 消耗与压缩状态</span><span class="le">Inspect token usage and compaction status</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2><span class="lz">模型、配置与扩展</span><span class="le">Model, Config & Extensions</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th><span class="lz">命令</span><span class="le">Command</span></th><th><span class="lz">语法与参数</span><span class="le">Syntax</span></th><th><span class="lz">说明</span><span class="le">Description</span></th></tr></thead>
+            <tbody>
+              <tr><td><code>/model</code></td><td><code>/model [profile/model:thinking]</code></td><td><span class="lz">查看或切换当前活跃模型</span><span class="le">Inspect or switch active model</span></td></tr>
+              <tr><td><code>/config</code></td><td><code>/config [setting]</code></td><td><span class="lz">打开交互式设置浏览器</span><span class="le">Open interactive settings browser</span></td></tr>
+              <tr><td><code>/mcp</code></td><td><code>/mcp status|reload</code></td><td><span class="lz">查看或热重载 MCP 服务</span><span class="le">Inspect or reload MCP connections</span></td></tr>
+              <tr><td><code>/memory</code></td><td><code>/memory list|add|search</code></td><td><span class="lz">查看、追加或检索长期记忆</span><span class="le">List, add or search long-term memory</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#examples">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← 实战场景与工作流</span><span class="le">← Workflows</span></span>
+          </a>
+          <a class="pager-btn" href="#cli">
+            <span class="pager-label"><span class="lz">下一篇</span><span class="le">Next</span></span>
+            <span class="pager-title"><span class="lz">CLI 命令行参数速查 →</span><span class="le">CLI Options →</span></span>
+          </a>
+        </div>
+      </article>
+
+      <!-- ================= 18. CLI ================= -->
+      <article id="cli" class="doc-page">
+        <div class="breadcrumb"><span class="lz">文档</span><span class="le">Docs</span> / <span class="lz">实战与参考</span><span class="le">Reference</span> / <span>CLI</span></div>
+        <h1><span class="lz">CLI 命令行参数与子命令速查</span><span class="le">CLI Options & Subcommands Reference</span></h1>
+        <p class="lead-text">
+          <span class="lz">Xcode 命令行入口、子命令与全局 Flags 速查参考手册。</span>
+          <span class="le">Quick reference for Xcode CLI entry points, subcommands, and global flags.</span>
+        </p>
+
+        <h2><span class="lz">子命令列表</span><span class="le">Subcommands</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th><span class="lz">子命令</span><span class="le">Subcommand</span></th><th><span class="lz">语法</span><span class="le">Syntax</span></th><th><span class="lz">功能说明</span><span class="le">Description</span></th></tr></thead>
+            <tbody>
+              <tr><td><code>tui</code> (默认)</td><td><code>xcode [tui]</code></td><td><span class="lz">启动全屏终端交互界面</span><span class="le">Launch fullscreen Textual TUI</span></td></tr>
+              <tr><td><code>cli</code></td><td><code>xcode cli</code></td><td><span class="lz">启动标准 REPL 命令行模式</span><span class="le">Launch standard REPL interface</span></td></tr>
+              <tr><td><code>setup</code></td><td><code>xcode setup</code></td><td><span class="lz">启动交互式首次配置向导</span><span class="le">Launch first-run setup wizard</span></td></tr>
+              <tr><td><code>config</code></td><td><code>xcode config</code></td><td><span class="lz">打开交互式设置浏览器</span><span class="le">Launch interactive settings browser</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2><span class="lz">常用全局参数 (Flags)</span><span class="le">Global Flags</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th><span class="lz">Flag 参数</span><span class="le">Flag</span></th><th><span class="lz">类型</span><span class="le">Type</span></th><th><span class="lz">说明</span><span class="le">Description</span></th></tr></thead>
+            <tbody>
+              <tr><td><code>-p, --prompt</code></td><td><span class="type-tag">string</span></td><td><span class="lz">单轮提问模式，执行完成后直接退出</span><span class="le">Single prompt execution mode</span></td></tr>
+              <tr><td><code>--resume</code></td><td><span class="type-tag">boolean</span></td><td><span class="lz">恢复当前项目最近一次会话</span><span class="le">Resume the most recent session</span></td></tr>
+              <tr><td><code>--mode</code></td><td><span class="type-tag">enum</span></td><td><span class="lz">指定启动执行模式：<code>plan</code> / <code>build</code> / <code>act</code></span><span class="le">Execution mode: plan / build / act</span></td></tr>
+              <tr><td><code>--project-root</code></td><td><span class="type-tag">path</span></td><td><span class="lz">指定项目工作区根目录路径</span><span class="le">Override project root directory</span></td></tr>
+              <tr><td><code>--debug</code></td><td><span class="type-tag">boolean</span></td><td><span class="lz">输出详细调试日志与网络事件</span><span class="le">Enable verbose debug logging</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="docs-pager">
+          <a class="pager-btn" href="#slash-commands">
+            <span class="pager-label"><span class="lz">上一篇</span><span class="le">Previous</span></span>
+            <span class="pager-title"><span class="lz">← Slash 命令完全手册</span><span class="le">← Slash Commands</span></span>
+          </a>
+          <a class="pager-btn" href="#design-philosophy">
+            <span class="pager-label"><span class="lz">返回起点</span><span class="le">Back to Start</span></span>
+            <span class="pager-title"><span class="lz">设计理念与核心实现 →</span><span class="le">Design Philosophy →</span></span>
+          </a>
+        </div>
+      </article>
+
+    </main>
+
+    <!-- Right On This Page TOC -->
+    <aside class="docs-toc">
+      <div class="toc-title"><span class="lz">本页目录</span><span class="le">On this page</span></div>
+      <ul class="toc-list" id="tocList"></ul>
+    </aside>
+
+  </div>
+
+  <script>
+    (function() {
+      // 1. Language Toggle
+      var langToggle = document.getElementById('langToggle');
+      if (langToggle) {
+        langToggle.addEventListener('click', function() {
+          var cur = document.documentElement.dataset.lang || 'zh';
+          var next = cur === 'zh' ? 'en' : 'zh';
+          document.documentElement.dataset.lang = next;
+          document.documentElement.lang = next === 'zh' ? 'zh-CN' : 'en';
+          try { localStorage.setItem('xcode-lang', next); } catch(e) {}
+        });
+      }
+
+      // 2. Theme Toggle
+      var themeToggle = document.getElementById('themeToggle');
+      if (themeToggle) {
+        var modes = ['auto', 'light', 'dark'];
+        function applyTheme(mode) {
+          var icons = themeToggle.querySelectorAll('.theme-icon');
+          icons.forEach(function(ic) { ic.classList.toggle('active', ic.dataset.mode === mode); });
+          if (mode === 'auto') {
+            document.documentElement.removeAttribute('data-theme');
+            try { localStorage.removeItem('xcode-theme'); } catch(e) {}
+          } else {
+            document.documentElement.dataset.theme = mode;
+            try { localStorage.setItem('xcode-theme', mode); } catch(e) {}
+          }
+        }
+        var curTheme = document.documentElement.dataset.theme || 'auto';
+        applyTheme(curTheme);
+        themeToggle.addEventListener('click', function() {
+          var cur = document.documentElement.dataset.theme || 'auto';
+          var next = modes[(modes.indexOf(cur) + 1) % modes.length];
+          applyTheme(next);
+        });
+      }
+
+      // 3. Mobile Sidebar Toggle
+      var sidebarToggle = document.getElementById('sidebarToggle');
+      var docsSidebar = document.getElementById('docsSidebar');
+      if (sidebarToggle && docsSidebar) {
+        sidebarToggle.addEventListener('click', function() {
+          docsSidebar.classList.toggle('open');
+        });
+      }
+
+      // 4. Page Routing & TOC Generator
+      var pages = document.querySelectorAll('.doc-page');
+      var sidebarLinks = document.querySelectorAll('.sidebar-link');
+      var tocList = document.getElementById('tocList');
+
+      function buildTOC(activePage) {
+        if (!tocList) return;
+        tocList.innerHTML = '';
+        var headings = activePage.querySelectorAll('h2, h3');
+        headings.forEach(function(h, idx) {
+          if (!h.id) { h.id = 'heading-' + idx; }
+          var li = document.createElement('li');
+          var a = document.createElement('a');
+          a.className = 'toc-link ' + h.tagName.toLowerCase();
+          a.href = '#' + h.id;
+          a.innerHTML = h.innerHTML.replace(/^#+\s*/, '');
+          a.addEventListener('click', function(e) {
+            e.preventDefault();
+            h.scrollIntoView({ behavior: 'smooth' });
+          });
+          li.appendChild(a);
+          tocList.appendChild(li);
+        });
+      }
+
+      function switchPage(pageId) {
+        var targetPage = document.getElementById(pageId) || document.getElementById('design-philosophy');
+        if (!targetPage) return;
+
+        pages.forEach(function(p) { p.classList.remove('active'); });
+        targetPage.classList.add('active');
+
+        sidebarLinks.forEach(function(l) {
+          l.classList.toggle('active', l.getAttribute('href') === '#' + targetPage.id);
+        });
+
+        buildTOC(targetPage);
+        window.scrollTo({ top: 0, behavior: 'instant' });
+
+        if (docsSidebar && docsSidebar.classList.contains('open')) {
+          docsSidebar.classList.remove('open');
+        }
+      }
+
+      function handleHashChange() {
+        var hash = (window.location.hash || '#design-philosophy').substring(1);
+        switchPage(hash);
+      }
+
+      window.addEventListener('hashchange', handleHashChange);
+      handleHashChange();
+
+      // Search Filter
+      var docSearch = document.getElementById('docSearch');
+      if (docSearch) {
+        docSearch.addEventListener('input', function(e) {
+          var val = e.target.value.toLowerCase().trim();
+          sidebarLinks.forEach(function(link) {
+            var text = link.textContent.toLowerCase();
+            link.style.display = (text.indexOf(val) !== -1 || !val) ? 'flex' : 'none';
+          });
+        });
+      }
+    })();
+
+    // Copy Code Helper
+    function copyCode(btn) {
+      var pre = btn.closest('.code-box, .arch-diagram').querySelector('pre');
+      if (pre) {
+        navigator.clipboard.writeText(pre.innerText).then(function() {
+          var original = btn.innerText;
+          btn.innerText = 'Copied!';
+          setTimeout(function() { btn.innerText = original; }, 1500);
+        });
+      }
+    }
+  </script>
+</body>
+</html>

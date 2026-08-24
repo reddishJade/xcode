@@ -336,6 +336,22 @@
       background: var(--paper-3); border: 1px solid var(--line-soft); color: var(--ink-soft);
     }
 
+    /* Workflows */
+    .workflow-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .workflow-card {
+      border: 1px solid var(--line-soft); border-radius: 14px; padding: 24px;
+      background: var(--paper); transition: transform .2s, border-color .2s;
+    }
+    .workflow-card:hover { transform: translateY(-3px); border-color: var(--clay); }
+    .workflow-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px; border-radius: 8px;
+      background: color-mix(in srgb, var(--clay) 12%, transparent);
+      color: var(--clay); margin-bottom: 14px; font-family: var(--font-mono); font-weight: 600; font-size: 14px;
+    }
+    .workflow-card h3 { font-family: var(--font-display); font-weight: 500; font-size: 1.18rem; margin-bottom: 8px; }
+    .workflow-card p { font-size: .92rem; color: var(--ink-soft); line-height: 1.55; }
+
     /* Slash commands */
     .cmd-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
     .cmd-cell {
@@ -381,16 +397,34 @@
     .bench-tag.warn { background: color-mix(in srgb, var(--clay) 12%, transparent); color: var(--clay-2); }
 
     /* Docs */
-    .docs-list { display: flex; flex-direction: column; border-top: 1px solid var(--line-soft); }
-    .doc-link {
-      display: flex; align-items: baseline; justify-content: space-between; gap: 20px;
-      padding: 20px 0; border-bottom: 1px solid var(--line-soft);
-      transition: color .2s, padding-left .2s;
+    .docs-hero-card {
+      display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 40px; align-items: center;
+      background: var(--paper-2); border: 1px solid var(--line); border-radius: 16px;
+      padding: 44px; margin-top: 10px;
     }
-    .doc-link:hover { color: var(--clay); padding-left: 10px; }
-    .doc-link strong { font-family: var(--font-display); font-weight: 500; font-size: 1.15rem; }
-    .doc-link span { color: var(--ink-soft); font-size: .95rem; }
-    .doc-link svg { flex-shrink: 0; width: 16px; height: 16px; color: var(--clay); }
+    .docs-hero-badge {
+      display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono);
+      font-size: 13px; color: var(--clay); background: var(--paper-3); padding: 4px 12px;
+      border-radius: 999px; border: 1px solid var(--line-soft); margin-bottom: 16px;
+    }
+    .docs-hero-left h3 {
+      font-family: var(--font-display); font-weight: 500; font-size: 1.75rem;
+      margin: 0 0 16px; color: var(--ink); line-height: 1.3;
+    }
+    .docs-hero-left p {
+      color: var(--ink-soft); font-size: 1.02rem; line-height: 1.68; margin: 0 0 28px;
+    }
+    .docs-hero-topics {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    }
+    .topic-chip {
+      display: flex; align-items: center; gap: 8px; background: var(--paper-3);
+      border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 14px;
+      font-size: 13px; font-family: var(--font-mono); color: var(--ink-soft);
+    }
+    .topic-chip .chip-dot {
+      width: 6px; height: 6px; border-radius: 999px; background: var(--clay); flex-shrink: 0;
+    }
 
     /* Footer */
     footer { padding: 50px 0 60px; border-top: 1px solid var(--line); }
@@ -406,12 +440,14 @@
       .features { grid-template-columns: 1fr; }
       .feature:nth-child(odd) { border-right: none; }
       .install-grid, .bench-grid { grid-template-columns: 1fr; }
+      .workflow-grid { grid-template-columns: repeat(2, 1fr); }
       .cmd-grid { grid-template-columns: repeat(2, 1fr); }
       .nav-links { display: none; }
     }
     @media (max-width: 560px) {
       .hero { padding-top: 120px; }
       .stats { gap: 14px; }
+      .workflow-grid { grid-template-columns: 1fr; }
       .cmd-grid { grid-template-columns: 1fr; }
       .arch-row { grid-template-columns: 1fr; gap: 8px; }
       .term-body { font-size: 12px; padding: 16px; }
@@ -438,9 +474,11 @@
       <div class="nav-links">
         <a href="#features"><span class="lz">特性</span><span class="le">Features</span></a>
         <a href="#install"><span class="lz">安装</span><span class="le">Install</span></a>
+        <a href="#workflows"><span class="lz">场景</span><span class="le">Workflows</span></a>
+        <a href="#commands"><span class="lz">命令</span><span class="le">Commands</span></a>
         <a href="#architecture"><span class="lz">架构</span><span class="le">Architecture</span></a>
         <a href="#benchmarks">Benchmark</a>
-        <a href="#docs"><span class="lz">文档</span><span class="le">Docs</span></a>
+        <a href="docs.html"><span class="lz">文档</span><span class="le">Docs</span></a>
       </div>
     </div>
     <div class="nav-right">
@@ -533,8 +571,8 @@
         </article>
         <article class="feature reveal">
           <span class="feature-num">04</span>
-          <h3><span class="lz">权限、审计与脱敏</span><span class="le">Permissions, audit & redaction</span></h3>
-          <p><span class="lz">PermissionEngine 统一权限判定与输出脱敏；JsonlAuditLogger 落盘审计日志；shell 效果分析器对无法保守解析的命令请求确认。</span><span class="le">PermissionEngine centralizes gating and output redaction; JsonlAuditLogger persists an audit trail; a shell-effect analyzer asks before commands it cannot parse conservatively.</span></p>
+          <h3><span class="lz">权限、审计与沙箱</span><span class="le">Permissions, audit & sandbox</span></h3>
+          <p><span class="lz">PermissionEngine 统一权限判定与脱敏；JsonlAuditLogger 记录审计日志；Linux 下 Agent shell 默认在 bubblewrap 沙箱中运行（网络隔离与路径保护）。</span><span class="le">PermissionEngine centralizes gating and redaction; JsonlAuditLogger persists an audit trail; Linux agent shell runs inside a bubblewrap sandbox by default (network isolation & path protection).</span></p>
         </article>
         <article class="feature reveal">
           <span class="feature-num">05</span>
@@ -566,14 +604,14 @@
             <div class="step-num">1</div>
             <div>
               <h4><span class="lz">克隆并安装</span><span class="le">Clone & install</span></h4>
-              <p><span class="lz">使用 uv 以 editable 模式安装；也可使用 pip。</span><span class="le">Install in editable mode with uv, or use pip.</span></p>
+              <p><span class="lz">使用 uv 以 editable 模式安装（Linux 默认沙箱需要 bubblewrap / bwrap）。</span><span class="le">Install in editable mode with uv (Linux default sandbox requires bubblewrap / bwrap).</span></p>
             </div>
           </div>
           <div class="step reveal">
             <div class="step-num">2</div>
             <div>
               <h4><span class="lz">配置 Provider</span><span class="le">Configure a provider</span></h4>
-              <p><span class="lz">运行交互式向导，或手动添加 OpenAI / DeepSeek / ChatGLM / MiMo profile。</span><span class="le">Run the interactive wizard, or manually add an OpenAI / DeepSeek / ChatGLM / MiMo profile.</span></p>
+              <p><span class="lz">运行 xcode setup 交互向导，或配置 OpenAI / DeepSeek / ChatGLM / MiMo profile。</span><span class="le">Run the interactive xcode setup wizard, or configure an OpenAI / DeepSeek / ChatGLM / MiMo profile.</span></p>
             </div>
           </div>
           <div class="step reveal">
@@ -584,8 +622,8 @@
             </div>
           </div>
           <p class="sandbox-note reveal">
-            <span class="lz"><strong>安全提示：</strong>Xcode 不为 agent 提供 OS 级沙箱。权限提示与 shell 效果分析仅用于辅助确认，不构成安全隔离；需要隔离时请在容器或虚拟机中运行。</span>
-            <span class="le"><strong>Safety note:</strong> Xcode does not provide an OS-level sandbox. Permission prompts and shell-effect analysis only help you confirm operations; they are not isolation. Run Xcode in a container or VM when isolation is required.</span>
+            <span class="lz"><strong>沙箱与安全：</strong>Linux 下 Agent 的 bash 命令默认在 bubblewrap 沙箱中运行（工作区与 /tmp 可写、宿主其余路径只读、凭据遮蔽、网络隔离）；权限引擎与自动 reviewer 负责操作审批。</span>
+            <span class="le"><strong>Sandbox & Safety:</strong> On Linux, agent bash commands run inside a bubblewrap sandbox by default (writable workspace & /tmp, read-only host, credential masking, network isolation); the permission engine and auto-reviewer handle operation approvals.</span>
           </p>
         </div>
 
@@ -599,8 +637,8 @@
 cd xcode
 uv pip install -e .
 
-xcode setup          <span class="code-comment"># 交互式配置向导</span>
-<span class="code-comment"># 或: xcode config add main</span>
+xcode setup          <span class="code-comment"># 首次配置向导 (Provider & API Key)</span>
+xcode config         <span class="code-comment"># 交互式设置浏览器 (执行模式/审批策略/Shell)</span>
 
 xcode                <span class="code-comment"># 进入 TUI</span>
 xcode cli            <span class="code-comment"># REPL 模式</span>
@@ -611,17 +649,62 @@ xcode -p "..."       <span class="code-comment"># 单发提问</span></code></pr
             <span class="chip">xcode tui</span>
             <span class="chip">xcode cli</span>
             <span class="chip">xcode --resume</span>
-            <span class="chip">xcode config list</span>
+            <span class="chip">xcode config</span>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <section id="commands">
+  <section id="workflows">
     <div class="wrap">
       <header class="sec-head reveal">
-        <p class="sec-kicker">03 — <span class="lz">REPL 命令</span><span class="le">REPL Commands</span></p>
+        <p class="sec-kicker">03 — <span class="lz">实战场景</span><span class="le">Workflows</span></p>
+        <h2>
+          <span class="lz">你可以用 Xcode <em>做什么</em></span>
+          <span class="le">What you can do with <em>Xcode</em></span>
+        </h2>
+        <span class="sec-rule"></span>
+      </header>
+      <div class="workflow-grid">
+        <div class="workflow-card reveal">
+          <div class="workflow-icon">&gt;_</div>
+          <h3><span class="lz">勘察与理解代码库</span><span class="le">Understand your codebase</span></h3>
+          <p><span class="lz">利用只读并发调度快速检索符号、分析目录结构，或使用 @file 注入精准上下文，快速理清复杂系统。</span><span class="le">Search symbols, map dependencies with concurrent reads, or inject exact context with @file to grok unfamiliar systems.</span></p>
+        </div>
+        <div class="workflow-card reveal">
+          <div class="workflow-icon">⚑</div>
+          <h3><span class="lz">Plan 规划与 Build 实施</span><span class="le">Plan and build features</span></h3>
+          <p><span class="lz">在 /plan 模式下零副作用产出架构方案与文件清单；切换至 /build 模式由沙箱与审查器守卫全自动落地。</span><span class="le">Produce zero-side-effect plans in /plan mode, then switch to /build mode to implement features safely under sandbox gating.</span></p>
+        </div>
+        <div class="workflow-card reveal">
+          <div class="workflow-icon">⎇</div>
+          <h3><span class="lz">会话分支与快照撤销</span><span class="le">Branching and snapshot undo</span></h3>
+          <p><span class="lz">大胆尝试实验性重构；随时用 /fork 开启新分支探索，或用 /undo 瞬间原子回滚所有受影响的文件变更。</span><span class="le">Explore refactors freely; use /fork to branch off a previous turn, or /undo to atomically restore modified files.</span></p>
+        </div>
+        <div class="workflow-card reveal">
+          <div class="workflow-icon">⬡</div>
+          <h3><span class="lz">连接 MCP 工具生态</span><span class="le">Extend with MCP tools</span></h3>
+          <p><span class="lz">通过标准 MCP stdio 协议直连本地数据库、外部 API 或自定义服务，动态扩充 Agent 的专业工具箱。</span><span class="le">Plug into local databases, APIs, or custom servers via standard MCP stdio protocol with dynamic tool discovery.</span></p>
+        </div>
+        <div class="workflow-card reveal">
+          <div class="workflow-icon">◈</div>
+          <h3><span class="lz">跨会话长期记忆</span><span class="le">Long-horizon memory</span></h3>
+          <p><span class="lz">项目约定与个人偏好持久化落盘，Agent 在需要时通过 BM25 自主检索，告别多轮对话中重复输入背景。</span><span class="le">Store durable project rules and user preferences; the agent searches memory on-demand without cluttering turn context.</span></p>
+        </div>
+        <div class="workflow-card reveal">
+          <div class="workflow-icon">⚡</div>
+          <h3><span class="lz">外部 Hooks 自动化</span><span class="le">Event-driven hooks</span></h3>
+          <p><span class="lz">在工具调用前后挂载外部脚本，实现命令执行前的动态安全判定、代码生成后的自动格式化与审计通知。</span><span class="le">Attach external scripts before or after tool runs for dynamic policy gating, automatic formatting, or audit notifications.</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="commands" style="background:var(--paper-2)">
+    <div class="wrap">
+      <header class="sec-head reveal">
+        <p class="sec-kicker">04 — <span class="lz">REPL 命令</span><span class="le">REPL Commands</span></p>
         <h2>
           <span class="lz">一个斜杠，<em>切换模式</em></span>
           <span class="le">One slash to <em>switch modes</em></span>
@@ -669,10 +752,10 @@ xcode -p "..."       <span class="code-comment"># 单发提问</span></code></pr
     </div>
   </section>
 
-  <section id="architecture" style="background:var(--paper-2)">
+  <section id="architecture">
     <div class="wrap">
       <header class="sec-head reveal">
-        <p class="sec-kicker">04 — <span class="lz">架构</span><span class="le">Architecture</span></p>
+        <p class="sec-kicker">05 — <span class="lz">架构</span><span class="le">Architecture</span></p>
         <h2>
           <span class="lz">五层骨架，<em>职责分离</em></span>
           <span class="le">Five layers, <em>clear ownership</em></span>
@@ -722,10 +805,10 @@ xcode -p "..."       <span class="code-comment"># 单发提问</span></code></pr
     </div>
   </section>
 
-  <section id="benchmarks">
+  <section id="benchmarks" style="background:var(--paper-2)">
     <div class="wrap">
       <header class="sec-head reveal">
-        <p class="sec-kicker">05 — <span class="lz">评估</span><span class="le">Evaluation</span></p>
+        <p class="sec-kicker">06 — <span class="lz">评估</span><span class="le">Evaluation</span></p>
         <h2>
           <span class="lz">用 Benchmark <em>量化</em> 关键设计</span>
           <span class="le"><em>Measure</em> the key design choices</span>
@@ -766,41 +849,49 @@ xcode -p "..."       <span class="code-comment"># 单发提问</span></code></pr
     </div>
   </section>
 
-  <section id="docs" style="background:var(--paper-2)">
+  <section id="docs">
     <div class="wrap">
       <header class="sec-head reveal">
-        <p class="sec-kicker">06 — <span class="lz">文档</span><span class="le">Documentation</span></p>
+        <p class="sec-kicker">07 — <span class="lz">开发者文档</span><span class="le">Documentation</span></p>
         <h2>
-          <span class="lz">继续<em>深入</em></span>
-          <span class="le">Go <em>deeper</em></span>
+          <span class="lz">深入了解 <em>Xcode</em></span>
+          <span class="le">Deep dive into <em>Xcode</em></span>
         </h2>
         <span class="sec-rule"></span>
       </header>
-      <div class="docs-list reveal">
-        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/README.md" target="_blank" rel="noopener">
-          <div><strong>README.md</strong><br><span class="lz">完整使用手册与功能速查</span><span class="le">Full manual and feature reference</span></span></div>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
-        </a>
-        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/CONFIG.md" target="_blank" rel="noopener">
-          <div><strong>CONFIG.md</strong><br><span class="lz">运行时配置参考与默认值</span><span class="le">Runtime configuration reference and defaults</span></span></div>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
-        </a>
-        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/benchmarks/README.md" target="_blank" rel="noopener">
-          <div><strong>benchmarks/README.md</strong><br><span class="lz">Benchmark 实验设计与报告口径</span><span class="le">Benchmark design and reporting metrics</span></span></div>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
-        </a>
-        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/docs/memory-architecture.md" target="_blank" rel="noopener">
-          <div><strong>docs/memory-architecture.md</strong><br><span class="lz">记忆系统架构</span><span class="le">Memory system architecture</span></span></div>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
-        </a>
-        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/docs/review-standards.md" target="_blank" rel="noopener">
-          <div><strong>docs/review-standards.md</strong><br><span class="lz">代码审查标准</span><span class="le">Code review standards</span></span></div>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
-        </a>
-        <a class="doc-link" href="https://github.com/reddishJade/xcode/blob/main/AGENTS.md" target="_blank" rel="noopener">
-          <div><strong>AGENTS.md</strong><br><span class="lz">编码规范与开发入口</span><span class="le">Coding guidelines and dev entry point</span></span></div>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
-        </a>
+
+      <div class="docs-hero-card reveal">
+        <div class="docs-hero-left">
+          <div class="docs-hero-badge">
+            <span class="brand-mark">&gt;_</span>
+            <span>docs.xcode</span>
+          </div>
+          <h3>
+            <span class="lz">Xcode 官方技术与开发者文档中心</span>
+            <span class="le">Xcode Official Developer Documentation Hub</span>
+          </h3>
+          <p>
+            <span class="lz">涵盖系统设计哲学、五层架构契约、Linux Bubblewrap 命名空间沙箱、只读并发调度与写串行屏障、70% 水位线分层压缩、Durable Session 子代理以及全套 Slash 命令与配置手册。</span>
+            <span class="le">Comprehensive reference covering design philosophy, 5-layer architecture, Linux bubblewrap sandbox, side-effect-aware concurrency, layered compaction, durable subagents, slash commands, and configuration.</span>
+          </p>
+          <div class="docs-hero-cta">
+            <a class="btn btn-primary" style="padding:12px 28px; font-size:15px; border-radius:10px;" href="docs.html">
+              <span class="lz">进入 Xcode 开发者文档页面</span>
+              <span class="le">Open Full Developer Documentation</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </a>
+          </div>
+        </div>
+        <div class="docs-hero-topics">
+          <div class="topic-chip"><span class="chip-dot"></span><span class="lz">设计理念与不变量</span><span class="le">Design & Invariants</span></div>
+          <div class="topic-chip"><span class="chip-dot"></span><span class="lz">五层单向流架构</span><span class="le">5-Layer Architecture</span></div>
+          <div class="topic-chip"><span class="chip-dot"></span><span class="lz">Plan / Build 执行模式</span><span class="le">Work Modes</span></div>
+          <div class="topic-chip"><span class="chip-dot"></span><span class="lz">Linux Bubblewrap 沙箱</span><span class="le">Bubblewrap Sandbox</span></div>
+          <div class="topic-chip"><span class="chip-dot"></span><span class="lz">工具并发分区调度</span><span class="le">Tool Concurrency</span></div>
+          <div class="topic-chip"><span class="chip-dot"></span><span class="lz">70% 水位线分层压缩</span><span class="le">Layered Compaction</span></div>
+          <div class="topic-chip"><span class="chip-dot"></span><span class="lz">MCP 服务与工具扩展</span><span class="le">MCP Integration</span></div>
+          <div class="topic-chip"><span class="chip-dot"></span><span class="lz">30+ Slash 交互指令</span><span class="le">Slash Commands</span></div>
+        </div>
       </div>
     </div>
   </section>
