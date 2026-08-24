@@ -231,6 +231,10 @@ class _XcodeTui:
         )
         command_bindings = cast(KeyBindings, self._command_choices.control.key_bindings)
         command_bindings.add("enter")(lambda _event: self._accept_command_choice())
+        # Esc 由菜单控件自身消费（eager 立即触发），返回上级或关闭。
+        command_bindings.add("escape", eager=True)(
+            lambda _event: self._cancel_key(None)
+        )
         self._question_choices: RadioList[str] = RadioList(
             [("", "")],
             show_numbers=True,
@@ -269,7 +273,8 @@ class _XcodeTui:
                 [
                     self._command_choices,
                     Window(
-                        FormattedTextControl(text=self._command_choice_hint_text)
+                        FormattedTextControl(text=self._command_choice_hint_text),
+                        dont_extend_height=True,
                     ),
                 ]
             ),
@@ -485,8 +490,13 @@ class _XcodeTui:
         bindings.add("c-o", eager=True)(self._toggle_tools_key)
         bindings.add("c-q")(self._quit_key)
         bindings.add("c-c")(self._cancel_key)
-        # 单独的 Esc 关闭挂起的菜单/表单；不用 eager 以保留 esc,enter 换行序列。
-        bindings.add("escape")(self._escape_key)
+        # 应用级只挂"文本表单激活时"的 Esc（eager + filter）：空闲输入不消费
+        # escape，方向键的 esc 序列解析和 esc,enter 换行都不受影响。
+        bindings.add(
+            "escape",
+            eager=True,
+            filter=Condition(lambda: self._state.pending_command_text is not None),
+        )(self._escape_key)
         return bindings
 
     def _submit_key(self, _event: object) -> None:
@@ -586,16 +596,20 @@ class _XcodeTui:
         self._refresh()
 
     def _escape_key(self, _event: object) -> None:
-        """单独 Esc：关闭挂起的菜单/表单；菜单链经 on_cancel 返回上级。"""
-        if self._state.pending_command_choice is not None:
-            self._cancel_key(_event)
-            return
+        """Esc：仅在文本表单挂起时到达这里（菜单的 Esc 由控件自身消费）。"""
         if self._state.pending_command_text is not None:
-            request = self._state.pending_command_text
-            self._state.pending_command_text = None
-            if request.on_cancel is not None:
-                request.on_cancel()
-            self._refresh()
+            self._cancel_pending_command_text()
+
+    def _cancel_pending_command_text(self) -> None:
+        """关闭文本表单并执行其取消回调。"""
+        request = self._state.pending_command_text
+        if request is None:
+            return
+        self._state.pending_command_text = None
+        self._input.buffer.complete_state = None
+        if request.on_cancel is not None:
+            request.on_cancel()
+        self._refresh()
 
     def _quit_key(self, _event: object) -> None:
         if self._state.pending_question_choice is not None:
@@ -618,16 +632,13 @@ class _XcodeTui:
             request = self._state.pending_command_choice
             self._state.pending_command_choice = None
             self._application.layout.focus(self._input)
+            self._input.buffer.complete_state = None
             if request.on_cancel is not None:
                 request.on_cancel()
             self._refresh()
             return
         if self._state.pending_command_text is not None:
-            request = self._state.pending_command_text
-            self._state.pending_command_text = None
-            if request.on_cancel is not None:
-                request.on_cancel()
-            self._refresh()
+            self._cancel_pending_command_text()
             return
         if self._state.pending_hitl is not None:
             self._finish_denial("")
