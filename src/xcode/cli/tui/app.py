@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from asyncio import TimerHandle
-from contextlib import redirect_stdout
-from io import StringIO
 import re
 import sys
 import threading
+from asyncio import TimerHandle
 from collections.abc import Callable
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event
@@ -26,11 +26,12 @@ from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import (
     ConditionalContainer,
     Dimension,
+    Float,
+    FloatContainer,
     HSplit,
     Layout,
     Window,
 )
-from prompt_toolkit.layout import Float, FloatContainer
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.output.base import Output
@@ -38,12 +39,22 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import CheckboxList, RadioList, TextArea
 
+from xcode.agent.messages import UserMessage
+from xcode.coding_agent.tools.question import CUSTOM_OPTION_LABEL
+from xcode.harness.agent_runtime import AgentHarnessEvent, SubmitStatus
+from xcode.harness.agent_runtime.events import (
+    FinalStructuredEvent,
+    ToolUseStructuredEvent,
+)
+from xcode.harness.snapshot import SnapshotStore, SnapshotUnsupportedError
+
 from ..app_contract import ReplApp
 from ..commands import ReplState
 from ..completion import CommandArgsSuggester, ReplCompleter
 from ..file_refs import expand_file_references
 from ..git import git_branch_name
 from ..markdown import TerminalMarkdownRenderer
+from ..repl import current_effort_options, current_model_options
 from ..repl_commands import COMMAND_NAMES, COMMAND_REGISTRY_EXPORT, handle_command
 from ..repl_hitl import (
     HITL_CHOICES,
@@ -52,8 +63,6 @@ from ..repl_hitl import (
     parse_hitl_choice,
     tool_preview_lines,
 )
-from xcode.coding_agent.tools.question import CUSTOM_OPTION_LABEL
-from ..repl import current_effort_options, current_model_options
 from ..repl_sessions import (
     print_saved_conversation,
     select_session_interactively,
@@ -63,8 +72,6 @@ from ..repl_tools import (
     file_reference_event,
     run_shell_shortcut,
 )
-from xcode.agent.messages import UserMessage
-from xcode.harness.agent_runtime import AgentHarnessEvent, SubmitStatus
 from .state import (
     _CommandChoiceRequest,
     _CommandTextRequest,
@@ -73,17 +80,11 @@ from .state import (
     _QuestionChoiceRequest,
     _TuiState,
 )
-from xcode.harness.snapshot import SnapshotStore, SnapshotUnsupportedError
 from .widgets import (
     TuiInputLexer,
     TuiOutputControl,
     TuiPromptSession,
     tui_input_prompt,
-)
-
-from xcode.harness.agent_runtime.events import (
-    FinalStructuredEvent,
-    ToolUseStructuredEvent,
 )
 
 _SHORTCUT_HELP = """Shortcuts
@@ -102,13 +103,14 @@ _SHORTCUT_HELP = """Shortcuts
 if TYPE_CHECKING:
     from prompt_toolkit.history import History
 
-    from xcode.harness.snapshot import SnapshotService, SnapshotResult
-
     from xcode.agent.types import ApprovalRequest
     from xcode.harness.security import HITLResult
     from xcode.harness.security.permission_model import (
         SessionGrantStoreManager,
     )
+    from xcode.harness.snapshot import SnapshotResult, SnapshotService
+
+    from ..config_registry import SettingSpec
 
 
 def run_tui(
@@ -754,23 +756,9 @@ class _XcodeTui:
             return True
         if command == "/config":
             parts = text.split(maxsplit=2)
-            action = parts[1] if len(parts) > 1 else ""
-            if action == "add":
-                self._state.log.append(
-                    _LogEntry(
-                        "system",
-                        "Adding a provider profile requires a multi-step TUI form; "
-                        "that form is not available yet.",
-                    )
-                )
-                self._refresh()
-                return True
-            if action in {"edit", "set"} and len(parts) < 3:
-                self._open_config_profile_editor()
-                return True
-            if action == "delete":
-                self._open_config_profile_delete()
-                return True
+            query = parts[1].strip() if len(parts) > 1 else ""
+            self._open_config_browser(query)
+            return True
         if command == "/fork":
             entries = self._store.get_forkable_user_messages()
             if not entries:
@@ -887,70 +875,105 @@ class _XcodeTui:
         request.on_submit(text)
         self._refresh()
 
-    def _open_config_profile_editor(self) -> None:
-        """在 TUI 内选择配置项并提交字段值。"""
-        from ..setup_wizard import CONFIG_FILENAME, _load_existing_config
-
-        config = _load_existing_config(self._project_root / CONFIG_FILENAME)
-        profiles = config.get("provider", {}).get("model_profiles", {})
-        if not isinstance(profiles, dict) or not profiles:
-            self._state.log.append(_LogEntry("system", "No profiles found."))
-            self._refresh()
-            return
-
-        def choose_profile(profile: object) -> None:
-            fields = [
-                "transport",
-                "chat_model",
-                "base_url",
-                "api_key",
-                "thinking",
-                "reasoning_effort",
-                "clear_thinking",
-                "tool_stream",
-            ]
-
-            def choose_field(field: object) -> None:
-                profile_name = str(profile)
-                field_name = str(field)
-                self._open_command_text(
-                    f"{profile_name}.{field_name}",
-                    lambda value: (
-                        self._run_command(
-                            f"/config set {profile_name} {field_name} {value}"
-                        )
-                        if value
-                        else None
-                    ),
-                )
-
-            self._open_command_choices(
-                [(field, field) for field in fields], choose_field
-            )
-
-        self._open_command_choices(
-            [(str(name), name) for name in profiles], choose_profile
+    def _open_config_browser(self, query: str = "") -> None:
+        """在 TUI 内打开设置浏览器：选择行进入编辑流程。"""
+        from ..config_registry import (
+            SETTING_SPECS,
+            find_setting,
+            format_setting,
+            load_effective_config,
+            matching_settings,
         )
-
-    def _open_config_profile_delete(self) -> None:
-        """在 TUI 内选择并删除配置 profile。"""
-        from ..setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
+        from ..setup_wizard import CONFIG_FILENAME
 
         config_path = self._project_root / CONFIG_FILENAME
-        config = _load_existing_config(config_path)
-        profiles = config.get("provider", {}).get("model_profiles", {})
-        if not isinstance(profiles, dict) or not profiles:
-            self._state.log.append(_LogEntry("system", "No profiles found."))
-            self._refresh()
+        config = load_effective_config(config_path)
+
+        def choose(selection: object) -> None:
+            if selection is None:
+                return
+            self._edit_config_setting(config_path, cast("SettingSpec", selection))
+
+        if query:
+            spec = find_setting(query)
+            if spec is None:
+                matches = matching_settings(query)
+                note = (
+                    f"'{query}' is ambiguous: "
+                    + ", ".join(match.label for match in matches)
+                    if matches
+                    else f"No setting matches '{query}'."
+                )
+                self._state.log.append(_LogEntry("system", note))
+                self._refresh()
+                return
+            choose(spec)
             return
 
-        def delete(profile: object) -> None:
-            name = str(profile)
-            profiles.pop(name, None)
-            _save_config(config, config_path)
-            self._state.log.append(_LogEntry("system", f"Deleted profile: {name}"))
+        choices: list[tuple[str, object]] = [
+            (f"{item.label:<28}{format_setting(item, config)}", item)
+            for item in SETTING_SPECS
+        ]
+        choices.append(("Exit", None))
+        self._open_command_choices(choices, choose)
 
-        self._open_command_choices([(str(name), name) for name in profiles], delete)
+    def _edit_config_setting(self, config_path: Path, spec: SettingSpec) -> None:
+        """编辑单个设置项：枚举走选择菜单，标量走文本输入。"""
+        from ..config_registry import (
+            SettingKind,
+            format_setting,
+            load_effective_config,
+            save_setting_text,
+            setting_detail,
+        )
+
+        config = load_effective_config(config_path)
+        current = format_setting(spec, config)
+
+        def reopen() -> None:
+            self._open_config_browser()
+
+        def report_and_reopen(ok: bool, message: str) -> None:
+            level = "system" if ok else "error"
+            self._state.log.append(_LogEntry(level, message))
+            reopen()
+
+        if spec.kind is SettingKind.INFO:
+            lines = [f"{spec.label} ({current}):"]
+            if spec.description:
+                lines.append(f"  {spec.description}")
+            lines.extend(setting_detail(spec, config))
+            for line in lines:
+                self._state.log.append(_LogEntry("system", line))
+            reopen()
+            return
+
+        if spec.kind in (SettingKind.BOOL, SettingKind.ENUM):
+            tokens = ("on", "off") if spec.kind is SettingKind.BOOL else spec.choices
+            titles = [
+                token + " (current)" if token == current.lower() else token
+                for token in tokens
+            ]
+
+            def pick(token: object) -> None:
+                text = str(token).removesuffix(" (current)")
+                ok, message = save_setting_text(config_path, spec, text)
+                report_and_reopen(ok, message)
+
+            self._open_command_choices([(title, title) for title in titles], pick)
+            return
+
+        hint = "Type value, enter to save, esc to cancel"
+        if spec.nullable:
+            hint += "; 'none' clears"
+
+        def submit(value: str) -> None:
+            ok, message = save_setting_text(config_path, spec, value)
+            report_and_reopen(ok, message)
+
+        self._open_command_text(
+            f"{spec.key} = {current} — {hint}", submit, on_cancel=reopen
+        )
 
     def _accept_command_choice(self) -> None:
         request = self._state.pending_command_choice
@@ -1593,6 +1616,7 @@ def _enter_snapshot_ctx(
         return None
     try:
         from typing import cast as _cast
+
         from xcode.harness.snapshot import SnapshotStore as _S
 
         store = _cast(_S, snapshot_store)
@@ -1614,6 +1638,7 @@ def _exit_snapshot_ctx(
         return
     try:
         from typing import cast as _cast
+
         from xcode.harness.snapshot import SnapshotStore as _S
 
         store = _cast(_S, snapshot_store)

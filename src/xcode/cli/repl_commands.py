@@ -1,19 +1,35 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast
-from xcode.agent.messages import AgentMessage
 
 import questionary
 
-from .app_contract import ReplApp
-from xcode.harness.session.types import SessionEntry, SessionInfoView
-from xcode.harness.session.types import JsonValue
+from xcode.agent.messages import AgentMessage
+from xcode.agent.types import ToolSpec
+from xcode.harness.memory import (
+    MemoryLayer,
+    MemoryLayerFilter,
+    MemoryManager,
+    build_memory_block,
+)
+from xcode.harness.security import (
+    FileGrantStore,
+    InMemoryGrantStore,
+    PermissionApprovalCallback,
+    PermissionEngine,
+    PermissionEngineConfig,
+    PermissionPolicy,
+)
+from xcode.harness.session import SessionStore
+from xcode.harness.session.types import JsonValue, SessionEntry, SessionInfoView
+from xcode.harness.snapshot import SnapshotStore, TurnSnapshotRecord
 
+from .app_contract import ReplApp
 from .commands import (
     COMMAND_GROUP_EXIT,
     COMMAND_GROUP_INFO,
@@ -28,6 +44,13 @@ from .commands import (
     ReplState,
     command_names,
     generate_help_text,
+)
+from .config_registry import (
+    edit_setting_interactive,
+    find_setting,
+    load_effective_config,
+    matching_settings,
+    run_config_browser,
 )
 from .markdown import MarkdownRenderer
 from .repl_rendering import clear_terminal_display, print_startup_banner
@@ -46,27 +69,8 @@ from .repl_settings import (
     handle_thinking_command,
 )
 from .repl_skills import activate_skill
-from .setup_wizard import CONFIG_FILENAME, _load_existing_config, _save_config
-from .config_cmd import _cmd_add, _cmd_edit, _cmd_delete
-from .config_cmd import BOOL_FIELDS
 from .repl_tools import run_tool_command
-from xcode.harness.security import (
-    FileGrantStore,
-    InMemoryGrantStore,
-    PermissionApprovalCallback,
-    PermissionEngine,
-    PermissionEngineConfig,
-    PermissionPolicy,
-)
-from xcode.harness.memory import (
-    MemoryLayer,
-    MemoryLayerFilter,
-    MemoryManager,
-    build_memory_block,
-)
-from xcode.agent.types import ToolSpec
-from xcode.harness.session import SessionStore
-from xcode.harness.snapshot import SnapshotStore, TurnSnapshotRecord
+from .setup_wizard import CONFIG_FILENAME
 
 
 def _queue_followup(ctx: CommandContext, text: str) -> None:
@@ -284,230 +288,28 @@ def cmd_thinking(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_config(cmd: str, ctx: CommandContext) -> bool:
-    """管理 provider 配置 profile。"""
+    """打开交互式配置浏览器，浏览并修改 xcode.config.json。"""
     config_path = ctx.project_root / CONFIG_FILENAME
-    config = _load_existing_config(config_path)
+    parts = cmd.split(maxsplit=1)
+    query = parts[1].strip() if len(parts) > 1 else ""
 
-    parts = cmd.split(maxsplit=2)
-    sub = parts[1].strip() if len(parts) >= 2 else ""
-
-    if not sub or sub == "list":
-        _config_cmd_list(config, config_path)
+    if not query:
+        run_config_browser(config_path)
         return False
 
-    if sub == "reload":
-        print("Reloading config from file...")
-        config = _load_existing_config(config_path)
-        _config_cmd_list(config, config_path)
-        print("(some changes may require restart)")
-        return False
-
-    if sub == "add":
-        parts = cmd.split(maxsplit=2)
-        name = parts[2] if len(parts) >= 3 else questionary.text("Profile name:").ask()
-        if not name:
-            return False
-        _cmd_add(config_path, name)
-        return False
-
-    if sub == "edit":
-        parts = cmd.split(maxsplit=2)
-        if len(parts) >= 3:
-            name = parts[2]
+    spec = find_setting(query)
+    if spec is None:
+        matches = matching_settings(query)
+        if matches:
+            print(f"'{query}' is ambiguous. Did you mean:")
+            for match in matches:
+                print(f"  {match.label} ({match.key})")
         else:
-            profiles = config.get("provider", {}).get("model_profiles", {})
-            if not profiles:
-                print("No profiles found. Use '/config add <name>' first.")
-                return False
-            name = questionary.select(
-                "Select profile:", choices=sorted(profiles.keys())
-            ).ask()
-        if not name:
-            return False
-        _cmd_edit(config_path, name)
+            print(f"No setting matches '{query}'. Use '/config' to browse all.")
         return False
 
-    if sub == "delete":
-        parts = cmd.split(maxsplit=2)
-        if len(parts) >= 3:
-            name = parts[2]
-        else:
-            profiles = config.get("provider", {}).get("model_profiles", {})
-            if not profiles:
-                print("No profiles found.")
-                return False
-            name = questionary.select(
-                "Select profile to delete:", choices=sorted(profiles.keys())
-            ).ask()
-        if not name:
-            return False
-        _cmd_delete(config_path, name)
-        return False
-
-    if sub == "set":
-        set_parts = cmd.split(maxsplit=4)
-        if len(set_parts) >= 5:
-            _, _, name, field, value = set_parts
-            _config_cmd_set(config, config_path, name, field, value)
-            return False
-        _config_cmd_set_interactive(config, config_path)
-        return False
-
-    print(
-        "Usage: /config [list|add <name>|edit <name>|delete <name>"
-        "|set <profile> <field> <value>|reload]"
-    )
+    edit_setting_interactive(config_path, spec, load_effective_config(config_path))
     return False
-
-
-def _mask_key(key: str) -> str:
-    if len(key) <= 8:
-        return "****"
-    return f"{'*' * max(0, len(key) - 4)}{key[-4:]}"
-
-
-BOOL_CONFIG_FIELDS = frozenset({"thinking", "clear_thinking", "tool_stream"})
-
-
-def _coerce_config_value(field: str, value: str) -> Any:
-    if field in BOOL_CONFIG_FIELDS:
-        if value.lower() in ("true", "1", "yes"):
-            return True
-        if value.lower() in ("false", "0", "no"):
-            return False
-        raise ValueError(f"Invalid bool value for '{field}': {value}")
-    if value.lower() == "null":
-        return None
-    return value
-
-
-def _config_cmd_list(config: dict[str, Any], config_path: Path) -> None:
-    profiles = config.get("provider", {}).get("model_profiles", {})
-    if not profiles:
-        print(f"No profiles found in {config_path.name}.")
-        return
-
-    print(f"Profiles in {config_path.name}:\n")
-    for name, profile in profiles.items():
-        if isinstance(profile, str):
-            print(f"  {name}: (inherits from main, model={profile})")
-            continue
-        print(f"  {name}:")
-        for fname in (
-            "transport",
-            "chat_model",
-            "base_url",
-            "api_key",
-            "thinking",
-            "reasoning_effort",
-            "clear_thinking",
-            "tool_stream",
-        ):
-            val = profile.get(fname)
-            if val is None:
-                continue
-            if fname == "api_key" and val:
-                val = _mask_key(str(val))
-            print(f"    {fname:20s}: {val}")
-        print()
-
-
-def _config_cmd_set(
-    config: dict[str, Any], config_path: Path, name: str, field: str, value: str
-) -> None:
-    profiles = config.setdefault("provider", {}).setdefault("model_profiles", {})
-
-    if name not in profiles:
-        available = ", ".join(sorted(profiles.keys()))
-        print(f"Profile '{name}' not found. Available: {available}")
-        return
-
-    profile = profiles[name]
-    if isinstance(profile, str):
-        print(f"Profile '{name}' is a string alias. Edit main first.")
-        return
-
-    try:
-        coerced = _coerce_config_value(field, value)
-    except ValueError as exc:
-        print(str(exc))
-        return
-
-    if coerced is None:
-        profile.pop(field, None)
-    else:
-        profile[field] = coerced
-
-    _save_config(config, config_path)
-    print(f"  {name}.{field} = {value} (saved to {config_path.name})")
-
-
-def _config_cmd_set_interactive(config: dict[str, Any], config_path: Path) -> None:
-    profiles = config.setdefault("provider", {}).setdefault("model_profiles", {})
-    if not profiles:
-        print("No profiles found. Use '/config add <name>' first.")
-        return
-
-    name = questionary.select("Select profile:", choices=sorted(profiles.keys())).ask()
-    if name is None:
-        return
-
-    profile = profiles[name]
-    if isinstance(profile, str):
-        print(f"Profile '{name}' is a string alias. Edit main first.")
-        return
-
-    SET_FIELDS = (
-        ("transport", "Transport"),
-        ("chat_model", "Chat Model"),
-        ("base_url", "Base URL"),
-        ("api_key", "API Key"),
-        ("thinking", "Thinking"),
-        ("reasoning_effort", "Reasoning Effort"),
-        ("clear_thinking", "Clear Thinking"),
-        ("tool_stream", "Tool Stream"),
-    )
-    field_choices = [
-        questionary.Choice(title=f"{label} ({profile.get(key, 'not set')})", value=key)
-        for key, label in SET_FIELDS
-    ]
-    field = questionary.select("Select field to change:", choices=field_choices).ask()
-    if field is None:
-        return
-
-    current = profile.get(field, "")
-    current_str = str(current) if current is not None else "(not set)"
-    if field == "api_key":
-        value = questionary.password(
-            f"API Key (current: {_mask_key(current_str)}):"
-        ).ask()
-    elif field in BOOL_FIELDS:
-        default_choice = "true" if current else "false"
-        value = questionary.select(
-            f"{field}:",
-            choices=["true", "false"],
-            default=default_choice,
-        ).ask()
-    else:
-        value = questionary.text(f"{field} (current: {current_str}):").ask()
-    if value is None:
-        return
-    if not value and field != "api_key":
-        return
-
-    try:
-        coerced = _coerce_config_value(field, value)
-    except ValueError as exc:
-        print(str(exc))
-        return
-
-    if coerced is None:
-        profile.pop(field, None)
-    else:
-        profile[field] = coerced
-
-    _save_config(config, config_path)
-    print(f"  {name}.{field} = {value} (saved to {config_path.name})")
 
 
 def cmd_plan(cmd: str, ctx: CommandContext) -> bool:
@@ -567,10 +369,7 @@ def cmd_debug(cmd: str, ctx: CommandContext) -> bool:
     if len(parts) == 2 and parts[1] == "on":
         ctx.state.verbosity = "debug"
         print("Debug mode on: reasoning preview and expanded tool results shown.")
-    elif len(parts) == 2 and parts[1] == "off":
-        ctx.state.verbosity = "normal"
-        print("Debug mode off.")
-    elif ctx.state.verbosity == "debug":
+    elif len(parts) == 2 and parts[1] == "off" or ctx.state.verbosity == "debug":
         ctx.state.verbosity = "normal"
         print("Debug mode off.")
     else:
@@ -1134,7 +933,7 @@ def _get_context_window(
     """返回模型上下文窗口；优先使用 provider profile 的覆盖值。"""
     if context_window_override is not None and context_window_override > 0:
         return context_window_override
-    from xcode.ai.models import get_providers, get_models
+    from xcode.ai.models import get_models, get_providers
 
     for provider in get_providers():
         for model in get_models(provider):
@@ -1183,8 +982,8 @@ def _compute_context_summary(
     if registry is not None:
         snap = registry
         from xcode.harness.agent_runtime.prompting import (
-            build_tool_prompt,
             build_tool_guidelines,
+            build_tool_prompt,
         )
 
         parts = ["Available tools:\n" + build_tool_prompt(snap)]
@@ -1277,7 +1076,7 @@ def _compute_context_summary(
     cost_output_rate = getattr(cost, "output", 0) if cost else 0
 
     input_cost = (total / 1_000_000) * cost_input_rate if cost_input_rate else 0
-    history = getattr(agent, "history_messages", lambda: [])()
+    history = getattr(agent, "history_messages", list)()
     output_tokens = _count_output_tokens(history)
     output_cost = (
         (output_tokens / 1_000_000) * cost_output_rate if cost_output_rate else 0
@@ -1677,10 +1476,10 @@ COMMAND_REGISTRY: dict[str, CommandEntry] = {
     ),
     "/config": CommandEntry(
         handler=cmd_config,
-        desc="Manage provider profiles interactively.",
-        args_desc="[list|add <name>|edit <name>|delete <name>|set <profile> <field> <value>|reload]",
+        desc="Open the interactive settings browser for xcode.config.json.",
+        args_desc="[setting]",
         accepts_args=True,
-        group=COMMAND_GROUP_MODEL,
+        group=COMMAND_GROUP_INFO,
     ),
     "/plan": CommandEntry(
         handler=cmd_plan,

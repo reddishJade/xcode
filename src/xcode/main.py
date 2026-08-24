@@ -1,45 +1,27 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
-
 import sys
+from pathlib import Path
 
 from .cli.config_cmd import handle_config_command
 from .cli.repl import run_repl
-from .cli.tui import run_tui
 from .cli.setup_wizard import has_valid_config, run_setup_wizard
-from .harness.config import discover_runtime_config, resolve_config_path
+from .cli.tui import run_tui
 from .coding_agent.app import build_app
+from .harness.config import discover_runtime_config, resolve_config_path
 
 
 def _build_config_parser(subparsers) -> None:
     config_parser = subparsers.add_parser(
         "config",
-        help="Manage provider API profiles (list / add / edit / delete / set)",
+        help="Browse and edit xcode settings interactively",
         description=(
-            "Manage provider API profiles. Each profile stores transport, model, "
-            "API key and other settings for an LLM provider. "
-            "Profiles are stored in xcode.config.json.\n\n"
-            "Available subcommands:\n"
-            "  list    — show all configured profiles\n"
-            "  add     — create a new profile interactively\n"
-            "  edit    — modify an existing profile interactively\n"
-            "  delete  — remove a profile\n"
-            "  set     — quick field update without interactive prompts\n\n"
-            "Common profile fields (set via `config set <profile> <field> <value>`):\n"
-            "  transport         Provider type: openai_chat, deepseek_chat, "
-            "chatglm_chat, mimo_chat\n"
-            "  chat_model        Model ID, e.g. deepseek-v4-flash, gpt-5.5\n"
-            "  base_url          API base URL\n"
-            "  api_key           API key (or set via env var instead)\n"
-            "  context_window    Context window token override (int, e.g. 262144)\n"
-            "  thinking          Enable reasoning mode (true/false)\n"
-            "  reasoning_effort  Level: off/minimal/low/medium/high/xhigh/max\n"
-            "  clear_thinking    Strip thinking tags from output (true/false)\n"
-            "  tool_stream       Stream tool calls incrementally (true/false)"
+            "Open an interactive browser over all xcode.config.json settings: "
+            "execution modes, agent limits, request hygiene, security policy, "
+            "paths, tools and skills. Pick a row to cycle preset values or "
+            "type a new one; changes are validated before they are saved."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     config_parser.add_argument(
         "--project-root", type=Path, default=Path.cwd(), help="Project root directory."
@@ -47,44 +29,6 @@ def _build_config_parser(subparsers) -> None:
     config_parser.add_argument(
         "--config", type=Path, help="Path to xcode.config.json to manage."
     )
-    config_sub = config_parser.add_subparsers(dest="config_action")
-
-    list_p = config_sub.add_parser(
-        "list", help="Show all configured profiles and their settings"
-    )
-    list_p.set_defaults(config_action="list")
-
-    add_p = config_sub.add_parser(
-        "add", help="Create a new provider profile via interactive prompts"
-    )
-    add_p.add_argument("name", help="Profile name, e.g. main, subagent, fallback")
-    add_p.set_defaults(config_action="add")
-
-    edit_p = config_sub.add_parser(
-        "edit", help="Modify an existing provider profile via interactive prompts"
-    )
-    edit_p.add_argument("name", help="Profile name to edit")
-    edit_p.set_defaults(config_action="edit")
-
-    delete_p = config_sub.add_parser("delete", help="Remove a provider profile by name")
-    delete_p.add_argument("name", help="Profile name to delete")
-    delete_p.set_defaults(config_action="delete")
-
-    set_p = config_sub.add_parser(
-        "set",
-        help="Set a single field in a profile (non-interactive, for scripting)",
-        description=(
-            "Set a single field value in a profile without interactive prompts. "
-            "Useful for quick changes or scripting.\n\n"
-            "Available fields: transport, chat_model, base_url, api_key, "
-            "context_window (int), thinking (bool), reasoning_effort, "
-            "clear_thinking (bool), tool_stream (bool)"
-        ),
-    )
-    set_p.add_argument("name", help="Profile name")
-    set_p.add_argument("field", help="Field name (see above)")
-    set_p.add_argument("value", help="Field value")
-    set_p.set_defaults(config_action="set")
 
 
 def _build_setup_parser(subparsers) -> None:

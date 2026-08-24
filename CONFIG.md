@@ -75,28 +75,37 @@ REPL 中可通过 `/model` 命令动态切换模型而无需重启：
 /model deepseek_chat/deepseek-v4-pro:max
 ```
 
-### CLI 配置管理
+### 交互式配置
 
-`xcode config` 子命令提供多 provider profile 的管理能力，无需手写 JSON：
+`/config`（REPL/TUI）与 `xcode config`（CLI）打开同一个交互式设置浏览器，
+覆盖 `xcode.config.json` 的全部可调字段：执行模式、agent 限制、request
+hygiene、安全策略、路径、tools、skills 等。provider profile 由首次启动的
+setup 向导管理，不在浏览器范围内。
 
 ```
-xcode config list                                     # 列出所有 profile
-xcode config --project-root <path> list               # 指定项目目录
-xcode config add <name>                               # 交互式添加 profile（如 fallback）
-xcode config delete <name>                            # 删除 profile
-xcode config set <name> <field> <value>               # 修改单个字段
+> Default Mode           act
+  Approval Policy        on-request
+  Auto Review Timeout    90s
+  Agent Max Steps        unlimited
+  Tool Timeout           120s
+  ...
 ```
+
+- 回车进入某行：枚举/布尔项在菜单中选值，当前值标注 `(current)`；
+  标量项输入新值，enter 保存、esc 取消。
+- 可空项接受 `none`/`unlimited` 恢复默认；字符串列表用逗号分隔。
+- `Hooks`、`External Dirs`、`Instructions` 等复杂结构只读展示，
+  修改需直接编辑 JSON。
+- 写入前用 `XcodeRuntimeConfig` 校验，非法值不落盘。
+- REPL 支持跳转：`/config approval` 直接进入匹配的设置项。
 
 示例：
-```
-xcode config add fallback                             # 交互式配置 fallback provider
-xcode config set fallback transport openai_chat       # 设置 transport
-xcode config set main thinking false                  # 关闭 thinking
-xcode config set main reasoning_effort null            # 删除 reasoning_effort（置空）
-xcode config delete subagent                          # 删除 subagent profile
-```
 
-支持 set 的字段：`transport`、`chat_model`、`base_url`、`api_key`、`thinking`（true/false）、`clear_thinking`（true/false）、`tool_stream`（true/false）、`reasoning_effort`（字符串或 `null`）。
+```
+/config                                     # 打开设置浏览器
+/config default mode                        # 跳转到 Default Mode
+xcode config                                # CLI 启动同一浏览器
+```
 
 ---
 
