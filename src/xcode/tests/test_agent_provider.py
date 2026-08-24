@@ -1,16 +1,24 @@
-"""Provider 流式收集的取消行为测试。"""
+"""Provider 流式收集、取消与故障分类测试。"""
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 
 from xcode.agent._provider import _collect_provider_events
 from xcode.agent.agent_loop import run_agent_loop
 from xcode.agent.config import AgentContext, AgentLoopConfig
 from xcode.agent.messages import UserMessage
 from xcode.agent.results import TerminationReason
-from xcode.ai.events import TextDelta
+from xcode.ai.events import (
+    FinalMessage,
+    ProviderEvent,
+    ProviderFailure,
+    TextDelta,
+)
+from xcode.ai.types import StreamOptions, ToolDefinition
 from xcode.harness.agent_runtime.cancellation import CancellationToken
+from xcode.harness.agent_runtime.result import _build_structured_result
 
 
 class _EndlessProvider:
@@ -132,3 +140,63 @@ async def test_agent_loop_terminates_when_interrupted_mid_stream() -> None:
 
     assert result.termination_reason is TerminationReason.CANCELLED
     assert provider.abort_calls >= 1
+
+
+class _ServiceUnavailable(RuntimeError):
+    status_code = 503
+
+
+class _FailingProvider:
+    @property
+    def model(self) -> str:
+        return "failing-model"
+
+    async def stream(
+        self,
+        messages: list[dict[str, object]],
+        tools: list[ToolDefinition],
+        options: StreamOptions | None = None,
+        **_kwargs: object,
+    ) -> AsyncIterator[ProviderEvent]:
+        del messages, tools, options
+        raise _ServiceUnavailable("temporarily unavailable")
+        yield FinalMessage(content="", stop_reason="end_turn")
+
+
+async def test_provider_exception_is_a_structured_event() -> None:
+    events = await _collect_provider_events(
+        _FailingProvider(),
+        [],
+        [],
+        None,
+        lambda _event: None,
+    )
+
+    assert events == [
+        ProviderFailure(
+            message="temporarily unavailable",
+            exception_type="_ServiceUnavailable",
+            status_code=503,
+        )
+    ]
+
+
+async def test_provider_failure_reaches_loop_and_harness_results() -> None:
+    result = await run_agent_loop(
+        [UserMessage(content="continue")],
+        AgentContext(),
+        AgentLoopConfig(
+            provider=_FailingProvider(),
+            max_step_retries=0,
+        ),
+        lambda _event: None,
+    )
+
+    assert result.termination_reason is TerminationReason.PROVIDER_ERROR
+    assert result.error_detail == "Provider error: temporarily unavailable"
+    assert result.provider_failure is not None
+    assert result.provider_failure.exception_type == "_ServiceUnavailable"
+    assert result.provider_failure.status_code == 503
+
+    harness_result = _build_structured_result(result)
+    assert harness_result.provider_failure == result.provider_failure

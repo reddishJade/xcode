@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from xcode.ai.events import StopReason
+from xcode.ai.events import ProviderFailure, StopReason
 from xcode.agent.types import (
     ContentBlock,
     FileContent,
@@ -51,6 +51,7 @@ class AssistantMessage(BaseModel):
     phase: str | None = None
     stop_reason: StopReason = "end_turn"
     error_message: str | None = None
+    provider_failure: ProviderFailure | None = None
     model: str = ""
     provider: str = ""
     timestamp: int = 0

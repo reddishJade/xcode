@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.functional_validators import SkipValidation
 from enum import StrEnum
 
+from xcode.ai.events import ProviderFailure
 from xcode.ai.providers.base import StreamProvider
 from .messages import AgentMessage
 
@@ -43,6 +44,7 @@ class AgentLoopResult(BaseModel):
     termination_reason: TerminationReason = TerminationReason.COMPLETED
     watchdog_reason: str | None = None
     error_detail: str | None = None
+    provider_failure: ProviderFailure | None = None
     metrics: AgentLoopMetrics | None = None
     active_provider: Annotated[StreamProvider | None, SkipValidation] = None
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)

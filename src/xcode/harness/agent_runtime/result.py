@@ -8,7 +8,7 @@ from typing import Any
 
 from ...agent.results import AgentLoopResult, TerminationReason
 from ...agent.messages import AssistantMessage
-from xcode.ai.events import ToolCall
+from xcode.ai.events import ProviderFailure, ToolCall
 from xcode.agent.types import TextContent, ToolCallContent
 from .agent_helpers import text_from_blocks, to_dict
 from .events import FinalStructuredEvent
@@ -44,6 +44,7 @@ class AgentHarnessResult:
     metrics: dict[str, Any] | None = None
     watchdog_reason: str | None = None
     error_detail: str | None = None
+    provider_failure: ProviderFailure | None = None
     needs_follow_up: bool = False
     last_agent: str = "main"
     run_state: RunState | None = None
@@ -112,6 +113,7 @@ def _build_structured_result(result: AgentLoopResult) -> AgentHarnessResult:
         metrics=metrics,
         watchdog_reason=result.watchdog_reason,
         error_detail=result.error_detail,
+        provider_failure=result.provider_failure,
         run_state=RunState(
             messages=[to_dict(message) for message in result.surface],
         ),

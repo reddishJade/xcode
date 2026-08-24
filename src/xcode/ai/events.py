@@ -60,6 +60,15 @@ class FinalMessage:
 
 
 @dataclass(frozen=True)
+class ProviderFailure:
+    """provider 流失败的可序列化分类信息。"""
+
+    message: str
+    exception_type: str
+    status_code: int | None = None
+
+
+@dataclass(frozen=True)
 class ReasoningDelta:
     """推理内容增量。"""
 
@@ -67,5 +76,10 @@ class ReasoningDelta:
 
 
 type ProviderEvent = (
-    TextDelta | ToolCallEvent | UsageUpdate | FinalMessage | ReasoningDelta
+    TextDelta
+    | ToolCallEvent
+    | UsageUpdate
+    | FinalMessage
+    | ProviderFailure
+    | ReasoningDelta
 )

@@ -18,6 +18,7 @@ from typing import Awaitable, cast
 from xcode.ai.events import (
     FinalMessage,
     Message,
+    ProviderFailure,
     ProviderEvent,
     ReasoningDelta,
     StopReason,
@@ -142,7 +143,13 @@ async def _collect_provider_events(
         if _is_cancelled(signal):
             # 打断触发的连接关闭会使阻塞读取抛出异常，属预期路径。
             return None
-        events.append(FinalMessage(content=f"Provider error: {e}", stop_reason="error"))
+        events.append(
+            ProviderFailure(
+                message=str(e) or type(e).__name__,
+                exception_type=type(e).__name__,
+                status_code=_exception_status_code(e),
+            )
+        )
         return events
 
 
@@ -159,6 +166,7 @@ def _provider_events_to_response(
     output_tokens = 0
     has_usage = False
     final_content: str | None = None
+    provider_failure: ProviderFailure | None = None
 
     for event in events:
         if isinstance(event, TextDelta):
@@ -174,6 +182,10 @@ def _provider_events_to_response(
             input_tokens += event.input_tokens
             output_tokens += event.output_tokens
             has_usage = True
+        elif isinstance(event, ProviderFailure):
+            provider_failure = event
+            stop_reason = "error"
+            final_content = f"Provider error: {event.message}"
         if isinstance(event, FinalMessage):
             stop_reason = event.stop_reason or "end_turn"
             if event.content:
@@ -197,10 +209,20 @@ def _provider_events_to_response(
             reasoning_content="".join(reasoning_parts) if reasoning_parts else None,
             stop_reason=stop_reason,
             error_message=final_content if stop_reason == "error" else None,
+            provider_failure=provider_failure,
             usage=usage,
         ),
         stop_reason=stop_reason,
     )
+
+
+def _exception_status_code(exc: BaseException) -> int | None:
+    """从常见 SDK 异常字段提取 HTTP 状态码。"""
+    for attribute in ("status_code", "status", "code"):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, int) and 100 <= value <= 599:
+            return value
+    return None
 
 
 def _append_text_delta(

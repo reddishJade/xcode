@@ -247,6 +247,7 @@ async def _run_loop(
                     else TerminationReason.CANCELLED
                 ),
                 error_detail=_assistant_error_detail(message),
+                provider_failure=message.provider_failure,
                 metrics=metrics,
                 active_provider=state.active_provider,
             )
@@ -536,6 +537,7 @@ async def _handle_provider_error(
             content=[TextContent(text="I encountered an error.")],
             stop_reason="error",
             error_message=_assistant_error_detail(message),
+            provider_failure=message.provider_failure,
         )
         emit(_message_start_event(msg))
         emit(_message_end_event(msg))
