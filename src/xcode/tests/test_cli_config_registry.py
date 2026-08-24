@@ -45,46 +45,21 @@ class TestRegistryIntegrity:
         longest = max(len(spec.label) for spec in SETTING_SPECS)
         assert longest <= 28
 
-    def test_curated_core_rows(self) -> None:
+    def test_curated_rows_exact(self) -> None:
         keys = {spec.key for spec in SETTING_SPECS}
-        assert "execution_modes.default_mode" in keys
-        assert "security.approval_policy" in keys
-        assert "tools.shell" in keys
-        # 调参类字段不进入运行时浏览器，只保留在 JSON 配置中。
-        assert not any(key.startswith("agent.") for key in keys)
-        assert not any(key.startswith("request_hygiene.") for key in keys)
+        assert keys == {
+            "execution_modes.default_mode",
+            "security.approval_policy",
+            "tools.shell",
+        }
 
 
 class TestFormatSetting:
     def test_defaults_on_empty_config(self) -> None:
         config = XcodeRuntimeConfig()
         assert format_setting(_spec("execution_modes.default_mode"), config) == "act"
-        assert format_setting(_spec("skills.trust_project_skills"), config) == "off"
-        assert (
-            format_setting(_spec("security.approval_policy"), config)
-            == "on-request"
-        )
-        assert (
-            format_setting(_spec("security.restricted_dirs"), config) == "(none)"
-        )
-        assert (
-            format_setting(_spec("security.external_directories"), config)
-            == "0 allowed"
-        )
-
-    def test_seconds_and_bool(self) -> None:
-        config = XcodeRuntimeConfig()
-        assert (
-            format_setting(_spec("security.auto_review_timeout_seconds"), config)
-            == "90s"
-        )
-        assert format_setting(_spec("skills.trust_project_skills"), config) == "off"
-
-    def test_global_default_unset_renders_default(self) -> None:
-        config = XcodeRuntimeConfig()
-        assert (
-            format_setting(_spec("security.global_default"), config) == "default"
-        )
+        assert format_setting(_spec("security.approval_policy"), config) == "on-request"
+        assert format_setting(_spec("tools.shell"), config) == "auto"
 
 
 class TestDescribeChoice:
@@ -99,34 +74,21 @@ class TestDescribeChoice:
 
 
 class TestParseSetting:
-    def test_bool_tokens(self) -> None:
-        spec = _spec("skills.trust_project_skills")
-        assert parse_setting(spec, "on") is True
-        assert parse_setting(spec, "FALSE") is False
-        with pytest.raises(ValueError):
-            parse_setting(spec, "maybe")
-
-    def test_float(self) -> None:
-        spec = _spec("security.auto_review_timeout_seconds")
-        assert parse_setting(spec, "45.5") == 45.5
-        with pytest.raises(ValueError):
-            parse_setting(spec, "abc")
-
     def test_enum_rejects_unknown_choice(self) -> None:
         spec = _spec("execution_modes.default_mode")
         assert parse_setting(spec, "PLAN") == "plan"
         with pytest.raises(ValueError):
             parse_setting(spec, "yolo")
 
-    def test_global_default_clears_via_none_choice(self) -> None:
-        spec = _spec("security.global_default")
-        assert parse_setting(spec, "deny") == "deny"
-        assert parse_setting(spec, "default") is None
+    def test_approval_policy_enum(self) -> None:
+        spec = _spec("security.approval_policy")
+        assert parse_setting(spec, "never") == "never"
+        with pytest.raises(ValueError):
+            parse_setting(spec, "sometimes")
 
-    def test_str_list_comma_separated(self) -> None:
-        spec = _spec("tools.subagent_extra_tools")
-        assert parse_setting(spec, "todowrite, webfetch") == ("todowrite", "webfetch")
-        assert parse_setting(spec, "none") is None
+    def test_shell_enum_accepts_all_choices(self) -> None:
+        spec = _spec("tools.shell")
+        assert parse_setting(spec, "ZSH") == "zsh"
 
 
 class TestApplySetting:
@@ -137,15 +99,13 @@ class TestApplySetting:
 
     def test_none_pops_leaf_key(self) -> None:
         raw: dict = {
-            "security": {"global_default": "ask", "approval_policy": "never"}
+            "execution_modes": {
+                "default_mode": "build",
+                "other_key": 1,
+            }
         }
-        apply_setting(raw, _spec("security.global_default"), None)
-        assert raw["security"] == {"approval_policy": "never"}
-
-    def test_empty_str_list_restores_default(self) -> None:
-        raw: dict = {"tools": {"subagent_extra_tools": ["todowrite"]}}
-        apply_setting(raw, _spec("tools.subagent_extra_tools"), ())
-        assert raw["tools"] == {}
+        apply_setting(raw, _spec("execution_modes.default_mode"), None)
+        assert raw["execution_modes"] == {"other_key": 1}
 
 
 class TestCommitSettingValue:
@@ -163,15 +123,14 @@ class TestCommitSettingValue:
         saved = json.loads(config_path.read_text(encoding="utf-8"))
         assert saved["execution_modes"]["default_mode"] == "build"
 
-    def test_out_of_range_value_not_saved(self, tmp_path: Path) -> None:
+    def test_type_mismatch_not_saved(self, tmp_path: Path) -> None:
         config_path = self._write(
             tmp_path / "xcode.config.json", {"tools": {"shell": "bash"}}
         )
-        ok, message = save_setting_text(
-            config_path, _spec("security.auto_review_timeout_seconds"), "301"
+        ok, _ = commit_setting_value(
+            config_path, _spec("execution_modes.default_mode"), 123
         )
         assert not ok
-        assert "less than or equal to 300" in message
         saved = json.loads(config_path.read_text(encoding="utf-8"))
         assert saved == {"tools": {"shell": "bash"}}
 
@@ -183,7 +142,8 @@ class TestCommitSettingValue:
                     "model_profiles": {
                         "main": {"transport": "deepseek_chat", "api_key": "sk-x"}
                     }
-                }
+                },
+                "agent": {"max_steps": 10},
             },
         )
         ok, _ = save_setting_text(config_path, _spec("tools.shell"), "bash")
@@ -192,6 +152,7 @@ class TestCommitSettingValue:
         assert saved["provider"]["model_profiles"]["main"]["transport"] == (
             "deepseek_chat"
         )
+        assert saved["agent"] == {"max_steps": 10}
         assert saved["tools"]["shell"] == "bash"
 
     def test_save_text_reports_parse_errors(self, tmp_path: Path) -> None:
@@ -203,14 +164,6 @@ class TestCommitSettingValue:
         assert "Expected" in message
         assert not config_path.exists()
 
-    def test_info_rows_reject_saving(self, tmp_path: Path) -> None:
-        config_path = tmp_path / "xcode.config.json"
-        ok, message = save_setting_text(
-            config_path, _spec("security.external_directories"), "1"
-        )
-        assert not ok
-        assert "read-only" in message
-
 
 class TestLookupAndDetails:
     def test_find_by_label_and_key(self) -> None:
@@ -219,11 +172,10 @@ class TestLookupAndDetails:
         assert find_setting("nonexistent-keyword-xyz") is None
 
     def test_matching_returns_all_hits(self) -> None:
-        hits = matching_settings("dirs")
-        labels = {spec.label for spec in hits}
-        assert labels == {"Restricted Dirs", "External Dirs"}
+        hits = matching_settings("shell")
+        assert [spec.label for spec in hits] == ["Shell"]
 
-    def test_external_dirs_detail_lists_entries(self) -> None:
+    def test_detail_fallback_renders_value(self) -> None:
         config = load_effective_config(Path("/nonexistent/xcode.config.json"))
-        lines = setting_detail(_spec("security.external_directories"), config)
-        assert lines == ["  (none)"]
+        lines = setting_detail(_spec("tools.shell"), config)
+        assert lines == ["  auto"]

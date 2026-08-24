@@ -78,34 +78,22 @@ REPL 中可通过 `/model` 命令动态切换模型而无需重启：
 ### 交互式配置
 
 `/config`（REPL/TUI）与 `xcode config`（CLI）打开同一个交互式设置浏览器，
-收录适合运行时调整的核心设置：执行模式、审批策略、自动 review 超时、
-全局默认决策、受限/外部目录、shell、subagent 额外工具、项目 skill 信任。
-agent 压缩参数、request hygiene 数值、路径、hooks、prompt 等调优字段不进
-浏览器，直接编辑 `xcode.config.json`；provider profile 由首次启动的 setup
-向导管理。
+只收录适合运行时调整的行为开关：执行模式、审批策略、shell。其余字段
+（agent 调参、request hygiene、路径、安全细则、hooks、prompt 等）直接编辑
+`xcode.config.json`；provider profile 由首次启动的 setup 向导管理。
 
 ```
 > Default Mode           act
   Approval Policy        on-request
-  Auto Review Timeout    90s
-  Global Default Decision default
-  Restricted Dirs        (none)
-  External Dirs          0 allowed
   Shell                  auto
-  Subagent Extra Tools   (none)
-  Trust Project Skills   off
 
   'act': read allowed, writes and shell ask the user. ...
 ```
 
 - 高亮行底部显示灰色说明，枚举项逐值解释（含权衡说明）。
-- 回车进入编辑：枚举/布尔项菜单选值，当前值标注 `(current)`；
-  标量项输入新值，enter 保存、esc 取消。
-- 二级菜单 esc 返回列表；列表 esc 退出。
-- 可空项接受 `none` 恢复默认；字符串列表用逗号分隔。
-- `External Dirs` 为只读展示，修改需直接编辑 JSON。
+- 回车进入编辑：菜单选值，当前值标注 `(current)`，esc 返回列表。
 - 写入前用 `XcodeRuntimeConfig` 校验，非法值不落盘。
-- REPL 支持跳转：`/config approval` 直接进入匹配的设置项。
+- REPL 支持跳转：`/config shell` 直接进入匹配的设置项。
 
 示例：
 

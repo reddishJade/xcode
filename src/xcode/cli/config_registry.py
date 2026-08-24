@@ -68,38 +68,6 @@ _FALSE_TOKENS = frozenset({"0", "false", "no", "off"})
 _CLEAR_TOKENS = frozenset({"none", "unset", "default", "unlimited"})
 
 
-def _fmt_bool(value: Any) -> str:
-    return "on" if value else "off"
-
-
-def _fmt_float(value: Any) -> str:
-    return f"{float(value):g}"
-
-
-def _fmt_seconds(value: Any) -> str:
-    return f"{float(value):g}s"
-
-
-def _fmt_str_list(value: Any) -> str:
-    items = list(value) if value is not None else []
-    return ", ".join(items) if items else "(none)"
-
-
-def _fmt_default(value: Any) -> str:
-    return "default" if value is None else str(value)
-
-
-def _count_getter(section: str) -> Callable[[XcodeRuntimeConfig], int]:
-    return lambda config: len(attrgetter(section)(config))
-
-
-def _external_dirs_detail(config: XcodeRuntimeConfig) -> list[str]:
-    entries = config.security.external_directories
-    if not entries:
-        return ["  (none)"]
-    return [f"  {item.path} ({item.access})" for item in entries]
-
-
 SETTING_SPECS: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="execution_modes.default_mode",
@@ -140,57 +108,6 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         },
     ),
     SettingSpec(
-        key="security.auto_review_timeout_seconds",
-        label="Auto Review Timeout",
-        kind=SettingKind.FLOAT,
-        description=(
-            "Total deadline for the automatic reviewer per action, "
-            "0-300 seconds. On timeout the action fails closed."
-        ),
-        formatter=_fmt_seconds,
-    ),
-    SettingSpec(
-        key="security.global_default",
-        label="Global Default Decision",
-        kind=SettingKind.ENUM,
-        choices=("allow", "ask", "deny", "default"),
-        none_choice="default",
-        description=(
-            "Decision applied when no static rule matches. 'allow' maximizes "
-            "autonomy; 'deny' fails closed. 'default' clears the override "
-            "and defers to the current mode fallback."
-        ),
-        formatter=_fmt_default,
-        choice_descriptions={
-            "allow": "Unmatched actions proceed without prompting.",
-            "ask": "Unmatched actions require a decision first.",
-            "deny": "Unmatched actions are always rejected.",
-            "default": "No global override; the mode fallback decides.",
-        },
-    ),
-    SettingSpec(
-        key="security.restricted_dirs",
-        label="Restricted Dirs",
-        kind=SettingKind.STR_LIST,
-        nullable=True,
-        description=(
-            "Directories the agent must never access, even when other rules "
-            "allow them. Comma separated; 'none' clears the list."
-        ),
-        formatter=_fmt_str_list,
-    ),
-    SettingSpec(
-        key="security.external_directories",
-        label="External Dirs",
-        kind=SettingKind.INFO,
-        description=(
-            "Workspace-external directories whitelisted for access; each "
-            "entry grants read, write, or read_write. Edit JSON to change."
-        ),
-        getter=_count_getter("security.external_directories"),
-        formatter=lambda v: f"{v} allowed",
-    ),
-    SettingSpec(
         key="tools.shell",
         label="Shell",
         kind=SettingKind.ENUM,
@@ -199,31 +116,6 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
             "Shell used by the bash tool. 'auto' detects the login shell at "
             "runtime; pick an explicit value to pin behavior across machines."
         ),
-    ),
-    SettingSpec(
-        key="tools.subagent_extra_tools",
-        label="Subagent Extra Tools",
-        kind=SettingKind.STR_LIST,
-        nullable=True,
-        description=(
-            "Main-agent tools additionally granted to subagents; most useful "
-            "for sharing 'todowrite'. Comma separated; 'none' clears."
-        ),
-        formatter=_fmt_str_list,
-    ),
-    SettingSpec(
-        key="skills.trust_project_skills",
-        label="Trust Project Skills",
-        kind=SettingKind.BOOL,
-        description=(
-            "Whether project-local .xcode/skills/ and .agents/skills/ "
-            "directories are discovered and exposed to the agent."
-        ),
-        formatter=_fmt_bool,
-        choice_descriptions={
-            "on": "Project skills load on demand like user skills.",
-            "off": "Only user-level skills (~/.xcode/skills) are visible.",
-        },
     ),
 )
 
@@ -259,15 +151,8 @@ def matching_settings(query: str) -> list[SettingSpec]:
 
 
 def setting_detail(spec: SettingSpec, config: XcodeRuntimeConfig) -> list[str]:
-    """INFO 行展开的多行详情。"""
-    detail_getters: dict[str, Callable[[XcodeRuntimeConfig], list[str]]] = {
-        "security.external_directories": _external_dirs_detail,
-    }
-    getter = detail_getters.get(spec.key)
-    if getter is None:
-        value = spec.read(config)
-        return [f"  {value}"]
-    return getter(config)
+    """INFO 行展开的多行详情；无自定义详情时回退到值的字符串形式。"""
+    return [f"  {spec.read(config)}"]
 
 
 def format_setting(spec: SettingSpec, config: XcodeRuntimeConfig) -> str:
@@ -278,11 +163,12 @@ def format_setting(spec: SettingSpec, config: XcodeRuntimeConfig) -> str:
     if value is None:
         return "(unset)"
     if spec.kind is SettingKind.BOOL:
-        return _fmt_bool(value)
+        return "on" if value else "off"
     if isinstance(value, float | int):
-        return _fmt_float(value)
+        return f"{float(value):g}"
     if isinstance(value, tuple | list):
-        return _fmt_str_list(value)
+        items = list(value)
+        return ", ".join(items) if items else "(none)"
     return str(value)
 
 
