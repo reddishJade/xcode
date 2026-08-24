@@ -1,4 +1,5 @@
 from .filesystem import FileSystem, LocalFileSystem
+from .linux_sandbox import LinuxBubblewrapSandbox, SandboxUnavailableError
 from .result import ExecutionResult
 from .sandbox import (
     CommandSandbox,
@@ -14,10 +15,12 @@ __all__ = [
     "CommandSandbox",
     "ExecutionResult",
     "FileSystem",
+    "LinuxBubblewrapSandbox",
     "LocalFileSystem",
     "NetworkAccess",
     "SandboxMode",
     "SandboxPolicy",
+    "SandboxUnavailableError",
     "SandboxedCommand",
     "Shell",
     "SubprocessShell",
