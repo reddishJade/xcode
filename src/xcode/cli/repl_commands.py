@@ -897,7 +897,7 @@ def cmd_skill(cmd: str, ctx: CommandContext) -> bool:
 
 
 def cmd_memory(cmd: str, ctx: CommandContext) -> bool:
-    """检索、列出或显式添加项目级与用户级记忆。"""
+    """检索、列出或显式维护项目级与用户级记忆。"""
     manager = MemoryManager(ctx.project_root)
     parts = cmd.split(maxsplit=2)
     action = parts[1].lower() if len(parts) >= 2 else "list"
@@ -909,10 +909,16 @@ def cmd_memory(cmd: str, ctx: CommandContext) -> bool:
         return _search_memory(manager, payload)
     if action == "add":
         return _add_memory(manager, payload)
+    if action == "update":
+        return _update_memory(manager, payload)
+    if action == "delete":
+        return _delete_memory(manager, payload)
 
     print("Usage: /memory list [all|project|user]")
     print("       /memory search <query>")
     print("       /memory add [project|user] <title> | <durable note>")
+    print("       /memory update [project|user] <title> | <durable note>")
+    print("       /memory delete [project|user] <title>")
     print("Example: /memory add project Retry policy | Retry providers at most twice.")
     return False
 
@@ -955,12 +961,7 @@ def _search_memory(manager: MemoryManager, query: str) -> bool:
 
 def _add_memory(manager: MemoryManager, payload: str) -> bool:
     """解析单行 Markdown 记忆并写入指定层级。"""
-    layer = "project"
-    value = payload
-    first, separator, remainder = payload.partition(" ")
-    if separator and first.lower() in {"project", "user"}:
-        layer = first.lower()
-        value = remainder.strip()
+    layer, value = _parse_memory_layer(payload)
 
     title, separator, body = value.partition("|")
     if not separator:
@@ -986,6 +987,44 @@ def _add_memory(manager: MemoryManager, payload: str) -> bool:
     print(f"Added {layer} memory: {title}")
     print(f"Path: {memory_file}")
     return False
+
+
+def _update_memory(manager: MemoryManager, payload: str) -> bool:
+    """按标题更新一条持久记忆。"""
+    layer, value = _parse_memory_layer(payload)
+    title, separator, body = value.partition("|")
+    if not separator or not title.strip() or not body.strip():
+        print("Usage: /memory update [project|user] <title> | <durable note>")
+        return False
+
+    memory_layer = cast(MemoryLayer, layer)
+    block = build_memory_block(title, body)
+    if not manager.update_memory_block(title, block, layer=memory_layer):
+        print("Memory was not updated because it was missing, empty, or duplicate.")
+        return False
+    print(f"Updated {layer} memory: {title.strip()}")
+    return False
+
+
+def _delete_memory(manager: MemoryManager, payload: str) -> bool:
+    """按标题删除一条持久记忆。"""
+    layer, title = _parse_memory_layer(payload)
+    if not title.strip():
+        print("Usage: /memory delete [project|user] <title>")
+        return False
+    if not manager.delete_memory_block(title, layer=cast(MemoryLayer, layer)):
+        print(f"Memory not found: {title.strip()}")
+        return False
+    print(f"Deleted {layer} memory: {title.strip()}")
+    return False
+
+
+def _parse_memory_layer(payload: str) -> tuple[str, str]:
+    """解析可选的 project/user 层级前缀。"""
+    first, separator, remainder = payload.partition(" ")
+    if separator and first.lower() in {"project", "user"}:
+        return first.lower(), remainder.strip()
+    return "project", payload
 
 
 def _split_memory_shorthand(text: str) -> tuple[str, str]:

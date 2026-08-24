@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from xcode.harness.memory import MemoryManager, build_memory_block, build_memory_tools
@@ -82,6 +83,65 @@ def test_duplicate_title_is_rejected_without_rewriting_existing_file(
         build_memory_block("retry RULE", "Retry three times."),
     )
     assert manager.memory_file.read_text(encoding="utf-8") == original
+
+
+def test_memory_blocks_can_be_updated_and_deleted_without_losing_preamble(
+    tmp_path: Path,
+) -> None:
+    manager = _manager(tmp_path)
+    manager.memory_file.write_text(
+        "# Project memory\n\nKeep this introduction.\n\n"
+        + build_memory_block("Retry rule", "Retry twice.")
+        + "\n"
+        + build_memory_block("Architecture", "Use a layered harness."),
+        encoding="utf-8",
+    )
+
+    assert manager.update_memory_block(
+        "retry RULE",
+        build_memory_block("Retry rule", "Retry only once."),
+    )
+    assert manager.delete_memory_block("Architecture")
+
+    text = manager.memory_file.read_text(encoding="utf-8")
+    assert "Keep this introduction." in text
+    assert "Retry only once." in text
+    assert "Retry twice." not in text
+    assert "Architecture" not in text
+
+
+def test_concurrent_memory_additions_do_not_overwrite_each_other(
+    tmp_path: Path,
+) -> None:
+    manager = _manager(tmp_path)
+
+    def add(index: int) -> bool:
+        return manager.add_memory_block(
+            build_memory_block(f"Rule {index}", f"Durable value {index}."),
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(add, range(20)))
+
+    assert all(results)
+    assert len(manager.read_memory_records(layer="project")) == 20
+
+
+def test_search_index_is_invalidated_after_external_edit(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    manager.memory_file.write_text(
+        "# Project memory\n\n" + build_memory_block("First", "alpha token."),
+        encoding="utf-8",
+    )
+    assert manager.search_memory_records("alpha")[0].title == "First"
+
+    manager.memory_file.write_text(
+        "# Project memory\n\n" + build_memory_block("Second", "beta token."),
+        encoding="utf-8",
+    )
+
+    assert manager.search_memory_records("alpha") == []
+    assert manager.search_memory_records("beta")[0].title == "Second"
 
 
 def test_budgeted_read_never_exceeds_budget(tmp_path: Path) -> None:
