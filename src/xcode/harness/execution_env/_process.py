@@ -62,6 +62,7 @@ def _taskkill(proc: subprocess.Popen) -> None:
     subprocess.run(
         ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
         capture_output=True,
+        check=False,
         timeout=5,
     )
 

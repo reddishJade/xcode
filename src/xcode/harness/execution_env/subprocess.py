@@ -7,9 +7,13 @@ from pathlib import Path
 
 from ._process import POLL_INTERVAL, close_pipes, kill_process, start_process
 from .result import ExecutionResult
+from .sandbox import CommandSandbox
 
 
 class SubprocessShell:
+    def __init__(self, sandbox: CommandSandbox | None = None) -> None:
+        self._sandbox = sandbox
+
     def run(
         self,
         argv: list[str],
@@ -20,6 +24,10 @@ class SubprocessShell:
         env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         logger = __import__("logging").getLogger(__name__)
+        if self._sandbox is not None:
+            command = self._sandbox.wrap(argv, cwd)
+            argv = list(command.argv)
+            cwd = command.cwd
         proc = start_process(argv, cwd, env=env)
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
