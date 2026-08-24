@@ -981,9 +981,11 @@ class _XcodeTui:
             return
         selected = self._command_choices.current_value
         self._state.pending_command_choice = None
-        request.on_select(selected)
+        # 先恢复输入框焦点，再执行回调：链式打开的下一级菜单或文本表单
+        # 会在回调内重新聚焦，不能被这里的默认焦点覆盖。
         self._application.layout.focus(self._input)
         self._scrollback = 0
+        request.on_select(selected)
         self._refresh()
 
     def _finish_command(self, text: str, should_exit: bool) -> None:
