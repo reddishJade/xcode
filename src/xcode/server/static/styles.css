@@ -546,6 +546,28 @@ button {
 
 .final-strip__chip b { color: var(--amber-strong); font-weight: 700; }
 
+/* ── 底栏统计 ── */
+
+.statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--ink);
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.statusbar__usage, .statusbar__context { letter-spacing: 0.04em; }
+
+.statusbar__spacer { flex: 1; }
+
+.statusbar__model { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
+
 /* ── 输入区 ── */
 
 .composer {
@@ -556,19 +578,6 @@ button {
   padding: 12px 20px;
   border-top: 1px solid var(--border);
   background: var(--panel);
-}
-
-.composer__mode {
-  flex: 0 0 auto;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  color: var(--amber-strong);
-  border: 1px solid var(--border-strong);
-  background: var(--amber-dim);
-  border-radius: 999px;
-  padding: 5px 12px;
-  margin-bottom: 4px;
 }
 
 .composer__input {

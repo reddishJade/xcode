@@ -43,6 +43,14 @@ def create_app(
     async def info() -> JSONResponse:
         return JSONResponse(_info_payload(hub.app, server.state.project_root))
 
+    @server.get("/api/stats")
+    async def stats() -> JSONResponse:
+        loop = asyncio.get_running_loop()
+        payload = await loop.run_in_executor(
+            None, lambda: _stats_payload(hub.app, server.state.project_root)
+        )
+        return JSONResponse(payload)
+
     @server.get("/api/model")
     async def model_info() -> JSONResponse:
         return JSONResponse(_model_payload(hub.app))
@@ -209,6 +217,38 @@ def create_app(
 
     server.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return server
+
+
+def _stats_payload(app: XcodeApp, project_root: Path) -> dict[str, object]:
+    """底栏统计：累计用量 + 上下文占用 + 模型/effort（与 REPL 底栏同口径）。"""
+    payload: dict[str, object] = {
+        "usage": "",
+        "context": "",
+        "model": "",
+        "effort": "",
+        "provider": "",
+    }
+    try:
+        info = dict(app.get_model_info())
+        payload["effort"] = str(info.get("reasoning_effort") or "")
+        payload["provider"] = str(info.get("transport") or "").removesuffix("_chat")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from xcode.cli.commands import ReplState
+        from xcode.cli.repl_commands import _compute_context_summary
+
+        agent = getattr(app, "agent", None)
+        if agent is None:
+            return payload
+        state = ReplState()
+        summary = _compute_context_summary(agent, project_root, state)
+        payload["usage"] = state.usage_stats
+        payload["context"] = state.context_usage
+        payload["model"] = summary.model_name
+    except Exception:  # noqa: BLE001 - 统计失败不影响主流程
+        pass
+    return payload
 
 
 def _model_payload(app: XcodeApp) -> dict[str, object]:

@@ -11,9 +11,7 @@
     modelSelect: $("model-select"),
     sessionId: $("session-id"),
     conn: $("conn"),
-    connLabel: $("conn-label"),
     modes: $("modes"),
-    composerMode: $("composer-mode"),
     stream: $("stream"),
     empty: $("empty"),
     input: $("input"),
@@ -26,6 +24,9 @@
     workspaceSelect: $("workspace-select"),
     workspaceSwitch: $("workspace-switch"),
     toast: $("toast"),
+    statsUsage: $("stats-usage"),
+    statsContext: $("stats-context"),
+    statsModel: $("stats-model"),
     approval: $("approval"),
     approvalTool: $("approval-tool"),
     approvalArgs: $("approval-args"),
@@ -105,7 +106,7 @@
     els.modes.querySelectorAll(".mode").forEach((b) => {
       b.classList.toggle("is-active", b.dataset.mode === mode);
     });
-    els.composerMode.textContent = mode;
+
   }
 
   function setRunning(next) {
@@ -465,11 +466,12 @@
       connected = true;
       els.conn.classList.add("is-live");
       els.conn.classList.remove("is-down");
-      els.connLabel.textContent = "online";
+  
       refreshInfo();
       refreshModel();
       refreshSessions();
       refreshWorkspaces();
+      refreshStats();
     };
 
     ws.onmessage = (event) => {
@@ -486,7 +488,7 @@
       connected = false;
       els.conn.classList.remove("is-live");
       els.conn.classList.add("is-down");
-      els.connLabel.textContent = "offline · 重连中";
+  
       clearTimeout(reconnectTimer);
       reconnectTimer = setTimeout(connect, 1500);
     };
@@ -506,6 +508,7 @@
       case "run_idle":
         setRunning(false);
         refreshSessions();
+        refreshStats();
         break;
       case "run_cancelled":
         systemNote("中断", "回合已取消");
@@ -521,11 +524,13 @@
         resetView(true);
         refreshInfo();
         refreshSessions();
+        refreshStats();
         break;
       case "session_switched":
         resetView(false);
         refreshInfo();
         refreshSessions();
+        refreshStats();
         loadSession(msg.session_id || "", "live");
         break;
       case "workspace_switched":
@@ -534,6 +539,7 @@
         refreshModel();
         refreshSessions();
         refreshWorkspaces();
+        refreshStats();
         systemNote("工作区", "已切换到 " + (msg.info?.project || ""));
         break;
       case "approval_request":
@@ -606,6 +612,7 @@
       applyModel(data);
       toast("已切换模型 " + next);
       refreshSessions();
+      refreshStats();
     } catch (_err) {
       toast("切换模型失败");
       els.modelSelect.value = previous;
@@ -672,6 +679,7 @@
       refreshModel();
       refreshSessions();
       refreshWorkspaces();
+      refreshStats();
       toast("已切换工作区 " + path);
     } catch (_err) {
       toast("切换工作区失败");
@@ -910,6 +918,21 @@
       const res = await fetch("/api/info");
       const info = await res.json();
       applyInfo(info);
+    } catch (_err) {
+      /* 忽略 */
+    }
+  }
+
+  async function refreshStats() {
+    try {
+      const res = await fetch("/api/stats");
+      const data = await res.json();
+      els.statsUsage.textContent = data.usage || "";
+      els.statsContext.textContent = data.context || "";
+      const model = data.model || "";
+      const effort = data.effort ? " • " + data.effort : "";
+      const provider = data.provider ? "(" + data.provider + ") " : "";
+      els.statsModel.textContent = provider + model + effort;
     } catch (_err) {
       /* 忽略 */
     }
