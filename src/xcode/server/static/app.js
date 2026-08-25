@@ -145,7 +145,6 @@
     thinking.hidden = true;
     const bar = document.createElement("button");
     bar.className = "thinking__bar";
-    bar.textContent = "◌ 思考中（点击折叠）";
     const thinkText = document.createElement("pre");
     thinkText.className = "thinking__text";
     thinking.append(bar, thinkText);
@@ -165,6 +164,9 @@
       lamp: lamp,
       thinking: thinking,
       thinkingText: thinkText,
+      thinkingBar: bar,
+      thinkingCollapsed: false,
+      thinkingTextHidden: false,
       assistant: assistant,
       assistantText: "",
       tools: tools,
@@ -172,10 +174,32 @@
       rendered: 0,
     };
     railParts.num.textContent = String(stepNum).padStart(2, "0");
+    bar.addEventListener("click", () => toggleThinking(record));
+    syncThinkingBar(record);
     steps.set(stepNum, record);
     lastStepKey = Math.max(lastStepKey, stepNum);
     scrollToBottom();
     return record;
+  }
+
+  function syncThinkingBar(record) {
+    const label = record.thinkingCollapsed ? "▸ 展开" : "▾ 收起";
+    record.thinkingBar.textContent = "◌ 思考 · " + label;
+    record.thinkingText.hidden = record.thinkingTextHidden;
+  }
+
+  function toggleThinking(record) {
+    record.thinkingCollapsed = !record.thinkingCollapsed;
+    record.thinkingTextHidden = record.thinkingCollapsed;
+    syncThinkingBar(record);
+    scrollToBottom();
+  }
+
+  function addThinking(record, delta) {
+    record.thinking.hidden = false;
+    record.thinkingText.textContent += delta;
+    lampState(record, "think");
+    scrollToBottom();
   }
 
   function lampState(record, state) {
@@ -196,13 +220,6 @@
     const live = running && record === steps.get(lastStepKey);
     record.assistant.innerHTML =
       markdown(record.assistantText) + (live ? '<span class="cursor"></span>' : "");
-    scrollToBottom();
-  }
-
-  function addThinking(record, delta) {
-    record.thinking.hidden = false;
-    record.thinkingText.textContent += delta;
-    lampState(record, "think");
     scrollToBottom();
   }
 
