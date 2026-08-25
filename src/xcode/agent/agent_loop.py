@@ -112,6 +112,11 @@ async def run_agent_loop(
         request_prefix=list(context.request_prefix),
         messages=list(context.messages) + list(prompts),
         tools=list(context.tools) if context.tools else [],
+        request_token_budget=(
+            config.request_token_budget
+            if config.request_token_budget > 0
+            else context.request_token_budget
+        ),
     )
     emit(_agent_start_event())
     emit(_turn_start_event())

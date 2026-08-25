@@ -100,5 +100,18 @@ class SkillIndexCollector:
                 target=ContextBlockTarget.USER_CONTEXT,
                 priority=ContextPriority.MEDIUM,
                 content=body,
+                provenance="skill registry",
+                truncated=any(
+                    len(summary.description) > _CATALOG_DESCRIPTION_MAX_CHARS
+                    for summary in summaries
+                ),
+                truncation_reason=(
+                    "description_limit"
+                    if any(
+                        len(summary.description) > _CATALOG_DESCRIPTION_MAX_CHARS
+                        for summary in summaries
+                    )
+                    else None
+                ),
             )
         ]

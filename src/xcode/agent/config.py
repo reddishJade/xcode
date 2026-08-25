@@ -46,6 +46,7 @@ class AgentContext(BaseModel):
     request_prefix: list[AgentMessage] = Field(default_factory=list)
     messages: list[AgentMessage] = Field(default_factory=list)
     tools: list[Annotated[AgentTool, SkipValidation]] = Field(default_factory=list)
+    request_token_budget: Annotated[int, Field(ge=0)] = 0
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
 
@@ -156,6 +157,7 @@ type BeforeProviderRequestHook = Callable[[RequestAssembly], None]
 class AgentLoopConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
     provider: Annotated[StreamProvider | None, SkipValidation] = None
+    request_token_budget: Annotated[int, Field(ge=0)] = 0
     tool_execution: ToolExecutionMode = "parallel"
     tool_workers: int = 4
     tool_timeout_seconds: float = 120.0

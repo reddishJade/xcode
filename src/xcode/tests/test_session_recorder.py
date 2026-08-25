@@ -222,6 +222,9 @@ def test_provider_request_hook_adds_provider_and_request_fingerprint() -> None:
     assert record.metadata["assembly"] == {
         "current_step": 1,
         "hygiene_applied": True,
+        "estimated_tokens": 1,
+        "token_budget": 0,
+        "budget_remaining": 0,
         "context_trace": [],
     }
     assert record.metadata["options"] == {}

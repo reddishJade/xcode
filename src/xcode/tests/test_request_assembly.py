@@ -31,6 +31,9 @@ class _Collector:
                 target=ContextBlockTarget.SYSTEM,
                 content="current architecture note",
                 block_id="note-current",
+                provenance="AGENTS.md",
+                truncated=True,
+                truncation_reason="byte_budget",
             ),
             ContextBlock(
                 source=ContextBlockSource.ACTIVE_DIFF,
@@ -80,8 +83,13 @@ def test_request_assembly_is_the_complete_provider_envelope() -> None:
     assert [(trace.block_id, trace.included) for trace in assembly.context_trace] == [
         ("note-current", True),
         ("diff-old", False),
+        ("read_file", True),
     ]
     assert all(len(trace.content_sha256) == 64 for trace in assembly.context_trace)
+    assert assembly.context_trace[0].provenance == "AGENTS.md"
+    assert assembly.context_trace[0].truncated
+    assert assembly.context_trace[0].truncation_reason == "byte_budget"
+    assert assembly.context_trace[2].source == "tool"
 
 
 def test_request_hygiene_changes_assembly_not_session_surface() -> None:

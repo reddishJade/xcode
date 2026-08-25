@@ -22,6 +22,7 @@ from xcode.agent.context import (
     trim_to_budget,
 )
 from xcode.agent.messages import SystemMessage, UserMessage
+from xcode.agent.types import ToolSpec, ToolSpecAdapter
 
 # ── ContextBlock ──
 
@@ -156,6 +157,28 @@ class TestTrimToBudget:
         assert len(used) == 1
         assert used[0].priority == ContextPriority.CRITICAL
 
+    def test_same_priority_preserves_collector_order(self) -> None:
+        blocks = [
+            ContextBlock(
+                source=ContextBlockSource.INSTRUCTION,
+                priority=ContextPriority.CRITICAL,
+                content="first",
+                token_count=5,
+                block_id="first",
+            ),
+            ContextBlock(
+                source=ContextBlockSource.INSTRUCTION,
+                priority=ContextPriority.CRITICAL,
+                content="second",
+                token_count=1,
+                block_id="second",
+            ),
+        ]
+
+        used, _dropped = trim_to_budget(blocks, budget=6, base_tokens=0)
+
+        assert [block.block_id for block in used] == ["first", "second"]
+
 
 # ── DefaultContextAssembler ──
 
@@ -229,6 +252,43 @@ class TestDefaultContextAssembler:
             )
         )
         assert len(result.blocks_dropped) == 1
+
+    def test_budget_includes_prompt_and_tool_tokens(self) -> None:
+        tool = ToolSpecAdapter(
+            ToolSpec(
+                name="read_file",
+                description="Read a file.",
+                input_hint="path",
+                handler=lambda _data, _update=None: "contents",
+                schema={"type": "object", "properties": {"path": {"type": "string"}}},
+            )
+        )
+        base_input = ContextAssemblyInput(
+            system_prompt="system instructions " * 20,
+            messages=[UserMessage(content="history " * 20)],
+            tools=[tool],
+        )
+        assembler = DefaultContextAssembler()
+        base = assembler.assemble(base_input).total_tokens
+        block = ContextBlock(
+            source=ContextBlockSource.NOTES,
+            priority=ContextPriority.LOW,
+            content="keep this note",
+            token_count=1,
+        )
+
+        result = assembler.assemble(
+            ContextAssemblyInput(
+                system_prompt=base_input.system_prompt,
+                messages=base_input.messages,
+                tools=base_input.tools,
+                context_blocks=[block],
+                token_budget=base,
+            )
+        )
+
+        assert result.blocks_dropped == [block]
+        assert result.base_tokens == base
 
 
 # ── _apply_size_budget ──

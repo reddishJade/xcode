@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from xcode.ai.models import effective_compact_threshold
+from xcode.ai.models import effective_compact_threshold, get_model_context_window
 from xcode.ai.providers.base import ModelProvider
 
 from ...agent._codec import convert_to_llm as _convert_to_llm
@@ -30,7 +30,7 @@ from ...agent.request import (
     RequestHygiene,
 )
 from ...agent.types import ApprovalCallback, ToolSpec
-from ..config import RequestHygieneConfig
+from ..config import AgentConfig, RequestHygieneConfig
 from ..observability import (
     AuditLogger,
     ExternalHookRunner,
@@ -226,6 +226,9 @@ def _build_before_provider_request_closure(
                     "assembly": {
                         "current_step": assembly.current_step,
                         "hygiene_applied": assembly.hygiene_applied,
+                        "estimated_tokens": assembly.estimated_tokens,
+                        "token_budget": assembly.token_budget,
+                        "budget_remaining": assembly.budget_remaining,
                         "context_trace": [
                             {
                                 "source": trace.source,
@@ -234,6 +237,9 @@ def _build_before_provider_request_closure(
                                 "included": trace.included,
                                 "token_count": trace.token_count,
                                 "content_sha256": trace.content_sha256,
+                                "provenance": trace.provenance,
+                                "truncated": trace.truncated,
+                                "truncation_reason": trace.truncation_reason,
                             }
                             for trace in assembly.context_trace
                         ],
@@ -364,6 +370,7 @@ def build_loop_config(
 
     return AgentLoopConfig(
         provider=provider,
+        request_token_budget=_request_token_budget(provider, composition.config),
         request_assembler=composition.request_assembler,
         max_steps=composition.config.max_steps,
         tool_workers=composition.config.tool_workers,
@@ -391,6 +398,18 @@ def build_loop_config(
         ),
         prepare_next_turn=prepare_next_turn_fn,
     )
+
+
+def _request_token_budget(provider: ModelProvider, config: AgentConfig) -> int:
+    """计算留出输出空间后的 provider 输入预算。"""
+    override = getattr(provider, "context_window", None)
+    window = override if isinstance(override, int) and override > 0 else None
+    if window is None:
+        model = getattr(provider, "model", "")
+        window = get_model_context_window(str(model))
+    if window is None:
+        return 0
+    return max(1, window - max(config.reserve_tokens, 0))
 
 
 def _should_compact(

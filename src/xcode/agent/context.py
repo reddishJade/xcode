@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import subprocess
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
@@ -18,7 +19,7 @@ from xcode.agent.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from xcode.agent.types import AgentTool
+from xcode.agent.types import AgentTool, materialize_json_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,9 @@ class ContextBlock:
     created_step: int = 0
     metadata: dict[str, object] = field(default_factory=dict)
     block_id: str = ""
+    provenance: str = ""
+    truncated: bool = False
+    truncation_reason: str | None = None
 
     def get_token_count(self) -> int:
         if self.token_count is not None:
@@ -125,6 +129,7 @@ class ContextAssemblyResult:
     total_tokens: int = 0
     token_budget: int = 0
     budget_remaining: int = 0
+    base_tokens: int = 0
 
 
 # ── 收集器协议 ──
@@ -212,7 +217,8 @@ def trim_to_budget(
     budget: int,
     base_tokens: int,
 ) -> tuple[list[ContextBlock], list[ContextBlock]]:
-    sorted_blocks = sorted(blocks, key=lambda b: (b.priority, b.get_token_count()))
+    # Python 的 sorted 是稳定排序；只按优先级排序可以保留 collector 的原始顺序。
+    sorted_blocks = sorted(blocks, key=lambda b: b.priority)
 
     if budget <= 0:
         return sorted_blocks, []
@@ -241,15 +247,16 @@ def trim_to_budget(
 class DefaultContextAssembler:
     def assemble(self, input: ContextAssemblyInput) -> ContextAssemblyResult:
         messages = list(input.messages)
-        total_tokens = _estimate_messages_tokens(messages)
+        base_tokens = _estimate_base_tokens(input, messages)
         budget = input.token_budget
 
         if not input.context_blocks:
             return ContextAssemblyResult(
                 messages=messages,
-                total_tokens=total_tokens,
+                total_tokens=base_tokens,
                 token_budget=budget,
-                budget_remaining=budget - total_tokens if budget > 0 else 0,
+                budget_remaining=budget - base_tokens if budget > 0 else 0,
+                base_tokens=base_tokens,
             )
 
         valid_blocks: list[ContextBlock] = []
@@ -262,7 +269,7 @@ class DefaultContextAssembler:
 
         used_blocks: list[ContextBlock]
         budget_dropped: list[ContextBlock]
-        used_blocks, budget_dropped = trim_to_budget(valid_blocks, budget, total_tokens)
+        used_blocks, budget_dropped = trim_to_budget(valid_blocks, budget, base_tokens)
         dropped.extend(budget_dropped)
 
         if used_blocks:
@@ -294,7 +301,7 @@ class DefaultContextAssembler:
                 ]
                 messages[insert_idx:insert_idx] = user_messages
 
-        final_total = _estimate_messages_tokens(messages)
+        final_total = _estimate_base_tokens(input, messages)
 
         return ContextAssemblyResult(
             messages=messages,
@@ -303,6 +310,7 @@ class DefaultContextAssembler:
             total_tokens=final_total,
             token_budget=budget,
             budget_remaining=max(0, budget - final_total) if budget > 0 else 0,
+            base_tokens=base_tokens,
         )
 
 
@@ -341,6 +349,46 @@ def _estimate_messages_tokens(messages: list[AgentMessage]) -> int:
         else:
             raw = msg.content if isinstance(msg.content, str) else str(msg.content)
             total += estimate_tokens(raw)
+    return total
+
+
+def _estimate_base_tokens(
+    input: ContextAssemblyInput,
+    messages: list[AgentMessage],
+) -> int:
+    """估算不含结构化上下文块的完整请求基线。"""
+    total = _estimate_messages_tokens(messages)
+    if input.system_prompt:
+        total += estimate_tokens(input.system_prompt)
+    total += _estimate_tools_tokens(input.tools)
+    return total
+
+
+def _estimate_tools_tokens(tools: list[AgentTool]) -> int:
+    total = 0
+    for tool in tools:
+        description = str(getattr(tool, "description", ""))
+        examples = getattr(tool, "examples", [])
+        if examples:
+            example_lines = ["\n", "Examples:"]
+            for example in examples:
+                example_lines.append(
+                    f"  - {example.get('name', '')}: "
+                    f"input={json.dumps(example.get('input', {}), ensure_ascii=False)}, "
+                    f'output="{example.get("output", "")}"'
+                )
+            description += "\n".join(example_lines)
+        payload = {
+            "name": str(getattr(tool, "name", "")),
+            "description": description,
+            "parameters": materialize_json_mapping(getattr(tool, "parameters", {})),
+        }
+        builtin = getattr(tool, "builtin", None)
+        if isinstance(builtin, dict):
+            payload["builtin"] = builtin
+        total += estimate_tokens(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        )
     return total
 
 
@@ -474,6 +522,9 @@ class InstructionCollector:
                 target=ContextBlockTarget.SYSTEM,
                 priority=priority,
                 content=content,
+                provenance=str(path),
+                truncated=len(data) > max_bytes,
+                truncation_reason="byte_budget" if len(data) > max_bytes else None,
             )
         ], consumed_bytes
 
@@ -492,6 +543,9 @@ class InstructionCollector:
                 target=ContextBlockTarget.SYSTEM,
                 priority=priority,
                 content=prepared,
+                provenance="inline instruction",
+                truncated=len(data) > max_bytes,
+                truncation_reason="byte_budget" if len(data) > max_bytes else None,
             )
         ], consumed_bytes
 
@@ -608,6 +662,11 @@ class ActiveDiffCollector:
                 target=ContextBlockTarget.USER_CONTEXT,
                 priority=ContextPriority.HIGH,
                 content=body,
+                provenance=f"git diff: {root}",
+                truncated=ideal_bytes > ACTIVE_DIFF_MAX_BYTES,
+                truncation_reason=(
+                    "byte_budget" if ideal_bytes > ACTIVE_DIFF_MAX_BYTES else None
+                ),
             )
         ]
 
@@ -696,6 +755,11 @@ class RecentValidationCollector:
             target=ContextBlockTarget.USER_CONTEXT,
             priority=ContextPriority.HIGH,
             content=body,
+            provenance=f"{command}:{msg.tool_call_id}",
+            truncated=_utf8_size(raw) > self._max_bytes,
+            truncation_reason=(
+                "byte_budget" if _utf8_size(raw) > self._max_bytes else None
+            ),
         )
 
 
@@ -773,5 +837,10 @@ class NotesCollector:
                 target=ContextBlockTarget.USER_CONTEXT,
                 priority=ContextPriority.MEDIUM,
                 content=body,
+                provenance=str(notes_dir),
+                truncated=_NOTES_TRUNCATED_MARKER in body,
+                truncation_reason=(
+                    "byte_budget" if _NOTES_TRUNCATED_MARKER in body else None
+                ),
             )
         ]
