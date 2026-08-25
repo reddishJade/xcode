@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -88,6 +89,34 @@ def create_app(
         except Exception as exc:  # noqa: BLE001 - 返回给前端展示
             return JSONResponse({"error": f"切换模型失败: {exc}"}, status_code=400)
         return JSONResponse(result)
+
+    @server.get("/api/git/branches")
+    async def git_branches() -> JSONResponse:
+        return JSONResponse(_git_branches_payload(server.state.project_root))
+
+    @server.post("/api/git/branches")
+    async def git_switch_endpoint(payload: dict) -> JSONResponse:
+        name = str(payload.get("name", "") or "").strip()
+        if not name:
+            return JSONResponse({"error": "分支名不能为空"}, status_code=400)
+        if hub.is_running:
+            return JSONResponse(
+                {"error": "回合运行中，无法切换分支"}, status_code=409
+            )
+
+        def _switch() -> tuple[bool, str]:
+            return _git_switch(server.state.project_root, name)
+
+        loop = asyncio.get_running_loop()
+        try:
+            ok, message = await loop.run_in_executor(None, _switch)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": f"切换分支失败: {exc}"}, status_code=400)
+        if not ok:
+            return JSONResponse({"error": message}, status_code=400)
+        return JSONResponse(
+            {"branches": _git_branches_payload(server.state.project_root)}
+        )
 
     @server.get("/api/workspaces")
     async def workspaces() -> JSONResponse:
@@ -307,6 +336,76 @@ def _model_payload(app: XcodeApp) -> dict[str, object]:
     except Exception:  # noqa: BLE001
         info["available"] = [str(info.get("model", ""))]
     return info
+
+
+def _git_branches_payload(project_root: Path) -> dict[str, object]:
+    """当前分支 + 本地/远端分支列表。"""
+    payload: dict[str, object] = {"current": "", "local": [], "remote": []}
+    try:
+        from xcode.cli.git import git_branch_name
+
+        payload["current"] = git_branch_name(project_root) or ""
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _refs(refspec: str) -> list[str]:
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(project_root),
+                    "for-each-ref",
+                    "--format=%(refname:short)",
+                    refspec,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        if result.returncode != 0:
+            return []
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        # 排除符号引用 refs/remotes/origin/HEAD（展开后显示为 origin）
+        return [line for line in lines if line != "origin" and not line.endswith("/HEAD")]
+
+    payload["local"] = _refs("refs/heads")
+    payload["remote"] = _refs("refs/remotes/origin/")
+    return payload
+
+
+def _git_switch(project_root: Path, name: str) -> tuple[bool, str]:
+    """切换分支；origin/ 前缀的远端名自动建跟踪分支或切回本地同名分支。"""
+    import shutil
+
+    if shutil.which("git") is None:
+        return False, "未找到 git 可执行文件"
+
+    if name.startswith("origin/"):
+        short = name.removeprefix("origin/")
+        branches = _git_branches_payload(project_root)
+        local = branches["local"]
+        if isinstance(local, list) and short in local:
+            name = short
+        else:
+            name = f"--track {name}"
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), "switch", *name.split()],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"git 执行失败: {exc}"
+    if result.returncode != 0:
+        return False, (result.stderr or result.stdout or "git switch 失败").strip()
+    return True, (result.stdout or "").strip()
 
 
 def _profile_transport(app: XcodeApp) -> str:

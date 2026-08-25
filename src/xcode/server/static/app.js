@@ -7,7 +7,9 @@
 
   const els = {
     project: $("project-path"),
-    branch: $("branch"),
+    branchLabel: null,
+    branchBtn: $("branch-btn"),
+    branchMenu: $("branch-menu"),
     modelBtn: $("model-btn"),
     modelMenu: $("model-menu"),
     effortBtn: $("effort-btn"),
@@ -50,6 +52,7 @@
   els.modelLabel = els.modelBtn.querySelector(".drop-btn__label");
   els.effortLabel = els.effortBtn.querySelector(".drop-btn__label");
   els.workspaceLabel = els.workspaceBtn.querySelector(".drop-btn__label");
+  els.branchLabel = els.branchBtn.querySelector(".drop-btn__label");
 
   const MODES = ["plan", "build", "act"];
   let mode = localStorage.getItem("xcode.mode") || "build";
@@ -643,7 +646,7 @@
   }
 
   function closeDrops() {
-    for (const menu of [els.modelMenu, els.effortMenu, els.workspaceMenu]) {
+    for (const menu of [els.modelMenu, els.effortMenu, els.workspaceMenu, els.branchMenu]) {
       menu.hidden = true;
     }
   }
@@ -772,6 +775,65 @@
   els.workspaceBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     toggleDrop(els.workspaceBtn, els.workspaceMenu);
+  });
+
+  async function refreshGitBranches() {
+    try {
+      const res = await fetch("/api/git/branches");
+      const data = await res.json();
+      const current = data.current || "";
+      els.branchLabel.textContent = current ? "⎇ " + current : "⎇ —";
+      els.branchBtn.title = current;
+      els.branchMenu.innerHTML = "";
+      const section = (label, names) => {
+        if (!names || !names.length) return;
+        const head = document.createElement("div");
+        head.className = "drop-menu__section";
+        head.textContent = label;
+        els.branchMenu.appendChild(head);
+        for (const name of names) {
+          const item = document.createElement("button");
+          item.className = "drop-menu__item" + (name === current ? " is-current" : "");
+          item.textContent = (name === current ? "● " : "") + name;
+          item.title = name;
+          item.addEventListener("click", () => {
+            closeDrops();
+            switchBranch(name);
+          });
+          els.branchMenu.appendChild(item);
+        }
+      };
+      section("本地分支", data.local);
+      section("远端分支", data.remote);
+    } catch (_err) {
+      /* 非 git 工作区时忽略 */
+    }
+  }
+
+  async function switchBranch(name) {
+    try {
+      const res = await fetch("/api/git/branches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        toast(data.error);
+        return;
+      }
+      toast("已切换到分支 " + name);
+      refreshGitBranches();
+      refreshInfo();
+    } catch (_err) {
+      toast("切换分支失败");
+    }
+  }
+
+  els.branchBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    refreshGitBranches();
+    toggleDrop(els.branchBtn, els.branchMenu);
   });
 
   els.workspaceNewCancel.addEventListener("click", () => {
@@ -1013,7 +1075,9 @@
 
   function applyInfo(info) {
     els.project.textContent = info.project || "—";
-    els.branch.textContent = info.git_branch ? "⎇ " + info.git_branch : "";
+    if (els.branchMenu.hidden) {
+      els.branchLabel.textContent = info.git_branch ? "⎇ " + info.git_branch : "⎇ —";
+    }
     els.sessionId.textContent = "session " + (info.session_id || "");
   }
 

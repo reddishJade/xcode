@@ -22,7 +22,12 @@
     </div>
     <div class="topbar__meta">
       <span class="meta" id="project-path">—</span>
-      <span class="meta meta--muted" id="branch"></span>
+      <div class="drop">
+        <button class="drop-btn drop-btn--muted" id="branch-btn" title="切换 git 分支">
+          <span class="drop-btn__label">⎇ —</span><span class="drop-btn__arrow">▾</span>
+        </button>
+        <div class="drop-menu" id="branch-menu" hidden></div>
+      </div>
       <div class="drop">
         <button class="drop-btn" id="model-btn" title="切换模型">
           <span class="drop-btn__label">—</span><span class="drop-btn__arrow">▾</span>
