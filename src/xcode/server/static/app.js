@@ -22,6 +22,9 @@
     scrollBottom: $("scroll-bottom"),
     sessionList: $("session-list"),
     newChat: $("new-chat"),
+    workspacePath: $("workspace-path"),
+    workspaceSelect: $("workspace-select"),
+    workspaceSwitch: $("workspace-switch"),
     toast: $("toast"),
     approval: $("approval"),
     approvalTool: $("approval-tool"),
@@ -465,6 +468,7 @@
       refreshInfo();
       refreshModel();
       refreshSessions();
+      refreshWorkspaces();
     };
 
     ws.onmessage = (event) => {
@@ -516,6 +520,14 @@
         resetView(true);
         refreshInfo();
         refreshSessions();
+        break;
+      case "workspace_switched":
+        resetView(true);
+        refreshInfo();
+        refreshModel();
+        refreshSessions();
+        refreshWorkspaces();
+        systemNote("工作区", "已切换到 " + (msg.info?.project || ""));
         break;
       case "approval_request":
         showApproval(msg);
@@ -605,6 +617,62 @@
   els.scrollBottom.addEventListener("click", () => scrollToBottom(true));
   els.stream.addEventListener("scroll", () => {
     if (nearBottom()) els.scrollBottom.hidden = true;
+  });
+
+  async function refreshWorkspaces() {
+    try {
+      const res = await fetch("/api/workspaces");
+      const data = await res.json();
+      els.workspacePath.value = data.current || "";
+      els.workspaceSelect.innerHTML = "";
+      for (const path of data.recent || []) {
+        const opt = document.createElement("option");
+        opt.value = path;
+        opt.textContent = path;
+        if (path === data.current) opt.selected = true;
+        els.workspaceSelect.appendChild(opt);
+      }
+    } catch (_err) {
+      /* 忽略 */
+    }
+  }
+
+  async function switchWorkspace(pathText) {
+    const path = String(pathText || "").trim();
+    if (!path) return toast("请输入工作区路径");
+    els.workspaceSwitch.disabled = true;
+    try {
+      const res = await fetch("/api/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        toast(data.error);
+        return;
+      }
+      resetView(true);
+      refreshInfo();
+      refreshModel();
+      refreshSessions();
+      refreshWorkspaces();
+      toast("已切换工作区 " + path);
+    } catch (_err) {
+      toast("切换工作区失败");
+    } finally {
+      els.workspaceSwitch.disabled = false;
+    }
+  }
+
+  els.workspaceSwitch.addEventListener("click", () => {
+    const selectPath = els.workspaceSelect.value;
+    const inputPath = els.workspacePath.value;
+    switchWorkspace(inputPath || selectPath);
+  });
+
+  els.workspaceSelect.addEventListener("change", () => {
+    els.workspacePath.value = els.workspaceSelect.value;
   });
 
   /* ── 会话列表 ── */

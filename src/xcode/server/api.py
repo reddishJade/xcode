@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -22,7 +23,14 @@ STATIC_DIR = Path(__file__).parent / "static"
 _SESSION_TRANSCRIPT_LIMIT = 500
 
 
-def create_app(app: XcodeApp, project_root: Path) -> FastAPI:
+AppFactory = Callable[[Path], XcodeApp]
+
+
+def create_app(
+    app: XcodeApp,
+    project_root: Path,
+    app_factory: AppFactory | None = None,
+) -> FastAPI:
     """装配 FastAPI 应用（静态资源 + API + WebSocket）。"""
     server = FastAPI(title="xcode web", docs_url=None, redoc_url=None)
     hub = WebRunHub(app)
@@ -33,11 +41,11 @@ def create_app(app: XcodeApp, project_root: Path) -> FastAPI:
 
     @server.get("/api/info")
     async def info() -> JSONResponse:
-        return JSONResponse(_info_payload(app, project_root))
+        return JSONResponse(_info_payload(hub.app, project_root))
 
     @server.get("/api/model")
     async def model_info() -> JSONResponse:
-        return JSONResponse(_model_payload(app))
+        return JSONResponse(_model_payload(hub.app))
 
     @server.post("/api/model")
     async def set_model_endpoint(payload: dict) -> JSONResponse:
@@ -45,14 +53,61 @@ def create_app(app: XcodeApp, project_root: Path) -> FastAPI:
         if not model:
             return JSONResponse({"error": "model 不能为空"}, status_code=400)
         try:
-            app.set_model(model=model, profile="main")
+            hub.app.set_model(model=model, profile="main")
         except Exception as exc:  # noqa: BLE001 - 返回给前端展示
             return JSONResponse({"error": f"切换模型失败: {exc}"}, status_code=400)
-        return JSONResponse(_model_payload(app))
+        return JSONResponse(_model_payload(hub.app))
+
+    @server.get("/api/workspaces")
+    async def workspaces() -> JSONResponse:
+        recent = _load_workspaces()
+        current = str(hub.app.session_store.project_root)
+        return JSONResponse(
+            {"current": current, "recent": _with_current(recent, current)}
+        )
+
+    @server.post("/api/workspaces")
+    async def switch_workspace_endpoint(payload: dict) -> JSONResponse:
+        factory = app_factory
+        if factory is None:
+            return JSONResponse(
+                {"error": "服务未启用工作区切换"}, status_code=400
+            )
+        raw = str(payload.get("path", "") or "").strip()
+        if not raw:
+            return JSONResponse({"error": "路径不能为空"}, status_code=400)
+        target = Path(raw).expanduser()
+        if not target.is_dir():
+            return JSONResponse({"error": f"目录不存在: {raw}"}, status_code=400)
+        if hub.is_running:
+            return JSONResponse(
+                {"error": "回合运行中，无法切换工作区"}, status_code=409
+            )
+        loop = asyncio.get_running_loop()
+        try:
+            new_app = await loop.run_in_executor(None, lambda: factory(target))
+        except Exception as exc:  # noqa: BLE001 - 返回给前端展示
+            return JSONResponse(
+                {"error": f"工作区装配失败: {exc}"}, status_code=400
+            )
+        old_app = hub.app
+        hub.set_app(new_app)
+        old_app.close()
+        server.state.project_root = target
+        _save_workspace(str(target))
+        hub.broadcast(
+            {
+                "type": "workspace_switched",
+                "info": _info_payload(new_app, target),
+            }
+        )
+        return JSONResponse(
+            {"workspace": str(target), "info": _info_payload(new_app, target)}
+        )
 
     @server.get("/api/sessions")
     async def sessions() -> JSONResponse:
-        store = app.session_store
+        store = hub.app.session_store
         try:
             infos = store.list_infos(limit=50)
         except Exception as exc:  # noqa: BLE001 - 会话目录可能损坏
@@ -86,7 +141,7 @@ def create_app(app: XcodeApp, project_root: Path) -> FastAPI:
 
     @server.get("/api/sessions/{session_id}")
     async def session_transcript(session_id: str) -> JSONResponse:
-        store = app.session_store
+        store = hub.app.session_store
         try:
             view = store.find_by_id(session_id)
         except Exception:  # noqa: BLE001
@@ -214,6 +269,36 @@ def _parse_mode(raw: object) -> ExecutionMode | None:
 
 def _count_tools(value: object) -> int:
     return len(value) if isinstance(value, list) else 0
+
+
+_WORKSPACES_FILE = Path.home() / ".xcode" / "web_workspaces.json"
+_WORKSPACES_LIMIT = 10
+
+
+def _load_workspaces() -> list[str]:
+    try:
+        data = json.loads(_WORKSPACES_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return [str(item) for item in data if isinstance(item, str)]
+    except (OSError, json.JSONDecodeError):
+        pass
+    return []
+
+
+def _save_workspace(path: str) -> None:
+    recent = _with_current(_load_workspaces(), path)
+    try:
+        _WORKSPACES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _WORKSPACES_FILE.write_text(
+            json.dumps(recent, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def _with_current(recent: list[str], current: str) -> list[str]:
+    merged = [current] + [item for item in recent if item != current]
+    return merged[:_WORKSPACES_LIMIT]
 
 
 def _read_transcript(path: Path) -> list[dict[str, object]]:

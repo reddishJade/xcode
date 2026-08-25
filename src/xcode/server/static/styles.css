@@ -175,6 +175,47 @@ button {
 
 .sidebar__hint { font-size: 11px; color: var(--text-3); margin: 0; line-height: 1.5; }
 
+.sidebar__label {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin: 0 0 6px;
+}
+
+.workspace-box { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+.workspace-input {
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--cream);
+  background: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+.workspace-input::placeholder { color: var(--text-3); }
+
+.workspace-input:focus { border-color: var(--amber); outline: none; }
+
+.workspace-row { display: flex; gap: 6px; align-items: center; }
+
+.workspace-select {
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-select:focus { border-color: var(--amber); outline: none; }
+
 .session-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 
 .session-item {

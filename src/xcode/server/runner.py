@@ -47,10 +47,20 @@ class WebRunHub:
         self._sinks: list[Sink] = []
         self._run_task: asyncio.Task[None] | None = None
         self._pending: _PendingApproval | None = None
+        self.set_app(app)
+
+    @property
+    def app(self) -> XcodeApp:
+        return self._app
+
+    def set_app(self, app: XcodeApp) -> None:
+        """替换运行时应用（工作区切换）；重建审批桥接。"""
+        self._app = app
         agent = getattr(app, "agent", None)
         if agent is not None:
             # 所有权限引擎的用户审批请求都走浏览器端 HITL 桥
             agent.user_approval_callback = self._approval_callback
+        self._pending = None
 
     # ── 连接管理 ──
 

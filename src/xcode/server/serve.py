@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from xcode.coding_agent.app import build_app
+from xcode.coding_agent.app import XcodeApp, build_app
 from xcode.harness.config import (
     XcodeRuntimeConfig,
     discover_runtime_config,
@@ -35,10 +35,24 @@ def run_web_server(
         runtime_config=runtime_config,
         sessions_dir=resolved_sessions,
     )
+
+    def build_for(target: Path) -> XcodeApp:
+        """为指定工作区重新装配运行时（工作区切换用）。"""
+        rc = discover_runtime_config(target, None)
+        sessions = (
+            resolve_config_path(target, rc.paths.sessions_dir)
+            or (target / ".xcode" / "sessions")
+        )
+        return build_app(
+            project_root=target,
+            runtime_config=rc,
+            sessions_dir=sessions,
+        )
+
     try:
         from .api import create_app
 
-        fastapi_app = create_app(app, project_root)
+        fastapi_app = create_app(app, project_root, app_factory=build_for)
         if open_browser:
             import threading
             import webbrowser
