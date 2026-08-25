@@ -167,6 +167,15 @@ button {
 
 .sidebar__hint { font-size: 11px; color: var(--text-3); margin: 0; line-height: 1.5; }
 
+.stage { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+
+.stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px 0 30px;
+  scroll-behavior: smooth;
+}
+
 .sidebar__label {
   font-size: 10px;
   letter-spacing: 0.2em;
@@ -208,14 +217,6 @@ button {
 
 .workspace-add:hover { color: var(--amber-strong); border-color: var(--amber); }
 
-.workspace-current {
-  font-size: 11px;
-  color: var(--text-3);
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .workspace-new-path {
   font: inherit;
