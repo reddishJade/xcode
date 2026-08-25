@@ -58,6 +58,17 @@ def create_app(app: XcodeApp, project_root: Path) -> FastAPI:
             }
         )
 
+    @server.post("/api/sessions")
+    async def new_session_endpoint() -> JSONResponse:
+        new_id = hub.new_session()
+        if new_id is None:
+            return JSONResponse(
+                {"error": "当前回合运行中，请先停止再新建会话。"}, status_code=409
+            )
+        return JSONResponse(
+            {"session_id": new_id}
+        )
+
     @server.get("/api/sessions/{session_id}")
     async def session_transcript(session_id: str) -> JSONResponse:
         store = app.session_store

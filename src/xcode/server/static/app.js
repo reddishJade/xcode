@@ -511,6 +511,11 @@
       case "user_message":
         renderUser(msg.text || "", "ws", msg.mode || mode);
         break;
+      case "session_reset":
+        resetView(true);
+        refreshInfo();
+        refreshSessions();
+        break;
       case "approval_request":
         showApproval(msg);
         break;
@@ -559,13 +564,16 @@
     if (btn) setMode(btn.dataset.mode);
   });
 
-  els.newChat.addEventListener("click", () => {
-    steps.clear();
-    lastStepKey = 0;
-    els.stream.innerHTML = "";
-    hideApproval();
-    systemNote("视图", "已清空本地视图；服务端会话仍在继续");
-    els.input.focus();
+  els.newChat.addEventListener("click", async () => {
+    try {
+      const res = await fetch("/api/sessions", { method: "POST" });
+      const data = await res.json();
+      if (data.error) return toast(data.error);
+      resetView(true);
+      refreshInfo();
+    } catch (_err) {
+      toast("新建会话失败");
+    }
   });
 
   els.scrollBottom.addEventListener("click", () => scrollToBottom(true));
@@ -585,30 +593,70 @@
     }
   }
 
+  function resetView(showEmpty) {
+    steps.clear();
+    lastStepKey = 0;
+    els.stream.innerHTML = "";
+    hideApproval();
+    if (showEmpty) renderEmpty();
+    els.input.focus();
+  }
+
+  function renderEmpty() {
+    const wrap = document.createElement("div");
+    wrap.className = "empty";
+    wrap.id = "empty";
+    wrap.innerHTML =
+      '<p class="empty__eyebrow">xcode / web workbench</p>' +
+      '<p class="empty__title">选择执行模式，向工作台提出第一个任务。</p>' +
+      '<p class="empty__sub">事件流实时落盘为会话账本；刷新页面后可在左侧恢复最近会话。</p>';
+    els.stream.appendChild(wrap);
+    els.empty = wrap;
+  }
+
   function renderSessions(data) {
     els.sessionList.innerHTML = "";
     const items = data.sessions || [];
-    if (!items.length) {
-      const li = document.createElement("li");
-      li.textContent = "暂无历史会话";
-      li.style.cssText = "font-size:11px;color:var(--text-3);padding:6px 10px;";
-      els.sessionList.appendChild(li);
-      return;
-    }
+
+    const li = document.createElement("li");
+    const live = document.createElement("button");
+    live.className = "session-item is-current";
+    const liveTitle = document.createElement("span");
+    liveTitle.className = "session-item__title";
+    liveTitle.textContent = "● 实时会话";
+    const liveMeta = document.createElement("span");
+    liveMeta.className = "session-item__meta";
+    liveMeta.textContent = data.current || "";
+    live.append(liveTitle, liveMeta);
+    live.addEventListener("click", () => {
+      resetView(true);
+      toast("已回到实时会话");
+    });
+    li.appendChild(live);
+    els.sessionList.appendChild(li);
+
+    if (!items.length) return;
+    const gap = document.createElement("li");
+    gap.style.cssText = "font-size:10px;color:var(--text-3);padding:4px 10px;";
+    gap.textContent = "历史会话（只读回放）";
+    els.sessionList.appendChild(gap);
+
     for (const item of items) {
-      const li = document.createElement("li");
+      const li2 = document.createElement("li");
       const btn = document.createElement("button");
-      btn.className = "session-item" + (item.id === data.current ? " is-current" : "");
+      btn.className =
+        "session-item" + (item.id === data.current ? " is-current" : "");
       const title = document.createElement("span");
       title.className = "session-item__title";
       title.textContent = item.title || item.id;
       const meta = document.createElement("span");
       meta.className = "session-item__meta";
-      meta.textContent = item.id + " · " + (item.updated_at || "").slice(0, 16).replace("T", " ");
+      meta.textContent =
+        item.id + " · " + (item.updated_at || "").slice(0, 16).replace("T", " ");
       btn.append(title, meta);
       btn.addEventListener("click", () => loadSession(item.id));
-      li.appendChild(btn);
-      els.sessionList.appendChild(li);
+      li2.appendChild(btn);
+      els.sessionList.appendChild(li2);
     }
   }
 
@@ -617,6 +665,7 @@
       const res = await fetch("/api/sessions/" + sessionId);
       const data = await res.json();
       if (data.error) return toast(data.error);
+      resetView(false);
       renderTranscript(data);
       toast("已加载会话 " + sessionId);
     } catch (_err) {
@@ -625,8 +674,24 @@
   }
 
   function renderTranscript(data) {
-    els.empty?.remove();
-    systemNote("历史", `会话 ${data.id} · ${data.title || ""} （只读回放，不切换服务端会话）`);
+    const banner = document.createElement("div");
+    banner.className = "system-note";
+    banner.innerHTML =
+      '<span class="system-note__tag">历史</span><span>会话 ' +
+      esc(data.id) +
+      " · " +
+      esc(data.title || "") +
+      " · 只读回放，不影响实时会话</span>";
+    const backBtn = document.createElement("button");
+    backBtn.className = "btn btn--ghost";
+    backBtn.style.cssText = "margin:2px 0 12px 78px;";
+    backBtn.textContent = "← 返回实时会话";
+    backBtn.addEventListener("click", () => {
+      resetView(true);
+      toast("已回到实时会话");
+    });
+    els.stream.append(banner, backBtn);
+
     const entries = data.entries || [];
     for (const entry of entries) {
       const inner = entry.content || {};

@@ -185,6 +185,20 @@ class WebRunHub:
             self._pending = None
             self.broadcast({"type": "run_idle"})
 
+    def new_session(self) -> str | None:
+        """清空当前账本并重建空会话；运行中拒绝。"""
+        if self.is_running:
+            return None
+        store = self._app.session_store
+        store.clear()
+        self._app.restore_session()
+        agent = getattr(self._app, "agent", None)
+        if agent is not None:
+            agent.session_id = store.session_id
+        new_id = store.session_id
+        self.broadcast({"type": "session_reset", "session_id": new_id})
+        return new_id
+
     # ── 审批桥 ──
 
     def _approval_callback(self, request: ApprovalRequest) -> HITLResult:
