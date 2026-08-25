@@ -45,7 +45,7 @@ agent
 | Agent | `src/xcode/agent/` | 消息模型、loop、工具执行和 provider 请求 |
 | Harness | `src/xcode/harness/` | session、权限、观测、MCP、记忆和运行策略 |
 | Coding product | `src/xcode/coding_agent/` | coding 工具、产品 registry 和应用装配 |
-| Host | `src/xcode/cli/` | REPL/TUI 输入输出与交互控制 |
+| Host | `src/xcode/cli/`、`src/xcode/server/` | REPL/TUI 输入输出、浏览器工作台（WebSocket 事件流） |
 
 依赖应朝更低层稳定协议流动。CLI/TUI 不拥有 session 语义；工具不直接拥有
 provider；provider 不感知产品工具。

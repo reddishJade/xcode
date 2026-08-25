@@ -237,6 +237,7 @@ provider。权限提示和 shell 效果分析用于帮助用户了解并确认�
 | `harness/` | `src/xcode/harness/` | 运行时配置、session 事实账本、权限/审计、MCP、skill、记忆、hooks 和本地执行协议 |
 | `coding_agent/` | `src/xcode/coding_agent/` | 产品工具装配：文件读写编辑、glob/grep/bash/subagent/webfetch/websearch 等 |
 | `cli/` | `src/xcode/cli/` | REPL UI、TUI、slash command 系统、setup wizard、配置管理 |
+| `server/` | `src/xcode/server/` | 浏览器工作台：FastAPI + WebSocket 实时事件流 + 零构建前端 |
 
 运行路径：`main.py` → `build_app()` → `CodingAgentHarness` → `Agent` loop → provider stream → tool execution。
 
@@ -308,6 +309,7 @@ uv run pyright src/
 * [设计理念与核心实现机制](docs/design-philosophy.md)：可回放账本、执行模式分权、Bubblewrap 沙箱、并发分区与分层压缩
 * [实战场景与工作流指南](docs/examples.md)：从 Plan 规划到 Build 落地、分支探索、快照撤销与 MCP/Hooks 实战
 * [五层架构与执行模型](docs/architecture.md)：系统分层、单向数据流与执行协议不变量
+* [浏览器工作台技术栈](docs/web.md)：FastAPI + WebSocket 事件流、REST API、零构建前端与进程模型
 
 ### 模块指南 (docs/guide/)
 * [安装与环境准备](docs/guide/install.md) · [模型与 Provider 配置](docs/guide/providers.md) · [快速上手与终端交互](docs/guide/quickstart.md)
