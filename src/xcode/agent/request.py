@@ -67,6 +67,7 @@ class RequestContextTrace:
     provenance: str = ""
     truncated: bool = False
     truncation_reason: str | None = None
+    scope: str = "project"
 
 
 @dataclass(frozen=True)
@@ -113,14 +114,23 @@ class DefaultRequestAssembler:
         current_step: int,
         options: StreamOptions | None,
     ) -> RequestAssembly:
-        base_messages = [*context.request_prefix, *context.messages]
-        blocks = self._collect(context, base_messages, current_step)
+        context.context_state.sync_request_prefix(context.request_prefix)
+        legacy_blocks, world_blocks = self._collect(
+            context,
+            list(context.messages),
+            current_step,
+        )
+        context.context_state.append_blocks(world_blocks)
+        base_messages = [
+            *context.context_state.persistent_messages,
+            *context.messages,
+        ]
         result = self.context_assembler.assemble(
             ContextAssemblyInput(
                 system_prompt=context.system_prompt,
                 messages=base_messages,
                 tools=list(context.tools),
-                context_blocks=blocks,
+                context_blocks=legacy_blocks,
                 current_step=current_step,
                 token_budget=context.request_token_budget,
             )
@@ -133,7 +143,10 @@ class DefaultRequestAssembler:
             wire_messages=tuple(wire_messages),
             tools=tuple(tool_definitions),
             context_trace=(
-                _context_trace(result.blocks_used, result.blocks_dropped)
+                _context_trace(
+                    [*world_blocks, *result.blocks_used],
+                    result.blocks_dropped,
+                )
                 + _tool_trace(tool_definitions)
             ),
             current_step=current_step,
@@ -149,17 +162,31 @@ class DefaultRequestAssembler:
         context: AgentContext,
         messages: list[AgentMessage],
         current_step: int,
-    ) -> list[ContextBlock]:
+    ) -> tuple[list[ContextBlock], list[ContextBlock]]:
         if self.context_collectors is None:
-            return []
-        return self.context_collectors.collect(
-            ContextCollectionInput(
-                system_prompt=context.system_prompt,
-                messages=messages,
-                tools=list(context.tools),
-                current_step=current_step,
-            )
+            return [], []
+        collection_input = ContextCollectionInput(
+            system_prompt=context.system_prompt,
+            messages=messages,
+            tools=list(context.tools),
+            current_step=current_step,
+            project_root=context.project_root,
+            cwd=context.cwd,
+            state=dict(context.state),
         )
+        legacy_blocks = self.context_collectors.collect(collection_input)
+        collect_sections = getattr(self.context_collectors, "collect_sections", None)
+        world_blocks: list[ContextBlock] = []
+        if callable(collect_sections):
+            collected = collect_sections(
+                collection_input,
+                context.context_state.world_state,
+            )
+            if isinstance(collected, list):
+                world_blocks = [
+                    block for block in collected if isinstance(block, ContextBlock)
+                ]
+        return legacy_blocks, world_blocks
 
 
 def _context_trace(
@@ -184,6 +211,7 @@ def _trace(block: ContextBlock, included: bool) -> RequestContextTrace:
         provenance=block.provenance,
         truncated=block.truncated,
         truncation_reason=block.truncation_reason,
+        scope=block.scope,
     )
 
 
@@ -210,6 +238,7 @@ def _tool_trace(tools: list[ToolDefinition]) -> tuple[RequestContextTrace, ...]:
                 token_count=estimate_tokens(payload),
                 content_sha256=hashlib.sha256(payload.encode("utf-8")).hexdigest(),
                 provenance=f"tool:{tool.name}",
+                scope="runtime",
             )
         )
     return tuple(traces)

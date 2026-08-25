@@ -7,11 +7,15 @@ from typing import TYPE_CHECKING, Any
 
 from xcode.agent.context import (
     ActiveDiffCollector,
+    ContextBlockSource,
     ContextCollectorRegistry,
+    ContextPriority,
     DefaultContextAssembler,
     InstructionCollector,
     NotesCollector,
     RecentValidationCollector,
+    make_collector_section,
+    make_state_section,
 )
 from xcode.agent.types import ApprovalCallback, ToolSpec
 from xcode.ai.providers.base import ModelProvider
@@ -144,22 +148,65 @@ def build_agent(
 
     sec = runtime_config.security
     context_collectors = ContextCollectorRegistry()
-    context_collectors.register(
-        InstructionCollector(
-            sources=tuple(
-                i.model_dump(exclude_none=True)
-                for i in runtime_config.prompt.instructions
+    context_collectors.register_section(
+        make_collector_section(
+            "agents",
+            InstructionCollector(
+                sources=tuple(
+                    i.model_dump(exclude_none=True)
+                    for i in runtime_config.prompt.instructions
+                ),
+                project_root=project_root,
             ),
-            project_root=project_root,
         )
     )
-    context_collectors.register(ActiveDiffCollector(project_root))
-    context_collectors.register(RecentValidationCollector())
-    context_collectors.register(NotesCollector(project_root))
+    context_collectors.register_section(
+        make_collector_section("active_diff", ActiveDiffCollector(project_root))
+    )
+    context_collectors.register_section(
+        make_collector_section("recent_validation", RecentValidationCollector())
+    )
+    context_collectors.register_section(
+        make_collector_section("notes", NotesCollector(project_root))
+    )
     if skill_registry is not None:
         from xcode.harness.skills import SkillIndexCollector
 
-        context_collectors.register(SkillIndexCollector(skill_registry))
+        context_collectors.register_section(
+            make_collector_section("skills", SkillIndexCollector(skill_registry))
+        )
+    context_collectors.register_section(
+        make_state_section(
+            "environment",
+            "environment",
+            ContextBlockSource.ENVIRONMENT,
+            priority=ContextPriority.MEDIUM,
+        )
+    )
+    context_collectors.register_section(
+        make_state_section(
+            "tools",
+            "tools",
+            ContextBlockSource.TOOLS,
+            priority=ContextPriority.MEDIUM,
+        )
+    )
+    context_collectors.register_section(
+        make_state_section(
+            "permissions",
+            "permissions",
+            ContextBlockSource.PERMISSIONS,
+            priority=ContextPriority.HIGH,
+        )
+    )
+    context_collectors.register_section(
+        make_state_section(
+            "mode",
+            "mode",
+            ContextBlockSource.MODE,
+            priority=ContextPriority.HIGH,
+        )
+    )
 
     runtime_context_provider = build_runtime_context_provider(
         project_root,

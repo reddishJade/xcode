@@ -112,6 +112,10 @@ async def run_agent_loop(
         request_prefix=list(context.request_prefix),
         messages=list(context.messages) + list(prompts),
         tools=list(context.tools) if context.tools else [],
+        context_state=context.context_state,
+        state=dict(context.state),
+        project_root=context.project_root,
+        cwd=context.cwd,
         request_token_budget=(
             config.request_token_budget
             if config.request_token_budget > 0
@@ -193,6 +197,7 @@ async def _run_loop(
             messages_before = list(current_context.messages)
             before = len(messages_before)
             current_context.messages = config.compact(current_context.messages)
+            current_context.context_state.reset()
             after = len(current_context.messages)
             archive: CompactionArchive | None = None
             if config.archive_writer:

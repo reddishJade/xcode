@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from copy import deepcopy
+import platform
+from pathlib import Path
 from threading import Lock
 
 from xcode.ai.events import ToolCall
 from xcode.ai.providers.base import ModelProvider
 
 from ...agent.agent import Agent
+from ...agent.config import ContextState
 from ...agent.messages import (
     AgentMessage,
     SystemMessage,
@@ -148,6 +151,7 @@ class AgentHarness:
         )
         self.audit_logger = gate_runtime.audit_logger
         self._history: list[AgentMessage] = []
+        self._context_state = ContextState()
         self._resumed_notice: str | None = None
         self._run_controller = SessionRunController(runtime.session_inbox)
 
@@ -183,6 +187,38 @@ class AgentHarness:
         if parts:
             return [SystemMessage(content="\n\n".join(p for p in parts if p))]
         return []
+
+    def _build_context_snapshot_state(
+        self,
+        active_registry: tuple[ToolSpec, ...],
+    ) -> dict[str, object]:
+        """构建供 world state 使用的环境、工具、权限和模式快照。"""
+        permission_policy = self.permission_policy
+        policy_payload = (
+            {
+                "global_default": permission_policy.global_default,
+                "rules": tuple(repr(rule) for rule in permission_policy.rules),
+            }
+            if permission_policy is not None
+            else None
+        )
+        mode = self._build_gate_mode()
+        return {
+            "environment": {
+                "cwd": str(Path.cwd()),
+                "project_root": str(self.project_root)
+                if self.project_root is not None
+                else None,
+                "platform": platform.platform(),
+            },
+            "tools": tuple(tool.name for tool in active_registry),
+            "permissions": {
+                "approval_policy": self.approval_policy,
+                "restricted_dirs": tuple(self.restricted_dirs),
+                "permission_policy": policy_payload,
+            },
+            "mode": {"current_mode": mode.current_mode},
+        }
 
     def _build_loop_config_extras(self) -> dict:
         """子类可返回额外的 build_loop_config 参数。"""
@@ -328,6 +364,7 @@ class AgentHarness:
 
     def clear_history(self) -> None:
         self._history = []
+        self._context_state.reset()
         self._gate.clear_session_grants()
         self._reset_provider_conversation_state()
 
@@ -372,6 +409,7 @@ class AgentHarness:
 
     def load_history(self, messages: list[AgentMessage]) -> None:
         self._history = deepcopy(messages)
+        self._context_state.reset()
         self._post_load_history(messages)
         if not messages:
             self._gate.clear_session_grants()
@@ -385,6 +423,7 @@ class AgentHarness:
 
     def load_run_state(self, run_state: RunState) -> None:
         self._history = messages_from_run_state(run_state)
+        self._context_state.reset()
         self._reset_provider_conversation_state()
 
     def history_messages(self) -> list[AgentMessage]:
@@ -455,6 +494,7 @@ class AgentHarness:
         registry_snapshot = composition.registry
         active_registry = self._build_active_registry(registry_snapshot)
         context_messages = self._build_context_messages(question, composition)
+        context_snapshot_state = self._build_context_snapshot_state(active_registry)
         self._resumed_notice = None
         history_messages = self.history_messages()
         turn_agent = Agent(self._gate.adapt_tools(active_registry))
@@ -504,6 +544,10 @@ class AgentHarness:
                 signal=self.cancellation_token,
                 history=history_messages,
                 request_prefix=context_messages,
+                context_state=self._context_state,
+                state=context_snapshot_state,
+                project_root=self.project_root,
+                cwd=Path.cwd(),
                 step_input=run_handle.claim_step_input,
                 finish_step_input=run_handle.finish_step_input,
                 reopen_step_input=run_handle.reopen_step_input,

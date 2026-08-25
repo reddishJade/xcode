@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,6 +22,7 @@ from xcode.agent.types import (
 from xcode.ai.providers.base import StreamProvider
 from xcode.ai.types import StreamOptions, ThinkingLevel
 
+from .context import ContextState
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage
 from .request import DefaultRequestAssembler, RequestAssembler, RequestAssembly
 
@@ -46,6 +48,12 @@ class AgentContext(BaseModel):
     request_prefix: list[AgentMessage] = Field(default_factory=list)
     messages: list[AgentMessage] = Field(default_factory=list)
     tools: list[Annotated[AgentTool, SkipValidation]] = Field(default_factory=list)
+    context_state: Annotated[ContextState, SkipValidation] = Field(
+        default_factory=ContextState
+    )
+    state: dict[str, object] = Field(default_factory=dict)
+    project_root: Path | None = None
+    cwd: Path | None = None
     request_token_budget: Annotated[int, Field(ge=0)] = 0
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 

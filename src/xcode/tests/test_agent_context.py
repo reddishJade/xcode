@@ -10,10 +10,13 @@ from xcode.agent.context import (
     ContextBlockTarget,
     ContextCollectionInput,
     ContextCollectorRegistry,
+    ContextState,
     ContextExpiry,
     ContextPriority,
     DefaultContextAssembler,
     InstructionCollector,
+    make_collector_section,
+    make_state_section,
     _apply_size_budget,
     _block_to_text,
     _is_expired,
@@ -378,6 +381,109 @@ class TestInstructionCollector:
 
         assert len(blocks) == 1
         assert blocks[0].content == content
+
+    def test_hierarchy_is_loaded_from_root_to_cwd_and_override_wins(
+        self, tmp_path
+    ) -> None:
+        child = tmp_path / "child"
+        nested = child / "nested"
+        nested.mkdir(parents=True)
+        (tmp_path / "AGENTS.md").write_text("root", encoding="utf-8")
+        (child / "AGENTS.md").write_text("child", encoding="utf-8")
+        (child / "AGENTS.override.md").write_text("override", encoding="utf-8")
+        (nested / "AGENTS.md").write_text("nested", encoding="utf-8")
+
+        blocks = InstructionCollector(project_root=tmp_path).collect(
+            ContextCollectionInput(cwd=nested)
+        )
+
+        assert [block.content for block in blocks] == ["root", "override", "nested"]
+        assert all(block.scope == "project" for block in blocks)
+
+
+class TestWorldState:
+    def test_unchanged_section_is_not_rendered_twice(self) -> None:
+        class _Collector:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def collect(self, _input: ContextCollectionInput) -> list[ContextBlock]:
+                self.calls += 1
+                return [
+                    ContextBlock(
+                        source=ContextBlockSource.INSTRUCTION,
+                        priority=ContextPriority.CRITICAL,
+                        target=ContextBlockTarget.SYSTEM,
+                        content="stable instruction",
+                        block_id="stable",
+                    )
+                ]
+
+        collector = _Collector()
+        registry = ContextCollectorRegistry()
+        registry.register_section(make_collector_section("agents", collector))
+        assembler = DefaultContextAssembler()
+        state = ContextState()
+        from xcode.agent.config import AgentContext
+        from xcode.agent.request import DefaultRequestAssembler
+
+        request_assembler = DefaultRequestAssembler(
+            context_collectors=registry,
+            context_assembler=assembler,
+        )
+        context = AgentContext(context_state=state)
+
+        first = request_assembler.assemble(context, current_step=1, options=None)
+        second = request_assembler.assemble(context, current_step=2, options=None)
+
+        assert collector.calls == 2
+        assert "stable instruction" in str(first.messages)
+        assert "stable instruction" in str(second.messages)
+        assert [trace.block_id for trace in first.context_trace] == ["stable"]
+        assert second.context_trace == ()
+
+    def test_changed_section_renders_a_replacement_notice(self) -> None:
+        class _Collector:
+            def __init__(self) -> None:
+                self.value = "before"
+
+            def collect(self, _input: ContextCollectionInput) -> list[ContextBlock]:
+                return [
+                    ContextBlock(
+                        source=ContextBlockSource.NOTES,
+                        priority=ContextPriority.MEDIUM,
+                        target=ContextBlockTarget.USER_CONTEXT,
+                        content=self.value,
+                    )
+                ]
+
+        collector = _Collector()
+        registry = ContextCollectorRegistry()
+        registry.register_section(make_collector_section("notes", collector))
+        from xcode.agent.config import AgentContext
+        from xcode.agent.request import DefaultRequestAssembler
+
+        context = AgentContext(context_state=ContextState())
+        request_assembler = DefaultRequestAssembler(context_collectors=registry)
+        request_assembler.assemble(context, current_step=1, options=None)
+        collector.value = "after"
+        assembly = request_assembler.assemble(context, current_step=2, options=None)
+
+        assert assembly.context_trace[0].block_id == "notes"
+        assert 'status="updated"' in str(assembly.messages)
+
+    def test_state_section_reports_removal(self) -> None:
+        section = make_state_section(
+            "mode",
+            "mode",
+            ContextBlockSource.MODE,
+        )
+        state = ContextState()
+        input_with_mode = ContextCollectionInput(state={"mode": {"current": "act"}})
+        assert state.world_state.render((section,), input_with_mode)
+        removed = state.world_state.render((section,), ContextCollectionInput())
+
+        assert removed[0].content == '<context-section id="mode" status="removed" />'
 
 
 # ── ContextCollectorRegistry ──

@@ -15,6 +15,8 @@ from .context import (
     ContextCollectionInput,
     ContextCollector,
     ContextCollectorRegistry,
+    ContextSection,
+    ContextState,
     ContextExpiry,
     ContextPriority,
     DefaultContextAssembler,
@@ -23,6 +25,9 @@ from .context import (
     InstructionSource,
     NotesCollector,
     RecentValidationCollector,
+    WorldState,
+    make_collector_section,
+    make_state_section,
     trim_to_budget,
 )
 from .events import AgentEvent
@@ -63,6 +68,8 @@ __all__ = [
     "ContextCollectionInput",
     "ContextCollector",
     "ContextCollectorRegistry",
+    "ContextSection",
+    "ContextState",
     "ContextExpiry",
     "ContextPriority",
     "DefaultContextAssembler",
@@ -80,6 +87,9 @@ __all__ = [
     "TerminationReason",
     "ToolResultMessage",
     "UserMessage",
+    "WorldState",
+    "make_collector_section",
+    "make_state_section",
     "run_agent_loop",
     "trim_to_budget",
 ]

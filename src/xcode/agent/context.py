@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 import json
 import subprocess
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import Literal, Protocol
@@ -33,6 +34,10 @@ class ContextBlockSource(StrEnum):
     ACTIVE_DIFF = "active_diff"
     NOTES = "notes"
     RECENT_VALIDATION = "recent_validation"
+    ENVIRONMENT = "environment"
+    TOOLS = "tools"
+    PERMISSIONS = "permissions"
+    MODE = "mode"
 
 
 # ── 注入目标枚举 ──
@@ -85,6 +90,7 @@ class ContextBlock:
     provenance: str = ""
     truncated: bool = False
     truncation_reason: str | None = None
+    scope: Literal["user", "project", "runtime"] = "project"
 
     def get_token_count(self) -> int:
         if self.token_count is not None:
@@ -103,6 +109,7 @@ class ContextCollectionInput:
     current_turn: int = 0
     current_step: int = 0
     project_root: Path | None = None
+    cwd: Path | None = None
     state: dict[str, object] = field(default_factory=dict)
 
 
@@ -132,6 +139,154 @@ class ContextAssemblyResult:
     base_tokens: int = 0
 
 
+# ── 会话级上下文 section ──
+
+
+@dataclass(frozen=True)
+class ContextSection:
+    """可快照、可增量渲染的动态上下文 section。"""
+
+    section_id: str
+    snapshot: Callable[[ContextCollectionInput], object]
+    render_full: Callable[[object], list[ContextBlock]]
+    render_diff: Callable[[object, object], list[ContextBlock]]
+
+
+@dataclass
+class WorldState:
+    """维护各 section 的上一次快照，避免每个 step 重复注入未变化内容。"""
+
+    _snapshots: dict[str, tuple[object, object]] = field(default_factory=dict)
+
+    def render(
+        self,
+        sections: tuple[ContextSection, ...],
+        input: ContextCollectionInput,
+    ) -> list[ContextBlock]:
+        rendered: list[ContextBlock] = []
+        active_ids: set[str] = set()
+        for section in sections:
+            active_ids.add(section.section_id)
+            try:
+                current = section.snapshot(input)
+                fingerprint = _snapshot_fingerprint(current)
+                previous = self._snapshots.get(section.section_id)
+                if previous is None:
+                    blocks = section.render_full(current)
+                elif previous[0] == fingerprint:
+                    blocks = []
+                else:
+                    blocks = section.render_diff(current, previous[1])
+                self._snapshots[section.section_id] = (fingerprint, current)
+                rendered.extend(blocks)
+            except Exception:
+                logger.exception(
+                    "ContextSection %s raised; skipping",
+                    section.section_id,
+                )
+
+        for section_id in set(self._snapshots) - active_ids:
+            del self._snapshots[section_id]
+        return rendered
+
+    def reset(self) -> None:
+        """清除 section baseline，使下一次请求重新注入完整状态。"""
+        self._snapshots.clear()
+
+
+@dataclass
+class ContextState:
+    """一次会话共享的 world state 与已确认上下文消息。"""
+
+    world_state: WorldState = field(default_factory=WorldState)
+    persistent_messages: list[AgentMessage] = field(default_factory=list)
+    _prefix_fingerprint: tuple[str, ...] | None = None
+
+    def sync_request_prefix(self, messages: list[AgentMessage]) -> None:
+        current = tuple(_message_fingerprint(message) for message in messages)
+        if self._prefix_fingerprint is None:
+            self.persistent_messages.extend(messages)
+        elif current != self._prefix_fingerprint:
+            content = _render_prefix_replacement(messages)
+            self.persistent_messages.append(SystemMessage(content=content))
+        self._prefix_fingerprint = current
+
+    def append_blocks(self, blocks: list[ContextBlock]) -> None:
+        for block in blocks:
+            if block.target == ContextBlockTarget.SYSTEM:
+                self.persistent_messages.append(SystemMessage(content=block.content))
+            else:
+                self.persistent_messages.append(
+                    UserMessage(content=_block_to_text(block))
+                )
+
+    def reset(self) -> None:
+        """清除压缩后需要重新建立的动态上下文投影。"""
+        self.world_state.reset()
+        self.persistent_messages.clear()
+        self._prefix_fingerprint = None
+
+
+def _snapshot_fingerprint(value: object) -> object:
+    if isinstance(value, ContextBlock):
+        return (
+            value.source.value,
+            value.priority,
+            value.target.value,
+            value.content,
+            value.block_id,
+            value.provenance,
+            value.truncated,
+            value.truncation_reason,
+            value.scope,
+            _snapshot_fingerprint(value.metadata),
+        )
+    if isinstance(value, dict):
+        items = [
+            (
+                str(key),
+                _snapshot_fingerprint(item),
+            )
+            for key, item in value.items()
+        ]
+        return tuple(
+            sorted(items, key=lambda item: item[0])
+        )
+    if isinstance(value, list | tuple):
+        return tuple(_snapshot_fingerprint(item) for item in value)
+    if isinstance(value, set | frozenset):
+        items = [_snapshot_fingerprint(item) for item in value]
+        return tuple(sorted(items, key=repr))
+    try:
+        json.dumps(value, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return repr(value)
+    return value
+
+
+def _message_fingerprint(message: AgentMessage) -> str:
+    return json.dumps(
+        message.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+
+
+def _render_prefix_replacement(messages: list[AgentMessage]) -> str:
+    if not messages:
+        return '<context-section id="request_prefix" status="removed" />'
+    body = "\n\n".join(
+        str(getattr(message, "content", getattr(message, "summary", "")))
+        for message in messages
+    )
+    return (
+        '<context-section id="request_prefix" status="replaced">\n'
+        + body
+        + "\n</context-section>"
+    )
+
+
 # ── 收集器协议 ──
 
 
@@ -149,9 +304,14 @@ class ContextCollectorSource(Protocol):
 class ContextCollectorRegistry:
     def __init__(self) -> None:
         self._collectors: list[ContextCollector] = []
+        self._sections: list[ContextSection] = []
 
     def register(self, collector: ContextCollector) -> None:
         self._collectors.append(collector)
+
+    def register_section(self, section: ContextSection) -> None:
+        """注册会话级动态 section。"""
+        self._sections.append(section)
 
     def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
         all_blocks: list[ContextBlock] = []
@@ -166,15 +326,25 @@ class ContextCollectorRegistry:
                 )
         return all_blocks
 
+    def collect_sections(
+        self,
+        input: ContextCollectionInput,
+        world_state: WorldState,
+    ) -> list[ContextBlock]:
+        return world_state.render(tuple(self._sections), input)
+
     def __len__(self) -> int:
         return len(self._collectors)
 
     def __bool__(self) -> bool:
-        return len(self._collectors) > 0
+        return bool(self._collectors or self._sections)
 
     def freeze(self) -> FrozenContextCollectorRegistry:
         """发布不可再注册 collector 的组合快照。"""
-        return FrozenContextCollectorRegistry(tuple(self._collectors))
+        return FrozenContextCollectorRegistry(
+            tuple(self._collectors),
+            tuple(self._sections),
+        )
 
 
 @dataclass(frozen=True)
@@ -182,6 +352,7 @@ class FrozenContextCollectorRegistry:
     """请求组装使用的不可变 collector generation。"""
 
     collectors: tuple[ContextCollector, ...] = ()
+    sections: tuple[ContextSection, ...] = ()
 
     def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
         all_blocks: list[ContextBlock] = []
@@ -195,11 +366,136 @@ class FrozenContextCollectorRegistry:
                 )
         return all_blocks
 
+    def collect_sections(
+        self,
+        input: ContextCollectionInput,
+        world_state: WorldState,
+    ) -> list[ContextBlock]:
+        return world_state.render(self.sections, input)
+
     def __len__(self) -> int:
         return len(self.collectors)
 
     def __bool__(self) -> bool:
-        return bool(self.collectors)
+        return bool(self.collectors or self.sections)
+
+
+def make_collector_section(
+    section_id: str,
+    collector: ContextCollector,
+) -> ContextSection:
+    """把旧式 collector 包装为会话级 snapshot/diff section。"""
+
+    def snapshot(input: ContextCollectionInput) -> object:
+        return tuple(collector.collect(input))
+
+    def render_full(snapshot_value: object) -> list[ContextBlock]:
+        return _snapshot_blocks(snapshot_value)
+
+    def render_diff(current: object, _previous: object) -> list[ContextBlock]:
+        blocks = _snapshot_blocks(current)
+        if not blocks:
+            return [
+                _section_notice(
+                    section_id,
+                    "removed",
+                    _snapshot_blocks(_previous),
+                )
+            ]
+        return [_section_replacement(section_id, blocks)]
+
+    return ContextSection(section_id, snapshot, render_full, render_diff)
+
+
+def make_state_section(
+    section_id: str,
+    state_key: str,
+    source: ContextBlockSource,
+    *,
+    priority: ContextPriority = ContextPriority.HIGH,
+) -> ContextSection:
+    """把 ContextCollectionInput.state 中的运行时快照包装为 section。"""
+
+    def snapshot(input: ContextCollectionInput) -> object:
+        return input.state.get(state_key)
+
+    def render_full(snapshot_value: object) -> list[ContextBlock]:
+        if snapshot_value is None:
+            return []
+        return [_state_block(section_id, source, priority, snapshot_value)]
+
+    def render_diff(current: object, previous: object) -> list[ContextBlock]:
+        if current is None:
+            return [_section_notice(section_id, "removed", previous, source, priority)]
+        return [
+            _section_replacement(
+                section_id,
+                [_state_block(section_id, source, priority, current)],
+            )
+        ]
+
+    return ContextSection(section_id, snapshot, render_full, render_diff)
+
+
+def _snapshot_blocks(value: object) -> list[ContextBlock]:
+    if not isinstance(value, tuple | list):
+        return []
+    return [block for block in value if isinstance(block, ContextBlock)]
+
+
+def _section_replacement(section_id: str, blocks: list[ContextBlock]) -> ContextBlock:
+    first = blocks[0]
+    content = "\n\n".join(block.content for block in blocks)
+    return replace(
+        first,
+        content=(
+            f'<context-section id="{section_id}" status="updated">\n'
+            f"{content}\n"
+            "</context-section>"
+        ),
+        block_id=first.block_id or section_id,
+    )
+
+
+def _section_notice(
+    section_id: str,
+    status: str,
+    previous: object,
+    source: ContextBlockSource = ContextBlockSource.INSTRUCTION,
+    priority: ContextPriority = ContextPriority.MEDIUM,
+) -> ContextBlock:
+    previous_blocks = _snapshot_blocks(previous)
+    template = previous_blocks[0] if previous_blocks else None
+    return ContextBlock(
+        source=template.source if template else source,
+        target=template.target if template else ContextBlockTarget.SYSTEM,
+        priority=template.priority if template else priority,
+        content=f'<context-section id="{section_id}" status="{status}" />',
+        block_id=section_id,
+        provenance=template.provenance if template else section_id,
+        scope=template.scope if template else "runtime",
+    )
+
+
+def _state_block(
+    section_id: str,
+    source: ContextBlockSource,
+    priority: ContextPriority,
+    value: object,
+) -> ContextBlock:
+    return ContextBlock(
+        source=source,
+        target=ContextBlockTarget.SYSTEM,
+        priority=priority,
+        content=(
+            f'<context-section id="{section_id}" status="full">\n'
+            f"{json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)}\n"
+            "</context-section>"
+        ),
+        block_id=section_id,
+        provenance=section_id,
+        scope="runtime",
+    )
 
 
 # ── 组装器协议 ──
@@ -431,6 +727,7 @@ class InstructionSource:
     path: str | None = None
     content: str | None = None
     priority: ContextPriority = ContextPriority.CRITICAL
+    scope: Literal["user", "project"] = "user"
 
 
 MANIFEST_MAX_BYTES: int = 32 * 1024
@@ -441,19 +738,29 @@ class InstructionCollector:
         self,
         sources: tuple[dict, ...] = (),
         project_root: Path | None = None,
+        cwd: Path | None = None,
     ) -> None:
         self._project_root = project_root
+        self._cwd = cwd
         self._sources: list[InstructionSource] = []
+        self._file_cache: dict[Path, tuple[tuple[int, int], bytes]] = {}
+        self._discovery_cache: dict[
+            tuple[Path, Path], tuple[tuple[tuple[Path, int], ...], tuple[Path, ...]]
+        ] = {}
         for entry in sources:
             typ = entry["type"]
             priority_str = entry.get("priority", "critical")
             priority = _INSTRUCTION_PRIORITY_MAP[priority_str.lower()]
+            scope = entry.get("scope", "user")
+            if scope not in {"user", "project"}:
+                scope = "user"
             if typ == "file":
                 self._sources.append(
                     InstructionSource(
                         type="file",
                         path=entry["path"],
                         priority=priority,
+                        scope=scope,
                     )
                 )
             else:
@@ -462,13 +769,16 @@ class InstructionCollector:
                         type="inline",
                         content=entry["content"],
                         priority=priority,
+                        scope=scope,
                     )
                 )
 
     def collect(self, input: ContextCollectionInput) -> list[ContextBlock]:
-        root = input.project_root or self._project_root
+        root_value = input.project_root or self._project_root
+        root = root_value.resolve() if root_value is not None else None
         if root is None:
             return []
+        cwd = self._normalise_cwd(input.cwd or self._cwd or root, root)
 
         blocks: list[ContextBlock] = []
         configured_paths: set[Path] = set()
@@ -485,33 +795,108 @@ class InstructionCollector:
                     continue
                 configured_paths.add(resolved)
                 source_blocks, consumed_bytes = self._collect_file(
-                    path, source.priority, remaining_bytes
+                    path, source.priority, remaining_bytes, source.scope
                 )
             else:
                 assert source.content is not None
                 source_blocks, consumed_bytes = self._collect_inline(
-                    source.content, source.priority, remaining_bytes
+                    source.content, source.priority, remaining_bytes, source.scope
                 )
             blocks.extend(source_blocks)
             remaining_bytes -= consumed_bytes
 
-        agents_path = root / "AGENTS.md"
-        if remaining_bytes > 0 and agents_path.is_file():
-            if agents_path.resolve() not in configured_paths:
-                source_blocks, _consumed_bytes = self._collect_file(
-                    agents_path, ContextPriority.CRITICAL, remaining_bytes
-                )
-                blocks.extend(source_blocks)
+        for agents_path in self._discover_instruction_paths(root, cwd):
+            if remaining_bytes <= 0:
+                break
+            resolved = agents_path.resolve()
+            if resolved in configured_paths:
+                continue
+            source_blocks, consumed_bytes = self._collect_file(
+                agents_path,
+                ContextPriority.CRITICAL,
+                remaining_bytes,
+                "project",
+            )
+            blocks.extend(source_blocks)
+            remaining_bytes -= consumed_bytes
 
         return blocks
 
+    def _normalise_cwd(self, cwd: Path, root: Path) -> Path:
+        resolved = cwd.resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            return root
+        return resolved
+
+    def _discover_instruction_paths(self, root: Path, cwd: Path) -> tuple[Path, ...]:
+        directories = self._hierarchy_directories(root, cwd)
+        signatures: list[tuple[Path, int]] = []
+        for directory in directories:
+            try:
+                signatures.append((directory, directory.stat().st_mtime_ns))
+            except OSError:
+                signatures.append((directory, -1))
+        cache_key = (root, cwd)
+        cached = self._discovery_cache.get(cache_key)
+        signature_tuple = tuple(signatures)
+        if cached is not None and cached[0] == signature_tuple:
+            return cached[1]
+
+        paths: list[Path] = []
+        for directory in directories:
+            override = directory / "AGENTS.override.md"
+            if override.is_file():
+                paths.append(override)
+                continue
+            for filename in ("AGENTS.md", "agents.md", "AGENTS.txt"):
+                candidate = directory / filename
+                if candidate.is_file():
+                    paths.append(candidate)
+                    break
+        result = tuple(paths)
+        self._discovery_cache[cache_key] = (signature_tuple, result)
+        return result
+
     @staticmethod
-    def _collect_file(
-        path: Path, priority: ContextPriority, max_bytes: int
-    ) -> tuple[list[ContextBlock], int]:
+    def _hierarchy_directories(root: Path, cwd: Path) -> tuple[Path, ...]:
+        try:
+            relative = cwd.relative_to(root)
+        except ValueError:
+            relative = Path()
+        directories = [root]
+        current = root
+        for part in relative.parts:
+            current = current / part
+            directories.append(current)
+        return tuple(directories)
+
+    def _read_cached(self, path: Path) -> bytes | None:
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        signature = (stat.st_mtime_ns, stat.st_size)
+        cached = self._file_cache.get(path)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
         try:
             data = path.read_bytes()
         except OSError:
+            return None
+        self._file_cache[path] = (signature, data)
+        return data
+
+    def _collect_file(
+        self,
+        path: Path,
+        priority: ContextPriority,
+        max_bytes: int,
+        scope: Literal["user", "project"],
+    ) -> tuple[list[ContextBlock], int]:
+        data = self._read_cached(path)
+        if data is None:
             return [], 0
         content, consumed_bytes = _prepare_manifest_bytes(data, max_bytes, path)
         if not content:
@@ -525,12 +910,16 @@ class InstructionCollector:
                 provenance=str(path),
                 truncated=len(data) > max_bytes,
                 truncation_reason="byte_budget" if len(data) > max_bytes else None,
+                scope=scope,
             )
         ], consumed_bytes
 
     @staticmethod
     def _collect_inline(
-        content: str, priority: ContextPriority, max_bytes: int
+        content: str,
+        priority: ContextPriority,
+        max_bytes: int,
+        scope: Literal["user", "project"],
     ) -> tuple[list[ContextBlock], int]:
         data = content.encode("utf-8")
         prepared = _prepare_manifest(content, max_bytes, "inline instruction")
@@ -546,6 +935,7 @@ class InstructionCollector:
                 provenance="inline instruction",
                 truncated=len(data) > max_bytes,
                 truncation_reason="byte_budget" if len(data) > max_bytes else None,
+                scope=scope,
             )
         ], consumed_bytes
 
@@ -667,6 +1057,7 @@ class ActiveDiffCollector:
                 truncation_reason=(
                     "byte_budget" if ideal_bytes > ACTIVE_DIFF_MAX_BYTES else None
                 ),
+                scope="runtime",
             )
         ]
 
@@ -760,6 +1151,7 @@ class RecentValidationCollector:
             truncation_reason=(
                 "byte_budget" if _utf8_size(raw) > self._max_bytes else None
             ),
+            scope="runtime",
         )
 
 
@@ -842,5 +1234,6 @@ class NotesCollector:
                 truncation_reason=(
                     "byte_budget" if _NOTES_TRUNCATED_MARKER in body else None
                 ),
+                scope="runtime",
             )
         ]

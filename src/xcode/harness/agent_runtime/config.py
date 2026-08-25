@@ -240,6 +240,7 @@ def _build_before_provider_request_closure(
                                 "provenance": trace.provenance,
                                 "truncated": trace.truncated,
                                 "truncation_reason": trace.truncation_reason,
+                                "scope": trace.scope,
                             }
                             for trace in assembly.context_trace
                         ],

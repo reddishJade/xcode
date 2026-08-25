@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 
 from xcode.ai.providers.base import ModelProvider
 
 from .agent_loop import run_agent_loop
 from .config import AgentContext, AgentLoopConfig
+from .context import ContextState
 from .events import (
     AgentEvent,
     ToolExecutionEndEvent,
@@ -146,6 +148,10 @@ class Agent:
         emit: Callable[[AgentEvent], None] | None = None,
         history: list[AgentMessage] | None = None,
         request_prefix: list[AgentMessage] | None = None,
+        context_state: ContextState | None = None,
+        state: dict[str, object] | None = None,
+        project_root: Path | None = None,
+        cwd: Path | None = None,
         step_input: Callable[[], list[AgentMessage]] | None = None,
         finish_step_input: Callable[[], list[AgentMessage]] | None = None,
         reopen_step_input: Callable[[], None] | None = None,
@@ -158,6 +164,10 @@ class Agent:
             request_prefix=list(request_prefix or []),
             messages=list(history or []),
             tools=list(self._tools),
+            context_state=context_state or ContextState(),
+            state=dict(state or {}),
+            project_root=project_root,
+            cwd=cwd,
         )
         sink = emit or (lambda _e: None)
         result = await run_agent_loop(
@@ -181,6 +191,10 @@ class Agent:
         signal: CancellationSignal | None = None,
         history: list[AgentMessage] | None = None,
         request_prefix: list[AgentMessage] | None = None,
+        context_state: ContextState | None = None,
+        state: dict[str, object] | None = None,
+        project_root: Path | None = None,
+        cwd: Path | None = None,
         step_input: Callable[[], list[AgentMessage]] | None = None,
         finish_step_input: Callable[[], list[AgentMessage]] | None = None,
         reopen_step_input: Callable[[], None] | None = None,
@@ -194,6 +208,10 @@ class Agent:
             request_prefix=list(request_prefix or []),
             messages=list(history or []),
             tools=list(self._tools),
+            context_state=context_state or ContextState(),
+            state=dict(state or {}),
+            project_root=project_root,
+            cwd=cwd,
         )
         queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
         error_slot: list[Exception] = []

@@ -113,5 +113,6 @@ class SkillIndexCollector:
                     )
                     else None
                 ),
+                scope="runtime",
             )
         ]
