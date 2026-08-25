@@ -147,9 +147,25 @@ button {
   border-radius: 6px;
   padding: 3px 10px;
   max-width: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.drop-btn__label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+}
+
+.drop-btn__arrow {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: 10px;
 }
 
 .drop-btn:hover { border-color: var(--border-strong); color: var(--cream); }
@@ -158,12 +174,12 @@ button {
 
 .drop-btn--muted { color: var(--text-3); font-size: 11px; }
 
-.drop-btn--full { width: 100%; max-width: none; display: block; text-align: left; }
+.drop-btn--full { width: 100%; max-width: none; }
 
 .drop-menu {
   position: fixed;
   z-index: 80;
-  min-width: 230px;
+  min-width: 0;
   max-height: 320px;
   overflow-y: auto;
   background: var(--panel-2);
@@ -181,6 +197,9 @@ button {
   color: var(--text-2);
   border-radius: 5px;
   padding: 6px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drop-menu__item:hover { background: var(--panel-3); color: var(--cream); }

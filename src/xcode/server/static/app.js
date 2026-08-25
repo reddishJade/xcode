@@ -14,6 +14,9 @@
     effortMenu: $("effort-menu"),
     workspaceBtn: $("workspace-btn"),
     workspaceMenu: $("workspace-menu"),
+    modelLabel: null,
+    effortLabel: null,
+    workspaceLabel: null,
     sessionId: $("session-id"),
     modes: $("modes"),
     stream: $("stream"),
@@ -43,6 +46,10 @@
     approvalReason: $("approval-reason"),
     approvalTranscript: $("approval-transcript"),
   };
+
+  els.modelLabel = els.modelBtn.querySelector(".drop-btn__label");
+  els.effortLabel = els.effortBtn.querySelector(".drop-btn__label");
+  els.workspaceLabel = els.workspaceBtn.querySelector(".drop-btn__label");
 
   const MODES = ["plan", "build", "act"];
   let mode = localStorage.getItem("xcode.mode") || "build";
@@ -627,8 +634,11 @@
 
   function openDrop(btn, menu) {
     const rect = btn.getBoundingClientRect();
+    const width = Math.max(120, btn.offsetWidth);
     menu.style.left = Math.max(8, rect.left) + "px";
     menu.style.top = rect.bottom + 6 + "px";
+    menu.style.width = width + "px";
+    menu.style.minWidth = width + "px";
     menu.hidden = false;
   }
 
@@ -702,7 +712,7 @@
       const current = data.current || "";
       currentWorkspace = current;
       const curName = current.split(/[\\/]/).pop() || current;
-      els.workspaceBtn.textContent = (current ? "● " + curName : "—") + " ▾";
+      els.workspaceLabel.textContent = current ? "● " + curName : "—";
       els.workspaceBtn.title = current;
       els.workspaceMenu.innerHTML = "";
       for (const path of data.recent || []) {
@@ -1021,7 +1031,7 @@
     const models =
       info.available && info.available.length ? info.available : [info.model || ""];
     const current = info.model || "";
-    els.modelBtn.textContent = current + " ▾";
+    els.modelLabel.textContent = current;
     els.modelBtn.title = current + (info.thinking === "on" ? " · thinking on" : "");
     els.modelBtn.dataset.current = current;
     els.modelMenu.innerHTML = "";
@@ -1051,7 +1061,7 @@
     const effortOptions = info.effort_options || [];
     const effort = info.effort || "";
     els.effortBtn.hidden = effortOptions.length === 0;
-    els.effortBtn.textContent = effort + " ▾";
+    els.effortLabel.textContent = effort;
     els.effortBtn.dataset.current = effort;
     els.effortMenu.innerHTML = "";
     for (const level of effortOptions) {
