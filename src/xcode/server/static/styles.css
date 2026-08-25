@@ -47,6 +47,27 @@ body { display: flex; flex-direction: column; }
   border-radius: 4px;
 }
 
+/* ── 滚动条主题 ── */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+
+::-webkit-scrollbar-track { background: transparent; }
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+  border: 2px solid var(--ink);
+}
+
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+::-webkit-scrollbar-corner { background: transparent; }
+
 button {
   font: inherit;
   color: inherit;
