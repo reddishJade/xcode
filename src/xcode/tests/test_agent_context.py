@@ -13,11 +13,9 @@ from xcode.agent.context import (
     ContextExpiry,
     ContextPriority,
     DefaultContextAssembler,
+    InstructionCollector,
     _apply_size_budget,
     _block_to_text,
-    _condense_manifest,
-    _drop_fenced_blocks,
-    _extract_key_sections,
     _is_expired,
     _prepare_manifest,
     _utf8_prefix,
@@ -261,20 +259,21 @@ class TestUtf8Prefix:
         assert len(result) <= 5
 
 
-# ── _condense_manifest ──
+# ── _prepare_manifest ──
 
 
-class TestCondenseManifest:
+class TestPrepareManifest:
     def test_short_text_returns_as_is(self) -> None:
         text = "Short content here"
         assert _prepare_manifest(text) == text
 
-    def test_long_manifest_gets_truncated_and_tagged(self) -> None:
+    def test_long_manifest_keeps_byte_limited_prefix(self) -> None:
         text = "x" * (MANIFEST_MAX_BYTES + 1000)
-        result = _condense_manifest(text)
-        assert "<manifest-truncated>" in result
+        result = _prepare_manifest(text)
+        assert result == text[:MANIFEST_MAX_BYTES]
+        assert len(result.encode("utf-8")) == MANIFEST_MAX_BYTES
 
-    def test_key_sections_preserved(self) -> None:
+    def test_long_manifest_keeps_only_prefix(self) -> None:
         text = (
             "Opening context\n"
             "## Priority\n"
@@ -282,51 +281,43 @@ class TestCondenseManifest:
             "## Checklist\n"
             "- check A\n\n" + "x" * 50000
         )
-        result = _condense_manifest(text)
-        assert "Priority" in result
-        assert "Checklist" in result
-
-    def test_non_key_section_not_in_key_sections(self) -> None:
-        text = "Opening\n## Random Section\n- stuff\n\n" + "y" * 50000
-        sections = _extract_key_sections(text)
-        assert not any("random section" in s.lower() for s in sections)
-
-
-# ── _extract_key_sections ──
-
-
-class TestExtractKeySections:
-    def test_extracts_matching_sections(self) -> None:
-        text = "## Priority\n- high\n\n## Git Safety\n- never rebase\n"
-        sections = _extract_key_sections(text)
-        assert len(sections) >= 1
-        assert any("priority" in s.lower() for s in sections)
-
-    def test_ignores_non_matching_sections(self) -> None:
-        text = "## Unrelated Topic\n- stuff\n"
-        assert _extract_key_sections(text) == []
-
-
-# ── _drop_fenced_blocks ──
-
-
-class TestDropFencedBlocks:
-    def test_removes_fenced_content(self) -> None:
-        lines = ["line1", "```", "hidden", "```", "line2"]
-        result = _drop_fenced_blocks(lines)
-        assert result == ["line1", "line2"]
-
-
-# ── _prepare_manifest ──
-
-
-class TestPrepareManifest:
-    def test_short_passthrough(self) -> None:
-        assert _prepare_manifest("small") == "small"
+        result = _prepare_manifest(text)
+        assert result == text[:MANIFEST_MAX_BYTES]
 
     def test_long_condenses(self) -> None:
         result = _prepare_manifest("x" * (MANIFEST_MAX_BYTES + 100))
-        assert "<manifest-truncated>" in result
+        assert result == "x" * MANIFEST_MAX_BYTES
+
+
+# ── InstructionCollector ──
+
+
+class TestInstructionCollector:
+    def test_instruction_sources_share_one_byte_budget(self, tmp_path) -> None:
+        first = tmp_path / "first.md"
+        first.write_bytes(b"a" * 20_000)
+        (tmp_path / "AGENTS.md").write_bytes(b"b" * 20_000)
+
+        collector = InstructionCollector(
+            sources=({"type": "file", "path": "first.md"},),
+            project_root=tmp_path,
+        )
+        blocks = collector.collect(ContextCollectionInput())
+
+        assert len(blocks) == 2
+        assert blocks[0].content == "a" * 20_000
+        assert blocks[1].content == "b" * (MANIFEST_MAX_BYTES - 20_000)
+
+    def test_fenced_content_is_preserved(self, tmp_path) -> None:
+        agents = tmp_path / "AGENTS.md"
+        content = "```powershell\n重要命令\n```\n"
+        agents.write_bytes(content.encode("utf-8"))
+
+        collector = InstructionCollector(project_root=tmp_path)
+        blocks = collector.collect(ContextCollectionInput())
+
+        assert len(blocks) == 1
+        assert blocks[0].content == content
 
 
 # ── ContextCollectorRegistry ──

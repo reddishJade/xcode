@@ -386,30 +386,6 @@ class InstructionSource:
 
 
 MANIFEST_MAX_BYTES: int = 32 * 1024
-MANIFEST_OPENING_BYTES: int = 6 * 1024
-
-MANIFEST_KEY_SECTIONS: frozenset[str] = frozenset(
-    {
-        "priority",
-        "conversation style",
-        "python coding principles",
-        "checklist",
-        "project rules",
-        "comments and docstrings",
-        "git safety",
-        "commit rules",
-        "validation",
-        "working rules",
-        "debugging approach",
-    }
-)
-
-_MANIFEST_TRUNCATED_MARKER = (
-    "<manifest-truncated>Content was truncated because it exceeded the "
-    "maximum allowed size. Opening context and key sections are preserved. "
-    "Use read_file to see the full file before acting on omitted details."
-    "</manifest-truncated>"
-)
 
 
 class InstructionCollector:
@@ -448,8 +424,11 @@ class InstructionCollector:
 
         blocks: list[ContextBlock] = []
         configured_paths: set[Path] = set()
+        remaining_bytes = MANIFEST_MAX_BYTES
 
         for source in self._sources:
+            if remaining_bytes <= 0:
+                break
             if source.type == "file":
                 assert source.path is not None
                 path = root / source.path
@@ -457,142 +436,89 @@ class InstructionCollector:
                 if resolved in configured_paths:
                     continue
                 configured_paths.add(resolved)
-                blocks.extend(self._collect_file(path, source.priority))
+                source_blocks, consumed_bytes = self._collect_file(
+                    path, source.priority, remaining_bytes
+                )
             else:
                 assert source.content is not None
-                blocks.extend(self._collect_inline(source.content, source.priority))
+                source_blocks, consumed_bytes = self._collect_inline(
+                    source.content, source.priority, remaining_bytes
+                )
+            blocks.extend(source_blocks)
+            remaining_bytes -= consumed_bytes
 
         agents_path = root / "AGENTS.md"
-        if agents_path.is_file() and agents_path.resolve() not in configured_paths:
-            content = agents_path.read_text(encoding="utf-8", errors="replace").strip()
-            if content:
-                blocks.append(
-                    ContextBlock(
-                        source=ContextBlockSource.INSTRUCTION,
-                        target=ContextBlockTarget.SYSTEM,
-                        priority=ContextPriority.CRITICAL,
-                        content=_prepare_manifest(content),
-                    )
+        if remaining_bytes > 0 and agents_path.is_file():
+            if agents_path.resolve() not in configured_paths:
+                source_blocks, _consumed_bytes = self._collect_file(
+                    agents_path, ContextPriority.CRITICAL, remaining_bytes
                 )
+                blocks.extend(source_blocks)
 
         return blocks
 
     @staticmethod
-    def _collect_file(path: Path, priority: ContextPriority) -> list[ContextBlock]:
-        if not path.is_file():
-            return []
-        content = path.read_text(encoding="utf-8", errors="replace").strip()
+    def _collect_file(
+        path: Path, priority: ContextPriority, max_bytes: int
+    ) -> tuple[list[ContextBlock], int]:
+        try:
+            data = path.read_bytes()
+        except OSError:
+            return [], 0
+        content, consumed_bytes = _prepare_manifest_bytes(data, max_bytes, path)
         if not content:
-            return []
+            return [], consumed_bytes
         return [
             ContextBlock(
                 source=ContextBlockSource.INSTRUCTION,
                 target=ContextBlockTarget.SYSTEM,
                 priority=priority,
-                content=_prepare_manifest(content),
+                content=content,
             )
-        ]
+        ], consumed_bytes
 
     @staticmethod
-    def _collect_inline(content: str, priority: ContextPriority) -> list[ContextBlock]:
+    def _collect_inline(
+        content: str, priority: ContextPriority, max_bytes: int
+    ) -> tuple[list[ContextBlock], int]:
+        data = content.encode("utf-8")
+        prepared = _prepare_manifest(content, max_bytes, "inline instruction")
+        consumed_bytes = min(len(data), max_bytes) if max_bytes > 0 else 0
+        if not prepared:
+            return [], consumed_bytes
         return [
             ContextBlock(
                 source=ContextBlockSource.INSTRUCTION,
                 target=ContextBlockTarget.SYSTEM,
                 priority=priority,
-                content=_prepare_manifest(content),
+                content=prepared,
             )
-        ]
+        ], consumed_bytes
 
 
-def _condense_manifest(text: str) -> str:
-    marker = _MANIFEST_TRUNCATED_MARKER
-    marker_bytes = _utf8_size(marker)
-
-    max_separator_bytes = _utf8_size("\n\n") * 2
-    reserved = marker_bytes + max_separator_bytes
-    content_budget = MANIFEST_MAX_BYTES - reserved
-
-    if content_budget <= 0:
-        return _utf8_prefix(marker, MANIFEST_MAX_BYTES)
-
-    parts: list[str] = []
-
-    opening_budget = min(MANIFEST_OPENING_BYTES, content_budget)
-    opening = _utf8_prefix(text, opening_budget).strip()
-    if opening:
-        parts.append(opening)
-        content_budget -= _utf8_size(opening)
-
-    sections = _extract_key_sections(text)
-    if sections and content_budget > 0:
-        section_header = "## Preserved Key Sections\n\n"
-        header_bytes = _utf8_size(section_header)
-        if content_budget > header_bytes:
-            chosen: list[str] = []
-            used = 0
-            for i, section in enumerate(sections):
-                prefix = "\n\n" if i > 0 else ""
-                item = prefix + section
-                item_bytes = _utf8_size(item)
-                if used + item_bytes + header_bytes <= content_budget:
-                    chosen.append(section)
-                    used += item_bytes
-            if chosen:
-                section_text = section_header + "\n\n".join(chosen)
-                parts.append(section_text)
-                content_budget -= _utf8_size(section_text)
-
-    parts.append(marker)
-
-    return "\n\n".join(parts)
+def _prepare_manifest_bytes(
+    data: bytes, max_bytes: int, source: Path | str
+) -> tuple[str, int]:
+    if max_bytes <= 0 or not data:
+        return "", 0
+    consumed_bytes = min(len(data), max_bytes)
+    if len(data) > max_bytes:
+        logger.warning(
+            "project instruction exceeds remaining byte budget; truncating: %s",
+            source,
+        )
+    return data[:consumed_bytes].decode("utf-8", errors="replace"), consumed_bytes
 
 
-def _extract_key_sections(text: str) -> list[str]:
-    sections: list[str] = []
-    current_heading = ""
-    current_lines: list[str] = []
-
-    def flush() -> None:
-        nonlocal current_heading, current_lines
-        if not current_heading or not current_lines:
-            return
-        heading_key = current_heading.strip("# ").strip().lower()
-        if heading_key not in MANIFEST_KEY_SECTIONS:
-            return
-        section = "\n".join(_drop_fenced_blocks(current_lines)).strip()
-        if section:
-            sections.append(section)
-
-    for line in text.splitlines():
-        if line.startswith(("## ", "### ")):
-            flush()
-            current_heading = line
-            current_lines = [line]
-        elif current_heading:
-            current_lines.append(line)
-    flush()
-    return sections
-
-
-def _drop_fenced_blocks(lines: list[str]) -> list[str]:
-    result: list[str] = []
-    in_fence = False
-    for line in lines:
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
-        result.append(line)
-    return result
-
-
-def _prepare_manifest(text: str) -> str:
-    source_bytes = _utf8_size(text)
-    if source_bytes <= MANIFEST_MAX_BYTES:
-        return text
-    return _condense_manifest(text)
+def _prepare_manifest(
+    text: str,
+    max_bytes: int = MANIFEST_MAX_BYTES,
+    source: Path | str = "project instruction",
+) -> str:
+    prepared, _consumed_bytes = _prepare_manifest_bytes(
+        text.encode("utf-8"), max_bytes, source
+    )
+    return prepared
 
 
 # ── 内置收集器：活动 diff ──
