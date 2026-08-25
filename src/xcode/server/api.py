@@ -41,7 +41,7 @@ def create_app(
 
     @server.get("/api/info")
     async def info() -> JSONResponse:
-        return JSONResponse(_info_payload(hub.app, project_root))
+        return JSONResponse(_info_payload(hub.app, server.state.project_root))
 
     @server.get("/api/model")
     async def model_info() -> JSONResponse:
