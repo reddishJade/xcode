@@ -756,10 +756,7 @@
     const liveTitle = document.createElement("span");
     liveTitle.className = "session-item__title";
     liveTitle.textContent = "● 实时会话";
-    const liveMeta = document.createElement("span");
-    liveMeta.className = "session-item__meta";
-    liveMeta.textContent = data.current || "";
-    live.append(liveTitle, liveMeta);
+    live.appendChild(liveTitle);
     live.addEventListener("click", () => {
       resetView(true);
       toast("已回到实时会话");
@@ -776,12 +773,8 @@
         "session-item" + (item.id === data.current ? " is-current" : "");
       const title = document.createElement("span");
       title.className = "session-item__title";
-      title.textContent = item.title || item.id;
-      const meta = document.createElement("span");
-      meta.className = "session-item__meta";
-      meta.textContent =
-        item.id + " · " + (item.updated_at || "").slice(0, 16).replace("T", " ");
-      btn.append(title, meta);
+      title.textContent = item.title || "未命名会话";
+      btn.appendChild(title);
       btn.addEventListener("click", () => resumeSession(item.id));
       li2.appendChild(btn);
       els.sessionList.appendChild(li2);
