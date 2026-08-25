@@ -10,7 +10,6 @@
     branch: $("branch"),
     modelSelect: $("model-select"),
     sessionId: $("session-id"),
-    conn: $("conn"),
     modes: $("modes"),
     stream: $("stream"),
     empty: $("empty"),
@@ -464,9 +463,6 @@
 
     ws.onopen = () => {
       connected = true;
-      els.conn.classList.add("is-live");
-      els.conn.classList.remove("is-down");
-  
       refreshInfo();
       refreshModel();
       refreshSessions();
@@ -486,9 +482,6 @@
 
     ws.onclose = () => {
       connected = false;
-      els.conn.classList.remove("is-live");
-      els.conn.classList.add("is-down");
-  
       clearTimeout(reconnectTimer);
       reconnectTimer = setTimeout(connect, 1500);
     };
@@ -856,7 +849,7 @@
     for (const entry of entries) {
       const inner = entry.content || {};
       if (inner.type === "inbox/claimed") {
-        renderUser(inner.data?.display_text || "", entry.id, "read");
+        renderUser(inner.data?.display_text || "", entry.id);
       } else if (inner.type === "assistant") {
         const blocks = inner.data;
         let text = "";
@@ -882,12 +875,15 @@
     const wrap = document.createElement("div");
     wrap.className = "user-msg";
     wrap.dataset.entry = source;
+    const chip =
+      msgMode && ["plan", "build", "act"].includes(String(msgMode).toLowerCase())
+        ? "<span class='user-msg__mode'>" + esc(String(msgMode).toLowerCase()) + "</span>"
+        : "";
     wrap.innerHTML =
       '<span class="user-msg__mark">›</span><span class="user-msg__text">' +
       esc(text) +
-      "</span><span class='user-msg__mode'>" +
-      esc(msgMode ? String(msgMode).toLowerCase() : "user") +
-      "</span>";
+      "</span>" +
+      chip;
     els.stream.appendChild(wrap);
     scrollToBottom();
   }

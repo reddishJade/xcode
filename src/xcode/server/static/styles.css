@@ -146,14 +146,6 @@ button {
 
 .mode.is-active { background: var(--amber-dim); color: var(--amber-strong); }
 
-.conn { display: flex; align-items: center; gap: 7px; font-size: 11px; letter-spacing: 0.12em; color: var(--text-3); text-transform: uppercase; }
-
-.conn__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
-
-.conn.is-live .conn__dot { background: var(--olive); box-shadow: 0 0 0 3px var(--olive-soft); }
-
-.conn.is-down .conn__dot { background: var(--red); box-shadow: 0 0 0 3px var(--red-soft); }
-
 /* ── 布局 ── */
 
 .layout {
