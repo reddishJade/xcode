@@ -19,9 +19,13 @@
     scrollBottom: $("scroll-bottom"),
     sessionList: $("session-list"),
     newChat: $("new-chat"),
-    workspacePath: $("workspace-path"),
     workspaceSelect: $("workspace-select"),
-    workspaceSwitch: $("workspace-switch"),
+    workspaceAdd: $("workspace-add"),
+    workspaceCurrent: $("workspace-current"),
+    workspaceModal: $("workspace-modal"),
+    workspaceNewPath: $("workspace-new-path"),
+    workspaceNewCancel: $("workspace-new-cancel"),
+    workspaceNewConfirm: $("workspace-new-confirm"),
     toast: $("toast"),
     statsUsage: $("stats-usage"),
     statsContext: $("stats-context"),
@@ -638,13 +642,15 @@
     try {
       const res = await fetch("/api/workspaces");
       const data = await res.json();
-      els.workspacePath.value = data.current || "";
+      const current = data.current || "";
+      els.workspaceCurrent.textContent = "当前：" + current;
       els.workspaceSelect.innerHTML = "";
       for (const path of data.recent || []) {
         const opt = document.createElement("option");
         opt.value = path;
-        opt.textContent = path;
-        if (path === data.current) opt.selected = true;
+        const name = path.split(/[\/]/).pop() || path;
+        opt.textContent = path === current ? "● " + name : name;
+        if (path === current) opt.selected = true;
         els.workspaceSelect.appendChild(opt);
       }
     } catch (_err) {
@@ -655,7 +661,6 @@
   async function switchWorkspace(pathText) {
     const path = String(pathText || "").trim();
     if (!path) return toast("请输入工作区路径");
-    els.workspaceSwitch.disabled = true;
     try {
       const res = await fetch("/api/workspaces", {
         method: "POST",
@@ -671,25 +676,41 @@
       refreshInfo();
       refreshModel();
       refreshSessions();
-      refreshWorkspaces();
       refreshStats();
+      refreshWorkspaces();
       toast("已切换工作区 " + path);
     } catch (_err) {
       toast("切换工作区失败");
-    } finally {
-      els.workspaceSwitch.disabled = false;
     }
   }
 
-  els.workspaceSwitch.addEventListener("click", () => {
-    const selectPath = els.workspaceSelect.value;
-    const inputPath = els.workspacePath.value;
-    switchWorkspace(inputPath || selectPath);
+  els.workspaceSelect.addEventListener("change", () => {
+    const next = els.workspaceSelect.value;
+    const current = (els.workspaceCurrent.textContent || "").replace("当前：", "");
+    if (!next || next === current) return;
+    switchWorkspace(next);
   });
 
-  els.workspaceSelect.addEventListener("change", () => {
-    els.workspacePath.value = els.workspaceSelect.value;
+  els.workspaceAdd.addEventListener("click", () => {
+    els.workspaceModal.hidden = false;
+    els.workspaceNewPath.value = "";
+    els.workspaceNewPath.focus();
   });
+
+  els.workspaceNewCancel.addEventListener("click", () => {
+    els.workspaceModal.hidden = true;
+  });
+
+  els.workspaceNewConfirm.addEventListener("click", () => {
+    const path = els.workspaceNewPath.value.trim();
+    els.workspaceModal.hidden = true;
+    if (path) switchWorkspace(path);
+  });
+
+  els.workspaceNewPath.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") els.workspaceNewConfirm.click();
+  });
+
 
   /* ── 会话列表 ── */
 
@@ -747,14 +768,9 @@
     els.sessionList.appendChild(li);
 
     if (!items.length) return;
-    const gap = document.createElement("li");
-    gap.style.cssText = "font-size:10px;color:var(--text-3);padding:4px 10px;";
-    gap.textContent = "历史会话（只读回放）";
-    els.sessionList.appendChild(gap);
 
     for (const item of items) {
       const li2 = document.createElement("li");
-      li2.className = "session-row";
       const btn = document.createElement("button");
       btn.className =
         "session-item" + (item.id === data.current ? " is-current" : "");
@@ -766,16 +782,8 @@
       meta.textContent =
         item.id + " · " + (item.updated_at || "").slice(0, 16).replace("T", " ");
       btn.append(title, meta);
-      btn.addEventListener("click", () => loadSession(item.id));
-      const resumeBtn = document.createElement("button");
-      resumeBtn.className = "session-item__continue";
-      resumeBtn.title = "恢复该会话并继续对话";
-      resumeBtn.textContent = "继续";
-      resumeBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        resumeSession(item.id);
-      });
-      li2.append(btn, resumeBtn);
+      btn.addEventListener("click", () => resumeSession(item.id));
+      li2.appendChild(btn);
       els.sessionList.appendChild(li2);
     }
   }

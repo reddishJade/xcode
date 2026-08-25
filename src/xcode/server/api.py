@@ -39,6 +39,13 @@ def create_app(
     server.state.hub = hub
     server.state.project_root = project_root
 
+    @server.middleware("http")
+    async def no_store(request, call_next):
+        # 静态前端迭代频繁，文件结构已变时旧缓存会引用不存在的节点
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     @server.get("/api/info")
     async def info() -> JSONResponse:
         return JSONResponse(_info_payload(hub.app, server.state.project_root))

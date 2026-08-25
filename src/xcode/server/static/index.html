@@ -40,18 +40,12 @@
       </div>
       <div class="workspace-box">
         <p class="sidebar__label">工作区</p>
-        <input
-          id="workspace-path"
-          class="workspace-input"
-          placeholder="项目目录绝对路径…"
-          spellcheck="false"
-        />
         <div class="workspace-row">
-          <select id="workspace-select" class="workspace-select"></select>
-          <button id="workspace-switch" class="btn btn--ghost">切换</button>
+          <select id="workspace-select" class="workspace-select" title="切换工作区"></select>
+          <button id="workspace-add" class="workspace-add" title="新建工作区">＋</button>
         </div>
+        <p class="workspace-current" id="workspace-current"></p>
       </div>
-      <p class="sidebar__hint">服务端运行单一会话；连接的所有浏览器共享事件流。切到其他工作区会重建运行时。</p>
       <ul class="session-list" id="session-list"></ul>
     </aside>
 
@@ -111,6 +105,27 @@
         <button class="btn btn--ghost" data-approve="session">本会话允许</button>
         <button class="btn btn--ghost" data-approve="permanent">始终允许</button>
         <button class="btn btn--danger" data-approve="deny">拒绝</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="workspace-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="workspace-modal-title">
+      <header class="modal__head">
+        <span class="modal__eyebrow">工作区</span>
+        <h2 class="modal__title" id="workspace-modal-title">新建工作区</h2>
+      </header>
+      <div class="modal__body">
+        <input
+          id="workspace-new-path"
+          class="workspace-new-path"
+          placeholder="项目目录绝对路径…"
+          spellcheck="false"
+        />
+      </div>
+      <footer class="modal__foot">
+        <button class="btn btn--ghost" id="workspace-new-cancel">取消</button>
+        <button class="btn" id="workspace-new-confirm">切换</button>
       </footer>
     </div>
   </div>
