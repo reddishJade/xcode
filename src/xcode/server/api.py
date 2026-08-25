@@ -35,6 +35,21 @@ def create_app(app: XcodeApp, project_root: Path) -> FastAPI:
     async def info() -> JSONResponse:
         return JSONResponse(_info_payload(app, project_root))
 
+    @server.get("/api/model")
+    async def model_info() -> JSONResponse:
+        return JSONResponse(_model_payload(app))
+
+    @server.post("/api/model")
+    async def set_model_endpoint(payload: dict) -> JSONResponse:
+        model = str(payload.get("model", "") or "")
+        if not model:
+            return JSONResponse({"error": "model 不能为空"}, status_code=400)
+        try:
+            app.set_model(model=model, profile="main")
+        except Exception as exc:  # noqa: BLE001 - 返回给前端展示
+            return JSONResponse({"error": f"切换模型失败: {exc}"}, status_code=400)
+        return JSONResponse(_model_payload(app))
+
     @server.get("/api/sessions")
     async def sessions() -> JSONResponse:
         store = app.session_store
@@ -118,6 +133,18 @@ def create_app(app: XcodeApp, project_root: Path) -> FastAPI:
 
     server.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return server
+
+
+def _model_payload(app: XcodeApp) -> dict[str, object]:
+    """当前模型信息 + 可用模型列表。"""
+    info: dict[str, object] = dict(app.get_model_info())
+    try:
+        from xcode.cli.repl import current_model_options
+
+        info["available"] = list(current_model_options(app))
+    except Exception:  # noqa: BLE001
+        info["available"] = [str(info.get("model", ""))]
+    return info
 
 
 def _info_payload(app: XcodeApp, project_root: Path) -> dict[str, object]:

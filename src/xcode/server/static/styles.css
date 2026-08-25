@@ -115,6 +115,21 @@ button {
 
 .meta--muted { color: var(--text-3); }
 
+.model-select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  max-width: 200px;
+}
+
+.model-select:hover { border-color: var(--border-strong); color: var(--cream); }
+
+.model-select:focus { border-color: var(--amber); outline: none; }
+
 .modes { display: flex; gap: 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px; }
 
 .mode {

@@ -8,7 +8,7 @@
   const els = {
     project: $("project-path"),
     branch: $("branch"),
-    model: $("model"),
+    modelSelect: $("model-select"),
     sessionId: $("session-id"),
     conn: $("conn"),
     connLabel: $("conn-label"),
@@ -463,6 +463,7 @@
       els.conn.classList.remove("is-down");
       els.connLabel.textContent = "online";
       refreshInfo();
+      refreshModel();
       refreshSessions();
     };
 
@@ -558,6 +559,31 @@
     els.input.style.height = Math.min(els.input.scrollHeight, 200) + "px";
   }
   els.input.addEventListener("input", autoGrow);
+
+  els.modelSelect.addEventListener("change", async () => {
+    const previous = els.modelSelect.dataset.current || "";
+    const next = els.modelSelect.value;
+    if (!next || next === previous) return;
+    try {
+      const res = await fetch("/api/model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: next }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        toast(data.error);
+        els.modelSelect.value = previous;
+        return;
+      }
+      applyModel(data);
+      toast("已切换模型 " + next);
+      refreshSessions();
+    } catch (_err) {
+      toast("切换模型失败");
+      els.modelSelect.value = previous;
+    }
+  });
 
   els.modes.addEventListener("click", (e) => {
     const btn = e.target.closest(".mode");
@@ -766,9 +792,34 @@
   function applyInfo(info) {
     els.project.textContent = info.project || "—";
     els.branch.textContent = info.git_branch ? "⎇ " + info.git_branch : "";
-    const m = info.model || {};
-    els.model.textContent = m.model ? m.model + (m.thinking === "on" ? " · thinking" : "") : "";
     els.sessionId.textContent = "session " + (info.session_id || "");
+  }
+
+  async function refreshModel() {
+    try {
+      const res = await fetch("/api/model");
+      const data = await res.json();
+      applyModel(data);
+    } catch (_err) {
+      /* 忽略 */
+    }
+  }
+
+  function applyModel(info) {
+    const models =
+      info.available && info.available.length ? info.available : [info.model || ""];
+    const current = info.model || "";
+    els.modelSelect.innerHTML = "";
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = m;
+      if (m === current) opt.selected = true;
+      els.modelSelect.appendChild(opt);
+    }
+    els.modelSelect.dataset.current = current;
+    els.modelSelect.title =
+      current + (info.thinking === "on" ? " · thinking on" : "");
   }
 
   /* ── 启动 ── */
