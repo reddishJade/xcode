@@ -95,6 +95,11 @@ xcode tui
 # CLI / REPL 模式（多轮对话，支持 /slash 命令）
 xcode cli
 
+# 浏览器工作台（FastAPI + WebSocket 实时事件流）
+xcode web            # 默认 http://127.0.0.1:8787
+xcode web --open     # 启动后自动打开浏览器
+xcode web --port 9000
+
 # 首次使用引导（配置 Provider 与 API key）
 xcode setup
 
@@ -164,6 +169,7 @@ xcode --resume
 - **上下文压缩与恢复** — `LayeredCompactor` 裁剪过期读取、大输出和旧工具结果；compact 后按 session 写入 checkpoint，resume 使用 checkpoint + 原文 tail 重建上下文。
 - **REPL 会话管理** — `/slash` 命令支持 plan/build/act、会话分支、回退、undo（快照恢复）、模型切换、config 管理、session transcript 落盘。
 - **TUI 全屏终端** — 基于 `prompt-toolkit` 的类 VSCode 全屏交互界面。
+- **浏览器工作台** — `xcode web` 启动 FastAPI + WebSocket 服务，单页面前端实时渲染结构化事件流：步骤脊柱、thinking、工具卡片与审批弹窗；会话账本可通过 REST 回放。
 - **Subagent 委托** — `subagent` 单入口委派子任务，持久化 batch/run 谱系与终态；子 agent 共享项目目录，并继承父 agent 的权限门控。
 - **类型化工具呈现** — terminal、diff、location 和 subagent 由工具产生结构化 intent，REPL/TUI 共享投影逻辑。
 - **MCP 协议** — 基于官方 Python SDK 连接本地 stdio server，自动发现 `.xcode/mcp_config.json` 并注册 `mcp__{server}__{tool}` 动态工具。

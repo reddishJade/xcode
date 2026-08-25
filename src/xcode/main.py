@@ -39,6 +39,34 @@ def _build_tui_parser(subparsers) -> None:
     subparsers.add_parser("tui", help="Run the full-screen terminal UI")
 
 
+def _build_web_parser(subparsers) -> None:
+    web_parser = subparsers.add_parser(
+        "web",
+        help="Run the browser workbench (FastAPI + WebSocket UI)",
+        description=(
+            "Start the Xcode browser workbench: a single-page frontend that "
+            "streams agent events over WebSocket."
+        ),
+    )
+    web_parser.add_argument(
+        "--host", default="127.0.0.1", help="Bind host address (default: 127.0.0.1)."
+    )
+    web_parser.add_argument(
+        "--port", type=int, default=8787, help="Bind port (default: 8787)."
+    )
+    web_parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the browser automatically after the server starts.",
+    )
+    web_parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path.cwd(),
+        help="Project root directory.",
+    )
+
+
 def _build_cli_parser(subparsers) -> None:
     subparsers.add_parser("cli", help="Run the interactive command-line REPL")
 
@@ -78,6 +106,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     _build_setup_parser(subparsers)
     _build_tui_parser(subparsers)
     _build_cli_parser(subparsers)
+    _build_web_parser(subparsers)
     return parser.parse_args(argv)
 
 
@@ -119,6 +148,17 @@ def main() -> int:
 
     try:
         runtime_config = discover_runtime_config(project_root, args.config)
+        if args.command == "web":
+            from .server.serve import run_web_server
+
+            return run_web_server(
+                project_root,
+                host=args.host,
+                port=args.port,
+                config_path=args.config,
+                runtime_config=runtime_config,
+                open_browser=args.open,
+            )
         return _run(args, runtime_config)
     finally:
         if temp_config is not None and temp_config.exists():

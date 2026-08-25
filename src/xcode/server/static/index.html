@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>xcode workbench</title>
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Crect x='1' y='1' width='10' height='10' rx='2' fill='%23141413' stroke='%23e0854a'/%3E%3Cpath d='M3.5 6.5 L5.5 8.5 L8.5 4' fill='none' stroke='%23e0854a' stroke-width='1.2'/%3E%3C/svg%3E"
+  />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand__mark" viewBox="0 0 12 12" aria-hidden="true">
+        <rect x="1" y="1" width="10" height="10" rx="2" />
+        <path d="M3.5 6.5 L5.5 8.5 L8.5 4" fill="none" />
+      </svg>
+      <span class="brand__word">xcode</span>
+      <span class="brand__tag">workbench</span>
+    </div>
+    <div class="topbar__meta">
+      <span class="meta" id="project-path">—</span>
+      <span class="meta meta--muted" id="branch"></span>
+      <span class="meta meta--muted" id="model"></span>
+      <span class="meta meta--muted" id="session-id"></span>
+    </div>
+    <nav class="modes" id="modes" aria-label="执行模式">
+      <button class="mode" data-mode="plan" title="只读规划：无副作用">plan</button>
+      <button class="mode" data-mode="build" title="自动构建：结构化写入 + 自动审批">build</button>
+      <button class="mode" data-mode="act" title="人机协作：每个副作用请求确认">act</button>
+    </nav>
+    <div class="conn" id="conn">
+      <span class="conn__dot" id="conn-dot"></span>
+      <span class="conn__label" id="conn-label">连接中</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__top">
+        <button class="btn sidebar__new" id="new-chat">＋ 清空视图</button>
+      </div>
+      <p class="sidebar__hint">服务端运行单一会话；连接的所有浏览器共享事件流。</p>
+      <ul class="session-list" id="session-list"></ul>
+    </aside>
+
+    <section class="stage">
+      <div class="stream" id="stream">
+        <div class="empty" id="empty">
+          <p class="empty__eyebrow">xcode / web workbench</p>
+          <p class="empty__title">选择执行模式，向工作台提出第一个任务。</p>
+          <p class="empty__sub">
+            事件流实时落盘为会话账本；刷新页面后可在左侧恢复最近会话。
+          </p>
+        </div>
+      </div>
+
+      <footer class="composer">
+        <div class="composer__mode" id="composer-mode">build</div>
+        <textarea
+          id="input"
+          class="composer__input"
+          rows="1"
+          placeholder="描述任务…（Enter 发送，Shift+Enter 换行）"
+          autocomplete="off"
+          spellcheck="false"
+        ></textarea>
+        <div class="composer__actions">
+          <button class="btn btn--ghost" id="scroll-bottom" hidden title="回到最新回应">⤓ 最新</button>
+          <button class="btn" id="send">发送 ↵</button>
+          <button class="btn btn--danger" id="stop" hidden>■ 停止</button>
+        </div>
+      </footer>
+    </section>
+  </main>
+
+  <div class="modal-backdrop" id="approval" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="approval-title">
+      <header class="modal__head">
+        <span class="modal__eyebrow">授权请求 · human in the loop</span>
+        <h2 class="modal__title" id="approval-title">工具需要你的确认</h2>
+      </header>
+      <div class="modal__body">
+        <p class="modal__tool"><span class="modal__tool-name" id="approval-tool">—</span></p>
+        <pre class="modal__args" id="approval-args"></pre>
+        <p class="modal__reason" id="approval-reason"></p>
+        <details class="modal__details" id="approval-details">
+          <summary>查看相关上下文</summary>
+          <pre id="approval-transcript"></pre>
+        </details>
+      </div>
+      <footer class="modal__foot">
+        <button class="btn" data-approve="once">允许一次</button>
+        <button class="btn btn--ghost" data-approve="session">本会话允许</button>
+        <button class="btn btn--ghost" data-approve="permanent">始终允许</button>
+        <button class="btn btn--danger" data-approve="deny">拒绝</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
