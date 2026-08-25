@@ -564,7 +564,7 @@
     if (viewedSessionId) {
       const resumed = await tryResumeSession(viewedSessionId);
       if (!resumed) {
-        toast("未能恢复该会话，已提交到当前实时会话");
+        toast("未能恢复该会话，已提交到当前服务端会话");
       }
     }
     if (running) return; // 恢复期间可能被其他端的回合占用
@@ -784,11 +784,11 @@
     live.className = "session-item is-current";
     const liveTitle = document.createElement("span");
     liveTitle.className = "session-item__title";
-    liveTitle.textContent = "● 实时会话";
+    liveTitle.textContent = "● 新对话";
     live.appendChild(liveTitle);
     live.addEventListener("click", () => {
       resetView(true);
-      toast("已回到实时会话");
+      toast("已开始新对话（服务端会话不变）");
     });
     li.appendChild(live);
     els.sessionList.appendChild(li);
@@ -868,10 +868,10 @@
     const backBtn = document.createElement("button");
     backBtn.className = "btn btn--ghost";
     backBtn.style.cssText = "margin:2px 0 12px 78px;";
-    backBtn.textContent = live ? "清空视图" : "← 返回实时会话";
+    backBtn.textContent = live ? "清空视图" : "← 新对话";
     backBtn.addEventListener("click", () => {
       resetView(true);
-      toast(live ? "已清空视图" : "已回到实时会话");
+      toast(live ? "已清空视图" : "已开始新对话（服务端会话不变）");
     });
     els.stream.append(banner, backBtn);
 
@@ -995,7 +995,7 @@
     if (info.custom) {
       const custom = document.createElement("option");
       custom.value = "__custom__";
-      custom.textContent = "＋ 自定义模型…";
+      custom.textContent = "＋";
       els.modelSelect.appendChild(custom);
     }
     els.modelSelect.dataset.current = current;
