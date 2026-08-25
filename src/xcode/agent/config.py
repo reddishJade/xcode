@@ -23,6 +23,7 @@ from xcode.ai.providers.base import StreamProvider
 from xcode.ai.types import StreamOptions, ThinkingLevel
 
 from .context import ContextState
+from .context_manager import ContextManager
 from .messages import AgentMessage, AssistantMessage, ToolResultMessage
 from .request import DefaultRequestAssembler, RequestAssembler, RequestAssembly
 
@@ -51,6 +52,7 @@ class AgentContext(BaseModel):
     context_state: Annotated[ContextState, SkipValidation] = Field(
         default_factory=ContextState
     )
+    context_manager: Annotated[ContextManager | None, SkipValidation] = None
     state: dict[str, object] = Field(default_factory=dict)
     project_root: Path | None = None
     cwd: Path | None = None

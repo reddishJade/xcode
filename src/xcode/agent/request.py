@@ -114,15 +114,24 @@ class DefaultRequestAssembler:
         current_step: int,
         options: StreamOptions | None,
     ) -> RequestAssembly:
-        context.context_state.sync_request_prefix(context.request_prefix)
+        if context.context_manager is not None:
+            context.messages[:] = context.context_manager.normalize_messages(
+                context.messages
+            )
+        context_state = (
+            context.context_manager.context_state
+            if context.context_manager is not None
+            else context.context_state
+        )
+        context_state.sync_request_prefix(context.request_prefix)
         legacy_blocks, world_blocks = self._collect(
             context,
             list(context.messages),
             current_step,
         )
-        context.context_state.append_blocks(world_blocks)
+        context_state.append_blocks(world_blocks)
         base_messages = [
-            *context.context_state.persistent_messages,
+            *context_state.persistent_messages,
             *context.messages,
         ]
         result = self.context_assembler.assemble(
@@ -138,7 +147,7 @@ class DefaultRequestAssembler:
         messages = self.hygiene.apply(result.messages)
         wire_messages = self.converter(messages)
         tool_definitions = _tools_to_definitions(context.tools)
-        return RequestAssembly(
+        assembly = RequestAssembly(
             messages=tuple(messages),
             wire_messages=tuple(wire_messages),
             tools=tuple(tool_definitions),
@@ -156,6 +165,9 @@ class DefaultRequestAssembler:
             budget_remaining=result.budget_remaining,
             options=options,
         )
+        if context.context_manager is not None:
+            context.context_manager.record_request(assembly)
+        return assembly
 
     def _collect(
         self,
@@ -180,7 +192,11 @@ class DefaultRequestAssembler:
         if callable(collect_sections):
             collected = collect_sections(
                 collection_input,
-                context.context_state.world_state,
+                (
+                    context.context_manager.context_state.world_state
+                    if context.context_manager is not None
+                    else context.context_state.world_state
+                ),
             )
             if isinstance(collected, list):
                 world_blocks = [

@@ -419,7 +419,7 @@ class CodingAgentHarness(AgentHarness):
             tool_name=tool_name,
             content=content,
         )
-        self._history.extend([assistant_message, result_message])
+        self._context_manager.append([assistant_message, result_message])
         self._reset_provider_conversation_state()
         return ExplicitSkillActivationResult(
             name=name,

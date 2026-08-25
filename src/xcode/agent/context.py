@@ -249,9 +249,7 @@ def _snapshot_fingerprint(value: object) -> object:
             )
             for key, item in value.items()
         ]
-        return tuple(
-            sorted(items, key=lambda item: item[0])
-        )
+        return tuple(sorted(items, key=lambda item: item[0]))
     if isinstance(value, list | tuple):
         return tuple(_snapshot_fingerprint(item) for item in value)
     if isinstance(value, set | frozenset):

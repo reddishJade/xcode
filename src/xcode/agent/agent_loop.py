@@ -113,6 +113,7 @@ async def run_agent_loop(
         messages=list(context.messages) + list(prompts),
         tools=list(context.tools) if context.tools else [],
         context_state=context.context_state,
+        context_manager=context.context_manager,
         state=dict(context.state),
         project_root=context.project_root,
         cwd=context.cwd,
@@ -122,12 +123,16 @@ async def run_agent_loop(
             else context.request_token_budget
         ),
     )
+    if current_context.context_manager is not None:
+        current_context.context_manager.token_usage.context_budget = (
+            current_context.request_token_budget
+        )
     emit(_agent_start_event())
     emit(_turn_start_event())
     for prompt in prompts:
         emit(_message_start_event(prompt))
         emit(_message_end_event(prompt))
-    return await _run_loop(
+    result = await _run_loop(
         current_context,
         new_messages,
         config,
@@ -137,6 +142,9 @@ async def run_agent_loop(
         finish_steering=finish_steering,
         reopen_steering=reopen_steering,
     )
+    if current_context.context_manager is not None:
+        current_context.context_manager.replace_history(result.surface)
+    return result
 
 
 # ── 外层循环 ──
@@ -196,8 +204,17 @@ async def _run_loop(
         ):
             messages_before = list(current_context.messages)
             before = len(messages_before)
-            current_context.messages = config.compact(current_context.messages)
-            current_context.context_state.reset()
+            compacted_messages = config.compact(current_context.messages)
+            if current_context.context_manager is not None:
+                current_context.messages = (
+                    current_context.context_manager.complete_compaction(
+                        compacted_messages,
+                        before_messages=before,
+                    )
+                )
+            else:
+                current_context.messages = compacted_messages
+                current_context.context_state.reset()
             after = len(current_context.messages)
             archive: CompactionArchive | None = None
             if config.archive_writer:

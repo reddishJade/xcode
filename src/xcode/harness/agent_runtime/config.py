@@ -319,6 +319,7 @@ def build_loop_config(
     emit_hook: Callable[[HookRecord], None],
     get_prompt_version: Callable[[], str],
     correlation: RuntimeCorrelation | None = None,
+    get_last_prompt_tokens: Callable[[], int | None] | None = None,
     # 领域扩展参数由上层装配后注入。
     mode_state: RuntimeModeState | None = None,
     watchdog_repeated_tool_skip: frozenset[str] | None = None,
@@ -332,7 +333,11 @@ def build_loop_config(
             loop_messages,
             compactor,
             manual_compact_requested,
-            last_prompt_tokens,
+            (
+                get_last_prompt_tokens()
+                if get_last_prompt_tokens is not None
+                else last_prompt_tokens
+            ),
             composition,
             provider,
         )

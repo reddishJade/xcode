@@ -84,7 +84,10 @@ async def call_provider(
     metrics.model_latencies_ms.append(elapsed)
     if events is None:
         return None
-    return _provider_events_to_response(events, metrics, lambda _event: None)
+    response = _provider_events_to_response(events, metrics, lambda _event: None)
+    if context.context_manager is not None:
+        context.context_manager.record_provider_usage(response.message.usage)
+    return response
 
 
 def _is_cancelled(signal: CancellationSignal | None) -> bool:

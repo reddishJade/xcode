@@ -17,12 +17,12 @@ from xcode.ai.events import ToolCall
 from xcode.ai.providers.base import ModelProvider
 
 from ...agent.agent import Agent
-from ...agent.config import ContextState
 from ...agent.messages import (
     AgentMessage,
     SystemMessage,
     UserMessage,
 )
+from ...agent.context_manager import ContextManager
 from ...agent.types import ApprovalCallback, ToolSpec
 from ..observability import HookRecord, RuntimeCorrelation
 from ..security.approval import ApprovalPolicy, ApprovalsReviewer
@@ -35,7 +35,6 @@ from .composition import AgentComposition
 from .config import (
     AgentRuntimeConfig,
     build_loop_config,
-    record_last_prompt_tokens,
 )
 from .events import (
     AgentHarnessEvent,
@@ -116,8 +115,6 @@ class AgentHarness:
             if supplied_gate is not None
             else gate_runtime.correlation or RuntimeCorrelation(gate_runtime.session_id)
         )
-        self._last_prompt_tokens: int | None = None
-
         self._hook_manager = gate_runtime.hook_manager
         self.external_directories = gate.external_directories
         self.sensitive_path_overrides = gate.sensitive_path_overrides
@@ -150,8 +147,9 @@ class AgentHarness:
             tool_path_extractors=gate.tool_path_extractors,
         )
         self.audit_logger = gate_runtime.audit_logger
-        self._history: list[AgentMessage] = []
-        self._context_state = ContextState()
+        self._context_manager = ContextManager()
+        self._history = self._context_manager.history
+        self._context_state = self._context_manager.context_state
         self._resumed_notice: str | None = None
         self._run_controller = SessionRunController(runtime.session_inbox)
 
@@ -363,10 +361,14 @@ class AgentHarness:
             self._compact_controller.request()
 
     def clear_history(self) -> None:
-        self._history = []
-        self._context_state.reset()
+        self._context_manager.clear()
         self._gate.clear_session_grants()
         self._reset_provider_conversation_state()
+
+    @property
+    def context_manager(self) -> ContextManager:
+        """返回当前 session 的统一上下文状态管理器。"""
+        return self._context_manager
 
     @property
     def current_approval_callback(self) -> ApprovalCallback | None:
@@ -408,8 +410,8 @@ class AgentHarness:
         self._run_controller.reload()
 
     def load_history(self, messages: list[AgentMessage]) -> None:
-        self._history = deepcopy(messages)
-        self._context_state.reset()
+        self._context_manager.replace_history(deepcopy(messages))
+        self._context_manager.context_state.reset()
         self._post_load_history(messages)
         if not messages:
             self._gate.clear_session_grants()
@@ -422,8 +424,8 @@ class AgentHarness:
         self._resumed_notice = notice
 
     def load_run_state(self, run_state: RunState) -> None:
-        self._history = messages_from_run_state(run_state)
-        self._context_state.reset()
+        self._context_manager.replace_history(messages_from_run_state(run_state))
+        self._context_manager.context_state.reset()
         self._reset_provider_conversation_state()
 
     def history_messages(self) -> list[AgentMessage]:
@@ -512,7 +514,10 @@ class AgentHarness:
                 self._compact_controller.consume if self._compact_controller else None
             ),
             compact_controller=self._compact_controller,
-            last_prompt_tokens=self._last_prompt_tokens,
+            last_prompt_tokens=self._context_manager.token_usage.last_prompt_tokens,
+            get_last_prompt_tokens=lambda: (
+                self._context_manager.token_usage.last_prompt_tokens
+            ),
             steer=inject_runtime,
             emit_hook=lambda rec: _emit_hook(self._hook_manager, rec),
             get_prompt_version=_get_prompt_version,
@@ -544,7 +549,7 @@ class AgentHarness:
                 signal=self.cancellation_token,
                 history=history_messages,
                 request_prefix=context_messages,
-                context_state=self._context_state,
+                context_manager=self._context_manager,
                 state=context_snapshot_state,
                 project_root=self.project_root,
                 cwd=Path.cwd(),
@@ -561,9 +566,6 @@ class AgentHarness:
 
             result = turn_agent.last_result
             assert result is not None
-
-            self._history = list(result.surface)
-            self._last_prompt_tokens = record_last_prompt_tokens(result.surface)
 
             visible_result = (
                 result.model_copy(

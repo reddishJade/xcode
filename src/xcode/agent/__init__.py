@@ -30,6 +30,12 @@ from .context import (
     make_state_section,
     trim_to_budget,
 )
+from .context_manager import (
+    ContextCompactionState,
+    ContextManager,
+    ContextTokenUsage,
+    PromptCacheMetadata,
+)
 from .events import AgentEvent
 from .messages import (
     AgentMessage,
@@ -66,10 +72,13 @@ __all__ = [
     "ContextBlock",
     "ContextBlockSource",
     "ContextCollectionInput",
+    "ContextCompactionState",
     "ContextCollector",
     "ContextCollectorRegistry",
+    "ContextManager",
     "ContextSection",
     "ContextState",
+    "ContextTokenUsage",
     "ContextExpiry",
     "ContextPriority",
     "DefaultContextAssembler",
@@ -83,6 +92,7 @@ __all__ = [
     "RequestAssembly",
     "RequestContextTrace",
     "RequestHygiene",
+    "PromptCacheMetadata",
     "SystemMessage",
     "TerminationReason",
     "ToolResultMessage",
