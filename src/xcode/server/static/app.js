@@ -8,7 +8,9 @@
   const els = {
     project: $("project-path"),
     branch: $("branch"),
-    modelSelect: $("model-select"),
+    modelBtn: $("model-btn"),
+    modelMenu: $("model-menu"),
+    effortSelect: $("effort-select"),
     sessionId: $("session-id"),
     modes: $("modes"),
     stream: $("stream"),
@@ -594,45 +596,61 @@
   }
   els.input.addEventListener("input", autoGrow);
 
-  async function switchModel(next) {
-    const previous = els.modelSelect.dataset.current || "";
-    if (!next || next === previous || next === "__custom__") return;
+  async function switchModel(next, effort) {
+    const previous = els.modelBtn.dataset.current || "";
+    const previousEffort = els.effortSelect.dataset.current || "";
+    if (!next || next === "__custom__") return;
+    if (next === previous && (!effort || effort === previousEffort)) return;
+    const body = { model: next };
+    if (effort) body.effort = effort;
     try {
       const res = await fetch("/api/model", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: next }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (data.error) {
         toast(data.error);
-        els.modelSelect.value = previous;
         return;
       }
       applyModel(data);
-      toast("已切换模型 " + next);
+      toast(effort ? "已切换 effort " + effort : "已切换模型 " + next);
       refreshSessions();
       refreshStats();
     } catch (_err) {
-      toast("切换模型失败");
-      els.modelSelect.value = previous;
+      toast("切换失败");
+      els.effortSelect.value = previousEffort;
     }
   }
 
-  els.modelSelect.addEventListener("change", () => {
-    const next = els.modelSelect.value;
-    if (next === "__custom__") {
-      els.modelModal.hidden = false;
-      els.modelCustomInput.value = "";
-      els.modelCustomInput.focus();
-      return;
-    }
-    switchModel(next);
+  function closeModelMenu() {
+    els.modelMenu.hidden = true;
+  }
+
+  function openModelMenu() {
+    const rect = els.modelBtn.getBoundingClientRect();
+    els.modelMenu.style.left = Math.max(8, rect.left) + "px";
+    els.modelMenu.style.top = rect.bottom + 6 + "px";
+    els.modelMenu.hidden = false;
+  }
+
+  els.modelBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (els.modelMenu.hidden) openModelMenu();
+    else closeModelMenu();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!els.modelMenu.hidden && !els.modelMenu.contains(e.target)) closeModelMenu();
+  });
+
+  els.effortSelect.addEventListener("change", () => {
+    switchModel(els.modelBtn.dataset.current || "", els.effortSelect.value);
   });
 
   els.modelCustomCancel.addEventListener("click", () => {
     els.modelModal.hidden = true;
-    els.modelSelect.value = els.modelSelect.dataset.current || "";
   });
 
   els.modelCustomConfirm.addEventListener("click", () => {
@@ -957,8 +975,7 @@
       els.statsContext.textContent = data.context || "";
       const model = data.model || "";
       const effort = data.effort ? " • " + data.effort : "";
-      const provider = data.provider ? "(" + data.provider + ") " : "";
-      els.statsModel.textContent = provider + model + effort;
+      els.statsModel.textContent = model + effort;
     } catch (_err) {
       /* 忽略 */
     }
@@ -984,23 +1001,46 @@
     const models =
       info.available && info.available.length ? info.available : [info.model || ""];
     const current = info.model || "";
-    els.modelSelect.innerHTML = "";
+    els.modelBtn.textContent = current + " ▾";
+    els.modelBtn.title = current + (info.thinking === "on" ? " · thinking on" : "");
+    els.modelBtn.dataset.current = current;
+    els.modelMenu.innerHTML = "";
     for (const m of models) {
-      const opt = document.createElement("option");
-      opt.value = m;
-      opt.textContent = m;
-      if (m === current) opt.selected = true;
-      els.modelSelect.appendChild(opt);
+      const item = document.createElement("button");
+      item.className = "model-menu__item" + (m === current ? " is-current" : "");
+      item.textContent = m;
+      item.addEventListener("click", () => {
+        closeModelMenu();
+        switchModel(m);
+      });
+      els.modelMenu.appendChild(item);
     }
     if (info.custom) {
-      const custom = document.createElement("option");
-      custom.value = "__custom__";
-      custom.textContent = "＋";
-      els.modelSelect.appendChild(custom);
+      const plus = document.createElement("button");
+      plus.className = "model-menu__plus";
+      plus.textContent = "＋";
+      plus.title = "自定义模型";
+      plus.addEventListener("click", () => {
+        closeModelMenu();
+        els.modelModal.hidden = false;
+        els.modelCustomInput.value = "";
+        els.modelCustomInput.focus();
+      });
+      els.modelMenu.appendChild(plus);
     }
-    els.modelSelect.dataset.current = current;
-    els.modelSelect.title =
-      current + (info.thinking === "on" ? " · thinking on" : "");
+    const effortOptions = info.effort_options || [];
+    const effort = info.effort || "";
+    els.effortSelect.hidden = effortOptions.length === 0;
+    els.effortSelect.innerHTML = "";
+    for (const level of effortOptions) {
+      const opt = document.createElement("option");
+      opt.value = level;
+      opt.textContent = level;
+      if (level === effort) opt.selected = true;
+      els.effortSelect.appendChild(opt);
+    }
+    els.effortSelect.dataset.current = effort;
+    if (effortOptions.length > 0) els.effortSelect.title = "推理 effort · " + effort;
   }
 
   /* ── 启动 ── */

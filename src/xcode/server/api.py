@@ -70,11 +70,16 @@ def create_app(
     @server.post("/api/model")
     async def set_model_endpoint(payload: dict) -> JSONResponse:
         model = str(payload.get("model", "") or "")
+        effort = str(payload.get("effort", "") or "")
         if not model:
             return JSONResponse({"error": "model 不能为空"}, status_code=400)
 
         def _apply() -> dict[str, object]:
-            hub.app.set_model(model=model, profile="main")
+            hub.app.set_model(
+                model=model,
+                profile="main",
+                reasoning_effort=effort if effort else None,
+            )
             return _model_payload(hub.app)
 
         loop = asyncio.get_running_loop()
@@ -270,9 +275,16 @@ def _stats_payload(app: XcodeApp, project_root: Path) -> dict[str, object]:
 
 
 def _model_payload(app: XcodeApp) -> dict[str, object]:
-    """当前模型信息 + 可用模型列表（优先网关 /models 发现）。"""
+    """当前模型信息 + 可用模型列表 + effort 选项。"""
     info: dict[str, object] = dict(app.get_model_info())
     transport = _profile_transport(app)
+    info["effort"] = str(info.get("reasoning_effort") or "")
+    try:
+        from xcode.cli.reasoning_effort import reasoning_effort_levels_for_transport
+
+        info["effort_options"] = list(reasoning_effort_levels_for_transport(transport))
+    except Exception:  # noqa: BLE001
+        info["effort_options"] = []
     if transport == "custom":
         # custom 网关不枚举模型：只提供当前模型 + 前端自定义输入
         current = str(info.get("model", ""))
